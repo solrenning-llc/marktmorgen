@@ -42,6 +42,7 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -738,21 +739,58 @@ export async function dropTeam(store: Store): Promise<void> {
 /**
  * Carries a person's places on other stores' teams to their new address,
  * when they move their account (app/api/auth/move). Without it, moving
- * would quietly take them off every team they are on.
+ * would quietly take them off every team they are on. Answers the stores
+ * whose place stayed on the old address (its restrictions or API keys could
+ * not be carried), so the move can say so and take them off (dropMemberships).
+ *
+ * The old address is never left on a team while the store is answered as carried (Claude 2's review of #3326): a
+ * store's team record, not this index, is what lets a session in (lib/studio-route.ts resolveAccess reads roleIn),
+ * so a place left on the record with its index entry gone would open the store to whoever signs in at the old
+ * address later, and nobody would be told. So:
+ *
+ *   - a list of stores or a store read in an unknown shape (rule 24) is never read as "nothing there": the first
+ *     throws UnknownReplyError, so nothing is said as carried and the move's clean-up runs; the second keeps that
+ *     store as stayed;
+ *   - when the new address already has the store (it is on the team, or owns it), the old address's place is not
+ *     carried but taken off, through removeMember as any teammate taken off is. The new address keeps the role the
+ *     store's owner gave it, not the higher of the two: that is the owner's own choice for the address now on the
+ *     team, and raising it would hand that address a power nobody granted to it. The old address's restrictions and
+ *     API keys go with its place (held "left"; the owner is emailed which), as merging them into the new address's
+ *     own would decide for the owner. The team's log says which role the old place had, so the owner can raise it.
+ *     A removal that cannot be finished keeps the store as stayed. One whose second sweep of the API keys could not be
+ *     finished (KeysNotSwept: the old place is off the team, but a key it made meanwhile may not be held) is not
+ *     stayed, as the place is gone and the new address keeps its own; it is put in `unswept`, with the old place's
+ *     role, for the move's clean-up to repeat that sweep (dropMemberships), which nothing else would do: the old
+ *     address has no role there any more, so it reads as nothing to take off (Claude 2's third review of #3326).
+ *     `unswept` is filled as each store is done, so a later store that throws does not lose it.
  */
-export async function moveMemberships(from: string, to: string): Promise<void> {
+export async function moveMemberships(from: string, to: string, unswept: Map<string, Role> = new Map()): Promise<string[]> {
+  if (!isRedisConfigured()) return [];
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
-    const store = await storeForId(sid);
-    if (!store || normaliseEmail(store.email) === after) continue;
-    const role = await withTeam(sid, async () => {
+    const found = await storeForIdExactly(sid);
+    // Confirmed gone: nothing opens it, and its index entry goes. Not known: never read as gone.
+    if (found === "none") continue;
+    if (found === "unknown") {
+      stayed.push(sid);
+      continue;
+    }
+    const store = found;
+    const owns = normaliseEmail(store.email) === after;
+    const outcome = await withTeam(sid, async (): Promise<{ moved: Role } | { taken: Role; kept: Role } | null> => {
       const team = await readTeam(sid);
-      if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;
+      const mine = team.members.find((m) => m.email === before);
+      if (!mine) return null;
+      // The new address already has this store: the old place is taken off below, outside this lock (removeMember takes it).
+      if (owns) return { taken: mine.role, kept: "owner" };
+      const theirs = team.members.find((m) => m.email === after);
+      if (theirs) return { taken: mine.role, kept: theirs.role };
       // What they may do with each pipeline (639 [GL7](7)) is copied to the new address first. If that cannot
       // be confirmed, this store's membership stays on the old address: the new one never has the store without
       // its restrictions.
@@ -778,16 +816,145 @@ export async function moveMemberships(from: string, to: string): Promise<void> {
         await movedMaker(sid, after, before).catch((back: unknown) => console.error("moving a teammate's API keys back to their old address failed", back));
         throw error;
       }
-      return team.members.find((m) => m.email === before)?.role ?? "support";
+      return { moved: mine.role };
     });
-    if (!role) continue;
+    if (!outcome) continue;
+    if ("taken" in outcome) {
+      try {
+        await removeMember(store, before);
+      } catch (error) {
+        if (error instanceof KeysNotSwept) {
+          // Off the team, its sweep to be repeated by the move's clean-up (dropMemberships), which is told the role it had.
+          console.error("a moved address was taken off a team, but its API keys could not all be paused; the move's clean-up repeats it", error);
+          unswept.set(sid, outcome.taken);
+        } else {
+          console.error("taking a moved address off a team its new address is already on failed; the move's clean-up takes it off", error);
+          stayed.push(sid);
+          continue;
+        }
+      }
+      await logTeam(sid, {
+        who: after,
+        role: outcome.kept,
+        what: `Moved their sign-in from ${before}, already on the team: the place at ${before} (${outcome.taken}) was taken off, and ${outcome.kept} kept`,
+      });
+      continue;
+    }
     // The old address's restrictions go only once the team names the new one.
     await forgetPipelineAccess(store, before).catch((error) => console.error("forgetting the old address's pipeline access failed", error));
     await redisPipeline([["SADD", indexKey(after), sid]]);
-    await logTeam(sid, { who: after, role, what: `Moved their sign-in from ${before}` });
+    await logTeam(sid, { who: after, role: outcome.moved, what: `Moved their sign-in from ${before}` });
   }
   // The old address keeps only the stores that stayed on it; SREM with no member is an error in Redis, so it is sent only with some.
   const moved = list.filter((sid) => !stayed.includes(sid));
   if (!stayed.length) await redisPipeline([["DEL", indexKey(before)]]);
   else if (moved.length) await redisPipeline([["SREM", indexKey(before), ...moved]]);
+  return stayed;
+}
+
+/**
+ * Takes an address an account moved away from off every other store's team it is still on, when the move could not
+ * carry those places (app/api/auth/move): left there, an account made at that address later would be on those
+ * teams. Each goes through removeMember, as any teammate taken off does: their API keys are paused, the owner is
+ * told of those, and the team's log says why. True only when the index and every store on it were read and settled;
+ * the person is told to ask each owner to invite the new address again.
+ *
+ * Kept on purpose, although it reaches past the person (Claude 2's review of #3326, finding LOW): the removal also
+ * pauses every key on that store whose maker was never recorded (lib/api-key-pause.ts leftTeam, held "told"),
+ * which may include the owner's own keys made before makers were recorded. Such a key may be the person's, and
+ * after this they are on that team at neither address, so it is never left open on a guess; the owner is emailed
+ * the keys by name and may turn each back on at once. Pausing only the person's recorded keys would leave theirs
+ * among the unrecorded ones working for somebody no longer on the team.
+ *
+ * A removal whose second sweep of the API keys could not be finished (KeysNotSwept), here or in moveMemberships
+ * (`unswept`, with the role the place had), is repeated once, as the team route repeats one when the owner presses
+ * Remove again (removeMember with `repeat`): the address has no role there any more, but a key it made while it was
+ * being taken off may not be held, and would work again for an account made at that address later and invited back
+ * (Claude 2's third review of #3326). A repeat that cannot be finished either leaves that store in the answer's
+ * `unswept`: the move is not said as complete there, the team's log says it, and the store's owner is emailed to
+ * revoke what they do not recognize (lib/api-key-pause.ts tellOwnerOfUnswept). `settled` is true only when the index
+ * and every store on it were read and settled, and no sweep was left unfinished.
+ */
+export async function dropMemberships(email: string, unswept: ReadonlyMap<string, Role> = new Map()): Promise<{ settled: boolean; unswept: string[] }> {
+  if (!isRedisConfigured()) return { settled: true, unswept: [] };
+  const address = normaliseEmail(email);
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(address)]]), 1)?.[0]);
+  if (!ids) throw new UnknownReplyError("a teammate's stores");
+  let settled = true;
+  const open: string[] = [];
+  // The index and the stores whose sweep is to be repeated: the latter may be out of the index already (its SREM ran,
+  // and forgetting the pipeline access after it failed).
+  for (const sid of [...new Set([...ids, ...unswept.keys()])].filter((id) => STORE_ID_PATTERN.test(id))) {
+    // A store whose sweep is to be repeated stays in `open` unless the repeat is known to have finished: a read that
+    // does not answer, or anything that throws before then, never passes as every key held (Claude 4's review of
+    // #3326, MEDIUM, rule 24). Its owner is emailed whenever the store itself was read.
+    let store: Store | null = null;
+    let finished = false;
+    let told = false;
+    try {
+      store = await storeForId(sid);
+      // Not found, or not known: kept in the index for memberStores to drop on a confirmed absence, and said as unsettled.
+      if (!store) {
+        settled = false;
+        if (unswept.has(sid)) open.push(sid);
+        continue;
+      }
+      const role = await roleIn(store, address);
+      if (role === "owner") continue;
+      const was = role ?? unswept.get(sid);
+      // No role and no unfinished sweep: nothing of theirs there (a place carried, or taken off whole).
+      if (!was) continue;
+      const out = await takeOffSwept(store, address, role === null);
+      finished = out.swept;
+      if (!out.swept) {
+        settled = false;
+        open.push(sid);
+      }
+      if (out.removed) {
+        await logTeam(sid, { who: address, role: was, what: "Taken off the team: they moved their sign-in to another address, and their place could not go with it" });
+      }
+      if (out.swept) continue;
+      told = true;
+      await tellOwnerOfUnswept(store, address);
+      await logTeam(sid, { who: address, role: was, what: `Some API keys ${address} made may still work: not all could be paused when they left the team. Revoke any you do not recognize` });
+    } catch (error) {
+      console.error("taking a moved address off a team failed", error);
+      settled = false;
+      if (unswept.has(sid) && !finished && !open.includes(sid)) open.push(sid);
+      if (store && open.includes(sid) && !told) await tellOwnerOfUnswept(store, address);
+    }
+  }
+  return { settled, unswept: open };
+}
+
+/** The owner of a store where a former teammate's API keys may still work is emailed; a failure is only logged. */
+async function tellOwnerOfUnswept(store: Store, address: string): Promise<void> {
+  const { tellOwnerOfUnswept: tell } = await import("@/lib/api-key-pause");
+  await tell(store, address).catch((error: unknown) => console.error("telling the owner that a former teammate's API keys may still work failed", error));
+}
+
+/**
+ * removeMember for an address that moved away, with its sweep of the API keys repeated once when it could not be
+ * finished (KeysNotSwept), as the team route does on the owner's second press. `again`: the address is off the team
+ * already and only the sweep is repeated. `removed`: it was on the team and is off it now; `swept`: a sweep after
+ * that finished. Any other failure of the first removal throws, as nothing was done.
+ */
+async function takeOffSwept(store: Store, address: string, again: boolean): Promise<{ removed: boolean; swept: boolean }> {
+  let removed = false;
+  if (!again) {
+    try {
+      return { removed: await removeMember(store, address), swept: true };
+    } catch (error) {
+      if (!(error instanceof KeysNotSwept)) throw error;
+      console.error("a moved address was taken off a team, but its API keys could not all be paused; repeated once", error);
+      removed = true;
+    }
+  }
+  try {
+    await removeMember(store, address, { repeat: true });
+    return { removed, swept: true };
+  } catch (error) {
+    console.error("repeating the sweep of a moved address's API keys failed", error);
+    return { removed, swept: false };
+  }
 }

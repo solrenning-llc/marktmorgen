@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | Defect (custo): unknown slugs on static content routes answer 404 without rendering or caching | claude1/cost-vercel-unknown-slugs | `app/blog/[slug]/page.tsx`, `app/blog/[slug]/opengraph-image.tsx`, `app/platform/[slug]/page.tsx`, `app/for/[slug]/page.tsx`, `app/proof/[slug]/page.tsx`, `tests/c1-cost-unknown-slugs.test.ts` | 12/11/2026 18h10 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

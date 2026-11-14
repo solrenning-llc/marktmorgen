@@ -178,7 +178,10 @@ export async function POST(request: NextRequest) {
   if (prepared && prepared.ok && prepared.checkout) {
     const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch(() => false);
     if (!counted) {
-      await releaseOwnHold(store, result.session).catch(() => {});
+      // This request opened that checkout: it is closed at Stripe even if the hold cannot be read, and a failure is logged.
+      await releaseOwnHold(store, result.session, { openedHere: true }).catch((error: unknown) => {
+        console.error("Call hold could not be released (pkg-used):", error instanceof Error ? error.message : error);
+      });
       return back("pkg-used");
     }
   }

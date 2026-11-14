@@ -7,8 +7,8 @@ import { ITEM_ID_PATTERN, findLesson, readCourses } from "@/lib/course";
 import { rememberFolderOwner } from "@/lib/delivery";
 import { ALLOWED_CONTENT_TYPES, MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
 import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
-import { storageBrakeFor } from "@/lib/storage-quota";
-import { ownsDeliveryId, storeFolder, storeForEmail } from "@/lib/store";
+import { storageBrakeFor, storageUsed } from "@/lib/storage-quota";
+import { imageFolder, ownsDeliveryId, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { isVaultConfigured, signPieces } from "@/lib/vault";
 import { PIECES_PER_ASK, readVaultPath } from "@/lib/vault-rules";
@@ -78,7 +78,10 @@ export async function POST(request: NextRequest) {
       if (!(await reserveStoreUpload(store, bytes, "r2"))) return fail("upload_budget_unavailable", 503);
       await rememberFolderOwner(folder, ref);
 
-      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, storageBrakeFor(standing, store.tier));
+      // The store's pictures count against its storage too (MR audit A3): they live in their own folder.
+      const limit = storageBrakeFor(standing, store.tier);
+      const pictures = await imageFolder(ref);
+      const opened = await openReservedVault({ folder, ownerId, name: safeFileName(text(body.name, 200)), bytes, type, multipart: true }, limit, () => storageUsed(folder, limit, pictures));
       if (!opened.ok) return fail(opened.reason === "off" ? "off" : opened.reason === "invalid" ? "invalid" : "files_unavailable", opened.reason === "off" ? 404 : opened.reason === "invalid" ? 400 : 503);
       return Response.json({ ok: true, upload: opened.upload }, { headers: { "Cache-Control": "no-store" } });
     }

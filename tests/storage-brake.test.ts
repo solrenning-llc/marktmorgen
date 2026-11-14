@@ -49,7 +49,7 @@ test("only an upload is ever refused by it, never a download", () => {
     // the room of a store with no plan: the daily job that gives what it
     // keeps a date (lib/plan-closing.ts), and the studio, which shows its
     // owner that date. Neither is a door a buyer comes through.
-    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
+    ["app/api/store/file/route.ts", "app/api/store/stream/route.ts", "app/api/store/vault/route.ts", "app/studio/page.tsx", "lib/plan-closing.ts", "lib/vault-storage.ts"],
     "what a store keeps is measured where an upload is let in, and for a store whose plan has ended. No download is ever refused by it.",
   );
 });

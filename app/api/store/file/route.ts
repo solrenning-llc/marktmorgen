@@ -7,7 +7,7 @@ import {
   type HandleUploadPresignedBody,
 } from "@vercel/blob/client";
 import { studioAccess } from "@/lib/studio-route";
-import { ownsDeliveryId, storeFolder } from "@/lib/store";
+import { imageFolder, ownsDeliveryId, storeFolder } from "@/lib/store";
 import {
   ALLOWED_CONTENT_TYPES,
   MAX_FILE_BYTES,
@@ -113,7 +113,7 @@ export async function POST(request: NextRequest) {
         // The browser does not supply a trusted file size. Limit both parts
         // of the signed authorization to the confirmed room that remains.
         const standing = standingOf(store);
-        const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
+        const held = await storageUsed(folder, storageBrakeFor(standing, store.tier), await imageFolder(ref));
         if (held.available === false) throw new Error("files_unavailable");
         const maximumSizeInBytes = maximumUploadBytes(held, MAX_FILE_BYTES);
         if (maximumSizeInBytes <= 0) throw new Error(storageRefusal(standing));

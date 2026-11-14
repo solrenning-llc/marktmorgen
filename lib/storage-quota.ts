@@ -25,11 +25,11 @@ export type StorageUse = { bytes: number; brake: number; left: number; full: boo
  * A missing, invalid or incomplete measurement cannot authorize more storage.
  * Existing downloads and content are unaffected; upload doors return a temporary failure.
  */
-export async function storageUsed(folder: string, brake: number = STORAGE_BRAKE_BYTES): Promise<StorageUse> {
+export async function storageUsed(folder: string, brake: number = STORAGE_BRAKE_BYTES, pictures?: string): Promise<StorageUse> {
   const unavailable: StorageUse = { bytes: 0, brake, left: 0, full: false, available: false };
-  if (!folder || !Number.isSafeInteger(brake) || brake <= 0) return unavailable;
+  if (!folder || !Number.isSafeInteger(brake) || brake <= 0 || pictures === "") return unavailable;
   try {
-    const files = await filesHeld(folder);
+    const files = await filesHeld(folder, pictures);
     const videos = await streamHeld(folder);
     if (videos === null || !Number.isSafeInteger(files) || files < 0 ||
         !Number.isSafeInteger(videos) || videos < 0) return unavailable;

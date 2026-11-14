@@ -8,7 +8,7 @@ import { rememberFolderOwner } from "@/lib/delivery";
 import { MAX_FILE_BYTES, safeFileName } from "@/lib/product-file";
 import { costPauseCode, storageRefusal, standingOf } from "@/lib/plan-standing";
 import { fits, storageBrakeFor, storageUsed } from "@/lib/storage-quota";
-import { storeFolder, storeForEmail } from "@/lib/store";
+import { imageFolder, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { isStreamConfigured, openUpload } from "@/lib/stream";
 import { VIDEO_RECORD_BYTES } from "@/lib/stream-rules";
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
     if (refused) return serviceRefusedJson(refused, "slow_down");
     // What a store may keep goes by where it stands with its plan (lib/plan-standing.ts).
     const standing = standingOf(store);
-    const held = await storageUsed(folder, storageBrakeFor(standing, store.tier));
+    const held = await storageUsed(folder, storageBrakeFor(standing, store.tier), await imageFolder(ref));
     if (held.available === false) return Response.json({ ok: false, error: "video_unavailable" }, { status: 503 });
     if (!fits(held, bytes)) return Response.json({ ok: false, error: storageRefusal(standing) }, { status: 400 });
     await rememberFolderOwner(folder, ref);

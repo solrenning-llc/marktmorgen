@@ -138,33 +138,41 @@ export async function listFiles(prefix: string): Promise<string[]> {
   }
 }
 
-/**
- * Complete bytes in both file stores. Throws on unavailable, invalid or
- * incomplete listings: a partial total cannot authorize another upload.
- */
-export async function filesHeld(folder: string): Promise<number> {
+/** Complete bytes under one file-store prefix. Throws on an unavailable, invalid or incomplete listing. */
+async function listedBytes(prefix: string): Promise<number> {
   let bytes = 0;
   let cursor: string | undefined;
   const seen = new Set<string>();
   const paths = new Set<string>();
-  let complete = false;
   for (let page = 0; page < 20; page += 1) {
-    const answer = await blob.list({ prefix: `stores/${folder}/`, limit: 1000, cursor });
+    const answer = await blob.list({ prefix, limit: 1000, cursor });
     if (!answer || !Array.isArray(answer.blobs) || answer.blobs.length > 1000 || typeof answer.hasMore !== "boolean") throw new Error("invalid storage listing");
     for (const entry of answer.blobs) {
-      if (!entry || typeof entry.pathname !== "string" || !entry.pathname.startsWith(`stores/${folder}/`) ||
+      if (!entry || typeof entry.pathname !== "string" || !entry.pathname.startsWith(prefix) ||
           paths.has(entry.pathname) || !Number.isSafeInteger(entry.size) || entry.size < 0) throw new Error("invalid storage entry");
       paths.add(entry.pathname);
       bytes += entry.size;
       if (!Number.isSafeInteger(bytes)) throw new Error("invalid storage total");
     }
-    if (!answer.hasMore) { complete = true; break; }
+    if (!answer.hasMore) return bytes;
     if (!answer.cursor || seen.has(answer.cursor)) throw new Error("incomplete storage listing");
     seen.add(answer.cursor);
     cursor = answer.cursor;
   }
-  if (!complete) throw new Error("storage listing exceeded page limit");
+  throw new Error("storage listing exceeded page limit");
+}
+
+/**
+ * Complete bytes in both file stores, and, given the store's picture folder
+ * (lib/store.ts, imageFolder), its product, link and page pictures, which
+ * live apart from its files (MR audit A3, 14 November 2026). Throws on
+ * unavailable, invalid or incomplete listings: a partial total cannot
+ * authorize another upload.
+ */
+export async function filesHeld(folder: string, pictures?: string): Promise<number> {
+  const bytes = await listedBytes(`stores/${folder}/`);
+  const shown = pictures === undefined ? 0 : await listedBytes(`images/${pictures}/`);
   const vault = await vaultHeld(folder);
-  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + vault)) throw new Error("incomplete vault measurement");
-  return bytes + vault;
+  if (vault === null || !Number.isSafeInteger(vault) || vault < 0 || !Number.isSafeInteger(bytes + shown + vault)) throw new Error("incomplete vault measurement");
+  return bytes + shown + vault;
 }

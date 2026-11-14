@@ -77,9 +77,9 @@ async function main(): Promise<void> {
     const door = read(path);
     if (name === "files") {
       const reserved = read("lib/vault-storage.ts");
-      is("R2 admission measures confirmed usage under its shared reservation", [/openReservedVault/.test(door), /storageBrakeFor\(standing, store\.tier\)/.test(door), /storageUsed\(input.folder, limit\)/.test(reserved), /held.available !== true/.test(reserved), /reserveStorage/.test(reserved)], [true, true, true, true, true]);
+      is("R2 admission measures confirmed usage under its shared reservation", [/openReservedVault/.test(door), /storageBrakeFor\(standing, store\.tier\)/.test(door), /const limit = storageBrakeFor\(standing, store\.tier\)/.test(door) && /storageUsed\(folder, limit, pictures\)/.test(door) && /pictures = await imageFolder\(ref\)/.test(door), /held.available !== true/.test(reserved), /reserveStorage/.test(reserved)], [true, true, true, true, true]);
     } else {
-      is(`the door for ${name} measures a store against its own figure and holds a file to what is left`, [/storageUsed\(folder, storageBrakeFor\(standing, store\.tier\)\)/.test(door), /!fits\(held, bytes\)/.test(door), /storageRefusal\(standing\)/.test(door)], [true, true, true]);
+      is(`the door for ${name} measures a store against its own figure and holds a file to what is left`, [/storageUsed\(folder, storageBrakeFor\(standing, store\.tier\), await imageFolder\(ref\)\)/.test(door), /!fits\(held, bytes\)/.test(door), /storageRefusal\(standing\)/.test(door)], [true, true, true]);
     }
   }
 

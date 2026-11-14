@@ -8,6 +8,7 @@ export async function guardStoreWrite(request:Request){return state.auth?{ok:tru
 export async function studioAccess(){return state.auth?{ok:true,access:{store:state.store,ref:'owner@example.test'}}:{ok:false,reason:'signed_out'};}
 export const storeForEmail=async()=>state.store;
 export const storeFolder=async()=>FOLDER;
+export const imageFolder=async()=>"a".repeat(24);
 export const storeRef=()=>'owner@example.test';
 export const ownsDeliveryId=()=>state.owns;
 export const readKind=async()=>[{course:{id:'course-1'}}];

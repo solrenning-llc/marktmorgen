@@ -177,7 +177,8 @@ const { chat, assistant } = result;
 
 part("The store chat");
 is("opening it from its button takes the focus to the panel's title (2.4.3)", chat.opened, "title");
-is("its conversation's live region and its status region are there before anything is said (4.1.3)", [chat.liveBefore, chat.statusBefore], [1, [""]]);
+// The conversation is not a live region: only an answer from the store is said, in the status region (tests/store-chat-reply-announced.test.ts).
+is("its conversation is not a live region, and its status region is there before anything is said (4.1.3)", [chat.liveBefore, chat.statusBefore], [0, [""]]);
 is("Escape takes the focus back to the button, now collapsed", chat.escaped, { on: "launcher", expanded: "false" });
 is("Close takes the focus back to the button", chat.closed, "launcher");
 is("Sent is said in the status region", chat.sentStatus, ["Sent. The answer shows here, and goes to your email too."]);

@@ -75,6 +75,25 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
   const [justSent, setJustSent] = useState(false);
   const typedAt = useRef(0);
   const list = useRef<HTMLDivElement>(null);
+  // How many messages are already on the screen (null: none yet), so only a new answer from the store is read out,
+  // once, with the store's name (4.1.3): never the visitor's own message, nor a kept conversation as it opens.
+  const known = useRef<number | null>(null);
+  const [said, setSaid] = useState("");
+  const take = useCallback(
+    (next: Thread) => {
+      const before = known.current;
+      known.current = next.messages.length;
+      const fresh = before === null ? [] : next.messages.slice(before).filter((m) => m.from === "store");
+      if (fresh.length) setSaid(`${storeName}: ${fresh.map((m) => m.text).join(" ")}`);
+      setThread(next);
+    },
+    [storeName],
+  );
+  const forgetThread = () => {
+    known.current = null;
+    setSaid("");
+    setThread(null);
+  };
   const panel = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const launcher = useRef<HTMLButtonElement>(null);
@@ -109,14 +128,14 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
   const read = useCallback(async () => {
     if (!token) return;
     const result = await ask({ action: "read", token });
-    if (result.ok) setThread(result.thread);
+    if (result.ok) take(result.thread);
     else if (result.error === "gone") {
       remember(handle, null);
       setToken(null);
-      setThread(null);
+      forgetThread();
       setNotice("gone");
     }
-  }, [token, handle]);
+  }, [token, handle, take]);
 
   useEffect(() => {
     if (!open || !token) return;
@@ -157,13 +176,13 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
       if (result.error === "gone") {
         remember(handle, null);
         setToken(null);
-        setThread(null);
+        forgetThread();
       }
       return;
     }
     remember(handle, result.thread.token);
     setToken(result.thread.token);
-    setThread(result.thread);
+    take(result.thread);
     setText("");
     setJustSent(true);
   }
@@ -171,7 +190,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
   function startOver() {
     remember(handle, null);
     setToken(null);
-    setThread(null);
+    forgetThread();
     setJustSent(false);
     setNotice(null);
     // The button pressed goes with the conversation: the focus goes to the new form's first field.
@@ -190,8 +209,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
               {w.close}
             </button>
           </div>
-          {/* There before the first message, so the first one is said too (4.1.3). */}
-          <div ref={list} className={thread ? "mt-3 flex-1 space-y-2 overflow-y-auto" : undefined} aria-live="polite" data-chat-thread>
+          <div ref={list} className={thread ? "mt-3 flex-1 space-y-2 overflow-y-auto" : undefined} data-chat-thread>
             {(thread?.messages ?? []).map((m, i) => (
               <div key={`${m.at}-${i}`} className={m.from === "visitor" ? "ml-8 text-right" : "mr-8"}>
                 <p className={`inline-block whitespace-pre-line rounded-xl px-3 py-2 text-left text-sm ${m.from === "visitor" ? "st-chat-mine" : "st-chat-theirs"}`}>{m.text}</p>
@@ -201,7 +219,12 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
             {thread?.status === "closed" ? <p className="st-muted text-xs">{w.closedNote}</p> : null}
           </div>
           {thread ? null : <p className="st-muted mt-2 text-sm">{w.intro(storeName)}</p>}
-          <div role="status">{justSent && thread ? <p className="st-muted mt-2 text-xs">{w.sent}</p> : null}</div>
+          <div role="status">
+            {justSent && thread ? <p className="st-muted mt-2 text-xs">{w.sent}</p> : null}
+            <span className="sr-only" data-chat-said>
+              {said}
+            </span>
+          </div>
           {notice ? (
             <p role="alert" className="mt-2 text-sm font-medium">
               {w.notices[notice]}
@@ -236,7 +259,7 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
               />
             </label>
             <div className="flex items-center justify-between gap-3">
-              <button type="submit" disabled={busy} className="btn st-btn">
+              <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                 {w.send}
               </button>
               {token ? (

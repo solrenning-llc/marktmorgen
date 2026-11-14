@@ -30,3 +30,13 @@ This adds checks, not a patch for an unpatched upstream package. Five developmen
 findings remain visible; a clean production audit or trace check does not certify
 the absence of all security defects. No application feature, price, quota,
 commercial gate or tax assumption changes.
+
+## Advisory withdrawn — 6 November 2026
+
+GitHub withdrew GHSA-vfj7-8cjw-p6xm on 23 October 2026 as not a practically
+exploitable vulnerability, and npm audit no longer reports it. The development
+exception above, with its pinned chain and 18 November expiry, was removed from
+scripts/check_dependency_audit.py: the full and production audits now both refuse
+any high or critical finding, with no exception list. The runtime trace check
+(scripts/check_dependency_runtime.py) is unchanged and still keeps this
+development-only chain out of every production trace.

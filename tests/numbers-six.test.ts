@@ -167,7 +167,7 @@ async function main(): Promise<void> {
   await upsertContact(LIST, "gone@example.com", { agreed: true, explicit: true, source: "buyer" }, ROOM);
   await stopWriting(LIST, "gone@example.com", "complained");
   const file = await buyerAudience({ ...store, listId: LIST });
-  is("only buyers who agreed and are still on the list, one address a line", [file.csv, file.rows], ["email\r\na@example.com\r\nb@example.com\r\n", 2]);
+  is("only buyers who agreed and are still on the list, one address a line", [file.csv, file.rows], ['email\r\n"a@example.com"\r\n"b@example.com"\r\n', 2]);
   is("an empty file still has its header", audienceCsv([]), "email\r\n");
 
   part("The month's goal");

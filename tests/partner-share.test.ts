@@ -253,7 +253,8 @@ test("nothing is written down until the invitation is opened", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function invitePartner");
   const body = aff.slice(at, aff.indexOf("export async function acceptPartnership"));
-  assert.doesNotMatch(body, /writeAffiliate/, "the record is made when they open the link, not when it is sent");
+  // Rule 23: the writers are now writeNewAffiliate and changeAffiliate; none of them, nor the old name, may be here.
+  assert.doesNotMatch(body, /writeAffiliate|writeNewAffiliate|changeAffiliate/, "the record is made when they open the link, not when it is sent");
   // The reason belongs in the comment over it, which is above `at`.
   assert.match(
     aff.slice(Math.max(0, at - 1_200), at),
@@ -264,11 +265,23 @@ test("nothing is written down until the invitation is opened", () => {
 
 test("an invitation arrives already approved, with the share the email stated", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
-  const at = aff.indexOf("export async function openAffiliateLink");
+  // The record is made in recordFromLink, which openAffiliateLink runs under the partner lock when the grant carries a share.
+  const at = aff.indexOf("async function recordFromLink");
+  assert.ok(at > 0, "the record an opened link makes should exist");
   const body = aff.slice(at, aff.indexOf("export function buyersJoin"));
   assert.match(body, /grant\.k === 1/, "an invitation has to be told apart from an application");
   assert.match(body, /status: invited \? "approved" : "pending"/, "a partner the creator asked for does not wait in a queue");
   assert.match(body, /share: invited \? grant\.p \?\? null : null/, "and the share travels with it");
+  // And the share is checked against the cap again when it is accepted, before anything is written (#2995 review).
+  const record = body.slice(0, body.indexOf("export async function openAffiliateLink"));
+  assert.ok(record.indexOf("partnerShareProblem(") > 0, "accepting re-checks the cap");
+  // Rule 23: writeAffiliate became changeAffiliate (a record already there, written over exactly what was read) and
+  // writeNewAffiliate (a record just made). The check still has to come before EACH of them, so this is as strict.
+  for (const writer of ["changeAffiliate(", "writeNewAffiliate("]) {
+    assert.ok(record.indexOf(writer) > 0, `the record is written by ${writer}`);
+    assert.ok(record.indexOf("partnerShareProblem(") < record.indexOf(writer), "before the share is written");
+  }
+  assert.match(body, /withPartnerLock\(store, \(held\) => recordFromLink\(/, "under the program's partner lock");
 });
 
 test("an invitation cannot be used to attach a share nobody checked", () => {
@@ -278,8 +291,9 @@ test("an invitation cannot be used to attach a share nobody checked", () => {
   const at = route.indexOf('if (action === "invite")');
   assert.ok(at > 0, "the invite action should exist");
   const body = route.slice(at, route.indexOf('if (action === "share")'));
-  assert.match(body, /shareProblem\(/, "the invite path has to run the same cap");
-  assert.ok(body.indexOf("shareProblem(") < body.indexOf("invitePartner("), "and run it before sending anything");
+  // partnerShareProblem (lib/affiliates.ts) runs shareProblem against the approved partners read exactly.
+  assert.match(body, /partnerShareProblem\(/, "the invite path has to run the same cap");
+  assert.ok(body.indexOf("partnerShareProblem(") < body.indexOf("invitePartner("), "and run it before sending anything");
 });
 
 // ---- a moat switched off is not a moat ---------------------------------

@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   redis.pipeline = original;
   const ids = both.map((r) => (r.ok ? r.certificate.id : ""));
   is("two presses at the same moment: one certificate, the same answer to both", [ids[0] === ids[1], both.filter((r) => r.ok && r.fresh).length], [true, 1]);
-  const standing = (await certificatesFor(course.id)).list.filter((c) => !c.withdrawnAt);
+  const standing = ((await certificatesFor(course.id))?.list ?? []).filter((c) => !c.withdrawnAt);
   is("and one standing per student in the creator's list", standing.map((c) => c.email).sort(), ["ana@example.com", "cy@example.com"]);
 
   part("Withdrawn");

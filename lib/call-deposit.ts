@@ -82,10 +82,20 @@ export function dueLines(words: BookingWords, due: DueInPerson | null, input: { 
   ];
 }
 
-/** The creator's line about it, in English as every creator email is. */
-export function creatorDueLine(due: DueInPerson | null, input: { paidCents: number | null | undefined; currency: string }): string {
+/**
+ * The creator's line about it, in English as every creator email is. With no currency read (lib/calls.ts,
+ * chargedIn), the same facts with no amount, so the rest is still collected and nothing is said in a guessed currency.
+ */
+export function creatorDueLine(due: DueInPerson | null, input: { paidCents: number | null | undefined; currency: string | null }): string {
   if (!due) return "";
-  const money = (cents: number) => formatMoney(cents, input.currency);
+  if (!input.currency) {
+    return [
+      due.code ? `They used code ${due.code}, taken off the whole price.` : "",
+      due.rest > 0 ? "The rest is paid to you in person; its amount is on the order in your Stripe account." : "",
+    ].filter(Boolean).join(" ");
+  }
+  const currency = input.currency;
+  const money = (cents: number) => formatMoney(cents, currency);
   const code = due.code ? `They used code ${due.code}: ${money(due.codeOff)} off the whole price.` : "";
   const paid = typeof input.paidCents === "number" && input.paidCents > 0 ? `${money(input.paidCents)} was paid now as a deposit. ` : "";
   const rest = due.rest > 0 ? `${paid}The rest, ${money(due.rest)}, is paid to you in person.` : "";

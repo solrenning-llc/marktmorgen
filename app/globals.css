@@ -5102,6 +5102,19 @@ fieldset:disabled .cm-poll-row {
   gap: 0.5rem;
   max-width: calc(100vw - 1.5rem);
 }
+/*
+ * WCAG 2.4.12 (Focus Not Obscured, Enhanced): on a phone the cart's button
+ * sits over the top of the page, where nothing scrolls a link out from under
+ * it (the store's line of news, the store's name on a product's page). Once
+ * the button is there, the page starts below it: 0.75rem from the top, 44px
+ * tall, and 0.5rem of room. Lower down, html's scroll-padding-top (5.5rem)
+ * already keeps what has the focus clear of it.
+ */
+@media (max-width: 639.98px) {
+  body:has(#cart .st-cart-open) .st-page {
+    padding-top: calc(44px + 1.25rem + env(safe-area-inset-top));
+  }
+}
 .st-cart-open {
   min-height: 44px;
   gap: 0.5rem;

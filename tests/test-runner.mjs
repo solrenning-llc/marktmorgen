@@ -75,6 +75,7 @@ export const SERIAL_TEST_FILES = Object.freeze([
   'answers-terms-numbers.test.ts', // < 250 ms
   'first-name.test.ts', // < 200 ms and < 50 ms
   'lesson-code.test.ts', // < 50 ms
+  'queue-health-report.test.ts', // < 200 ms
   'sequence-import.test.ts', // < 2,000 ms
   // Wall-clock windows around real timers and deadlines.
   'as1-orders-course-progress.test.ts', // answered in < 300 ms

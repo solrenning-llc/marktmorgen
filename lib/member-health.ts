@@ -11,6 +11,7 @@
  *   nl:health:<statsId>   JSON Health, ten minutes
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -238,19 +239,35 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     }
   }
   const { rows, complete } = await runningMembers(store);
-  const { members, unscored } = await scoredMembers(store, rows, now);
-  const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
-  let atRisk = 0;
-  let atRiskElsewhere = 0;
-  for (const m of members) {
-    counts[m.band] += 1;
-    if (m.band !== "risk") continue;
-    if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
-    else atRisk += m.monthly;
+  const scored = await scoredMembers(store, rows, now);
+  const { unscored } = scored;
+  // Stripe keeps a deleted member's membership, so every reading would name them again: whoever the store deleted is
+  // left out (lib/suppression.ts; the class of #4379). A list of prints that cannot be read throws (rule 24).
+  const gone = store.listId && scored.members.length ? await suppressedAmong(store.listId, scored.members.map((m) => m.email)) : new Set<string>();
+  const summary = (kept: MemberRow[]): Health => {
+    const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
+    let atRisk = 0;
+    let atRiskElsewhere = 0;
+    for (const m of kept) {
+      counts[m.band] += 1;
+      if (m.band !== "risk") continue;
+      if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
+      else atRisk += m.monthly;
+    }
+    return { at: Math.floor(now / 1000), currency: store.currency, members: kept, counts, atRisk, atRiskElsewhere, unscored, complete };
+  };
+  const health = summary(scored.members.filter((m) => !gone.has(m.email)));
+  if (!isRedisConfigured()) return health;
+  const names = health.members.map((m) => m.email);
+  if (!store.listId || !names.length) {
+    await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
+    return health;
   }
-  const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
-  return health;
+  // Kept only when nobody it names was deleted meanwhile, in one step with the write (keepUnlessErased), so a reading
+  // begun before an erasure never writes the deleted member back. One deleted meanwhile is left out of this answer too;
+  // a check that cannot run keeps nothing.
+  const since = await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(health), CACHE_SECONDS, names).catch(() => new Set<string>());
+  return since.size ? summary(health.members.filter((m) => !since.has(m.email))) : health;
 }
 
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */

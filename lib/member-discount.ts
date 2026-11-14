@@ -158,7 +158,11 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (codes.state !== "ok") return { ok: false, reason: "stripe" };
   if (!codes.codes.some((c) => c.id === promotion && c.active)) return { ok: false, reason: "code" };
   try {
-    await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    const row = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    // Applied only on Stripe's answer for this membership showing a discount on it (rule 30, DISC-C-3): any other
+    // answer is not known to have put it on, so the creator is never told the renewals are discounted.
+    const discounted = (Array.isArray(row?.discounts) && row.discounts.length > 0) || (row?.discount !== null && row?.discount !== undefined);
+    if (row?.id !== subscription || !discounted) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

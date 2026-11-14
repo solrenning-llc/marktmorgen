@@ -261,6 +261,7 @@ function centralAliases(file,root,here){
  if(file==='eu-who-answers.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-keys-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='assistant-counter-admission.test.ts')for(const name of ['redis','store','store-assistant','metered-limits'])aliases['@/lib/'+name]=join(here,'assistant-counter-admission-world.ts');
+ if(file==='places-totals-unknown.test.ts'){aliases['@/lib/community-page']=join(here,'places-totals-unknown-world.ts');for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'places-totals-unknown-world.ts');}
  if(file==='embed-library-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='a8-stock-unknown.proof.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-soon-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}

@@ -16,7 +16,7 @@
  *   - the purchase email offers the link only where it works.
  */
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
-import { affiliateForSession, decide, joinAsBuyer, listAffiliates } from "@/lib/affiliates";
+import { decide, joinAsBuyer, listAffiliates } from "@/lib/affiliates";
 import { NextRequest } from "next/server";
 import { POST as joinRoute } from "@/app/api/store/affiliates/join/route";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
@@ -27,6 +27,8 @@ import { done, is, part } from "./check";
 const sessions = new Map<string, Record<string, unknown>>();
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
+  // The sign-in link an order now emails (lib/affiliates.ts, requestAffiliateLink).
+  if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email-stand-in" }), { status: 200 });
   const m = url.pathname.match(/^\/v1\/checkout\/sessions\/(cs_[A-Za-z0-9_]+)$/);
   const found = m ? sessions.get(m[1]) : undefined;
   return new Response(JSON.stringify(found ?? { error: { message: "No such checkout.session" } }), { status: found ? 200 : 404 });
@@ -49,6 +51,7 @@ const paid = (id: string, email: string, store = "harbor", extra: Record<string,
 
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_buyers_only_a_stand_in";
+  process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
   redis.clear();
   const made = await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
   if (!made.ok) throw new Error("no store");
@@ -81,7 +84,7 @@ async function main(): Promise<void> {
   if (!dana.ok) throw new Error(`Dana could not join: ${dana.reason}`);
   is("a buyer joins at once, approved", dana.affiliate.status, "approved");
   is("as the address that paid", dana.affiliate.email, "dana@example.com");
-  is("and this browser is signed in as them", (await affiliateForSession(store, dana.session))?.id, dana.affiliate.id);
+  is("made now, and no browser is signed in by the order (it emails the sign-in link instead)", [dana.created, "session" in dana], [true, false]);
   const again = await joinAsBuyer(store, "cs_test_dana000000001");
   is("the same order twice is the same affiliate", !again.ok && again.reason === "known" && again.affiliate.id, dana.affiliate.id);
   is("but it signs nobody in the second time: their own link is emailed instead (MM-SA-34)", again.ok, false);
@@ -148,8 +151,10 @@ async function main(): Promise<void> {
   };
   paid("cs_test_gusdot0000001", "gus+news@example.com");
   paid("cs_test_lou000000001", "lou@example.com");
-  is("the page then says the application is in, not that a link is ready", await viaRoute("cs_test_gusdot0000001"), "https://marktmorgen.com/@harbor/affiliates?status=applied");
-  is("and a buyer let in hears their link is ready", await viaRoute("cs_test_lou000000001"), "https://marktmorgen.com/@harbor/affiliates?status=joined");
+  // An order signs nobody in: a waiting application and a buyer let in both get the sign-in link by email, and the same
+  // answer (tests/affiliate-order-never-session.test.ts).
+  is("a waiting application is told to check the inbox", await viaRoute("cs_test_gusdot0000001"), "https://marktmorgen.com/@harbor/affiliates?status=sent");
+  is("and so is a buyer let in", await viaRoute("cs_test_lou000000001"), "https://marktmorgen.com/@harbor/affiliates?status=sent");
 
   part("The purchase email offers it only where it works");
   const session = { ...sessions.get("cs_test_dana000000001")!, metadata: { store: "harbor", product: "p8w2m4q9zz" } };

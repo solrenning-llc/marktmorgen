@@ -1420,7 +1420,7 @@ export async function buyerOfOrder(store: Store, sessionId: string): Promise<str
 }
 
 export type JoinResult =
-  | { ok: true; session: string; affiliate: Affiliate; created: boolean }
+  | { ok: true; affiliate: Affiliate; created: boolean }
   | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" }
   /** Already an affiliate here: an order is no sign-in, so the caller emails their link (MM-SA-34). */
   | { ok: false; reason: "known"; email: string; affiliate: Affiliate };
@@ -1482,10 +1482,10 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   // who holds the browser now. It makes a new affiliate, never a session on one that was already there,
   // with its address, earnings and where their money is paid: that one signs in by the emailed link (MM-SA-34).
   if (!created) return { ok: false, reason: "known", email: affiliate.email, affiliate };
-
-  const session = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS]]);
-  if (created) {
+  // Nor on the one it has just made: a leaked id pressed before its buyer did would sign the holder in as the buyer's
+  // new account, free to set where its money is paid before the buyer earned anything (the security audit of 14
+  // November 2026). The caller emails the ordinary sign-in link to the address that paid, as for a known one.
+  {
     await alertCreator(
       store,
       "affiliate",
@@ -1495,7 +1495,7 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
       { seed: affiliate.id },
     ).catch((error) => console.error("a new-affiliate notification failed", error));
   }
-  return { ok: true, session, affiliate, created };
+  return { ok: true, affiliate, created };
 }
 
 /** The affiliate a browser is signed in as, on this store, or null. */

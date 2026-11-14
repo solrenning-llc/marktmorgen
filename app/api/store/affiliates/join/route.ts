@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer, requestAffiliateLink } from "@/lib/affiliates";
+import { joinAsBuyer, requestAffiliateLink } from "@/lib/affiliates";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -42,24 +42,14 @@ export async function POST(request: NextRequest) {
     console.error("a buyer joining the affiliate program failed", error);
     return { ok: false as const, reason: "error" as const };
   });
-  // Already an affiliate here: the order is no sign-in to their page (MM-SA-34). Their own
-  // link goes to the address that paid, with the apply form's limits, and the page says "check your inbox".
-  if (!result.ok && result.reason === "known") {
-    const sent = await requestAffiliateLink({ store, email: result.email, note: "", ip: clientAddress(request), origin: linkOrigin(request, store) }).catch((error) => {
-      console.error("emailing a known affiliate their link failed", error);
-      return "error" as const;
-    });
-    return back(sent);
-  }
-  if (!result.ok) return back(result.reason);
-  const secure = origin.startsWith("https://") ? "; Secure" : "";
-  return new Response(null, {
-    status: 303,
-    headers: {
-      // An address matching one already on the list waits for the creator: the page says the application is in.
-      Location: `${page}?status=${result.affiliate.status === "pending" ? "applied" : "joined"}`,
-      "Cache-Control": "no-store",
-      "Set-Cookie": `${affiliateCookieName(store.handle)}=${result.session}; Path=/; Max-Age=${AFFILIATE_SESSION_SECONDS}; HttpOnly; SameSite=Lax${secure}`,
-    },
+  if (!result.ok && result.reason !== "known") return back(result.reason);
+  // An order is no sign-in (MM-SA-34; the security audit of 14 November 2026): whether it has just made the buyer an
+  // affiliate or they already were one, their own link goes to the address that paid, with the apply form's limits,
+  // and the page says "check your inbox", the same answer either way.
+  const email = result.ok ? result.affiliate.email : result.email;
+  const sent = await requestAffiliateLink({ store, email, note: "", ip: clientAddress(request), origin: linkOrigin(request, store) }).catch((error) => {
+    console.error("emailing an affiliate their link after an order failed", error);
+    return "error" as const;
   });
+  return back(sent);
 }

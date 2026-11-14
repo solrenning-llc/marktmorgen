@@ -18,7 +18,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, storeForEmail } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, affiliateForSession, joinAsBuyer } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, affiliateForSession, joinAsBuyer, openAffiliateLink, signInLinkFor } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGE_CODES } from "@/lib/store-language";
@@ -66,8 +66,12 @@ async function signedIn() {
   if (!store) throw new Error("no store");
   const joined = await joinAsBuyer(store, "cs_test_dana000000001");
   if (!joined.ok) throw new Error(`could not join: ${joined.reason}`);
-  assert.equal((await affiliateForSession(store, joined.session))?.id, joined.affiliate.id);
-  return { store, session: joined.session };
+  // An order signs nobody in (lib/affiliates.ts, joinAsBuyer): the affiliate signs in by the emailed link.
+  const link = await signInLinkFor(store, joined.affiliate.email, "https://marktmorgen.com");
+  const opened = link ? await openAffiliateLink(store, new URL(link).searchParams.get("token") ?? "") : null;
+  if (!opened?.ok) throw new Error("could not sign in by the emailed link");
+  assert.equal((await affiliateForSession(store, opened.session))?.id, joined.affiliate.id);
+  return { store, session: opened.session };
 }
 
 const post = (session?: string) => {

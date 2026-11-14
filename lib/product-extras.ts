@@ -312,10 +312,13 @@ export function parsePlan(raw: unknown): Plan | null {
   return { payments, interval: value.interval, amountCents: value.amountCents };
 }
 
-/** The options a plan has to cover: the ones a buyer is offered (lib/store-checkout.ts, sellableOptions). */
+/**
+ * The options a plan has to cover: the ones a buyer is offered (lib/store-checkout.ts, sellableOptions), so
+ * never one the creator took off sale (642 [WG2]): it needs no payment and never pauses the plan for the rest.
+ */
 function offeredOptions(product: Listing): ProductOption[] {
   const opens = Boolean(product.course || product.podcast || product.shipping);
-  return product.options.filter((option) => optionDelivers(option, opens));
+  return product.options.filter((option) => !option.offSale && optionDelivers(option, opens));
 }
 
 /** The first price on a product with several that its plan does not cover, and why; null when it covers them all. */
@@ -381,7 +384,9 @@ export function planFor(product: Listing, optionId: string | null): Plan | null 
   const plan = activePlan(product);
   if (!plan) return null;
   if (product.options.length === 0) return { payments: plan.payments, interval: plan.interval, amountCents: plan.amountCents };
-  const cents = optionId ? plan.options?.[optionId] : undefined;
+  // Only a price on sale: one taken off sale keeps no plan, whatever payment was saved for it.
+  if (!optionId || !offeredOptions(product).some((option) => option.id === optionId)) return null;
+  const cents = plan.options?.[optionId];
   return cents ? { payments: plan.payments, interval: plan.interval, amountCents: cents } : null;
 }
 

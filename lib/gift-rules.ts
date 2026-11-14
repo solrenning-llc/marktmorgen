@@ -41,13 +41,14 @@ export function canGift(product: Listing): boolean {
 }
 
 /**
- * The price options of a product that can be bought for somebody else: paid,
- * and handing over a file or a link of their own, or opening the course.
- * Empty for a product sold at one price.
+ * The price options of a product that can be bought for somebody else: on
+ * sale (642 [WG2]: one the creator took off sale is never offered, even when
+ * it is their pick), paid, and handing over a file or a link of their own, or
+ * opening the course. Empty for a product sold at one price.
  */
 export function givableOptions(product: Listing): ProductOption[] {
   if (product.recurring || product.call || product.pwyw || product.keys) return [];
-  return product.options.filter((option) => option.priceCents > 0 && Boolean(option.file || option.link || product.course));
+  return product.options.filter((option) => !option.offSale && option.priceCents > 0 && Boolean(option.file || option.link || product.course));
 }
 
 /**

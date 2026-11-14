@@ -17,6 +17,7 @@ import { PROVIDER_NAMES, readVideo } from "@/lib/sales-page";
 import { AUDIO_NAMES, readAudio } from "@/lib/audio-embed";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { useFixLink } from "@/components/use-fix-link";
 
 /** What a link plays on the page, by name: "the YouTube video", "the Spotify player"; null when it plays nothing. */
 function playable(url: string): { name: string; what: string } | null {
@@ -336,6 +337,14 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
     setAdding(false);
     setEditingId(link.id);
   }
+
+  // "Change the words of …" in the store's check: opens that link's form with the focus in its words.
+  useFixLink("edit-link-", (id) => {
+    const link = links.find((one) => one.id === id && !one.header);
+    if (!link) return null;
+    startEditing(link);
+    return "link-title";
+  });
 
   return (
     <div className="card mt-8 p-6 sm:p-8">

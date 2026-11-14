@@ -39,7 +39,7 @@ async function main(): Promise<void> {
 
   part("What the studio shows");
   const shown = renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: true, missing: [], unchecked: 0 }, links: { vague: [{ id: "a", title: "Read more" }, { id: "b", title: "https://example.com/x" }] } } }));
-  is("each link named, with how to say it and where", [shown.includes("2 links do not say where they go"), shown.includes("<li>Read more</li>"), shown.includes("https://example.com/x"), /Say where it goes/.test(shown), shown.includes('href="#links"')], [true, true, true, true, true]);
+  is("each link named, with how to say it and where", [shown.includes("2 links do not say where they go"), /<li><a href="#edit-link-a"[^>]*>Change the words of “Read more”<\/a><\/li>/.test(shown), shown.includes("https://example.com/x"), /Say where it goes/.test(shown), shown.includes('href="#links"')], [true, true, true, true, true]);
   is("all links clear: said so", renderToStaticMarkup(StoreAccessCheck({ check: { pictures: { done: true, missing: [], unchecked: 0 }, links: { vague: [] } } })).includes('data-access-links="done"'), true);
   is("never a conformity claim", /fully accessible|ADA compliant|WCAG AAA certified|most accessible/i.test(shown), false);
   done();

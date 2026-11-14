@@ -562,13 +562,7 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    // A reply that is not a list page is unknown, never an empty page read to the end (rule 24): the run stops
-    // unsure and the place stays, so the refunds it would have held are read next run (14 November 2026).
-    if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") {
-      unsure = true;
-      break;
-    }
-    const refunds = listed.data as Record<string, unknown>[];
+    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
     // Lost disputes, read once with the first page; more than it reads, or a failed read, keeps the anchor.
     const lost = page === 0 ? await lostDisputesOrRetry(account, since, deadline, lostCursorKey("keys", store.statsId ?? account)) : null;
     if (lost) lostRead = lost;

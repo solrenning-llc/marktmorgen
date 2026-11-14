@@ -1,3 +1,4 @@
+import { Abbr } from "@/components/abbr";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -95,7 +96,7 @@ export default function DevelopersPage() {
 
       <LegalSection title="Keys">
         <p>
-          {`Make a key in your studio, under API keys. It is shown once, when you make it, and never again: we keep only a fingerprint of it. A store can have ${MAX_KEYS} keys; each shows when it was last used, and revoking one refuses the very next request made with it. Deleting a store revokes all of its keys and removes its webhook endpoints with it.`}
+          {`Make a key in your studio, under `}<Abbr of="API" />{` keys. It is shown once, when you make it, and never again: we keep only a fingerprint of it. A store can have ${MAX_KEYS} keys; each shows when it was last used, and revoking one refuses the very next request made with it. Deleting a store revokes all of its keys and removes its webhook endpoints with it.`}
         </p>
         <p>
           A key reads, and changes nothing, unless you check &quot;It can also write&quot; when you make it. That choice is
@@ -108,17 +109,17 @@ export default function DevelopersPage() {
   -H "Authorization: Bearer nl_live_…"`}</Code>
         <p>
           A key belongs to one store and reads only that store. Keep it on a server, in Zapier or in Make — never in a web
-          page, where anybody who opens the page could copy it. The API sends no CORS headers, so a browser refuses to
+          page, where anybody who opens the page could copy it. The API sends no <Abbr of="CORS" /> headers, so a browser refuses to
           use one.
         </p>
       </LegalSection>
 
       <LegalSection title="Answers, pages and limits">
         <p>
-          Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
+          Every answer is <Abbr of="JSON" />. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
           the next page, until it is <code className="font-mono">null</code>.
-          {` A page holds about ${API_PAGE} rows. Products never has more. Your list, your members and a course's students can have a few more on a page. A page can also come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
+          {` A page holds about ${API_PAGE} rows. Products never has more. Your list, your members and a course's students can have a few more on a page. A page can also come back empty before the last one, so keep asking until next is null. Times are `}<Abbr of="ISO" />{` 8601, in `}<Abbr of="UTC" />{`. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
           To get only some fields of each row, add <code className="font-mono">?fields=</code> with their names,
@@ -211,7 +212,7 @@ export default function DevelopersPage() {
       <LegalSection title="Leads">
         <Endpoint path="/api/v1/leads">
           Your list: everybody who asked for something free, bought, or came in with an import — the same rows as the
-          CSV export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
+          <Abbr of="CSV" /> export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
           from you and have not unsubscribed: the ones it is fair to email. If a page holds a contact that could not be
           read, it leaves that contact out and says how many in <code className="font-mono">unreadable</code>; a page
           without that field left nobody out.

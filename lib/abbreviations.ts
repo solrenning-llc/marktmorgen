@@ -5,6 +5,7 @@
 export const ABBREVIATIONS = {
   ACH: "Automated Clearing House, a US bank transfer",
   API: "application programming interface",
+  CORS: "Cross-Origin Resource Sharing",
   CRM: "customer relationship management",
   CSV: "comma-separated values",
   DNS: "Domain Name System",
@@ -18,6 +19,7 @@ export const ABBREVIATIONS = {
   HTML: "HyperText Markup Language",
   ICS: "iCalendar file",
   ID: "identifier",
+  ISO: "International Organization for Standardization",
   JPEG: "Joint Photographic Experts Group, a picture file",
   JPG: "Joint Photographic Experts Group, a picture file",
   JSON: "JavaScript Object Notation",

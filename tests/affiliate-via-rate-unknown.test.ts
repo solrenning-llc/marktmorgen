@@ -62,6 +62,7 @@ async function main(): Promise<void> {
     // Stripe says the tax, 0 included: one it does not say is not known (tests/affiliate-sale-amount-unknown.test.ts).
     total_details: { amount_tax: 0 },
     currency: "usd",
+    total_details: { amount_tax: 0, amount_shipping: 0 },
     payment_intent: `pi_${id.slice(3)}`,
     metadata: { store: "harbor", product: "course", title: "Course", via: affiliate, ...meta },
     customer_details: { email: "buyer@example.com" },

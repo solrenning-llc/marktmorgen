@@ -260,13 +260,18 @@ export function InboxStudio({
     toast("A suggestion is in the box. Read it and change what you need before sending.");
   }
 
-  async function saveSetting(body: Record<string, unknown>, done: string) {
+  /** True only once the server confirmed the change, so a form clears what was typed only then. */
+  async function saveSetting(body: Record<string, unknown>, done: string): Promise<boolean> {
     setBusy(true);
     const answer = await post(body);
     setBusy(false);
-    if (!answer.ok) return fail(answer.error);
+    if (!answer.ok) {
+      fail(answer.error);
+      return false;
+    }
     setSetting(answer.inbox as InboxSetting);
     toast(done);
+    return true;
   }
 
   const c = thread?.conversation;
@@ -464,12 +469,13 @@ export function InboxStudio({
         ) : null}
       </section>
 
-      <SavedReplies saved={setting.saved} busy={busy} onSave={(saved, done) => void saveSetting({ action: "saved", saved }, done)} />
+      <SavedReplies saved={setting.saved} busy={busy} onSave={(saved, done) => saveSetting({ action: "saved", saved }, done)} />
     </div>
   );
 }
 
-function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: boolean; onSave: (saved: SavedReply[], done: string) => void }) {
+/** The store's saved replies; what is typed for a new one is kept until its save is confirmed (WCAG 3.3.7). */
+export function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: boolean; onSave: (saved: SavedReply[], done: string) => Promise<boolean> }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   return (
@@ -503,9 +509,9 @@ function SavedReplies({ saved, busy, onSave }: { saved: SavedReply[]; busy: bool
       {saved.length < MAX_SAVED ? (
         <form
           className="mt-4 grid gap-3"
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            onSave([...saved, { id: savedId(), title: title.trim(), text: body.trim() }], "Saved.");
+            if (!(await onSave([...saved, { id: savedId(), title: title.trim(), text: body.trim() }], "Saved."))) return;
             setTitle("");
             setBody("");
           }}

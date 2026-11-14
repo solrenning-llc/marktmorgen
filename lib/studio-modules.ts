@@ -112,6 +112,7 @@ export const NOT_MODULES: Readonly<Record<string, string>> = {
   card: "The business card, one address with a Save contact button, opened from Your pages.",
   invoices: "The invoices of the store's own Marktmorgen plan, opened from the plan card on the studio home.",
   tax: "The tax registrations active on the store's Stripe account, read from Stripe: a report for the owner, not a part of the store.",
+  appeals: "Asking us to look again at a decision that took something down from this store, opened from the notice on the studio home; not a part of the store.",
   companies: "The companies your buyers work at, a part of Buyers opened from its page rather than a part of the store on its own.",
 };
 

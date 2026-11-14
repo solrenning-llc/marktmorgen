@@ -1434,6 +1434,12 @@ export default async function StudioPage({
                   We emailed you each time, with the notice and how to answer it. Reply to that email to send a counter-notice;
                   your buyers keep what they bought. <Link href="/copyright" className="underline underline-offset-2">Our policy</Link>.
                 </p>
+                {/* 646 [WG6]: the request to look again, for whoever may change the store's settings (app/studio/appeals). */}
+                {store.strikes.length && may("settings") ? (
+                  <p className="mt-2 text-sm">
+                    <Link href={studioPath(store, "", "appeals")} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">Ask us to look again at a decision</Link>
+                  </p>
+                ) : null}
               </div>
             ) : null}
             {/* A store with nothing on it yet: its first draft, written with AI from a few sentences (lib/ai.ts, writeStoreSetup). */}

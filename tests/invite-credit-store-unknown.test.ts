@@ -7,7 +7,7 @@
  * invited store read when earning, and the two lists the run walks. Stripe is a stand-in; nothing real is charged.
  */
 import { claimHandle, setSubscription } from "@/lib/store";
-import { OWED_KEY, creditKey, inviteCode, recordInvite, type Credit } from "@/lib/creator-invites";
+import { OWED_KEY, byKey, creditKey, inviteCode, mineKey, recordInvite, type Credit } from "@/lib/creator-invites";
 import { settleInvites } from "@/lib/creator-invite-credit";
 import { INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
 import { store as redis } from "./redis-stub";
@@ -27,8 +27,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  // An owed credit's invoice, read again by its id before the credit is sent (lib/creator-invite-credit.ts paidNow).
+  const byId = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
+  if (method === "GET" && byId) {
+    const found = [...invoices.values()].flat().find((inv) => inv.id === byId[1]);
+    return found ? answer(found) : answer({ error: { message: "No such invoice" } }, 404);
+  }
   if (method === "GET" && path === "/invoices") return answer({ object: "list", data: invoices.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
   if (method === "GET" && path === "/refunds") return answer({ object: "list", data: [], has_more: false });
+  // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   const txns = path.match(/^\/customers\/(cus_[A-Za-z0-9]+)\/balance_transactions$/);
   if (txns && method === "GET") return answer({ object: "list", data: [], has_more: false });
   if (txns && method === "POST") {
@@ -85,10 +93,27 @@ async function main(): Promise<void> {
   await setSubscription("ana@example.com", { customerId: "cus_Ana0001", subscriptionId: "sub_Ana0001", active: true, period: paidPeriod() });
   const anaIdKey = `nl:store:id:${ana.sid}`;
 
+  let shares = 0;
   const owe = (id: string, to: string, cents: number) => {
-    const credit: Credit = { id, kind: "bonus", to, from: to, cents, cur: "usd", at: nowS - PAST * DAY, state: "owed" };
+    const at = nowS - PAST * DAY;
+    const credit: Credit = { id, kind: "bonus", to, from: to, cents, cur: "usd", at, state: "owed" };
     redis.run(["SET", creditKey(id), JSON.stringify(credit)]);
     redis.run(["SADD", OWED_KEY, id]);
+    // What a real bonus has behind it, read again before it is sent (lib/creator-invite-credit.ts stillOwed): the
+    // invite, and the share its first paid invoice earned, at the same moment, on the inviter's list, with the invoice.
+    const inviter = "1".repeat(32);
+    redis.run(["SET", byKey(to), JSON.stringify({ r: inviter, at: at - DAY })]);
+    shares += 1;
+    const shareId = `in_OweShare${String(shares).padStart(3, "0")}`;
+    const share: Credit = { id: shareId, kind: "share", to: inviter, from: to, cents: 1450, cur: "usd", at, state: "done" };
+    redis.run(["SET", creditKey(shareId), JSON.stringify(share)]);
+    redis.run(["ZADD", mineKey(inviter), at, shareId]);
+    invoices.set(`cus_Owe${shares}`, [{
+      id: shareId, object: "invoice", status: "paid", amount_paid: 2900, post_payment_credit_notes_amount: 0, currency: "usd",
+      created: at, status_transitions: { paid_at: at },
+      parent: { type: "subscription_details", subscription_details: { subscription: "sub_x" } },
+      payments: { object: "list", data: [{ payment: { type: "payment_intent", payment_intent: `pi_owe_${shares}` } }], has_more: false },
+    }]);
   };
 
   part("A store read answered in another shape is unknown: the credit stays owed, never gone");

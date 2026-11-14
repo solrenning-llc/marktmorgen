@@ -24,10 +24,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   if (url.hostname !== "api.stripe.com") return answer({}, 404);
+  // An owed credit's invoice, read again by its id before the credit is sent (lib/creator-invite-credit.ts paidNow).
+  const byId = path.match(/^\/invoices\/(in_[A-Za-z0-9]+)$/);
+  if (method === "GET" && byId) {
+    const found = [...invoiceByCustomer.values()].find((inv) => inv.id === byId[1]);
+    return found ? answer(found) : answer({ error: { message: "No such invoice" } }, 404);
+  }
   if (method === "GET" && path === "/invoices") {
     const row = invoiceByCustomer.get(url.searchParams.get("customer") ?? "");
     return answer({ object: "list", data: row ? [row] : [], has_more: false });
   }
+  // The disputes of each paid invoice's payment, read beside its refunds (lib/creator-invite-credit.ts disputedOn): none here.
+  if (method === "GET" && path === "/disputes") return answer({ object: "list", data: [], has_more: false });
   if (method === "GET" && path === "/refunds") {
     const payment = url.searchParams.get("payment_intent") ?? url.searchParams.get("charge") ?? "";
     return answer(refundAnswerByPayment.get(payment));

@@ -3531,7 +3531,7 @@ export default async function StudioPage({
               ) : null}
 
               {store.extra && may("delete") ? (
-                <details className="mt-8 border-t border-line pt-6">
+                <details id="delete-store" className="mt-8 scroll-mt-32 border-t border-line pt-6">
                   <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">
                     Delete this store
                   </summary>
@@ -3682,6 +3682,11 @@ export default async function StudioPage({
           {store ? (
             <Link href={studioPath(store, "", "devices")} className="btn btn-ghost">
               Log out of other devices
+            </Link>
+          ) : null}
+          {store ? (
+            <Link href={studioPath(store, "", "privacy")} className="btn btn-ghost">
+              Privacy and your data
             </Link>
           ) : null}
         </div>

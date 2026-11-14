@@ -219,6 +219,23 @@ async function main() {
   is("its notice is in all seven languages, each its own, said as a warning", [notEmailed.every((n) => typeof n?.text === "string" && n.text.length > 20 && n.tone === "warn"), new Set(notEmailed.map((n) => n?.text)).size], [true, 7]);
   is("its notice says the post is up and nothing was emailed", /^Posted\. It was not emailed/.test(communityNotices("en").notemailed?.text ?? ""), true);
 
+  part("Claude 7's hunt C7 (ALTO): a cursor this list never gave is refused, never the start of the list again");
+  const pass = async () => async () => null;
+  for (const bad of ["undefined", "null", "abc", "-1", "1.5", " 7"]) {
+    const answer = await apiMembers(store, bad, pass);
+    is(`cursor ${JSON.stringify(bad)}: 400 invalid_cursor, never the first page`, answer instanceof Response ? answer.status : "a page", 400);
+  }
+  const fromStart = await apiMembers(store, null, pass);
+  is("no cursor still begins at the start", fromStart instanceof Response ? "refused" : fromStart.data.length, 1);
+
+  part("Claude 7's hunt C7 (MEDIUM): a member whose record does not read is counted, never left out without a word");
+  await original([["HSET", `nl:cm:${id}:m`, "b".repeat(32), "{not a member"]]);
+  const page = await memberPage(id, "0", 1000);
+  is("memberPage says one record did not read", [page.members.length, page.unreadable], [1, 1]);
+  const api = await apiMembers(store, null, pass);
+  is("the API says so too, as the leads do", api instanceof Response ? "refused" : [api.data.length, (api as { unreadable?: number }).unreadable], [1, 1]);
+  await original([["HDEL", `nl:cm:${id}:m`, "b".repeat(32)]]);
+
   done();
 }
 

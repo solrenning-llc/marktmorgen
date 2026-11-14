@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
@@ -146,9 +147,16 @@ export function ThanksNoteEditor({ productId, productTitle, storeName, initial }
           {busy ? "Saving…" : "Save the note"}
         </button>
         {has ? (
-          <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void send(null)}>
+          <ConfirmAction
+            className="btn btn-ghost"
+            disabled={busy}
+            busy={busy}
+            question="Remove the note? Its words, video and button go with it."
+            yes="Yes, remove"
+            onConfirm={() => send(null)}
+          >
             Remove
-          </button>
+          </ConfirmAction>
         ) : null}
       </div>
     </section>

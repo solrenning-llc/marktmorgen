@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
@@ -110,9 +111,16 @@ export function AnswersEditor({
         <div className="mt-7 border-t border-line pt-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="font-semibold text-ink">Questions your pages did not answer</p>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => void post({ clear: true }, "clear", "List cleared.")} disabled={busy !== null} aria-busy={busy === "clear"}>
+            <ConfirmAction
+              className="btn btn-ghost btn-sm"
+              disabled={busy !== null}
+              busy={busy === "clear"}
+              question="Clear the list? These questions cannot be brought back."
+              yes="Yes, clear"
+              onConfirm={() => post({ clear: true }, "clear", "List cleared.")}
+            >
               Clear the list
-            </button>
+            </ConfirmAction>
           </div>
           <p className="mt-1 text-sm text-ink-soft">Newest first, with nothing about who asked. Answer them on the product&apos;s page or in your notes above, and the next visitor gets the answer.</p>
           <ul className="mt-3 space-y-2">

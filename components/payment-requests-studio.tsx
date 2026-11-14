@@ -1,5 +1,6 @@
 "use client";
 
+import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { paymentRequestReply, type RequestAction } from "@/lib/payment-request-reply";
@@ -414,9 +415,17 @@ export function PaymentRequestsStudio({
                     </button>
                   ) : null}
                   {canSend && status !== "open" ? (
-                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== ""} onClick={() => void act("delete", r.id, "Request deleted. Any payment stays on your Stripe account.")} aria-label={`Delete the request to ${r.email}`}>
+                    <ConfirmAction
+                      className="btn btn-secondary btn-sm"
+                      disabled={busy !== ""}
+                      busy={busy !== ""}
+                      label={`Delete the request to ${r.email}`}
+                      question="Delete this request? Any payment stays on your Stripe account."
+                      yes="Yes, delete"
+                      onConfirm={() => act("delete", r.id, "Request deleted. Any payment stays on your Stripe account.")}
+                    >
                       <Icon name="trash" size={15} /> Delete
-                    </button>
+                    </ConfirmAction>
                   ) : null}
                   {status === "open" && !again.ok && canSend ? <span className="text-xs text-ink-soft">{again.why}</span> : null}
                 </div>

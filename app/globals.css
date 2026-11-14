@@ -830,6 +830,21 @@ html {
   }
 }
 /*
+ * Fills, in forced colors (WCAG 1.4.11; AX274 item 4). A bar, a meter's fill
+ * or a day's mark drawn only as a coloured box is painted Canvas by the system
+ * and vanishes on the page's own Canvas. They are drawn in CanvasText instead:
+ * the studio's charts and meters (.meter-fill) and a review's share bars.
+ * Gradients go too, since the system drops background images there.
+ */
+@media (forced-colors: active) {
+  .meter-fill,
+  .rv-bar > span {
+    forced-color-adjust: none;
+    /* Over a fill's own colour, set inline or later in this file. */
+    background: CanvasText !important;
+  }
+}
+/*
  * 40px was below both platforms' guidance. 44 is Apple's number and the
  * smaller of the two, which is the one to meet.
  */

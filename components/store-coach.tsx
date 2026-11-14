@@ -38,7 +38,7 @@ export function StoreCoach({ checks }: { checks: StoreCheck[] }) {
         aria-valuemax={100}
         aria-valuenow={score}
       >
-        <div className="h-full rounded-full bg-violet-brand transition-[width]" style={{ width: `${score}%` }} />
+        <div className="meter-fill h-full rounded-full bg-violet-brand transition-[width]" style={{ width: `${score}%` }} />
       </div>
       {next.length ? (
         <ol className="mt-5 space-y-3">

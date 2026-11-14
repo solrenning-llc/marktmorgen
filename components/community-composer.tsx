@@ -275,7 +275,7 @@ export function CommunityComposer({
       {busy ? (
         <div className="mt-3" role="status">
           <div className="h-2 w-full overflow-hidden rounded-full" style={{ background: "var(--st-accent-soft)" }} role="progressbar" aria-label={words.sendingPicture} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-full rounded-full" style={{ width: `${Math.max(percent, 4)}%`, background: "var(--st-accent)" }} />
+            <div className="meter-fill h-full rounded-full" style={{ width: `${Math.max(percent, 4)}%`, background: "var(--st-accent)" }} />
           </div>
           <p className="st-muted mt-1 text-sm">{words.shrinkingPicture}</p>
         </div>

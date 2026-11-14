@@ -5,7 +5,7 @@
  * filed, a notice acted on once however many steps were taken, and each kind
  * of step. Nothing about who sent a notice or which store it named.
  *
- *   nl:transparency:<YYYY>          hash  notice:<kind>, acted:<kind> (copyright, other), step:<type>
+ *   nl:transparency:<YYYY>          hash  notice:<kind>, acted:<kind> (copyright, other, child_safety, intimate_image), step:<type>
  *   nl:transparency:acted:<YYYY>    set   the notices acted on that year, so each counts once
  *   nl:transparency:since           ISO day counting began
  */
@@ -116,8 +116,8 @@ export async function transparencyCounts(now = Date.now()): Promise<{ since: str
       const get = (field: string) => counts.get(field) ?? 0;
       return {
         year,
-        notices: { copyright: get("notice:copyright"), other: get("notice:other") },
-        acted: { copyright: get("acted:copyright"), other: get("acted:other") },
+        notices: Object.fromEntries(NOTICE_KINDS.map((kind) => [kind, get(`notice:${kind}`)])) as Record<NoticeKind, number>,
+        acted: Object.fromEntries(NOTICE_KINDS.map((kind) => [kind, get(`acted:${kind}`)])) as Record<NoticeKind, number>,
         steps: { link: get("step:link"), product: get("step:product"), kit: get("step:kit"), store: get("step:store") },
       };
     }),

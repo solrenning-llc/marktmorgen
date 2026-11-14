@@ -195,3 +195,55 @@ Com a trava ligada, apagar um objeto mais novo que ela é recusado pela Cloudfla
 - Também disparam o alarme: os motivos `prune_*`, `room_*` e `last_good_copy_lost` da cópia do banco (C4-36, item 4); e, no Worker, lista vazia, falha, incompleta ou encolhida mais de 20% (em relação à anterior, à de 7 dias ou à de 30 dias antes), exclusões retidas (com a data do fim automático), registros de um dia ou de 30 dias acima de 20% de uma origem, mais de 20% dos objetos de uma loja com etag novo num dia ou em 30 dias, o teto de espaço de uma loja (`files_room`), arquivo recusado por tamanho, itens ausentes sem registro de exclusão (no dia em que aparecem e de novo no fim dos 90 dias, não nos dias entre os dois; um item ausente cujo registro de exclusão ainda está no prazo de 30 dias, ou antes do fim de 90 dias se retido, é esperado: não dispara alarme e não segura o sinal de vida), cópia atrasada em relação ao próprio teto e recusa da rota de listagem.
 - Alarme de silêncio quer dizer: a cópia do dia **não** foi feita ou não foi verificada, por qualquer motivo, inclusive a Vercel ou a Cloudflare fora do ar. Abrir o relatório do backup e o motivo da última falha (`nl:backup:last-fail`, para o banco; o registro do Worker, para arquivos e vídeos); se um provedor estiver fora, esperar a volta e conferir que a próxima execução mandou o sinal.
 - O monitor externo é do dono, ainda não foi escolhido e ainda não existe; o preço dele é desconhecido, não zero (docs/backup-costs-2026-11-08.md, seção 5c). Até lá, não há alarme fora da Vercel nem fora da Cloudflare.
+
+## 9. Exploração sexual infantil e imagem íntima sem consentimento (09/11/2026)
+
+Pedido do Claude 1 (C1-20261109-1546-TODOS-70). Fontes lidas em 09/11/2026 **por trechos de busca atribuídos às páginas oficiais**: as páginas em si (uscode.house.gov, govinfo.gov, congress.gov, ftc.gov, missingkids.org) não abriram a partir deste ambiente. Cada ponto abaixo diz se o texto foi visto em trecho oficial ou se ainda falta conferir. Isto não é parecer jurídico.
+
+**Regra que vale para todo agente: Nenhum agente abre, baixa, encaminha, descreve ou analisa conteúdo denunciado como exploração sexual infantil ou imagem íntima sem consentimento**, nem pede a outro agente ou a uma IA que olhe. Os e-mails automáticos não trazem o conteúdo, uma prévia dele nem a descrição de quem denunciou.
+
+### O que o site faz sozinho (lib/child-safety.ts, /report)
+
+- Em /report há dois tipos novos de denúncia. A de exploração sexual infantil pede só onde está e um e-mail para resposta, sem nome, assinatura ou declaração sob pena de perjúrio, para não afastar quem denuncia. A de imagem íntima sem consentimento pede assinatura da própria pessoa (ou de quem a representa), onde está a imagem e a declaração de boa-fé de que ela foi publicada sem consentimento.
+- **Exploração sexual infantil:** o produto apontado sai do ar na hora (fica como rascunho). Nada é apagado: arquivos e registros ficam como estão. Para que o formulário aberto não sirva de arma contra lojas, a retirada automática tem teto de 3 produtos distintos por loja por dia (outra denúncia do mesmo produto, ou a repetição de um envio, não gasta o teto); acima disso, o dono decide. Sair do ar quer dizer sair da loja: quem comprou antes ainda alcança os arquivos até a unidade 3 (preservação restrita e controle de acesso) cortar esse acesso. Uma loja que não pode ser lida é dita como "não confirmado", e o dono age à mão. O dono recebe na hora um e-mail "URGENT" na caixa de suporte, só com o endereço e o que foi feito.
+- **Imagem íntima sem consentimento:** nada sai do ar sozinho; o dono recebe um e-mail "URGENT" com o prazo de 48 horas já calculado.
+- A página de transparência conta essas denúncias só por tipo, sem loja nem pessoa.
+
+### O que o dono faz
+
+**Exploração sexual infantil (18 U.S.C. § 2258A):**
+1. Não abrir o conteúdo. Conferir no e-mail "URGENT" o que foi feito. **Cuidado com a página da denúncia (/takedown/<token>, link no e-mail da denúncia):** hoje as ações dela tratam estes dois tipos como uma denúncia comum: mandam ao criador as palavras de quem denunciou (até 600 caracteres), com a declaração de motivos da DSA e o texto de contranotificação. O e-mail da denúncia na caixa de suporte também cita a descrição de quem denunciou, em texto. Avisar ou não o criador é decisão pendente do dono; a troca dessas mensagens para estes dois tipos depende de lib/takedown.ts, reservado a outro agente. Enquanto isso, usar a ação dessa página só para o que faltar tirar do ar (outra página, link ou a loja inteira), sabendo do aviso ao criador.
+2. Se houver conhecimento real ("actual knowledge") de aparente material de abuso sexual infantil, denunciar ao CyberTipline do NCMEC "as soon as reasonably possible" (§ 2258A(a); trecho oficial). Desde a REPORT Act (Pub. L. 118-59, 07/05/2024; trecho oficial), o dever também cobre tráfico sexual de menor (§ 1591) e aliciamento (§ 2422(b)).
+3. Preservar o conteúdo e os dados ligados a ele por **1 ano** a partir da denúncia (§ 2258A(h)(1), alterado pela REPORT Act de 90 dias para 1 ano; trecho oficial), em local seguro e com o acesso limitado ao necessário (§ 2258A(h); § 2258B(c) manda "minimize the number of employees" com acesso; trechos oficiais). A trava contra o criador apagar, mudar ou republicar o produto retido é a unidade 2 (#3471), e o corte do acesso de quem já comprou é a unidade 3; até as duas estarem no ar, o dono suspende a loja inteira quando o caso for real.
+4. Não há dever de monitorar nem de varrer conteúdo (§ 2258A(f); trecho oficial). Multa por falha "knowing and willful": até US$ 600.000 na primeira e US$ 850.000 nas seguintes, para provedor com menos de 100 milhões de usuários mensais (REPORT Act §4(a)(2); trecho oficial).
+5. Encerrar a conta do criador, como dizem os Termos (#child-safety).
+
+**Imagem íntima sem consentimento (TAKE IT DOWN Act, Pub. L. 119-12, 19/05/2025; trecho oficial):**
+1. Remover a imagem **em até 48 horas** do pedido válido e fazer esforço razoável para remover cópias idênticas conhecidas (trecho oficial). O FTC fiscaliza desde **19/05/2026** (trecho oficial: o prazo de adequação já passou).
+2. O Marktmorgen provavelmente é "covered platform": serve o público e hospeda principalmente conteúdo enviado pelos criadores, inclusive imagens e vídeos em lojas e comunidades. A redação literal da definição e das exclusões não foi lida na fonte; tratar como coberta.
+3. O FTC sugere dar um número de protocolo a cada pedido (trecho oficial); o e-mail da denúncia já traz o número da notice.
+
+### Pendências do dono (não feitas por nenhum agente)
+
+- **Cadastro de provedor (ESP) no CyberTipline.** O NCMEC exige o cadastro para o canal seguro de denúncia de provedores; o envio pode ser manual, por formulário, sem integração (relatório OJJDP-NCMEC 2023; trecho oficial). Página atual de cadastro e custo: **não conferidos**. Página arquivada de 2017 indica o pedido por e-mail a espteam@ncmec.org (a confirmar). Texto pronto para o dono enviar, em inglês:
+
+  > Subject: CyberTipline ESP registration request — Solrenning LLC (Marktmorgen)
+  >
+  > Hello NCMEC ESP Team,
+  >
+  > Solrenning LLC, a Delaware limited liability company, operates Marktmorgen (https://marktmorgen.com), an online service where creators run their own stores. Creators can upload digital files, courses, product pages and community posts that may include images and video, and the public can view them.
+  >
+  > We would like to register as an electronic service provider so we can report apparent child sexual exploitation to the CyberTipline under 18 U.S.C. § 2258A.
+  >
+  > Point of contact: [NAME], [TITLE]
+  > Email: [EMAIL]
+  > Phone: [PHONE]
+  > Mailing address: [MAILING ADDRESS]
+  >
+  > Please let us know the next steps, including the reporting options available to a provider of our size.
+  >
+  > Thank you,
+  > [NAME]
+  > Solrenning LLC
+
+- **Conferência das fontes na íntegra**, quando o ambiente puder abrir as páginas oficiais: redação vigente de § 2258A(a)(1)(B) e (b), numeração de (h)(2)–(h)(6), § 2258B(a)/(b), definição literal de "covered platform", itens do pedido válido e isenção por boa-fé da TAKE IT DOWN.

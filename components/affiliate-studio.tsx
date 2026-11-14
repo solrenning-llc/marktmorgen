@@ -37,6 +37,7 @@ import {
   creatorKeeps,
 } from "@/lib/partner-share";
 import type { Affiliate, AffiliateStatus, HoldFlag, Payout } from "@/lib/affiliates";
+import type { HeldPayFile } from "@/lib/affiliate-payouts";
 import { StoreField } from "@/components/studio-store-pin";
 import { LeadReview, type LeadRow, LeadTerms, type LeadTermsState } from "@/components/affiliate-leads-studio";
 import { MAX_LEAD_BUDGET_CENTS, MAX_LEAD_CAP, MAX_LEAD_CENTS, MAX_LEAD_HOLD_DAYS, MIN_LEAD_BUDGET_CENTS, MIN_LEAD_CENTS, MIN_LEAD_HOLD_DAYS } from "@/lib/affiliate-lead-rules";
@@ -75,6 +76,9 @@ const MESSAGES: Record<string, string> = {
   amount: "Type the amount you paid, like 25 or 25.50.",
   date: "Pick the day you paid it.",
   nothing: "Nobody is owed anything right now, so there was nothing to write down.",
+  file: "We could not find that payout file, so nothing was written down. It may be written down already, or it was downloaded more than 30 days ago. Reload the page, and download the file again if you still need it.",
+  busy: "Payments to your affiliates are being written down right now, so nothing was saved. Try again in a minute.",
+  stale: "That file is out of date, so nothing was written down: a payment to one of its affiliates was sent through PayPal or written down after you downloaded it. If you paid this file too, write each of those payments down by hand. Otherwise, download a new file.",
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
@@ -170,15 +174,15 @@ async function postUndo(payload: Record<string, unknown>): Promise<{ ok: true; u
  * Separate from `post` because it answers with how many payouts it wrote, and
  * because it is the one call that touches several affiliates at once.
  */
-async function postBatch(payload: Record<string, unknown>): Promise<{ written: number } | { error: string }> {
+async function postBatch(payload: Record<string, unknown>): Promise<{ written: number; left: number | null } | { error: string }> {
   try {
     const response = await fetch("/api/store/affiliates/payout-batch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; written?: number };
-    if (data.ok) return { written: Number(data.written) || 0 };
+    const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; written?: number; left?: number | null };
+    if (data.ok) return { written: Number(data.written) || 0, left: typeof data.left === "number" ? data.left : null };
     return { error: MESSAGES[data.error ?? ""] ?? MESSAGES.server_error };
   } catch {
     return { error: MESSAGES.server_error };
@@ -206,6 +210,7 @@ export function AffiliateStudio({
   payPanel = null,
   leads = [],
   leadsTotal = 0,
+  payFiles = [],
 }: {
   handle: string;
   setting: AffiliateSetting;
@@ -235,6 +240,8 @@ export function AffiliateStudio({
   /** Confirmed leads, newest first (lib/affiliate-leads.ts), and how many there are in all. */
   leads?: LeadRow[];
   leadsTotal?: number;
+  /** Payout files downloaded and not yet written down, newest first (lib/affiliate-payouts.ts heldPayFiles); null when they could not be read. */
+  payFiles?: HeldPayFile[] | null;
 }) {
   const router = useRouter();
   const pending = rows.filter((r) => r.affiliate.status === "pending");
@@ -296,6 +303,10 @@ export function AffiliateStudio({
   }
   const [batchDate, setBatchDate] = useState(today);
   const [batchReference, setBatchReference] = useState("");
+  const [batchFileId, setBatchFileId] = useState("");
+  // The file being written down: the one picked, or the newest when none was picked or the picked one is gone.
+  const files = payFiles ?? [];
+  const chosenFile = files.find((file) => file.id === batchFileId) ?? files[0] ?? null;
 
   async function act(where: string, payload: Record<string, unknown>, confirmation: string): Promise<boolean> {
     setBusy(where);
@@ -396,9 +407,10 @@ export function AffiliateStudio({
                   className="mt-4 rounded-xl border-2 border-violet-brand/30 bg-white p-3"
                   onSubmit={async (e) => {
                     e.preventDefault();
+                    if (!chosenFile) return;
                     setBusy("batch");
                     setError(null);
-                    const done = await postBatch({ date: batchDate, reference: batchReference });
+                    const done = await postBatch({ date: batchDate, reference: batchReference, file: chosenFile.id });
                     setBusy(null);
                     if ("error" in done) {
                       setError({ where: "batch", text: done.error });
@@ -406,7 +418,9 @@ export function AffiliateStudio({
                     }
                     setBatchOpen(false);
                     setBatchReference("");
-                    toast(`${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.`);
+                    toast(
+                      `${done.written} ${done.written === 1 ? "payout" : "payouts"} written down.${done.left ? ` ${money(done.left, currency)} is still owed and goes in the next file.` : ""}`,
+                    );
                     router.refresh();
                   }}
                 >
@@ -436,12 +450,30 @@ export function AffiliateStudio({
                       />
                     </label>
                   </div>
+                  {chosenFile ? (
+                    <label className="mt-3 block" htmlFor="batch-f">
+                      <span className="field-label">File you paid</span>
+                      <select id="batch-f" value={chosenFile.id} onChange={(e) => setBatchFileId(e.target.value)} className="field">
+                        {files.map((file) => (
+                          <option key={file.id} value={file.id}>
+                            {`Downloaded ${new Date(file.at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC" })} UTC: ${file.people} ${file.people === 1 ? "affiliate" : "affiliates"}, ${money(file.cents, file.currency)}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <p className="mt-3 text-sm text-ink-soft" role="status">
+                      {payFiles === null
+                        ? "Your downloaded payout files could not be read just now, so nothing can be written down. Reload the page in a minute."
+                        : "No payout file is waiting. Download the PayPal file or the worksheet first, pay it, then come back here."}
+                    </p>
+                  )}
                   <p className="mt-2 text-xs text-ink-soft">
-                    This writes one payout for each of the {owedNow.length} owed right now, against what the book says at this
-                    moment. It records a payment you already made; no money moves from here.
+                    This writes down exactly what that file paid each affiliate. Anything they earned after you downloaded it is
+                    still owed and goes in the next file. It records a payment you already made; no money moves from here.
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null} aria-busy={busy === "batch"}>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null || !chosenFile} aria-busy={busy === "batch"}>
                       Write the batch down
                     </button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setBatchOpen(false)}>
@@ -456,7 +488,10 @@ export function AffiliateStudio({
                   onClick={() => {
                     setBatchDate(today);
                     setBatchReference("");
+                    setBatchFileId("");
                     setBatchOpen(true);
+                    // A file downloaded since this page loaded is listed once the page reads them again.
+                    router.refresh();
                   }}
                 >
                   I have paid this batch

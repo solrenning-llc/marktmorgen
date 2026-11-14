@@ -61,6 +61,7 @@ import { MAX_STORE_BYTES } from "@/lib/store";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
+import { MAX_PAY_FILES } from "@/lib/affiliate-payouts";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
@@ -260,6 +261,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:affhub:link:@lib/affiliate-hub.ts": company("An emailed link to an affiliate's page, a day", "Per affiliate across stores, behind a per-address limit."),
   "nl:sdemo:@lib/studio-demo-rules.ts": company("The studio demo's day: its counts and caps (nl:sdemo:day:<day>), and the day's sessions and refusals by a keyed fingerprint of each address or network, with the day's count of refusals (nl:sdemo:addr:<day>)", "The company's, no store's (256 [KJ1], off): the day's hash holds only the fields of DEMO_COUNTS and the caps' counters, kept 400 days; the addresses' hash holds at most DEMO_SESSIONS_PER_DAY fields of sessions, DEMO_REFUSALS_PER_DAY fields of an address's refusals and the day's count of refusals, and ends with the day (EXPIREAT)."),
   "nl:sdemo:{<session>}:<family>[:<part>]@lib/studio-demo-rules.ts": company("A studio demo session: its record and the drafts it changed, one key a family of DEMO_KEY_FAMILIES", "The company's, no store's (256 [KJ1], off): written only through sandboxKey, at most DEMO_SESSIONS_PER_DAY sessions a day, each held under DEMO_BYTES_PER_SESSION and ending all at once DEMO_SESSION_SECONDS (21 hours) after it opened (EXPIREAT, never extended), so two days of openings are alive at the most (docs/studio-demo.md)."),
+  // Payout files downloaded and not yet written down as paid (C1-20261112-1000-C7-141, item 2c): one hash a store, a
+  // field a file, its lines as an affiliate id and an amount (about 34 bytes each, taken at 48), no address.
+  "nl:affpay:@lib/affiliate-payouts.ts": { what: "Payout files a creator downloaded, kept until written down as paid or for thirty days after the last download", parts: [capped(MAX_PAY_FILES * ((MAX_AFFILIATES + 1) * 48 + 128) + 4 * KEY, "MAX_PAY_FILES files a store, each at most a line per affiliate (MAX_AFFILIATES), the hash running out PAY_FILE_SECONDS after the last download.", src("lib/affiliate-payouts.ts", "MAX_PAY_FILES", "PAY_FILE_SECONDS"), src("lib/affiliate-setting.ts", "MAX_AFFILIATES"))] },
   "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),
   "nl:aff:payday:@lib/affiliate-payday.ts": short("A store's monthly payday claimed", "day", 40),
   "nl:aff:@lib/affiliates.ts": {

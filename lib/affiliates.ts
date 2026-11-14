@@ -2243,6 +2243,23 @@ export async function addPayoutOnce(store: Store, input: PayoutInput & { id: str
 }
 
 /**
+ * Every payout written in the store's book, read exactly; UnknownReplyError when the reply is not a list of field
+ * and value pairs. A value that does not read as a payout is left out, as readBook leaves it out of the book.
+ */
+export async function readPayoutsExact(store: Store): Promise<Payout[]> {
+  if (!store.statsId) throw new Error("a store's payouts need its statsId");
+  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const payouts: Payout[] = [];
+  for (let i = 1; i < flat.length; i += 2) {
+    const payout = parsePayout(flat[i]);
+    if (payout) payouts.push(payout);
+  }
+  return payouts;
+}
+
+/**
  * The references of every payout written in the store's book, read exactly; UnknownReplyError when the reply is not
  * a list of field and value pairs. A value that does not read as a payout is not counted in the book (readBook), so
  * it is left out here too.
@@ -3844,10 +3861,13 @@ export function idleRemovalAllowed(setting: { recurring: number }): boolean {
  *   - a partner holding a standing share (lib/partner-share.ts): their shares
  *     come from every sale of the product, not through a link;
  *   - anybody who may still be owed something: what their sales, second tier,
- *     leads and monthly goals could have earned, before refunds and so on the
- *     high side, is more than the creator wrote down as paid to them (a sale
- *     in another currency counts as owed). Removal takes them out of every
- *     later payment batch, so it waits until they are paid;
+ *     leads, monthly goals and the instalments and membership payments read
+ *     from the creator's Stripe invoices could have earned, before refunds and
+ *     so on the high side, is more than the creator wrote down as paid to them
+ *     (a sale in another currency counts as owed). Removal takes them out of
+ *     every later payment batch, so it waits until they are paid; and while
+ *     those invoices cannot all be read, nobody is warned or removed (a store
+ *     with no Stripe account has none to read);
  *   - every affiliate of a program that credits memberships (idleRemovalAllowed).
  *
  * The count starts no earlier than when the creator switched this on, changed
@@ -3921,7 +3941,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   }
   const mayBeOwed = (id: string) => foreign.has(id) || (owedHigh.get(id) ?? 0) > (paid.get(id) ?? 0);
 
-  const steps = everyone
+  const stepsNow = () => everyone
     .filter((a) => a.status === "approved" && a.share === null && !mayBeOwed(a.id))
     .map((affiliate) => ({
       affiliate,
@@ -3940,7 +3960,40 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
         now,
       ),
     }))
-    .filter(({ step }) => step.do === "remove" || step.do === "warn")
+    .filter(({ step }) => step.do === "remove" || step.do === "warn");
+  // A payment plan's instalments (and a membership's payments) earn commission too, but they are read from the
+  // creator's Stripe invoices, never written down as sales (recurringReferrals), and a plan sold while the program
+  // credited them keeps paying after the creator turned that off (C1-20261112-1000-C7-141, item 2d). So before
+  // anybody is warned or removed, those are read too, from the same oldest application on as readBook, without
+  // product names (no Redis read), and counted on the high side like the sales above. When they cannot all be read,
+  // what is still owed is not known, and not known is never "nothing owed": nobody is warned or removed this run.
+  // A store with no Stripe account has no invoices at all, so nothing is unknown there and the sweep runs on what
+  // is written down, as readBook treats it (review of #3906, MÉDIO 1).
+  if (stepsNow().length && store.stripeAccountId) {
+    let read: { lines: Referral[]; complete: boolean };
+    try {
+      read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, deadline, false);
+    } catch (error) {
+      console.error("reading invoices for the idle-affiliate sweep failed", error);
+      return done;
+    }
+    if (!read.complete) return done;
+    // An instalment paid is activity, as a sale is: a plan still paying restarts the idle count, so an affiliate
+    // paid up between two instalments is never removed while the plan pays (second review of #3906, MEDIUM 1).
+    for (const line of read.lines) {
+      if (line.self) continue;
+      active(line.aff, line.at);
+      if (line.currency !== store.currency) foreign.add(line.aff);
+      earn(line.aff, (line.base * line.rate) / 100);
+      const up = inviter.get(line.aff);
+      if (up) {
+        active(up.id, line.at);
+        if (line.currency !== store.currency) foreign.add(up.id);
+        earn(up.id, (line.base * up.percent) / 100);
+      }
+    }
+  }
+  const steps = stepsNow()
     // Removals first: they were warned longest ago.
     .sort((x, y) => (x.step.do === y.step.do ? 0 : x.step.do === "remove" ? -1 : 1))
     .slice(0, MAX_IDLE_STEPS);

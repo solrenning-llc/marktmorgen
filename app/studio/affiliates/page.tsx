@@ -14,7 +14,7 @@ import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
 import { onTheirWay, payableLines, paypalChecks, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { batchTotal } from "@/lib/affiliate-payouts";
+import { batchTotal, heldPayFiles } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
 import { PartnerOffers } from "@/components/affiliate-studio";
@@ -46,7 +46,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
 
   // What PayPal paid since the last look is written into the book first (lib/paypal-payouts.ts).
   await settlePayPal(store).catch((error) => console.error("settling PayPal payouts failed", error));
-  const [paypal, away, owners, codeList, checks] = await Promise.all([
+  const [paypal, away, owners, codeList, checks, payFiles] = await Promise.all([
     readPayPal(store).catch(() => null),
     onTheirWay(store).catch(() => null),
     codeOwners(store).catch(() => new Map<string, string>()),
@@ -57,6 +57,8 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
       : Promise.resolve({ state: "unavailable" as const }),
     // Payments whose answer from PayPal is not known (lib/paypal-payouts.ts): counted, never guessed.
     paypalChecks(store).catch(() => null),
+    // Payout files downloaded and not yet written down: "Mark as paid" writes down exactly one of them.
+    heldPayFiles(store),
   ]);
   // Partnerships other creators here have offered this one, waiting to be
   // accepted or declined (lib/partner-invites.ts). Read for the person signed
@@ -201,6 +203,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           elsewhere={book?.elsewhere ?? 0}
           away={away ? [...away] : []}
           pendingPayoutsChecked={away !== null}
+          payFiles={payFiles}
           codes={codes}
           codeOwners={Object.fromEntries(owners)}
           payPanel={

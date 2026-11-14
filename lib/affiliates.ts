@@ -2880,7 +2880,171 @@ export type Book = {
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked: boolean;
+  /**
+   * Paid membership and plan invoices read whole that could not be linked to
+   * one payment intent (paid in parts, by a charge or a payment record, or none
+   * paid listed, its payments read to the end): left out of the book,
+   * no commission on them, and reading again does not change that. Absent
+   * means none (an affiliate's own slice of a kept book).
+   */
+  unlinkedInvoices?: number;
+  /**
+   * True when the invoices were not all read because the store has more paid membership and plan invoices than the
+   * book can keep between readings (INVOICES_KEPT_MAX_LINES or INVOICES_KEPT_MAX_BYTES): reloading does not help, so
+   * the creator is told so, not "try again in a moment" (review of #3378 by Claude 2, MEDIUM). Only with
+   * invoicesChecked false; absent means false.
+   */
+  invoicesPastCeiling?: boolean;
 };
+
+/** A Stripe reply not in its exact shape: an UnknownReplyError, with Stripe named in what is logged. */
+class UnknownStripeReplyError extends UnknownReplyError {
+  constructor(what: string) {
+    super(what);
+    this.message = `Stripe gave ${what} in an unknown shape`;
+  }
+}
+
+/**
+ * One page of a Stripe list as Stripe gave it (CX-123 rule 24, found reviewing #3048), the same reading as
+ * lib/checkout-sweep.ts and lib/winback-send.ts: `data` a list of objects, `has_more` a yes or no, and when there is
+ * more, the last row's id to go on from (`next`, null when the list is whole). Anything else throws, so a page that
+ * cannot be read is never "the whole list, and nothing on it", and the affiliate book says invoicesChecked false.
+ */
+function stripePage(listed: { data?: unknown; has_more?: unknown }, what: string): { rows: Record<string, unknown>[]; next: string | null } {
+  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") throw new UnknownStripeReplyError(what);
+  const rows = listed.data as unknown[];
+  if (!rows.every((row) => row !== null && typeof row === "object" && !Array.isArray(row))) throw new UnknownStripeReplyError(what);
+  if (!listed.has_more) return { rows: rows as Record<string, unknown>[], next: null };
+  const last = (rows.at(-1) as Record<string, unknown> | undefined)?.id;
+  if (typeof last !== "string" || !last) throw new UnknownStripeReplyError(`${what} with no last one to go on from`);
+  return { rows: rows as Record<string, unknown>[], next: last };
+}
+
+/** An amount in cents Stripe gave: a whole number, never below zero; null for anything else. */
+function knownCents(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? raw : null;
+}
+
+/** The statuses Stripe gives an invoice payment (API 2026-08-26.dahlia). */
+const INVOICE_PAYMENT_STATES = new Set(["open", "paid", "canceled"]);
+/** The kinds of payment an invoice payment names that are not a payment intent: a refund could not be matched to them. */
+const UNLINKED_PAYMENT_TYPES = new Set(["charge", "payment_record"]);
+/** An invoice read whole that has no one payment intent to link it to (invoiceIntentOf). */
+const UNLINKED = "unlinked" as const;
+
+/**
+ * How many more pages of one invoice's payments are read past the page the invoice gives (GET /v1/invoice_payments,
+ * a hundred a page), and only within the invoice pages the book already waits on (INVOICE_PAGES: recurringReferrals
+ * shares them), so BOOK_STRIPE_PAGES, and what a reading of the book costs, do not move. An invoice whose payments
+ * are not read whole within them is not known (invoicesChecked false), never "unlinked".
+ */
+export const INVOICE_PAYMENT_PAGES = 3;
+
+/** What an invoice's payments read so far say: the payment intents paid, and whether a paid one is not a payment intent. */
+type PaymentTally = { intents: Set<string>; unlinked: boolean };
+
+/**
+ * Adds one page of an invoice's payments to `tally`. False when a row does not read: not an invoice payment with a
+ * status Stripe gives one, a paid row naming a payment intent with no id, or a kind of payment not known. Open and
+ * canceled attempts are passed over.
+ */
+function tallyPayments(rows: readonly unknown[], tally: PaymentTally): boolean {
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return false;
+    const { status, payment } = row as { status?: unknown; payment?: unknown };
+    if (typeof status !== "string" || !INVOICE_PAYMENT_STATES.has(status)) return false;
+    if (status !== "paid") continue;
+    if (!payment || typeof payment !== "object" || Array.isArray(payment)) return false;
+    const { type, payment_intent: raw } = payment as { type?: unknown; payment_intent?: unknown };
+    if (typeof type === "string" && UNLINKED_PAYMENT_TYPES.has(type)) {
+      tally.unlinked = true;
+      continue;
+    }
+    if (type !== undefined && type !== "payment_intent") return false;
+    const id = typeof raw === "string" ? raw : raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as { id?: unknown }).id : undefined;
+    if (typeof id !== "string" || !id) return false;
+    tally.intents.add(id);
+  }
+  return true;
+}
+
+/**
+ * The one payment intent a paid invoice was paid by, from its expanded `payments` list (API 2026-08-26.dahlia) and,
+ * when that list says there is more (has_more true), the rest of it from GET /v1/invoice_payments?invoice=…, followed
+ * with starting_after from the last payment read, up to INVOICE_PAYMENT_PAGES pages and only while the book's shared
+ * `budget` of Stripe pages and its `deadline` (stripeWait) allow: the paid one can be past ten failed or canceled
+ * attempts (third money pre-review of claude5/affiliate-refund-list-exact2).
+ *
+ * null when the list is not known whole: it cannot be read (not a list, `has_more` not a yes or no, a row that does not
+ * read: tallyPayments), a page asked for does not read as a list of this invoice's payments, the call fails, there is
+ * more with no last id to go on from, or the ceiling, the budget or the deadline comes first. The book is then not
+ * whole, and the next reading tries again. UNLINKED when it reads whole and names no one payment intent: paid in parts
+ * by two, by a charge or a payment record, or no paid payment at all; the payment its refund would name is not known,
+ * so no commission is paid on it, and reading it again would give the same (recurringReferrals counts it apart). A list
+ * already shown to be paid in parts or by a charge is UNLINKED without asking for the rest, which could not undo that.
+ */
+async function invoiceIntentOf(
+  store: Store,
+  invoice: string,
+  payments: unknown,
+  budget: { pages: number },
+  deadline: number | undefined,
+): Promise<string | typeof UNLINKED | null> {
+  if (!payments || typeof payments !== "object" || Array.isArray(payments)) return null;
+  const listed = payments as { data?: unknown; has_more?: unknown };
+  if (!Array.isArray(listed.data) || typeof listed.has_more !== "boolean") return null;
+  const tally: PaymentTally = { intents: new Set<string>(), unlinked: false };
+  if (!tallyPayments(listed.data as unknown[], tally)) return null;
+  let more = listed.has_more;
+  let last = (listed.data.at(-1) as { id?: unknown } | undefined)?.id;
+  for (let page = 0; more; page += 1) {
+    if (tally.unlinked || tally.intents.size > 1) return UNLINKED;
+    if (typeof last !== "string" || !last) return null;
+    if (page >= INVOICE_PAYMENT_PAGES || budget.pages < 1) return null;
+    const wait = stripeWait(deadline);
+    if (wait === null) return null;
+    budget.pages -= 1;
+    let read: StripePage;
+    try {
+      const reply: unknown = await onAccount(
+        "GET",
+        store.stripeAccountId as string,
+        `/invoice_payments?${new URLSearchParams({ invoice, limit: "100", starting_after: last })}`,
+        undefined,
+        AFF_SUB_STRIPE_VERSION,
+        undefined,
+        wait,
+      );
+      if (!plainObject(reply) || ownField(reply, "object") !== "list") return null;
+      // Every row an invoice payment of this invoice, with its id: a row of another invoice proves nothing of this one.
+      read = readStripePage(reply, (row) => {
+        const of = ownField(row, "invoice");
+        const named = typeof of === "string" ? of : plainObject(of) ? ownField(of, "id") : undefined;
+        return ownField(row, "object") === "invoice_payment" && named === invoice;
+      });
+    } catch (error) {
+      console.error("reading the rest of an invoice's payments for the affiliate book failed", store.handle, error);
+      return null;
+    }
+    if (read.unreadable || !tallyPayments(read.rows, tally)) return null;
+    more = read.hasMore;
+    last = read.lastId ?? undefined;
+  }
+  return !tally.unlinked && tally.intents.size === 1 ? [...tally.intents][0] : UNLINKED;
+}
+
+/** An invoice's tax in cents, from `total_taxes` (a list of amounts); null when it cannot be read. */
+function invoiceTaxOf(raw: unknown): number | null {
+  if (!Array.isArray(raw)) return null;
+  let sum = 0;
+  for (const tax of raw as unknown[]) {
+    const cents = tax && typeof tax === "object" ? knownCents((tax as { amount?: unknown }).amount) : null;
+    if (cents === null) return null;
+    sum += cents;
+  }
+  return sum;
+}
 
 /**
  * Adds one refund or dispute Stripe listed to what was taken back from its
@@ -3153,7 +3317,7 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
  * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
-  if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
+  if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, unlinkedInvoices: 0, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
     ["HGETALL", peopleKey(statsId)],
@@ -3213,12 +3377,16 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
   let invoicesChecked = true;
+  let invoicesPastCeiling = false;
+  let unlinkedInvoices = 0;
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
     try {
       const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline, limits.titles !== false);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;
+      invoicesPastCeiling = !read.complete && read.pastCeiling;
+      unlinkedInvoices = read.unlinked.filter((aff) => !only || aff === only).length;
     } catch (error) {
       console.error("reading invoices for the affiliate book failed", error);
       invoicesChecked = false;
@@ -3351,7 +3519,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
+  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, invoicesPastCeiling, unlinkedInvoices, currency: store.currency, elsewhere };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */
@@ -3370,7 +3538,7 @@ type InvoiceLike = {
   status_transitions?: { paid_at?: unknown } | null;
   total_taxes?: { amount?: unknown }[] | null;
   parent?: { subscription_details?: { metadata?: Record<string, string> | null } | null } | null;
-  payments?: { data?: { payment?: { payment_intent?: unknown } | null }[] } | null;
+  payments?: unknown;
 };
 
 /** Whether a payment made at `paidAt` falls within `months` of `from`, both in seconds. */
@@ -3384,70 +3552,394 @@ export function withinMonths(from: number, paidAt: number, months: number): bool
 /**
  * The paid invoices of this store's memberships and payment plans that were
  * sold through an affiliate's link, as Referrals: read from the creator's
- * Stripe account, pinned to one API version so their shape is known, and
- * never written down. A membership's payment counts while it falls within
- * the months agreed when it was sold; a plan's every payment counts.
+ * Stripe account, pinned to one API version so their shape is known. A
+ * membership's payment counts while it falls within the months agreed when it
+ * was sold; a plan's every payment counts.
+ *
+ * Every relevant invoice is reached in a bounded number of readings, each
+ * within the same INVOICE_PAGES pages (audit A1, 9 November 2026: only the
+ * thousand newest paid invoices of the account were ever read, so an
+ * affiliate's older renewals fell out of the book). What one reading read
+ * whole is kept for the next (invoiceKeepKey, an affiliate's line a paid
+ * invoice, never the buyer's address), and the reading goes on from where the
+ * last one stopped:
+ *
+ *  - `kept`: every paid invoice created from `since` up to its `top`, read
+ *    whole; the newer ones, created after `top`, are read again each reading
+ *    (they may still be paid), and the book is whole only when those are.
+ *  - `walk`: a reading of a span of the account (created after `from`, up to
+ *    `top`) that did not end, with where it stopped (`after`). A catch-up walk
+ *    (`full` false, or no `kept` yet) is what the book waits on: it is read
+ *    first, then added to `kept`. A full one reads everything again from
+ *    `since` every INVOICE_REBUILD_SECONDS, with the pages the newer invoices
+ *    leave, keeping only the invoices `kept` does not have, and adds them to
+ *    it when it ends, so an older invoice paid late (an open one paid weeks
+ *    after it was made) is counted then; while it runs, `kept` and the newer
+ *    invoices are the book.
+ *
+ * A record that does not read, of another account, another set of the
+ * store's handles or a later `since`, is not taken: the reading starts again.
+ * A record past INVOICE_KEPT_MAX_BYTES is not kept, and the book then says it
+ * did not read every invoice (invoicesChecked false): the declared ceiling,
+ * past which nothing is paid by itself, nor a batch file handed out or
+ * recorded (lib/paypal-payouts.ts, lib/affiliate-payday.ts, unsettledBook).
+ * What was kept is replaced by a mark of when it went past (`over`), carried
+ * by the readings that begin again until one keeps every invoice whole, so
+ * every reading in between says `pastCeiling` and the creator is told that
+ * reloading will not help (review of #3378 by Claude 2, MEDIUM). A store
+ * whose invoices fit in one reading keeps nothing and reads as it always did.
  */
-async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean }> {
+async function recurringReferrals(store: Store, everyone: Affiliate[], since: number, deadline?: number, named = true): Promise<{ lines: Referral[]; complete: boolean; unlinked: string[]; pastCeiling: boolean }> {
+  const statsId = store.statsId as string;
+  const account = store.stripeAccountId as string;
   const handles = saleHandles(store);
   const byId = new Map(everyone.map((a) => [a.id, a]));
-  const found: { invoice: InvoiceLike; meta: Record<string, string> }[] = [];
-  let after = "";
+  const tag = [...handles].sort().join(" ");
+  const start = Math.floor(Date.now() / 1000);
+  // The Stripe pages this reading may wait on (INVOICE_PAGES): the invoice pages, then the rest of an invoice's
+  // payments (invoiceIntentOf), so following those never adds a page to BOOK_STRIPE_PAGES.
+  const budget = { pages: INVOICE_PAGES };
+  const take = (row: Record<string, unknown>) => takeInvoice(store, row as InvoiceLike, handles, byId, budget, deadline);
+  const walk = (range: { gt: number; lte: number }, after: string, into: InvoiceSet) => walkPaid(store, range, after, budget, deadline, take, into);
+  const loaded = await readInvoiceKeep(statsId, account, tag, since);
+  // A record with nothing kept and no walk (one dropped after failing, or the mark of a store past the ceiling) is
+  // begun again; the mark is carried by the readings that begin again, until one keeps every invoice whole.
+  let keep = loaded && (loaded.kept || loaded.walk) ? loaded : null;
+  let over = loaded?.over ?? null;
+  /** The invoices newer than what is kept, read this time. */
+  const live = emptySet();
   let complete = false;
-  for (let page = 0; page < INVOICE_PAGES; page += 1) {
-    const query = new URLSearchParams({ limit: "100", status: "paid", "created[gte]": String(Math.max(0, since)) });
-    query.append("expand[]", "data.payments");
-    if (after) query.set("starting_after", after);
-    const wait = stripeWait(deadline);
-    if (wait === null) break;
-    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as InvoiceLike[];
-    for (const invoice of rows) {
-      const meta = invoice.parent?.subscription_details?.metadata ?? {};
-      if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) continue;
-      found.push({ invoice, meta });
+  let changed = false;
+  try {
+    if (!keep) {
+      // Nothing kept: everything since the oldest affiliate joined. Whole within the pages: nothing to keep.
+      const read = await walk({ gt: since - 1, lte: start }, "", live);
+      if (read.done) {
+        complete = live.whole;
+        // Read in one go: nothing needs keeping, so the store is not past the ceiling.
+        over = null;
+      } else {
+        keep = { v: 1, account, handles: tag, since, kept: null, walk: { ...live, from: since - 1, top: start, at: start, after: read.after, full: true, fails: 0 }, over };
+        changed = true;
+      }
+    } else if (keep.walk && (!keep.walk.full || !keep.kept)) {
+      // A catch-up walk: the book waits on it, so it has the pages first.
+      const w = keep.walk;
+      const read = await walk({ gt: w.from, lte: w.top }, w.after, w);
+      w.after = read.after;
+      w.fails = 0;
+      changed = true;
+      if (read.done) {
+        const done: KeptSet = keep.kept && !w.full
+          ? { lines: [...keep.kept.lines, ...w.lines], unlinked: [...keep.kept.unlinked, ...w.unlinked], whole: keep.kept.whole && w.whole, top: w.top, at: keep.kept.at }
+          : { lines: w.lines, unlinked: w.unlinked, whole: w.whole, top: w.top, at: w.at };
+        keep.kept = done;
+        keep.walk = null;
+        const tail = await walk({ gt: done.top, lte: start }, "", live);
+        if (tail.done) complete = done.whole && live.whole;
+        else keep.walk = { ...live, from: done.top, top: start, at: start, after: tail.after, full: false, fails: 0 };
+      }
+    } else if (keep.kept) {
+      const kept = keep.kept;
+      const tail = await walk({ gt: kept.top, lte: start }, "", live);
+      if (!tail.done) {
+        // More newer invoices than the pages: they become a catch-up walk, read on next time (a full walk is dropped).
+        keep.walk = { ...live, from: kept.top, top: start, at: start, after: tail.after, full: false, fails: 0 };
+        changed = true;
+      } else {
+        complete = kept.whole && live.whole;
+        if (!keep.walk && (start - kept.at >= INVOICE_REBUILD_SECONDS || !kept.whole)) {
+          keep.walk = { ...emptySet(), from: since - 1, top: start, at: start, after: "", full: true, fails: 0 };
+          changed = true;
+        }
+        const w = keep.walk;
+        if (w && budget.pages > 0) {
+          const read = await walk({ gt: w.from, lte: w.top }, w.after, w);
+          w.after = read.after;
+          w.fails = 0;
+          changed = true;
+          if (read.done) {
+            // What it found that was not kept joins what was (pre-review, 9 November 2026: replacing `kept` with it
+            // meant keeping both whole while it ran, which past half INVOICES_KEPT_MAX_LINES never fitted, so it was
+            // dropped each time and an old invoice paid late was never counted on a book said to be whole). Whole
+            // only if every invoice read whole this time.
+            keep.kept = { lines: [...kept.lines, ...w.lines], unlinked: [...kept.unlinked, ...w.unlinked], whole: w.whole, top: w.top, at: w.at };
+            keep.walk = null;
+            // An invoice it could not read (an old one paid late with a tax that does not read): this reading is not
+            // whole either (review of #3378 by Claude 2, LOW), not only the next one.
+            complete = complete && w.whole;
+          }
+        }
+      }
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
-      complete = true;
-      break;
+  } catch (error) {
+    // A page that does not read (stripePage) or a call that fails: the book is not whole, as it always was. A walk
+    // that fails INVOICE_WALK_TRIES times in a row is dropped, so a cursor Stripe no longer knows is not asked for ever.
+    if (keep?.walk) {
+      keep.walk.fails += 1;
+      if (keep.walk.fails >= INVOICE_WALK_TRIES) keep.walk = null;
+      await writeInvoiceKeep(statsId, keep).catch(() => undefined);
     }
-    after = last.id;
+    throw error;
   }
-  const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];
+  if (changed && keep) {
+    const wrote = await writeInvoiceKeep(statsId, keep);
+    if (wrote === "ceiling") over = start;
+    else if (wrote === "kept" && keep.kept) over = null;
+    if (wrote !== "kept") complete = false;
+  }
+
+  // What the book shows: what is kept, a catch-up walk's part read so far, and the newer invoices read now; each
+  // invoice once, and none made before `since`.
+  const shown = [keep?.kept, keep?.walk && (!keep.walk.full || !keep.kept) ? keep.walk : null, live].filter((s): s is InvoiceSet => Boolean(s));
+  const seen = new Set<string>();
+  const kept: KeptLine[] = [];
+  const unlinked: string[] = [];
+  for (const set of shown) {
+    for (const line of set.lines) if (line[4] >= since && !seen.has(line[0]) && seen.add(line[0])) kept.push(line);
+    for (const [invoice, aff, created] of set.unlinked) if (created >= since && !seen.has(invoice) && seen.add(invoice)) unlinked.push(aff);
+  }
+  const ids = [...new Set(kept.map((line) => line[5]).filter(Boolean))];
   // Named from the products' cards, not their whole listings (a title, not up to MAX_PRODUCT_BYTES a product). A
   // reading that fails, or answers in a shape not known, leaves the names empty and every line in, as it always did.
   const titles = new Map([...(named && ids.length ? await readCardsFor(store, ids).catch(() => new Map<string, Card>()) : new Map<string, Card>())].map(([id, card]) => [id, card.title]));
-  const lines: Referral[] = [];
-  for (const { invoice, meta } of found) {
-    const total = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-    if (typeof invoice.id !== "string" || invoice.status !== "paid" || total <= 0) continue;
-    const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
-    const plan = meta.kind === "plan";
-    const months = Number(meta.via_months) || 0;
-    const soldAt = Number(meta.via_at) || 0;
-    if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) continue;
-    const tax = (invoice.total_taxes ?? []).reduce((sum, t) => sum + (typeof t?.amount === "number" ? t.amount : 0), 0);
-    const pi = invoice.payments?.data?.map((p) => p.payment?.payment_intent).find((x): x is string => typeof x === "string") ?? "";
-    const affiliate = byId.get(meta.via);
-    const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
-    lines.push({
-      ref: invoice.id,
-      pi,
-      aff: meta.via,
-      at: paidAt,
-      product: meta.product ?? "",
-      title: (titles.get(meta.product ?? "") ?? "").slice(0, 200),
-      base: Math.max(0, total - tax),
-      total,
-      currency: readCurrencyCode(invoice.currency),
-      rate: Number(meta.via_rate) || 0,
-      self: Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer),
-      how: "recurring",
-      promotion: affiliatePromotionFrom(meta) ?? undefined,
-    });
+  const lines: Referral[] = kept.map(([ref, pi, aff, at, , product, base, total, currency, rate, self, promotion]) => ({
+    ref,
+    pi,
+    aff,
+    at,
+    product,
+    title: (titles.get(product) ?? "").slice(0, 200),
+    base,
+    total,
+    currency,
+    rate,
+    self: self === 1,
+    how: "recurring" as const,
+    promotion: promotion ?? undefined,
+  }));
+  return { lines, complete, unlinked, pastCeiling: !complete && over !== null };
+}
+
+/** Where the paid invoices read whole are kept between readings of the book (recurringReferrals). */
+const invoiceKeepKey = (statsId: string) => `nl:aff:${statsId}:invoices`;
+/**
+ * The most a store's kept invoices may take: INVOICES_KEPT_MAX_LINES paid invoices (each line and each unlinked one,
+ * what is kept and a reading under way together, a full reading again keeping only what is not kept) and
+ * INVOICES_KEPT_MAX_BYTES (UTF-8 bytes of the record). Past either, nothing is kept and the book is not whole
+ * (invoicesChecked false), never a book that leaves out what did not fit. Counted in lib/api-read-rules.ts (BOOK_INVOICES_KEPT_BYTES,
+ * BOOK_INVOICES_KEPT_LINES), tests/plan-cost-registry.ts and tests/store-data-registry.ts.
+ */
+export const INVOICES_KEPT_MAX_LINES = 5_000;
+export const INVOICES_KEPT_MAX_BYTES = 2_000_000;
+/** The longest id, product or currency kept, so a line is never more than a few hundred bytes. */
+const KEPT_TEXT_MAX = 255;
+/** How long the kept invoices outlive the last reading that wrote them: past it, the next reading starts again. */
+export const INVOICE_KEEP_SECONDS = 8 * 24 * 60 * 60;
+/** How often everything kept is read again whole, so an older invoice paid late is counted: a day. */
+export const INVOICE_REBUILD_SECONDS = 24 * 60 * 60;
+/** Readings in a row whose walk fails before the walk is dropped and begun again. */
+const INVOICE_WALK_TRIES = 3;
+
+/**
+ * One paid invoice read whole: [invoice, payment intent, affiliate, paid at, created, product, before tax, in all,
+ * currency, rate, paid with the affiliate's own address (1) or not (0), the campaign's labels or null].
+ */
+type KeptLine = [string, string, string, number, number, string, number, number, string, number, 0 | 1, AffiliatePromotion | null];
+/** One paid invoice read whole with no one payment intent to link it to: [invoice, affiliate, created]. */
+type KeptUnlinked = [string, string, number];
+/** Invoices read, and whether each one read whole (an invoice that did not makes the set not whole). */
+type InvoiceSet = { lines: KeptLine[]; unlinked: KeptUnlinked[]; whole: boolean };
+type KeptSet = InvoiceSet & { top: number; at: number };
+type WalkSet = InvoiceSet & { from: number; top: number; at: number; after: string; full: boolean; fails: number };
+/** `over`: when the invoices last went past the ceiling (epoch seconds), until a reading keeps every one whole; null otherwise. */
+type InvoiceKeep = { v: 1; account: string; handles: string; since: number; kept: KeptSet | null; walk: WalkSet | null; over: number | null };
+
+const emptySet = (): InvoiceSet => ({ lines: [], unlinked: [], whole: true });
+const safeInt = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n);
+const isText = (s: unknown): s is string => typeof s === "string";
+
+function keptLineOf(raw: unknown): KeptLine | null {
+  if (!Array.isArray(raw) || raw.length !== 12) return null;
+  const [ref, pi, aff, at, created, product, base, total, currency, rate, self, promotion] = raw as unknown[];
+  if (!isText(ref) || !ref || !isText(pi) || !pi || !isText(aff) || !AFFILIATE_ID_PATTERN.test(aff) || !safeInt(at) || !safeInt(created) || !isText(product)) return null;
+  if ([ref, pi, product, currency].some((t) => typeof t === "string" && t.length > KEPT_TEXT_MAX)) return null;
+  if (!safeInt(base) || base < 0 || !safeInt(total) || total < 0 || !isText(currency) || typeof rate !== "number" || !Number.isFinite(rate) || (self !== 0 && self !== 1)) return null;
+  const labels = promotion === null ? null : readAffiliatePromotion(promotion);
+  if (promotion !== null && !labels) return null;
+  return [ref, pi, aff, at, created, product, base, total, currency, rate, self, labels];
+}
+
+function setOf(raw: unknown): InvoiceSet | null {
+  if (!plainObject(raw)) return null;
+  const { lines, unlinked, whole: read } = raw as { lines?: unknown; unlinked?: unknown; whole?: unknown };
+  if (!Array.isArray(lines) || !Array.isArray(unlinked) || typeof read !== "boolean") return null;
+  const out: KeptLine[] = [];
+  for (const line of lines) {
+    const ok = keptLineOf(line);
+    if (!ok) return null;
+    out.push(ok);
   }
-  return { lines, complete };
+  const apart: KeptUnlinked[] = [];
+  for (const u of unlinked) {
+    if (!Array.isArray(u) || u.length !== 3 || !isText(u[0]) || !u[0] || u[0].length > KEPT_TEXT_MAX || !isText(u[1]) || !AFFILIATE_ID_PATTERN.test(u[1]) || !safeInt(u[2])) return null;
+    apart.push([u[0], u[1], u[2]]);
+  }
+  return { lines: out, unlinked: apart, whole: read };
+}
+
+/**
+ * The kept invoices of this account, these handles and a `since` no later than this one; null when there are none,
+ * or what is there does not read whole in this shape (it is then read again from Stripe, never taken as "none").
+ */
+async function readInvoiceKeep(statsId: string, account: string, tag: string, since: number): Promise<InvoiceKeep | null> {
+  const [raw] = await redisPipeline([["GET", invoiceKeepKey(statsId)]]);
+  if (typeof raw !== "string") return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!plainObject(value)) return null;
+    const v = value as Record<string, unknown>;
+    if (v.v !== 1 || v.account !== account || v.handles !== tag || !safeInt(v.since) || v.since > since) return null;
+    let kept: KeptSet | null = null;
+    if (v.kept !== null) {
+      const set = setOf(v.kept);
+      const { top, at } = v.kept as { top?: unknown; at?: unknown };
+      if (!set || !safeInt(top) || !safeInt(at)) return null;
+      kept = { ...set, top, at };
+    }
+    let walking: WalkSet | null = null;
+    if (v.walk !== null) {
+      const set = setOf(v.walk);
+      const { from, top, at, after, full, fails } = v.walk as Record<string, unknown>;
+      if (!set || !safeInt(from) || !safeInt(top) || !safeInt(at) || !isText(after) || typeof full !== "boolean" || !safeInt(fails) || fails < 0) return null;
+      walking = { ...set, from, top, at, after, full, fails };
+    }
+    // Absent in a record written before the mark existed: not past the ceiling.
+    const over = v.over === undefined || v.over === null ? null : safeInt(v.over) ? v.over : undefined;
+    if (over === undefined) return null;
+    return { v: 1, account, handles: tag, since: v.since, kept, walk: walking, over };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps them for the next reading: "kept"; "ceiling" when they are past INVOICES_KEPT_MAX_LINES or
+ * INVOICES_KEPT_MAX_BYTES, and only the mark of it is kept; "failed" when Redis does not say it kept them.
+ */
+async function writeInvoiceKeep(statsId: string, keep: InvoiceKeep): Promise<"kept" | "ceiling" | "failed"> {
+  const once = (set: InvoiceSet): InvoiceSet => {
+    const seen = new Set<string>();
+    return {
+      lines: set.lines.filter((line) => !seen.has(line[0]) && Boolean(seen.add(line[0]))),
+      unlinked: set.unlinked.filter((u) => !seen.has(u[0]) && Boolean(seen.add(u[0]))),
+      whole: set.whole,
+    };
+  };
+  const kept = keep.kept && { ...keep.kept, ...once(keep.kept) };
+  // A full reading again keeps only the invoices not kept already: it adds them to `kept` when it ends.
+  const known = new Set(keep.walk?.full && kept ? [...kept.lines.map((line) => line[0]), ...kept.unlinked.map((u) => u[0])] : []);
+  const fresh = (set: InvoiceSet): InvoiceSet => ({ lines: set.lines.filter((line) => !known.has(line[0])), unlinked: set.unlinked.filter((u) => !known.has(u[0])), whole: set.whole });
+  const walking = keep.walk && { ...keep.walk, ...once(fresh(keep.walk)) };
+  const count = (set: InvoiceSet | null) => (set ? set.lines.length + set.unlinked.length : 0);
+  const fits = (value: string, sets: (InvoiceSet | null)[]) => Buffer.byteLength(value, "utf8") <= INVOICES_KEPT_MAX_BYTES && sets.reduce((n, set) => n + count(set), 0) <= INVOICES_KEPT_MAX_LINES;
+  // Every invoice kept whole once more clears the mark of having gone past the ceiling.
+  const value = JSON.stringify({ ...keep, kept, walk: walking, over: kept ? null : keep.over });
+  if (!fits(value, [kept, walking])) {
+    console.error("the affiliate book's kept invoices are past their ceiling: nothing kept, the book not whole", statsId);
+    // Only the mark of it, in place of what was kept (one command, as the DEL it replaces): the readings that begin
+    // again carry it, so the creator is told reloading will not help, not "try again in a moment".
+    const mark = JSON.stringify({ v: 1, account: keep.account, handles: keep.handles, since: keep.since, kept: null, walk: null, over: Math.floor(Date.now() / 1000) });
+    await redisPipeline([["SET", invoiceKeepKey(statsId), mark, "EX", INVOICE_KEEP_SECONDS]]).catch(() => undefined);
+    return "ceiling";
+  }
+  const [set] = await redisPipeline([["SET", invoiceKeepKey(statsId), value, "EX", INVOICE_KEEP_SECONDS]]);
+  return set === "OK" ? "kept" : "failed";
+}
+
+/** What one invoice listed gives the book. */
+type InvoiceTaken =
+  | { kind: "skip" }
+  | { kind: "line"; line: KeptLine }
+  | { kind: "unlinked"; unlinked: KeptUnlinked }
+  /** Not read whole: an amount, a tax, a date or its payments that do not read. The set is not whole. */
+  | { kind: "unknown" }
+  /** Its payments could not be read before the pages or the time ran out: read again next time, from it. */
+  | { kind: "stopped" };
+
+/**
+ * One paid invoice of the account, read for the book: skipped when it is not this store's sale through an affiliate's
+ * link, or a membership's payment past the months agreed, or nothing was paid. A payment that counts is read whole or
+ * not counted, and the set it is in is then not whole (invoicesChecked false): an amount or a tax that cannot be read
+ * is not 0, and a payment whose payment intent is not known could never be matched to its refund.
+ */
+async function takeInvoice(store: Store, invoice: InvoiceLike, handles: Set<string>, byId: Map<string, Affiliate>, budget: { pages: number }, deadline: number | undefined): Promise<InvoiceTaken> {
+  const meta = invoice.parent?.subscription_details?.metadata ?? {};
+  if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) return { kind: "skip" };
+  const paidAt = Number(invoice.status_transitions?.paid_at) || Number(invoice.created) || 0;
+  const plan = meta.kind === "plan";
+  const months = Number(meta.via_months) || 0;
+  const soldAt = Number(meta.via_at) || 0;
+  if (!plan && (months < 1 || !soldAt || !withinMonths(soldAt, paidAt, months))) return { kind: "skip" };
+  const total = knownCents(invoice.amount_paid);
+  const created = invoice.created;
+  if (typeof invoice.id !== "string" || !invoice.id || invoice.id.length > KEPT_TEXT_MAX || (meta.product ?? "").length > KEPT_TEXT_MAX) return { kind: "unknown" };
+  if (invoice.status !== "paid" || total === null || !safeInt(created)) return { kind: "unknown" };
+  if (total === 0) return { kind: "skip" };
+  const tax = invoiceTaxOf(invoice.total_taxes);
+  // A tax that does not read leaves the invoice out before any more of its payments is asked for.
+  if (tax === null) return { kind: "unknown" };
+  const pi = await invoiceIntentOf(store, invoice.id, invoice.payments, budget, deadline);
+  if (pi === null) return budget.pages < 1 || stripeWait(deadline) === null ? { kind: "stopped" } : { kind: "unknown" };
+  // Read whole, but no refund could ever be matched to it: left out, no commission, and said so (unlinkedInvoices),
+  // never "not read", which would ask for a reload that changes nothing.
+  if (pi === UNLINKED) return { kind: "unlinked", unlinked: [invoice.id, meta.via, created] };
+  if (pi.length > KEPT_TEXT_MAX) return { kind: "unknown" };
+  const affiliate = byId.get(meta.via);
+  const buyer = typeof invoice.customer_email === "string" ? invoice.customer_email : "";
+  const self = Boolean(affiliate && buyer) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
+  return {
+    kind: "line",
+    line: [invoice.id, pi, meta.via, paidAt, created, meta.product ?? "", Math.max(0, total - tax), total, readCurrencyCode(invoice.currency), Number(meta.via_rate) || 0, self ? 1 : 0, affiliatePromotionFrom(meta)],
+  };
+}
+
+/**
+ * Reads the account's paid invoices created after `range.gt` and up to `range.lte`, newest first, on from `after`
+ * (an invoice already read, or "" for the newest), into `into`, while the book's `budget` of Stripe pages and its
+ * `deadline` allow. `done` once the last page is read; else `after` is the last invoice taken, the next reading goes
+ * on from it. A page that does not read throws (stripePage): it is not "no membership payments".
+ */
+async function walkPaid(
+  store: Store,
+  range: { gt: number; lte: number },
+  after: string,
+  budget: { pages: number },
+  deadline: number | undefined,
+  take: (row: Record<string, unknown>) => Promise<InvoiceTaken>,
+  into: InvoiceSet,
+): Promise<{ done: boolean; after: string }> {
+  for (;;) {
+    if (budget.pages < 1) return { done: false, after };
+    const wait = stripeWait(deadline);
+    if (wait === null) return { done: false, after };
+    const query = new URLSearchParams({ limit: "100", status: "paid", "created[gt]": String(Math.max(-1, range.gt)), "created[lte]": String(range.lte) });
+    query.append("expand[]", "data.payments");
+    if (after) query.set("starting_after", after);
+    budget.pages -= 1;
+    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
+    const { rows, next } = stripePage(listed, "a page of paid invoices");
+    for (const row of rows) {
+      const got = await take(row);
+      if (got.kind === "stopped") return { done: false, after };
+      if (got.kind === "line") into.lines.push(got.line);
+      else if (got.kind === "unlinked") into.unlinked.push(got.unlinked);
+      else if (got.kind === "unknown") into.whole = false;
+      if (typeof row.id === "string" && row.id) after = row.id;
+    }
+    if (next === null) return { done: true, after };
+    after = next;
+  }
 }
 
 /**

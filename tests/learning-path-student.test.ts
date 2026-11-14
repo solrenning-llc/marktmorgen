@@ -9,7 +9,7 @@
  * Redis double.
  */
 import { editCourse, emptyCourse, saveCourse, type Course } from "@/lib/course";
-import { markLesson, recordEnrollment } from "@/lib/learn";
+import { markLesson, paidCourses, recordEnrollment } from "@/lib/learn";
 import { pathStudent } from "@/lib/learning-path-student";
 import { pathProgress, type LearningPath } from "@/lib/learning-path-rules";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -131,6 +131,23 @@ async function main(): Promise<void> {
   stripe = "list";
   const whole = await pathStudent(store, path, { ...freshLearner, email: "whole-student@example.com" });
   is("read whole and empty: known, nothing had", [whole.has ? [...whole.has] : null], [[]]);
+
+  part("The course page's cached answer is never taken for an exact one (review of #3724 by Claude 7)");
+  // The lenient read (paidCourses, every course page) keeps its answer for PAID_SECONDS even when a listing did not read
+  // (readKind leaves it out), so that answer can lack a course only Stripe knows of. The exact read asks Stripe itself.
+  const cached = "cached-student@example.com";
+  stripe = "list";
+  await paidCourses(store, cached);
+  stripe = "down";
+  stripeCalls = 0;
+  const fromCache = await pathStudent(store, path, { ...freshLearner, email: cached });
+  is("a cached course-page answer, Stripe down: Stripe is asked, and has is unknown", [stripeCalls > 0, fromCache.has, fromCache.finished], [true, null, null]);
+  stripe = "more";
+  const partial = "partial-student@example.com";
+  await paidCourses(store, partial);
+  const afterPartial = await pathStudent(store, path, { ...freshLearner, email: partial });
+  is("the course page read a list cut short: the exact read is unknown, never \"has nothing\"", [afterPartial.has, afterPartial.finished], [null, null]);
+  stripe = "list";
 
   part("A course gone from the store");
   const gone: LearningPath = { ...path, courses: [a.product, "prodGone0001"] };

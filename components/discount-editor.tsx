@@ -3,17 +3,18 @@
 import { useState, useSyncExternalStore } from "react";
 import {
   CODE_PROBLEMS,
+  MAX_CODES,
   type CodeProblem,
   type DiscountCode,
   amountProblem,
   codeRules,
   minimumProblem,
   offLabel,
-} from "@/lib/discount";
+} from "@/lib/discount-rules";
 import { type Currency, fieldPrefix } from "@/lib/money";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { readDiscountConfirmation } from "@/lib/discount-confirmation";
+import { discountListComplete, readDiscountConfirmation } from "@/lib/discount-confirmation";
 import {
   SCHEDULE_PROBLEMS,
   STATE_LABELS,
@@ -40,7 +41,7 @@ const MESSAGES: Record<string, string> = {
 /** What a cancel did, as the route says it: "done" (it never started) or "stopped" (it may have started; it is off now). */
 type Canceled = "done" | "stopped";
 
-type Answer = { codes?: DiscountCode[]; schedules?: ScheduleEntry[]; at?: number; canceled?: Canceled; problem?: string };
+type Answer = { codes?: DiscountCode[]; complete?: boolean; schedules?: ScheduleEntry[]; at?: number; canceled?: Canceled; problem?: string };
 
 /** The cancel's own answer, read exactly; anything else is no answer. */
 const canceledOf = (data: unknown): Canceled | undefined => {
@@ -72,7 +73,7 @@ async function send(payload: Record<string, unknown>, currency: Currency): Promi
       // The codes waiting for their start (511 [CK3]): read exactly, or the list is not confirmed.
       const schedules = readScheduleConfirmation(data);
       // The moment it was read, for the states it shows.
-      return schedules === null ? { problem: UNCONFIRMED } : { codes, schedules, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
+      return schedules === null ? { problem: UNCONFIRMED } : { codes, complete: discountListComplete(data), schedules, at: Math.floor(Date.now() / 1000), canceled: canceledOf(data) };
     }
     if (data && typeof data === "object" && Object.hasOwn(data,"ok") && (data as {ok?: unknown}).ok === false && Object.hasOwn(data,"error")) {
       const refusal = data as {error?: unknown;reason?: unknown};
@@ -151,6 +152,8 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
   const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
 
   const [codes, setCodes] = useState<DiscountCode[] | null>(null);
+  // False when Stripe has older codes behind the newest page shown here.
+  const [complete, setComplete] = useState(true);
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   // The moment the list was read, for its states: read when Stripe answers, not while drawing.
   const [now, setNow] = useState(0);
@@ -179,6 +182,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
     setBusy(false);
     if (answer.codes) {
       setCodes(answer.codes);
+      setComplete(answer.complete === true);
       setSchedules(answer.schedules ?? []);
       setNow(answer.at ?? 0);
     } else setError(answer.problem ?? MESSAGES.server_error);
@@ -194,6 +198,7 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
       return;
     }
     setCodes(answer.codes);
+    setComplete(answer.complete === true);
     setSchedules(answer.schedules ?? []);
     setNow(answer.at ?? 0);
     done();
@@ -340,7 +345,13 @@ export function DiscountEditor({ selling, currency = "usd", address = "" }: { se
             </>
           ) : null}
 
-          {codes !== null && live.length === 0 && !adding ? (
+          {codes !== null && !complete ? (
+            <p className="mt-5 text-sm text-ink-soft">
+              {`These are your ${MAX_CODES} newest codes. You have older ones too; see them in your Stripe dashboard.${live.length === 0 ? " None of these newest codes is live." : ""}`}
+            </p>
+          ) : null}
+
+          {codes !== null && complete && live.length === 0 && !adding ? (
             <p className="mt-5 text-sm text-ink-soft">
               No live code right now. A buyer sees no box to type one into,
               which is how it should be until there is something to type.

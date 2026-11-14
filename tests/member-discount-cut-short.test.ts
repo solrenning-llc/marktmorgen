@@ -59,6 +59,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/promotion_codes") {
     return answer({ object: "list", has_more: false, data: [{ id: "promo_active0001", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } }] });
   }
+  // The apply asks for its one code by id (lib/discount.ts, findCode).
+  if (path === "/promotion_codes/promo_active0001") {
+    return answer({ id: "promo_active0001", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } });
+  }
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     posted.push(path);
     return answer({ id: path.split("/")[2] });

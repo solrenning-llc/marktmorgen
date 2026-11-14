@@ -43,3 +43,8 @@ export function readDiscountConfirmation(raw: unknown, httpOk: boolean): Discoun
  }
  return result;
 }
+
+/** Whether the studio's list is the whole list: only from an exact `complete: true`; otherwise it is the newest page. */
+export function discountListComplete(raw: unknown): boolean {
+ return record(raw) && Object.hasOwn(raw,"complete") && raw.complete === true;
+}

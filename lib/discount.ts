@@ -29,142 +29,33 @@
  * version explicitly. The request and the version can then never disagree.
  */
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { type Currency, formatMoney, rangeWords } from "@/lib/money";
 import type { MayComeOff } from "@/lib/platform-share";
+import { hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { CODE_PATTERN, MAX_CODES, type CodeDuration, type CodeMinimum, type DiscountCode, type Off } from "@/lib/discount-rules";
+
+// The pure rules live in lib/discount-rules.ts, so the studio's editor never carries the Stripe reader above; every server reader still imports them from here.
+export { CODE_PATTERN, MAX_CODES, type Off, type CodeProblem, CODE_PROBLEMS, minimumProblem, type CodeDuration, type CodeMinimum, amountProblem, readCode, codeProblem, offLabel, type DiscountCode, codeRules } from "@/lib/discount-rules";
 
 /** Pinned, so the shape we send is the shape this version expects. */
 const API_VERSION = "2025-09-30.clover";
 /** The version codes are read at, for a reader outside this file (lib/deposit-code.ts). */
 export const CODES_API_VERSION = API_VERSION;
 
-/**
- * What a code may look like.
- *
- * Stripe accepts letters, digits and dashes, and treats the code as
- * case-insensitive. Codes are held upper case here so that what the creator
- * sees in the studio is what a buyer would type on a poster.
- */
-export const CODE_PATTERN = /^[A-Z0-9-]{3,24}$/;
-export const MAX_CODES = 20;
-
-/**
- * The two ways a code can take money off. An amount is in one currency,
- * Stripe's rule for a coupon: it only comes off a checkout in that currency.
- */
-export type Off =
-  | { kind: "percent"; percent: number }
-  | { kind: "amount"; cents: number; currency: string };
-
-export type CodeProblem =
-  /** Nothing was typed. */
-  | "empty"
-  /** Characters Stripe will not take, or a length it will not take. */
-  | "shape"
-  /** Not a percentage between 1 and 100. */
-  | "percent"
-  /** Not an amount of money we can charge. */
-  | "amount"
-  /** A cap on redemptions that is not a whole positive number. */
-  | "uses"
-  /** A minimum order that is not an amount the store can charge. */
-  | "minimum";
-
-export const CODE_PROBLEMS: Record<CodeProblem, string> = {
-  empty: "Type the code a buyer will enter, like LAUNCH20.",
-  shape:
-    "A code is 3 to 24 characters, and only letters, numbers and dashes.",
-  percent: "Type a percentage between 1 and 100.",
-  amount: "Type an amount between 1 and 5000, like 10 or 7.50.",
-  uses: "Leave the limit empty, or type a whole number of uses above zero.",
-  minimum: "Leave the minimum empty, or type an amount between 1 and 5000, like 50.",
-};
-
-/** The minimum sentence for a store in another currency than the dollar. */
-export function minimumProblem(currency: Currency): string {
-  return currency === "usd"
-    ? CODE_PROBLEMS.minimum
-    : `Leave the minimum empty, or type an amount ${rangeWords(currency)}, in ${currency.toUpperCase()}${currency === "jpy" ? ", with no decimals" : ""}.`;
-}
-
-/**
- * How long a code keeps coming off a membership, as Stripe has it on the
- * coupon (its `duration`): the first charge, the first months, or every
- * charge. A code made here is always the first charge; the others are read
- * back from a code the creator made in their own Stripe dashboard, so the
- * studio says what Stripe will really do.
- */
-export type CodeDuration = { kind: "once" } | { kind: "repeating"; months: number } | { kind: "forever" };
-
-/** A minimum order, as Stripe checks it before the code comes off: the amount and its currency. */
-export type CodeMinimum = { cents: number; currency: string };
-
-/** The amount sentence for a store in another currency than the dollar. */
-export function amountProblem(currency: Currency): string {
-  return currency === "usd"
-    ? CODE_PROBLEMS.amount
-    : `Type an amount ${rangeWords(currency)}, in ${currency.toUpperCase()}${currency === "jpy" ? ", with no decimals" : ""}.`;
-}
-
-/** The code as it will be stored and shown: trimmed and upper case. */
-export function readCode(raw: string): string {
-  return (raw ?? "").trim().toUpperCase();
-}
-
-export function codeProblem(code: string): CodeProblem | null {
-  if (!code) return "empty";
-  if (!CODE_PATTERN.test(code)) return "shape";
-  return null;
-}
-
-/** "20% off" / "$10 off" / "€10 off" — how a code reads to a person. */
-export function offLabel(off: Off): string {
-  if (off.kind === "percent") return `${off.percent}% off`;
-  return `${formatMoney(off.cents, off.currency)} off`;
-}
-
-/** One code as the studio shows it, read back from Stripe every time. */
-export type DiscountCode = {
-  /** Stripe's own id for the promotion code, used to switch it off. */
-  id: string;
-  code: string;
-  off: Off | null;
-  /** How many times Stripe says it has been used. */
-  timesRedeemed: number;
-  /** The cap the creator set, if any. */
-  maxRedemptions: number | null;
-  /** Seconds since the epoch, as Stripe counts them. */
-  expiresAt: number | null;
-  /** Whether Stripe will still take it. Stripe decides, not us. */
-  active: boolean;
-  /** The smallest order it comes off, as Stripe checks it (`restrictions.minimum_amount`), or null for any. */
-  minimum: CodeMinimum | null;
-  /** Only for a buyer Stripe counts as new (`restrictions.first_time_transaction`): read back, never set here. */
-  firstOrder: boolean;
-  /** How long it comes off a membership, when the coupon could be read. */
-  duration: CodeDuration | null;
-  /** Stripe has a restriction on it that this page cannot read (a minimum per currency, or one in a shape not known here). */
-  otherRules: boolean;
-};
-
-/**
- * What else decides when a code comes off, in plain words, from what Stripe
- * has: its minimum, a first order only, and how long on a membership. Empty
- * when it is the plain code made here.
- */
-export function codeRules(entry: Pick<DiscountCode, "minimum" | "firstOrder" | "duration" | "otherRules">): string[] {
-  const out: string[] = [];
-  if (entry.minimum) out.push(`When the first payment is ${formatMoney(entry.minimum.cents, entry.minimum.currency)} or more.`);
-  // Stripe treats a checkout with no customer of its own as a first one, and this store's checkouts never name one.
-  if (entry.firstOrder) out.push("First order only, as Stripe counts it. Checkouts in this store are always new to Stripe, so this rule does not stop a buyer who has bought before.");
-  if (entry.duration?.kind === "repeating") out.push(`On a membership: the first ${entry.duration.months} ${entry.duration.months === 1 ? "month" : "months"} of charges.`);
-  if (entry.duration?.kind === "forever") out.push("On a membership: every charge, for as long as it lasts.");
-  if (entry.otherRules) out.push("It has other rules, set in your Stripe dashboard, that this page cannot show.");
-  return out;
-}
-
 export type CodeList =
-  | { state: "ok"; codes: DiscountCode[] }
+  /**
+   * `complete` is true only when Stripe said the page is the last one
+   * (has_more false). A page with more behind it is the newest MAX_CODES
+   * codes: what is on it is found, but no code on it is not "no code"
+   * (lib/stripe-list.ts), so nothing "none" is concluded or written from it.
+   */
+  | { state: "ok"; codes: DiscountCode[]; complete: boolean }
   | { state: "unavailable" }
+  | { state: "error" };
+
+/** One code looked up by its id: found (live or not), confirmed absent by Stripe, or not known. */
+export type FoundCode =
+  | { state: "found"; active: boolean }
+  | { state: "none" }
   | { state: "error" };
 
 /**
@@ -241,39 +132,68 @@ function readRow(row: Record<string, unknown>): DiscountCode | null {
 }
 
 /**
- * The codes on this creator's account.
+ * The codes on this creator's account: the newest page of them.
  *
  * Read from Stripe on every look rather than copied into our own record, for
  * the same reason the sales list is: there is then no second copy to drift
  * from the real one, and the redemption counts are the ones that actually
  * decide whether a code still works.
+ *
+ * One page, MAX_CODES codes, newest first, which is all one API read is
+ * counted for (lib/api-read-rules.ts, codesWork). Stripe never deletes a
+ * code, so a store past MAX_CODES always has a page behind this one: that
+ * page is still read and answered, with `complete` false, never refused
+ * whole and never taken for the whole list. `active` asks Stripe for the
+ * live codes alone, for a reader that only offers live ones.
  */
-export async function listCodes(account: string): Promise<CodeList> {
+export async function listCodes(account: string, only: { active?: true } = {}): Promise<CodeList> {
   try {
-    const page = await onAccount(
+    const raw = await onAccount(
       "GET",
       account,
       // Expanded, so what each code takes off comes from the coupon itself
       // rather than from anything we wrote down beside it.
-      `/promotion_codes?limit=${MAX_CODES}&expand[]=data.promotion.coupon`,
+      `/promotion_codes?limit=${MAX_CODES}${only.active ? "&active=true" : ""}&expand[]=data.promotion.coupon`,
       undefined,
       API_VERSION,
     );
-    // An absent/unreadable provider list is not evidence that no live code
-    // exists. The route reconciles hasDiscounts only after a confirmed list.
-    if (!Object.hasOwn(page,"data") || !Array.isArray(page.data)) return { state:"error" };
+    // Read in its exact shape (lib/stripe-list.ts): no own `data` list or no
+    // `has_more` true/false is not a page at all, and throws.
+    const page = readStripePage(raw, (row) => hasOwnField(row, "code") && readRow(row) !== null);
+    // One unreadable row refuses the page: the studio and the API show the
+    // codes as a list, and a list with a hole in it is not Stripe's list.
+    if (page.unreadable > 0) return { state: "error" };
     const codes: DiscountCode[] = [];
     const ids = new Set<string>();
-    for (const raw of page.data) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw) || !Object.hasOwn(raw,"id") || !Object.hasOwn(raw,"code")) return { state:"error" };
-      const entry = readRow(raw as Record<string,unknown>);
-      if (!entry || ids.has(entry.id)) return { state:"error" };
+    for (const row of page.rows) {
+      const entry = readRow(row);
+      if (!entry || ids.has(entry.id)) return { state: "error" };
       ids.add(entry.id);
       codes.push(entry);
     }
-    return { state: "ok", codes };
+    return { state: "ok", codes, complete: !page.hasMore };
   } catch (error) {
     console.error("listing discount codes failed", error);
+    return { state: "error" };
+  }
+}
+
+/**
+ * One code on this creator's account, asked for by its id, on whatever page
+ * of the list it would be (GET /promotion_codes/:id, one request, the slot
+ * the list read used to take). Only Stripe's own "no such object"
+ * (404 resource_missing) is "none"; any other failure, or an answer that is
+ * not that code with a true/false `active`, is not known.
+ */
+export async function findCode(account: string, id: string): Promise<FoundCode> {
+  try {
+    const row = await onAccount("GET", account, `/promotion_codes/${encodeURIComponent(id)}`, undefined, API_VERSION);
+    if (!plainObject(row) || hasOwnField(row, "error") || ownField(row, "id") !== id) return { state: "error" };
+    const active = ownField(row, "active");
+    return typeof active === "boolean" ? { state: "found", active } : { state: "error" };
+  } catch (error) {
+    if (error instanceof StripeError && error.status === 404 && error.code === "resource_missing") return { state: "none" };
+    console.error("looking up a discount code failed", error);
     return { state: "error" };
   }
 }

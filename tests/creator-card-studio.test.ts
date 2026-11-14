@@ -19,7 +19,7 @@ import { done, is, part } from "./check";
 const phone = "+" + "15550104477";
 const card: CreatorCard = { on: true, name: "Ana Souza", title: "Pottery teacher", email: "ana@example.com", phone, website: "https://ana.example.com/", note: "Classes online" };
 const draw = (initial: CreatorCard) =>
-  renderToStaticMarkup(createElement(CreatorCardEditor, { initial, handle: "anapottery", storeName: "Ana's Pottery", words: CONTACT_WORDS.pt.card, address: "marktmorgen.com/@anapottery/contact", look: { className: "st-page st-theme-warm", style: {}, lang: "pt-PT" } }));
+  renderToStaticMarkup(createElement(CreatorCardEditor, { initial, handle: "anapottery", storeName: "Ana's Pottery", language: "pt", address: "marktmorgen.com/@anapottery/contact", look: { className: "st-page st-theme-warm", style: {}, lang: "pt-PT" } }));
 
 part("Filling it in");
 const empty = draw(NO_CARD);

@@ -71,7 +71,7 @@ async function call(method: "GET" | "POST", url: string, body?: Record<string, u
 
 const count = (n: number) => n.toLocaleString("en-US");
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-const quiet = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
+const quiet = "inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
 
 /** A product's license keys in the studio: where they come from, how many are left, and who has which. */
 export function LicenceKeyEditor({ product, handle }: { product: Product; handle: string }) {

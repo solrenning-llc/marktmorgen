@@ -1,6 +1,8 @@
 /**
  * #2514 / review 6750502912: unknown room evidence must leave both
- * confirmation and reminder attempts available for a healthy retry.
+ * confirmation and reminder attempts available for a healthy retry. With
+ * main's staged confirmation the mark is written first and stays owed, and
+ * the retry resumes it at the time the diary keeps.
  * Real callers, in-memory Redis and synthetic Stripe/Resend only.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Product, type Store } from "@/lib/store";
@@ -50,6 +52,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 
+const OWED = ["sending", "booked", "buyer", "moved"];
 let fault: "none" | "shape" | "transport" = "none";
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = async commands => {
@@ -95,17 +98,20 @@ async function main() {
       fault = mode;
       const rejected = await confirmBooking(input).then(() => false, () => true);
       fault = "none";
-      is(mode + ": unknown room throws before confirmed mark and any email", [rejected, await isConfirmed(session), emails.length], [true, false, 0]);
+      // Main's staged confirmation (lib/calls.ts, ConfirmStage): the mark and the time kept for good are written first,
+      // and the room is read after them, so an unknown room leaves the mark owed, never done, with no email sent.
+      const [heldMark] = await pipeline([["GET", confirmedKey(session)]]);
+      is(mode + ": unknown room throws with the confirmation left owed and no email", [rejected, OWED.includes(String(heldMark)), emails.length], [true, true, 0]);
       await confirmBooking(input);
-      is(mode + ": healthy retry confirms and sends both emails", [await isConfirmed(session), [...emails].sort()], [true, [buyer, owner].sort()]);
+      is(mode + ": healthy retry confirms and sends both emails", [await isConfirmed(session), (await pipeline([["GET", confirmedKey(session)]]))[0], [...emails].sort()], [true, "done", [buyer, owner].sort()]);
       const seenCommands: (string | number)[][] = [];
       const counting = redis.pipeline;
       redis.pipeline = async commands => { seenCommands.push(...commands); return counting(commands); };
       try { await confirmBooking(input); } finally { redis.pipeline = counting; }
       is(mode + ": a repeated confirmation sends neither again", emails.length, 2);
-      // Claude 1 (C3) on #2514: a reload of the thanks page for a booking already confirmed reads the mark and stops,
-      // never preparing the meeting or the room again (a meeting record, the meet queue, a studio problem).
-      is(mode + ": a repeated confirmation only reads the confirmed mark", seenCommands.map(c => String(c[0])), ["EXISTS"]);
+      // Claude 1 (C3) on #2514: a reload of the thanks page for a booking already confirmed stops at the mark, never
+      // preparing the meeting or reading the room again (a meeting record, the meet queue, a studio problem).
+      is(mode + ": a repeated confirmation reads no room and no meeting", seenCommands.filter(c => c.some(a => /^nl:(call:room|meet):/.test(String(a)))), []);
 
       clock = start - 24 * HOUR + 60_000;
       const member = reminderMember(store.callsId!, handle, session, "24", start);
@@ -148,7 +154,7 @@ async function main() {
       fault = "none";
       const owed = async () => {
         const [mark] = await pipeline([["GET", confirmedKey(session2)]]);
-        return mark === null || ["sending", "booked", "buyer", "moved"].includes(String(mark));
+        return mark === null || OWED.includes(String(mark));
       };
       is(mode + ": an unknown room leaves the confirmation owed, with no email", [rejected2, await owed(), emails.length], [true, true, 0]);
       const busy = `nl:call:busy:${store.callsId}`;

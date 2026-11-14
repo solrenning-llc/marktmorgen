@@ -78,6 +78,16 @@ export function stringList(reply: unknown): string[] | null {
 }
 
 /**
+ * A list of any members (an EVAL that answers a list of numbers), as a fresh
+ * plain list read from the reply's own data slots, or null: a Proxy, a hole,
+ * an inherited member or a getter is refused (ownSlots). The caller checks
+ * each member's shape.
+ */
+export function replyList(reply: unknown): unknown[] | null {
+  return ownSlots(reply);
+}
+
+/**
  * A list's own data slots, whatever each holds, as a fresh plain list, or null for anything that is not a plain list
  * (a Proxy, a hole, an inherited slot or a getter). For a reply whose members are read one by one, so a member that
  * cannot be read is told apart from the ones that can; nothing of the reply is run.
@@ -119,6 +129,15 @@ export function scanPage(replies: unknown): { next: string; items: string[] } | 
   const items = stringList(page[1]);
   return items ? { next, items } : null;
 }
+
+/**
+ * Deletes one hash field only while it holds the value given (KEYS[1] the hash, ARGV[1] the field, ARGV[2] the value):
+ * 1 when deleted, 0 when the field is absent or holds another value; a key of another type answers an error, which is
+ * neither. So taking back what one write put there (lib/paypal-delivery.ts takeBack) keeps a later write's value.
+ */
+export const HDEL_IF_EQUAL = `-- marktmorgen:hdel-if-equal:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end
+return 0`;
 
 /** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */
 export class UnknownReplyError extends Error {

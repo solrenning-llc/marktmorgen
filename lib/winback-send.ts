@@ -511,7 +511,8 @@ export async function openWinBack(
     // Never longer than Stripe keeps it open: a checkout told to close sooner (the store's reminders ask for an hour;
     // a held unit, CHECKOUT_OPEN_SECONDS) is kept until two minutes before that (Claude 7's review of #3482, MEDIUM).
     const ceiling = holding ? OPEN_KEPT_HELD_SECONDS : OPEN_KEPT_SECONDS;
-    const closesAt = held.value.closesAt;
+    // Not said (a physical order's confirmed origin, never a membership's): the ceiling alone.
+    const closesAt = held.value.closesAt ?? null;
     const left = closesAt === null ? ceiling : Math.min(ceiling, closesAt - Math.floor(Date.now() / 1000) - 120);
     if (left > 0) await keepCheckout(token, opened, left);
     return { ok: true, url: opened };

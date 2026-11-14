@@ -12,7 +12,8 @@
  * else", and deleted the host's own calendar although the host still served
  * another, live store. Such a store now waits a walk, its host's calendar kept.
  *
- * Synthetic stores, in-memory Redis; the unreadable record is a read that times out.
+ * Synthetic stores, in-memory Redis; the unreadable record is a read that times out. Each store is closed the
+ * way the closing job leaves it (tests/closed-for-erasure.ts): the walk erases only a store really due (#3156).
  */
 import { createHash } from "node:crypto";
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue } from "@/lib/closed-store-data";
@@ -21,6 +22,7 @@ import { putMember } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { hostId } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
+import { closeForErasure } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const ownerKey = (email: string) => "nl:store:owner:" + createHash("sha256").update("nimbus-store:" + email).digest("hex").slice(0, 40);
@@ -38,13 +40,18 @@ let batchWriteFails = false;
 let batchWriteUnconfirmed = false;
 // The move back a walk (ZADD XX) answered with nothing Redis would say: not known to have moved.
 let unconfirmedMoves = false;
+// The walk entry's write: a plain HSET, or (#3156) the CLOSING_FENCED step that writes it with the record's close
+// while the walk holds the store's lock.
+const writesEntry = (c: (string | number)[]) =>
+  (c[0] === "HSET" && c[1] === BATCH_KEY) ||
+  (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-fenced:v1\n") && c.slice(3, 3 + Number(c[2])).includes(BATCH_KEY));
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (unconfirmedMoves && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][2] === "XX") return [null];
   if (commands.some((c) => c[0] === "GET" && unreadable.has(String(c[1])))) throw new Error("Redis request timed out (test)");
   if (commands.some((c) => c[0] === "SMEMBERS" && unreadableSets.has(String(c[1])))) throw new Error("Redis request timed out (test)");
-  if (batchWriteFails && commands.some((c) => c[0] === "HSET" && c[1] === BATCH_KEY)) throw new Error("Redis request timed out (test)");
-  if (batchWriteUnconfirmed && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) return [null];
+  if (batchWriteFails && commands.some(writesEntry)) throw new Error("Redis request timed out (test)");
+  if (batchWriteUnconfirmed && commands.length === 1 && writesEntry(commands[0])) return [null];
   // A read of what the store is made of (its team, its email sequences) that times out.
   if (commands.some((c) => c[0] === "GET" && unreadableParts.some((prefix) => String(c[1]).startsWith(prefix)))) throw new Error("Redis request timed out (test)");
   return realPipeline(commands);
@@ -69,6 +76,8 @@ async function main(): Promise<void> {
 
   part("The erasing walk keeps an unreadable store in line");
   const T = Date.now();
+  await closeForErasure(A);
+  await closeForErasure(B);
   await markDue(A, T - 1000);
   await markDue(B, T - 1000);
   unreadable.add(ownerKey(A));
@@ -89,6 +98,7 @@ async function main(): Promise<void> {
     await makeStore(X, "hostxa");
     const b = await makeStore(Y, "owneryb");
     if (teammate && !(await putMember(b, X, "admin"))) throw new Error("setup: X is not on B's team");
+    await closeForErasure(X);
     for (const key of calendarOf(X)) redis.run(["SET", key, "test"]);
   }
 
@@ -151,6 +161,7 @@ async function main(): Promise<void> {
     const owner = `parts-${prefix.length}@example.com`;
     await makeStore(owner, `parts${prefix.length}`);
     await ensureListId(owner);
+    await closeForErasure(owner);
     const TP = Date.now();
     await markDue(owner, TP - 1000);
     unreadableParts = [prefix];
@@ -170,6 +181,7 @@ async function main(): Promise<void> {
   redis.clear();
   const W = "batch-write@example.com";
   await makeStore(W, "batchwrite");
+  await closeForErasure(W);
   const TW = Date.now();
   await markDue(W, TW - 1000);
   batchWriteFails = true;
@@ -193,6 +205,7 @@ async function main(): Promise<void> {
   redis.clear();
   const U = "batch-unconfirmed@example.com";
   await makeStore(U, "batchunconfirmed");
+  await closeForErasure(U);
   const TBU = Date.now();
   await markDue(U, TBU - 1000);
   batchWriteUnconfirmed = true;

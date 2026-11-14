@@ -860,7 +860,7 @@ export async function testConnection(store: Store): Promise<{ ok: boolean; messa
  * the records of its jobs — which hold buyers' addresses — are deleted
  * rather than left to expire.
  */
-export async function forgetStoreSync(statsId: string | null): Promise<void> {
+export async function forgetStoreSync(statsId: string | null, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
   // Every reply read exactly (CX-123 rule 24): a log or a queue page in another shape is unknown, never "no job".
   // What was read is still deleted (the sealed key with the settings), the log is kept when it did not read, so
@@ -875,13 +875,17 @@ export async function forgetStoreSync(statsId: string | null): Promise<void> {
     if (JOB_ID.test(id)) ids.add(id);
   }
   // The records go before the queue lets go of them (Claude 4 on #2860), so a batch cut short never leaves one
-  // holding an address off the queue; the log is deleted last.
+  // holding an address off the queue; the log is deleted last. `apply` sends the deletes: the closing walk's makes
+  // them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy).
   const commands: (string | number)[][] = [
     ...[...ids].map((id) => ["DEL", jobKey(id)]),
     ...(queued.length ? [["ZREM", QUEUE_KEY, ...queued]] : []),
     ["DEL", cfgKey(statsId), tagsKey(statsId), badKey(statsId), ...(logged ? [logKey(statsId)] : [])],
   ];
-  if (!countsFor(await redisPipeline(commands), commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
+  const replies = await apply(commands);
+  // A plain pipeline's replies are read exactly, one count per command. The closing walk's fenced apply answers no
+  // counts: it reads its own EVAL reply exactly and throws itself on a lost lock or a reply in another shape.
+  if (apply === redisPipeline && !countsFor(replies, commands.length)) throw new UnknownReplyError("the forgetting of a deleted store's email platform jobs");
   if (unread) throw new UnknownReplyError("a deleted store's email platform jobs");
 }
 

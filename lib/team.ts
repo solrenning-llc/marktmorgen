@@ -715,11 +715,13 @@ export async function spendInvite(token: string): Promise<JoinResult> {
 }
 
 /**
- * Forgets a store's team, its invitations and its log, when the store itself goes. A team that answers in an
- * unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the teammates' index entries,
- * which could not be read, are left, and memberStores drops each on the confirmed absence that follows.
+ * Forgets a store's team, its invitations and its log, when the store itself goes. `apply` sends the deletes: the
+ * closing walk's makes them only while it still holds the store's lock (lib/closed-store-data.ts, fencedBy). A team
+ * that answers in an unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the
+ * teammates' index entries, which could not be read, are left, and memberStores drops each on the confirmed absence
+ * that follows.
  */
-export async function dropTeam(store: Store): Promise<void> {
+export async function dropTeam(store: Store, apply: (commands: (string | number)[][]) => Promise<unknown> = redisPipeline): Promise<void> {
   if (!store.sid) return;
   const members = await readTeam(store.sid).then(
     (team) => team.members,
@@ -728,7 +730,7 @@ export async function dropTeam(store: Store): Promise<void> {
       throw error;
     },
   );
-  await redisPipeline([
+  await apply([
     ...members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],

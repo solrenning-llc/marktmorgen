@@ -86,3 +86,16 @@ if #KEYS == 4 then
   redis.call('HDEL', KEYS[4], sid)
 end
 return taken`;
+
+/**
+ * FORGET_PATH made only while a lock is still its holder's, read in the same step: the closing walk forgets a closing
+ * store's Path only while it still holds the store's lock (lib/closed-store-data.ts, prepareStore; Codex M's focal M1
+ * on #3156). KEYS: FORGET_PATH's four, then the lock; ARGV: FORGET_PATH's two, then the holder's token. {-9, 0}, and
+ * nothing done, when the lock is not the holder's; otherwise FORGET_PATH's answer, the lock left out of its keys.
+ */
+export const FORGET_PATH_HELD = `-- marktmorgen:path-forget-held:v1
+if #KEYS ~= 5 or #ARGV ~= 3 then return {-1, 0} end
+if redis.call('GET', KEYS[5]) ~= ARGV[3] then return {-9, 0} end
+KEYS[5] = nil
+ARGV[3] = nil
+${FORGET_PATH.slice(FORGET_PATH.indexOf("\n") + 1)}`;

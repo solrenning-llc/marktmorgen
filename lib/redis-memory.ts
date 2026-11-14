@@ -129,6 +129,89 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/closed-store-data.ts CLOSING_TAKE: a closing store's lock taken for the walk only while its record, the
+        // closing job's record and its closing day are what the walk's check read.
+        if (key.startsWith("-- marktmorgen:closing-take:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, owner, lock, closing, finals, raw, hasClosing, closingRaw, hasScore, scoreRaw, ref, token, seconds] = args;
+          if (this.run(["GET", owner]) !== raw) return 0;
+          const now = this.run(["GET", closing]);
+          if (hasClosing === "1" ? now !== closingRaw : now !== null && now !== undefined) return 0;
+          const score = this.run(["ZSCORE", finals, ref]);
+          if (hasScore === "1" ? score === null || score === undefined || Number(score) !== Number(scoreRaw) : score !== null && score !== undefined) return 0;
+          return this.run(["SET", lock, token, "NX", "EX", seconds]) === "OK" ? 1 : -1;
+        }
+        // lib/closed-store-data.ts CLOSING_UNHELD: what the walk deletes of what an id a live store may hold names,
+        // only while no live store holds it, read in the same step.
+        if (key.startsWith("-- marktmorgen:closing-unheld:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const [kind, rawChecks, account, rawKnown] = argv;
+          const checks = Number(rawChecks), known = Number(rawKnown);
+          const members = argv.slice(4, 4 + known);
+          const op = argv[4 + known];
+          const changed = argv.slice(5 + known);
+          const shape = (op === "DEL" && keys.length > checks) || (["SREM", "ZREM", "HDEL"].includes(op) && keys.length === checks + 1 && changed.length > 0);
+          if (!shape) return -1;
+          if (kind === "key") {
+            if (this.run(["EXISTS", keys[0]]) === 1) return 0;
+          } else if (kind === "address") {
+            const holder = this.run(["GET", keys[0]]);
+            if (typeof holder === "string" && holder !== "" && !holder.startsWith("released:")) return 0;
+          } else if (kind === "account") {
+            if (Number(this.run(["SCARD", keys[1]])) !== known) return -2;
+            if (members.some((member) => Number(this.run(["SISMEMBER", keys[1], member])) !== 1)) return -2;
+            let held = false;
+            for (let i = 0; i < checks; i += 1) {
+              if (i === 1) continue;
+              const raw = this.run(["GET", keys[i]]);
+              if (raw === null || raw === undefined) continue;
+              let record: unknown;
+              try {
+                record = JSON.parse(String(raw));
+              } catch {
+                return -1;
+              }
+              if (!record || typeof record !== "object") return -1;
+              if ((record as { stripeAccountId?: unknown }).stripeAccountId === account) held = true;
+            }
+            if (held) return 0;
+          } else return -1;
+          this.run(op === "DEL" ? ["DEL", ...keys.slice(checks)] : [op, keys[checks], ...changed]);
+          return 1;
+        }
+        // lib/closed-store-data.ts CLOSING_FENCED: a closing store's deletes made only while the walk still holds the
+        // store's lock, every change read before any is made.
+        if (key.startsWith("-- marktmorgen:closing-fenced:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const plan: { op: string; key: string; words: string[] }[] = [];
+          for (let i = 1; i < argv.length; ) {
+            const [op, rawAt, rawN] = argv.slice(i, i + 3);
+            const at = Number(rawAt), n = Number(rawN);
+            if (!Number.isInteger(at) || !Number.isInteger(n) || at < 2 || at > keys.length || n < 0 || i + 3 + n > argv.length) return -1;
+            if (op === "DEL" ? n !== 0 : ["SREM", "ZREM", "HDEL"].includes(op) ? n < 1 : op === "SETEX" ? n !== 2 || !Number.isFinite(Number(argv[i + 4])) : op === "HSET" ? n !== 2 : true) return -1;
+            plan.push({ op, key: keys[at - 1], words: argv.slice(i + 3, i + 3 + n) });
+            i += 3 + n;
+          }
+          if (!plan.length) return -1;
+          if (this.run(["GET", keys[0]]) !== argv[0]) return 0;
+          for (const { op, key: target, words } of plan) {
+            if (op === "DEL") this.run(["DEL", target]);
+            else if (op === "SETEX") this.run(["SET", target, words[0], "EX", words[1]]);
+            else if (op === "HSET") this.run(["HSET", target, words[0], words[1]]);
+            else this.run([op, target, ...words]);
+          }
+          return 1;
+        }
+        // lib/path-atomic.ts FORGET_PATH_HELD: FORGET_PATH made only while a lock is still its holder's.
+        if (key.startsWith("-- marktmorgen:path-forget-held:v1\n")) {
+          if (args[0] !== "5" || args.length !== 9) return [-1, 0];
+          const [, room, target, boardKey, mapKey, lock, month, sid, token] = args;
+          if (this.run(["GET", lock]) !== token) return [-9, 0];
+          return this.run(["EVAL", "-- marktmorgen:path-forget:v1\n", "4", room, target, boardKey, mapKey, month, sid]);
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

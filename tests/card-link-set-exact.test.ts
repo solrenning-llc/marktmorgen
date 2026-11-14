@@ -77,6 +77,10 @@ async function main(): Promise<void> {
   state.active = [{
     id: "sub_Running000001",
     status: "active",
+    // As Stripe sends a running membership: main's noticeCards (rule 24) reads these exactly and skips a row without them.
+    cancel_at_period_end: false,
+    cancel_at: null,
+    pause_collection: null,
     metadata: { store: "harbor", product: club.product.id },
     customer: { id: "cus_Member000001", email: "cy@example.com", invoice_settings: { default_payment_method: null } },
     items: { data: [{ current_period_end: payAt }] },

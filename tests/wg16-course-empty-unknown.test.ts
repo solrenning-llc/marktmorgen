@@ -105,7 +105,15 @@ async function main(): Promise<void> {
     true,
   );
   const learn = readFileSync("lib/learn.ts", "utf8");
-  is("the drip schedule skips a course whose students it could not read this round, says so, and does not count it", /const read = await studentsOf\(course, 5000\);\n    if \(!read\) \{\n[^}]*console\.error\([^}]*\n      continue;\n    \}\n    counts\.courses \+= 1;/.test(learn), true);
+  // Since the drip run is bounded (tests/drip-run-bounded.test.ts): the students are read page by page, and a page or
+  // blocked list that does not read throws; the run counts the course as failed, says so and goes on, and only a
+  // course read to its last student is counted.
+  is(
+    "the drip schedule skips a course whose students it could not read this round, says so, and does not count it",
+    /if \(!blockedList\) throw new UnknownReplyError\([^)]*\);[\s\S]*if \(!read \|\| read\.items\.length % 2 !== 0\) throw new UnknownReplyError\([^)]*\);[\s\S]*\} while \(page !== "0"\);\n  counts\.courses \+= 1;/.test(learn) &&
+      /\} catch \(error\) \{\n[^}]*counts\.failed \+= 1;\n\s*console\.error\("a course's drip emails failed/.test(learn),
+    true,
+  );
 
   done();
 }

@@ -770,6 +770,17 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/tier-benefits.ts BENEFIT_MARK: one person's benefit marks written only while they are not on the store's
+        // list of the deleted; -1 when they are, otherwise each HSETNX's reply and the SADD's.
+        if (key.startsWith("-- marktmorgen:benefit-mark:v1\n") && args[0] === "3" && args.length >= 8 && (args.length - 6) % 2 === 0) {
+          const [, marks, who, erased, print, person, ...pairs] = args;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", erased, print]) === 1) return -1;
+          const out: unknown[] = [];
+          for (let i = 0; i < pairs.length; i += 2) out.push(this.run(["HSETNX", marks, pairs[i], pairs[i + 1]]));
+          out.push(this.run(["SADD", who, person]));
+          return out;
+        }
         // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
         // each address link only while it points at them; the people and links deleted and the people left.
         if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {

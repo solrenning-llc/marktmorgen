@@ -93,6 +93,7 @@ import { forgetLedgerCopy } from "@/lib/segments";
 import { forgetReadingsPerson } from "@/lib/store-readings";
 import { forgetFeedCopyPerson } from "@/lib/calendar-sync";
 import { forgetHealthCopy } from "@/lib/member-health";
+import { forgetBenefitPerson } from "@/lib/tier-benefits";
 import { forgetReviewsPerson } from "@/lib/reviews";
 import { dropReviewQuotes, keepStoreQuotes } from "@/lib/store-quotes";
 import { forgetVoicePerson } from "@/lib/customer-voice";
@@ -195,6 +196,7 @@ export const ERASERS: Eraser[] = [
   // The private calendar feed's kept file names who booked (review of #2111): it goes, and is made again.
   { module: "lib/calendar-sync.ts", run: (s) => forgetFeedCopyPerson(s.statsId) },
   { module: "lib/member-health.ts", run: (s) => forgetHealthCopy(s.store) },
+  { module: "lib/tier-benefits.ts", run: (s) => forgetBenefitPerson(s.store, s.person) },
   {
     module: "lib/reviews.ts",
     only: "person",

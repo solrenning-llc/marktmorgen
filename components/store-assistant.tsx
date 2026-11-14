@@ -125,6 +125,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     if (busy) return;
     setBusy(true);
     setNotice(null);
+    setSaid("");
     const result = await post({ handle, action: "handoff", token: thread?.token, email, name, text });
     setBusy(false);
     if (!result.ok) {
@@ -141,6 +142,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     if (thread) await post({ handle, action: "delete", token: thread.token });
     remember(handle, null);
     setThread(null);
+    setSaid("");
     setHanding(false);
     setSent(false);
     setDeleted(true);

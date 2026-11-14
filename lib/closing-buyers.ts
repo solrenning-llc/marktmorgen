@@ -213,7 +213,11 @@ async function paypalPage(statsId: string, offset: number): Promise<{ read: numb
         paid = null;
       }
       const sale = paid && typeof paid === "object" && !Array.isArray(paid) ? (paid as { store?: unknown; order?: unknown; email?: unknown }) : null;
-      if (sale && sale.store === statsId && sale.order === order && typeof sale.email === "string" && sale.email) emails.push(sale.email);
+      // Read as tell() reads it (normaliseEmail, EMAIL_PATTERN): an address that is not one is unread, so the sale is
+      // counted as not told (its unreadField mark keeps it once), never dropped before the told list (Codex L's MEDIUM,
+      // Claude 3 cloud S on #4427).
+      const email = sale && sale.store === statsId && sale.order === order && typeof sale.email === "string" ? normaliseEmail(sale.email) : "";
+      if (EMAIL_PATTERN.test(email)) emails.push(email);
       else unread.push(order);
     }
   }

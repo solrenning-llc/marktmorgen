@@ -141,6 +141,22 @@ async function main(): Promise<void> {
     is("the other store's buyer is not written to", countOf(emails[0]), 0);
   }
 
+  part("A record whose buyer address is not an address: counted as not told, once, never dropped");
+  // Codex L's MEDIUM, reproduced by Claude 3 cloud S on #4427: paypalPage passed any nonempty text on, and tell()
+  // dropped it before the told list, so the sale was neither told nor counted.
+  {
+    const { store, statsId } = await closingStore("ppbadmail", 100);
+    const emails = await seedSales(statsId, "PPBAD", 2);
+    const bad = order("PPBAD", 0);
+    await redis.pipeline([["SET", `nl:ppsell:paid:${bad}`, JSON.stringify({ store: statsId, order: bad, capture: `CAP${bad}`, email: "not-an-address", product: "p1", cents: 1000, currency: "usd", at: 1_790_000_000 })]]);
+    const end = await toTheEnd(store);
+    is("the valid buyer is told once", countOf(emails[1]), 1);
+    is("the sale with the invalid address is counted in untold", end.untold, 1);
+    is("nothing is sent to the text that is not an address", countOf("not-an-address"), 0);
+    const again = await tellBuyers(store, E, DAY, "", Date.now() + 60_000);
+    is("a fresh round does not count it twice", again.untold, 0);
+  }
+
   part("A store with more PayPal sales than a page: no MGET above the page, every buyer told or counted");
   {
     const n = 2 * PAYPAL_PAGE + 37;

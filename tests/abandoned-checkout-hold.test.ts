@@ -18,6 +18,7 @@ import { createCheckout } from "@/lib/store-checkout";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
+import { confirmationKey } from "@/lib/purchase-email";
 import { addProduct, claimHandle, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -180,6 +181,35 @@ async function main(): Promise<void> {
   is("its place opens once the sweep reads it closed", (await admitOrders(store, 1)).ok, true);
   await sweep();
   is("the same closed checkout read again gives nothing back twice", await admitOrders(store, 1), { ok: false, reason: "paused" });
+
+  part("A Stripe recovery copy of a checkout whose place was given back never gives a place back again when paid");
+  // Review of #4232 (Claude 4 cloud X, MEDIUM): a checkout opened with Stripe's recovery on is copied by Stripe when its
+  // recovery link is opened; the copy carries the same mm_admit hour and `recovered_from`. Once the original's place was
+  // given back at expiry, the paid copy must not give back another live checkout's place: the store would admit one
+  // order over the plan's limit (a cost ceiling, MR).
+  store = await freshStore();
+  hour = await fill(store, limit, Date.now(), "rec");
+  const recovery = { after_expiration: { recovery: { enabled: true } } };
+  const paidCopy = (id: string, original: string): Session => ({
+    ...expired(id, seconds() - 60, hour, { status: "complete", payment_status: "paid", recovered_from: original, amount_total: 4900, amount_subtotal: 4900, currency: "usd", customer_details: { email: "buyer@example.com" } }),
+  });
+  sessions = [expired(sid("rec", 0), seconds() - 3600, hour, recovery)];
+  await sweep();
+  sessions = [...sessions, paidCopy("cs_test_recoveredcopy00000001", sid("rec", 0))];
+  await sweep();
+  is("the paid copy was confirmed by the sweep", Boolean((await redis.pipeline([["GET", confirmationKey("cs_test_recoveredcopy00000001")]]))[0]), true);
+  is("the paid copy is counted, and takes no other checkout's place back", await admitOrders(store, 1), { ok: false, reason: "paused" });
+
+  part("A recovery copy paid before the original's closing is read gives the place back once, never again at the sweep");
+  store = await freshStore();
+  hour = await fill(store, limit, Date.now(), "early");
+  sessions = [paidCopy("cs_test_recoveredcopy00000002", sid("early", 0))];
+  await sweep();
+  is("the paid copy was confirmed by the sweep", Boolean((await redis.pipeline([["GET", confirmationKey("cs_test_recoveredcopy00000002")]]))[0]), true);
+  is("the paid copy is counted in the place its original held", await admitOrders(store, 1), { ok: false, reason: "paused" });
+  sessions = [...sessions, expired(sid("early", 0), seconds() - 3600, hour, recovery)];
+  await sweep();
+  is("the original read closed afterwards gives nothing back a second time", await admitOrders(store, 1), { ok: false, reason: "paused" });
 
   part("A checkout left at Stripe's default, closed a day after it opened, still gives its place back");
   store = await freshStore();

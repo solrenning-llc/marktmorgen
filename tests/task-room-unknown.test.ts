@@ -260,3 +260,27 @@ test("a full room: refused as before, nothing kept, no mark left", async () => {
   assert.equal(await roomTotal(w.room), limit - 500, "the room is what it was");
   assert.deepEqual(redis.keys().filter((key) => key.startsWith("nl:tasks:taken:")), [], "and no mark is left");
 });
+
+/** #2608 LOW (Claude 4 F1 / Claude 1): the hand-in counter, full or unreadable. */
+function handInCounter(how: "full" | "unknown"): void {
+  redis.pipeline = async (commands: (string | number)[][]) => {
+    const hit = commands.find((c) => String(c[1] ?? "").startsWith("nl:rl:task-hand-in:"));
+    if (hit && how === "unknown") throw new Error("Redis timed out (synthetic)");
+    if (hit) await realPipeline([["SET", String(hit[1]), "1000000000", "EX", 3_600]]);
+    return realPipeline(commands);
+  };
+}
+
+test("past the hour's hand-ins: 429 slow, as before", async () => {
+  const w = await world("taskslowfull");
+  handInCounter("full");
+  const result = await handIn(w);
+  assert.deepEqual([result.status, result.body.error], [429, "slow"]);
+});
+
+test("a hand-in count that cannot be read is 503 unavailable, never 'slow down'", async () => {
+  const w = await world("taskslowunk");
+  handInCounter("unknown");
+  const result = await handIn(w);
+  assert.deepEqual([result.status, result.body.error], [503, "unavailable"]);
+});

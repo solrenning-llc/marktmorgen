@@ -241,7 +241,7 @@ export default async function FreePage({ params, searchParams }: Params) {
               </>
             ) : (
               <>
-                <WelcomeCountdown until={welcome.until} left={ww.left} untilWords={ww.until("{when}")} locale={said.lang.locale} />
+                <WelcomeCountdown until={welcome.until} left={ww.left} untilWords={ww.until("{when}")} locale={said.lang.locale} pause={ww.pause} resume={ww.resume} />
                 <form action="/api/store/welcome/open" method="post" className="mt-4">
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="token" value={token} />

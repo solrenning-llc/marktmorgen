@@ -227,7 +227,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     // A record that does not read would leave out whether they agreed or left: the copy fails rather than omit it.
     const contact = parseContact(reply[0]);
     if (!contact) throw new UnknownReplyError("the person's contact record");
-    return [{ email: s.email, ...contact }];
+    // The token in their unsubscribe link is a key, left out: they have it in every email from the list.
+    const { t: _token, ...kept } = contact;
+    void _token;
+    return [{ email: s.email, ...kept }];
   },
   "lib/crm.ts": async (s) => {
     const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
@@ -261,7 +264,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/payment-request-store.ts": async (s) => {
     const list = await listRequests(s.store);
     if (list === null) throw new Error("the payment requests could not be read");
-    return list.filter((r) => same(r.email, s.email));
+    // The request's id is the secret in its pay link, a key, left out: they have it in the email that sent it. So are
+    // the store's own id and the last checkout opened for it; what was asked, paid and refunded stays.
+    return list.filter((r) => same(r.email, s.email)).map(({ id: _id, sid: _sid, session: _session, ...kept }) => {
+      void [_id, _sid, _session];
+      return kept;
+    });
   },
   "lib/agreement-store.ts": async (s) => {
     const list = await listAgreements(s.store);
@@ -270,7 +278,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
       for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
-      out.push({ ...a, versions });
+      // The agreement's id is the secret in its signing link, a key, left out: whoever held the file could sign as them.
+      // They have it in the email that sent it. So are the store's own id, the linked payment request's secret and the
+      // internal reason an email failed; what was agreed, each version and each signature stay.
+      const { id: _id, sid: _sid, payRequest: _payRequest, failed: _failed, ...kept } = a;
+      void [_id, _sid, _payRequest, _failed];
+      out.push({ ...kept, versions });
     }
     return out;
   },

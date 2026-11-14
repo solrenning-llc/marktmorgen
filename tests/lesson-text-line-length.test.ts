@@ -19,6 +19,7 @@ import { LessonText } from "../components/lesson-text";
 const html = renderToStaticMarkup(
   createElement(LessonText, {
     text: "A first paragraph of the lesson.\n\nA second one.\n\n- one item\n- another item\n\n```\nconst wide = 'code keeps the whole width';\n```",
+    lang: "en-US",
   }),
 );
 const cap = (cls: string): number | null => {

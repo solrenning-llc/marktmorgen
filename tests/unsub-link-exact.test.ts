@@ -263,7 +263,8 @@ async function settle(node: ReactNode): Promise<ReactNode> {
   if (Array.isArray(node)) return Promise.all(node.map(settle));
   if (!isValidElement(node)) return node;
   const element = node as ReactElement<{ children?: ReactNode }>;
-  if (typeof element.type === "function") {
+  // A server component (async) is awaited here; a client one, with its hooks, is left for renderToStaticMarkup to draw.
+  if (typeof element.type === "function" && element.type.constructor.name === "AsyncFunction") {
     return settle(await (element.type as (props: unknown) => ReactNode | Promise<ReactNode>)(element.props));
   }
   return "children" in element.props ? cloneElement(element, undefined, await settle(element.props.children)) : element;

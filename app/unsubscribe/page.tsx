@@ -12,6 +12,7 @@ import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { countingFor } from "@/lib/mail-clicks";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { FocusedStatus } from "@/components/community-flash";
 
 type Query = { [key: string]: string | string[] | undefined };
 
@@ -111,7 +112,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
             <h1 className="t-h3">{a.listAsk(name)}</h1>
             <p className="mt-3 text-ink-soft">{a.forEmail(found.email)}</p>
             {/* done=0 on a link still found and not left: the last press was not saved (its read or write was unknown), so the button is offered again. */}
-            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
+            {notSaved ? <FocusedStatus text={a.reviewsNotSaved} className="mt-3 font-semibold" /> : null}
             <form action={`/api/mail/unsubscribe?t=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.unsubscribeButton}</button>
@@ -203,7 +204,7 @@ async function StopAnnouncements({ token, notSaved }: { token: string; notSaved:
           <>
             <h1 className="t-h3">{a.communityAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.communityFor(found.member.e, where)}</p>
-            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
+            {notSaved ? <FocusedStatus text={a.reviewsNotSaved} className="mt-3 font-semibold" /> : null}
             <form action={`/api/mail/unsubscribe?c=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopEmails}</button>
@@ -278,7 +279,7 @@ async function StopReviewRequests({ token, notSaved }: { token: string; notSaved
           <>
             <h1 className="t-h3">{a.reviewsAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.reviewsFor(found.email)}</p>
-            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
+            {notSaved ? <FocusedStatus text={a.reviewsNotSaved} className="mt-3 font-semibold" /> : null}
             <form action={`/api/mail/unsubscribe?v=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopReviews}</button>

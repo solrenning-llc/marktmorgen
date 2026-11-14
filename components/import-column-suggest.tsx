@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { clearHeader, type Source } from "@/lib/csv-map-ai-rules";
+import { askBody, clearHeader, type Source } from "@/lib/csv-map-ai-rules";
 
 /** A field of the import, as the import screen lists it. */
 export type SuggestField = { key: string; label: string };
@@ -95,7 +95,7 @@ export function ImportColumnSuggest({
       const response = await fetch("/api/store/import-columns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, header, guess }),
+        body: JSON.stringify({ kind, ...askBody(header, guess) }),
       });
       const data = (await response.json().catch(() => null)) as { ok?: boolean; error?: string; message?: string; columns?: Record<string, { column: number; from: Source }> } | null;
       if (!data?.ok || !data.columns) {

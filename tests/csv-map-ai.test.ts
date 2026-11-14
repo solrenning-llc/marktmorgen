@@ -158,12 +158,13 @@ async function main(): Promise<void> {
   is("each column is used only by the creator's press on it", [(ui.match(/onUse\(/g) ?? []).length, ui.includes("if (use && s) {\n      onUse(field, s.column);"), ui.includes("Use this column"), ui.includes("Not this one")], [1, true, true, true]);
   is("a field set meanwhile is not suggested over", ui.includes("suggestions.filter((s) => (mapping[s.field] ?? -1) < 0"), true);
   is("it says only names are sent, and that nothing changes until each is chosen", [ui.includes("Only the column names are sent, never what is in the rows."), ui.includes("Nothing changes until you choose")], [true, true]);
-  is("it sends names and the guess, nothing else", ui.includes("body: JSON.stringify({ kind, header, guess })"), true);
+  // Review at 15974dfb92, LOW: only the names the model can see are sent (askBody, held in tests/csv-map-ai-lows.test.ts).
+  is("it sends names and the guess, nothing else, through askBody", ui.includes("body: JSON.stringify({ kind, ...askBody(header, guess) })"), true);
   // Out-of-family review of #3559 at c720cc496a, LOW 1: the first row is checked in the browser, so a file with no
   // header row sends nothing at all, not even to our server, and "only the column names are sent" is what happens.
   is(
     "a first row that is not clearly a header is never sent: the screen checks it before asking, with the rules' own clearHeader",
-    [ui.includes('import { clearHeader, type Source } from "@/lib/csv-map-ai-rules";'), /if \(!clearHeader\(header\)\) \{\n\s+setNote\(SUGGEST_MESSAGES\.no_header\);\n\s+return;\n\s+\}/.test(ui), ui.indexOf("if (!clearHeader(header))") < ui.indexOf('fetch("/api/store/import-columns"')],
+    [ui.includes('import { askBody, clearHeader, type Source } from "@/lib/csv-map-ai-rules";'), /if \(!clearHeader\(header\)\) \{\n\s+setNote\(SUGGEST_MESSAGES\.no_header\);\n\s+return;\n\s+\}/.test(ui), ui.indexOf("if (!clearHeader(header))") < ui.indexOf('fetch("/api/store/import-columns"')],
     [true, true, true],
   );
   // Claude 1's review of #3559 at a323e8a3ae, LOW: a refusal a retry cannot help never says "try again".

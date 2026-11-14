@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { PAUSE_CHOICES } from "@/lib/membership-pause-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   months: "Pick off, or one, two or three months.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm whether your pause setting was saved. Reload this page to check before trying again.",
 };
 

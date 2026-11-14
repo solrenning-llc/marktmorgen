@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { parseYearlyAsk, type YearlyAsk } from "@/lib/yearly-switch-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   address: "Type the postal address where you can be reached. The law in the United States asks every email like this to carry one.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm these yearly offer settings. Reload this page to check before trying again.",
 };
 

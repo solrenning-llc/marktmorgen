@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { DEFAULT_PLACE, MAX_PLACE, buttonColors, embedPlace } from "@/lib/embed-rules";
 import { MAX_CAMPAIGN, MAX_EMBED_SITES, type ScriptMode, listedReturn, readEmbedSites } from "@/lib/embed-sites";
 import { BUILDERS, MAX_LINK_TEXT, cspLines, loaderHash, scriptCode } from "@/lib/embed-sdk";
@@ -18,7 +18,7 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   invalid: "Each line needs to be an https website address, like https://www.example.com.",
   too_many: `A store can list up to ${MAX_EMBED_SITES} sites.`,
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "We could not confirm this website list. Reload this page to check before trying again.",
 };

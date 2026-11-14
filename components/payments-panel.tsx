@@ -8,7 +8,7 @@ import { CURRENCIES, type Currency, currencyLabel, currencyRule, formatMoney } f
 import type { WayGroup, WaysToPay } from "@/lib/payment-methods";
 import type { CurrencyShortfall } from "@/lib/store";
 import { useStudioHref } from "@/components/studio-store-pin";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 /** What each kind of amount is called in the list of ones that are too small. */
@@ -38,7 +38,7 @@ const MESSAGES: Record<string, string> = {
   stripe: "Stripe did not answer when we asked whether any membership is still running, so nothing was changed. Try again in a moment.",
   none: "This account has no store yet.",
   store_full: "Your store has reached the most it can hold, so nothing was changed.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   unavailable: "We could not check your store just now. Nothing was changed; try again in a few minutes.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
 };

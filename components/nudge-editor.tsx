@@ -4,13 +4,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { parseNudge, type Nudge } from "@/lib/member-health-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   address: "Type the postal address where you can be reached. The law in the United States asks every email like this to carry one.",
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "We could not confirm whether your member email settings were saved. Reload this page to check before trying again.",
 };
 

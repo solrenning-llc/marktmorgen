@@ -8,6 +8,13 @@ import { SETUP_STORAGE_BYTES } from "@/lib/plan-standing";
 const GB = 1024 * 1024 * 1024;
 const SETUP_GB = SETUP_STORAGE_BYTES / GB;
 
+/**
+ * When the session ends while a page is open (WCAG 2.2.5): logging in again in the same tab would leave the page and
+ * what was typed on it, so the words say how to keep it (as the email studio first did).
+ */
+export const SESSION_ENDED =
+  "Your session ended. What you wrote stays on this page: log in again in a new tab, then come back to this tab and press the same button again.";
+
 export const STUDIO_MESSAGES: Record<string, string> = {
   role: "You need permission for this change. Ask the store owner to review your role.",
   // A session let in without its second step (lib/two-step.ts LOCKED_NEEDS).

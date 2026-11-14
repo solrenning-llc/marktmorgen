@@ -20,7 +20,7 @@ import {
 } from "@/lib/quiz";
 import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { browserFrames, focusWhenDrawn, handFocusOnAfterRemoval } from "@/lib/focus-when-drawn";
 import { AiAssist } from "@/components/ai-assist";
 import { DEFAULT_QUIZ_DRAFT, type DraftedQuestion, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
@@ -137,7 +137,7 @@ export function QuizEditor({
         onCourse(data.course);
         return true;
       }
-      setError(data.error === "quiz" ? problemText(data.problem) : data.error === "signed_out" ? "Your session ended. Log in again." : STUDIO_MESSAGES[data.error ?? ""] ?? problemText(undefined));
+      setError(data.error === "quiz" ? problemText(data.problem) : data.error === "signed_out" ? SESSION_ENDED : STUDIO_MESSAGES[data.error ?? ""] ?? problemText(undefined));
       return false;
     } catch {
       setError(problemText(undefined));

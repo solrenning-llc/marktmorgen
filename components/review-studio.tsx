@@ -12,7 +12,7 @@ import { toast } from "@/components/toast";
 import { HIDE_REASONS, MAX_REPLY_TEXT, hideReasonLabel } from "@/lib/review-summary";
 import { AiOn } from "@/components/ai-assist";
 import { DEFAULT_ASK_DAYS, MAX_AGAIN_DAYS, MAX_ASK_DAYS, MIN_AGAIN_DAYS, MIN_ASK_DAYS } from "@/lib/review-ask";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
 const MESSAGES: Record<string, string> = {
@@ -23,7 +23,7 @@ const MESSAGES: Record<string, string> = {
   email: "Review requests are email, so they need Pro with your email set up (the sender name and postal address). Set that up in Email first.",
   busy: "Someone else changed this review at the same moment. Try again.",
   missing: "That review is not there anymore: its buyer may have deleted it. Reload the page.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };

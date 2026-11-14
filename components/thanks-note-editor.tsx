@@ -4,7 +4,7 @@ import { ConfirmAction } from "@/components/confirm-action";
 import { useState } from "react";
 import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 import { MAX_NOTE_BODY, MAX_NOTE_HEADING, MAX_NOTE_LABEL, readNote, parseNote, type ThanksNote } from "@/lib/thanks-note";
 import { videoAddress } from "@/lib/sales-page";
 import { MAX_LINK_LENGTH } from "@/lib/product-link";
@@ -16,7 +16,7 @@ const MESSAGES: Record<string, string> = {
   label: "Give the button its words, like “Join the group”, or empty the address.",
   empty: "Write something, add a video or a button, or press Remove to have no note.",
   unknown: "That product is no longer in your store. Reload the page.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 

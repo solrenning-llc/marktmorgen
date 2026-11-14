@@ -2,6 +2,7 @@
 
 import { BusyButton } from "@/components/busy-button";
 import { Abbr } from "@/components/abbr";
+import { SESSION_ENDED } from "@/lib/studio-messages";
 import { customRangeChannelsReport, customRangeProductsReport, customRangeDailyReport, customRangeComparisonReport, customRangeChartReport, customRangeSelectionReport, customRangeChartSummaryReport, customRangeWeekdayReport, type CustomRangeReportSelection } from "@/lib/channel-reports";
 import { ReportDownload } from "@/components/report-download";
 
@@ -22,7 +23,7 @@ const MESSAGES: Record<string, string> = {
   order: "The start date comes after the end date. Swap them.",
   future: "The end date is in the future. Pick today or a day before it.",
   kept: "Visits are kept for 400 days. Pick a start date inside them.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   server_error: "Your numbers could not be read just now. Try again in a moment.",
 };
 

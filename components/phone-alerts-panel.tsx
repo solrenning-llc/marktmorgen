@@ -8,7 +8,7 @@ import { ConfirmAction } from "@/components/confirm-action";
 import { Icon } from "@/components/icons";
 import { STUDIO_SCOPE, STUDIO_WORKER } from "@/components/studio-app";
 import type { DeviceView, PhoneEvent, PhoneView } from "@/lib/phone-alerts";
-import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STUDIO_MESSAGES, SESSION_ENDED } from "@/lib/studio-messages";
 
 
 /** Every event, in the order the studio lists them, with what each one says. */
@@ -27,7 +27,7 @@ const EVENTS: { key: PhoneEvent; label: string; hint: string }[] = [
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   none: "This account has no store yet.",
-  signed_out: "Your session ended. Log in again.",
+  signed_out: SESSION_ENDED,
   unavailable: "Notifications are not set up on this deployment, so nothing was saved.",
   invalid: "This browser gave a subscription we cannot send to. Try again, or use another browser.",
   full: `That is ${MAX_DEVICES} devices, as many as one person can have on a store. Remove one below first.`,

@@ -31,7 +31,7 @@ async function pathsWith(env: Record<string, string | undefined>): Promise<Seen[
   }) as typeof fetch;
   try {
     await verifyDomain("shop.example.com");
-    await domainStatus("shop.example.com", { sid: "s_test" });
+    await domainStatus("shop.example.com", { sid: "s_test", handle: "shop", previousHandles: [] });
   } finally {
     globalThis.fetch = realFetch;
     for (const name of Object.keys(process.env)) if (!(name in before)) delete process.env[name];

@@ -76,6 +76,7 @@ export const reserved: number[] = [];
 export const reserve = async (_store: unknown, n: number) => { reserved.push(n); return "ok"; };
 export const released: number[] = [];
 export const release = async (_store: unknown, n: number) => { released.push(n); };
+export const mailDay = () => "nl:mail:day:synthetic";
 export const render = (_store: unknown, subject: string, text: string) => ({ subject, text, html: text, headers: {} });
 export const bodyHtml = (text: string) => text;
 /** As lib/order-data.ts answers it: each command run, its reply in order (the room is not modelled here). */

@@ -12,7 +12,7 @@ import {
 } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_IMPORT, WHO, type Who, audience, importContacts, isBuyer, leadsKey, listCounts, parseContact, readAddresses, readTags } from "@/lib/contacts";
-import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, monthlyAllowance, render, reserve, release } from "@/lib/mail";
+import { MAX_MAIL_BODY, MAX_SUBJECT, fromLine, mailDay, monthlyAllowance, render, reserve, release } from "@/lib/mail";
 import { sendBatch } from "@/lib/email";
 import { healthId, startRamp } from "@/lib/mail-health";
 import { BroadcastCancellationUnconfirmed, BroadcastWriteUnconfirmed, BroadcastsUnreadable, advanceBroadcast, cancelBroadcast, createBroadcast, whoOf } from "@/lib/broadcasts";
@@ -213,7 +213,8 @@ export async function POST(request: NextRequest) {
       const content = text(body.body, MAX_MAIL_BODY * 2).trim().slice(0, MAX_MAIL_BODY);
       if (!subject) return fail("subject");
       if (!content) return fail("body");
-      const reserved = await reserve(store, 1);
+      const day = mailDay();
+      const reserved = await reserve(store, 1, false, day);
       if (reserved !== "ok") return fail(reserved === "month" ? "allowance" : reserved === "sender" ? "sender" : "day");
       const r = render(store, `[Test] ${subject}`, content, null);
       const outcome = await sendBatch(
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest) {
         { by: "monthly" },
       );
       if (outcome !== "sent") {
-        await release(store, 1);
+        await release(store, 1, day);
         return fail("send", 502);
       }
       return Response.json({ ok: true, to: email });

@@ -127,6 +127,14 @@ function dailyCap(): number {
 }
 const dayKey = (now = new Date()) => `nl:mail:day:${now.toISOString().slice(0, 10)}`;
 
+/**
+ * The company's day a reservation is taken from, read once by the caller and handed to both the reservation and its
+ * give-back, so a send that crosses 00:00 UTC gives back to the day it took from: never to the next day's counter
+ * (which would go below zero and let that day send past MARKETING_DAILY_CAP), never leaving the old one inflated.
+ */
+export type MailDay = string & { readonly mailDay: unique symbol };
+export const mailDay = (now = new Date()): MailDay => dayKey(now) as MailDay;
+
 /** How many more list emails the company may send today. */
 async function dailyRoom(): Promise<number> {
   const cap = dailyCap();
@@ -264,7 +272,7 @@ function confirmedCount(raw: unknown, minimum: number): number | null {
  * sender — the one email to buyers brought over from another platform
  * (lib/imports.ts). False, and nothing taken, when it would pass the cap.
  */
-export async function reserveDay(n: number): Promise<boolean> {
+export async function reserveDay(n: number, day: MailDay = mailDay()): Promise<boolean> {
   if (!Number.isSafeInteger(n) || n<0) return false;
   if (n===0) return true;
   if (!isRedisConfigured()) return false;
@@ -272,7 +280,6 @@ export async function reserveDay(n: number): Promise<boolean> {
     if (!(await senderTakes(n))) return false;
     const cap=dailyCap();
     if(cap===0)return true;
-    const day=dayKey();
     const result=await redisPipeline([["INCRBY",day,n],["EXPIRE",day,3*86400]]);
     if(result.length!==2 || result[1]!==1)return false;
     const today=confirmedCount(result[0],n);
@@ -283,14 +290,14 @@ export async function reserveDay(n: number): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Gives back what reserveDay took, for a send that did not go out. */
-export async function releaseDay(n: number): Promise<void> {
+/** Gives back what reserveDay took on `day` (the same MailDay it was given), for a send that did not go out. */
+export async function releaseDay(n: number, day: MailDay): Promise<void> {
   if (dailyCap() === 0 || n <= 0) return;
-  await redisPipeline([["DECRBY", dayKey(), n]]);
+  await redisPipeline([["DECRBY", day, n]]);
 }
 
 /** Takes `n` from the month (and the company's day), or nothing when that would pass either. */
-export async function reserve(store: Store, n: number, listOnly = false): Promise<Reserved> {
+export async function reserve(store: Store, n: number, listOnly = false, day: MailDay = mailDay()): Promise<Reserved> {
   if (!Number.isSafeInteger(n) || n<0) return "month";
   if(n===0)return "ok";
   if(!store.listId)return "month";
@@ -303,7 +310,7 @@ export async function reserve(store: Store, n: number, listOnly = false): Promis
   if(!Number.isSafeInteger(allowance) || allowance<0 || n>allowance)return "month";
   if(store.period?.funded===true && !(await reservePaidResourceWindow(store)))return "unavailable";
   try {
-    const key=usedKey(store.listId,window),cap=dailyCap(),day=dayKey();
+    const key=usedKey(store.listId,window),cap=dailyCap();
     if(!listOnly) {
       if(!(await senderTakes(n)))return "sender";
       const results=await redisPipeline([["INCRBY",key,n],["EXPIRE",key,70*86400],["INCRBY",day,n],["EXPIRE",day,3*86400]]);
@@ -417,16 +424,16 @@ export async function giveBackToMonth(store: Store, n: number): Promise<void> {
 }
 
 /**
- * Gives back what was taken for a batch that was not sent. True when there was nothing to give back or both counters
- * answered a whole number (rule 24); false when the give-back could not be confirmed, so a caller that must know
- * (lib/product-updates.ts) does not take it as done. Throws when the pipeline does.
+ * Gives back what reserve took on `day` (the same MailDay it was given) for a batch that was not sent. True when there
+ * was nothing to give back or both counters answered a whole number (rule 24); false when the give-back could not be
+ * confirmed, so a caller that must know (lib/product-updates.ts) does not take it as done. Throws when the pipeline does.
  */
-export async function release(store: Store, n: number): Promise<boolean> {
+export async function release(store: Store, n: number, day: MailDay): Promise<boolean> {
   const window = windowOf(store);
   if (!store.listId || !window || !(n > 0)) return true;
   const replies = repliesFor(await redisPipeline([
     ["DECRBY", usedKey(store.listId, window), n],
-    ["DECRBY", dayKey(), n],
+    ["DECRBY", day, n],
   ]), 2);
   return !!replies && replies.every((r) => typeof r === "number" && Number.isSafeInteger(r));
 }
@@ -613,7 +620,8 @@ export async function sendTo(
     const portion = await rampRoom(watched, Math.min(BATCH_SIZE, room, emails.length - i));
     if (portion <= 0) return told({ done, rest: emails.slice(i), stopped: "portion" });
     const chunk = emails.slice(i, i + portion);
-    const reserved = await reserve(store, chunk.length, true);
+    const day = mailDay();
+    const reserved = await reserve(store, chunk.length, true, day);
     if (reserved !== "ok") {
       await rampBack(watched, chunk.length);
       return told({ done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved });
@@ -627,7 +635,7 @@ export async function sendTo(
     try {
       tokens = await tokensFor(store.listId as string, chunk, store.handle, counting);
     } catch {
-      await release(store, chunk.length);
+      await release(store, chunk.length, day);
       await rampBack(watched, chunk.length);
       return told({ done, rest: emails.slice(i), stopped: "retry" });
     }
@@ -644,7 +652,7 @@ export async function sendTo(
     if (outcome === "waiting") {
       // This invocation made no provider send. Existing allowance/portion
       // reservations may be returned; unknown acceptance never uses this path.
-      await release(store, chunk.length);
+      await release(store, chunk.length, day);
       await rampBack(watched, chunk.length);
       return told({ done, rest: emails.slice(i), stopped: "sender" });
     }
@@ -678,7 +686,7 @@ export async function sendTo(
     const refusedTo = new Set(refusedHere.map((r) => r.email));
     const accepted = messages.filter((m) => !refusedTo.has(m.to));
     refused.push(...refusedHere);
-    if (messages.length < chunk.length) await release(store, chunk.length - messages.length);
+    if (messages.length < chunk.length) await release(store, chunk.length - messages.length, day);
     // What a bounce or a complaint is later measured against.
     await noteSent(watched, accepted.length);
     for (const m of accepted) done.push(m.to);

@@ -38,6 +38,6 @@ export async function closeReservedVault(pathname: string, etags: string[]) {
 export async function abortReservedVault(pathname: string) {
   const id = await vaultReservationId(pathname);
   const result = await abortVaultUpload(pathname);
-  if (result) await release(pathname, id);
+  if (result === true) await release(pathname, id);
   return result;
 }

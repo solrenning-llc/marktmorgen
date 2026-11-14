@@ -228,7 +228,10 @@ async function main() {
   const closed = await closeVaultUpload(pathname, etags);
   is("with every piece, it is joined and measured by the store itself", closed, { ok: true, file: { pathname, bytes: big.byteLength, contentType: "application/zip" } });
   is("the store holds the file exactly", md5(objects.get(pathname)?.bytes ?? new Uint8Array()), md5(big));
-  is("and the upload cannot be closed, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [{ ok: false, reason: "unknown" }, null]);
+  const askedClosed = asked.length;
+  // The refused piece lists above asked R2 nothing and were not counted (lib/vault.ts): a second close is told the first one's answer.
+  is("and the upload cannot be joined, or added to, a second time", [await closeVaultUpload(pathname, etags), await signPieces(pathname, [1])], [closed, null]);
+  is("and the store is not asked for that", asked.length, askedClosed);
 
   part("A small file goes up whole");
   const small = bytesOf(5000, 11);
@@ -260,6 +263,7 @@ async function main() {
   is("an unreachable provider does not falsely confirm cancellation", await abortVaultUpload(cancelled.upload.pathname), false);
   service = "up";
   is("a failed cancellation keeps the session available to retry", (await signPieces(cancelled.upload.pathname, [1]))?.length, 1);
+  // Only a confirmed cancellation is written down (lib/vault.ts): a retry inside the priced requests asks the provider again.
   is("a retry confirms cancellation at the provider", await abortVaultUpload(cancelled.upload.pathname), true);
   is("a part URL from an aborted session cannot create a file", (await fetch(cancelPart.url, { method: "PUT", body: sessionBytes as BodyInit })).status, 404);
   is("the canceled file does not exist", objects.has(cancelled.upload.pathname), false);

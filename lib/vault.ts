@@ -36,6 +36,9 @@
  *   R2_BUCKET              the bucket's name
  *
  *   nl:vault:up:<hash>     an upload that was opened and not yet closed
+ *   nl:vault:ctl:<hash>:n      how many finish and cancel requests it made
+ *   nl:vault:ctl:<hash>:done   its first finish, and that finish's answer
+ *   nl:vault:ctl:<hash>:abort  its first cancel, and that cancel's answer
  */
 import { createHash, randomBytes } from "node:crypto";
 import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-sign";
@@ -46,6 +49,8 @@ import {
   PIECE_BYTES,
   PIECE_SECONDS,
   UPLOAD_SECONDS,
+  VAULT_CONTROL_CALLS_PER_UPLOAD,
+  VAULT_LIST_PAGES,
   isVaultPath,
   pieceCount,
   pieceSize,
@@ -149,7 +154,107 @@ type Upload = {
 /** The shape of a session id the provider hands back and openVaultUpload keeps. */
 const UPLOAD_ID = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
 
-const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+const pathHash = (pathname: string) => createHash("sha256").update(pathname).digest("hex").slice(0, 40);
+const uploadKey = (pathname: string) => `nl:vault:up:${pathHash(pathname)}`;
+const controlKey = (pathname: string, part: "n" | ControlKind) => `nl:vault:ctl:${pathHash(pathname)}:${part}`;
+
+// ------------------------------------------------- finishing and cancelling
+
+/**
+ * One upload start is priced for VAULT_CONTROL_CALLS_PER_UPLOAD finish or
+ * cancel requests (lib/spend-cost-table.ts, UPLOAD_REQUESTS_PER_OPEN), one
+ * completion at R2 and the file measurements UPLOAD_OPEN_CLASS_B_OPS counts.
+ * So the first finish and the first cancel of an upload are claimed before
+ * R2 is asked. A finish's answer is always written down, so R2 joins an
+ * upload once; a cancel's only when R2 confirmed it, and an unconfirmed one
+ * gives its claim back, so a retry may ask R2 again. A repeat after a
+ * written-down answer is given that answer and R2 is not asked again. And
+ * every finish or cancel request for an upload that is open (or was finished or canceled here) is counted
+ * before R2 is asked or anything is written: past
+ * VAULT_CONTROL_CALLS_PER_UPLOAD it is refused with nothing else done. A
+ * request for a path with neither is answered from those reads alone, so it
+ * writes nothing. A Redis reply off its shape is unknown (CX-123 rule 24):
+ * it throws, and R2 is not asked.
+ *
+ * Every key lives UPLOAD_SECONDS from its last write, so it outlives the
+ * upload's own record (written once, at the start, for UPLOAD_SECONDS):
+ * while that record is there to act on, the count and the answers are too.
+ */
+type ControlKind = "done" | "abort";
+
+/** A first finish or cancel still running elsewhere, past this, did not finish: its answer is taken as "unavailable". */
+const CONTROL_PENDING_MS = 15 * 60 * 1000;
+
+/** Counts one finish or cancel request; false when it is past what one upload may make. */
+async function countControl(pathname: string): Promise<boolean> {
+  const key = controlKey(pathname, "n");
+  const replies = repliesFor(await redisPipeline([["INCR", key], ["EXPIRE", key, UPLOAD_SECONDS]]), 2);
+  if (!replies || !Number.isSafeInteger(replies[0]) || (replies[0] as number) < 1 || replies[1] !== 1) throw new UnknownReplyError("a vault upload's finish and cancel count");
+  return (replies[0] as number) <= VAULT_CONTROL_CALLS_PER_UPLOAD;
+}
+
+type Control = { state: "pending"; at: number } | { state: "answered"; answer: unknown };
+
+/** The first finish or cancel of an upload, as written down; null only when Redis confirms there is none. */
+async function readControl(pathname: string, kind: ControlKind): Promise<Control | null> {
+  const replies = repliesFor(await redisPipeline([["GET", controlKey(pathname, kind)]]), 1);
+  if (!replies) throw new UnknownReplyError("a vault upload's first " + kind);
+  const raw = replies[0];
+  if (raw === null) return null;
+  let value: { state?: unknown; at?: unknown; answer?: unknown } | null;
+  try {
+    if (typeof raw !== "string") throw new Error();
+    value = JSON.parse(raw) as { state?: unknown; at?: unknown; answer?: unknown } | null;
+  } catch {
+    throw new UnknownReplyError("a vault upload's first " + kind);
+  }
+  if (value && typeof value === "object" && value.state === "pending" && Number.isSafeInteger(value.at) && (value.at as number) >= 0) return { state: "pending", at: value.at as number };
+  if (value && typeof value === "object" && value.state === "answered" && Object.hasOwn(value, "answer")) return { state: "answered", answer: value.answer };
+  throw new UnknownReplyError("a vault upload's first " + kind);
+}
+
+/** Takes the one first finish (or cancel) of an upload; false when another request already took it. */
+async function claimControl(pathname: string, kind: ControlKind): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["SET", controlKey(pathname, kind), JSON.stringify({ state: "pending", at: Date.now() }), "NX", "EX", UPLOAD_SECONDS]]), 1);
+  if (!replies || !(replies[0] === "OK" || replies[0] === null)) throw new UnknownReplyError("a vault upload's first " + kind + "'s claim");
+  return replies[0] === "OK";
+}
+
+/** Writes down the first finish's (or cancel's) answer, for every repeat to be given. */
+async function answerControl(pathname: string, kind: ControlKind, answer: unknown): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["SET", controlKey(pathname, kind), JSON.stringify({ state: "answered", answer }), "EX", UPLOAD_SECONDS]]), 1);
+  // Not written: a repeat finds the claim still pending, and once it is
+  // stale takes the answer as "unavailable", still without asking R2.
+  if (replies?.[0] !== "OK") console.error("a vault upload's first " + kind + " was not written down");
+}
+
+/**
+ * Gives a claim back when its request's answer is not to be written down, so
+ * a later request (still counted by countControl) may ask R2 again. A reply
+ * other than 0 or 1 is unknown: the claim may still be there, and a repeat
+ * is then answered as from a pending one, never by asking R2.
+ */
+async function releaseControl(pathname: string, kind: ControlKind): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["DEL", controlKey(pathname, kind)]]), 1);
+  if (!replies || !(replies[0] === 0 || replies[0] === 1)) console.error("a vault upload's " + kind + " claim was not given back");
+}
+
+/**
+ * Runs `act` as the one first finish (or cancel) of an upload. Its answer is
+ * written down, also when it throws, when `kept` says so; otherwise the claim
+ * is given back, so only the answers `kept` takes are final.
+ */
+async function firstControl<T>(pathname: string, kind: ControlKind, failed: T, act: () => Promise<T>, kept: (answer: T) => boolean = () => true): Promise<T | "busy"> {
+  if (!(await claimControl(pathname, kind))) return "busy";
+  let answer = failed;
+  try {
+    answer = await act();
+    return answer;
+  } finally {
+    const settle = kept(answer) ? answerControl(pathname, kind, answer) : releaseControl(pathname, kind);
+    await settle.catch((error) => console.error("a vault upload's first " + kind + " was not settled", error));
+  }
+}
 
 /**
  * The upload opened at this path; null only when Redis confirms there is none.
@@ -172,7 +277,7 @@ async function readUpload(pathname: string): Promise<Upload | null> {
   }
   // Every field in exactly the shape openVaultUpload writes it. A session id
   // read as "" would be taken for a file sent whole (the object deleted in
-  // place of the session cancelled), and a reservation read as none would
+  // place of the session canceled), and a reservation read as none would
   // never be given back: anything else is an unknown record, not a guess.
   if (
     !value ||
@@ -231,7 +336,7 @@ export async function openVaultUpload(input: {
   const record: Upload = { reservation: input.reservation, pathname, uploadId, bytes: input.bytes, type: input.type, at: Date.now() };
   const written = repliesFor(await redisPipeline([["SET", uploadKey(pathname), JSON.stringify(record), "EX", UPLOAD_SECONDS]]), 1);
   if (written?.[0] !== "OK") {
-    // Not handed out: nothing can be signed for it, so its session is cancelled now.
+    // Not handed out: nothing can be signed for it, so its session is canceled now.
     if (uploadId) await retireVaultSession(pathname, uploadId).catch(() => false);
     throw new UnknownReplyError("a vault upload record's write");
   }
@@ -286,15 +391,47 @@ export type StoredFile = { pathname: string; bytes: number; contentType: string 
 export async function closeVaultUpload(
   pathname: string,
   etags: string[],
-): Promise<{ ok: true; file: StoredFile } | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" }> {
+): Promise<ClosedUpload> {
   const config = vaultConfig();
   if (!config || !isRedisConfigured()) return { ok: false, reason: "off" };
-  const upload = await readUpload(pathname);
+  if (!isVaultPath(pathname)) return { ok: false, reason: "unknown" };
+  const before = await readControl(pathname, "done");
+  const upload = before ? null : await readUpload(pathname);
+  // Nothing open and nothing finished here: nothing to count or keep.
+  if (!before && !upload) return { ok: false, reason: "unknown" };
+  // A piece list that cannot be this upload's is refused from the reads
+  // above, before it is counted: R2 is not asked, and nothing is written, so
+  // it is not one of the finish and cancel requests the start is priced for.
+  if (!before && upload?.uploadId && !piecesListed(upload.bytes, etags)) return { ok: false, reason: "invalid" };
+  if (!(await countControl(pathname))) return { ok: false, reason: "tries" };
+  if (before) return closedAnswer(pathname, before);
   if (!upload) return { ok: false, reason: "unknown" };
+  const answer = await firstControl<ClosedUpload>(pathname, "done", { ok: false, reason: "unavailable" }, () => joinAndMeasure(config, upload, etags));
+  return answer === "busy" ? { ok: false, reason: "busy" } : answer;
+}
 
+/** Whether `etags` is one tag the store could have answered for each piece of a file of `bytes`, in order. */
+function piecesListed(bytes: number, etags: string[]): boolean {
+  return etags.length === pieceCount(bytes) && etags.every((etag) => /^"?[0-9a-fA-F]{32}(-\d{1,5})?"?$/.test(etag));
+}
+
+type ClosedUpload = { ok: true; file: StoredFile } | { ok: false; reason: "unknown" | "invalid" | "unavailable" | "off" | "tries" | "busy" };
+
+/** A first finish's written-down answer, held to the only shapes joinAndMeasure gives; anything else is unknown. */
+function closedAnswer(pathname: string, control: Control): ClosedUpload {
+  if (control.state === "pending") return Date.now() - control.at > CONTROL_PENDING_MS ? { ok: false, reason: "unavailable" } : { ok: false, reason: "busy" };
+  const answer = control.answer as { ok?: unknown; reason?: unknown; file?: { pathname?: unknown; bytes?: unknown; contentType?: unknown } } | null;
+  if (answer && answer.ok === false && (answer.reason === "invalid" || answer.reason === "unavailable")) return { ok: false, reason: answer.reason };
+  const file = answer?.ok === true ? answer.file : null;
+  if (file && file.pathname === pathname && Number.isSafeInteger(file.bytes) && (file.bytes as number) >= 0 && typeof file.contentType === "string")
+    return { ok: true, file: { pathname, bytes: file.bytes as number, contentType: file.contentType } };
+  throw new UnknownReplyError("a vault upload's first done");
+}
+
+/** The one finish of an upload: its pieces joined, and the file measured by the store itself. */
+async function joinAndMeasure(config: Config, upload: Upload, etags: string[]): Promise<{ ok: true; file: StoredFile } | { ok: false; reason: "invalid" | "unavailable" }> {
+  const pathname = upload.pathname;
   if (upload.uploadId) {
-    const count = pieceCount(upload.bytes);
-    if (etags.length !== count || !etags.every((etag) => /^"?[0-9a-fA-F]{32}(-\d{1,5})?"?$/.test(etag))) return { ok: false, reason: "invalid" };
     const body =
       "<CompleteMultipartUpload>" +
       etags.map((etag, i) => `<Part><PartNumber>${i + 1}</PartNumber><ETag>"${etag.replace(/"/g, "")}"</ETag></Part>`).join("") +
@@ -321,12 +458,39 @@ export async function closeVaultUpload(
   return { ok: true, file: { pathname, bytes: found.bytes, contentType: found.contentType || upload.type } };
 }
 
-/** Forgets an upload only after the provider confirms its cancellation. */
-export async function abortVaultUpload(pathname: string): Promise<boolean> {
+/**
+ * Forgets an upload only after the provider confirms its cancellation.
+ * True when it is canceled or was never open; "tries" past the finish and
+ * cancel requests one upload may make; "busy" while a cancel is still
+ * running. A repeat after a confirmed cancel is given that answer, R2 not
+ * asked; one after an unconfirmed cancel asks R2 again.
+ */
+export async function abortVaultUpload(pathname: string): Promise<boolean | "tries" | "busy"> {
   const config = vaultConfig();
   if (!config || !isRedisConfigured()) return false;
-  const upload = await readUpload(pathname);
+  if (!isVaultPath(pathname)) return true;
+  const before = await readControl(pathname, "abort");
+  const upload = before ? null : await readUpload(pathname);
+  // Nothing open and nothing canceled here: nothing to count or keep.
+  if (!before && !upload) return true;
+  if (!(await countControl(pathname))) return "tries";
+  if (before) {
+    if (before.state === "pending") return Date.now() - before.at > CONTROL_PENDING_MS ? false : "busy";
+    if (typeof before.answer !== "boolean") throw new UnknownReplyError("a vault upload's first abort");
+    return before.answer;
+  }
   if (!upload) return true;
+  // Only a confirmed cancel is final. One R2 did not confirm frees nothing
+  // and is not written down: a retry, still counted above, asks R2 again
+  // (AbortMultipartUpload and DeleteObject are free; a 404 is measured, which
+  // UPLOAD_OPEN_CLASS_B_OPS prices), so its bytes come back without waiting
+  // for the session to be retired.
+  return firstControl(pathname, "abort", false, () => cancelAtStore(config, upload), (answer) => answer === true);
+}
+
+/** The one cancel of an upload, at the store. */
+async function cancelAtStore(config: Config, upload: Upload): Promise<boolean> {
+  const pathname = upload.pathname;
   const url = upload.uploadId
     ? `${objectUrl(config, pathname)}?uploadId=${encodeURIComponent(upload.uploadId)}`
     : objectUrl(config, pathname);
@@ -500,7 +664,7 @@ export async function vaultHeld(folder: string): Promise<number | null> {
   let cursor: string | undefined;
   const seen = new Set<string>();
   const paths = new Set<string>();
-  for (let page = 0; page < 20; page += 1) {
+  for (let page = 0; page < VAULT_LIST_PAGES; page += 1) {
     const answer = await listVault(`vault/${folder}/`, cursor);
     if (!answer) return null;
     for (const file of answer.files) {

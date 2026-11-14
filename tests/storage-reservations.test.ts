@@ -101,10 +101,9 @@ test("R2 opens reserve capacity and failed provider cancellation cannot free it"
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
     assert.equal(await abortReservedVault(opened.upload.pathname), false);
     await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = true;
-    assert.equal(await abortReservedVault(opened.upload.pathname), false);
-    await assert.rejects(openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true })), /storage_(limit|pending)/);
-    missingSession = false;
+    // An unconfirmed cancel is not written down (lib/vault.ts): a retry,
+    // inside the requests one upload is priced for, asks the provider again,
+    // and once it confirms, the bytes come back at once.
     cancel = true;
     assert.equal(await abortReservedVault(opened.upload.pathname), true);
     const reopened = await openReservedVault(input, 10, async () => ({ bytes: 0, brake: 10, left: 10, full: false, available: true }));

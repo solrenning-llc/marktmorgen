@@ -10,6 +10,14 @@ const GiB=1024*1024*1024;
 /** 8, 64 and 128 GB until 18 October 2026, lowered (never the prices) so every plan keeps the owner's 60%
  * with what a store keeps after its plan ends, until its closing day, priced (tests/plan-cost-registry.ts). */
 export const PAID_STORAGE_BYTES = Object.freeze({ creator:5*GiB, pro:40*GiB, scale:80*GiB }) satisfies Record<Tier,number>;
+/**
+ * How many pages of a store's listing in the host's own file store a
+ * measurement of what it keeps reads at most (lib/file-store.ts, filesHeld),
+ * a thousand names to a page. Each page is one Vercel Blob list, an Advanced
+ * Operation; the cost table prices an upload start from this
+ * (lib/spend-cost-table.ts, UPLOAD_OPEN_BLOB_ADVANCED_OPS).
+ */
+export const BLOB_LIST_PAGES = 20;
 /** Conservative default when a caller has not supplied a paid tier. */
 export const STORAGE_BRAKE_BYTES=PAID_STORAGE_BYTES.creator;
 export function paidStorageBytes(tier: Tier='creator'):number {

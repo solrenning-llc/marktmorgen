@@ -10,6 +10,7 @@
  *   nl:ppsell:own:<stats>:<address hash>:<product>  the paid orders behind one address's product
  *   nl:ppsell:sales:<stats>     every paid order, scored by when it was paid (400 days): the store's numbers read it
  *   nl:ppsell:refunded:<stats>  paid orders PayPal says were refunded in full, scored by when that was seen
+ *   nl:ppsell:back:<stats>      the same refunds by payment, kept for good, for the affiliate book's lines
  *
  * How it fits together. Marktmorgen is a PayPal partner; a creator connects their
  * PayPal Business account through PayPal's own onboarding (Partner Referrals
@@ -45,6 +46,7 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
+import { orderWrite } from "@/lib/order-data";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
@@ -140,7 +142,21 @@ export const ownKey = (statsId: string, email: string, productId: string) => `nl
 const salesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
 /** Exported for the affiliate book's count of what it will read (lib/affiliates.ts, bookSizes). */
 export const refundedKey = (statsId: string) => `nl:ppsell:refunded:${statsId}`;
+/**
+ * The store's PayPal payments refunded in full, kept for good (a field per payment, named as the affiliate book names
+ * it, paypalPaymentId; its value when the refund was seen): the affiliate book's lines are kept for good, so what
+ * takes one back must be too. refundedKey is the short-lived index the store's numbers list; the book reads this,
+ * and asks refundedKey about its own orders only (lib/affiliates.ts, readBook).
+ */
+export const backKey = (statsId: string) => `nl:ppsell:back:${statsId}`;
+/** The most names one question of the affiliate book carries (an HMGET of backKey, a ZMSCORE of refundedKey); a longer list is asked in slices. */
+export const BOOK_KEPT_SLICE = 500;
 const SALES_KEPT_SECONDS = 400 * 86_400;
+/**
+ * A member of refundedKey that is a partial refund's mark rather than an order refunded in full: "part:" and the
+ * order (the partial refund's unit builds on this). Readers of refunds in full pass over it, never as a cut.
+ */
+export const PARTIAL_MARK = /^part:[A-Z0-9]{10,36}$/;
 
 type Partner = { client: string; secret: string; merchant: string; bn: string };
 
@@ -957,6 +973,25 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
+    // And written down for good, by the payment as the affiliate book names it (backKey): the book's lines are kept for
+    // good, so what takes one back must outlive the set above and the paid record, or a refunded sale would be paid
+    // again once they expire (P3), or the whole book left unchecked once the record alone did (P4). Charged to the
+    // store's room as an order's record (lib/order-data.ts). Its one reply read exactly, 0 or 1 (written, or already
+    // there); anything else, or a write that failed, is unknown: the order stays watched, looked at again in an hour,
+    // before anything is told (rule 24). The set's mark above still takes the sale back in the meantime, and the
+    // affiliate book asks the set about its own orders as well as this record. No count of tries: a refund never
+    // kept for good is never let go, so a failure that lasts costs one look an hour, inside the run's 25 orders.
+    let lasting: unknown[] | null = null;
+    try {
+      lasting = await orderWrite(store, [["HSETNX", backKey(statsId), paypalPaymentId(paid.capture), String(now)]]);
+    } catch (error) {
+      console.error("a PayPal refund could not be kept for the affiliate book", error);
+    }
+    if (!lasting || lasting.length !== 1 || !(lasting[0] === 0 || lasting[0] === 1)) {
+      console.error("a PayPal refund could not be kept for good; looked at again in an hour", order);
+      await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      continue;
+    }
     if (on.refunded) await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".
@@ -1167,7 +1202,12 @@ export async function paypalKept(statsId: string | null, refunds: boolean): Prom
 /**
  * PayPal sales refunded in full since `since` (seconds): the payment, how
  * much, in what, and when the refund was seen. At most PAYPAL_REFUNDS_READ,
- * their records read in one MGET.
+ * their records read in one MGET; `partial` when that did not cover every
+ * one (more listed, one listed that is no order's, or one whose record is
+ * gone). A member PARTIAL_MARK names (a partial refund's, "part:<order>")
+ * is neither a refund in full nor a cut: it is left to its own reader.
+ * The affiliate book does not read this: it asks the set about its own
+ * orders and reads backKey (lib/affiliates.ts, readBook).
  */
 export async function readPayPalRefundsWithCoverage(statsId: string | null, since: number): Promise<{ rows: { order: string; capture: string; cents: number; currency: string; at: number }[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { rows: [], partial: false };
@@ -1181,7 +1221,10 @@ export async function readPayPalRefundsWithCoverage(statsId: string | null, sinc
   for (let i = 1; i < flat.length; i += 2) {
     if (!REDIS_SCORE.test(flat[i]) || Number(flat[i]) < from) throw new UnknownReplyError("a PayPal refund's date");
   }
-  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
+  // A partial refund's mark (PARTIAL_MARK) is neither a refund in full nor a cut: passed over, left to its own reader.
+  for (let i = 0; i + 1 < Math.min(flat.length, 2 * PAYPAL_REFUNDS_READ); i += 2) {
+    if (!PARTIAL_MARK.test(flat[i])) listed.push({ order: flat[i], at: Number(flat[i + 1]) });
+  }
   const out: { order: string; capture: string; cents: number; currency: string; at: number }[] = [];
   let missing = listed.some((entry) => !ORDER_ID.test(entry.order));
   const readable = listed.filter((entry) => ORDER_ID.test(entry.order));

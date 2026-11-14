@@ -74,7 +74,7 @@
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -2461,8 +2461,9 @@ export async function notePartners(
  * the share it had when the buyer paid, and to every partner who shares in
  * the product. Once per order, whichever of the return page and the sweep
  * hands it over first. A refund in full on PayPal takes it back in the book
- * (readBook, through readPayPalRefundsWithCoverage). `remember` false: the
- * buyer is not tied to the affiliate (rememberBuyer), the rest is credited.
+ * (readBook, through the refunds kept for good, lib/paypal-sales.ts backKey).
+ * `remember` false: the buyer is not tied to the affiliate (rememberBuyer),
+ * the rest is credited.
  */
 export async function creditPayPalSale(store: Store, paid: Paid, title: string, remember = true): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
@@ -3249,28 +3250,58 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline, currencyOf) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
-      // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
-      // sale, one in another currency than its sale's means nothing in its cents, and one whose cents are not a
-      // whole positive amount, or not its sale's whole amount (a PayPal refund here is in full), would count as a
-      // refund of less: each leaves what is owed unknown (refundsChecked), never a refund of nothing, so no payout
-      // is made on it (rule 24, as #3189 for Stripe). So does a reading that did not cover every refund since the
-      // oldest line (more listed than PAYPAL_REFUNDS_READ, or a listed one whose record is gone): a refund past the
-      // cut is never paid on. A refund is in full, so the same payment listed twice counts once.
+      // PayPal's refunds in full (9 November 2026, pre-review of the PayPal partial refund and of its fix): the book's
+      // lines are kept for good, so it asks about its own PayPal payments only, never lists the store's refunds since
+      // its oldest line (a listing capped at PAYPAL_REFUNDS_READ that a busy store passes for good, P4 and the
+      // pre-review's A). Two questions, both cut in slices of BOOK_KEPT_SLICE: the refunds kept for good
+      // (lib/paypal-sales.ts, backKey, by payment), and the set's marks (refundedKey, by order), which a refund seen
+      // before backKey existed, or one whose lasting record is being written again, has alone. A mark or a kept record
+      // is a refund in full: the whole amount of the payment's lines, the sale's and each partner's share, once, with
+      // no paid record needed. Lines of one payment that do not agree, or any reply not exactly one answer per name
+      // (null, or text), leave what is owed unknown (refundsChecked), never a refund of nothing (rule 24).
       const paypalSales = new Map<string, { currency: string; total: number }[]>();
+      // The order each PayPal payment on the book was paid by: a sale's line is "paypal:<order>", a partner's share of
+      // it "paypal:<order>:<partner>" (an order id has no colon).
+      const paypalOrders = new Map<string, string>();
       for (const r of everything) {
-        if (r.pi.startsWith("paypal:")) paypalSales.set(r.pi, [...(paypalSales.get(r.pi) ?? []), { currency: r.currency.toLowerCase(), total: r.total }]);
+        if (!r.pi.startsWith("paypal:")) continue;
+        paypalSales.set(r.pi, [...(paypalSales.get(r.pi) ?? []), { currency: r.currency.toLowerCase(), total: r.total }]);
+        if (r.ref.startsWith("paypal:")) paypalOrders.set(r.ref.slice("paypal:".length).split(":")[0], r.pi);
       }
       const paypalSeen = new Set<string>();
-      const paypal = await readPayPalRefundsWithCoverage(store.statsId, since);
-      if (paypal.partial) refundsChecked = false;
-      for (const r of paypal.rows) {
-        const named = typeof r.capture === "string" && r.capture !== "";
-        const sales = named ? paypalSales.get(paypalPaymentId(r.capture)) : undefined;
-        const readable = named && typeof r.currency === "string" && Number.isSafeInteger(r.cents) && r.cents > 0;
-        if (!readable || (sales ?? []).some((sale) => sale.currency !== r.currency.toLowerCase() || sale.total !== r.cents)) refundsChecked = false;
-        else if (!paypalSeen.has(r.capture)) {
-          paypalSeen.add(r.capture);
-          refunds.set(paypalPaymentId(r.capture), (refunds.get(paypalPaymentId(r.capture)) ?? 0) + r.cents);
+      const refundedInFull = (pi: string) => {
+        const sales = paypalSales.get(pi) ?? [];
+        if (!sales.length || paypalSeen.has(pi)) return;
+        if (sales.some((sale) => sale.currency !== sales[0].currency || sale.total !== sales[0].total)) {
+          refundsChecked = false;
+          return;
+        }
+        paypalSeen.add(pi);
+        refunds.set(pi, (refunds.get(pi) ?? 0) + sales[0].total);
+      };
+      const pis = [...paypalSales.keys()];
+      const orders = [...paypalOrders.keys()];
+      if (pis.length) {
+        const slices = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / BOOK_KEPT_SLICE) }, (_, i) => list.slice(i * BOOK_KEPT_SLICE, (i + 1) * BOOK_KEPT_SLICE));
+        const kept = slices(pis).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
+        const marked = slices(orders).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
+        const replies = repliesFor(await redisPipeline([...kept, ...marked]), kept.length + marked.length);
+        const answers = (from: number, commands: (string | number)[][]) => {
+          const out: unknown[] = [];
+          commands.forEach((command, i) => {
+            const reply = replies?.[from + i];
+            if (Array.isArray(reply) && reply.length === command.length - 2) out.push(...reply);
+            else out.push(undefined);
+          });
+          return out;
+        };
+        const back = answers(0, kept);
+        const seen = answers(kept.length, marked);
+        const answer = (v: unknown) => v === null || typeof v === "string";
+        if (!replies || back.length !== pis.length || seen.length !== orders.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
+        else {
+          for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
+          for (const [i, order] of orders.entries()) if (seen[i] !== null) refundedInFull(paypalOrders.get(order) as string);
         }
       }
     } catch (error) {

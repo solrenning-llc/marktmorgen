@@ -13,6 +13,13 @@
  * did not cover every refund since the oldest line (more than
  * PAYPAL_REFUNDS_READ listed, or a listed refund whose record is gone)
  * leaves the book unchecked, so a refund past the cut is never paid on.
+ *
+ * Since 9 November 2026 (tests/affiliate-refund-lifetime.test.ts) the book
+ * no longer reads a refund's record at all: it asks the set about its own
+ * orders and reads the refunds kept for good, and a mark is a refund in full
+ * of that order's lines. A record that cannot be trusted, or a store past
+ * PAYPAL_REFUNDS_READ refunds, now takes that sale's commission back and
+ * leaves the rest of the book checked; nothing is paid on it either way.
  * Synthetic only: the Redis stub, no provider call.
  */
 import { creditPayPalSale, readBook } from "@/lib/affiliates";
@@ -79,11 +86,17 @@ async function withRange<T>(flat: string[], run: () => Promise<T>): Promise<T> {
   }
 }
 
+// Changed 9 November 2026 (second unit of tests/affiliate-refund-lifetime.test.ts, pre-review A): the book no longer
+// reads the paid record behind a refund's mark; it asks the set about its own orders, and a mark is a refund in full of
+// that order's lines, whatever its record says. So a record that cannot be trusted no longer leaves the whole book
+// unchecked: the line it marks is refunded in full and nothing is paid on it (was: "the book is not checked" false;
+// "nothing passes the refund guard" 0 is kept, and the line's commission is now asserted 0).
 async function held(name: string, record: Record<string, unknown>): Promise<void> {
   part(name);
   await setup(record, true);
   const read = await offered();
-  is("the book is not checked", read.checked, false);
+  is("the book stays checked", read.checked, true);
+  is("no commission", read.commission, 0);
   is("nothing passes the refund guard", read.through, 0);
 }
 
@@ -122,10 +135,15 @@ async function main(): Promise<void> {
   await held("A refund in cents that are not a number", { ...paid, cents: "abc" });
   await held("A refund with no cents", { ...paid, cents: undefined });
 
-  part("A listed refund whose kept record is gone: the read is partial, nothing is paid");
+  // Changed 9 November 2026 (tests/affiliate-refund-lifetime.test.ts, P4): a listed refund whose paid record is gone
+  // used to leave the whole book unchecked, which blocked every affiliate's payment for good once a record expired
+  // before its mark. It is still a refund in full of that order, so of this sale's line: the book stays checked and
+  // the line's commission is taken back (was: "the book is not checked" false; nothing passed then, nothing now).
+  part("A listed refund whose kept record is gone: a refund in full of its line, the book still checked, nothing paid on it");
   await setup(null, true);
   const gone = await offered();
-  is("the book is not checked", gone.checked, false);
+  is("the book stays checked", gone.checked, true);
+  is("no commission", gone.commission, 0);
   is("nothing passes the refund guard", gone.through, 0);
 
   // `others` refunds of other sales, each with its record, listed before this sale's own refund.
@@ -147,10 +165,13 @@ async function main(): Promise<void> {
   is("no commission", whole.commission, 0);
   is("nothing offered", whole.through, 0);
 
-  part(`More than ${PAYPAL_REFUNDS_READ} refunds, this sale's past the cut: the read is partial, nothing is paid`);
+  // Changed 9 November 2026 (pre-review A): the book asks the set about its own orders, so no count of the store's
+  // refunds cuts it (was: "the book is not checked" false, for good once a store passed PAYPAL_REFUNDS_READ).
+  part(`More than ${PAYPAL_REFUNDS_READ} refunds: the book asks about its own order, its commission taken back, still checked`);
   await crowd(PAYPAL_REFUNDS_READ);
   const cut = await offered();
-  is("the book is not checked", cut.checked, false);
+  is("the book stays checked", cut.checked, true);
+  is("no commission", cut.commission, 0);
   is("nothing passes the refund guard", cut.through, 0);
 
   part("The same refund listed twice counts once, and the book stays checked");

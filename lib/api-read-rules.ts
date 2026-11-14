@@ -43,6 +43,7 @@ import { DELIVERY_MAX_BYTES, LOG_SIZE, READ_DELIVERIES_CALLS_EACH, RECENT_MESSAG
 import { MAX_CODES } from "@/lib/discount";
 import { MAX_FLOWS } from "@/lib/flow-limits";
 import { MOVE_BYTES, MOVE_KEY_BYTES, moveReads } from "@/lib/call-moves-read";
+import { BOOK_KEPT_SLICE } from "@/lib/paypal-sales";
 
 /** Database commands one further API request pays for. */
 export const API_UNIT_COMMANDS = 20;
@@ -173,6 +174,14 @@ export const AFFILIATE_ENTRY_BYTES = 4_096;
 export const AFFILIATE_SENT_BYTES = 512;
 /** PayPal refunds readBook reads at the most (lib/paypal-sales.ts, readPayPalRefundsWithCoverage). */
 export const BOOK_PAYPAL_REFUNDS = 500;
+/**
+ * What the book's two questions about one PayPal payment weigh (lib/affiliates.ts, readBook): the name it sends to the
+ * refunds kept for good (lib/paypal-sales.ts, backKey: "paypal:" and a capture id of up to 64 characters) and the
+ * answer (null, or a time of up to 12 digits), and the order it sends to the set (up to 36 characters) and its score
+ * (up to 24), each a bulk string with at most 8 bytes of framing ("$NN\r\n" and "\r\n"): 175, rounded up. Counted for
+ * every entry, a ceiling of the payments.
+ */
+export const BOOK_KEPT_REFUND_BYTES = 192;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
@@ -192,12 +201,15 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
+    // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
+    // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling.
+    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
   };
 }
 

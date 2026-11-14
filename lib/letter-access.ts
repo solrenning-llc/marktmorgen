@@ -224,8 +224,11 @@ function afterAnswer(task: () => Promise<void>): void {
  */
 export async function readLetterGrant(token: string): Promise<LetterGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
-  if (typeof raw !== "string") return null;
+  // Read exactly (rule 24): nil is a link that is gone; a reply lost or in another shape is unknown, never "gone".
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)]]), 1);
+  const raw = replies?.[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("an emailed letter link's grant");
   try {
     const grant = JSON.parse(raw) as LetterGrant;
     return typeof grant.e === "string" && typeof grant.k === "string" && typeof grant.h === "string" && typeof grant.l === "string" && LETTER_ID.test(grant.l) ? grant : null;

@@ -250,7 +250,8 @@ export async function sales(store: Store, cursor: string | null, charge: Charge)
   const meta = (row: Row): Record<string, string> => row.metadata ?? {};
   // A product sold whose checkout wrote its title is named by it, its listing never read for that.
   const wanted = titleIds(mine.map((row) => (cutText(meta(row).title, SALE_TEXT_LIMITS.title) ? { ...meta(row), product: "" } : meta(row))));
-  const refused = await charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS);
+  // `taken` is what the call took beyond the door (lib/api-guard.ts takeMoreApi): API_SALES_UNITS, the request included.
+  const refused = await charge(apiReadUnits(listingsWork(listingsToRead(store, wanted))), API_SALES_UNITS - 1);
   if (refused) return refused;
   const titles = new Map((wanted.length ? await readListings(store, wanted) : []).map((p) => [p.id, cutText(p.title, MAX_TITLE_LENGTH)]));
   const product = (id: string) => ({ id, title: titles.get(id) ?? null });

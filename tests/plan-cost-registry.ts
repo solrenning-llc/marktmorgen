@@ -230,6 +230,18 @@ export const LATE_OFFER_LOOKS_MOST = 6;
 export const LATE_OFFER_LOOK_COMMANDS_MOST = 8;
 export const LATE_OFFER_SHARE_OF_ORDER_COMPUTE = 0.35;
 /**
+ * Every look the five-minute job takes at one offer after paying still waiting on Stripe (lib/upsell.ts,
+ * settlePendingOffers), from its first minute to the day it is let go: a payment the bank asked the buyer to confirm,
+ * one whose answer was lost on the way back, or one still processing. At most OFFER_WATCH_LOOKS_MOST looks an offer,
+ * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands (its record read twice, its next look written, the
+ * store's record and the run's share of reading the list), and Stripe reads of the creator's account, which bill no API
+ * call. Measured in tests/upsell-settle-late.test.ts and held to a declared share of ORDER_COMPUTE, an offer being its
+ * own order (line orders); what is left of ORDER_COMPUTE is more than the offer's own answer takes, measured there too.
+ */
+export const OFFER_WATCH_LOOKS_MOST = 11;
+export const OFFER_WATCH_LOOK_COMMANDS_MOST = 7;
+export const OFFER_WATCH_SHARE_OF_ORDER_COMPUTE = 0.6;
+/**
  * The access emails a plan's window holds (lib/store-allowance-rules.ts):
  * since 17 October 2026 counted and refused past the figure, before sending
  * (lib/email.ts, EmailMeter); until then a figure set high that no counter held.

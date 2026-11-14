@@ -17,7 +17,7 @@ import { readUpsell, settlePendingOffers, takeUpsell, newUpsellKey } from "@/lib
 import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { COMMAND, LATE_OFFER_LOOK_COMMANDS_MOST, LATE_OFFER_LOOKS_MOST, LATE_OFFER_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE } from "./plan-cost-registry";
+import { COMMAND, LATE_OFFER_LOOK_COMMANDS_MOST, LATE_OFFER_LOOKS_MOST, LATE_OFFER_SHARE_OF_ORDER_COMPUTE, OFFER_WATCH_LOOK_COMMANDS_MOST, OFFER_WATCH_LOOKS_MOST, OFFER_WATCH_SHARE_OF_ORDER_COMPUTE, ORDER_COMPUTE } from "./plan-cost-registry";
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_upsell_settle_late_only";
@@ -176,6 +176,47 @@ async function main(): Promise<void> {
   is(
     "every late look of one offer inside its declared share of an order's compute",
     LATE_OFFER_LOOKS_MOST * LATE_OFFER_LOOK_COMMANDS_MOST * COMMAND <= LATE_OFFER_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE,
+    true,
+  );
+
+  part("RED: every look at one waiting offer, from its first minute to its last day, inside a declared cost");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000005 = paidCheckout("cs_test_settlelate000005", front, browser.fingerprint);
+  const plainTake = redis.pipeline.bind(redis);
+  let taking = 0;
+  redis.pipeline = async (list: (string | number)[][]) => {
+    taking += list.length;
+    return plainTake(list);
+  };
+  is("taken: checking", (await take("cs_test_settlelate000005", "kit001", "yes")).kind, "checking");
+  redis.pipeline = plainTake;
+  const watched = String(made[made.length - 1].id);
+  const lookedAt = () => stripeReads.filter((path) => path.endsWith(watched)).length;
+  let watchCommands = 0;
+  for (ahead = 60_000; ahead <= 8 * DAY; ahead += 5 * 60_000) {
+    const seen = lookedAt();
+    let run = 0;
+    redis.pipeline = async (list: (string | number)[][]) => {
+      run += list.length;
+      return plainTake(list);
+    };
+    await job();
+    redis.pipeline = plainTake;
+    if (lookedAt() > seen) watchCommands += run;
+  }
+  const watchLooks = lookedAt();
+  is("let go by the eighth day", await listed("cs_test_settlelate000005"), null);
+  is("RED: looked at no more than its declared number of times in all", [watchLooks, watchLooks <= OFFER_WATCH_LOOKS_MOST], [watchLooks, true]);
+  is("RED: its looks' commands within the declared figure", watchCommands <= OFFER_WATCH_LOOKS_MOST * OFFER_WATCH_LOOK_COMMANDS_MOST, true);
+  is(
+    "every look of one offer inside its declared share of an order's compute",
+    OFFER_WATCH_LOOKS_MOST * OFFER_WATCH_LOOK_COMMANDS_MOST * COMMAND <= OFFER_WATCH_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE,
+    true,
+  );
+  is(
+    "and the offer's own answer fits in what is left of an order's compute",
+    taking * COMMAND <= (1 - OFFER_WATCH_SHARE_OF_ORDER_COMPUTE) * ORDER_COMPUTE,
     true,
   );
 

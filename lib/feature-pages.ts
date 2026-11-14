@@ -2354,7 +2354,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "A sale, and your phone",
     highlight: "tells you",
     intro:
-      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, and a comment under a lesson.",
+      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, a comment under a lesson, and a buyer's message in your inbox.",
     visual: "phone",
     badge: WORKING,
     accent: "from-pink-brand to-amber-brand",
@@ -2381,6 +2381,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "alert", title: "Reports", body: "A member reported a post or a comment in your community." },
           { icon: "handshake", title: "Affiliate applications", body: "Someone confirmed an application to your program." },
           { icon: "chat", title: "Course comments", body: "A student commented under a lesson: which lesson, and the start of what they wrote." },
+          { icon: "mail", title: "Buyer messages", body: "A buyer wrote in your inbox: once until you read it, never what they wrote. Tap it to open the conversation." },
           { icon: "video", title: "Live events", body: "One of your community's live events starts in 15 minutes: time to open the room.", href: "/platform/live-events" },
           { icon: "lock", title: "Written for a lock screen", body: "Amounts, titles, times and the start of a lesson comment, as the student wrote it. We never add a buyer's name or email address." },
           { icon: "users", title: "Each person their own", body: `Up to ${MAX_DEVICES} devices each. Your team members see only their own devices, and hear only what their role may see.` },

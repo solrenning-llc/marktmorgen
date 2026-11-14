@@ -1,5 +1,6 @@
 "use client";
 
+import { scrollBehavior } from "@/lib/scroll-motion";
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { templateLeftMessage } from "@/lib/template-text-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
@@ -2782,7 +2783,7 @@ export function PageEditor({
             const id = target?.dataset.block;
             if (!id || !drafts.some((d) => d.block.id === id)) return;
             setOpen(id);
-            document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            document.getElementById(`row-${id}`)?.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
           }}
         >
           {/* Room above and beside it, so its focus ring is never cut by the panel's own scrolling edge (WCAG 2.4.13). */}

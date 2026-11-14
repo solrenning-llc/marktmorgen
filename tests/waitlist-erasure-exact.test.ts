@@ -1,63 +1,68 @@
 /**
- * Deleting a person takes them off every waitlist of the store
- * (forgetWaitlistPerson, lib/person-erasure.ts). Each HDEL's answer was read
- * with `Number(n) || 0`, so a reply in another shape (no reply, a word, a
- * list, a fraction) was counted as "nothing there to delete" and the erasure
- * was said as finished while the place may still be kept (rule 24). Now an
- * unknown deletion answer throws, so the erasure is reported as not done and
- * tried again. Control: exact answers still delete the place and count it.
- * Synthetic data; no provider is called.
+ * Defect #4383 (Codex L): erasing a person from the store's waitlists reads
+ * each product's HDEL exactly. One reply per product, each the integer 0 or
+ * 1; a short, sparse or off-shape answer is unknown (rule 24) and throws
+ * UnknownReplyError, so the erasure is never reported complete while an
+ * entry holding the address may still be there to be copied into a launch.
+ * Synthetic records only.
  */
-import { forgetWaitlistPerson } from "@/lib/waitlist";
-import { store as redis } from "./redis-stub";
-import { done, is, part } from "./check";
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {forgetWaitlistPerson} from '@/lib/waitlist';
+import {UnknownReplyError} from '@/lib/redis-reply';
+import {store as redis} from './redis-stub';
 
-const SID = "stats_harbor";
-const PRODUCTS = ["prod_a", "prod_b"];
-const place = JSON.stringify({ at: 1, ok: 1, c: false, t: "a".repeat(48) });
+const sid = 'abcdef0124';
+const products = ['p1', 'p2'];
+const address = 'erased-waitlist@example.test';
+type Batch = (string | number)[][];
 
-async function main(): Promise<void> {
+async function seed() {
   redis.clear();
-  const real = redis.pipeline.bind(redis);
-  const seed = () => {
-    for (const p of PRODUCTS) redis.run(["HSET", `nl:wl:${SID}:${p}`, "dana@example.com", place]);
-  };
-
-  part("An unknown deletion answer is never read as \"nothing to delete\"");
-  for (const [label, shape] of [
-    ["no reply", () => undefined],
-    ["a word", () => "OK"],
-    ["a list", () => [1]],
-    ["a fraction", () => 0.5],
-    ["a negative number", () => -1],
-    ["one reply short", null],
-  ] as [string, (() => unknown) | null][]) {
-    redis.clear();
-    seed();
-    redis.pipeline = (async (commands: (string | number)[][]) => {
-      const replies = await real(commands);
-      if (commands[0]?.[0] !== "HDEL") return replies;
-      return shape ? [shape(), ...replies.slice(1)] : replies.slice(0, -1);
-    }) as typeof redis.pipeline;
-    const outcome = await forgetWaitlistPerson(SID, PRODUCTS, "dana@example.com").then(
-      (n) => `finished (${n})`,
-      () => "not finished",
-    );
-    redis.pipeline = real;
-    is(`(${label}) the erasure is not said as finished`, outcome, "not finished");
-  }
-
-  part("Control: exact answers delete and count every place");
-  redis.clear();
-  seed();
-  is("two places deleted", await forgetWaitlistPerson(SID, PRODUCTS, "Dana@Example.com"), 2);
-  is("none kept", PRODUCTS.map((p) => redis.run(["HGET", `nl:wl:${SID}:${p}`, "dana@example.com"])), [null, null]);
-  is("a second run finds nothing", await forgetWaitlistPerson(SID, PRODUCTS, "dana@example.com"), 0);
-
-  done();
+  for (const p of products) await redis.pipeline([['HSET', `nl:wl:${sid}:${p}`, address, JSON.stringify({at: 1, ok: 1, c: false})]]);
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+/** Answers the first all-HDEL batch with `shaped(original replies)`; every other batch as Redis would. */
+function shapeHdel(shaped: (replies: unknown[]) => unknown) {
+  const original = redis.pipeline.bind(redis);
+  let hit = false;
+  (redis as unknown as {pipeline: unknown}).pipeline = async (batch: Batch) => {
+    const replies = (await original(batch)) as unknown[];
+    if (!hit && batch.length && batch.every((c) => c[0] === 'HDEL')) {
+      hit = true;
+      return shaped(replies);
+    }
+    return replies;
+  };
+  return {restore: () => ((redis as unknown as {pipeline: unknown}).pipeline = original), hit: () => hit};
+}
+
+const cases: [string, (r: unknown[]) => unknown][] = [
+  ['one reply short', (r) => r.slice(0, 1)],
+  ['a hole where a reply should be', (r) => { const s = r.slice(); delete s[1]; return s; }],
+  ['a reply as text', (r) => [r[0], '1']],
+  ['a reply of two', (r) => [r[0], 2]],
+  ['a reply that is null', (r) => [r[0], null]],
+  ['not a list at all', () => null],
+];
+
+for (const [what, shaped] of cases) {
+  test(`waitlist erasure with ${what}: unknown, never complete`, async () => {
+    await seed();
+    const patch = shapeHdel(shaped);
+    let outcome: unknown;
+    try {
+      outcome = await forgetWaitlistPerson(sid, products, address).then((n) => n, (e: unknown) => e);
+    } finally {
+      patch.restore();
+    }
+    assert.equal(patch.hit(), true, 'the HDEL batch was sent');
+    assert.ok(outcome instanceof UnknownReplyError, `an unknown deletion throws, not ${JSON.stringify(outcome)}`);
+  });
+}
+
+test('waitlist erasure read whole: each entry counted once', async () => {
+  await seed();
+  assert.equal(await forgetWaitlistPerson(sid, products, address), 2);
+  assert.equal(await forgetWaitlistPerson(sid, products, address), 0, 'nothing left the second time');
 });

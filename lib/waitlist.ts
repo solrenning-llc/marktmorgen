@@ -24,6 +24,7 @@ import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -189,7 +190,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
   }
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
+    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
     );
   }
@@ -445,17 +446,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  // Each deletion is read exactly (rule 24): an answer in another shape throws, so the erasure is
-  // said as not done and tried again (lib/person-erasure.ts), never as "nothing there to delete".
-  let deleted = 0;
+  let removed = 0;
   if (productIds.length) {
+    // One reply per product, each the integer 0 or 1. Anything else is unknown (rule 24, #4383): an entry holding the
+    // address may still be there to be copied into a launch, so the erasure is never reported complete; its retry
+    // deletes what is left.
     const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
-    const counts = replies?.map(countOf);
-    if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's waitlist places");
-    deleted = (counts as number[]).reduce((sum, n) => sum + n, 0);
+    if (!replies || replies.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a person's waitlist deletions");
+    removed = replies.reduce<number>((sum, n) => sum + (n as number), 0);
   }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return deleted + blanked;
+  return removed + blanked;
 }
 
 /**

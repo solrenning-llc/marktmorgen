@@ -6,7 +6,7 @@ const roles: Record<string,{creator:string;platform:string}> = {
  test:{creator:"Only in Stripe test mode, inspect the checkout and manually check access to what was bought.",platform:"Checks a recorded paid test checkout. This does not verify file access or delivery; live stores are never asked to make a real self-purchase."},
  social:{creator:"Choose a social profile and share your store address where appropriate.",platform:"Checks whether a visit from a social network was recorded. It does not promise traffic or publish a post for you."},
  posts:{creator:"Make a separate short link for each post you plan.",platform:"Checks the number of recorded post links, without claiming they generated sales."},
- lead:{creator:"Offer a sign-up or free product and explain the person's permission choices.",platform:"Checks a recorded address left on the store; that record alone is not marketing consent."},
+ lead:{creator:"Offer a sign-up or free product and explain the person's permission choices.",platform:"Counts an address once its owner confirms it from the emailed link; a typed-in address does not count, and a confirmation alone is not marketing consent."},
  sale:{creator:"When live checkout is available, present your product and its actual terms to people who choose to buy.",platform:"Checks a real paid order confirmed by Stripe; a full refund removes its completion. No sale or deadline is guaranteed."},
 };
 export const PATH_HOME_STEPS = dayMissions(NO_FACTS,{minutes:15,audience:"none",subject:"",skills:""}).map(mission=>({id:mission.id,title:mission.title,...roles[mission.id]}));

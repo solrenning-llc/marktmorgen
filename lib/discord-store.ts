@@ -266,12 +266,19 @@ export async function dueMembers(now = Date.now(), limit = 200): Promise<{ sid: 
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).filter((m): m is string => typeof m === "string");
-  const until = Math.floor(now / 1000) + DUE_LEASE_SECONDS;
-  if (entries.length) await redisPipeline([["ZADD", DUE_KEY, "XX", ...entries.flatMap((entry) => [until, entry])]]);
-  return entries.flatMap((entry) => {
-    const [sid, userId] = entry.split("|");
-    return sid && userId && SNOWFLAKE.test(userId) ? [{ sid, userId }] : [];
+  const parsed = entries.map((entry) => {
+    const [sid, userId, ...rest] = entry.split("|");
+    return { entry, person: sid && userId && rest.length === 0 && SNOWFLAKE.test(userId) ? { sid, userId } : null };
   });
+  const leased = parsed.filter((p) => p.person).map((p) => p.entry);
+  // An entry that is not sid|userId is nobody to check: taken off, never leased again and again (nuvem B's L1 on #4239).
+  const junk = parsed.filter((p) => !p.person).map((p) => p.entry);
+  const until = Math.floor(now / 1000) + DUE_LEASE_SECONDS;
+  const commands: (string | number)[][] = [];
+  if (leased.length) commands.push(["ZADD", DUE_KEY, "XX", ...leased.flatMap((entry) => [until, entry])]);
+  if (junk.length) commands.push(["ZREM", DUE_KEY, ...junk]);
+  if (commands.length) await redisPipeline(commands);
+  return parsed.flatMap((p) => (p.person ? [p.person] : []));
 }
 
 // ---------------------------------------------------------------- trips to Discord's page

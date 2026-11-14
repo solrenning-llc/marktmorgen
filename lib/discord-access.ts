@@ -132,6 +132,10 @@ export async function checkMember(sid: string, userId: string, now = Date.now())
   const [server, member] = await Promise.all([readServerOrThrow(room), readMember(room, userId)]);
   if (!server || !member) {
     await dropDue(sid, userId);
+    // A rejoin between the member read and dropDue wrote a fresh entry that dropDue just took off (Claude 1 cloud's
+    // LOW on #4239): read the member again and put them back in line if they are there now, so a later refund is
+    // still checked. Only with a server: without one, nobody is checked, and putting them back would loop for ever.
+    if (server && (await readMember(room, userId))) await checkSoon(sid, userId);
     return "gone";
   }
   const byProduct = await productRolesOrThrow(room);

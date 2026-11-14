@@ -22,3 +22,8 @@ export function rangeProblem() {
 export async function readRange(): Promise<RangeData | null> {
   return world.range;
 }
+
+/** The studio request the chart's marks take before reading emails (lib/auto-marks.ts): always given here, so a failed read stays the failure under test. */
+export async function countStudio(): Promise<{ ok: true }> {
+  return { ok: true };
+}

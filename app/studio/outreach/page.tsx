@@ -59,7 +59,7 @@ export default async function StudioOutreachPage({ searchParams }: Params) {
           <StudioTrail store={store} here="Outreach" />
           <h1 className="t-h2 mt-3">Write to a business that could pay you</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            Name a business. We read its website for the address it asks to be written at, write a short email from what you
+            Name a business. We read its website for the address it asks to be written at. We write a short email from what you
             tell us and what its own site says, and open it as a draft in your own mailbox. You read it, change it and send
             it yourself.
           </p>

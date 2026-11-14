@@ -89,7 +89,7 @@ export function ThanksNoteEditor({ productId, productTitle, storeName, initial }
             After paying: a note from you
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-ink-soft">
-            {`What buyers of ${productTitle} read on the thank-you page, under what they bought, and in their confirmation email: what to do first, a welcome video, one button to your group, a booking or a next step.`}
+            {`What buyers of ${productTitle} read on the thank-you page, under what they bought, and in their confirmation email. It can say what to do first, and hold a welcome video, one button to your group, a booking or a next step.`}
           </p>
         </div>
         <span className={`tag ${has ? "tag-live" : ""}`}>{has ? "On" : "None"}</span>

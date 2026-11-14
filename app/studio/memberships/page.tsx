@@ -542,7 +542,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                   <li>Monthly recurring revenue: every paying membership at its list price, before discounts and tax, as a month — a yearly one counts a twelfth. Members in a free trial are not in it until they pay.</li>
                   <li>Churn: of the memberships that were paying 30 days ago, the share that has ended since.</li>
                   <li>Trials that became paying: of the free trials that ended in the last 90 days, those still running a day after.</li>
-                  <li>The next three months: each month keeps the share of paying members the last 90 days kept, and gains the monthly revenue the last 90 days gained from members who joined in them and are still paying. It needs at least five members who were paying 90 days ago.</li>
+                  <li>The next three months: each month keeps the share of paying members the last 90 days kept. It also gains the monthly revenue the last 90 days gained from members who joined in them and are still paying. It needs at least five members who were paying 90 days ago.</li>
                   {numbers.elsewhere ? <li>{`${numbers.elsewhere} running ${numbers.elsewhere === 1 ? "membership is" : "memberships are"} in a currency other than your store's, and ${numbers.elsewhere === 1 ? "is" : "are"} not in the sums.`}</li> : null}
                   {!numbers.complete ? <li>Your Stripe account holds more memberships than one reading takes, so the oldest are not counted.</li> : null}
                 </ul>

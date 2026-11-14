@@ -117,10 +117,10 @@ export function StoreAssistantEditor({
         <span className="text-sm font-semibold text-ink-soft">{`Add-on · ${assistantPriceWords()}`}</span>
       </div>
       <p className="mt-2 text-ink-soft">
-        A chat in the corner of every page of your store that answers buyers at any hour, in their language, only from what you published: your
-        products, their prices and how each is delivered, the questions and refund promises on their pages, your store&apos;s questions and answers,
-        and your notes below. Every reply is labeled as AI. When it does not know, or the question is a complaint, a refund request or a payment problem,
-        it says so and passes the question to your inbox with the buyer&apos;s email, for you to answer.
+        A chat in the corner of every page of your store that answers buyers at any hour, in their language. It answers only from what you
+        published: your products, their prices and how each is delivered, the questions and refund promises on their pages, your store&apos;s
+        questions and answers, and your notes below. Every reply is labeled as AI. Sometimes it does not know, or the question is a complaint, a
+        refund request or a payment problem. Then it says so and passes the question to your inbox with the buyer&apos;s email, for you to answer.
       </p>
       <p className="mt-2 text-sm text-ink-soft">{assistantAllowanceWords()}</p>
 
@@ -221,7 +221,7 @@ export function StoreAssistantEditor({
           Never what the buyer just bought or already owns from you, never something they turned down after paying, and never while one of your
           offers after paying is waiting on their answer. Your own choices come first, in this order: what you said goes well with the product,
           what it offers after paying, what it offers at checkout, the rest of a collection it is in. Only when you set none does an AI choose among
-          your products, labeled &ldquo;AI suggestion&rdquo;; each such choice is one reply of the month, and once the month&apos;s replies are used
+          your products, labeled &ldquo;AI suggestion&rdquo;. Each such choice is one reply of the month. Once the month&apos;s replies are used,
           your store&apos;s own order decides, at no AI cost.
         </p>
         <label className="mt-4 flex min-h-11 cursor-pointer items-start gap-3 text-sm font-semibold text-ink">
@@ -262,10 +262,10 @@ export function StoreAssistantEditor({
         <p className="mt-1 text-sm text-ink-soft">
           Your checkout shows an unchecked box, &ldquo;{assistReminderWords("en").box}&rdquo; (in your store&apos;s language), with a place for the
           buyer&apos;s email once it is checked. Only a buyer who checks it and types an address gets one email from you, about an hour after
-          that checkout closes unpaid: what they left, its link and today&apos;s price, the sentence they checked and the day, your postal
+          that checkout closes unpaid. It holds what they left, its link and today&apos;s price, the sentence they checked and the day, your postal
           address and a link that stops your reminders at once. Never when they paid, paid for it since, or stopped or left your emails, and
           never twice for one checkout. An AI adds one short, neutral line about those products from your own descriptions, labeled as
-          written by AI, with no price, deal, deadline or claim; each line is one reply of the month, and once those are used the same email
+          written by AI. The line has no price, deal, deadline or claim. Each line is one reply of the month, and once those are used the same email
           goes without it. The email is one of your store&apos;s own emails for the month, and is not sent when those are used. What the buyer
           typed is deleted {ASSIST_REMIND_KEEP_SECONDS / 86_400} days after the checkout opened.
         </p>

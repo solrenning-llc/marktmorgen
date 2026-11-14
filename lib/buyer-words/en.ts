@@ -314,6 +314,8 @@ export const en = {
   // ---- The offer to a leaving visitor ----------------------------------------------------
   close: "Close",
   beforeYouGo: "Before you go — free",
+  /** Turns off every store's leaving offer in this browser (WCAG 2.2.4). */
+  noMoreOffers: "Don't show offers like this",
 
   // ---- A sales page's blocks -----------------------------------------------------------------
   aboutStore: (store: string) => `About ${store}`,

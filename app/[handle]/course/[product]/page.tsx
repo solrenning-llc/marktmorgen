@@ -199,7 +199,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
               <p className="mt-1 text-sm">{w.ownBody}</p>
               {course.certificate ? (
                 <p className="mt-2 text-sm">
-                  <Link href={`/@${store.handle}/certificate/sample?product=${product.id}`} className="font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                  <Link href={`/@${store.handle}/certificate/sample?product=${product.id}`} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
                     {w.seeSample}
                   </Link>
                 </p>

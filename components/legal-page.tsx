@@ -1,4 +1,5 @@
 import { Children, isValidElement } from "react";
+import { Breadcrumb, type Crumb } from "./breadcrumb";
 import Link from "next/link";
 import { Icon } from "./icons";
 import { SiteFooter } from "./site-footer";
@@ -37,6 +38,7 @@ export function LegalPage({
   eyebrow = "The small print, in plain words",
   effective = "August 15, 2026",
   legalNav = true,
+  trail,
   children,
 }: {
   title: string;
@@ -51,6 +53,8 @@ export function LegalPage({
   effective?: string | null;
   /** The row of links between the legal pages. Only on the legal pages. */
   legalNav?: boolean;
+  /** The levels above a page one level down (/help/zoom under the help center): where it is, WCAG 2.4.8. */
+  trail?: Crumb[];
   children: React.ReactNode;
 }) {
   // The sections, read from the page itself, so the index can never list one
@@ -80,6 +84,7 @@ export function LegalPage({
       <main id="content" className="flex-1">
         <section className="surface-dawn border-b border-line">
           <div className="container-page py-14 sm:py-20">
+            {trail ? <div className="mb-4"><Breadcrumb path={trail} here={title} /></div> : null}
             <p className="eyebrow">{eyebrow}</p>
             <h1 className="t-h1 balance mt-4 max-w-3xl">{title}</h1>
             <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3 text-[0.9375rem] text-ink-mute">

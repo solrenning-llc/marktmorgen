@@ -51,7 +51,7 @@ export default function HelpPage() {
         <div className="container-page grid gap-10 py-14 sm:py-20 lg:grid-cols-[15rem_1fr] lg:gap-16">
           <nav aria-label="Help sections" className="min-w-0 lg:sticky lg:top-24 lg:self-start">
             <p className="text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-ink-mute">Sections</p>
-            <ul className="mt-3 flex gap-2 overflow-x-auto pb-2 lg:block lg:space-y-1 lg:overflow-visible lg:pb-0">
+            <ul className="mt-3 flex flex-wrap gap-2 lg:block lg:space-y-1">
               {HELP_SECTIONS.map((section) => (
                 <li key={section.id} className="shrink-0">
                   <a
@@ -82,7 +82,7 @@ export default function HelpPage() {
                 <div className="mt-6 divide-y divide-line overflow-hidden rounded-[var(--r-lg)] border border-line bg-white">
                   {section.items.map((item) => (
                     <details key={item.q} id={answerId(item.q)} data-help-item className="group scroll-mt-24">
-                      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-6 px-5 py-5 font-semibold text-ink hover:bg-paper focus-visible:[outline-offset:-3px]! sm:px-6 [&::-webkit-details-marker]:hidden">
+                      <summary className="flex min-h-11 cursor-pointer list-none items-center [overflow-wrap:anywhere] justify-between gap-6 px-5 py-5 font-semibold text-ink hover:bg-paper focus-visible:[outline-offset:-3px]! sm:px-6 [&::-webkit-details-marker]:hidden">
                         {item.q}
                         <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-ink-soft group-open:border-violet-brand group-open:text-violet-deep">
                           <Icon name="plus" size={16} className="group-open:hidden" />

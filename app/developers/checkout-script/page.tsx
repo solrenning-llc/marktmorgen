@@ -41,7 +41,7 @@ export default async function CheckoutScriptPage() {
     withScript: false,
   });
   return (
-    <LegalPage title="Checkout script" eyebrow="For your own website" effective={null} legalNav={false} lastUpdated="October 17, 2026">
+    <LegalPage title="Checkout script" eyebrow="For your own website" effective={null} legalNav={false} lastUpdated="October 17, 2026" trail={[{ label: "Developers", href: "/developers" }]}>
       <p>
         Put a link on any page of your own site, on WordPress, Webflow, Squarespace, Ghost or plain HTML, and it opens your product&apos;s card, or
         your email list&apos;s sign-up form, over that page. Your buyer pays on Stripe&apos;s checkout page, on your own connected Stripe account:
@@ -57,14 +57,14 @@ export default async function CheckoutScriptPage() {
         <Code>{example}</Code>
         <p>
           The link works with or without the script: followed as it is, it opens the card as a page of its own, whose buy button goes on to
-          Stripe in the same tab. With the script on the page and {c('data-mm="overlay"')}, it opens the card in a frame over your page instead,
-          and Stripe&apos;s checkout opens in a new tab, so your page stays where it was. With {c('data-mm="page"')} the script lets the link be
+          Stripe in the same tab. With the script on the page and {c('data-mm="overlay"')}, it opens the card in a frame over your page instead.
+          Stripe&apos;s checkout then opens in a new tab, so your page stays where it was. With {c('data-mm="page"')} the script lets the link be
           followed and only says it was pressed. A link to {c("/embed/<store>/join")} opens your sign-up form the same two ways.
         </p>
         <p>
           {`The address carries its own tags: utm_source is the place you name (website when you leave it empty), utm_medium is ${SCRIPT_MEDIUM}, and utm_campaign is yours if you give one. A sale made through it carries them to Stripe and to your numbers, where it is listed under Where the money came from. `}
-          {c("return")} is the page the receipt sends the buyer back to; {c("via")} is an affiliate&apos;s code, for a link an affiliate puts on
-          their own site, which opens your product&apos;s page so your store&apos;s affiliate and consent rules apply there as they do to any
+          {c("return")} is the page the receipt sends the buyer back to. {c("via")} is an affiliate&apos;s code, for a link an affiliate puts on
+          their own site. It opens your product&apos;s page, so your store&apos;s affiliate and consent rules apply there as they do to any
           affiliate link. Product ids are in your studio, and in the API&apos;s{" "}
           <Link href="/developers#products" className="text-black underline underline-offset-2 hover:no-underline">
             products
@@ -75,10 +75,10 @@ export default async function CheckoutScriptPage() {
 
       <LegalSection title="Your sites">
         <p>
-          {`List up to ${MAX_EMBED_SITES} of your own sites in the studio, each an https address such as https://www.example.com. Only on those does the card or the form open over the page, with its buy button or its box, and only those are told what happened. On any other site, or when the browser sends no address of the page, the frame shows a plain link, in a new tab, to your product's page (or, for the form, your store's page), and tells nobody anything. The return page has to be on one of your sites too, so the receipt can never send somebody to an address you did not name.`}
+          {`List up to ${MAX_EMBED_SITES} of your own sites in the studio, each an https address such as https://www.example.com. Only on those does the card or the form open over the page, with its buy button or its box, and only those are told what happened. On any other site, or when the browser sends no address of the page, the frame shows a plain link instead. It opens your product's page in a new tab (or, for the form, your store's page). It tells nobody anything. The return page has to be on one of your sites too, so the receipt can never send somebody to an address you did not name.`}
         </p>
         <p>
-          The frame knows which site it is on from the address the browser sends with it; the script asks for the site&apos;s origin only (
+          The frame knows which site it is on from the address the browser sends with it. The script asks for the site&apos;s origin only (
           {c('referrerpolicy="origin"')}), never the page&apos;s path, and a web page cannot write that header itself. Once you list a site, the
           cards you pasted with the frame code show the plain link anywhere else as well. Until you list one, those cards work wherever they are
           pasted, as before.
@@ -107,7 +107,7 @@ marktmorgen:purchase  back from paying (on document); detail is
           {`The purchase event: after paying, the receipt page shows a button back to the return page, whose address ends in #mm-purchase=<product>.<order>. The script on that page reads that mark from the address once, says marktmorgen:purchase, keeps it in window.Marktmorgen.purchase and takes the mark off the address. order is the same id as the sale.completed webhook's, so your server and your page can be matched.`}
         </p>
         <p>
-          These events are for what your page shows. Anybody can make a page say them, so never hand anything over because of one: what was
+          These events are for what your page shows. Anybody can make a page say them, so never hand anything over because of one. What was
           paid is told to your server by the signed {c("sale.completed")} webhook, and a confirmed sign-up by {c("list.joined")}. The sign-up
           is a double opt-in: {c("sent")} means the email with the button is on its way, and the address joins your list only once it is
           pressed.
@@ -121,7 +121,7 @@ marktmorgen:purchase  back from paying (on document); detail is
 
       <LegalSection title="Webhooks">
         <p>
-          {`sale.completed now carries source: utm_source, utm_medium, utm_campaign and utm_content as the sale was tagged, and site, the listed site the checkout script opened it for, each null when there is none. list.joined is sent when somebody confirms their address to join your list, from your store page's box, one of your forms or the script, with their email, whether they allowed their link use in sequences to be seen, the form, the site and when they asked. Webhooks are signed and retried as on every other event; a store has up to ${MAX_ENDPOINTS} addresses.`}
+          {`sale.completed now carries source: utm_source, utm_medium, utm_campaign and utm_content as the sale was tagged. It also carries site, the listed site the checkout script opened it for. Each is null when there is none. list.joined is sent when somebody confirms their address to join your list, from your store page's box, one of your forms or the script. It carries their email, whether they allowed their link use in sequences to be seen, the form, the site and when they asked. Webhooks are signed and retried as on every other event; a store has up to ${MAX_ENDPOINTS} addresses.`}
         </p>
       </LegalSection>
 
@@ -181,7 +181,7 @@ marktmorgen:purchase  back from paying (on document); detail is
       <LegalSection title="What it does not do">
         <ul className="list-disc space-y-2 pl-5">
           <li>It does not draw Stripe&apos;s card form inside your page. Stripe&apos;s checkout opens on Stripe&apos;s own page.</li>
-          <li>It does not pick one of a product&apos;s price options for the buyer: a product with options, a plan, a box at checkout or a time to book opens its own page, where the buyer chooses.</li>
+          <li>It does not pick one of a product&apos;s price options for the buyer. A product with options, a plan, a box at checkout or a time to book opens its own page, where the buyer chooses.</li>
           <li>It does not read your page&apos;s address for tags or affiliate codes: what a link carries is what you put in it.</li>
           <li>The overlay inside a builder that frames pasted code opens inside that frame. Use the link that opens a page there.</li>
         </ul>

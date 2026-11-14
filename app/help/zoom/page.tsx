@@ -19,7 +19,7 @@ const link = "text-black underline underline-offset-2 hover:no-underline";
  */
 export default function ZoomGuidePage() {
   return (
-    <LegalPage title="Zoom for Marktmorgen" lastUpdated="November 8, 2026">
+    <LegalPage title="Zoom for Marktmorgen" lastUpdated="November 8, 2026" trail={[{ label: "Help center", href: "/help" }]}>
       <p>
         Marktmorgen is a link-in-bio store where creators sell digital
         products, courses, memberships and paid video calls. The Zoom app lets
@@ -57,7 +57,7 @@ export default function ZoomGuidePage() {
           <li>
             <strong className="text-black">Calls.</strong> Under Products, open a call&apos;s hours or sessions and choose{" "}
             <strong className="text-black">Zoom (automatic)</strong> in Where the call happens. Each booking of a one-to-one call
-            gets its own scheduled meeting on your Zoom account; a group call or a live session on a set date gets one meeting per time,
+            gets its own scheduled meeting on your Zoom account. A group call or a live session on a set date gets one meeting per time,
             shared by everyone booked into it. The join link goes into the buyer&apos;s confirmation email, reminders and calendar file.
           </li>
           <li>
@@ -69,8 +69,8 @@ export default function ZoomGuidePage() {
             of a one-to-one call, or when you cancel an event, its meeting is deleted.
           </li>
           <li>
-            <strong className="text-black">Starting.</strong> Click <strong className="text-black">Start in Zoom</strong> next to a call under Upcoming calls in your studio, or next to a live event in the community section of your studio, and Marktmorgen
-            asks Zoom for a fresh start link, so you join as the host.
+            <strong className="text-black">Starting.</strong> Click <strong className="text-black">Start in Zoom</strong> next to a call under Upcoming calls in your studio, or next to a live event in the community section of your studio. Marktmorgen
+            then asks Zoom for a fresh start link, so you join as the host.
           </li>
           <li>
             <strong className="text-black">If a meeting cannot be made.</strong> The booking gets your own meeting link, or a private

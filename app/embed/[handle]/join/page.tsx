@@ -79,9 +79,10 @@ export default async function EmbedJoin({ params, searchParams }: Params) {
     framed ? (
       <div lang={lang} className={`st-page st-theme-${theme} h-screen`} style={{ ...look, background: "transparent" }}>
         <style>{"html,body{background:transparent!important;min-height:0!important;height:100%;margin:0}"}</style>
-        <div className="st-card flex h-full flex-col justify-center overflow-hidden p-6" style={{ boxShadow: "none" }}>
+        {/* One main landmark around the card, as on the product card (1.3.1); #content is where skip links point. */}
+        <main id="content" className="st-card flex h-full flex-col justify-center overflow-hidden p-6" style={{ boxShadow: "none" }}>
           {body}
-        </div>
+        </main>
       </div>
     ) : (
       <div lang={lang} className={`st-page st-theme-${theme} flex min-h-screen items-center justify-center px-4 py-10`} style={look}>

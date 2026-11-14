@@ -93,7 +93,7 @@ export function RenameForm({ current }: { current: string }) {
       <label htmlFor="new-handle" className="field-label">
         New address
       </label>
-      <div className="card flex items-center pl-4 transition focus-within:border-violet-brand">
+      <div className="card flex items-center border-(--line-off)! pl-4 transition focus-within:border-violet-brand!">
         <span className="text-ink-soft">marktmorgen.com/@</span>
         <input
           id="new-handle"

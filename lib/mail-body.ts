@@ -60,7 +60,8 @@ function linked(text: string, goesTo?: (href: string) => string, link = "#4c1d95
       // "…at https://example.com/plan." — the full stop belongs to the sentence.
       const tail = part.match(TRAILING)?.[0] ?? "";
       const href = tail ? part.slice(0, -tail.length) : part;
-      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:${link};text-decoration:underline">${escape(href)}</a>${escape(tail)}`;
+      // The words are the address itself, with no space to break at: it may break anywhere, so a phone never scrolls sideways (1.4.10).
+      return `<a href="${escape(goesTo ? goesTo(href) : href)}" style="color:${link};text-decoration:underline;word-break:break-all;overflow-wrap:anywhere">${escape(href)}</a>${escape(tail)}`;
     })
     .join("");
 }
@@ -184,7 +185,7 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
       case "button": {
         const href = goesTo ? goesTo(block.href) : block.href;
         out.push(
-          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
+          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:10px 20px;border:2px solid transparent;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );
         break;
       }

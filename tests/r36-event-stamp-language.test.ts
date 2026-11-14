@@ -92,7 +92,7 @@ const book = () =>
   ]);
 
 /** The English sentences a store in another language must never hand its buyers. */
-const ENGLISH_EVENT = /Join from the event page|The way in shows|in 15 minutes|^Live:|RSVP|add it to your calendar|join here|\b(AM|PM)\b/m;
+const ENGLISH_EVENT = /Join from the event page|The way in shows|in 15 minutes|^Live:|RSVP|Say you are coming|add it to your calendar|join here|\b(AM|PM)\b/m;
 const ENGLISH_STAMP = /Sold to|\border\b|for personal use/;
 /** What the PDF's standard font prints (lib/pdf-stamp.ts, writable): printable ASCII, Latin-1 and the ellipsis. */
 const PRINTABLE = /^[ -~ -ÿ…]*$/;
@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   const enPost = announcementText(storeIn("en"), event);
   is("control: an English store's post says what it said before, word for word", enPost, {
     title: "Live: Sauerteig live",
-    text: `${eventTime(event)}, 1 h 30 min.\n\nWir backen zusammen; bringt Mehl, Wasser und Salz mit.\n\nRSVP, add it to your calendar and join here: ${page}`,
+    text: `${eventTime(event)}, 1 h 30 min.\n\nWir backen zusammen; bringt Mehl, Wasser und Salz mit.\n\nSay you are coming, add it to your calendar and join here: ${page}`,
   });
   const posts = Object.fromEntries(LANGUAGE_CODES.map((code) => [code, announcementText(storeIn(code), event)]));
   for (const code of others) {

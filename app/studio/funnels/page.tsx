@@ -279,7 +279,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
 
         {owners.length === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to follow yet</p>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to follow yet</h3>
             <p className="mt-2 text-ink-soft">
               Offers follow a one-off paid product: a download, a link or a course. Add one in the studio and it appears here.
             </p>

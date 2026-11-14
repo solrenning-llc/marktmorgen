@@ -42,6 +42,7 @@
  * added up in tests/plan-margin.test.ts.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { holdLock } from "@/lib/redis-lock";
 import {
   BillingError,
   hasContractFunding,
@@ -58,7 +59,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, parseTier } from "@/lib/plan";
-import { setSubscription, storeForEmail, storeForRestartSource, storeRef, type Store } from "@/lib/store";
+import { setSubscription, storeForEmail, storeForRestartSource, storeRef, withStoreLock, type Store } from "@/lib/store";
 import {
   PAID_MONTHS_BEFORE_PAUSE,
   PAUSE_EVERY_DAYS,
@@ -298,6 +299,14 @@ export type PauseResult = { kind: "paused"; record: PauseRecord } | { kind: "ref
 
 /** Sets a break of `months`, starting when the period already paid for ends. */
 export async function pausePlan(store: Store, months: PauseMonths, nowSeconds = Math.floor(Date.now() / 1000)): Promise<PauseResult> {
+  // Under the store's own lock, on the store read afresh under it (Codex X5's MEDIUM on #3752): a move of its address
+  // takes the same lock, so a break is never written between the move's reads and its last write, and a store whose
+  // address moved since the caller read it is refused here, never paused at its old ref.
+  const out = await withStoreLock(store, (fresh, held) => pausePlanHeld(fresh, months, nowSeconds, () => holdLock(held)));
+  return out === "moved" ? { kind: "refused", reason: "standing" } : out;
+}
+
+async function pausePlanHeld(store: Store, months: PauseMonths, nowSeconds: number, stillHeld: () => Promise<boolean>): Promise<PauseResult> {
   const id = store.subscriptionId;
   if (!id || !isBillingConfigured() || !isRedisConfigured()) return { kind: "refused", reason: "standing" };
   const subscription = await subscriptionRecord(id);
@@ -336,6 +345,9 @@ export async function pausePlan(store: Store, months: PauseMonths, nowSeconds = 
     told: 0,
     ...((store.period?.funded === true || hasContractFunding(subscription)) ? { funding: { version: 1 as const, grantId: (() => { const metadata = subscription.metadata as Record<string, unknown> | null | undefined; const pending = metadata?.funding_pending_grant !== undefined || metadata?.funding_pending_review !== undefined; const grant = pending ? metadata?.funding_pending_grant : metadata?.funding_grant; return typeof grant === "string" && /^ctr_[A-Za-z0-9_-]{1,80}$/.test(grant) ? grant : null; })() } } : {}),
   };
+  // The lock may have run out during the provider read: the writes go only while it is still this call's, so a move
+  // that took the lock since sees no break half written (and one written here is seen by a move as underway).
+  if (!(await stillHeld())) return { kind: "refused", reason: "standing" };
   // All three durable scheduling writes must be acknowledged before any
   // provider mutation. A missing/partial reply may hide committed writes:
   // retain them and refuse rather than assuming an unused year or no pause.
@@ -452,6 +464,13 @@ async function forget(ref: string, andTheYear: boolean): Promise<void> {
  * this only means it will not start again by itself.
  */
 export async function undoPause(store: Store, nowSeconds = Math.floor(Date.now() / 1000)): Promise<"kept" | "stopped" | "none"> {
+  // Under the store's own lock too (Codex X5's MEDIUM on #3752), on the store read afresh: nothing at a ref the store
+  // left is touched.
+  const out = await withStoreLock(store, (fresh) => undoPauseHeld(fresh, nowSeconds));
+  return out === "moved" ? "none" : out;
+}
+
+async function undoPauseHeld(store: Store, nowSeconds: number): Promise<"kept" | "stopped" | "none"> {
   const ref = storeRef(store);
   // Unknown evidence cannot mean that the break was removed. Preserve the
   // existing bounded observation and refuse before provider or cleanup writes.

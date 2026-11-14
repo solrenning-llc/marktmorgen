@@ -39,6 +39,8 @@ const handleKey = (handle: string) => `nl:store:handle:${handle}`;
 /** A break's record and the line of breaks, as lib/plan-pause.ts keeps them (recordKey, DUE). */
 const pauseKey = (ref: string) => `nl:pause:${ref}`;
 const PAUSE_DUE = "nl:pause:due";
+/** The once-a-year mark of a break taken, as lib/plan-pause.ts keeps it (lastKey): pausePlan refuses another while it lasts. */
+const pauseYearKey = (ref: string) => `nl:pause:last:${ref}`;
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 const ORIGIN = "https://marktmorgen.com";
@@ -63,6 +65,8 @@ let heldUnread = false;
 let recordReadFails: string | null = null;
 /** The read of a store's break (its record and its place in the line of breaks) answered in a shape Redis never gives. */
 let pauseUnread = false;
+/** The read of a store's once-a-year break mark answered in a shape Redis never gives. */
+let pauseYearUnread = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (recordReadFails && commands.some((c) => c[0] === "GET" && c[1] === recordReadFails)) throw new Error("Redis request failed with status 503");
@@ -72,6 +76,7 @@ redis.pipeline = async (commands: (string | number)[][]) => {
     await hook(String(commands[0][2]));
   }
   if (pauseUnread && commands.some((c) => c[1] === PAUSE_DUE)) return commands.map(() => ({ unexpected: true }));
+  if (pauseYearUnread && commands.some((c) => (c[0] === "GET" || c[0] === "PTTL") && String(c[1]).startsWith("nl:pause:last:"))) return commands.map(() => ({ unexpected: true }));
   if (linesUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === FINAL_INDEX)) return [{}];
   if (heldUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === HELD_INDEX)) {
     const replies = await realPipeline(commands);
@@ -285,6 +290,47 @@ async function main(): Promise<void> {
   is("nothing moved", [traces(P, P2, p.sid, p.handle).atOld, traces(P, P2, p.sid, p.handle).atNew, redis.run(["GET", idKey(p.sid)])], [true, false, P]);
   await dropPause(p);
   is("control: once the break is taken back, it moves", [(await moveAccount(P, P2)).ok, traces(P, P2, p.sid, p.handle).atNew], [true, true]);
+
+  part("A move carries the once-a-year break mark to the new address (Claude 3 on #3672)");
+  // pausePlan allows one break in PAUSE_EVERY_DAYS, read from the mark under the store's ref, its owner's address.
+  // A move that left the mark at the old address gave the store a fresh year at the new one: a break taken, the
+  // address moved, and another break at once, each one a stretch of the plan not paid for.
+  redis.clear();
+  const Y = "year-y@example.com";
+  const Y2 = "year-y-new@example.com";
+  const y = await makeStore(Y, "yearmark");
+  const takenAt = String(Math.floor(Date.now() / 1000) - 40 * 86_400);
+  redis.run(["SET", pauseYearKey(Y), takenAt, "EX", 325 * 86_400]);
+  const ttlBefore = Number(redis.run(["PTTL", pauseYearKey(Y)]));
+  is("the move goes through", (await moveAccount(Y, Y2)).ok, true);
+  const ttlAfter = Number(redis.run(["PTTL", pauseYearKey(Y2)]));
+  is("the mark is at the new address, with the time it was taken", redis.run(["GET", pauseYearKey(Y2)]), takenAt);
+  is("it ends when it would have ended, never later and never without an end", [ttlAfter > 0, ttlAfter <= ttlBefore, ttlBefore - ttlAfter < 60_000], [true, true, true]);
+  is("nothing is left at the old address", redis.run(["GET", pauseYearKey(Y)]), null);
+  is("the store moved with it", [traces(Y, Y2, y.sid, y.handle).atOld, traces(Y, Y2, y.sid, y.handle).atNew], [false, true]);
+
+  redis.clear();
+  const Z = "year-z@example.com";
+  const Z2 = "year-z-new@example.com";
+  const z = await makeStore(Z, "yearnomark");
+  is("control: a store that never took a break moves, and no mark is made for it", [(await moveAccount(Z, Z2)).ok, redis.run(["GET", pauseYearKey(Z2)]), redis.run(["GET", pauseYearKey(Z)])], [true, null, null]);
+
+  redis.clear();
+  const W = "year-w@example.com";
+  const W2 = "year-w-new@example.com";
+  const w = await makeStore(W, "yearunread");
+  redis.run(["SET", pauseYearKey(W), takenAt, "EX", 325 * 86_400]);
+  pauseYearUnread = true;
+  let yearThrew = "";
+  try {
+    await moveAccount(W, W2);
+  } catch (error) {
+    yearThrew = (error as Error).name;
+  } finally {
+    pauseYearUnread = false;
+  }
+  is("rule 24: a mark that does not read is never \"no break taken\": the move throws an unknown reply", yearThrew, "UnknownReplyError");
+  is("nothing moved, and the mark stays where it was", [traces(W, W2, w.sid, w.handle).atOld, traces(W, W2, w.sid, w.handle).atNew, redis.run(["GET", pauseYearKey(W)]), redis.run(["GET", pauseYearKey(W2)])], [true, false, takenAt, null]);
 
   part("Rule 24: the line of held stores that does not read is never \"not held\"");
   redis.clear();

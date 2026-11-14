@@ -19,7 +19,7 @@ export function CampaignResultsPanel({ data, range, spends }: { data: StatsData;
   const sortLabel=CAMPAIGN_SORTS.find(option=>option.key===sort)?.label ?? "Recorded ads: highest first";
   const money = (amount: number | null) => amount === null ? "—" : formatMoney(amount, data.currency);
   return <section className="mt-6 rounded-[12px] bg-paper px-4 py-4 ring-1 ring-line" aria-labelledby="numbers-posts">
-    <h3 id="numbers-posts" className="text-sm font-bold text-ink">Campaigns, payments and recorded ads</h3>
+    <h3 id="numbers-posts" tabIndex={-1} className="text-sm font-bold text-ink">Campaigns, payments and recorded ads</h3>
     <p className="mt-1 text-xs text-ink-soft">{report.from} to {report.to}, UTC. The same campaign tag is combined across channels. Visits are counted for the tag as a whole; payment channels describe paid records, not a split of those visits.</p>
     {!report.salesKnown ? <p className="mt-2 text-sm text-ink-soft" role="status">{report.partial ? "The purchase reading is incomplete. Full campaign amounts and paid-record counts wait for complete figures." : "Complete paid-record figures are not available. Visits and recorded ads can still be read."}</p> : null}
     {report.rows.length ? <div className="mt-3 flex flex-wrap items-end gap-3">

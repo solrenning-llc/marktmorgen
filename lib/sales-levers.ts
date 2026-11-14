@@ -14,7 +14,7 @@ export function salesLeverSettings(store:Store){
  {key:"upsell" as const,title:"Upsell",state:funnel?"A funnel is configured; review its offer steps":"No visible product funnel is configured",path:"#products",cost:"Configure a real product and its terms; the buyer chooses whether to accept."},
  {key:"downsell" as const,title:"Downsell",state:funnel?"A funnel is configured; review its decline path":"No visible product funnel is configured",path:"#products",cost:"A decline path needs your product choices; no offer or charge is invented."},
  {key:"bundle" as const,title:"Bundle",state:visible.some(item=>(item.kind&KIND.bundle)!==0)?"A visible bundle is configured":"No visible bundle is configured",path:"bundles",cost:"Available for your chosen products and published terms; no buyer is charged automatically."},
- {key:"recovery" as const,title:"Checkout recovery",state:store.recovery.enabled?"Enabled in saved settings":"Off in saved settings",path:"#recovery",cost:"Email, consent, sender, allowance and cost gates apply. Not automatically enabled."},
+ {key:"recovery" as const,title:"Checkout recovery",state:store.recovery.enabled?"Enabled in saved settings":"Off in saved settings",path:"#checkout-reminders",cost:"Email, consent, sender, allowance and cost gates apply. Not automatically enabled."},
  {key:"next" as const,title:"Next offer",state:store.nextOffer.on?"Enabled in saved settings; add-on gates still apply":"Off in saved settings",path:"#answers",cost:"Store assistant add-on, data reads and optional AI have their own caps and reservation. Not automatically enabled."},
  ];
 }

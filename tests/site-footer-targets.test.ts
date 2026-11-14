@@ -25,12 +25,23 @@ const VARIANTS = [
   ["morning", renderToStaticMarkup(createElement(SiteFooter, { morning: true }))],
 ] as const;
 
+/** Drops every tag until none is left, so a tag cut in two cannot rebuild one (CodeQL js/incomplete-multi-character-sanitization). */
+function withoutTags(text: string): string {
+  let before: string;
+  let after = text;
+  do {
+    before = after;
+    after = before.replace(/<[^>]*>/g, "");
+  } while (after !== before);
+  return after;
+}
+
 /** Every link of a footer list (a column or the bottom row), with its class list and words. */
 const anchors = (html: string) =>
   [...html.matchAll(/<li[^>]*>\s*<a([^>]*)>([\s\S]*?)<\/a>/g)].map((m) => ({
     cls: /class="([^"]*)"/.exec(m[1])?.[1] ?? "",
     href: /href="([^"]*)"/.exec(m[1])?.[1] ?? "",
-    words: m[2].replace(/<[^>]*>/g, "").trim(),
+    words: withoutTags(m[2]).trim(),
   }));
 
 test("every footer link outside a sentence is a 44 x 44 target", () => {

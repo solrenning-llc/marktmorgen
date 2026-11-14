@@ -27,6 +27,7 @@ import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { del } from "@/lib/blob";
 import { withLock } from "@/lib/redis-lock";
+import { reportEmailRoom } from "@/lib/takedown-mail";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
@@ -55,6 +56,11 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
     ["SET", reportKey(id), JSON.stringify(report), "EX", REPORT_SECONDS],
     ["SET", tokenKey(token), id, "EX", TOKEN_SECONDS],
   ]);
+  // The day's company ceiling on these emails (lib/takedown-mail.ts): past it the notice, already kept above, is answered
+  // as received and goes in the next daily digest; it is never refused.
+  const room = await reportEmailRoom(id);
+  if (room === "held") return "sent";
+  if (room === "unknown") return "error";
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,

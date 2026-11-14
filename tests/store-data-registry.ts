@@ -984,6 +984,11 @@ export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- lib/ t–z
   "nl:report:@lib/takedown.ts": company("A takedown report", "Reports to the company."),
   "nl:report:t:@lib/takedown.ts": company("A takedown report's token", "Reports to the company."),
+  "nl:report:@lib/takedown-mail.ts": company("A takedown report, read for the day's digest", "Reports to the company."),
+  "nl:report:t:@lib/takedown-mail.ts": company("A takedown report's link, made for the day's digest", "Reports to the company, 60 days."),
+  "nl:report:mailday:@lib/takedown-mail.ts": company("The report form's emails sent today", "One count a UTC day, kept two days: the company's."),
+  "nl:report:held@lib/takedown-mail.ts": company("Notices waiting for the daily digest", "Report ids only, taken off as each digest is sent: the company's."),
+  "nl:report:digest:@lib/takedown-mail.ts": company("The day's digest of waiting notices, once", "One mark a UTC day, kept two days: the company's."),
   "nl:callteam:@lib/team-booking.ts": { what: "A team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:callteam:rr:@lib/team-booking.ts": { what: "Round-robin counts of a team event type: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
   "nl:rl:team-invite:@lib/team.ts": short("Invites a day", "studio", 1, 128),

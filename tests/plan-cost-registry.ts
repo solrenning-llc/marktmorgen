@@ -1349,6 +1349,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // A campaign landing's save checks its words against up to AD_REVIEWS of the product's reviews: AD_CONTEXT_UNITS studio requests first, at the reviews' heaviest, refused without reading (Claude 5's review of #1950; tests/ad-context-cost.test.ts holds the bytes).
+      { file: "lib/ad-context.ts", names: ["AD_REVIEWS", "AD_REVIEW_BYTES", "STUDIO_REQUEST_BYTES", "AD_CONTEXT_UNITS"] },
+      // And the product's page it reads, measured first (keptPageBytes) and read no further (readPageWithin), counted at pageReadUnits in the save and the list (Claude 5's return on #1950; tests/campaign-landing-page-cost.test.ts).
+      { file: "lib/ad-context.ts", names: ["pageReadUnits"] },
+      { file: "lib/sales-page-store.ts", names: ["keptPageBytes", "readPageWithin", "PageGrown"] },
+      { file: "app/api/store/campaign-landing/route.ts", names: ["countStudio(store, null, AD_CONTEXT_UNITS + pageReadUnits(bytes))", "countStudio(store, null, pageReadUnits(bytes))"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Explaining a funnel check reads that funnel's checks again: FUNNEL_EXPLAIN_READ_UNITS more studio requests first, a studio page's in all (26 [E9]).

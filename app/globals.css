@@ -2362,6 +2362,16 @@ a.chip {
   border-color: var(--st-accent-text);
   box-shadow: 0 0 0 3px var(--st-accent-soft);
 }
+/* No block of the digital consent box is wider than 80 characters, wherever it is drawn (1.4.8 AAA,
+   tests/consent-box-line-length.test.ts): its paragraphs and the sentence the buyer checks (the label's span); its
+   error box and its screen-reader-only line keep their width. In @layer components at no weight, like the store
+   front's caps below: where the box sits in .st-measure or [data-store-layout] their narrower 34ch still applies,
+   and Tailwind's utilities still win. */
+@layer components {
+  :where([data-digital-consent]) :where(p:not(.st-note, .sr-only), label > span) {
+    max-width: 46ch;
+  }
+}
 /* Keyboard focus stays distinct even when a creator picks a very pale or
    dark accent. Each opaque band is large enough to be seen on its own. */
 .st-field:focus-visible {

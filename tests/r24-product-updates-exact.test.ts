@@ -15,7 +15,7 @@ import test from "node:test";
 import { advanceUpdate, advanceUpdates, latestUpdate, readUpdateJob, startUpdate } from "@/lib/product-updates";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setMailSettings, setProductLink, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { usedThisMonth } from "@/lib/mail";
+import { GIVE_BACK_FLOOR, usedThisMonth } from "@/lib/mail";
 import { windowId } from "@/lib/allowance-window";
 import { forgetNoted } from "@/lib/erasure-index";
 import { UnknownReplyError } from "@/lib/redis-reply";
@@ -126,6 +126,9 @@ test("1.1 a send whose links failed says so in the job and keeps it for the next
   } finally { r.restore(); }
 });
 
+// release (lib/mail.ts) gives back on the month and the day, each never below zero (GIVE_BACK_FLOOR, #4074).
+const isGiveBack = (c: unknown[]) => c[0] === "DECRBY" || (c[0] === "EVAL" && c[1] === GIVE_BACK_FLOOR);
+
 const unknownReleases: [string, unknown[] | "throw"][] = [
   ["throws", "throw"], ["an empty answer", []], ["a short answer", [0]], ["text", ["0", "x"]], ["objects", [{}, {}]], ["fractions", [0.5, 1]],
 ];
@@ -135,7 +138,7 @@ for (const [name, reply] of unknownReleases) {
     try {
       const out = await runWith(r, async (cs) => {
         if (cs.some(isStopWrite)) throw new Error("synthetic stop link write failed");
-        if (cs.length === 2 && cs.every((c) => c[0] === "DECRBY")) {
+        if (cs.length === 2 && cs.every(isGiveBack)) {
           if (reply === "throw") throw new Error("synthetic give-back failed");
           return reply;
         }
@@ -288,7 +291,7 @@ test("2.4 a send whose give-back is unknown still throws, and the other send in 
   }) as typeof fetch;
   let unknownOnce = false;
   redis.pipeline = (async (cs: Command[]) => {
-    if (!unknownOnce && cs.length === 2 && cs.every((c) => c[0] === "DECRBY")) {
+    if (!unknownOnce && cs.length === 2 && cs.every(isGiveBack)) {
       unknownOnce = true;
       return [{}, {}];
     }

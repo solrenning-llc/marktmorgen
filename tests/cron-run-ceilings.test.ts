@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   redis.clear();
   {
     const from = sent.length;
-    rule = { when: (c) => c.some((x) => (x[0] === "SET" || x[0] === "GET") && x[1] === LOCK), reply: ["not OK"] };
+    rule = { when: (c) => c.some((x) => (x[0] === "SET" || x[0] === "GET") && x[1] === LOCK), reply: [123] };
     const response = await usage(request);
     rule = null;
     const body = (await response.json()) as Record<string, unknown>;

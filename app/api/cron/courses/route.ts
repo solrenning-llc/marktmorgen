@@ -18,6 +18,15 @@ import { sweepCommunityUploads } from "@/lib/community-files";
  * in (lib/assignment.ts), and community pictures never put in a post
  * (lib/community-files.ts), a day on.
  */
+/**
+ * The most one run may take. Its lock is held 300 seconds and the drip emails
+ * have no deadline of their own, so the run is given the same: a shorter one
+ * could stop a run between taking a student's mark and sending the email, and
+ * that email would then wait out the mark (lib/learn.ts). The same ceiling as
+ * the shares job, whose run is also long.
+ */
+export const maxDuration = 300;
+
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
   // constant time. Without one set, only a local development server runs the

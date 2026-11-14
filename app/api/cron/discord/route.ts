@@ -8,6 +8,9 @@ import { sweepDiscord } from "@/lib/discord-access";
 /** How long one run may go on checking; the rest wait for the next. */
 const BUDGET_MS = 45_000;
 
+/** The platform stops the run past this, as for the other jobs with a 45-second budget; the lock (120 s) outlasts it. */
+export const maxDuration = 60;
+
 /**
  * Run on a schedule by Vercel: checks again everyone a store's Discord
  * server gave roles to, each at most every few hours (lib/discord-access.ts),

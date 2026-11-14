@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { TakedownButton } from "@/components/takedown-actions";
-import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
+import { heldByNotice, openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
@@ -12,7 +12,10 @@ type Params = { params: Promise<{ token: string }> };
 /**
  * One notice, opened from the email it was sent in (lib/takedown.ts): what it
  * says, and the reported store's content with a button to take each piece
- * down. Only that store can be touched from here, and only for 60 days.
+ * down. Only that store can be touched from here, and only for 60 days, or
+ * longer while a link it took down is held (lib/takedown-hold.ts): the
+ * links it holds are listed with what is next for each, and the buttons that
+ * record a counter-notice or the sender's word that they went to court.
  */
 export default async function TakedownPage({ params }: Params) {
   const { token } = await params;
@@ -36,6 +39,8 @@ export default async function TakedownPage({ params }: Params) {
       owedUnknown = true;
     }
   }
+  const held = store ? heldByNotice(report, store) : [];
+  const day = (ms: number) => new Date(ms).toLocaleDateString("en-US", { dateStyle: "long", timeZone: "UTC" });
   return (
     <LegalPage title={report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"} eyebrow={`Notice ${report.id}`} effective={null} legalNav={false} lastUpdated={new Date(report.at).toLocaleString("en-US", { dateStyle: "long", timeStyle: "short", timeZone: "UTC" }) + " UTC"}>
       <LegalSection title="What it says">
@@ -65,6 +70,36 @@ export default async function TakedownPage({ params }: Params) {
                       {o.up ? <span className="block">It is back up now; the email still explains why it was taken down.</span> : null}
                     </span>
                     <TakedownButton token={token} action={o.action} label="Send the email to the creator" owed />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {held.length ? (
+            <>
+              <p className="font-semibold text-black">Held after this notice</p>
+              <p>Off the store and kept, so it can go back after a counter-notice. Without one by its date, it is deleted on that date.</p>
+              <ul className="space-y-3">
+                {held.map((h) => (
+                  <li key={`${h.link.id}-${h.heldAt}`} className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="[overflow-wrap:anywhere]">
+                      {h.link.title} — {h.link.url}
+                      <span className="block">
+                        {h.court
+                          ? `The sender went to court: it stays down, and is deleted on ${day(Date.parse(h.until))} or soon after.`
+                          : h.back !== null
+                            ? `Counter-notice received ${day(Date.parse(h.counter ?? ""))}: it goes back on ${day(h.back)}, unless the sender tells us first that they have gone to court.`
+                            : `Waiting for a counter-notice until ${day(Date.parse(h.until))}.`}
+                      </span>
+                    </span>
+                    {h.court ? null : h.back !== null ? (
+                      <span className="inline-flex flex-wrap gap-2">
+                        <TakedownButton token={token} action={{ type: "held", id: h.link.id, op: "court" }} label="The sender went to court" />
+                        {h.canRestore ? <TakedownButton token={token} action={{ type: "held", id: h.link.id, op: "restore" }} label="Put it back now" /> : null}
+                      </span>
+                    ) : h.canCounter ? (
+                      <TakedownButton token={token} action={{ type: "held", id: h.link.id, op: "counter" }} label="A counter-notice came in" />
+                    ) : null}
                   </li>
                 ))}
               </ul>

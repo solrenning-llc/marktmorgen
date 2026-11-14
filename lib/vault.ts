@@ -531,3 +531,24 @@ export async function retireVaultSession(pathname: string, uploadId: string): Pr
   const completed = await headVault(pathname);
   return completed !== null && completed !== "unreachable";
 }
+
+/**
+ * Retires the session of an upload whose own record has expired (lib/vault-storage.ts). With the record confirmed
+ * gone, nothing can be signed or joined for it any more, so a session the provider no longer has (aborted by its own
+ * lifecycle rule for incomplete uploads, or already completed) holds nothing beyond what the store measures: whether
+ * the object is there (measured with the store's files) or confirmed absent (nothing kept). An unreachable provider
+ * or a record that cannot be read keeps every reserved byte.
+ */
+export async function retireExpiredVaultSession(pathname: string, uploadId: string): Promise<boolean> {
+  const config = vaultConfig();
+  if (!config || !readVaultPath(pathname) || !UPLOAD_ID.test(uploadId)) return false;
+  try {
+    if ((await readUpload(pathname)) !== null) return retireVaultSession(pathname, uploadId);
+  } catch {
+    return false;
+  }
+  const answer = await ask(config, "DELETE", objectUrl(config, pathname) + "?uploadId=" + encodeURIComponent(uploadId));
+  if ([200, 204].includes(answer.status)) return true;
+  if (answer.status !== 404) return false;
+  return (await headVault(pathname)) !== "unreachable";
+}

@@ -189,6 +189,7 @@ async function main(): Promise<void> {
     "product del(file.pathname)": "files of a removed product, read from its own records",
     "product del(linked.removed.pathname)": "the file the record held, after the link that replaced it was written",
     "option del(file.pathname)": "files of a removed option, read from its own record",
+    "stores deleteFile(some)": "a deleted extra store's own folders (its pictures, its files, its community's pictures), listed by prefix after deleteStore removed it; deleteStore admits only an extra store with no product",
     "links del(result.removed.path)": "the removed link's own picture, after it was written; link-image attach admits only a fresh or own name",
     "link-image dropFresh(path)": "only a path this request took from the picture door",
     "link-image dropFresh(image.path)": "only a path this request took from the picture door",

@@ -128,7 +128,8 @@ type Pending = {
 function parseOwed(raw: unknown): Owed | undefined {
   const value = raw as Partial<Owed> | null | undefined;
   if (!value || typeof value !== "object") return undefined;
-  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) > 0 ? (value.cents as number) : undefined;
+  // 0 is a settlement that gives nothing back (every language delivered) whose close did not land: collectRefund closes it.
+  const cents = value.cents === null ? null : Number.isSafeInteger(value.cents) && (value.cents as number) >= 0 ? (value.cents as number) : undefined;
   if (cents === undefined || typeof value.key !== "string" || !value.key || typeof value.since !== "number" || !Number.isSafeInteger(value.looks)) return undefined;
   return { cents, key: value.key, since: value.since, looks: value.looks as number, ...(value.stuck === true ? { stuck: true as const } : {}) };
 }
@@ -285,7 +286,11 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
   const held = repliesFor(await redisPipeline([["GET", pendingKey(id)]]), 1);
   if (!held) return { ok: false, reason: "unavailable" };
   const order = parseOrder(held[0]);
-  if (!order) return { ok: false, reason: parsePending(held[0])?.owed ? "owed" : "busy" };
+  if (!order) {
+    const owed = parsePending(held[0])?.owed;
+    // Nothing owed (cents 0) is a request about to be closed, never a refund waiting on Stripe.
+    return { ok: false, reason: owed && owed.cents !== 0 ? "owed" : "busy" };
+  }
   if (now - order.at < ORDER_SETTLE_MS) return { ok: false, reason: "checking" };
   const settled = await settleOrder(id, held[0] as string, order, now);
   return { ok: false, reason: settled === "refund" ? "owed" : settled === "gone" ? "unavailable" : "checking" };
@@ -412,7 +417,7 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   const answer = await askStream("GET", `/videos/${id}`);
   if (answer.status === 404) {
     // The video is gone, deleted with its lesson: what was not written is given back.
-    return (await settle(id, pending, pending.got, now)) ? "done" : "waiting";
+    return (await settle(id, raw as string, pending, pending.got, now)) ? "done" : "waiting";
   }
   if (answer.status !== 200) {
     await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
@@ -425,12 +430,13 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
   // A language delivered at an earlier look stays delivered (R47): captions taken off since are not refunded.
   const delivered = pending.langs.filter((lang) => got.includes(lang) || pending.got.includes(lang));
   if (delivered.length === pending.langs.length || now - pending.at > GIVE_UP_HOURS * 3_600_000) {
-    return (await settle(id, pending, delivered, now)) ? "done" : "waiting";
+    return (await settle(id, raw as string, pending, delivered, now)) ? "done" : "waiting";
   }
-  await redisPipeline([
-    ["SET", key, JSON.stringify({ ...pending, got: delivered }), "EX", KEEP_SECONDS],
-    ["ZADD", QUEUE, now + LOOK_AGAIN_MS, id],
-  ]);
+  // Progress is written only over the record this look read, as settle is: a slow look must never bring back a
+  // request another look settled and closed, or overwrite a refund owed (it would then refund a delivered language).
+  // When the record changed, it looks again and reads what the other look decided.
+  await swapRecord(id, raw as string, JSON.stringify({ ...pending, got: delivered }), KEEP_SECONDS);
+  await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
   return "waiting";
 }
 
@@ -439,21 +445,41 @@ export async function syncAutoCaptions(id: string, now = Date.now()): Promise<"d
  * record goes only once Stripe confirms the refund succeeded; otherwise what
  * is owed is kept and looked at again (collectRefund).
  */
-async function settle(id: string, pending: Pending, got: string[], now: number): Promise<boolean> {
+async function settle(id: string, raw: string, pending: Pending, got: string[], now: number): Promise<boolean> {
   const missing = pending.langs.length - got.length;
-  if (missing > 0) {
-    const cents = got.length === 0 ? null : Math.floor((pending.cents * missing) / pending.langs.length);
-    if (cents === null || cents > 0) {
-      const key = `nl-captions:${id}:${pending.at}:refund`;
-      if (!(await giveBack(pending, cents, key))) {
-        await owe(id, { ...pending, got }, cents, key, now);
-        return false;
-      }
-    }
+  const cents = missing <= 0 ? 0 : got.length === 0 ? null : Math.floor((pending.cents * missing) / pending.langs.length);
+  const key = `nl-captions:${id}:${pending.at}:refund`;
+  // Decided once, before any refund: the record this look read becomes the refund owed, in one script, only while it
+  // is still what this look read. Two looks at once (the announcement and the sweep) may have read the service a moment
+  // apart; the one that read less would otherwise refund a language the other saw delivered, or the whole payment once
+  // the other had settled and deleted the record (Stripe refuses a key reused with another amount, and the refusal was
+  // kept as the whole payment owed). The look that loses looks again, and reads what the first one decided.
+  const owed: Owed = { cents, key, since: now, looks: 0 };
+  if (!(await swapRecord(id, raw, JSON.stringify({ ...pending, got, owed })))) {
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id]]);
+    return false;
   }
-  await redisPipeline([["DEL", pendingKey(id)]]);
-  await unqueue(id, null, now);
+  if (cents !== 0 && !(await giveBack(pending, cents, key))) {
+    console.error("a captions refund was not confirmed; it is kept and looked at again", id);
+    await redisPipeline([["ZADD", QUEUE, now + LOOK_AGAIN_MS, id], ...keepListed(pending)]);
+    return false;
+  }
+  await closeOwed(id, pending, now);
   return true;
+}
+
+/** A captions record replaced only while it is still `from`, with its expiry, in one script (the local stand-in, lib/redis-memory.ts, models it by name). */
+const RECORD_SWAP = '-- marktmorgen:captions-swap:v1\nif redis.call("GET", KEYS[1]) == ARGV[1] then redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3]) return 1 else return 0 end';
+
+/** True only when the record was `from` and is now `to`; any other answer, or none, is false and nothing is assumed written. */
+async function swapRecord(id: string, from: string, to: string, seconds = REFUND_KEEP_SECONDS): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", RECORD_SWAP, 1, pendingKey(id), from, to, seconds]]), 1);
+    return replies?.[0] === 1;
+  } catch (error) {
+    console.error("a captions record could not be changed; looked at again", id, error);
+    return false;
+  }
 }
 
 /** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
@@ -592,6 +618,11 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     await redisPipeline([["ZREM", QUEUE, id]]);
     return "waiting";
   }
+  // A settlement that gives nothing back (every language delivered) only closes.
+  if (owed.cents === 0) {
+    await closeOwed(id, pending, now);
+    return "done";
+  }
   if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
     await closeOwed(id, pending, now);
     return "done";
@@ -670,6 +701,6 @@ export async function autoRefundsOwed(folder: string): Promise<{ id: string; cen
   const rows = await redisPipeline(ids.map((id) => ["GET", pendingKey(id)]));
   return ids.flatMap((id, i) => {
     const pending = parsePending(rows[i]);
-    return pending?.owed && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    return pending?.owed && pending.owed.cents !== 0 && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
   });
 }

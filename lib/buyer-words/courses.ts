@@ -162,6 +162,8 @@ const en = {
   pausedStrong: "This video is paused for now.",
   pausedRest: (store: string) =>
     `${store} has no paid plan, and its videos have been watched for all the hours a store without one has this month. It plays again as soon as the store's plan is paid, or when the month turns. The rest of the lesson is here as usual.`,
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts): true whatever the plan.
+  freePausedRest: "Free previews and downloads from this store are paused until next month. Anything you have bought is unaffected. The rest of the lesson is here as usual.",
   videoFailed: (store: string) => `This lesson's video could not be prepared. ${store} has to upload it again.`,
   videoNotLoaded: "The video could not be loaded just now. Refresh the page in a moment.",
   /** The button under a stamped lesson video (602 [WP1]): puts the video and the buyer's mark in full screen together. */
@@ -486,6 +488,7 @@ const es: CoursesWords = {
   pausedStrong: "Este video está en pausa por ahora.",
   pausedRest: (store) =>
     `${store} no tiene un plan de pago, y sus videos ya se vieron durante todas las horas que tiene este mes una tienda sin plan. Se vuelve a reproducir en cuanto se pague el plan de la tienda, o cuando empiece el mes siguiente. El resto de la lección está aquí como siempre.`,
+  freePausedRest: "Las vistas previas y descargas gratuitas de esta tienda están en pausa hasta el mes que viene. Lo que hayas comprado no se ve afectado. El resto de la lección está aquí como siempre.",
   videoFailed: (store) => `No se pudo preparar el video de esta lección. ${store} tiene que volver a subirlo.`,
   videoNotLoaded: "No se pudo cargar el video en este momento. Actualiza la página en un momento.",
   fullScreen: "Pantalla completa",
@@ -793,6 +796,7 @@ const fr: CoursesWords = {
   pausedStrong: "Cette vidéo est en pause pour le moment.",
   pausedRest: (store) =>
     `${store} n'a pas de forfait payant, et ses vidéos ont été regardées pendant toutes les heures dont dispose ce mois-ci une boutique sans forfait. Elle sera de nouveau lue dès que le forfait de la boutique sera payé, ou au début du mois prochain. Le reste de la leçon est disponible comme d'habitude.`,
+  freePausedRest: "Les aperçus et téléchargements gratuits de cette boutique sont en pause jusqu'au mois prochain. Ce que vous avez acheté n'est pas concerné. Le reste de la leçon est disponible comme d'habitude.",
   videoFailed: (store) => `La vidéo de cette leçon n'a pas pu être préparée. ${store} doit la mettre en ligne à nouveau.`,
   videoNotLoaded: "La vidéo n'a pas pu être chargée pour le moment. Actualisez la page dans un instant.",
   fullScreen: "Plein écran",
@@ -1094,6 +1098,7 @@ const de: CoursesWords = {
   pausedStrong: "Dieses Video ist vorerst pausiert.",
   pausedRest: (store) =>
     `${store} hat keinen bezahlten Tarif, und seine Videos wurden in diesem Monat bereits so viele Stunden angesehen, wie ein Shop ohne Tarif hat. Es wird wieder abgespielt, sobald der Tarif des Shops bezahlt ist oder der neue Monat beginnt. Der Rest der Lektion ist wie gewohnt hier.`,
+  freePausedRest: "Kostenlose Vorschauen und Downloads dieses Shops sind bis zum nächsten Monat pausiert. Was Sie gekauft haben, ist davon nicht betroffen. Der Rest der Lektion ist wie gewohnt hier.",
   videoFailed: (store) => `Das Video dieser Lektion konnte nicht vorbereitet werden. ${store} muss es erneut hochladen.`,
   videoNotLoaded: "Das Video konnte gerade nicht geladen werden. Laden Sie die Seite gleich neu.",
   fullScreen: "Vollbild",
@@ -1397,6 +1402,7 @@ const it: CoursesWords = {
   pausedStrong: "Questo video è in pausa per ora.",
   pausedRest: (store) =>
     `${store} non ha un piano a pagamento, e i suoi video sono già stati guardati per tutte le ore che un negozio senza piano ha questo mese. Si potrà riprodurre di nuovo non appena il piano del negozio sarà pagato, o all'inizio del mese prossimo. Il resto della lezione è qui come sempre.`,
+  freePausedRest: "Le anteprime e i download gratuiti di questo negozio sono in pausa fino al mese prossimo. Ciò che hai acquistato non è interessato. Il resto della lezione è qui come sempre.",
   videoFailed: (store) => `Non è stato possibile preparare il video di questa lezione. ${store} deve caricarlo di nuovo.`,
   videoNotLoaded: "Non è stato possibile caricare il video in questo momento. Ricarica la pagina tra un momento.",
   fullScreen: "Schermo intero",
@@ -1701,6 +1707,7 @@ const nl: CoursesWords = {
   pausedStrong: "Deze video is voorlopig gepauzeerd.",
   pausedRest: (store) =>
     `${store} heeft geen betaald abonnement, en de video's van deze winkel zijn deze maand al bekeken voor alle uren die een winkel zonder abonnement heeft. Hij speelt weer af zodra het abonnement van de winkel is betaald, of wanneer de nieuwe maand begint. De rest van de les staat hier zoals gewoonlijk.`,
+  freePausedRest: "Gratis voorproefjes en downloads van deze winkel zijn gepauzeerd tot volgende maand. Wat je hebt gekocht, blijft gewoon beschikbaar. De rest van de les staat hier zoals gewoonlijk.",
   videoFailed: (store) => `De video van deze les kon niet worden voorbereid. ${store} moet hem opnieuw uploaden.`,
   videoNotLoaded: "De video kon nu niet worden geladen. Vernieuw de pagina zo.",
   fullScreen: "Volledig scherm",
@@ -2005,6 +2012,7 @@ const pt: CoursesWords = {
   pausedStrong: "Este vídeo está em pausa por agora.",
   pausedRest: (store) =>
     `${store} não tem um plano pago, e os vídeos desta loja já foram vistos durante todas as horas que uma loja sem plano tem este mês. Volta a ser reproduzido assim que o plano da loja for pago, ou quando começar o próximo mês. O resto da aula está aqui como de costume.`,
+  freePausedRest: "As pré-visualizações e transferências gratuitas desta loja estão em pausa até ao próximo mês. O que comprou não é afetado. O resto da aula está aqui como de costume.",
   videoFailed: (store) => `Não foi possível preparar o vídeo desta aula. ${store} tem de o carregar novamente.`,
   videoNotLoaded: "Não foi possível carregar o vídeo neste momento. Atualize a página daqui a pouco.",
   fullScreen: "Tela cheia",

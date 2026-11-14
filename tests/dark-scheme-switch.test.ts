@@ -212,7 +212,7 @@ const failing = proof.pairs.filter((p) => p.ratio < p.min).map((p) => `${p.where
 is("no pair under 7:1, or 4.5:1 for a heading", [...new Set(failing)], []);
 is("the proof read hundreds of pairs, not a handful", proof.pairs.length > 600, true);
 const weakest = Math.min(...proof.pairs.filter((p) => p.min === 7).map((p) => p.ratio));
-is("the weakest text pair, recorded so a change is seen", Math.round(weakest * 100) / 100, 7.25);
+is("the weakest text pair, recorded so a change is seen", Math.round(weakest * 100) / 100, 7.58);
 
 part("The proof fails when the dark rules are missing");
 const start = css.indexOf(DARK_BLOCK_START);

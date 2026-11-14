@@ -14,7 +14,6 @@ import { activePlan } from "@/lib/product-extras";
 import { activeFunnel, funnelProductIds } from "@/lib/funnel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
-import { rememberPlan } from "@/lib/plans";
 import { UPSELL_COOKIE, newUpsellKey } from "@/lib/upsell";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 import { BUYER_COOKIE, BUYER_COOKIE_SECONDS, newBuyerKey } from "@/lib/learn";
@@ -362,11 +361,9 @@ export async function POST(request: NextRequest) {
     // The link is spent only once its checkout exists: going back from Stripe's
     // page and pressing buy again before that still has it.
     if (returning) await spendReturningLink(linkToken);
-    // Written down before the buyer leaves, so the plan — or a membership that
-    // ends after a set number of payments — is given its end whether or not
-    // they come back from paying.
-    const ends = inPlan || (product.recurring !== null && product.recurring.payments > 0);
-    if (ends && store.stripeAccountId) await rememberPlan(store.stripeAccountId, held.value.id);
+    // A plan, or a membership that ends after a set number of payments, was
+    // written down to be given its end by createCheckout itself (rememberPlan),
+    // as for every other door that opens a checkout.
     // The buyer's yes, kept with the sentence, its version and the time, before they leave for Stripe.
     if (reminding) await keepAssistReminder({ store, session: held.value.id, email: remindEmail, version: remindVersion });
     // Counted once the buyer is on their way, so the count never slows them.

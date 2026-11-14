@@ -316,9 +316,18 @@ export function affiliatesOn(store: Store): boolean {
   return store.affiliates.enabled && Boolean(store.statsId) && isRedisConfigured();
 }
 
-/** Whether people can apply: the programme is on and its emails can be sent. */
+/**
+ * Whether the programme takes anybody new: on, and the store not switched off after notices about its content
+ * (lib/takedown.ts). The one place every way in reads (canApply, buyersJoin, acceptPartnership, openAffiliateLink,
+ * invitePartner), so a direct POST is refused as the page is; an affiliate the store already has keeps signing in.
+ */
+export function takesNewAffiliates(store: Store): boolean {
+  return affiliatesOn(store) && !store.suspended;
+}
+
+/** Whether people can apply: the programme takes anybody new and its emails can be sent. */
 export function canApply(store: Store): boolean {
-  return affiliatesOn(store) && isSenderConfigured();
+  return takesNewAffiliates(store) && isSenderConfigured();
 }
 
 function parseAffiliate(raw: unknown): Affiliate | null {
@@ -858,11 +867,21 @@ async function changeAffiliate(
   throw new LockBusyError("an affiliate's record kept changing while it was written");
 }
 
-/** The affiliate this store has under an address, or null. */
+/**
+ * The record the address index names, only when it is that index's own: the record's id is the id the field held and
+ * its address is the one looked up (Codex G's MEDIUM on #3573). An index that points an address at another
+ * affiliate's record (a partial write, old data) names nobody, so it never signs one person in to another's page.
+ */
+function ownRecord(affiliate: Affiliate | null, id: string, email: string): Affiliate | null {
+  if (!affiliate || affiliate.id !== id) return null;
+  return canonicalEmail(affiliate.email) === canonicalEmail(email) ? affiliate : null;
+}
+
+/** The affiliate this store has under an address, or null (also when the index names another affiliate's record). */
 export async function affiliateByEmail(store: Store, email: string): Promise<Affiliate | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
   const [id] = await redisPipeline([["HGET", emailsKey(store.statsId), normaliseEmail(email)]]);
-  return typeof id === "string" && id ? readAffiliate(store, id) : null;
+  return typeof id === "string" && id ? ownRecord(await readAffiliate(store, id), id, email) : null;
 }
 
 /**
@@ -1049,7 +1068,8 @@ export async function invitePartner(input: {
   const { store, share, origin } = input;
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
-  if (!affiliatesOn(store) || !isSenderConfigured()) return "unavailable";
+  // Taking nobody new (takesNewAffiliates, as a store switched off after notices about its content): no email is sent.
+  if (!takesNewAffiliates(store) || !isSenderConfigured()) return "unavailable";
   const email = normaliseEmail(raw);
   if (email === normaliseEmail(store.email)) return "owner";
 
@@ -1135,7 +1155,7 @@ export async function invitePartner(input: {
  * carried, so the record is made exactly as it is made everywhere else.
  */
 export async function acceptPartnership(store: Store, email: string, share: PartnerShare, charge: Charge = PAID): Promise<OpenResult> {
-  if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
+  if (!takesNewAffiliates(store)) return { ok: false, reason: "unavailable" };
   const token = randomBytes(32).toString("hex");
   const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
@@ -1167,6 +1187,23 @@ export async function linkEmail(store: Store, token: string): Promise<string | n
   const [raw] = await redisPipeline([["GET", linkKey(token)]]);
   const grant = parseGrant(raw);
   return grant && grant.s === store.statsId ? grant.e : null;
+}
+
+/**
+ * Whether a link may be opened now: any, while the programme takes anybody new (takesNewAffiliates); otherwise only a
+ * plain link of an affiliate the store already has, which signs them in, never one that would make an application or
+ * approve the creator's invitation (grant.k). Reads only.
+ */
+async function grantOpens(store: Store, grant: LinkGrant): Promise<boolean> {
+  return takesNewAffiliates(store) || (grant.k !== 1 && (await affiliateByEmail(store, grant.e)) !== null);
+}
+
+/** grantOpens for an emailed link, for its page: false for a link that is not this store's or no longer works. */
+export async function linkOpens(store: Store, token: string): Promise<boolean> {
+  if (!AFFILIATE_TOKEN_PATTERN.test(token) || !isRedisConfigured()) return false;
+  const [raw] = await redisPipeline([["GET", linkKey(token)]]);
+  const grant = parseGrant(raw);
+  return Boolean(grant && grant.s === store.statsId && (await grantOpens(store, grant)));
 }
 
 /** A readable code for a new affiliate, from their address, not yet taken here. */
@@ -1203,7 +1240,11 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   let affiliate: Affiliate | null = null;
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-  if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // Only the index's own record (ownRecord): one under another address is never this link's (Codex G on #3573).
+  if (typeof knownId === "string") {
+    affiliate = ownRecord(await readAffiliate(store, knownId), knownId, grant.e);
+    if (!affiliate && knownId) return { ok: false, reason: "expired" };
+  }
   if (fence) {
     // The people read paid for first, by whoever pays for this path (openAffiliateLink's `charge`), rule 30.
     const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null, fence.charge);
@@ -1228,7 +1269,7 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
     const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
     if (Number(won) !== 1) {
       const [other] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+      affiliate = typeof other === "string" ? ownRecord(await readAffiliate(store, other), other, grant.e) : null;
       if (!affiliate) return { ok: false, reason: "expired" };
     } else {
       const code = await claimCode(store, grant.e, id);
@@ -1273,6 +1314,8 @@ export async function openAffiliateLink(store: Store, token: string, charge: Cha
   const [raw] = await redisPipeline([["GET", linkKey(token)]]);
   const grant = parseGrant(raw);
   if (!grant || grant.s !== statsId) return { ok: false, reason: "expired" };
+  // Taking nobody new (takesNewAffiliates): refused before anything is written, the link kept (grantOpens).
+  if (!(await grantOpens(store, grant))) return { ok: false, reason: "unavailable" };
 
   // A share carried by an invitation is checked again now, against the partners there are now, under the program's
   // partner lock (#2995 review): each invitation was inside the cap alone when sent, and two accepted could promise
@@ -1392,7 +1435,7 @@ async function sameInboxAsAnother(store: Store, address: string, self: string | 
 
 /** Whether buyers may join this store's programme on their own (lib/affiliate-setting.ts). */
 export function buyersJoin(store: Store): boolean {
-  return affiliatesOn(store) && store.affiliates.buyers;
+  return takesNewAffiliates(store) && store.affiliates.buyers;
 }
 
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;

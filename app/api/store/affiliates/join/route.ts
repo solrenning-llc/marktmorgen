@@ -2,7 +2,7 @@ import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, buyersJoin, joinAsBuyer } from "@/lib/affiliates";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -37,6 +37,9 @@ export async function POST(request: NextRequest) {
   const page = `${origin}/@${store.handle}/affiliates`;
   const back = (status: string) =>
     new Response(null, { status: 303, headers: { Location: `${page}?status=${status}`, "Cache-Control": "no-store" } });
+  // Nobody may join here (lib/affiliates.ts buyersJoin, which reads takesNewAffiliates: a store switched off after
+  // notices about its content takes nobody new): refused before anything is counted, written or read from Stripe.
+  if (!buyersJoin(store)) return back("unavailable");
   if (!(await withinStore("aff-join", `${clientAddress(request)}|${store.handle}`, 20, 600, store))) return back("limited");
   const result = await joinAsBuyer(store, order).catch((error) => {
     console.error("a buyer joining the affiliate program failed", error);

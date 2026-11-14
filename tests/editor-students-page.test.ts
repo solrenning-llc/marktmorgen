@@ -10,6 +10,8 @@
  *
  * In-memory Redis (tests/redis-stub.ts), a stand-in next/headers and next/navigation; no network.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { answering } from "./security/next-headers";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -79,6 +81,10 @@ async function main(): Promise<void> {
   part("The students page: the owner and the admin still open it");
   is("the owner opens it", await page(OWNER), "drawn");
   is("the admin opens it", await page(ADMIN), "drawn");
+
+  part("The course page offers the students page only to a role that may open it");
+  const coursePage = readFileSync(join(process.cwd(), "app/studio/course/[product]/page.tsx"), "utf8");
+  is("the link to the students page is drawn only when the role sees buyers' addresses", /\{seesBuyers \? \(\s*<p[^>]*>\s*<Link href=\{studioPath\(store, `product=\$\{encodeURIComponent\(product\.id\)\}`, "students"\)\}/.test(coursePage), true);
 
   part("The bulk route: the Editor is refused before anything is read");
   const editor = await bulk(EDITOR);

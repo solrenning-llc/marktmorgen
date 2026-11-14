@@ -206,9 +206,19 @@ function exactOwnArray(value: unknown, length?: number): unknown[] | null {
   return out;
 }
 
+/**
+ * The store's email platform settings, read exactly (CX-123 rule 24): null only when none are kept. A reply in
+ * another shape, or kept settings that do not read, throws UnknownReplyError: never "disconnected", which would fail
+ * a consented buyer's job for good (Claude 2 (nuvem D) bug hunt).
+ */
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's email platform settings");
+  const [raw] = replies;
+  if (raw === null) return null;
+  const config = typeof raw === "string" ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's email platform settings");
+  return config;
 }
 
 /** A tag as it is kept and sent: one line, no commas, at most MAX_TAG_LENGTH characters. */

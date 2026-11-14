@@ -43,7 +43,7 @@
  * a person, for the owner's monthly report (autoCaptionsKeptMonth).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
@@ -845,14 +845,20 @@ export async function autoCaptionsMoney(folder: string): Promise<{ owed: { id: s
     if (raw === null) return;
     if (typeof raw !== "string") throw new UnknownReplyError("an AI captions record");
     const pending = parsePending(raw);
-    if (!pending || readStreamPath(pending.path)?.folder !== folder) return;
+    // A record that does not read is unknown (rule 24): it throws, never left out as nothing owed.
+    if (!pending) throw new UnknownReplyError("an AI captions record");
+    if (readStreamPath(pending.path)?.folder !== folder) return;
     if (pending.owed) out.owed.push({ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true });
     else if (pending.kept !== undefined) out.unconfirmed.push({ id, cents: pending.cents });
   });
   return out;
 }
 
-/** Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and whether automatic looks have stopped. */
+/**
+ * Refunds for AI captions not yet confirmed by Stripe in one store folder, deleted videos included: cents owed and
+ * whether automatic looks have stopped. A reply in an unknown shape throws UnknownReplyError, never "none owed"
+ * (CX-123 rules 24 and 30): money owed is never hidden by a read that failed. A record gone (expired) is not owed.
+ */
 export async function autoRefundsOwed(folder: string): Promise<{ id: string; cents: number; stuck: boolean }[]> {
   return (await autoCaptionsMoney(folder)).owed;
 }

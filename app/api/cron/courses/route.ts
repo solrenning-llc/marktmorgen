@@ -10,13 +10,16 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
+import { noticeHeldStores } from "@/lib/community-held-notice";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
  * course opens for them. Once per student and module, one run at a time.
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
- * (lib/community-files.ts), a day on.
+ * (lib/community-files.ts), a day on. And tells each creator whose
+ * community has posts or comments waiting for approval, once a day
+ * (lib/community-held-notice.ts, 543 [CM2]).
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -45,8 +48,12 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep unused community pictures", error);
       return null;
     });
+    const held = await noticeHeldStores({ until: Date.now() + 20_000 }).catch((error) => {
+      console.error("telling creators about held community items failed", error);
+      return null;
+    });
     return Response.json(
-      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      { ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}), heldNotices: held },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

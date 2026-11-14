@@ -19,7 +19,7 @@
  */
 import { type Store, STORE_ID_PATTERN, handleLeadsToStore, handleProblem, storeForEmail, storeHandleKey } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export type ExactStore = Store | "none" | "unknown";
 
@@ -51,4 +51,16 @@ export async function storeForIdExactly(sid: string): Promise<ExactStore> {
   if (ref === null) return "none";
   const store = await storeForEmail(ref);
   return store && store.sid === sid ? store : "unknown";
+}
+
+/**
+ * The store behind a public address for a scheduled job's work (app/api/cron/mail): null only when it is confirmed
+ * gone; a reply out of shape throws, so a scheduled email, a sequence step or a product update whose store could not
+ * be read just now stays in line for a later run, and is never ended as "the store is not here anymore" (rule 24).
+ * The same two reads as storeForHandle.
+ */
+export async function storeForScheduledWork(handle: string): Promise<Store | null> {
+  const found = await storeForHandleExactly(handle);
+  if (found === "unknown") throw new UnknownReplyError("a scheduled send's store");
+  return found === "none" ? null : found;
 }

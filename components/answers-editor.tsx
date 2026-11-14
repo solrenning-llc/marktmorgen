@@ -61,8 +61,8 @@ export function AnswersEditor({
         for you to read: that list shows you what your pages are missing.
       </p>
       <p className="mt-2 text-ink-soft">
-        With three products or more, your store page also gets &ldquo;Not sure which one is for you?&rdquo;: a visitor says what they want and
-        sees which of your products fit, and why, picked only from your titles, one-line summaries, prices and notes. When nothing fits, what they
+        With three products or more, your store page also gets &ldquo;Not sure which one is for you?&rdquo;. A visitor says what they want and
+        sees which of your products fit, and why. The picks come only from your titles, one-line summaries, prices and notes. When nothing fits, what they
         looked for lands here too: an idea for your next product. Each pick counts as one answer.
       </p>
 

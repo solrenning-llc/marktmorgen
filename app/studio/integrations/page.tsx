@@ -62,8 +62,8 @@ export default async function StudioIntegrationsPage({ searchParams }: Params) {
         <h1 className="t-h2 mt-3">Your list, in your own email tool</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Connect Mailchimp, Kit, beehiiv or MailerLite, and the people who agree to hear from you are added there as they
-          come in — free sign-ups once they confirm, buyers once they have paid — with the tags you choose for each
-          product. No Zapier in between.
+          come in, with the tags you choose for each product. Free sign-ups are added once they confirm, and buyers once
+          they have paid. No Zapier in between.
         </p>
 
         {view === null ? (

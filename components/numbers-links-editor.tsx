@@ -100,7 +100,7 @@ export function NumbersLinksEditor({ links, now }: { links: LinkRow[]; now: numb
       </h2>
       <p className="mt-2 text-sm text-ink-soft">
         For a partner, a co-producer or a sponsor: a read-only page with your visitors, page views, checkouts and sales for the last 7, 30 and
-        90 days, where visitors came from, what sold and where buyers are. Counted here and read once a day, so it says the day; never a
+        90 days. It also shows where visitors came from, what sold and where buyers are. Counted here and read once a day, so it says the day; never a
         buyer&apos;s name or address. Each link has its own password and an end date, and you can take it back at any time.
       </p>
       <form

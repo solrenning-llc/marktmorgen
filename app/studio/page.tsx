@@ -2875,7 +2875,7 @@ export default async function StudioPage({
                   <p className="mt-1 text-ink-soft">
                     {`${ordersWords(ordered)} counted of the ${countWords(orderRoom)} ${
                       standing === "paid" ? "your plan covers" : "a free trial has"
-                    }. An order is a purchase confirmed, an offer taken after paying, a PayPal order, a place in a purchase for several people, a package of calls, or a free copy sent; a call booked counts as ${countWords(CALL_ORDER_UNITS)}.${feeWords(COMMISSION_LIVE && store.shared).ordersShared}`}
+                    }. An order is a purchase confirmed, an offer taken after paying, a PayPal order, a place in a purchase for several people, a package of calls, or a free copy sent. A call booked counts as ${countWords(CALL_ORDER_UNITS)}.${feeWords(COMMISSION_LIVE && store.shared).ordersShared}`}
                   </p>
                   {standing === "paid" && store && ordered >= orderRoom ? (
                     <p className="mt-4 notice notice-warn">

@@ -136,7 +136,7 @@ export function KitEditor({
       <h2 id="kit-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Media kit</h2>
       <p className="mt-2 break-words text-ink-soft">
         A page for brands at marktmorgen.com{address}: who you are, your audience, what a collaboration costs and who you have
-        worked with, in your store&apos;s look, with a button to save it as a PDF. The numbers are yours to type, and the page says so,
+        worked with. It is in your store&apos;s look, with a button to save it as a PDF. The numbers are yours to type, and the page says so,
         with the day you last changed them. Beside them it shows what this site counted itself: your products, your buyers&apos;
         rating and, if you choose, your visitors, sales and buyers&apos; countries.
       </p>

@@ -798,7 +798,7 @@ function Terms({
             <span className="block font-semibold text-ink">Buyers join without applying</span>
             <span className="block text-ink-soft">
               The thanks page and the purchase email offer everyone who buys their own link, approved at once. Someone you
-              declined or removed cannot rejoin this way with the same address, and an address that matches one on your list
+              declined or removed cannot rejoin this way with the same address. An address that matches one on your list
               written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Everyone else
               still applies.
             </span>
@@ -816,7 +816,7 @@ function Terms({
             <span className="block font-semibold text-ink">Approve every application at once</span>
             <span className="block text-ink-soft">
               Anyone who applies gets their link straight away, and you are told who joined; you can remove them at any time.
-              Someone you declined or removed stays out with the same address, and an application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.
+              Someone you declined or removed stays out with the same address. An application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.
             </span>
           </span>
         </label>
@@ -832,7 +832,7 @@ function Terms({
             <span className="block font-semibold text-ink">Draft posts for my affiliates</span>
             <span className="block text-ink-soft">
               On their own page, approved affiliates pick one of your products and get three posts written from its page, in
-              your store&apos;s language, each ending with their link and a line saying they earn from it. Up to 3 a day each;
+              your store&apos;s language. Each post ends with their link and a line saying they earn from it. Up to 3 a day each;
               every draft is one of your writing jobs for the month, and your affiliates together never use more than a quarter.
             </span>
           </span>
@@ -994,7 +994,7 @@ function Terms({
             ))}
           </div>
           <p className="mt-2 text-xs text-ink-soft">
-            {`One sale earns one affiliate either way: a commission is never split between two people who both sent the same buyer, because the one who did the work to convert them ends up paying for the one who did not. Your affiliate page tells applicants which of the two you chose, before they apply. The window of ${days.trim() || setting.days} days is counted from ${rule === "first" ? "that first click" : "their most recent click"}.`}
+            {`One sale earns one affiliate either way. A commission is never split between two people who both sent the same buyer. If it were, the one who did the work to convert them would end up paying for the one who did not. Your affiliate page tells applicants which of the two you chose, before they apply. The window of ${days.trim() || setting.days} days is counted from ${rule === "first" ? "that first click" : "their most recent click"}.`}
           </p>
         </fieldset>
 
@@ -1276,9 +1276,9 @@ function Terms({
           <span className="text-sm">
             <span className="block font-semibold text-ink">Affiliates may run paid search ads on your name</span>
             <span className="block text-ink-soft">
-              Off: when an affiliate&rsquo;s link is reached from a paid search ad (Google or Microsoft), what they are owed is
-              held out of every payment until you look and release it, so nobody is paid for buyers who were already searching
-              for you. Your affiliate page says so before anyone applies.
+              Off: sometimes an affiliate&rsquo;s link is reached from a paid search ad (Google or Microsoft). Then what they are
+              owed is held out of every payment until you look and release it. That way nobody is paid for buyers who were
+              already searching for you. Your affiliate page says so before anyone applies.
             </span>
           </span>
         </label>

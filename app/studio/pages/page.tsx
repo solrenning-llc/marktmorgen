@@ -149,7 +149,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
         <StudioTrail store={store} here="Sales pages" />
         <h1 className="t-h2 mt-3">A page that sells each product</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
-          {`Build each product's own page from up to ${MAX_BLOCKS} blocks: a hero with its picture or a video, text, benefits, what's inside, about you, questions, your guarantee, buttons to the checkout and your buyers' verified reviews. Something free gets a landing page with the sign-up form, to send ads to. Pages follow your store's look, and a product without blocks keeps the page it has.`}
+          {`Build each product's own page from up to ${MAX_BLOCKS} blocks. You can use a hero with its picture or a video, text, benefits, what's inside, about you, questions, your guarantee, buttons to the checkout and your buyers' verified reviews. Something free gets a landing page with the sign-up form, to send ads to. Pages follow your store's look, and a product without blocks keeps the page it has.`}
         </p>
 
         {templateNotice ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{templateNotice}</p> : null}

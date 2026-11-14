@@ -71,7 +71,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
           <StudioTrail store={store} here="Your pages" />
           <h1 className="t-h2 mt-3">Pages of your own, beside your products</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`About you, where to start, how to work with you, the questions people ask: each page is built from up to ${MAX_BLOCKS} blocks, follows your store's look, lives at your store's address and on your own domain, and can sit in the menu at the top of your store.`}
+            {`About you, where to start, how to work with you, the questions people ask. Each page is built from up to ${MAX_BLOCKS} blocks and follows your store's look. It lives at your store's address and on your own domain, and can sit in the menu at the top of your store.`}
           </p>
           <p className="mt-2 max-w-2xl text-sm text-ink-soft">
             {"Also yours: a business card, one address to give anyone you meet, with a button that saves you to their phone's contacts. "}

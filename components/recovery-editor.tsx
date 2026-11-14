@@ -73,8 +73,8 @@ export function RecoveryEditor({
       </div>
       <p className="mt-2 text-ink-soft">
         When a buyer leaves your checkout without paying, they can get one email about an hour later with a link back to
-        the product. Only a buyer who said yes: by asking for it on the page the way back from the checkout leads to, or,
-        on a Stripe account in the United States, by checking Stripe&apos;s box on the checkout itself. Nobody else is
+        the product. It goes only to a buyer who said yes. They say yes by asking for it on the page the way back from the
+        checkout leads to. On a Stripe account in the United States, they can also check Stripe&apos;s box on the checkout itself. Nobody else is
         ever written to.
       </p>
       <ul className="mt-4 space-y-2 text-sm text-ink-soft">
@@ -97,7 +97,7 @@ export function RecoveryEditor({
         <li className="flex gap-2">
           <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-brand" />
           <span>
-            Each paid product&apos;s page offers the same under its buy box, for a visitor who is not ready yet: one
+            Each paid product&apos;s page offers the same under its buy box, for a visitor who is not ready yet. They get one
             reminder with the link, in about an hour, tomorrow or in three days, as they choose. The same limits, the
             same stop link, and none if they buy first.
           </span>
@@ -111,7 +111,7 @@ export function RecoveryEditor({
         </li>
         <li className="flex gap-2">
           <span aria-hidden="true" className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-brand" />
-          <span>For calls and live sessions, the time the buyer picked goes back on sale when the checkout closes, so their reminder leads to the times still open, and is sent only while there is one.</span>
+          <span>For calls and live sessions, the time the buyer picked goes back on sale when the checkout closes. Their reminder then leads to the times still open, and is sent only while there is one.</span>
         </li>
       </ul>
 

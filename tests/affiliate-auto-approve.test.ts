@@ -121,7 +121,7 @@ async function main(): Promise<void> {
 
   part("The studio");
   const studio = readFileSync("components/affiliate-studio.tsx", "utf8");
-  is("a labeled switch that says what it does, no more than the code keeps", studio.includes("Approve every application at once") && studio.includes("Someone you declined or removed stays out with the same address, and an application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.") && !studio.includes("Anyone you declined or removed stays out"), true);
+  is("a labeled switch that says what it does, no more than the code keeps", studio.includes("Approve every application at once") && studio.includes("Someone you declined or removed stays out with the same address. An application whose address matches one on your list written another way we recognize (a + tag, or dots in a Gmail address) waits for your decision. Off, each application waits for you.") && !studio.includes("Anyone you declined or removed stays out"), true);
   is("the hold says declined and removed people count too", studio.includes("Another affiliate in your program, or someone you declined or removed, has the same inbox or payout address"), true);
   done();
 }

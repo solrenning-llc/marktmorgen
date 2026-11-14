@@ -87,8 +87,8 @@ export function TipsEditor({
     <form id="support" onSubmit={save} aria-busy={saving} className="card mt-8 scroll-mt-32 p-6 sm:p-8" noValidate>
       <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Support my work</h2>
       <p className="mt-2 text-ink-soft">
-        A box on your store page where a fan who has nothing to buy today can still say thank you: three amounts to press, or
-        one of their own, paid on Stripe&apos;s page to your own Stripe account, with a message for you if they want. Nothing is
+        A box on your store page where a fan who has nothing to buy today can still say thank you. They press one of three
+        amounts, or type their own, and pay on Stripe&apos;s page to your own Stripe account, with a message for you if they want. Nothing is
         delivered, so nothing can go wrong after it. Each one is listed with your sales as &ldquo;Support&rdquo;, with their
         message, and no affiliate or partner share is taken from it.
       </p>

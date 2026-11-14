@@ -445,8 +445,8 @@ export function BundleEditor({
       </div>
 
       <p className="mt-5 text-xs leading-relaxed text-ink-soft">
-        A buyer gets each product in the bundle exactly as if they had bought it on its own: its download or link on the
-        thank-you page and in their purchases, its course, its license key and its stamped <Abbr of="PDF" />, and they may review each one.
+        A buyer gets each product in the bundle exactly as if they had bought it on its own. That means its download or link on the
+        thank-you page and in their purchases, its course, its license key and its stamped <Abbr of="PDF" />. They may review each one.
         A refund of the bundle closes all of them. Products kept as drafts can go in, so something can be sold only as part
         of a bundle. The value shown on your store is worked out from each product&apos;s price today, and is only shown when
         the products cost more on their own.

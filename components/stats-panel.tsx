@@ -1379,7 +1379,7 @@ export function StatsPanel({
           </table>
           <p className="mt-2 text-xs text-ink-soft">
             Page views are the times the product&apos;s own page was opened, counted from October 8, 2026, for 7, 30 and 90 days.
-            Paid is sales for every 100 checkouts started; Bought is sales for every 100 page views, and is left out while a
+            Paid is sales for every 100 checkouts started. Bought is sales for every 100 page views. Bought is left out while a
             product sells more than its page is visited, as when buyers pay from your store&apos;s front page. A free product&apos;s
             checkouts are the addresses asked for, and it has no sales.
           </p>

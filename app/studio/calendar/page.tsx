@@ -105,7 +105,7 @@ export default async function StudioCalendarPage({ searchParams }: Params) {
           <StudioTrail store={store} here="Your calendar" />
           <h1 className="t-h2 mt-3">Your busy times, kept out of your team calls</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
-            {`Signed in as ${email}. When you host a team call, on this store or any other, the times you are busy in your own calendar are not offered, and the bookings you host can be written into your Google Calendar with a Meet link.`}
+            {`Signed in as ${email}. When you host a team call, on this store or any other, the times you are busy in your own calendar are not offered. The bookings you host can also be written into your Google Calendar with a Meet link.`}
           </p>
           {said?.tone === "ok" ? <ToastOnLoad message={said.text} param="cal" /> : null}
           {said && said.tone !== "ok" ? (

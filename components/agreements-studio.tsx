@@ -236,7 +236,7 @@ export function AgreementsStudio({
           <p className="mt-2 max-w-2xl text-ink-soft">
             {editing
               ? "A version that was sent is never changed. Saving writes a new version, emails its link, and needs a new signature; an earlier signature stays recorded against the text it signed."
-              : "For one person you deal with. They get one email from your store's name with a link to a page that shows the exact text, and sign it there by typing their full name and the address it was sent to."}
+              : "For one person you deal with. They get one email from your store's name with a link to a page that shows the exact text. They sign it there by typing their full name and the address it was sent to."}
           </p>
           {!open ? <p className="notice notice-error mt-4" role="alert">Agreements can be sent while your plan, or free trial, is running.</p> : null}
           {!editing ? (

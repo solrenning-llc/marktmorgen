@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     const url = new URL(String(input));
     if (url.hostname === "api.stripe.com") {
       if (url.pathname.endsWith("/customers")) return Response.json({ data: [{ id: "cus_Member000001", created: 1 }], has_more: false });
-      if (url.pathname.endsWith("/subscriptions")) return Response.json({ data: [{ status: "active", metadata: { store: "help-promise0" }, created: 1 }], has_more: false });
+      if (url.pathname.endsWith("/subscriptions")) return Response.json({ data: [{ id: "sub_HelpPromise01", status: "active", metadata: { store: "help-promise0" }, created: 1 }], has_more: false });
     }
     if (url.hostname === "api.resend.com") {
       captured = JSON.parse(String(init?.body));

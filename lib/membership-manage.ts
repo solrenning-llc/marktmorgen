@@ -117,7 +117,8 @@ export function sellsMemberships(store: Store): boolean {
   return sellsAny(store, "recurring");
 }
 
-type Listed = { data?: unknown };
+/** The pages of an address's customers read to find a member: twenty each, newest first. */
+export const MEMBER_CUSTOMER_PAGES = 3;
 
 /**
  * The creator's customer behind an address, when that customer has a
@@ -131,24 +132,39 @@ export async function findMember(store: Store, email: string): Promise<string | 
   if (!account) return null;
   const handles = saleHandles(store);
 
-  const customers = (await onAccount(
-    "GET",
-    account,
-    `/customers?email=${encodeURIComponent(email)}&limit=20`,
-  )) as Listed;
-  const list = Array.isArray(customers.data) ? (customers.data as { id?: unknown; created?: unknown }[]) : [];
-
-  let best: { id: string; at: number } | null = null;
-  for (const customer of list) {
-    if (typeof customer.id !== "string" || !CUSTOMER_PATTERN.test(customer.id)) continue;
-    const subs = (await onAccount(
+  // Every checkout makes a customer, and Stripe lists the newest first: the one holding a running membership may be
+  // past the first page. The list is read whole, up to MEMBER_CUSTOMER_PAGES, or not at all (rule 24): a page that is
+  // not a list, a customer that cannot be read or more than that throws, so the member is told it could not be
+  // checked, never "sent" with nothing sent (14 November 2026).
+  const customers: string[] = [];
+  let after = "";
+  for (let page = 0; ; page += 1) {
+    if (page >= MEMBER_CUSTOMER_PAGES) throw new StripeListUnreadable("a member's customers, more pages than are read");
+    const listed: unknown = await onAccount(
       "GET",
       account,
-      `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`,
-    )) as Listed;
-    const rows = Array.isArray(subs.data)
-      ? (subs.data as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[])
-      : [];
+      `/customers?email=${encodeURIComponent(email)}&limit=20${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+    );
+    const read = readStripePage(listed, () => true, CUSTOMER_PATTERN);
+    if (read.unreadable > 0) throw new StripeListUnreadable("a member's customers, a row");
+    customers.push(...read.rows.map((row) => row.id as string));
+    if (!read.hasMore) break;
+    if (!read.lastId) throw new StripeListUnreadable("a member's customers, no place to go on from");
+    after = read.lastId;
+  }
+
+  let best: { id: string; at: number } | null = null;
+  for (const customer of customers) {
+    // Each customer's memberships, whole, as subsOf reads them: a row or a page more it cannot read throws.
+    const listed: unknown = await onAccount(
+      "GET",
+      account,
+      `/subscriptions?customer=${encodeURIComponent(customer)}&status=all&limit=20`,
+    );
+    const read = readStripePage(listed, (row) => typeof ownField(row, "status") === "string", SUB_PATTERN);
+    if (read.unreadable > 0) throw new StripeListUnreadable("a customer's memberships, a row");
+    if (read.hasMore) throw new StripeListUnreadable("a customer's memberships, more than one page");
+    const rows = read.rows as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[];
     for (const sub of rows) {
       if (typeof sub.status !== "string" || !LIVE.has(sub.status)) continue;
       if (!handles.has(sub.metadata?.store ?? "")) continue;
@@ -156,7 +172,7 @@ export async function findMember(store: Store, email: string): Promise<string | 
       // membership: it ends by itself and is not cancelled from here.
       if (sub.metadata?.kind === "plan") continue;
       const at = typeof sub.created === "number" ? sub.created : 0;
-      if (!best || at > best.at) best = { id: customer.id, at };
+      if (!best || at > best.at) best = { id: customer, at };
     }
   }
   return best?.id ?? null;

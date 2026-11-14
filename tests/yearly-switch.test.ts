@@ -76,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   calls.push({ method, path, body });
-  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Dana000001", created: 1 }] });
+  if (method === "GET" && path === "/customers") return json({ data: [{ id: "cus_Dana000001", created: 1 }], has_more: false });
   if (method === "GET" && path === "/customers/cus_Dana000001") return json({ id: "cus_Dana000001", email: "dana@example.com" });
   if (method === "GET" && path === "/subscriptions") {
     const customer = url.searchParams.get("customer");

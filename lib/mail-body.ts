@@ -185,7 +185,7 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
       case "button": {
         const href = goesTo ? goesTo(block.href) : block.href;
         out.push(
-          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
+          `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:10px 20px;border:2px solid transparent;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );
         break;
       }

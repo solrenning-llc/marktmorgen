@@ -678,6 +678,8 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // compare-and-set a try, CONFIG_WRITE_TRIES tries at the most, and only on a reply it cannot read one GET more, the
   // settings read back once (CX-123 rule 24); when they are as they were read, that read starts the next try.
   // A webhook's try (lib/webhooks.ts): the delivery and the store read and written, the endpoint waited on for up to eight seconds.
+  // Since 14 November 2026 a try also reads the store's deletion marks for the addresses in its message, one HMGET
+  // (namesErased), before the endpoint is called: 11 commands a try in tests/webhook-erased-person.test.ts, inside the 20.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
 

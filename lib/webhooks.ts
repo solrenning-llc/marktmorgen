@@ -75,6 +75,7 @@ import { StripeError, onAccount } from "@/lib/stripe-account";
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
+import { suppressedAmongCommand, wholeErasedReply } from "@/lib/suppression";
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
 import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/store-allowance";
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
@@ -559,6 +560,56 @@ export function setSendHooksForTests(hooks: SendHooks): void {
   hooksForTests = hooks;
 }
 
+/** What the log says of a delivery not sent because a person in it was deleted from the store since it was made. */
+export const ERASED_NOT_SENT_WORDS = "Not sent: someone in this message was deleted from your store after it was made, so it is not sent and not kept.";
+
+/** What the log says of a try held because the store's deletion marks could not be read. */
+const ERASED_UNREAD_WORDS = {
+  retrying: "Not sent yet: we could not check whether someone in this message was deleted from your store. It is tried again on the usual schedule.",
+  failed: "Not sent: we could not check whether someone in this message was deleted from your store. You can send it again once your store reads normally.",
+};
+
+/** The most addresses one message is checked for; a message holds a handful (a buyer, an affiliate), DELIVERY_MAX_BYTES bounds the rest. */
+const ERASED_CHECK_MAX = 50;
+const ADDRESS_LIKE = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/;
+
+/** Every email address written anywhere in a delivery's message, lowercased, each once. */
+export function addressesIn(body: string): string[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    return [];
+  }
+  const found = new Set<string>();
+  const walk = (v: unknown, depth: number): void => {
+    if (depth > 12) return;
+    if (typeof v === "string") {
+      const text = v.trim().toLowerCase();
+      if (text.length <= 254 && ADDRESS_LIKE.test(text)) found.add(text);
+    } else if (Array.isArray(v)) v.forEach((item) => walk(item, depth + 1));
+    else if (v && typeof v === "object") Object.values(v).forEach((item) => walk(item, depth + 1));
+  };
+  walk(value, 0);
+  return [...found];
+}
+
+/**
+ * Whether a person named in a delivery's message has been deleted from the store since (lib/suppression.ts), read
+ * now, before anything is sent: lib/person-data.ts says a webhook's message is never acted on for a deleted address
+ * (Claude 7's webhook hunt, 14 November 2026). One HMGET of the store's prints for every address in it, read whole
+ * (wholeErasedReply): any other reply throws UnknownReplyError, never "not deleted". A message with no address, or a
+ * store with no list (its deletion marks are kept under its list), names nobody deleted, and reads nothing.
+ */
+async function namesErased(store: Pick<Store, "listId">, body: string): Promise<boolean> {
+  const addresses = addressesIn(body);
+  if (!store.listId || addresses.length === 0) return false;
+  // More than the check reads is not read as "not deleted": the message is held as unknown.
+  if (addresses.length > ERASED_CHECK_MAX) throw new UnknownReplyError("the people a webhook message names");
+  const [reply] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
+  return wholeErasedReply(reply, addresses.length).some((print) => print !== null);
+}
+
 /** One try of one delivery. Returns the delivery as it stands after it. */
 /**
  * `store` is whose month the try is taken from, before the endpoint is
@@ -592,6 +643,24 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
     }
   }
   if (keyHeld) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: HELD_WORDS[keyHeld] };
+  // A person in the message deleted from the store since it was made: never sent, and its message is not kept, so it
+  // cannot be sent again by hand either; nothing of the month is taken. A deletion mark that cannot be read is never
+  // "not deleted": the endpoint is not called, the try is counted and waits on the published schedule like a key
+  // that cannot be read, so it costs at most MAX_ATTEMPTS reads (Claude 7's webhook hunt, 14 November 2026).
+  if (store !== "taken" && delivery.type !== "test") {
+    let erased: boolean;
+    try {
+      erased = await namesErased(store, delivery.body);
+    } catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error("WEBHOOK DELETION MARKS UNREAD: the delivery is held, not sent", delivery.statsId, delivery.id, next.attempts);
+      const retryIn = RETRY_MINUTES[next.attempts - 1];
+      const held = { ...next, counted: countedByMonth(delivery) };
+      if (retryIn === undefined) return { ...held, state: "failed", next: 0, lastStatus: 0, lastError: ERASED_UNREAD_WORDS.failed };
+      return { ...held, state: "retrying", next: now + retryIn * 60_000, lastStatus: 0, lastError: ERASED_UNREAD_WORDS.retrying };
+    }
+    if (erased) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: ERASED_NOT_SENT_WORDS, body: "", givenUp: true };
+  }
   // 232 [CA1] 4b4b2: while the plan's renewal is unpaid or its payment is
   // disputed, nothing is sent and the endpoint is not called. The delivery is
   // marked not sent at once, with the reason, and not tried again: a delivery
@@ -1262,6 +1331,14 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Its API key paused or revoked (owner C3-100): refused before anything is marked, counted or taken.
   const keyHeld = await heldNow(store, endpoint);
   if (keyHeld) return { ok: false, reason: "paused", message: HELD_WORDS[keyHeld] };
+  // Never sent again by hand about a person deleted from the store since (namesErased); a mark that cannot be read
+  // is unknown, never "not deleted": nothing is marked, taken or sent.
+  try {
+    if (await namesErased(store, before.body)) return { ok: false, reason: "missing" };
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return { ok: false, reason: "unavailable" };
+  }
   const againId = `dlv_${randomBytes(12).toString("hex")}`;
   // Two presses at once: only the one that marks the original first goes on (COMPARE_AND_SET over the text read).
   // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.

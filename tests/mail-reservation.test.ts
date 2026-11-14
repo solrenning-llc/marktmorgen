@@ -81,6 +81,38 @@ test('funded paid list dispatch stops before the provider when financial approva
  assert.equal(await usedThisMonth(made.listId,windowId(made)),0);
 });
 
+test('a failed daily usage read is logged and still blocks list email',async()=>{
+ const previous=console.error, seen:unknown[][]=[];
+ console.error=(...args:unknown[])=>{seen.push(args);};
+ try {
+  // reserveDay never reads the day (INCRBY); dailyRoom is reached only from the list loop (Claude 4 J/B MEDIUM).
+  const made=await fullStore();
+  dayRead={value:new Error('synthetic daily usage failure')};
+  const result=await sendTo(made,['reader@example.com'],'Synthetic','Test only','failed-day-read');
+  assert.equal(result.stopped,'day');assert.equal(dispatch.calls,0);
+  assert.equal(seen.length,1);
+  assert.equal(seen[0][0],'reading the daily email usage failed');
+  assert.equal(JSON.stringify(seen[0].map(String)).includes('reader@example.com'),false,'no address in the log');
+  const listId=made.listId;assert.ok(listId);
+  assert.equal(JSON.stringify(seen[0].map(String)).includes(listId),false,'no list id in the log');
+ } finally { console.error=previous; }
+});
+test('an unknown daily usage reply that does not throw is logged too (Claude 4 B LOW)',async()=>{
+ const previous=console.error, seen:unknown[][]=[];
+ console.error=(...args:unknown[])=>{seen.push(args);};
+ try {
+  const made=await fullStore();
+  for(const [i,value] of ([[null,null],['01'],[0],{}] as unknown[]).entries()){
+   seen.length=0;
+   dayRead={value};
+   const result=await sendTo(made,['reader@example.com'],'Synthetic','Test only','odd-day-read-'+i);
+   assert.equal(result.stopped,'day');
+   assert.equal(seen.length,1,'logged once: '+JSON.stringify(value));
+   assert.equal(seen[0][0],'reading the daily email usage failed');
+   assert.equal(JSON.stringify(seen[0].map(String)).includes('reader@example.com'),false);
+  }
+ } finally { console.error=previous; }
+});
 test('unknown daily usage stops the real list loop before reservations and dispatch',async()=>{
  const made=await fullStore();pipelines=[];
  const inherited=new Array(1);Object.setPrototypeOf(inherited,{0:null});

@@ -28,6 +28,7 @@ import { type AllowanceStore, takeAllowance } from "@/lib/store-allowance";
 import { allowanceWindow } from "@/lib/allowance-window";
 import type { ShipmentMailDispatch } from "@/lib/shipment-mail-outbox";
 import { repliesFor } from "@/lib/redis-reply";
+import { stopTags } from "@/lib/mail-health-rules";
 
 /**
  * What an email is counted against (added 17 October 2026), said by every
@@ -306,7 +307,18 @@ type OneMessage = {
    * day, is answered without sending it again.
    */
   idempotencyKey?: string;
+  /**
+   * Labels the sender gives back with what became of it (BatchMessage.tags).
+   * Left out, a store's email (meter `by: "store"`) carries its store's list
+   * (stopTags), so a bounce for good or a complaint takes the address off it.
+   */
+  tags?: Record<string, string>;
 };
+
+/** The tags one email goes with: its own, or, for a store's, the store's list (ALL-160). Never shown to the reader. */
+function messageTags(message: OneMessage): { name: string; value: string }[] {
+  return cleanTags(message.tags ?? (message.meter.by === "store" ? stopTags(message.meter.store) : undefined));
+}
 
 const onceKey = (key: string) => `nl:ses:once:${createHash("sha256").update(key).digest("hex").slice(0, 40)}`;
 
@@ -340,6 +352,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
     }
   }
   const headers = cleanHeaders(message.headers);
+  const tags = messageTags(message);
   let last: Awaited<ReturnType<typeof sesSend>> = { outcome: "busy", why: "" };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     last = await sesSend(config, {
@@ -351,6 +364,7 @@ async function viaAmazon(message: OneMessage, to: string, originalIdempotencyKey
       replyTo: oneAddress(message.replyTo),
       headers,
       attachments: message.attachments,
+      ...(tags.length ? { tags } : {}),
     });
     // A timeout or server error may follow acceptance. Keep any existing
     // claim, report unknown, and make no second SES attempt or Resend send.
@@ -498,7 +512,11 @@ async function resendOutcome(message: OneMessage, originalIdempotencyKey: string
     ...(replyTo ? { reply_to: replyTo } : {}),
     ...(headers ? { headers } : {}),
   };
-  const body = () => JSON.stringify({ from: fromLine(from), ...payload });
+  // No second request without the tags on a 400 or 422: cleanTags already
+  // sends only what Resend takes, and the guard does not read a refusal's
+  // body, so a refusal for the recipient would be asked twice a pass.
+  const tags = messageTags(message);
+  const body = () => JSON.stringify({ from: fromLine(from), ...payload, ...(tags.length ? { tags } : {}) });
   let auth = key;
   // A sign-in link or a receipt must not be lost because the sender was busy
   // with a creator's newsletter a second earlier: asked to slow down, it
@@ -688,6 +706,12 @@ async function dispatchBatch(
   // What actually goes: a message with no address that can be written to is
   // left out below, and is not counted as sent either.
   let going = messages.slice(0, 100).filter((m) => oneAddress(m.to) !== null);
+  // A store's batch that names no tags carries its store's list (stopTags,
+  // ALL-160), as a single email of a store's does (messageTags).
+  if (meter.by === "store") {
+    const stop = stopTags(meter.store);
+    if (Object.keys(stop).length) going = going.map((m) => (m.tags ? m : { ...m, tags: { ...stop } }));
+  }
   const config = sesConfig();
   // Decide only a known unavailable selected route before taking its figure.
   // These synchronous observations grant no quota or provider permission.

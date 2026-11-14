@@ -107,6 +107,29 @@ test("the copy of a person's data: a list or a consent in another shape is unkno
   }
 });
 
+test("a member of the note that is no checkout id is unknown, never skipped (Codex X6 MEDIUM on #3929)", async (t) => {
+  // Only a checkout id is ever added to the note (lib/assistant-reminder.ts, recordAssistReminder), so a member of
+  // another shape is a reply that does not read: skipping it would delete the note and keep that consent, address
+  // and all, with nothing left to find it by, and the erasure would say it finished.
+  for (const [answer, label] of [
+    [async () => [[`${SESSION} `]], "the only member altered"],
+    [async () => [[SESSION, "not-a-checkout"]], "one member of two altered"],
+    [async () => [[SESSION, 7]], "a member that is a number"],
+  ] as [() => Promise<unknown>, string][]) {
+    await t.test(`forget: ${label}`, async () => {
+      await seed();
+      await assert.rejects(intercept(isMembers, answer, () => forgetAssistReminderPerson(STATS, EMAIL)), `forget: ${label}`);
+      const [members, consent] = await redis.pipeline([["SMEMBERS", WHO], ["GET", assistRemindKey(SESSION)]]);
+      assert.deepEqual(members, [SESSION], "the note of their checkouts is kept for the erasure pressed again");
+      assert.equal(consent, CONSENT, "the consent is kept with a way to find it");
+    });
+    await t.test(`copy: ${label}`, async () => {
+      await seed();
+      await assert.rejects(intercept(isMembers, answer, () => remindersOf(STATS, EMAIL)), `copy: ${label}`);
+    });
+  }
+});
+
 test("control: the healthy answers copy and forget as before", async () => {
   await seed();
   assert.deepEqual(await remindersOf(STATS, EMAIL), [{ address: EMAIL, sentence: "Email me a reminder if I don't finish this order", version: "1", at: 1_000 }]);

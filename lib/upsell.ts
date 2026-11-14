@@ -95,6 +95,11 @@ type UpsellRecord = {
    * offer was taken, which is what this buyer gets (lib/bundle-rules.ts).
    */
   items?: string[];
+  /**
+   * "processing" while Stripe last said the payment is processing: it can still be paid, so the buyer is told it is
+   * being checked (charged once at most), never that it was not charged. Absent while it waits on the buyer's bank.
+   */
+  waiting?: "processing";
 };
 
 /**
@@ -525,7 +530,7 @@ export async function takeUpsell(input: {
     // read as one that took nothing can still be paid. It stays pending on the five-minute job's list and is settled
     // from what Stripe says (settleOne), never told as declined while the buyer may yet be charged.
     if (!NOTHING_TAKEN.has(String(pi.status))) {
-      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now() });
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now(), waiting: "processing" });
       return { kind: "checking" };
     }
     await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, pi: id, customer, at: Date.now() });
@@ -680,8 +685,15 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
       else await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
       await writeUpsell(session, slot, { ...record, pi: id, state: "failed" });
-    } else if (id !== record.pi) {
-      await writeUpsell(session, slot, { ...record, pi: id });
+    } else {
+      // Still pending: told as checking while Stripe says processing, as not confirmed while it waits on the buyer.
+      const waiting = pi.status === "processing" ? "processing" : pi.status === "requires_action" ? undefined : record.waiting;
+      if (id !== record.pi || waiting !== record.waiting) {
+        const next: UpsellRecord = { ...record, pi: id };
+        if (waiting) next.waiting = waiting;
+        else delete next.waiting;
+        await writeUpsell(session, slot, next);
+      }
     }
     return typeof pi.status === "string" ? pi.status : null;
   } catch (error) {
@@ -870,7 +882,7 @@ export async function funnelView(input: {
       const items = record.items?.length ? await contentsOf(store, record.items) : null;
       taken.push({ slot, product: known, reference: upsellReference(session, slot, record), items });
     }
-    if (record.state === "pending") notes.push({ state: record.pi ? "unconfirmed" : "checking", title });
+    if (record.state === "pending") notes.push({ state: record.pi && record.waiting !== "processing" ? "unconfirmed" : "checking", title });
     if (record.state === "failed") notes.push({ state: "declined", title });
     if (record.state === "declined" || record.state === "failed") declined.push(record.product);
   }

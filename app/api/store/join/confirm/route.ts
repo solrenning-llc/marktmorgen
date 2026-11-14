@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       await enroll(store, result.grant.e, { joined: result.added.joined });
       // A lead for Marktmorgen Path when the link makes the address newly mailable on the list; the address counts
       // once for the store, two presses at once included (lib/path-lead.ts; 13 [D10]). An unknown answer is logged.
-      if (result.added.joined) await countConfirmedLead(store.statsId, result.grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
+      if (result.added.joined) await countConfirmedLead(store, result.grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
       // A sign-up an affiliate brought, where the store pays per sign-up: credited now that it is confirmed,
       // and only for an address new to the list (lib/affiliate-leads.ts).
       if (result.grant.a && result.added.joined) {

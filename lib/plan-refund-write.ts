@@ -45,9 +45,9 @@ export const LOCK_SECONDS = Math.ceil((READ_BUDGET_MS + (1 + 2 * MAX_PARTS) * ST
 /** The last moment after taking the lock a write may start: it ends, time-out included, a minute before the lock expires. */
 export const WRITE_BY_MS = (LOCK_SECONDS - 60) * 1000 - STRIPE_TIMEOUT_MS;
 const REFUND_ID = /^re_[A-Za-z0-9]{6,128}$/;
-/** An id Stripe gives as a string or, expanded, as an object's own id; anything else reads as "". */
+/** An id Stripe gives as a string or, expanded, as an object's own id (an own field, never an inherited one); anything else reads as "". */
 const idOf = (value: unknown): string =>
-  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof (value as { id?: unknown }).id === "string" ? (value as { id: string }).id : "";
+  typeof value === "string" ? value : value !== null && typeof value === "object" && typeof ownField(value as Record<string, unknown>, "id") === "string" ? (ownField(value as Record<string, unknown>, "id") as string) : "";
 
 export type PlanRefundMade =
   | { ok: true; cents: number; currency: string; refundId: string; refundIds: string[]; status: "succeeded" | "pending" }
@@ -60,11 +60,17 @@ const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_a
  * with a refund's id and a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
  * whole, readable list may say.
  */
-function wholeRefunds(page: unknown): Row[] {
+function wholeRefunds(page: unknown, chargeId: string, paymentIntent: string): Row[] {
   // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
+  // It counts only when it proves it is this charge's own (#4474): the list's filter is not proof, and a row of
+  // another charge (or with no charge, or another payment intent) would block the refund or change its idempotency key.
   const read = readStripePage(
     page,
-    (row) => typeof ownField(row, "status") === "string" && REFUND_STATES.includes(ownField(row, "status") as string),
+    (row) =>
+      idOf(ownField(row, "charge")) === chargeId &&
+      (ownField(row, "payment_intent") == null || idOf(ownField(row, "payment_intent")) === paymentIntent) &&
+      typeof ownField(row, "status") === "string" &&
+      REFUND_STATES.includes(ownField(row, "status") as string),
     REFUND_ID,
   );
   if (read.hasMore || read.unreadable) throw new StripeListUnreadable(read.hasMore ? "more refunds than one page" : "a refund not readable");
@@ -104,7 +110,7 @@ export async function refundPlanPayment(
     for (const part of parts) {
       let refunds: Row[];
       try {
-        refunds = wholeRefunds(await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`));
+        refunds = wholeRefunds(await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`), part.chargeId, part.paymentIntent);
       } catch (error) {
         console.error("reading a plan payment's refunds failed", error);
         return { ok: false, reason: "failed" };

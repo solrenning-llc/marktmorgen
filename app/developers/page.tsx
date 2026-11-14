@@ -60,9 +60,10 @@ export const metadata: Metadata = {
  * lib/api-read.ts builds, field for field — a field that is not here is not
  * sent. When an address is added, it is added here in the same change.
  */
-function Code({ children }: { children: string }) {
+function Code({ children, label }: { children: string; label: string }) {
+  // A wide example scrolls sideways: it takes focus so a keyboard can scroll it, and is named by what it shows (2.1.1).
   return (
-    <pre className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
+    <pre tabIndex={0} role="region" aria-label={label} className="overflow-x-auto rounded-[12px] bg-[#15112e] p-4 text-[0.8125rem] leading-relaxed text-[#ece9ff]">
       <code>{children}</code>
     </pre>
   );
@@ -103,7 +104,7 @@ export default function DevelopersPage() {
           write. Only the store&apos;s owner and Admins can make a key that writes.
         </p>
         <p>Send it on every request:</p>
-        <Code>{`curl ${BASE}/store \\
+        <Code label="Example request with your API key">{`curl ${BASE}/store \\
   -H "Authorization: Bearer nl_live_…"`}</Code>
         <p>
           A key belongs to one store and reads only that store. Keep it on a server, in Zapier or in Make — never in a web
@@ -142,7 +143,7 @@ export default function DevelopersPage() {
           <code className="font-mono">store_full</code>
           {", and nothing is written."}
         </p>
-        <Code>{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
+        <Code label="Error answers">{`401  {"error": "unauthorized", "message": "Send your API key as: Authorization: Bearer nl_live_…"}
 429  {"error": "rate_limited", "message": "At most ${API_RATE} requests a minute per key. Try again in a minute."}
 429  {"error": "monthly_limit", "message": "Your store's API requests for this month are used: 2,000 API requests. This opens again with your next billing month, on …"}
 429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
@@ -176,7 +177,7 @@ export default function DevelopersPage() {
 
       <LegalSection title="Store">
         <Endpoint path="/api/v1/store">Which store the key reads. The first call to make, to check a key works.</Endpoint>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/store">{`{
   "data": { "handle": "harbor", "name": "Harbor Kitchen", "currency": "usd" }
 }`}</Code>
       </LegalSection>
@@ -184,7 +185,7 @@ export default function DevelopersPage() {
       <LegalSection title="Products">
         <Endpoint path="/api/v1/products">Every product, in the order your store shows them, drafts included.</Endpoint>
         <p>{`A full page counts as up to ${n(PRODUCTS_PAGE_MOST)} of your API requests, by how many of its products have to be read; a smaller page counts as fewer.`}</p>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/products">{`{
   "data": [
     {
       "id": "k3j9x2p1ab",
@@ -216,7 +217,7 @@ export default function DevelopersPage() {
           without that field left nobody out.
         </Endpoint>
         <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read.`}</p>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/leads">{`{
   "data": [
     {
       "email": "dana@example.com",
@@ -242,7 +243,7 @@ export default function DevelopersPage() {
           Everybody who has come into your community, as your own member list shows them. 404 with{" "}
           <code className="font-mono">no_community</code> when the store has none.
         </Endpoint>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/members">{`{
   "data": [
     {
       "email": "dana@example.com",
@@ -272,7 +273,7 @@ export default function DevelopersPage() {
         <p>
           {`Each page reads every student's progress, so a full page of ${n(API_PAGE)} counts as ${n(STUDENTS_PAGE_COUNTS)} of your API requests (${n(STUDENTS_PAGE_COUNTS_MOST)} when more than ${n(BLOCKED_READ_MAX)} students of the course are blocked). A smaller page counts as fewer.`}
         </p>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/students">{`{
   "total": 1,
   "data": [
     {
@@ -294,7 +295,7 @@ export default function DevelopersPage() {
           revenue, each channel from visit to sale, and page views by country and by device.
         </Endpoint>
         <p>{`Read anew, it reads 180 days of counts and, with your Stripe account connected, every page of your sales, renewals, refunds and disputes it may need, so it counts as ${n(NUMBERS_COUNT)} of your API requests (${n(NUMBERS_COUNT_NO_SALES)} for a store with no sales to read), and more when you have PayPal sales or refunds. A copy of the numbers is then kept for an hour: within that hour, a read comes from the copy and counts only for reading it and its answer, as few as ${n(NUMBERS_KEPT_LEAST)} and at most ${n(NUMBERS_KEPT_MOST)}. `}<code className="font-mono">asOf</code>{" says when the numbers were read, in ISO 8601 (UTC), so a number up to an hour old is never taken for one of this minute."}</p>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/stats">{`{
   "data": {
     "currency": "usd",
     "sales": "ok",
@@ -472,7 +473,7 @@ export default function DevelopersPage() {
         <Endpoint path="/api/v1/affiliates">
           Every affiliate, with what they earned, were paid and are owed — the numbers on your affiliates page.
         </Endpoint>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/affiliates">{`{
   "currency": "usd",
   "refunds_checked": true,
   "data": [
@@ -511,7 +512,7 @@ export default function DevelopersPage() {
         <p>
           {`With your Stripe account connected, it reads up to ${n(BOOKINGS_READ)} bookings from it, so it counts as ${n(BOOKINGS_COUNT)} of your API requests, however many you have. Without Stripe connected, it counts as one.`}
         </p>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/bookings">{`{
   "data": [
     {
       "id": "cs_live_a1B2c3…",
@@ -538,7 +539,7 @@ export default function DevelopersPage() {
           nobody who unsubscribed from your list is ever added back, whatever is sent. Somebody new starts the sequences
           that start when somebody joins your list; a label they come with starts the sequences that label starts.
         </Endpoint>
-        <Code>{`curl -X POST ${BASE}/leads \\
+        <Code label="Example request: POST /api/v1/leads">{`curl -X POST ${BASE}/leads \\
   -H "Authorization: Bearer nl_live_…" \\
   -H "Content-Type: application/json" \\
   -d '{"email": "dana@example.com", "name": "Dana Ortiz", "tags": ["webinar"], "agreed": true}'
@@ -551,7 +552,7 @@ export default function DevelopersPage() {
           Adds and takes away labels of somebody already on your list. A label added starts the sequences it starts in
           your studio.
         </Endpoint>
-        <Code>{`{"email": "dana@example.com", "add": ["vip"], "remove": ["webinar"]}
+        <Code label="Example request body: POST /api/v1/leads/labels">{`{"email": "dana@example.com", "add": ["vip"], "remove": ["webinar"]}
 
 200  {"data": {"email": "dana@example.com", "labels": ["vip"]}}
 404  {"error": "not_on_list", "message": "Nobody with this address is on your list."}`}</Code>
@@ -588,7 +589,7 @@ export default function DevelopersPage() {
           from your store&apos;s name saying so, in your store&apos;s language, while your plan is running. Somebody
           deleted from your store is never given anything again or emailed.
         </Endpoint>
-        <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab", "notify": true}
+        <Code label="Example request body: POST /api/v1/access">{`{"email": "dana@example.com", "product": "k3j9x2p1ab", "notify": true}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "given", "emailed": true}}
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "already", "emailed": false}}
@@ -599,7 +600,7 @@ export default function DevelopersPage() {
           purchase paid with PayPal is not the API&apos;s to take, and gets 404{" "}
           <code className="font-mono">not_given_here</code>.
         </Endpoint>
-        <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab"}
+        <Code label="Example request body: DELETE /api/v1/access">{`{"email": "dana@example.com", "product": "k3j9x2p1ab"}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "taken_back"}}`}</Code>
         <p>{`A store may give ${GIVES_PER_DAY.toLocaleString("en-US")} products a day through the API. A body is JSON of up to 4,000 bytes.`}</p>
@@ -614,7 +615,7 @@ export default function DevelopersPage() {
           store&apos;s. A checkout that only saved a card is not a sale and is not listed. What a buyer typed at checkout is
           not included. 409 with <code className="font-mono">not_selling</code> while the store is not taking payments.
         </Endpoint>
-        <Code>{`{
+        <Code label="Example answer: /api/v1/sales">{`{
   "data": [
     {
       "checkout_session": "cs_live_a1B2c3",

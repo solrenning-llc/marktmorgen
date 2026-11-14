@@ -345,6 +345,34 @@ export async function holdCheckout(store: Store, session: unknown, admitted: Adm
   }
 }
 
+/**
+ * Gives back, once its order is counted, the place a paid Checkout Session's checkout held (confirmPurchase).
+ *
+ * A session Stripe made from an expired one's recovery link (`recovered_from`; opened with recovery on,
+ * lib/recovery-setting.ts) carries the original's metadata, so the same mm_admit hour, but it never held a place of
+ * its own: the place is the original's. That place may already have been given back when the original closed unpaid
+ * (releaseExpiredHolds), and giving the hour back again would take another live checkout's place, so the store would
+ * admit one order over the plan's limit (review of #4232, Claude 4 cloud X, MEDIUM). So a copy gives the place back
+ * only by taking the original's own record of it (GETDEL, the same record the sweep takes): whichever of the two
+ * takes it gives the place back, once. Without that record (already given back, never recorded, or a reply that does
+ * not read) the copy gives nothing, and a place still held is kept until its hour leaves the window, never freed
+ * twice. Any other session gives its hour back as before. Never throws.
+ */
+export async function settlePaidCheckout(store: Store, session: { metadata?: Record<string, string> | null; recovered_from?: unknown }, items = 1): Promise<void> {
+  const meta = session.metadata && typeof session.metadata === "object" ? session.metadata : null;
+  const hour = meta && Object.hasOwn(meta, ADMITTED_FIELD) ? meta[ADMITTED_FIELD] : undefined;
+  if (session.recovered_from === undefined || session.recovered_from === null) return settleAdmitted(store, hour, 1, items);
+  const original = session.recovered_from;
+  if (typeof original !== "string" || !CHECKOUT_SESSION.test(original) || typeof hour !== "string" || !/^\d{1,9}$/.test(hour) || !store.sid) return;
+  try {
+    if (!isRedisConfigured()) return;
+    const [taken] = repliesFor(await redisPipeline([["GETDEL", holdMarkKey(original)]]), 1) ?? [undefined];
+    if (taken === holdMark(Number(hour), store)) await settleAdmitted(store, hour, 1, items);
+  } catch (error) {
+    console.error("a recovered checkout's place could not be given back; it stays held until its hour leaves the window", error);
+  }
+}
+
 /** What releaseExpiredHolds reads of one Checkout Session, as Stripe lists it on the creator's own account. */
 export type ClosedCheckout = { id?: unknown; status?: unknown; payment_status?: unknown; metadata?: Record<string, string> | null };
 

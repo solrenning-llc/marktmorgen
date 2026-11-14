@@ -1047,6 +1047,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-checkout.ts", names: ["holdCheckout(store, session.id, admitted)"] },
       { file: "lib/cart-checkout.ts", names: ["holdCheckout(store, session.id, admitted)"] },
       { file: "lib/payment-requests.ts", names: ["holdCheckout(store, session.id, admitted)"] },
+      // A paid Stripe recovery copy gives its original's place back only by taking that record, one GETDEL once, so a
+      // place given back at expiry is never given back twice (review of #4232, Claude 4 cloud X): inside that order's work.
+      { file: "lib/order-admission.ts", names: ["settlePaidCheckout", "recovered_from"] },
+      { file: "lib/purchase-email.ts", names: ["settlePaidCheckout(store, read.session, read.items ?? 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },

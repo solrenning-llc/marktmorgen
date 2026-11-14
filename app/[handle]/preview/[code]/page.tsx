@@ -102,7 +102,9 @@ export default async function DraftPreviewPage({ params }: Params) {
           </p>
           {about.trim() ? <ProductAbout blocks={aboutBlocks(about)} language={language} /> : null}
           {aboutUnread ? (
-            <p className="mt-4 text-ink">
+            // The store's own text color on its card (never text-ink, 1.004:1 on a Night card), and marked as the fixed
+            // US English it is inside a page in the store's language (WCAG 1.4.6, 3.1.2).
+            <p className="mt-4" lang="en-US">
               The description could not be loaded just now. Reload the page in a minute to see it.
             </p>
           ) : null}

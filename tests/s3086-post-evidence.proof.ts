@@ -20,10 +20,13 @@ globalThis.fetch=(async(input: string|URL|Request,init?:RequestInit)=>{
 async function main(){
  for(const kind of ['healthy','wrong-id','missing','zero','string']){
   redis.clear();cap=0;posts=0;mode=kind;await rememberPlan(account,session);
-  const first=await settlePlans();const [pending]=await redis.pipeline([['SMEMBERS','nl:plans:pending']]);
-  if(kind==='healthy'){is('healthy real writer caps and clears', [first.done,cap,Array.isArray(pending)?pending.length:-1],[1,addPeriods(anchor,'month',3),0]);continue;}
+  const first=await settlePlans();const [pending,retry]=await redis.pipeline([['SMEMBERS','nl:plans:pending'],['ZRANGEBYSCORE','nl:plans:retry','-inf','+inf']]);
+  // Merged with claude5/plans-stuck-entries (rule 23): a plan not settled moves from the pending set to the line of
+  // plans tried (nl:plans:retry), so "reachable" is in either line, and the healthy pass leaves both empty.
+  const lines=[...(Array.isArray(pending)?pending:[]),...(Array.isArray(retry)?retry:[])];
+  if(kind==='healthy'){is('healthy real writer caps and clears', [first.done,cap,lines.length],[1,addPeriods(anchor,'month',3),0]);continue;}
   is(`${kind}: no confirmed cap is not a completed plan`,first.done,0);
-  is(`${kind}: original pending member remains reachable`,Array.isArray(pending)&&pending.length===1,true);
+  is(`${kind}: original pending member remains reachable`,lines.length===1&&lines[0].startsWith(`${account}|${session}|`),true);
   mode='healthy';const second=await settlePlans();
   is(`${kind}: next healthy pass caps the plan`,[second.done,cap],[1,addPeriods(anchor,'month',3)]);
  }

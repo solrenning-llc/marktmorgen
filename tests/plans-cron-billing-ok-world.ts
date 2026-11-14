@@ -9,6 +9,8 @@ export const world: { billing: Billing | null; billingThrows: boolean } = { bill
 export const cronAllowed = async () => true;
 export const isBillingConfigured = () => true;
 export const settlePlans = async () => ({ settled: 0 });
+// The route passes the plans' limit (claude5/plans-stuck-entries, merged with main): only its name is needed here.
+export const PLANS_PER_RUN = 200;
 export const syncPlanDisputes = async () => ({ seen: 0, recorded: 0, unmatched: 0, reread: 0, failed: 0, complete: true });
 export const syncSubscriptions = async () => {
   if (world.billingThrows) throw new Error("synthetic sync failure");

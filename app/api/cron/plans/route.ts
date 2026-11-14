@@ -3,7 +3,7 @@ import { cronAllowed } from "@/lib/request-guard";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { settlePlans } from "@/lib/plans";
+import { PLANS_PER_RUN, settlePlans } from "@/lib/plans";
 import { isBillingConfigured } from "@/lib/billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { syncPlanDisputes } from "@/lib/plan-disputes";
@@ -19,6 +19,13 @@ import { sendWinBacks } from "@/lib/winback-send";
 import { ensureDemoStore } from "@/lib/demo-seed";
 
 export const maxDuration = 60;
+
+/**
+ * The plans' own share of a run (PLAN_SETTLE_RUN.runMs in tests/plan-cost-registry.ts): first, as they are money a
+ * buyer agreed to, and never all of it, so the disputes and the stores' subscriptions after them still run. Plans
+ * not reached wait in their lines for the next run.
+ */
+const PLANS_MS = 25_000;
 
 /**
  * Run on a schedule by Vercel, once a day, for the jobs that keep money
@@ -78,11 +85,15 @@ async function run(request: NextRequest): Promise<Response> {
   // Leaves time to answer inside maxDuration, whatever the jobs find.
   const deadline = Date.now() + 45_000;
   try {
+    // Without the platform's key no call to Stripe can be made: the plans are not tried at all, so no failure of
+    // ours is counted against them (lib/plans.ts, isAccountRefusal), and no plan can have been opened.
     let plans = null;
-    try {
-      plans = await settlePlans();
-    } catch (error) {
-      console.error("settling payment plans failed", error);
+    if (isBillingConfigured()) {
+      try {
+        plans = await settlePlans(PLANS_PER_RUN, Math.min(deadline, Date.now() + PLANS_MS));
+      } catch (error) {
+        console.error("settling payment plans failed", error);
+      }
     }
     // A creator who disputed a payment for their plan has what costs us to
     // run paused, as for an unpaid renewal (232 [CA1] unit 5). At most eight
@@ -175,7 +186,8 @@ async function run(request: NextRequest): Promise<Response> {
     if (demo && demo.pending.length) console.error("the demo store is missing something", demo.pending);
     // A subscription whose paid-up state could not be applied or checked
     // makes the run a failed one, not a healthy one (lib/billing-sync.ts).
-    const ok = plans !== null && ((billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured());
+    // Without the platform's key the plans are not tried (null), as the rest.
+    const ok = (plans !== null && billing !== null && billing.failed === 0 && disputes !== null) || !isBillingConfigured();
     return Response.json({ ok, ...(plans ?? {}), billing, disputes, recovered, comeBack, nudged, yearly, verified, benchmarks, invites, catalogs, demo }, { status: ok ? 200 : 500, headers: { "Cache-Control": "no-store" } });
   } finally {
     await releaseMark("nl:plans:lock", lock);

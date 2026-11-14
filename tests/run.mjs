@@ -13,19 +13,23 @@ import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { checkClientBundles } from "./client-bundles.mjs";
 import {testAliases,testEnvironment} from "./test-config.mjs";
-import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS} from "./test-runner.mjs";
+import {runTestFiles,runBundle,TEST_FILE_TIMEOUT_MS,parseShard,shardFiles} from "./test-runner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const out = mkdtempSync(join(tmpdir(), "nimbus-tests-"));
 let failed = 0;
+// TEST_SHARD="index/total" runs one CI job's share (tests/test-runner.mjs shardFiles); unset runs every file.
+const shard = parseShard(process.env.TEST_SHARD);
 
 try {
-  const files = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();
-  if (!files.length) {
+  const all = readdirSync(here).filter((f) => f.endsWith(".test.ts")).sort();
+  if (!all.length) {
     console.log("No tests found.");
     process.exit(0);
   }
+  const files = shardFiles(all, shard);
+  if (shard) console.log(`TEST_SHARD ${shard.index}/${shard.total}: ${files.length} of ${all.length} test files, by sorted position.`);
   failed = await runTestFiles({files, compileTimeoutMs: TEST_FILE_TIMEOUT_MS, compile: async file => {
     const bundle = join(out, `${file}.cjs`);
     await build({
@@ -46,10 +50,13 @@ try {
   rmSync(out, { recursive: true, force: true });
 }
 
-const clientBundles = await checkClientBundles(root);
-console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${clientBundles.total} passed.`);
-for (const failure of clientBundles.failures) console.error(failure);
-failed += clientBundles.failed;
+// Once per run: in a full run, or in share 1 of a sharded one.
+if (!shard || shard.index === 1) {
+  const clientBundles = await checkClientBundles(root);
+  console.log(`\nBrowser bundles: ${clientBundles.total - clientBundles.failed}/${clientBundles.total} passed.`);
+  for (const failure of clientBundles.failures) console.error(failure);
+  failed += clientBundles.failed;
+}
 
 // Ends by its exit code, like tests/check.ts done(): Node 24 can deadlock inside process.exit() (nodejs/node#64274).
 // The unref'd timer only fires if something (an esbuild service, a stray handle) still holds the process.

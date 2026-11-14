@@ -29,6 +29,7 @@ import { transparencyCounts } from "@/lib/transparency";
 import { KIND } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readsKey, rewriteKeys } from "./listing-reads";
 import { paidPeriod } from "./billing-period-fixture";
 
 const ORIGIN = "https://marktmorgen.com";
@@ -58,10 +59,11 @@ const realPipeline = redis.pipeline;
 let fault: { key: string; mode: "throw" | "null" } | null = null;
 redis.pipeline = async (commands: (string | number)[][]) => {
   const hit = fault;
-  if (hit && commands.some((c) => c[0] === "GET" && c[1] === hit.key)) {
+  // The key read alone (GET) or among others (MGET, lib/catalog.ts getMany since 10 November 2026).
+  if (hit && commands.some((c) => readsKey(c, hit.key))) {
     if (hit.mode === "throw") throw new Error("Redis request timed out (test)");
     const answers = await realPipeline(commands);
-    return commands.map((c, i) => (c[0] === "GET" && c[1] === hit.key ? null : answers[i]));
+    return rewriteKeys(commands, answers, (key) => (key === hit.key ? null : undefined));
   }
   return realPipeline(commands);
 };

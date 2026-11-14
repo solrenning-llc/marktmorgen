@@ -35,14 +35,14 @@
  * store record replaced, in one write. Until that write lands the old record
  * is the store, complete, and doing it again writes the same records.
  */
-import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
-export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+import { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
+export { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH, listingReads } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -648,19 +648,32 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 
 // ---- Reading ----------------------------------------------------------------
 
+/** MGETs in one pipeline at the most: the same few hundred keys a request as the GETs before, sent side by side. */
+const MGETS_PER_PIPELINE = 4;
+
 /**
- * Many GETs, in pipelines of a few hundred sent side by side: one reply for each key, in its own envelope, or
- * UnknownReplyError (CX-123 rule 24), never a list cut short whose missing replies would read as "no record".
+ * Many records, LISTINGS_PER_MGET at one MGET, MGETS_PER_PIPELINE MGETs a pipeline, the pipelines sent side by side.
+ * Read only whole (CX-123 rule 24): one reply for each MGET and, in each, one value for each key, a string or Redis's
+ * own nil; anything else throws UnknownReplyError, never a list cut short whose missing replies would read as "no
+ * record", nor a value of another type taken for none.
  */
-async function getMany(keys: string[]): Promise<unknown[]> {
+async function getMany(keys: string[]): Promise<(string | null)[]> {
   if (keys.length === 0) return [];
-  const chunks: string[][] = [];
-  for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
+  const lots: string[][] = [];
+  for (let i = 0; i < keys.length; i += LISTINGS_PER_MGET) lots.push(keys.slice(i, i + LISTINGS_PER_MGET));
+  const trips: string[][][] = [];
+  for (let i = 0; i < lots.length; i += MGETS_PER_PIPELINE) trips.push(lots.slice(i, i + MGETS_PER_PIPELINE));
   const answers = await Promise.all(
-    chunks.map(async (chunk) => {
-      const replies = repliesFor(await redisPipeline(chunk.map((key) => ["GET", key])), chunk.length);
+    trips.map(async (trip) => {
+      const replies = repliesFor(await redisPipeline(trip.map((lot) => ["MGET", ...lot])), trip.length);
       if (!replies) throw new UnknownReplyError("a store's product records");
-      return replies;
+      return trip.flatMap((lot, l) => {
+        const values = listSlots(replies[l]);
+        if (!values || values.length !== lot.length || !values.every((v) => v === null || typeof v === "string")) {
+          throw new UnknownReplyError("a store's product records");
+        }
+        return values as (string | null)[];
+      });
     }),
   );
   return answers.flat();

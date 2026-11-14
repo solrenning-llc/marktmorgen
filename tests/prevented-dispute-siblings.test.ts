@@ -23,9 +23,10 @@
  * Kept as they are: `lost` (status alone, as today); the legacy
  * `charge_refunded` (removed in API 2023-08-16) went back through a refund,
  * which the refund readings already count; the affiliate book still reads
- * the status alone (lib/affiliates.ts disputesSince, rewritten by open #3189),
+ * the status alone (lib/affiliates.ts disputesSince, rewritten by #3189),
  * so every prevented dispute there holds the commission, the side that never
- * pays on money the buyer may have got back. A refund's money is a Refund's
+ * pays on money the buyer may have got back; a status it does not know holds
+ * the whole book as incomplete. A refund's money is a Refund's
  * own balance transaction, never one of the dispute's, so a resolution that
  * also made a Refund is counted once.
  * Synthetic Stripe stand-in only; no real provider is called.
@@ -175,8 +176,11 @@ test("a resolution that also made a Refund is counted once: the refund reading h
 });
 
 test("the affiliate book still reads the status alone: every prevented dispute holds the commission", async () => {
+  // A status Stripe adds later is unreadable (rule 24): it holds the whole book, never read as nothing.
   listed = HEALTHY.map(row);
-  const { byIntent, complete } = await disputesSince(store, SINCE);
+  assert.equal((await disputesSince(store, SINCE, undefined, new Map())).complete, false);
+  listed = HEALTHY.filter(([status]) => status !== "a_status_stripe_adds_later").map(row);
+  const { byIntent, complete } = await disputesSince(store, SINCE, undefined, new Map());
   assert.equal(complete, true);
   assert.deepEqual([...byIntent.entries()].sort(), [
     ["pi_block", 2500],

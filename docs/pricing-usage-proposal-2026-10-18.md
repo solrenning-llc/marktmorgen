@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 18.8% | 60.24% | 60.05% | $77.72 | 0.49 |
+| $129 / $1,290 **(recommended)** | 18.7% | 60.24% | 60.05% | $77.72 | 0.49 |
 | $149 / $1,490 | 70.6% | 60.26% | 60.05% | $89.79 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.43% | 60.21% | $102.13 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.92% | 60.74% | $121.24 | 0.32 |
@@ -88,8 +88,8 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **6 + 39** · 40 + 250 · 40 + 250 | **8 + 43** · 80 + 400 · 80 + 400 |
 | Storage: included · #553 · before #553 | **0.5 GB** · 5 GB · 5 GB | **6 GB** · 40 GB · 40 GB | **8.5 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
-| Access emails a month: included · #553 · before #553 | **28** · 150 · 150 | **62** · 400 · 400 | **100** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **14** · 75 · 75 | **47** · 300 · 300 | **87** · 800 · 800 |
+| Access emails a month: included · #553 · before #553 | **27** · 150 · 150 | **62** · 400 · 400 | **100** · 1,000 · 1,000 |
+| Store emails a month: included · #553 · before #553 | **13** · 75 · 75 | **47** · 300 · 300 | **87** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.24% | 60.36% | 60.41% |
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.05% | 60.02% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.12% | 12.14% |

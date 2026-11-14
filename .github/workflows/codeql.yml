@@ -58,7 +58,11 @@ jobs:
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' }}
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # 120, not 60 (ALL-194, 14/11/2026): the JavaScript analysis is limited by time, not memory. run-queries already
+    # uses every core of the runner (--threads=4) and ~14 GB (--ram=14568) with no memory error; runs that finish take
+    # 27 to 54 minutes, and those cancelled at 60 had most queries done (82 of 105 on #3559). The merge queue waits
+    # 360 minutes for checks, so a longer job is still answered. Coverage is unchanged (tests/codeql-timeout.test.ts).
+    timeout-minutes: 120
     permissions:
       contents: read
       actions: read

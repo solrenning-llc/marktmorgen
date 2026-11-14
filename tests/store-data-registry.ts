@@ -820,6 +820,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:plans:pending@lib/plans.ts": company("Plans being started", "One set, minutes."),
   "nl:share:stores@lib/platform-share.ts": company("Stores whose sales pay a share", "One set for every store."),
   "nl:pod:by:@lib/podcast-access.ts": { what: "A listener's access to a private podcast", parts: [item(MARK, "One a buyer.", "membership")] },
+  "nl:pod:pids:@lib/podcast-access.ts": { what: "The store's products that ever had a private podcast feed, so a person's deletion finds a removed one's feeds", parts: [item(96, "A product's id in the store's set, written once, with the product's first feed (lib/order-data.ts charges a SADD the id, 10 or at most 12 characters (lib/store.ts freshId), and 64 bytes, a quarter more, in steps of 16: 96; a SADD of an id already there charges nothing).", "membership")] },
   "nl:pod:n:@lib/podcast-access.ts": short("A feed's reads a day", "request", 2, 128, REQ("page")),
   "nl:pod:ok:@lib/podcast-access.ts": short("A listener's access, answered", "request", 1, KEY, REQ("page")),
   "nl:pod:t:@lib/podcast-access.ts": { what: "A listener's feed token", parts: [item(KEY, "One a buyer.", "membership")] },

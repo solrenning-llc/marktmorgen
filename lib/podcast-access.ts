@@ -34,7 +34,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
@@ -48,6 +48,12 @@ const addressKey = (email: string) => sha(`nimbus-podcast:${normaliseEmail(email
 export const tokenKey = (token: string) => `nl:pod:t:${sha(token)}`;
 const byKey = (sid: string, pid: string, email: string) => `nl:pod:by:${sid}:${pid}:${addressKey(email)}`;
 const okKey = (sid: string, pid: string, email: string) => `nl:pod:ok:${sid}:${pid}:${addressKey(email)}`;
+/**
+ * The store's products that ever had a private feed, noted with each new grant in the same counted write, so a
+ * person's deletion still finds a product's feeds after the catalog forgot it (nuvem I privacy audit, 13 November
+ * 2026). A removed product stays: its grants are reached by every deletion and by the walk at store closing.
+ */
+const pidsKey = (sid: string) => `nl:pod:pids:${sid}`;
 
 export type FeedGrant = { s: string; h: string; p: string; e: string };
 
@@ -64,7 +70,9 @@ export async function feedToken(store: Store, productId: string, email: string):
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
   // Only "OK" made the index and only null says another token was kept first: any other reply is unknown, and
   // writing a grant then could leave one holding the address that no index leads to, which an erasure never finds.
-  const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"]]);
+  // The product is noted in the same counted write as the index (lib/order-data.ts takes its room first): a grant
+  // made from now on is never one that a person's deletion could not find.
+  const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"], ["SADD", pidsKey(sid), productId]]);
   if (set === null) {
     const again = await indexedToken(sid, productId, email);
     return typeof again === "string" && FEED_TOKEN.test(again) ? withGrant(store, again, grant) : null;
@@ -231,9 +239,11 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
  * the feed's address stops working in their podcast app. A buyer who still
  * holds the podcast asks for a new one, as on a new device.
  */
-export async function forgetPodcastPerson(store: Store, productIds: string[], email: string): Promise<number> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
+export async function forgetPodcastPerson(store: Store, catalogIds: string[], email: string): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
+  const productIds = await podcastProductIds(sid, catalogIds);
+  if (!productIds.length) return 0;
   // Read exactly before anything is deleted (CX-123 rule 24): the index is the only way back to the grant that holds
   // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
   const held = (await indexedTokens(sid, productIds, email)).filter((t): t is string => t !== null);
@@ -244,6 +254,17 @@ export async function forgetPodcastPerson(store: Store, productIds: string[], em
   const gone = reply ? countOf(reply[0]) : null;
   if (gone === null) throw new UnknownReplyError("the deletion of a person's podcast feeds");
   return gone;
+}
+
+/**
+ * The products a person's feeds are looked for in: the catalog and every product the store's set notes, removed
+ * ones included. Read exactly: an unreadable set throws, so a deletion says it could not finish, never that there
+ * was nothing to delete (rule 24).
+ */
+async function podcastProductIds(sid: string, catalogIds: string[]): Promise<string[]> {
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", pidsKey(sid)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the products with private podcast feeds");
+  return [...new Set([...catalogIds, ...members])];
 }
 
 /**
@@ -263,8 +284,11 @@ async function indexedTokens(sid: string, productIds: string[], email: string): 
  * given: it is a key, and the person has it in the email that sent it. Only
  * reads; never makes a feed.
  */
-export async function feedsOf(store: Store, productIds: string[], email: string): Promise<string[]> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return [];
+export async function feedsOf(store: Store, catalogIds: string[], email: string): Promise<string[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  // The same products a deletion reaches, so the copy shows every feed the deletion would take away.
+  const productIds = await podcastProductIds(store.statsId, catalogIds);
+  if (!productIds.length) return [];
   const tokens = await indexedTokens(store.statsId, productIds, email);
   return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));
 }

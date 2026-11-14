@@ -422,7 +422,9 @@ export default function PrivacyPage() {
           an episode, we check that your address still holds the podcast, and
           we count those reads to stop a feed from being shared; we do not
           keep which episodes you play. The creator sees neither your feed nor
-          what you listen to.
+          what you listen to. We keep your feed until you ask the store to
+          delete your data or the store closes, even after the creator removes
+          the podcast, so that a deletion always reaches it.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}

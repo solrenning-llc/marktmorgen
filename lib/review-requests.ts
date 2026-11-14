@@ -34,7 +34,7 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { normaliseEmail } from "@/lib/auth";
-import { type BatchMessage, sendBatch } from "@/lib/email";
+import { type BatchMessage, type BatchReceipt, sendBatchNoting } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -407,12 +407,14 @@ export async function sendReviewRequests(
       await unclaim(nowSeconds + RETRY_SECONDS.plan);
       continue;
     }
-    const outcome = await sendBatch(
+    const receipt: BatchReceipt = { maybeSent: false };
+    const outcome = await sendBatchNoting(
       ready.map((item) => item.message),
-      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
+      `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" }, receipt,
     );
     if (outcome !== "sent") {
-      await release(store, ready.length);
+      // Given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting).
+      if (!receipt.maybeSent) await release(store, ready.length);
       if (outcome === "refused") {
         await unclaim(null);
         for (const item of ready) await drop(item.member);

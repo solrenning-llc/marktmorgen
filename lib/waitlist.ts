@@ -18,7 +18,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
-import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
+import { type BatchReceipt, NIMBUS_FROM, sendBatchNoting, sendEmail } from "@/lib/email";
 import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
@@ -405,13 +405,16 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         const r = render(sender, words.subject, words.body, null, door);
         return { from: fromLine(sender), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers };
       });
-      const outcome = await sendBatch(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" });
+      const receipt: BatchReceipt = { maybeSent: false };
+      const outcome = await sendBatchNoting(messages, `waitlist:${sid}:${pid}:${job.started}:${job.cursor}`, { by: "store", store, kind: "email" }, receipt);
+      // The company's day is given back only when no provider can have taken any of it (lib/email.ts sendBatchNoting).
       if (outcome === "retry") {
-        await releaseDay(chunk.length);
+        if (!receipt.maybeSent) await releaseDay(chunk.length);
         break;
       }
-      if (outcome === "refused") await releaseDay(chunk.length);
-      else {
+      if (outcome === "refused") {
+        if (!receipt.maybeSent) await releaseDay(chunk.length);
+      } else {
         job.sent += chunk.length;
         sent += chunk.length;
       }

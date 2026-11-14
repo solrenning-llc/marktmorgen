@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { clearedSessionCookies } from "@/lib/session-cookie";
 import { originFrom } from "@/lib/request-origin";
 import {
   SESSION_COOKIE,
@@ -7,7 +8,6 @@ import {
 } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
-import { clearedSessionCookies } from "@/lib/session-cookie";
 
 /**
  * Closes every session this creator has open, on every device.

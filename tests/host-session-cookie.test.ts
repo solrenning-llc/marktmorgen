@@ -9,7 +9,7 @@
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
 import { HOST_SESSION_COOKIE, LEGACY_SESSION_COOKIE_UNTIL, SESSION_COOKIE, carrySessionCookie, clearedSessionCookies, sessionCookieName } from "@/lib/session-cookie";
-import { sessionCookie } from "@/lib/auth";
+import { SESSION_COOKIE as READ_AS, sessionCookie } from "@/lib/auth";
 import { done, is, part } from "./check";
 
 const A = "a".repeat(64);
@@ -23,6 +23,7 @@ const forwardedSession = (headers: Headers | null) => {
 
 async function main(): Promise<void> {
   part("Written as __Host-nl_session over https, as before over http");
+  is("the proxy hands on the name the code reads (lib/auth.ts SESSION_COOKIE)", SESSION_COOKIE, READ_AS);
   is("the names", [sessionCookieName(true), sessionCookieName(false)], ["__Host-nl_session", "nl_session"]);
   const written = sessionCookie(A, true);
   is("a __Host- cookie: Secure, Path=/, no Domain", [written.startsWith(`${HOST_SESSION_COOKIE}=${A};`), /; Secure(;|$)/.test(written), /; Path=\/(;|$)/.test(written), /Domain=/i.test(written)], [true, true, true, false]);

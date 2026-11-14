@@ -63,8 +63,7 @@ import { writtenSessionCookie } from "@/lib/session-cookie";
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MAX_EMAIL_LENGTH = 254;
-// The name the code reads the session under; written as __Host-nl_session over https (lib/session-cookie.ts).
-export { SESSION_COOKIE } from "@/lib/session-cookie";
+export const SESSION_COOKIE = "nl_session";
 
 const LINK_TTL_SECONDS = 15 * 60;
 export const SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;

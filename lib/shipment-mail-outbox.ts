@@ -294,10 +294,17 @@ end
 local supported = r.reviewId==p.reviewId
 if type(p.continuedReviewIds)=='table' then for _,id in ipairs(p.continuedReviewIds) do if id==r.reviewId then supported=true end end end
 if not supported then return {'unknown'} end
+-- A physical confirmation whose checkout is still open waits for the buyer,
+-- not for delivery: a pass that finds it still unpaid and defers it gives its
+-- check back, and a parked budget does not stop claiming it. The wait is
+-- bounded by the latest possible Stripe session expiry (creation replay
+-- window 23h plus the 24h maximum session life); after that every pass spends
+-- a check again. Shipment rows (no 'confirmation' kind) are unaffected.
+local paymentWait = r.kind=='confirmation' and r.originKind==nil and r.phase=='awaiting_payment' and type(r.created)=='number' and now<r.created+169200000
 if op == 'claim' then
  if r.state~='queued' and not (r.state=='preparing' and r.leaseUntil<=now) then return {'held',raw} end
  if r.next>now then return {'held',raw} end
- if r.checks>=p.maximumChecks then
+ if r.checks>=p.maximumChecks and not paymentWait then
   r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=0
  else
   r.state='preparing'; r.owner=ARGV[7]; r.leaseUntil=now+60000; r.next=r.leaseUntil; r.checks=r.checks+1; r.reviewId=p.reviewId
@@ -308,6 +315,7 @@ elseif op == 'dispatch' then
 elseif op == 'defer' then
  if r.state~='preparing' or r.owner~=ARGV[7] then return {'held',raw} end
  r.state='queued'; r.owner=''; r.leaseUntil=0; r.next=now+p.retryMilliseconds
+ if paymentWait and r.checks>0 then r.checks=r.checks-1 end
 elseif op == 'not-accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  r.state='queued'; r.owner=''; r.next=now+p.retryMilliseconds
@@ -318,12 +326,12 @@ elseif op == 'accepted' then
  if r.state~='dispatching' or r.owner~=ARGV[7] then return {'held',raw} end
  drop(); return {'accepted'}
 else return {'unknown'} end
-if r.state=='queued' and r.checks>=p.maximumChecks then r.next=0 end
+if r.state=='queued' and r.checks>=p.maximumChecks and not paymentWait then r.next=0 end
 local encoded=cjson.encode(r)
 if #encoded>maxbytes or #encoded>r.bytes then return {'unknown'} end
 redis.call('SET',KEYS[1],encoded)
 if r.state=='queued' and r.next==0 and r.checks>=p.maximumChecks then redis.call('ZADD',KEYS[3],-r.checks,r.id)
-elseif r.next>0 and (r.state=='preparing' or r.checks<p.maximumChecks) then redis.call('ZADD',KEYS[3],r.next,r.id) else redis.call('ZREM',KEYS[3],r.id) end
+elseif r.next>0 and (r.state=='preparing' or r.checks<p.maximumChecks or paymentWait) then redis.call('ZADD',KEYS[3],r.next,r.id) else redis.call('ZREM',KEYS[3],r.id) end
 return {r.state,encoded}
 `;
 

@@ -631,10 +631,14 @@ async function main() {
   store = await setup(["sale.completed"]);
   timeline = [evt("evt_Lost", "checkout.session.completed", 1_790_141_000, { id: "cs_Lost01", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", amount_total: 4900, currency: "usd", metadata: { store: HANDLE, product: "p_course" }, customer_details: { email: null, name: null } })];
   const lostMark = `nl:hooks:evt:${eventIdFor(statsId, "sale.completed", "cs_Lost01")}`;
-  breakWhen((command) => (command[0] === "ZADD" && command[1] === "nl:hooks:q") || (command[0] === "DEL" && command[1] === lostMark));
+  breakWhen((command) => (command[0] === "ZADD" && command[1] === "nl:hooks:q") || (command[0] === "DEL" && command[1] === lostMark) || (command[0] === "EVAL" && command.includes(lostMark)));
   await watchStripe(Date.now() + 10_000);
   mend();
-  is("when the mark cannot be taken back either, the lost event is said loudly", said.some((l) => l.startsWith("WEBHOOK EVENT LOST") && l.includes("sale.completed")), true);
+  // Mail-queue hunt: the mark is pending until the deliveries are written, so when it cannot be taken back either the
+  // event is no longer lost (it was "said loudly" and never sent): the next visit resumes it and sends it once.
+  is("when the mark cannot be taken back either, the event is kept pending, not lost", said.some((l) => l.startsWith("WEBHOOK EVENT LOST")), false);
+  await watchStripe(Date.now() + 10_000);
+  is("and the next visit sends it exactly once", [(await recentMessages(store, "sale.completed")).length, await waitRecord()], [1, null]);
 
   part("An answer that is not JSON is Stripe's passing failure, not ours");
   store = await setup(["dispute.opened"]);

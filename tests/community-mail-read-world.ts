@@ -64,6 +64,7 @@ export const eventTimeIn = () => "November 6, 2026";
 export const lengthIn = () => "30 minutes";
 export const isSenderConfigured = () => true;
 export const sendBatch = async (messages: unknown[]) => { sent.push(messages); return "sent"; };
+export const sendListBatch = sendBatch;
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";

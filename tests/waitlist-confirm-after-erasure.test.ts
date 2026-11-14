@@ -146,6 +146,19 @@ async function main(): Promise<void> {
   const kept = await upsertContact(store.listId!, other, { agreed: true, explicit: true, source: "free", fence }, store);
   is("with the fence in place, the own yes is written and lifts the print", [kept.joined, kept.gone, redis.run(["HEXISTS", suppressedKey(store.listId!), suppressionPrint(store.listId!, other)])], [true, undefined, 0]);
   is("and counts one more who agreed, in the same step", Number(redis.run(["GET", agreedKey(store.listId!)]) ?? 0), agreedBefore + 1);
+
+  // The deleted mark is Redis's second (ERASED_PRINT); the app's clock may be behind it. A fenced yes is placed against
+  // its link on Redis's own clock (CONTACT_FENCED_WRITE_IF), never against the app's `at`, which would refuse a fresh
+  // yes whenever the two clocks differ by a second or more.
+  part("a fenced own yes is placed on Redis's clock, even with the app's clock behind it");
+  const skewed = "fence-skew@example.com";
+  advance(10_000);
+  redis.run(["HSET", suppressedKey(store.listId!), suppressionPrint(store.listId!, skewed), Math.floor(redis.now() / 1000) - 3]);
+  redis.run(["SET", "nl:test:fence-skew", "1", "EX", 3600]);
+  is("(control) the app's clock is behind the mark's second", Date.now() < (Math.floor(redis.now() / 1000) - 2) * 1000, true);
+  const placed = await upsertContact(store.listId!, skewed, { agreed: true, explicit: true, source: "free", at: new Date().toISOString(), fence: { key: "nl:test:fence-skew", seconds: 3600 } }, store);
+  is("written, not refused", [placed.joined, placed.gone], [true, undefined]);
+  is("its own yes, by a link issued after the mark, lifted it", redis.run(["HEXISTS", suppressedKey(store.listId!), suppressionPrint(store.listId!, skewed)]), 0);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

@@ -15,6 +15,7 @@
  * a day, for the currencies their country can charge in.
  */
 import { saleHandles } from "@/lib/store";
+import { productOfSub } from "@/lib/tier-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { DELAYED_METHODS } from "@/lib/instant-pay";
@@ -296,7 +297,17 @@ export async function runningSubscriptions(store: Store, product?: string): Prom
         for (const row of read.rows) {
           const meta = ownField(row, "metadata") as Record<string, unknown>;
           const soldBy = ownField(meta, "store");
-          if (typeof soldBy === "string" && handles.has(soldBy) && (product === undefined || ownField(meta, "product") === product)) count += 1;
+          if (typeof soldBy !== "string" || !handles.has(soldBy)) continue;
+          if (product === undefined) {
+            count += 1;
+            continue;
+          }
+          // The product a member pays for now is the price's after a tier switch, the subscription's otherwise
+          // (productOfSub, lib/tier-rules.ts; a subscription item carries its whole price, metadata included). One of
+          // this store's with no product to read may be this product's: "at least", never "not this one" (#4074).
+          const on = productOfSub(row);
+          if (!on) unreadable += 1;
+          else if (on === product) count += 1;
         }
         if (!read.hasMore) {
           done = true;

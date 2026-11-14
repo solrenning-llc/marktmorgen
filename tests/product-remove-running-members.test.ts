@@ -8,7 +8,7 @@
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/store/product/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, editProduct, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -74,6 +74,34 @@ async function main(): Promise<void> {
   const gone = await remove(club.product.id);
   is("with no member left, the product is removed", [gone.status, gone.body.ok, await present(club.product.id)], [200, true, false]);
   is("Stripe was asked by every status that charges", ["active", "trialing", "past_due"].every((status) => asked.includes(status)), true);
+
+  part("Made free first, then removed: Stripe is still asked (reviews on #4074, MEDIUM)");
+  const freed = await addProduct(owner, "Freed Club", "", "9", { interval: "month", trialDays: 0, payments: 0 });
+  if (!freed.ok) throw new Error("freed fixture failed");
+  running = [member(freed.product.id, "active")];
+  const edited = await editProduct(owner, freed.product.id, "Freed Club", "", "0", null);
+  is("setup: the membership was edited to free and not recurring", edited.ok, true);
+  const freedRefused = await remove(freed.product.id);
+  is("a member still charged for it keeps it, even after it was made free", [freedRefused.status, freedRefused.body.error, await present(freed.product.id)], [409, "memberships", true]);
+
+  part("A member on a switched tier counts for the product the price delivers (reviews on #4074, HIGH)");
+  const tierA = await addProduct(owner, "Tier A", "", "5", { interval: "month", trialDays: 0, payments: 0 });
+  const tierB = await addProduct(owner, "Tier B", "", "9", { interval: "month", trialDays: 0, payments: 0 });
+  if (!tierA.ok || !tierB.ok) throw new Error("tier fixtures failed");
+  const switched = { ...member(tierA.product.id, "active"), id: "sub_MemberSwitchedTier", items: { object: "list", data: [{ price: { id: "price_TierB", metadata: { product: tierB.product.id } } }] } };
+  running = [switched];
+  const tierRefused = await remove(tierB.product.id);
+  is("the tier the member pays for now is not removed", [tierRefused.status, tierRefused.body.error, await present(tierB.product.id)], [409, "memberships", true]);
+  const tierAGone = await remove(tierA.product.id);
+  is("the tier the member left is removed as before", [tierAGone.status, tierAGone.body.ok, await present(tierA.product.id)], [200, true, false]);
+
+  part("A member of this store with no product to read is not \"nobody\" (reviews on #4074, HIGH)");
+  running = [{ id: "sub_MemberNoProduct", object: "subscription", status: "active", metadata: { store: "removerunning" } }];
+  const blind = await remove(tierB.product.id);
+  is("the removal is refused as not known, and nothing is removed", [blind.status, blind.body.error, await present(tierB.product.id)], [502, "stripe", true]);
+  running = [{ id: "sub_MemberElsewhere", object: "subscription", status: "active", metadata: { store: "someoneelse" } }];
+  const elsewhere = await remove(tierB.product.id);
+  is("another store's subscription with no product does not hold it", [elsewhere.status, elsewhere.body.ok, await present(tierB.product.id)], [200, true, false]);
   done();
 }
 

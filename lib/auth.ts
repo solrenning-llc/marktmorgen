@@ -856,7 +856,9 @@ export async function endAllSessions(email: string): Promise<number | null> {
     const keys = stringList(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
-    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ["DEL", owned]];
+    // Only the sessions read leave the set (#4263, as dropSecondStep does): a login landing between the read and these
+    // deletes keeps its session named in the set, so the next "log out of all devices" still closes it.
+    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ...keys.map((key) => ["SREM", owned, key])];
     // Each delete answers 0 or 1: an answer missing or in another shape is not a session closed (CX-123 rule 24).
     if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
     return keys.length;

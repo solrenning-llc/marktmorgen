@@ -8,6 +8,9 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setProductShipping, setStripeAccount, setSubscription, setProductBundle, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
+import { handsOver } from "@/lib/product-option";
+import { sellsWithPayPal } from "@/lib/paypal-sales";
+import { readFileSync } from "node:fs";
 import { bundleOwnerProblem } from "@/lib/bundle-rules";
 import { activeShipping, parseShipping } from "@/lib/shipping";
 import { store as redis } from "./redis-stub";
@@ -45,6 +48,24 @@ async function main(): Promise<void> {
   const box = await addProduct(OWNER, "Starter box", "", "25", null);
   if (!box.ok) throw new Error("no product");
   is("made a bundle", (await setProductBundle(OWNER, box.product.id, [a.product.id, b.product.id])).ok, true);
+  part("A bundle saved with shipping before this rule is never sold without it");
+  // As one made before the rule: a bundle whose record also holds shipping, written as the store keeps it.
+  const legacy = await addProduct(OWNER, "Old gift box", "", "40", null);
+  if (!legacy.ok) throw new Error("no product");
+  if (!(await setProductBundle(OWNER, legacy.product.id, [a.product.id, b.product.id])).ok) throw new Error("bundle fixture");
+  const catalog = (await storeForEmail(OWNER))!.catalog.id!;
+  const key = `nl:catalog:${catalog}:l:${legacy.product.id}`;
+  const [raw] = (await redis.pipeline([["GET", key]])) as string[];
+  await redis.pipeline([["SET", key, JSON.stringify({ ...JSON.parse(raw), shipping })]]);
+  const now = (await storeForEmail(OWNER))!;
+  const old = (await readProduct(now, legacy.product.id))!;
+  is("the record holds both, as one saved before the rule", [Boolean(old.bundle), old.shipping?.cents], [true, 600]);
+  is("it hands over nothing it can charge for, so Stripe's checkout, the cart and the page do not sell it (canSellProduct)", handsOver(old), false);
+  is("while a bundle with no shipping still does", handsOver((await readProduct(now, box.product.id))!), true);
+  is("nor through PayPal", sellsWithPayPal(old), false);
+  is("and a shipped product is never sold through PayPal, which asks for no address", sellsWithPayPal(after), false);
+  const editor = readFileSync("components/shipping-editor.tsx", "utf8");
+  is("the studio says why, beside the shipping it shows", editor.includes("This bundle is not on sale while it has shipping"), true);
   done();
 }
 

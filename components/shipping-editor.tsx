@@ -89,6 +89,12 @@ export function ShippingEditor({ product }: { product: Product }) {
   if (!open) {
     return (
       <div className="mt-3 text-sm text-ink-soft">
+        {current && product.bundle ? (
+          <p role="status" className="mb-2 font-semibold text-ink">
+            This bundle is not on sale while it has shipping: a bundle hands over the products in it, and its checkout would
+            charge no shipping and ask for no address. Stop shipping it, or make a new product to ship.
+          </p>
+        ) : null}
         {current ? (
           <p>
             <span className="font-semibold text-ink">

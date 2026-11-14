@@ -62,6 +62,7 @@ import {
 import { type Recurring } from "@/lib/product-recurring";
 import { type StoreLook, DEFAULT_LOOK, parseLook } from "@/lib/store-look";
 import { PHOTO_ID_PATTERN } from "@/lib/photo-limits";
+import { deletePhotos } from "@/lib/store-photo";
 import { type CallSetup } from "@/lib/call-setup";
 import { type Pixels, NO_PIXELS, parsePixels } from "@/lib/pixels";
 import { type TaxSetting, NO_TAX, parseTax } from "@/lib/tax";
@@ -73,6 +74,7 @@ import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
+import { type ReturningCode, MAX_RETURNING_CODES, parseReturningCodes } from "@/lib/returning-code-rules";
 import { type WelcomeOffer, NO_WELCOME_OFFER, parseWelcomeOffer } from "@/lib/welcome-offer";
 import { type InboxSetting, NO_INBOX, parseInboxSetting } from "@/lib/inbox-rules";
 import { type PastSale, type StoreSale, NO_SALE, parsePastSales, parseSale, withPastSale } from "@/lib/store-sale";
@@ -479,6 +481,14 @@ export type Store = {
    */
   hasDiscounts: boolean;
   /**
+   * Codes only for people who already bought from this store (554 [DS1],
+   * unit 2; lib/returning-code-rules.ts): the word a buyer types and the
+   * creator's own Stripe coupon it applies. Never a promotion code, so
+   * Stripe's own box can never take one; the server checks the buyer's
+   * earlier purchase first. Empty for every store until the creator makes one.
+   */
+  returningCodes: ReturningCode[];
+  /**
    * Where the addresses collected by free products are kept.
    *
    * An id of its own rather than anything derived from the sign-in address,
@@ -497,6 +507,17 @@ export type Store = {
    * browser may keep it for good; a new photo gets a new id.
    */
   photoId: string | null;
+  /**
+   * Photos kept under this store that its page does not show, until their
+   * deletion is confirmed: one written before the store was pointed at it
+   * (`gone` false, left alone for PHOTO_PENDING_SECONDS, as its write may
+   * still be running), and one the store stopped showing (`gone` true).
+   * Named here, each is deleted by the next upload (settlePhotos), erased
+   * with the store when it closes (its id is one of the store's marks,
+   * lib/closed-store-data.ts) and weighed with the store's data
+   * (lib/data-recount.ts). At most PHOTO_LEFT_MAX; absent when none.
+   */
+  photoLeft?: PhotoLeft[];
   /**
    * Where this store's booked and held call times are kept. An id of its own,
    * made the first time a call is set up, so neither a new address nor a new
@@ -990,6 +1011,8 @@ function parseStore(raw: unknown): Store | null {
       // same as a store nobody has added one to yet.
       links: parseStoreLinks(value.links),
       hasDiscounts: value.hasDiscounts === true,
+      // Stores written before these existed have none; an entry in any other shape is dropped, never applied.
+      returningCodes: parseReturningCodes((value as { returningCodes?: unknown }).returningCodes),
       listId:
         typeof value.listId === "string" && LIST_ID_PATTERN.test(value.listId)
           ? value.listId
@@ -999,6 +1022,7 @@ function parseStore(raw: unknown): Store | null {
         typeof value.photoId === "string" && PHOTO_ID_PATTERN.test(value.photoId)
           ? value.photoId
           : null,
+      ...photoLeftOf((value as { photoLeft?: unknown }).photoLeft),
       callsId:
         typeof value.callsId === "string" && LIST_ID_PATTERN.test(value.callsId)
           ? value.callsId
@@ -1367,6 +1391,7 @@ async function freshStore(fields: {
     catalog: emptyCatalog(await catalogIdFor(ref, createdAt)),
     links: [],
     hasDiscounts: false,
+    returningCodes: [],
     listId: newListId(),
     look: { ...DEFAULT_LOOK },
     photoId: null,
@@ -3078,17 +3103,116 @@ export async function updateLook(
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 
+/** A photo the store keeps and does not show (Store.photoLeft): its id, when it was named (seconds), and whether the page stopped showing it. */
+export type PhotoLeft = { id: string; at: number; gone: boolean };
+
+/** How long a photo written and not put on yet is left alone: longer than any function may run (800 s at most on Vercel), and far longer than the store lock its pointing holds. */
+export const PHOTO_PENDING_SECONDS = 15 * 60;
+/** The most photos a store names without showing: past it a new upload waits (lib/store-data-registry). */
+export const PHOTO_LEFT_MAX = 2;
+
+/** Reads the photos a record names without showing; every well-formed name is kept, so none is lost to a read. */
+function photoLeftOf(raw: unknown): { photoLeft?: PhotoLeft[] } {
+  if (!Array.isArray(raw)) return {};
+  const out: PhotoLeft[] = [];
+  for (const row of raw as unknown[]) {
+    if (!row || typeof row !== "object") continue;
+    const { id, at, gone } = row as { id?: unknown; at?: unknown; gone?: unknown };
+    if (typeof id !== "string" || !PHOTO_ID_PATTERN.test(id) || out.some((left) => left.id === id)) continue;
+    out.push({ id, at: Number.isSafeInteger(at) && (at as number) > 0 ? (at as number) : 0, gone: gone === true });
+  }
+  return out.length ? { photoLeft: out } : {};
+}
+
+const leftOrNone = (left: PhotoLeft[]): PhotoLeft[] | undefined => (left.length ? left : undefined);
+
+/**
+ * Under the store's lock: deletes each photo the store names and does not
+ * show that may go now (one it stopped showing, or one written more than
+ * PHOTO_PENDING_SECONDS ago and never put on), and answers the names that
+ * stay. The deletion is confirmed before a name is dropped; when it is not,
+ * this throws and every name stays.
+ */
+async function settleLeft(store: Store, nowSeconds: number): Promise<{ due: boolean; kept: PhotoLeft[] }> {
+  const left = store.photoLeft ?? [];
+  const shown = (left: PhotoLeft) => left.id === store.photoId;
+  const due = left.filter((entry) => !shown(entry) && (entry.gone || entry.at <= nowSeconds - PHOTO_PENDING_SECONDS));
+  if (due.length) await deletePhotos(due.map((entry) => entry.id));
+  const kept = left.filter((entry) => !shown(entry) && !due.includes(entry));
+  return { due: kept.length !== left.length, kept };
+}
+
+/**
+ * Names a photo about to be written for the page in the store record, before
+ * anything is written under its id, so a write or a pointing that fails
+ * never leaves it where nothing finds it. Deletes first what may go now.
+ * "busy" when PHOTO_LEFT_MAX are still waiting: the creator tries again in a
+ * few minutes. Throws when a deletion or the record's write is not confirmed.
+ */
+export async function notePhotoUpload(
+  email: string,
+  id: string,
+  now = Date.now(),
+): Promise<{ ok: true } | { ok: false; reason: "none" | "busy" }> {
+  const nowSeconds = Math.floor(now / 1000);
+  const result = await withStore(email, async (store, save) => {
+    const { due, kept } = await settleLeft(store, nowSeconds);
+    if (kept.length >= PHOTO_LEFT_MAX) {
+      if (due) await save({ ...store, photoLeft: leftOrNone(kept) });
+      return { ok: false as const, reason: "busy" as const };
+    }
+    await save({ ...store, photoLeft: [...kept, { id, at: nowSeconds, gone: false }] });
+    return { ok: true as const };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+/**
+ * Deletes, and stops naming, what the store keeps and does not show that may
+ * go now. Throws when a deletion is not confirmed: the names stay, for the
+ * next try or the closing walk.
+ */
+export async function settlePhotos(email: string, now = Date.now()): Promise<void> {
+  await withStore(email, async (store, save) => {
+    const { due, kept } = await settleLeft(store, Math.floor(now / 1000));
+    if (due) await save({ ...store, photoLeft: leftOrNone(kept) });
+  });
+}
+
+/**
+ * Deletes a photo named for an upload whose write failed, so the store was
+ * never pointed at it, and stops naming it once the deletion is confirmed.
+ * Never one the store shows. Throws when not confirmed: the name stays.
+ */
+export async function dropPhotoUpload(email: string, id: string): Promise<void> {
+  await withStore(email, async (store, save) => {
+    const left = store.photoLeft ?? [];
+    if (id === store.photoId || !left.some((entry) => entry.id === id && !entry.gone)) return;
+    await deletePhotos([id]);
+    await save({ ...store, photoLeft: leftOrNone(left.filter((entry) => entry.id !== id)) });
+  });
+}
+
 /**
  * Points the store at a photo, or at none, and says which one it replaced so
- * the caller can delete the old picture once nothing refers to it.
+ * the caller can delete the old picture once nothing refers to it. In the
+ * same write the new photo stops being named as waiting and the old one is
+ * named as no longer shown (Store.photoLeft), so its picture is found again
+ * when its deletion fails. `deleted` is a photo whose deletion the caller has
+ * already confirmed: it is not named again.
  */
 export async function setPhotoId(
   email: string,
   photoId: string | null,
+  now = Date.now(),
+  deleted: string | null = null,
 ): Promise<{ ok: true; store: Store; was: string | null } | { ok: false; reason: "none" }> {
   const result = await withStore(email, async (store, save) => {
-    const next = await save({ ...store, photoId });
-    return { ok: true as const, store: next, was: store.photoId };
+    const was = store.photoId && store.photoId !== photoId ? store.photoId : null;
+    const left = (store.photoLeft ?? []).filter((entry) => entry.id !== photoId && entry.id !== was && entry.id !== deleted);
+    if (was && was !== deleted) left.push({ id: was, at: Math.floor(now / 1000), gone: true });
+    const next = await save({ ...store, photoId, photoLeft: leftOrNone(left) });
+    return { ok: true as const, store: next, was };
   });
   return result ?? { ok: false, reason: "none" };
 }
@@ -3828,6 +3952,16 @@ export async function setHasDiscounts(
   if (!store) return null;
   if (store.hasDiscounts === hasDiscounts) return store;
   return patchStore(email, (current) => (current.hasDiscounts === hasDiscounts ? null : { hasDiscounts }));
+}
+
+/**
+ * Writes the store's codes for people who already bought here (554 [DS1],
+ * unit 2), read through the same strict reader as every load, so nothing in
+ * another shape is ever kept. At most MAX_RETURNING_CODES.
+ */
+export async function setReturningCodes(email: string, codes: ReturningCode[]): Promise<Store | null> {
+  const kept = parseReturningCodes(codes.slice(0, MAX_RETURNING_CODES));
+  return patchStore(email, () => ({ returningCodes: kept }));
 }
 
 export type ProductPartResult =

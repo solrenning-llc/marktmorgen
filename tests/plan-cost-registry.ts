@@ -117,6 +117,7 @@ import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { WINBACK_OPEN_STRIPE_CALLS } from "@/lib/winback";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
@@ -460,6 +461,13 @@ export function affiliateLoadRead(size: AffiliateLoadSize): number {
 export function publicListingsRead(listings: number): number {
   return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
 }
+/**
+ * What reading whether a come-back link's person already has a membership that has not ended costs at the most
+ * (lib/winback-send.ts, openWinBack), besides the press itself (a public request, "come-back"): the units taken, and
+ * WINBACK_OPEN_STRIPE_CALLS calls to the creator's Stripe account, each waited on at 2 GB with a whole page's body.
+ * Taken as WINBACK_OPEN_REQUEST_UNITS public requests before it reads (tests/plan-cost-registry.test.ts).
+ */
+export const WINBACK_OPEN_READ = TAKE_COMMANDS * COMMAND + WINBACK_OPEN_STRIPE_CALLS * stripePage();
 /**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
  * the request, the store's counts and the listings it reads, every page of
@@ -1271,6 +1279,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
       { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      // A come-back link's checkout reads whether the person has a membership still running before it opens (R43, follow-up to #3371).
+      { file: "lib/winback-send.ts", names: ["takeBuyerRead(store, WINBACK_OPEN_REQUEST_UNITS)", "WINBACK_OPEN_STRIPE_CALLS - 2"] },
+      { file: "lib/winback.ts", names: ["WINBACK_OPEN_STRIPE_CALLS", "WINBACK_OPEN_REQUEST_UNITS"] },
       // A code only for people who bought here before reads what the typed email bought from the creator's Stripe account, counted before (554 [DS1], unit 2, 11 November 2026).
       { file: "lib/returning-code.ts", names: ["takeBuyerRead(store, RETURNING_CODE_REQUEST_UNITS)", "RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "RETURNING_TRIES = 6", "RETURNING_LINKS_PER_ADDRESS = 3", "RETURNING_LINK_SECONDS = 1800", "kind: \"transactional\""] },
       // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).

@@ -299,7 +299,7 @@ export async function createCheckout(
   } = {},
   /** Internal integration dependency; never populated from HTTP or environment flags. */
   confirmationRuntime: ConfirmationOriginRuntime = {},
-): Promise<{ url: string; id: string }> {
+): Promise<{ url: string; id: string; closesAt?: number | null }> {
   if (!store.stripeAccountId) throw new Error("This store has no account");
   if (extras.gift) extras = { ...extras, bumps: [], plan: false, upsellKey: undefined, group: undefined };
   if (extras.preorder) {
@@ -796,6 +796,7 @@ export async function createCheckout(
     if (!reserved.ok) throw new Error("The payment page could not be opened");
     const ready = await openConfirmationOrigin(reserved.id, confirmationRuntime);
     if (!ready) throw new Error("The payment page could not be confirmed");
+    // The confirmed origin's own answer, as it is kept (no closing time is read back on this path).
     return ready;
   }
 
@@ -885,7 +886,14 @@ export async function createCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
-  return { url: session.url, id: session.id };
+  // When Stripe closes it, in Unix seconds: its own expires_at, else the one this checkout was opened with (a held unit,
+  // the reminders' hour), else null (Stripe's default day). A caller that keeps the address keeps it no longer
+  // (lib/winback-send.ts; Claude 7's review of #3482, MEDIUM).
+  const told = Number(body.get("expires_at"));
+  const closesAt = Number.isSafeInteger(session.expires_at) && Number(session.expires_at) > 0
+    ? Number(session.expires_at)
+    : body.has("expires_at") && Number.isSafeInteger(told) && told > 0 ? told : null;
+  return { url: session.url, id: session.id, closesAt };
 }
 
 /** A product added at checkout, as an order hands it over. */

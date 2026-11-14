@@ -224,15 +224,23 @@ const en = {
 
   // ---- A membership that has ended ----------------------------------------------------------
   offerNotices: {
+    /** A membership of this product that has not ended was found: the come-back checkout is not opened (lib/winback-send.ts). */
+    member: "You already have a membership to this that is still running, so the offer was not used. Nothing was charged.",
     price: "The store no longer offers the price this offer was for, so it cannot be used. Nothing was charged.",
     expired: "This offer has ended. You can still come back at the usual price below.",
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** Another press of the same link is opening its checkout right now (lib/winback-send.ts): wait, then press again. */
+    opening: "This offer is already opening in another window. Wait a moment, then press the button again. Nothing was charged.",
     /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
     unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
+  /** The heading when a come-back link was refused because the membership has not ended. */
+  runningTitle: "Your membership is still running",
+  /** A link of its own, to the page where a member manages or cancels (app/[handle]/manage). */
+  manageLink: "Manage your membership",
   endedBody: (title: string) =>
     `Your membership for ${title} is no longer running, so what it gave you access to is closed now. Renew it and everything opens again right away.`,
   /** The same without the promise that renewing opens it again: said when the price the offer named is gone. */
@@ -586,14 +594,18 @@ const es: MembershipWords = {
   backToMembership: "Volver a tu membresía",
 
   offerNotices: {
+    member: "Ya tienes una membresía de esto que sigue activa, así que la oferta no se usó. No se cobró nada.",
     price: "La tienda ya no ofrece el precio para el que era esta oferta, así que no se puede usar. No se cobró nada.",
     expired: "Esta oferta ha terminado. Todavía puedes volver al precio habitual, abajo.",
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    opening: "Esta oferta ya se está abriendo en otra ventana. Espera un momento y vuelve a pulsar el botón. No se cobró nada.",
     unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
+  runningTitle: "Tu membresía sigue activa",
+  manageLink: "Gestiona tu membresía",
   endedBody: (title) =>
     `Tu membresía de ${title} ya no está activa, así que aquello a lo que te daba acceso está cerrado ahora. Renuévala y todo se vuelve a abrir al instante.`,
   endedClosed: (title) =>
@@ -941,14 +953,18 @@ const fr: MembershipWords = {
   backToMembership: "Retour à votre abonnement",
 
   offerNotices: {
+    member: "Vous avez déjà un abonnement à ceci qui est toujours en cours, donc l'offre n'a pas été utilisée. Rien n'a été débité.",
     price: "La boutique ne propose plus le prix auquel cette offre correspondait, elle ne peut donc pas être utilisée. Rien n'a été débité.",
     expired: "Cette offre est terminée. Vous pouvez toujours revenir au prix habituel ci-dessous.",
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    opening: "Cette offre est déjà en cours d'ouverture dans une autre fenêtre. Patientez un instant, puis appuyez à nouveau sur le bouton. Rien n'a été débité.",
     unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
+  runningTitle: "Votre abonnement est toujours en cours",
+  manageLink: "Gérez votre abonnement",
   endedBody: (title) =>
     `Votre abonnement à ${title} n'est plus actif, donc ce à quoi il vous donnait accès est désormais fermé. Renouvelez-le et tout se rouvre immédiatement.`,
   endedClosed: (title) =>
@@ -1301,6 +1317,7 @@ const de: MembershipWords = {
   backToMembership: "Zurück zu Ihrer Mitgliedschaft",
 
   offerNotices: {
+    member: "Sie haben hierfür bereits eine Mitgliedschaft, die noch läuft, deshalb wurde das Angebot nicht genutzt. Es wurde nichts berechnet.",
     price: "Der Shop bietet den Preis, für den dieses Angebot galt, nicht mehr an, deshalb kann es nicht genutzt werden. Es wurde nichts berechnet.",
     expired: "Dieses Angebot ist abgelaufen. Sie können unten weiterhin zum normalen Preis zurückkehren.",
     unavailable:
@@ -1308,9 +1325,12 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    opening: "Dieses Angebot wird bereits in einem anderen Fenster geöffnet. Warten Sie einen Moment und drücken Sie dann die Schaltfläche erneut. Es wurde nichts berechnet.",
     unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
+  runningTitle: "Ihre Mitgliedschaft läuft noch",
+  manageLink: "Verwalten Sie Ihre Mitgliedschaft",
   endedBody: (title) =>
     `Ihre Mitgliedschaft für ${title} läuft nicht mehr, daher ist das, wozu sie Ihnen Zugang gab, jetzt geschlossen. Erneuern Sie sie, und alles öffnet sich sofort wieder.`,
   endedClosed: (title) =>
@@ -1662,14 +1682,18 @@ const it: MembershipWords = {
   backToMembership: "Torna al tuo abbonamento",
 
   offerNotices: {
+    member: "Hai già un abbonamento a questo ancora attivo, quindi l'offerta non è stata usata. Non è stato addebitato nulla.",
     price: "Il negozio non offre più il prezzo a cui si riferiva questa offerta, quindi non può essere usata. Non è stato addebitato nulla.",
     expired: "Questa offerta è terminata. Puoi comunque tornare al prezzo normale qui sotto.",
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    opening: "Questa offerta si sta già aprendo in un'altra finestra. Aspetta un momento, poi premi di nuovo il pulsante. Non è stato addebitato nulla.",
     unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
+  runningTitle: "Il tuo abbonamento è ancora attivo",
+  manageLink: "Gestisci il tuo abbonamento",
   endedBody: (title) =>
     `Il tuo abbonamento a ${title} non è più attivo, quindi ciò a cui ti dava accesso ora è chiuso. Rinnovalo e tutto si riapre subito.`,
   endedClosed: (title) =>
@@ -2014,14 +2038,18 @@ const nl: MembershipWords = {
   backToMembership: "Terug naar je lidmaatschap",
 
   offerNotices: {
+    member: "Je hebt hier al een lidmaatschap voor dat nog loopt, dus het aanbod is niet gebruikt. Er is niets afgeschreven.",
     price: "De winkel biedt de prijs waarvoor dit aanbod gold niet meer aan, dus het kan niet worden gebruikt. Er is niets afgeschreven.",
     expired: "Dit aanbod is afgelopen. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs.",
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    opening: "Dit aanbod wordt al in een ander venster geopend. Wacht even en druk dan opnieuw op de knop. Er is niets afgeschreven.",
     unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
+  runningTitle: "Je lidmaatschap loopt nog",
+  manageLink: "Beheer je lidmaatschap",
   endedBody: (title) =>
     `Je lidmaatschap voor ${title} loopt niet meer, dus waar het je toegang toe gaf, is nu gesloten. Verleng het en alles gaat meteen weer open.`,
   endedClosed: (title) =>
@@ -2364,14 +2392,18 @@ const pt: MembershipWords = {
   backToMembership: "Voltar à sua subscrição",
 
   offerNotices: {
+    member: "Já tem uma subscrição disto que ainda está ativa, por isso a oferta não foi usada. Não foi cobrado nada.",
     price: "A loja já não oferece o preço a que esta oferta se referia, por isso não pode ser usada. Não foi cobrado nada.",
     expired: "Esta oferta terminou. Ainda pode voltar ao preço habitual, abaixo.",
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    opening: "Esta oferta já está a abrir noutra janela. Aguarde um momento e carregue novamente no botão. Não foi cobrado nada.",
     unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
+  runningTitle: "A sua subscrição ainda está ativa",
+  manageLink: "Gira a sua subscrição",
   endedBody: (title) =>
     `A sua subscrição de ${title} já não está ativa, por isso aquilo a que lhe dava acesso está agora fechado. Renove-a e tudo volta a abrir de imediato.`,
   endedClosed: (title) =>

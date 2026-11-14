@@ -6,6 +6,7 @@ Only Claude 4 edits this file (owner decision 04/11/2026, inbox C4-1). Add a row
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
+| Claude 4 (nuvem Q) | AX274 Part A item 5: the buyer's line stamped on a PDF is an artifact, so a creator's tagged PDF stays tagged (PDF/UA, ISO 14289-1 7.1) | claude4/ax-pdf-stamp-artifact | `lib/pdf-stamp.ts`, `tests/ax-pdf-stamp-artifact.test.ts` | 11/11/2026 15h42 |
 | Claude 4 (nuvem Q) | AX274 Part A item 5: the emails and generated PDFs audit, recorded with its gaps | claude4/ax-mail-pdf-audit | `docs/accessibility-email-pdf-audit-2026-11-11.md` | 11/11/2026 15h46 |
 | Claude 4 | 375 [TB1] unit 5 (a video in a window behind a button; PR after #2077, which merged) | claude4/tb1-video-window | `components/side-panel-switch.tsx`, `tests/e2e/block-picker-wide.mjs`, `tests/e2e/us-english-composer.mjs` (waits for the editor to hydrate before opening the picker), `components/video-window.tsx`, `lib/buyer-words/blocks.ts`, `lib/row-edit-rules.ts`, `tests/row-editor.test.ts`, `tests/store-language.test.ts` | 04/11/2026 07h20 |
 | Claude 4 | r24 unit 6 (draft lease owned; checkout-trouble day mark kept on an unknown send) | claude4/r24-draft-lock-owner | `lib/mail-drafts.ts`, `lib/checkout-trouble.ts`, `tests/draft-lock-owner.test.ts`, `tests/checkout-trouble-send-unknown.test.ts`, `tests/draft-version.test.ts`, `tests/l10a-claims-exact.test.ts` | 08/11/2026 22h20 |

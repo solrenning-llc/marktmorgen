@@ -40,12 +40,13 @@ export const MAX_NEXT_STEP_LINE = 160;
 /** What the creator picked for one course: a product of the store, and their line (which may be empty). */
 export type NextStep = { productId: string; line: string };
 
-export type NextStepProblem = "product" | "self" | "long" | "hidden" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
+export type NextStepProblem = "product" | "self" | "never" | "long" | "hidden" | "link" | "deal" | "pressure" | "number" | "quote" | "exclaim";
 
 /** What the studio says for each problem, in plain words. */
 export const NEXT_STEP_PROBLEMS: Record<NextStepProblem, string> = {
   product: "Pick a product from your store.",
   self: "Pick another product. A course cannot be its own next step.",
+  never: "Pick another product. A product with a limited number, a free product and a bundle the student builds or with too few products are never shown as a next step.",
   long: `Keep the line to ${MAX_NEXT_STEP_LINE} characters or fewer.`,
   hidden: "Leave out hidden characters, such as zero-width spaces or marks that change the direction of the text. Type the line again in plain words.",
   link: "Leave out links and addresses. The button already opens the product's page.",

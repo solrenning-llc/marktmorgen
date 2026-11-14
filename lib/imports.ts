@@ -59,6 +59,7 @@ import { DataRoomError } from "@/lib/store-data";
 import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { namesAddress } from "@/lib/address-match";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -238,6 +239,8 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   }
 }
 const KEEP_SECONDS = 14 * 86_400;
+/** How long an import's records are kept, as the store is told (lib/person-data.ts): read by tests/import-mail-putback-retention.test.ts. */
+export const IMPORT_KEEP_SECONDS = KEEP_SECONDS;
 /**
  * How long the rows themselves are kept while they wait to be brought in
  * (since 18 October 2026): what they weigh is counted in the database's
@@ -443,14 +446,32 @@ async function writeJobIf(raw: string, job: ImportJob, batch?: string[][]): Prom
  * left out.
  */
 export async function storeImports(store: Store): Promise<ImportJob[]> {
-  if (!store.sid || !isRedisConfigured()) return [];
+  return (await readStoreImports(store)).jobs;
+}
+
+/**
+ * storeImports with what it leaves out counted (Codex U on #4321): `listed` is how many entries the store's list
+ * held, `unreadable` how many of them were kept but could not be read as one of its imports (an id of another shape,
+ * a record parseJob refuses, or one naming another store). A missing record (its GET answered nothing) is gone, not
+ * unreadable.
+ */
+async function readStoreImports(store: Store): Promise<{ jobs: ImportJob[]; listed: number; unreadable: number }> {
+  if (!store.sid || !isRedisConfigured()) return { jobs: [], listed: 0, unreadable: 0 };
   const ids = stringList(repliesFor(await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]), 1)?.[0]);
   if (ids === null) throw new UnknownReplyError("the store's imports");
   const list = ids.filter((id) => IMPORT_ID_PATTERN.test(id));
-  if (!list.length) return [];
+  let unreadable = ids.length - list.length;
+  if (!list.length) return { jobs: [], listed: ids.length, unreadable };
   const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", jobKey(id)])), list.length);
   if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's imports");
-  return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
+  const jobs: ImportJob[] = [];
+  for (const raw of raws) {
+    if (raw === null) continue;
+    const job = parseJob(raw);
+    if (job !== null && job.sid === store.sid) jobs.push(job);
+    else unreadable += 1;
+  }
+  return { jobs, listed: ids.length, unreadable };
 }
 
 /**
@@ -1555,12 +1576,15 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     if (emails === null) throw new UnknownReplyError("the addresses an import took to email");
     return "retry";
   }
+  // Every put-back below sends the queue's expiry with it: when the portion was the whole queue, the SREM emptied it
+  // and Redis deleted the key, expiry and all, so a bare SADD would make a key holding those addresses for good
+  // (tests/import-mail-putback-retention.test.ts).
   // Then SREM of exactly those, in its exact shape: all of them gone. Any other answer, or a reply lost on the way
   // back, puts the same addresses back (SADD of one still there changes nothing), gives the portion back and
   // throws, so the step is left as it was, still mailing (runImport), with every address queued.
   const taken = countOf(repliesFor(await redisPipeline([["SREM", mailKey(job.id), ...emails]]), 1)?.[0]);
   if (taken !== emails.length) {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (!paused) await rampBack(job.sid, portion);
     throw new UnknownReplyError("the addresses an import took to email");
   }
@@ -1598,7 +1622,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
       });
       deleted = await deletedAmong(listId, messages.map((m) => m.to));
     } catch (error) {
-      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
       await unsent(portion);
       throw error;
     }
@@ -1610,7 +1634,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   // The company's day first: over it, the same buyers wait for tomorrow.
   if (!(await reserveDay(messages.length))) {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     await unsent(portion);
     return "retry";
   }
@@ -1628,7 +1652,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
     const saved = repliesFor(await redisPipeline([saveJob(job)]), 1)?.[0];
     if (saved !== "OK") {
       held.n += room;
-      await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+      await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
       await releaseDay(messages.length);
       await unsent(portion);
       throw new UnknownReplyError("an import's hold saved before its send");
@@ -1642,7 +1666,7 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   const sent = await sendBatch(sending, `nimbus-import:${job.id}:${emails.slice().sort()[0]}:${emails.length}`, { by: "monthly" });
   if (sent === "retry") {
-    await redisPipeline([["SADD", mailKey(job.id), ...emails]]);
+    await redisPipeline([["SADD", mailKey(job.id), ...emails], ["EXPIRE", mailKey(job.id), KEEP_SECONDS]]);
     if (held) held.n += sending.length;
     else await releaseMoved(store, sending.length);
     await releaseDay(sending.length);
@@ -1680,6 +1704,99 @@ function batchOf(raw: unknown): string[][] | null {
   if (!Array.isArray(batch)) return null;
   for (const row of batch) if (!Array.isArray(row) || row.some((cell) => typeof cell !== "string")) return null;
   return batch as string[][];
+}
+
+/** A glob that matches its text exactly, for HSCAN MATCH: the pattern characters escaped. */
+const globExact = (text: string) => text.replace(/[\\*?[\]]/g, (c) => `\\${c}`);
+
+/** What one import of the store holds about one address, for the person's copy. */
+export type ImportTrace = {
+  import: string;
+  kind: ImportKind;
+  started: string;
+  rowsWaiting: string[][];
+  notBroughtIn: { row: number; column: string; problem: string; value: string }[];
+  rowsSeen: { key: string; row: string }[];
+  toBeEmailed: boolean;
+};
+
+/**
+ * What the store's kept imports hold about one address, for the person's copy (lib/person-copy.ts, GDPR art. 15; C7
+ * data-copy hunt): rows of a file still waiting to be brought in (RAW_DAYS) that name the address, the report of rows
+ * not brought in (KEEP_SECONDS), the note of which row it was seen on, and whether an email to it still waits. Only
+ * reads. Each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
+ * rather than leave this out. What cannot be reached is said in `unread`, never left out in silence: a report line or
+ * a batch of rows kept in an unreadable shape, and imports older than the store's last LIST_SIZE, which are kept for
+ * KEEP_SECONDS but are no longer on its list.
+ */
+export async function importTracesOf(store: Store, email: string, now = Date.now()): Promise<{ records: ImportTrace[]; unread: string[] }> {
+  const address = normaliseEmail(email);
+  const records: ImportTrace[] = [];
+  const unread: string[] = [];
+  if (!address) return { records, unread };
+  const { jobs, listed, unreadable } = await readStoreImports(store);
+  if (unreadable) unread.push(`${unreadable === 1 ? "An import" : `${unreadable} imports`} on the store's list could not be read for this copy.`);
+  // Each cell's addresses compared whole: never a longer address that only contains theirs (Codex G on #4321).
+  const names = (cells: string[]) => cells.some((cell) => namesAddress(cell, address));
+  for (const job of jobs) {
+    const replies = repliesFor(await redisPipeline([["LRANGE", errorsKey(job.id), 0, MAX_REPORT_ROWS - 1], ["LLEN", rowsKey(job.id)], ["SMEMBERS", mailKey(job.id)]]), 3);
+    const errors = stringList(replies?.[0]);
+    const batches = countOf(replies?.[1]);
+    const mail = stringList(replies?.[2]);
+    if (errors === null || batches === null || mail === null) throw new UnknownReplyError("an import's records about a person");
+    const notBroughtIn: ImportTrace["notBroughtIn"] = [];
+    for (const raw of errors) {
+      let line: unknown;
+      try {
+        line = JSON.parse(raw);
+      } catch {
+        line = null;
+      }
+      if (!Array.isArray(line) || line.length !== 4 || typeof line[0] !== "number" || line.slice(1).some((cell) => typeof cell !== "string")) {
+        unread.push(`A line of the report of the import "${job.file}" could not be read.`);
+        continue;
+      }
+      const [row, column, problem, value] = line as [number, string, string, string];
+      if (names([value])) notBroughtIn.push({ row, column, problem, value });
+    }
+    const rowsWaiting: string[][] = [];
+    for (let i = 0; i < batches; i += 1) {
+      const read = repliesFor(await redisPipeline([["LINDEX", rowsKey(job.id), i]]), 1);
+      if (!read) throw new UnknownReplyError("an import's rows");
+      // Gone since the length was read (brought in, or let go): nothing waits there any more.
+      if (read[0] === null) continue;
+      const batch = batchOf(read[0]);
+      if (!batch) {
+        unread.push(`Rows of the import "${job.file}" waiting to be brought in could not be read.`);
+        continue;
+      }
+      rowsWaiting.push(...batch.filter(names));
+    }
+    const rowsSeen: ImportTrace["rowsSeen"] = [];
+    let cursor = "0";
+    do {
+      const read = repliesFor(await redisPipeline([["HSCAN", seenKey(job.id), cursor, "MATCH", `?:${globExact(address)}*`, "COUNT", 1000]]), 1);
+      const page = read?.[0];
+      if (!Array.isArray(page) || page.length !== 2 || typeof page[0] !== "string") throw new UnknownReplyError("an import's rows seen");
+      const pairs = stringList(page[1]);
+      if (pairs === null || pairs.length % 2) throw new UnknownReplyError("an import's rows seen");
+      for (let i = 0; i < pairs.length; i += 2) {
+        const key = pairs[i].slice(2);
+        // Only this address (`e:<address>`, `p:<address>|<product>`, `m:<address>|<product>`), not a longer one it starts.
+        if (key === address || key.startsWith(`${address}|`)) rowsSeen.push({ key, row: pairs[i + 1] });
+      }
+      cursor = page[0];
+    } while (cursor !== "0");
+    const toBeEmailed = mail.some((m) => normaliseEmail(m) === address);
+    if (rowsWaiting.length || notBroughtIn.length || rowsSeen.length || toBeEmailed) {
+      records.push({ import: job.file, kind: job.kind, started: new Date(job.at).toISOString(), rowsWaiting, notBroughtIn, rowsSeen, toBeEmailed });
+    }
+  }
+  // The list holds the last LIST_SIZE imports; one before them is kept KEEP_SECONDS from its start but is off the list.
+  // Counted by the list's entries, not the imports read from it: an unreadable one does not hide the older ones.
+  const oldest = Math.min(...jobs.map((job) => job.at));
+  if (listed >= LIST_SIZE && oldest > now - KEEP_SECONDS * 1000) unread.push(`Imports older than the store's last ${LIST_SIZE} are kept up to ${KEEP_SECONDS / 86_400} days and could not be read for this copy.`);
+  return { records, unread };
 }
 
 export async function runImport(id: string, deadline: number): Promise<ImportJob | null> {

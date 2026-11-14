@@ -317,14 +317,28 @@ export async function storeKeysOf(folders: string[]): Promise<(string | null)[]>
 
 /**
  * The creators behind a set of folders, for the notice that goes to them:
- * null for a folder nobody uploaded to, or whose kept key is not an address.
- * Read exactly, as storeKeysOf: an unknown answer throws, and is never "no
- * address on file".
+ * the address, or null for a folder nobody uploaded to or whose key is an
+ * account's other store ("#" and its id, lib/store.ts storeRef), which holds
+ * no address. Read exactly: a read unknown as a whole (no reply, one of
+ * another length, a database that does not answer) throws, and is never "no
+ * address on file". One folder's answer that is neither (not text, "",
+ * whitespace, "not-an-owner": Codex Z on #3072) is undefined, that folder's
+ * owner unknown: not evidence that the store has no owner, so support is not
+ * told so and it is not recorded, and it costs no other folder its notice
+ * (Claude 1's decision on #3072, 1975a5cd).
  */
-export async function ownersOf(folders: string[]): Promise<(string | null)[]> {
+export async function ownersOf(folders: string[]): Promise<(string | null | undefined)[]> {
   if (!isRedisConfigured() || folders.length === 0) return folders.map(() => null);
-  return (await keptOwners(folders, "who a folder belongs to")).map((v) => (v !== null && v.includes("@") ? v : null));
+  const replies = repliesFor(await redisPipeline(folders.map((f) => ["GET", ownerKey(f)])), folders.length);
+  if (!replies) throw new UnknownReplyError("who a folder belongs to");
+  return replies.map((v) => {
+    if (v === null || (typeof v === "string" && OTHER_STORE_KEY.test(v))) return null;
+    return typeof v === "string" && v.includes("@") ? v : undefined;
+  });
 }
+
+/** An account's other store as kept under a folder: "#" and its id (lib/store.ts STORE_ID_PATTERN, extraRef). */
+const OTHER_STORE_KEY = /^#[0-9a-f]{32}$/;
 
 /** Each folder's kept owner key: a non-empty string, or null when none is kept; any other answer throws. */
 async function keptOwners(folders: string[], what: string): Promise<(string | null)[]> {

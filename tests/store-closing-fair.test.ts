@@ -522,7 +522,7 @@ async function main() {
   // This ending's budget, set before any call as the daily job sets it, cut here to one member's worth (8 calls) to see the cap work.
   const joFolder = await storeFolder(jo);
   const { createHash } = await import("node:crypto");
-  await startCallBudget(joFolder, 8);
+  await startCallBudget(joFolder, 8, J);
   // Its emails, as the daily job sets them with the budget (lib/closing-credit.ts).
   await redis.pipeline([["SET", creditKey(joFolder), 100]]);
   await redis.pipeline([["SET", `nl:plan:closing:${createHash("sha256").update(jo).digest("hex").slice(0, 40)}`, JSON.stringify({ of: J, holdFrom: J })]]);

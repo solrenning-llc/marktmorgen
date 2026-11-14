@@ -33,7 +33,8 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
@@ -191,13 +192,15 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number): Promise<void> {
   if (!isRedisConfigured()) return;
+  const ledger = ledgerKey(store, email);
   const replies = repliesFor(
     await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
+      startedAt === undefined ? ["HDEL", ledger, productId] : ["EVAL", HDEL_IF_EQUAL, 1, ledger, productId, String(Math.floor(startedAt))],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,
@@ -236,6 +239,7 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
     const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
@@ -529,6 +533,35 @@ export async function doneLessonsOrUnknown(courseId: string, email: string): Pro
     if (error instanceof UnknownReplyError) return null;
     throw error;
   }
+}
+
+/**
+ * How far one person is in each of these courses, for their list of purchases
+ * (560 [AS1]): the lessons done among the lessons each course has now, all in
+ * one round trip. Each course asks only about its own lessons (SMISMEMBER),
+ * so what comes back is one 0 or 1 a lesson, MAX_LESSONS at the most, however
+ * many marks were kept for lessons since taken out. A course with no lessons
+ * is left out: there is nothing to count. A reply that is not exactly one 0 or
+ * 1 for each lesson asked is null for that course, said as "could not be
+ * checked", never as 0 done (CX-123 rule 24).
+ */
+export async function lessonsDoneIn(courses: Course[], email: string): Promise<Map<string, { done: number; total: number } | null>> {
+  const out = new Map<string, { done: number; total: number } | null>();
+  const asked = courses.flatMap((course) => {
+    const ids = lessonsInOrder(course).map(({ lesson }) => lesson.id);
+    return ids.length ? [{ course, ids }] : [];
+  });
+  if (!asked.length || !isRedisConfigured()) return out;
+  const rows = repliesFor(await redisPipeline(asked.map(({ course, ids }) => ["SMISMEMBER", doneKey(course.id, email), ...ids])), asked.length);
+  asked.forEach(({ course, ids }, i) => {
+    const flags = rows ? repliesFor(rows[i], ids.length) : null;
+    if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) {
+      out.set(course.id, null);
+      return;
+    }
+    out.set(course.id, { done: flags.filter((flag) => flag === 1).length, total: ids.length });
+  });
+  return out;
 }
 
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */
@@ -958,11 +991,23 @@ export async function sendDripEmails(
       for (const unit of dripping) {
         const at = opensAt(course, unit, student.since);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
-        const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
-        if (claimed === null) continue;
+        // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
+        // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
+        // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
+        const mark = dripMailKey(course.id, student.email, unit.id);
+        const value = claimValue();
+        const claimed = await claimMark(mark, 400 * 86_400, value);
+        if (claimed === "unknown") {
+          console.error("a drip email's mark could not be confirmed; not sent this run", course.id, unit.id);
+          await releaseMark(mark, value);
+        }
+        if (claimed !== "ours") continue;
         const ok = await sendDripEmail(store, product, unit, student.email, origin);
         if (ok) counts.sent += 1;
-        else await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
+        // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
+        // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
+        // 2, open): sendEmail's false is also an SES answer lost after the POST, which a later pass may send again.
+        else await releaseMark(mark, value);
       }
     }
   }

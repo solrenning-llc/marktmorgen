@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { StudioEmptyState } from "@/components/empty-state";
 import { toast } from "@/components/toast";
 import type { PersonNote } from "@/lib/buyer-profile";
 
@@ -68,7 +69,7 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-sm text-ink-soft">No notes yet.</p>
+        <StudioEmptyState title="No notes yet" body="A note you save here keeps what you know about this person, for you and your team." action={{ href: "#person-note", label: "Add the first note" }} className="mt-4" />
       )}
       <form
         className="mt-4"
@@ -80,6 +81,7 @@ export function PersonNotes({ person, initial }: { person: string; initial: Pers
         <label className="block text-sm">
           <span className="field-label">Add a note</span>
           <textarea
+            id="person-note"
             required
             rows={3}
             maxLength={MAX_PERSON_NOTE}

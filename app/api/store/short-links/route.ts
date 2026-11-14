@@ -3,6 +3,7 @@ import { guardStoreWrite } from "@/lib/store-request";
 import { ensureStatsId } from "@/lib/store";
 import { readTitles } from "@/lib/catalog";
 import { addLink, removeLink, retarget } from "@/lib/short-links";
+import { UnknownReplyError } from "@/lib/redis-reply";
 
 /**
  * The store's short links for posts (lib/short-links.ts), for whoever may
@@ -10,7 +11,9 @@ import { addLink, removeLink, retarget } from "@/lib/short-links";
  * `{ action: "target", code, target }` changes where it goes, and
  * `{ action: "remove", code }` ends it. A target is `{ kind: "store" }` or
  * `{ kind: "product", id }` or a ready cart, `{ kind: "cart", ids, code? }`
- * (624 [SZ8](23)). Answers the list as it is after.
+ * (624 [SZ8](23)). Answers the list as it is after. A list that
+ * cannot be read is never "no links": adding refuses ("unavailable", 503) and
+ * a change already made answers "unread" (503), so the studio says to reload.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "page", 1_000);
@@ -34,6 +37,10 @@ export async function POST(request: NextRequest) {
     if (body.action === "remove") return answer(await removeLink(store.statsId, body.code));
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {
+    if (error instanceof UnknownReplyError) {
+      console.error("a store's short links could not be read", error);
+      return Response.json({ ok: false, error: "unread" }, { status: 503 });
+    }
     console.error("changing a short link failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

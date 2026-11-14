@@ -647,7 +647,8 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
     for (const id of [group.p, ...(group.items ?? [])]) await input.recordStart(email, id, mark.at);
     // The purchase was paid, so it is covered wherever its sale paid a share. A count not confirmed leaves the mark
     // short of done and the room held: an open of the link within the week does what follows the gift again, and
-    // counts the place once (lib/orders.ts).
+    // counts the place once (lib/orders.ts). Past the room's hours (OPEN_HOURS) the place is in neither the count nor
+    // the room until such an open counts it, and in neither for good when none comes.
     if ((await countOrder(store, `place:${group.id}:${who}`, group.paid ? 1 : 0)) === "unknown") return;
     // Only the open that turns the mark to done gives the room back (Claude 5's review of #2654): an open that
     // outlived its hold and one that came after it may both get here, and the hour's room is shared by every

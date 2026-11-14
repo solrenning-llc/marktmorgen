@@ -20,7 +20,7 @@ import { isSesConfigured, sesBulkRoom, sesReady } from "@/lib/ses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { TRIAL_MONTHLY_EMAILS, canUse, monthlyEmails } from "@/lib/plan";
-import { tokensFor } from "@/lib/contacts";
+import { stopWriting, tokensFor } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { calendarWindow, windowId } from "@/lib/allowance-window";
@@ -101,10 +101,12 @@ export async function usedThisMonthExact(listId: string | null, window: string |
   return Number(raw);
 }
 
+/**
+ * This month's list emails used: the same exact reader as usedThisMonthExact. It THROWS UnknownReplyError on a
+ * reply it cannot trust (rule 24), never answers 0 for it: a caller that must stay up catches it (#3727).
+ */
 export async function usedThisMonth(listId: string | null, window: string | null = calendarWindow().id): Promise<number> {
-  if (!listId || !window || !isRedisConfigured()) return 0;
-  const [raw] = await redisPipeline([["GET", usedKey(listId, window)]]);
-  return Number(raw) || 0;
+  return usedThisMonthExact(listId, window);
 }
 
 /**
@@ -421,15 +423,19 @@ export async function giveBackToMonth(store: Store, n: number): Promise<void> {
   if (store.listId && window && Number.isSafeInteger(n) && n > 0) await redisPipeline([["EVAL", GIVE_BACK_FLOOR, 1, usedKey(store.listId, window), n]]);
 }
 
-/** Gives back what reserve took on `day` (the same MailDay it was given) for a batch that was not sent. */
-export async function release(store: Store, n: number, day: MailDay): Promise<void> {
+/**
+ * Gives back what reserve took on `day` (the same MailDay it was given) for a batch that was not sent. True when there
+ * was nothing to give back or both counters answered a whole number (rule 24); false when the give-back could not be
+ * confirmed, so a caller that must know (lib/product-updates.ts) does not take it as done. Throws when the pipeline does.
+ */
+export async function release(store: Store, n: number, day: MailDay): Promise<boolean> {
   const window = windowOf(store);
-  if (store.listId && window && n > 0) {
-    await redisPipeline([
-      ["DECRBY", usedKey(store.listId, window), n],
-      ["DECRBY", day, n],
-    ]);
-  }
+  if (!store.listId || !window || !(n > 0)) return true;
+  const replies = repliesFor(await redisPipeline([
+    ["DECRBY", usedKey(store.listId, window), n],
+    ["DECRBY", day, n],
+  ]), 2);
+  return !!replies && replies.every((r) => typeof r === "number" && Number.isSafeInteger(r));
 }
 
 function escape(text: string): string {
@@ -563,6 +569,17 @@ export type SendOutcome = {
    * of retrying automatically after that checkpoint is confirmed.
    */
   uncertain?: string[];
+  /**
+   * Addresses the email service refused for good, in a batch it answered for
+   * every email (lib/email.ts ListBatchOutcome): not sent, and never
+   * uncertain. In neither `done` nor `rest`. `removed` when it refused the
+   * address itself and the address was then taken off the list (lib/contacts.ts
+   * stopWriting, "refused"). What was taken from the month for each stays
+   * taken: it paid for asking the sender, reading back who took the batch
+   * and taking the address off, all before they were done; since the address
+   * is off the list, it is never paid for again.
+   */
+  refused?: { email: string; removed: boolean }[];
 };
 
 /** What a send that met the sender's ceiling says in the studio. */
@@ -584,6 +601,9 @@ export async function sendTo(
   tag?: MailTag,
 ): Promise<SendOutcome> {
   const done: string[] = [];
+  const refused: { email: string; removed: boolean }[] = [];
+  // Whatever stops it, those refused before the stop are told too.
+  const told = (outcome: SendOutcome): SendOutcome => refused.length ? { ...outcome, refused } : outcome;
   // A store whose addresses turned out to be bad ones waits its week out
   // (lib/mail-health.ts). Nothing is taken from its month for it.
   const watched = healthId(store);
@@ -594,17 +614,17 @@ export async function sendTo(
   const tags = healthTags(store, true, tag?.campaign);
   for (let i = 0; i < emails.length; ) {
     const room = await dailyRoom();
-    if (room <= 0) return { done, rest: emails.slice(i), stopped: "day" };
+    if (room <= 0) return told({ done, rest: emails.slice(i), stopped: "day" });
     // A list with addresses lately brought in goes out in portions that
     // double (lib/mail-health.ts); for any other store this is every one asked for.
     const portion = await rampRoom(watched, Math.min(BATCH_SIZE, room, emails.length - i));
-    if (portion <= 0) return { done, rest: emails.slice(i), stopped: "portion" };
+    if (portion <= 0) return told({ done, rest: emails.slice(i), stopped: "portion" });
     const chunk = emails.slice(i, i + portion);
     const day = mailDay();
     const reserved = await reserve(store, chunk.length, true, day);
     if (reserved !== "ok") {
       await rampBack(watched, chunk.length);
-      return { done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved };
+      return told({ done, rest: emails.slice(i), stopped: reserved === "month" ? "allowance" : reserved === "unavailable" ? "retry" : reserved });
     }
     // In a sequence, those who allowed their link use to be seen get links that say so (lib/mail-clicks.ts).
     const counting = tag?.medium === "sequence" ? new Set<string>() : undefined;
@@ -617,7 +637,7 @@ export async function sendTo(
     } catch {
       await release(store, chunk.length, day);
       await rampBack(watched, chunk.length);
-      return { done, rest: emails.slice(i), stopped: "retry" };
+      return told({ done, rest: emails.slice(i), stopped: "retry" });
     }
     const keys = counting?.size ? await rememberLinkKeys([...counting].map((email) => tokens.get(email) ?? "")) : new Map<string, string>();
     const messages: BatchMessage[] = chunk
@@ -634,18 +654,43 @@ export async function sendTo(
       // reservations may be returned; unknown acceptance never uses this path.
       await release(store, chunk.length, day);
       await rampBack(watched, chunk.length);
-      return { done, rest: emails.slice(i), stopped: "sender" };
+      return told({ done, rest: emails.slice(i), stopped: "sender" });
     }
-    if (outcome !== "sent") {
+    const refusedHere: { email: string; removed: boolean }[] = [];
+    if (typeof outcome === "object") {
+      // The email service answered for every email of the batch: the ones it
+      // refused are known not sent, never uncertain, and every other one went.
+      // An address it refused as an address is refused again by every email,
+      // so it is taken off the list, saying why, and the next email does not
+      // stop on it (nor pay for it again). What was taken from the month for
+      // a refused one stays taken: it paid, before they were done, for asking
+      // the sender, the read-back of who took the batch (lib/email.ts) and
+      // the removal (tests/plan-cost-registry.ts, "list-email").
+      for (const r of outcome.refused) {
+        let removed = false;
+        if (r.address) {
+          try {
+            await stopWriting(store.listId as string, r.to, "refused");
+            removed = true;
+          } catch (error) {
+            console.error("taking a refused address off the list failed", error);
+          }
+        }
+        refusedHere.push({ email: r.to, removed });
+      }
+    } else if (outcome !== "sent") {
       // Dispatch may have succeeded before its acknowledgement was lost.
       // Keep attempted capacity reserved; retries consume new capacity.
-      return { done, rest: emails.slice(i), stopped: outcome, ...(outcome === "retry" ? { uncertain: messages.map((m) => m.to) } : {}) };
+      return told({ done, rest: emails.slice(i), stopped: outcome, ...(outcome === "retry" ? { uncertain: messages.map((m) => m.to) } : {}) });
     }
+    const refusedTo = new Set(refusedHere.map((r) => r.email));
+    const accepted = messages.filter((m) => !refusedTo.has(m.to));
+    refused.push(...refusedHere);
     if (messages.length < chunk.length) await release(store, chunk.length - messages.length, day);
     // What a bounce or a complaint is later measured against.
-    await noteSent(watched, messages.length);
-    for (const m of messages) done.push(m.to);
+    await noteSent(watched, accepted.length);
+    for (const m of accepted) done.push(m.to);
     i += chunk.length;
   }
-  return { done, rest: [], stopped: null };
+  return told({ done, rest: [], stopped: null });
 }

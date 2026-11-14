@@ -534,21 +534,15 @@ export async function releaseHolds(store: Store, until: number, nowSeconds = Mat
   return out;
 }
 
-/** The members' last payments a store has written down, by subscription. */
+/**
+ * The members' last payments a store has written down, by subscription, read exactly (paidRows): a reply that is not
+ * their whole list, a field that is not a subscription or a row that does not read as a payment throws
+ * UnknownReplyError (rule 24), never an empty or shorter map. Only a confirmed complete read means no member paid, so
+ * the closing day never writes its refunds down as settled, nor deletes what is owed (forgetHeld), on a read that failed.
+ */
 export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>> {
-  const out = new Map<string, PaidPeriod>();
-  if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["HGETALL", paidKey(await storeFolder(storeRef(store)))]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    try {
-      const row = JSON.parse(flat[i + 1]) as PaidPeriod;
-      if (SUB_ID.test(flat[i]) && typeof row.amt === "number" && typeof row.inv === "string") out.set(flat[i], row);
-    } catch {
-      // A row that cannot be read is left out, never guessed at.
-    }
-  }
-  return out;
+  if (!isRedisConfigured()) return new Map();
+  return new Map(await paidRows(await storeFolder(storeRef(store)), true));
 }
 
 /** Writes back what became of one member's refund. */

@@ -7,6 +7,8 @@
  *   nl:grp:<id>:n            string  how many places were taken, as counted before 5 November 2026 (no longer written)
  *   nl:grp:<id>:t:<hash>     string  one open of an address's link at a time, for 30 seconds at most
  *   nl:grp:<id>:mail         string  emails this link sent today, so it cannot be used to fill inboxes
+ *   nl:grp:<id>:stuck        string  its refund stuck on its way was said in the log today (a day at most)
+ *   nl:grp:<id>:held         string  its charge was read with a part on its way: asked again after an hour
  *   nl:grp:take:<token>      string  the link in a place's email: which purchase, which address
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
@@ -49,11 +51,11 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
-import { onAccount } from "@/lib/stripe-account";
-import { refundRowKnown } from "@/lib/refunds";
-import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
+import { StripeError, onAccount } from "@/lib/stripe-account";
+import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
+import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
-import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
+import { STRIPE_ACCOUNT_PATTERN, type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
 import { givenOption } from "@/lib/gift-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -109,6 +111,27 @@ const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
 const REFUND_PAGES = 10;
 /** Where a pass over the refunds stands, kept between runs (revokeRefundedGroups). */
 const passKey = (sid: string) => `nl:grp:${sid}:refunds:pass`;
+/**
+ * The Stripe account the anchor is of, written with it (REFUNDS_END). An anchor kept before anchors named their account
+ * has none, and is read as the store's account today, as it was read then.
+ */
+const ownerKey = (sid: string) => `nl:grp:${sid}:refunds:acct`;
+/**
+ * Where each account the store left is read from again should the store come back to it (A, then B, then A): a
+ * sorted set, the account as member and, as score, its anchor when the store left it, or the start of a pass on it
+ * that never ended. At most REFUND_ACCOUNTS_KEPT; past that the newest marks are let go, and an account with no mark
+ * is read from the oldest mark kept (never later than any mark let go) or a week back, whichever is older, so no
+ * refund is lost and what is kept stays bounded.
+ */
+const leftKey = (sid: string) => `nl:grp:${sid}:refunds:left`;
+const REFUND_ACCOUNTS_KEPT = 16;
+/** A pass ended: the anchor and the account it is of written together, that account's mark let go, the pass too. */
+const REFUNDS_END = `-- marktmorgen:group-refunds-end:v1
+redis.call('SET', KEYS[1], ARGV[1])
+redis.call('SET', KEYS[2], ARGV[2])
+redis.call('ZREM', KEYS[3], ARGV[2])
+redis.call('DEL', KEYS[4])
+return 1`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
 const PASS_SECONDS = 7 * 86_400;
 /**
@@ -125,6 +148,90 @@ const RETRY_CAP = 100;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
 const PAYMENT_ID = /^pi_[A-Za-z0-9]{3,252}$/;
 const now = () => Math.floor(Date.now() / 1000);
+
+/**
+ * The refunds of one charge read in one run (one GET /refunds?charge= each, only for a refund that succeeded on a
+ * charge read refunded in full without covering the charge by itself): past it, the refund holds the anchor and is
+ * read in the next run. A scheduled job bounded by its schedule, like REFUND_PAGES; Stripe bills no API call.
+ */
+export const CHARGE_REFUND_LOOKUPS = 10;
+/**
+ * How long a group purchase whose charge was read with a part still on its way waits before that charge is asked
+ * again (heldKey; second money review of #3410, Claude 3): its parts hold the anchor meanwhile, and the run's lookups go
+ * to the other charges, so ten charges waiting on a part never starve an older one refunded in full. A charge is asked
+ * once a run at most, whatever its parts (chargeSettled in revokeRefundedGroups). Up to CHARGE_REFUND_LOOKUPS x 12
+ * charges waiting at once are each asked again within the hour; the places of one whose last part went through go at
+ * most this long later.
+ */
+const CHARGE_HELD_RECHECK_SECONDS = 3_600;
+const heldKey = (id: string) => `nl:grp:${id}:held`;
+/**
+ * A refund still on its way this long is said in the log, and still takes nothing back (the owner's decision 18, 9
+ * November 2026: a refund pending for many days raises an alert, never a revocation). Stripe finishes almost every
+ * refund within days; one still pending after a week needs a look (the creator's balance short, a payment method
+ * that answers slowly). Said in the log at most once a payment a day (stuckKey), and only for a payment that paid for a
+ * group purchase: no email.
+ */
+const REFUND_STUCK_SECONDS = 7 * 86_400;
+/** The mark that a purchase's refund stuck on its way was said in the log today: one SET NX EX a run while it is stuck. */
+const stuckKey = (id: string) => `nl:grp:${id}:stuck`;
+const STUCK_SAID_SECONDS = 86_400;
+
+// The reading of a refund in parts below is a copy of the one on #2868 (lib/licence-keys.ts, claude5/fix-licence-refund,
+// wholeOnItsOwn and chargeRefundsSettled), not yet on main: once both are, one shared function in lib/refunds.ts
+// should take the place of both copies.
+/** The most refunds of one charge read in one GET /refunds?charge= (one page; more than that is unknown). */
+const CHARGE_REFUNDS_PAGE = 100;
+const CHARGE_PATTERN = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+/** Statuses a refund still on its way has: it may yet fail, and Stripe already counts it in amount_refunded. */
+const REFUND_ON_ITS_WAY = new Set(["pending", "requires_action"]);
+const REFUND_STATUS_KNOWN = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const centsKnown = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+/**
+ * Whether a succeeded refund whose charge reads refunded in full gave the whole charge back by itself: its own amount
+ * covers the charge's. Only then is no other refund of the charge needed to say the money went back for good.
+ */
+function wholeOnItsOwn(refund: Record<string, unknown>): boolean {
+  const charge = refund.charge;
+  if (!plainObject(charge)) return false;
+  const amount = ownField(charge, "amount");
+  return centsKnown(refund.amount) && centsKnown(amount) && amount > 0 && refund.amount >= amount;
+}
+
+/**
+ * A full refund made of several refunds of one charge, read from all of that charge's refunds (one GET /refunds?charge=,
+ * Stripe's own list): "held" while any is still on its way (it may still fail, and Stripe counts it in the charge's
+ * amount_refunded already), "through" when the ones that succeeded add up to the whole charge. Anything else (no
+ * charge id, a row or a list in another shape, more than one page, or succeeded refunds that do not add up although
+ * the charge reads refunded in full) throws StripeListUnreadable: never "nothing pending" (CX-123 rule 24).
+ */
+async function chargeRefundsSettled(account: string, refund: Record<string, unknown>): Promise<"held" | "through"> {
+  const charge = refund.charge;
+  const id = plainObject(charge) ? ownField(charge, "id") : undefined;
+  const amount = plainObject(charge) ? ownField(charge, "amount") : undefined;
+  if (typeof id !== "string" || !CHARGE_PATTERN.test(id) || !centsKnown(amount) || amount <= 0) {
+    throw new StripeListUnreadable("a refund's charge without its id or amount");
+  }
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    const named = ownField(row, "charge");
+    const chargeId = typeof named === "string" ? named : plainObject(named) ? ownField(named, "id") : undefined;
+    return typeof status === "string" && REFUND_STATUS_KNOWN.has(status) && centsKnown(ownField(row, "amount")) && chargeId === id;
+  };
+  const listed = readStripePage(
+    // Pinned to the version the list is read in, as the store's refund pages are (readPage below).
+    await onAccount("GET", account, `/refunds?${new URLSearchParams({ charge: id, limit: String(CHARGE_REFUNDS_PAGE) })}`, undefined, STRIPE_LIST_VERSION),
+    legible,
+  );
+  if (listed.unreadable > 0 || listed.hasMore) throw new StripeListUnreadable("a charge's refunds");
+  // The refund being read is one of them, as it now stands: if Stripe's list does not have it, the list proves nothing.
+  if (!listed.rows.some((row) => row.id === refund.id)) throw new StripeListUnreadable("a charge's refunds without the one read");
+  if (listed.rows.some((row) => REFUND_ON_ITS_WAY.has(ownField(row, "status") as string))) return "held";
+  const through = listed.rows.reduce((sum, row) => sum + (ownField(row, "status") === "succeeded" ? (ownField(row, "amount") as number) : 0), 0);
+  if (through >= amount) return "through";
+  throw new StripeListUnreadable("a charge read refunded in full whose succeeded refunds do not add up");
+}
 
 /** How a place is named where purchases given to an address are kept. */
 export const groupJob = (id: string) => `group:${id}`;
@@ -764,15 +871,47 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
 
 /** A write of one item (SADD of one member, HDEL of one field) answers 0 or 1; anything else is unknown. */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
-/** Where a pass over the refunds stands between runs: its start, the page it continues from, the newest refund read. */
-type RefundPass = { since: number; after: string; newest: number };
-function readPass(raw: unknown): RefundPass | null | undefined {
+/**
+ * Where a pass over the refunds stands between runs: its start, the page it continues from, the newest refund read,
+ * the Stripe account whose list it is reading (its cursor is a refund of that account and of no other), and, when a
+ * row it passed was not readable, the oldest time such a row holds (`hold`: the anchor goes no further when the pass
+ * ends, so the next pass reads that row again).
+ */
+type RefundPass = { since: number; after: string; newest: number; account: string; hold?: number };
+/** A pass's cursor: an id as Stripe gives one. */
+const CURSOR = /^[A-Za-z0-9_]{3,255}$/;
+/** A time kept as a mark: whole seconds, as Redis answers a score or a value; anything else is unknown (undefined). */
+function timeMark(raw: unknown): number | null | undefined {
+  if (raw === null) return null;
+  if (typeof raw === "number") return Number.isSafeInteger(raw) && raw >= 0 ? raw : undefined;
+  return typeof raw === "string" && /^\d{1,12}$/.test(raw) ? Number(raw) : undefined;
+}
+/** The oldest mark of an account left, from ZRANGEBYSCORE ... LIMIT 0 1 WITHSCORES: null when there is none. */
+function lowestMark(raw: unknown): number | null | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  if (raw.length === 0) return null;
+  if (raw.length !== 2 || typeof raw[0] !== "string") return undefined;
+  return timeMark(raw[1]) ?? undefined;
+}
+/**
+ * A kept pass, only when it is in its exact shape and reads the store's account today. One kept on another account
+ * (the creator connected another one) or before passes named their account is not read from: its cursor would be
+ * answered 404 by this account. Then the pass starts again from the anchor, which never moved past it.
+ */
+function readPass(raw: unknown, account: string): RefundPass | null | undefined {
   if (raw === null) return null;
   if (typeof raw !== "string") return undefined;
   try {
     const pass = JSON.parse(raw) as Partial<RefundPass>;
-    if (Number.isSafeInteger(pass.since) && Number.isSafeInteger(pass.newest) && typeof pass.after === "string" && /^[A-Za-z0-9_]{3,255}$/.test(pass.after)) {
-      return { since: pass.since as number, after: pass.after, newest: pass.newest as number };
+    if (
+      Number.isSafeInteger(pass.since) &&
+      Number.isSafeInteger(pass.newest) &&
+      typeof pass.after === "string" &&
+      CURSOR.test(pass.after) &&
+      pass.account === account &&
+      (pass.hold === undefined || (Number.isSafeInteger(pass.hold) && (pass.hold as number) >= 0))
+    ) {
+      return { since: pass.since as number, after: pass.after, newest: pass.newest as number, account, ...(pass.hold !== undefined ? { hold: pass.hold } : {}) };
     }
   } catch {}
   return undefined;
@@ -783,6 +922,14 @@ function readPass(raw: unknown): RefundPass | null | undefined {
  * refunds since it last looked, finds the purchase each paid for, and removes
  * it from every address that took a place. Returns how many places went.
  *
+ * A refund takes the places back only once it succeeded on a charge refunded in full by the refunds that succeeded
+ * (the owner's decision 18, 9 November 2026): one still on its way, or a part of a charge whose rest is on its way,
+ * holds the anchor at its time and takes nothing back yet; one that failed or was canceled takes nothing back; one
+ * on its way for more than REFUND_STUCK_SECONDS is said in the log, never taken back for that. A dispute Stripe closed
+ * as lost takes the places back as a full refund that succeeded does, whatever its amount; one won or still open takes
+ * nothing (lib/refunds.ts, lostDisputesOrRetry, read once a run as gifts and pre-orders read it). Only a payment that
+ * paid for a group purchase is looked at further: any other refund holds nothing and asks Stripe nothing more.
+ *
  * The refunds are read in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page
  * after page (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). One pass from the anchor to the end of the list may
  * take several runs: where it stands is kept (passKey) after every page read whole and handled, so the next run goes
@@ -792,6 +939,22 @@ function readPass(raw: unknown): RefundPass | null | undefined {
  * run that stops halfway leaves it to the next (Codex G on #2781, M2); one whose work was left unknown (a reply in
  * another shape, a record that does not read) marks nothing and is kept on a short list tried first on every run, so
  * it never holds back the refunds after it (Claude 4 on #2781); with that list full, the pass stays on its page.
+ *
+ * The pass is kept with the account it reads: one kept on the store's previous Stripe account is never read from on
+ * the new one, and a kept cursor the account answers 404 `resource_missing` for is let go and the pass starts again
+ * from the top in the same run, so a refund is never left unread behind a cursor that cannot be followed (the sibling
+ * of M2 on #3301). A row that is not readable never holds back the pages after it (the sibling of M1 on #3301): the
+ * pass goes on from the page's last readable row or, on a page with none, from its last row's id when that id reads;
+ * when it ends, the anchor goes no further than the oldest such row's time (the start of the pass when that time does
+ * not read), so the next pass reads it again and the week a store with no anchor starts from never slides past it. A
+ * page with no row whose id reads gives nothing to go on from: the pass stays on it, says in the log that what is
+ * after it is unknown, and reads it again on the next run, at most the newest page and that one.
+ *
+ * The anchor is of one account (ownerKey). A store that connects another account starts that one from its own mark
+ * (leftKey): where it was left, or, for one never read, a week back or the oldest mark kept, whichever is older; the
+ * account left is marked at its anchor before anything else, and the anchor moves to the new account only once a pass
+ * over it ends (REFUNDS_END, in one step). So a store that goes back to an account it left reads that account from
+ * where it left it, never from the other account's anchor (A, then B, then A).
  */
 export async function revokeRefundedGroups(
   store: Store,
@@ -801,30 +964,139 @@ export async function revokeRefundedGroups(
   if (!store.statsId || !store.stripeAccountId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
   const account = store.stripeAccountId;
-  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)]]), 3);
+  const begun = repliesFor(await redisPipeline([["GET", anyKey(sid)], ["GET", anchorKey(sid)], ["GET", passKey(sid)], ["GET", ownerKey(sid)]]), 4);
   if (!begun) return 0;
-  const [any, anchorRaw, passRaw] = begun;
+  const [any, anchorRaw, passRaw, ownerRaw] = begun;
   if (!any) return 0;
   // The anchor read exactly: in another shape, no pass starts (Claude 4 on #2781), never one from a week back.
   if (anchorRaw !== null && (typeof anchorRaw !== "string" || !/^\d{1,12}$/.test(anchorRaw))) return 0;
-  const kept = readPass(passRaw);
-  // A pass kept in an unknown shape is started again from the anchor, which never moved past it.
-  const since = kept ? kept.since : Math.max(0, (Number(anchorRaw) || now() - 7 * 86_400) - 300);
-  let newest = kept ? kept.newest : Number(anchorRaw) || since;
+  // And the account it is of: in another shape, no pass starts either.
+  if (ownerRaw !== null && (typeof ownerRaw !== "string" || !STRIPE_ACCOUNT_PATTERN.test(ownerRaw))) return 0;
+  // Where this account is read from: its anchor, when the anchor is of this account (or kept before anchors named one).
+  let start: number;
+  if (anchorRaw !== null && (ownerRaw === null || ownerRaw === account)) start = Number(anchorRaw);
+  else {
+    // No anchor of this account: its own mark, if the store left it before, else a week back or the oldest mark kept.
+    const marks = repliesFor(await redisPipeline([["ZSCORE", leftKey(sid), account], ["ZRANGEBYSCORE", leftKey(sid), "-inf", "+inf", "LIMIT", 0, 1, "WITHSCORES"]]), 2);
+    const own = marks ? timeMark(marks[0]) : undefined;
+    const lowest = marks ? lowestMark(marks[1]) : undefined;
+    if (own === undefined || lowest === undefined) return 0;
+    start = own ?? Math.min(lowest ?? Number.MAX_SAFE_INTEGER, Math.max(0, now() - 7 * 86_400));
+    // Before anything is read: the account left is marked at its anchor, and this one at where it starts, so neither
+    // is lost if the store moves again before a pass here ends; then the newest marks past the bound are let go.
+    const marking: (string | number)[][] = [];
+    if (anchorRaw !== null && ownerRaw !== null) marking.push(["ZADD", leftKey(sid), "NX", anchorRaw, ownerRaw]);
+    marking.push(["ZADD", leftKey(sid), "NX", String(start), account], ["ZREMRANGEBYRANK", leftKey(sid), REFUND_ACCOUNTS_KEPT, -1]);
+    const marked = repliesFor(await redisPipeline(marking), marking.length);
+    if (!marked || !marked.slice(0, -1).every(oneWrite) || countOf(marked.at(-1)) === null) return 0;
+  }
+  const kept = readPass(passRaw, account);
+  // A pass kept in an unknown shape, or on another account, is started again from the anchor, which never moved past it.
+  const since = kept ? kept.since : Math.max(0, start - 300);
+  let newest = kept ? kept.newest : start;
   let after = kept ? kept.after : "";
+  let hold = kept?.hold;
   let revoked = 0;
 
-  /** One refund row read whole: false when something it needed was left unknown, and then it is not marked handled. */
-  const handle = async (refund: Record<string, unknown>): Promise<boolean> => {
+  let lookups = CHARGE_REFUND_LOOKUPS;
+  /** Refunds read in this run still on their way after REFUND_STUCK_SECONDS, each said in the log once a run. */
+  const stuck = new Set<string>();
+  /** Each charge's parts as read in this run: held (a part on its way, seen on a row or in the charge's refunds) or through. */
+  const chargeSettled = new Map<string, "held" | "through">();
+
+  /**
+   * One refund row, or one dispute closed as lost (as lostDisputesSince builds it), read whole: true when it was
+   * handled or takes nothing back; false when something it needed was left unknown, and then it is not marked handled;
+   * "hold" when it may still take its purchase back but has not yet, and it then holds the anchor at its time, so the
+   * next pass reads it again (audit of refunds, A1).
+   *
+   * The owner's decision 18 (9 November 2026): the places go only once the refund succeeded on a charge refunded in full,
+   * or the dispute was lost. A refund still on its way (pending, or waiting on an action) takes nothing back, since it
+   * may yet fail, and holds the anchor; failed or canceled, it takes nothing back and holds nothing. A refund in parts
+   * (as on #2868): a succeeded part on a charge read refunded in full (Stripe counts a refund still pending in
+   * amount_refunded) takes the places back only once the charge's succeeded refunds add up to the whole charge; while
+   * one of them is on its way, or when they cannot be read, it holds. A dispute lost takes the whole purchase back,
+   * whatever its amount (lib/refunds.ts, the owner's rule of 4 November 2026); one won or still open takes nothing.
+   * `decided` is a refund already read through, kept to be tried again.
+   *
+   * Whether the payment paid for a group purchase is read first (the pre-review of claude5/group-buy-cursor-account):
+   * a refund of any other sale never holds the anchor, is never said in the log, and never asks Stripe about its
+   * charge, so it cannot spend the lookups a group's own parts need.
+   */
+  const handle = async (refund: Record<string, unknown>, decided = false): Promise<boolean | "hold"> => {
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
+    const dispute = refund.object === "dispute";
+    const markRead = async (): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    if (dispute) {
+      if (!rowGivesBack(refund)) return true;
+      // No payment to look up: nothing of this store can be told from it, so it is read, and never holds the place back.
+      if (!pi) return markRead();
+    }
+    if (!pi) return true;
+    const onItsWay = !dispute && !decided && REFUND_ON_ITS_WAY.has(refund.status as string);
     const charge = refund.charge as { refunded?: unknown } | null;
-    if (!pi || refund.status !== "succeeded" || charge?.refunded !== true) return true;
+    if (!dispute && !onItsWay && (refund.status !== "succeeded" || charge?.refunded !== true)) return true;
+    // Through already when lost to a dispute, kept read through, or when its own amount covers the charge; otherwise
+    // only once the charge's refunds are read below.
+    const through = dispute || decided || (!onItsWay && wholeOnItsOwn(refund));
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
-    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return false;
+    // Left unknown before it was read through: held for the next pass, never kept on the retry list, which reads what
+    // it keeps as through.
+    if (!looked || handled === null || handled > 1 || (groupId !== null && typeof groupId !== "string")) return through ? false : "hold";
     if (handled === 1) return true;
+    // No group purchase paid by it: nothing to take back, so nothing held, said or asked of Stripe. One that gives its
+    // payment back is marked read, as before; one still on its way is read again with the list, at no cost.
+    if (groupId === null) return onItsWay ? true : markRead();
+    const chargeId = plainObject(refund.charge) ? ownField(refund.charge, "id") : undefined;
+    const chargeKey = typeof chargeId === "string" && CHARGE_PATTERN.test(chargeId) ? chargeId : "";
+    if (onItsWay) {
+      // Its charge has a part on its way: a succeeded part of it read later in this run holds without asking Stripe.
+      if (chargeKey) chargeSettled.set(chargeKey, "held");
+      if (typeof refund.created === "number" && refund.created <= now() - REFUND_STUCK_SECONDS && !stuck.has(id)) {
+        stuck.add(id);
+        // An alert for whoever reads the logs, never a revocation (the owner's decision 18): nothing goes until it
+        // succeeded. At most once a payment a day: the mark is written first, and only a mark already there is quiet.
+        const mark = typeof groupId === "string" && GROUP_ID.test(groupId) ? repliesFor(await redisPipeline([["SET", stuckKey(groupId), "1", "NX", "EX", STUCK_SAID_SECONDS]]), 1)?.[0] : undefined;
+        if (mark !== null) {
+          console.error("a refund for a group purchase has been pending for more than seven days; its places are kept while it is on its way", { store: sid, account, refund: id, status: refund.status, created: refund.created });
+        }
+      }
+      return "hold";
+    }
+    // A succeeded part of the charge: through only once the charge's succeeded refunds add up to it. Read after the
+    // handled mark and the group purchase, so a refund already handled, or of another sale, asks Stripe nothing more.
+    // Each charge is asked once a run at most, and one found waiting on a part is asked again only after
+    // CHARGE_HELD_RECHECK_SECONDS (its mark, or a reply on the mark that does not read, holds without a lookup).
+    if (!through) {
+      const known = chargeKey ? chargeSettled.get(chargeKey) : undefined;
+      if (known === "held") return "hold";
+      if (known !== "through") {
+        // A purchase id in another shape has no mark: its charge is asked as before, never held for good.
+        const marked = typeof groupId === "string" && GROUP_ID.test(groupId) ? groupId : "";
+        const waiting = marked ? repliesFor(await redisPipeline([["GET", heldKey(marked)]]), 1) : [null];
+        if (!waiting || waiting[0] !== null) return "hold";
+        if (lookups <= 0) return "hold";
+        lookups -= 1;
+        let settled: "held" | "through";
+        try {
+          settled = await chargeRefundsSettled(account, refund);
+        } catch (error) {
+          if (!(error instanceof StripeListUnreadable) && !(error instanceof StripeError)) throw error;
+          console.error("reading the refunds of a refunded charge for group purchases failed; held for the next pass", error);
+          if (chargeKey) chargeSettled.set(chargeKey, "held");
+          return "hold";
+        }
+        if (chargeKey) chargeSettled.set(chargeKey, settled);
+        if (settled === "held") {
+          // A mark whose write is left unknown only means the charge is asked again on the next run.
+          if (marked) await redisPipeline([["SET", heldKey(marked), "1", "EX", CHARGE_HELD_RECHECK_SECONDS]]);
+          return "hold";
+        }
+      }
+    }
     if (typeof groupId === "string") {
       const raw = repliesFor(await redisPipeline([["GET", groupKey(groupId)]]), 1);
       if (!raw || (raw[0] !== null && typeof raw[0] !== "string")) return false;
@@ -903,17 +1175,46 @@ export async function revokeRefundedGroups(
       }
     }
     // Marked handled only now, once everything it takes back was written.
-    return oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    return markRead();
   };
 
-  /** One page of refunds: its rows read in their exact shape, or null when the page itself could not be read. */
-  const readPage = async (from: string): Promise<StripePage | null> => {
+  /**
+   * One page of refunds: its rows read in their exact shape, null when the page itself could not be read, or "gone"
+   * when the account does not know the refund it was asked to read on from (404 `resource_missing` on a cursor). With
+   * the page: its last row's id when that id reads, whatever the rest of the row (`tailId`), and the oldest time a row
+   * not readable holds (`holdAt`: its own time when that reads, the start of the pass when it does not).
+   */
+  const readPage = async (from: string): Promise<(StripePage & { tailId: string | null; holdAt: number | null }) | null | "gone"> => {
     const query = new URLSearchParams({ limit: "100", "created[gte]": String(since) });
     query.append("expand[]", "data.charge");
     if (from) query.set("starting_after", from);
     try {
-      return readStripePage(await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION), refundRowKnown);
+      const raw = await onAccount("GET", account, `/refunds?${query}`, undefined, STRIPE_LIST_VERSION);
+      const page = readStripePage(raw, refundRowKnown);
+      // A page that read is a plain object whose own data is a list: its rows are looked at again, slot by slot.
+      const data = ownField(raw as Record<string, unknown>, "data") as unknown[];
+      const readable = new Set<unknown>(page.rows);
+      const slot = (i: number): unknown => {
+        const own = Object.getOwnPropertyDescriptor(data, String(i));
+        return own && Object.hasOwn(own, "value") ? own.value : undefined;
+      };
+      let holdAt: number | null = null;
+      for (let i = 0; i < data.length; i += 1) {
+        const row = slot(i);
+        if (readable.has(row)) continue;
+        const created = plainObject(row) ? ownField(row, "created") : undefined;
+        // A time Stripe could have given this list (inside its window, not ahead of now); otherwise the pass's start.
+        const at = typeof created === "number" && Number.isSafeInteger(created) && created >= since && created <= now() + 300 ? created : since + 300;
+        holdAt = holdAt === null ? at : Math.min(holdAt, at);
+      }
+      const last = data.length > 0 ? slot(data.length - 1) : undefined;
+      const lastId = plainObject(last) ? ownField(last, "id") : undefined;
+      return { ...page, tailId: typeof lastId === "string" && CURSOR.test(lastId) ? lastId : null, holdAt };
     } catch (error) {
+      if (from && error instanceof StripeError && error.status === 404 && error.code === "resource_missing") {
+        console.error("a kept pass over group refunds named a refund this account does not know; started again", error);
+        return "gone";
+      }
       if (!(error instanceof StripeListUnreadable)) throw error;
       console.error("reading refunds for group purchases failed", error);
       return null;
@@ -939,12 +1240,29 @@ export async function revokeRefundedGroups(
     for (const [id, pi] of pairs) {
       if (Date.now() >= deadline) return revoked;
       if (typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) continue;
-      // Only a refund in full is ever kept here (handle reads nothing else), so it is read again as one.
-      if (await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } })) {
+      // Only a refund read through in full is ever kept here (handle hands nothing else to later), so it is read again
+      // as one, without asking Stripe again.
+      if ((await handle({ id, payment_intent: pi, status: "succeeded", charge: { refunded: true } }, true)) === true) {
         await redisPipeline([["HDEL", retryKey(sid), id]]);
       }
     }
   }
+
+  // Disputes closed as lost since this pass's start, read once a run as the siblings read them (lib/gifts.ts,
+  // lib/preorders.ts; lib/refunds.ts, lostDisputesOrRetry): each takes its purchase back as a full refund that succeeded
+  // does (the owner's decision 18). A read that fails or does not reach the end, or a dispute whose work was left
+  // unknown, keeps the anchor where this pass started should the pass end in this run, so they are read again; the place
+  // in the closing events moves only once every one read was handled (confirmLostRead).
+  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("grp", sid));
+  let lostUnsure = !lost.complete;
+  for (const closed of lost.rows) {
+    if (Date.now() >= deadline) return revoked;
+    if ((await handle(closed)) !== true) lostUnsure = true;
+  }
+  if (!(await confirmLostRead(lost, seenKey(sid)))) lostUnsure = true;
+  // No further than the newest closing read when the sweep went on from a kept place, so a dispute closed meanwhile is
+  // read from the top next time (as lib/gifts.ts does).
+  const lostHold = lostUnsure ? since + 300 : lost.resumed ? Math.max(lost.newest, since + 300) : undefined;
 
   let pages = REFUND_PAGES;
   if (after) {
@@ -952,7 +1270,7 @@ export async function revokeRefundedGroups(
     // here never moves the pass or the anchor; a later pass reads these again, and what was handled stays handled.
     pages -= 1;
     const top = await readPage("");
-    for (const refund of top?.rows ?? []) {
+    for (const refund of top && top !== "gone" ? top.rows : []) {
       if (Date.now() >= deadline) return revoked;
       await handle(refund);
     }
@@ -960,26 +1278,63 @@ export async function revokeRefundedGroups(
   for (let page = 0; page < pages; page += 1) {
     if (Date.now() >= deadline) return revoked;
     const read = await readPage(after);
+    if (read === "gone") {
+      // The cursor is not this account's: the pass is let go and started again from the top, never read from it again.
+      // The anchor did not move during the pass, so nothing it covers is skipped; what was handled stays handled.
+      await redisPipeline([["DEL", passKey(sid)]]);
+      after = "";
+      newest = start;
+      hold = undefined;
+      continue;
+    }
     if (!read) return revoked;
-    let whole = read.unreadable === 0;
+    let whole = true;
+    const held: number[] = [];
     for (const refund of read.rows) {
       if (Date.now() >= deadline) return revoked;
       // A refund on a readable row is taken back whatever the other rows. One whose work was left unknown is kept to
       // be tried again first on the next runs, and the pass goes on; when it cannot be kept for sure, the page stays.
-      if (!(await handle(refund)) && !(await later(refund))) whole = false;
+      const result = await handle(refund);
+      if (result === "hold") held.push(refund.created as number);
+      else if (!result && !(await later(refund))) whole = false;
     }
-    // A page with a row not readable, or a row neither handled nor kept for later, is read again next run.
+    // A row neither handled nor kept for later: the page is read again next run.
     if (!whole) return revoked;
+    // A row not readable holds the anchor at its time, so the next pass reads it again, and never holds back the pages
+    // after it (the sibling of M1 on #3301).
+    if (read.holdAt !== null) hold = hold === undefined ? read.holdAt : Math.min(hold, read.holdAt);
+    // A refund that has not taken its purchase back yet but may (on its way, a part of a charge not settled, or one
+    // whose charge's refunds did not read) holds the anchor the same way (audit of refunds, A1): the next pass reads it
+    // again, and its places go once it went through.
+    for (const at of held) hold = hold === undefined ? at : Math.min(hold, at);
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
-      const ended = repliesFor(await redisPipeline([["SET", anchorKey(sid), String(newest)], ["DEL", passKey(sid)]]), 2);
-      if (!ended) console.error("ending a pass over group refunds was left unknown");
+      // Every row read and final: the anchor goes to the newest. A row not read, or a refund not final yet: no further
+      // than its time, never back before where this pass started.
+      // The lost disputes of this run count only here, at the pass's end: they are read again on every run.
+      // The lost disputes' bound is capped at the newest refund this pass read, as lib/gifts.ts and lib/preorders.ts
+      // cap theirs (first money review of #3410): a sweep that went on from a kept place may have read closings newer
+      // than a refund made during the pass, seen only on the newest page, whose holds never move the anchor. Only that
+      // bound is capped: a row not readable may rightly hold later than `newest` (read.holdAt).
+      const lostAt = lostHold === undefined ? undefined : Math.min(lostHold, newest);
+      const until = lostAt === undefined ? hold : hold === undefined ? lostAt : Math.min(hold, lostAt);
+      const at = until === undefined ? newest : Math.max(since + 300, until);
+      const ended = repliesFor(await redisPipeline([["EVAL", REFUNDS_END, 4, anchorKey(sid), ownerKey(sid), leftKey(sid), passKey(sid), String(at), account]]), 1);
+      if (ended?.[0] !== 1) console.error("ending a pass over group refunds was left unknown");
       return revoked;
     }
-    // More pages, and no readable last row to read them from: not read whole.
-    if (!read.lastId) return revoked;
-    after = read.lastId;
-    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest } satisfies RefundPass), "EX", PASS_SECONDS]]);
+    // More pages: read on from the last readable row (a row not readable after it is read again on the next page), or,
+    // on a page with no readable row, from its last row's id when that id reads.
+    const next = read.lastId ?? read.rows.at(-1)?.id ?? read.tailId;
+    if (!next) {
+      // Nothing to read on from: the refunds after this page are unknown until it reads. The pass stays on it and the
+      // anchor (or this account's mark) where it was, so nothing after it leaves the window; each run reads the newest
+      // page and this one again, inside its page bound.
+      console.error("a page of refunds for group purchases has no row whose id reads: the pass stays on it, and the refunds after it are unknown", { store: sid, account });
+      return revoked;
+    }
+    after = next;
+    await redisPipeline([["SET", passKey(sid), JSON.stringify({ since, after, newest, account, ...(hold !== undefined ? { hold } : {}) } satisfies RefundPass), "EX", PASS_SECONDS]]);
   }
   return revoked;
 }

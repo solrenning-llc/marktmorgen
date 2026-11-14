@@ -755,7 +755,12 @@ async function peopleCount(store: Store, meter?: Meter): Promise<number> {
 
 export async function readAffiliate(store: Store, id: string): Promise<Affiliate | null> {
   if (!store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["HGET", peopleKey(store.statsId), id]]);
+  // Read exactly (rule 24): only an exact null is "no such affiliate"; a reply cut short or of another shape throws,
+  // never "no such affiliate", which wrote an affiliate's own purchase with a commission. A stored record that does not
+  // parse is still none, as before.
+  const read = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  const raw = read?.[0];
+  if (!read || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an affiliate's record");
   return parseAffiliate(raw);
 }
 
@@ -2476,12 +2481,15 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
     total: paid.cents,
     currency: readCurrencyCode(paid.currency),
   };
+  // The partners' shares do not wait on the affiliate's: an unknown read of the affiliate (readAffiliate, rule 24)
+  // throws below only after they are written, and the caller keeps the sale to credit it again (both writes are
+  // HSETNX, so crediting it again changes nothing that was written).
+  await notePartners(store, { ...sale, buyer: paid.email });
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
     // Not for a person deleted at their own request (lib/paypal-delivery.ts): the bond names them, the referral does not.
     if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await notePartners(store, { ...sale, buyer: paid.email });
 }
 
 async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean> {

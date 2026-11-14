@@ -123,6 +123,36 @@ async function watchPending(store: Store, session: string, slot: string): Promis
   );
 }
 
+/**
+ * A paid offer whose affiliate credit failed (noteCharge: an unknown read of the affiliate, rule 24, or Redis
+ * trouble): kept in the job's list as `<member>|credit`, so the five-minute job credits it again from what Stripe
+ * says of its payment (creditAgain), never by charging, emailing or delivering again. noteCharge writes with HSETNX,
+ * so a second credit changes nothing that was written. Best effort, as the list itself is.
+ */
+const CREDIT_MARK = /^credit:(\d{13})$/;
+const creditMember = (handle: string, session: string, slot: string, since: number) => `${pendingMember(handle, session, slot)}|credit:${since}`;
+async function creditCharge(store: Store, session: string, slot: string, pi: Record<string, unknown>): Promise<void> {
+  await noteCharge(store, pi).catch(async (error) => {
+    console.error("noting an affiliate sale failed; credited again by the job", error);
+    await redisPipeline([["ZADD", PENDING_KEY, Date.now(), creditMember(store.handle, session, slot, Date.now())]]).catch(() => undefined);
+  });
+}
+
+/**
+ * Credits again a paid offer kept by creditCharge, from Stripe's own record of its payment. Throws while unknown: an
+ * offer record that does not read (it is kept far longer than an offer is watched) or a payment Stripe does not give.
+ */
+async function creditAgain(store: Store, session: string, slot: string): Promise<void> {
+  const record = await readUpsell(session, slot);
+  if (!record) throw new Error("a paid offer's record did not read");
+  // Never paid, or paid before a payment id was known: nothing to credit from.
+  if (record.state !== "paid" || !record.pi || !store.stripeAccountId) return;
+  const pi = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(record.pi)}`);
+  const meta = pi.metadata as Record<string, string> | null;
+  if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
+  await noteCharge(store, pi);
+}
+
 async function unwatchPending(store: Store, session: string, slot: string): Promise<void> {
   await redisPipeline([["ZREM", PENDING_KEY, pendingMember(store.handle, session, slot)]]).catch((error) =>
     console.error("unlisting a settled offer failed", error),
@@ -448,7 +478,7 @@ export async function takeUpsell(input: {
       await unwatchPending(store, session, slot);
       // Its place is given back only once the offer is counted (or covered by its share): a count not confirmed
       // keeps it held until its hours end, never given back as if counted (lib/orders.ts, countOrder).
-      if ((await afterPaid(store, session, target, pi, email)) !== "unknown") await settleAdmitted(store, admitted.hour);
+      if ((await afterPaid(store, session, slot, target, pi, email)) !== "unknown") await settleAdmitted(store, admitted.hour);
       return { kind: "done" };
     }
     const next = pi.next_action as { redirect_to_url?: { url?: unknown } } | null;
@@ -483,8 +513,8 @@ export async function takeUpsell(input: {
  * (lib/sale-events.ts). None can undo the payment, so none failing is passed
  * on. Answers what counting it answered (lib/orders.ts, countOrder).
  */
-async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
-  await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
+async function afterPaid(store: Store, session: string, slot: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
+  await creditCharge(store, session, slot, pi);
   const reference = typeof pi.id === "string" ? pi.id : "";
   const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
   const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
@@ -587,8 +617,8 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
       await writeUpsell(session, slot, { ...record, pi: id, state: "paid" });
       const target = await readListing(store, record.product);
       const email = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
-      if (target) await afterPaid(store, session, target, pi, email);
-      else await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
+      if (target) await afterPaid(store, session, slot, target, pi, email);
+      else await creditCharge(store, session, slot, pi);
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
       await writeUpsell(session, slot, { ...record, pi: id, state: "failed" });
     } else if (id !== record.pi) {
@@ -632,8 +662,25 @@ export async function settlePendingOffers(
   const list = Array.isArray(members) ? (members as unknown[]).map(String) : [];
   for (const member of list) {
     if (Date.now() >= deadline) break;
-    const [handle, session, slot = ""] = member.split("|");
+    const [handle, session, slot = "", mark = ""] = member.split("|");
     const drop = () => redisPipeline([["ZREM", PENDING_KEY, member]]);
+    const since = CREDIT_MARK.exec(mark)?.[1];
+    if (since && handle && SESSION_ID.test(session ?? "") && (!slot || SLOT_PATTERN.test(slot))) {
+      counts.checked += 1;
+      try {
+        const store = await storeFor(handle);
+        if (!store) throw new Error("the offer's store did not read");
+        await creditAgain(store, session, slot);
+        await drop();
+      } catch (error) {
+        // Still unknown: kept, moved behind the others, tried at the next run, for as long as an offer is watched
+        // from the first failure (the member carries its time, so no read is needed to let it go).
+        console.error("crediting a paid offer again failed; tried again by the job", error);
+        if (Date.now() - Number(since) > PENDING_WATCH_MS) await drop().catch(() => undefined);
+        else await redisPipeline([["ZADD", PENDING_KEY, Date.now(), creditMember(handle, session, slot, Number(since))]]).catch(() => undefined);
+      }
+      continue;
+    }
     if (!handle || !SESSION_ID.test(session ?? "") || (slot && !SLOT_PATTERN.test(slot))) {
       await drop();
       continue;

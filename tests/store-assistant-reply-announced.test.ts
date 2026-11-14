@@ -63,10 +63,13 @@ try{
  out.after=await page.evaluate(()=>({tag:document.activeElement?.tagName,text:document.activeElement?.textContent}));
  out.said=await page.evaluate(()=>window.__said.join(' | '));
  out.shown=await page.evaluate(()=>document.querySelector('[data-assistant-thread]')?.textContent);
+ await page.getByRole('button',{name:'Delete this chat'}).click();
+ await page.waitForTimeout(300);
+ out.afterDelete=await page.evaluate(()=>document.querySelector('[data-assistant-said]')?.textContent??'');
 }finally{if(browser)await browser.close();}
 console.log(JSON.stringify(out));
 `;
-type Result = { onOpen: string; waiting: { tag: string; text: string }; after: { tag: string; text: string }; said: string; shown: string };
+type Result = { afterDelete: string; onOpen: string; waiting: { tag: string; text: string }; after: { tag: string; text: string }; said: string; shown: string };
 let result: Result | null = null;
 try {
   result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 90_000, maxBuffer: 8_000_000 })) as Result;
@@ -82,5 +85,6 @@ if (result) {
   is("the buyer's own question is not read back", /How many lessons/.test(result.said), false);
   is("while the reply is on its way the focus stays on Ask (2.4.3)", [result.waiting.tag, result.waiting.text], ["BUTTON", "Ask"]);
   is("and is still on Ask once it has come", [result.after.tag, result.after.text], ["BUTTON", "Ask"]);
+  is("once the chat is deleted, the last reply is no longer in the status region", result.afterDelete, "");
 }
 done();

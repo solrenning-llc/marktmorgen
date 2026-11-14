@@ -77,7 +77,9 @@ export function owedLines(book: Book): BatchLine[] {
  * the lines does not change it; the amount of any one line does. Not a secret: the batch is the creator's own.
  */
 export function batchId(lines: readonly BatchLine[]): string {
-  const parts = lines.map((line) => `${line.affiliate.id}:${line.cents}`).sort();
+  // The address each line pays is part of it (Codex P's MÉDIO, relatorios-codex/P-20261113-2039-review-branch-4479.md):
+  // an address changed after the download is another batch, so the file that paid the old one is never confirmed.
+  const parts = lines.map((line) => `${line.affiliate.id}:${line.cents}:${payAddress(line.affiliate)}`).sort();
   return `b${createHash("sha256").update(`affiliate-batch|${parts.join(",")}`).digest("hex").slice(0, 24)}`;
 }
 

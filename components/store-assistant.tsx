@@ -64,6 +64,8 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
   const [name, setName] = useState("");
   const [sent, setSent] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  // The reply just come, with its label: the one thing read out when it comes (4.1.3), never the thread again.
+  const [said, setSaid] = useState("");
   const list = useRef<HTMLDivElement>(null);
 
   // A conversation this browser had here in the last day: read once, when the chat is first opened.
@@ -96,6 +98,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     setBusy(true);
     setNotice(null);
     setDeleted(false);
+    setSaid("");
     const asked = text;
     const result = await post({ handle, action: "ask", token: thread?.token, text });
     setBusy(false);
@@ -111,6 +114,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
     remember(handle, result.thread.token);
     setThread(result.thread);
     const last = result.thread.turns[result.thread.turns.length - 1];
+    if (last?.from === "ai") setSaid(`${w.label}: ${last.text}`);
     // Handed over: the same question goes in the form, ready to send to the creator.
     setText(last?.status === "handoff" ? asked : "");
     if (last?.status === "handoff") setHanding(true);
@@ -162,7 +166,10 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
             <span className="st-chat-badge mr-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ring-1 ring-current">{w.label}</span>
             {w.intro(storeName)}
           </p>
-          <div ref={list} className="mt-3 flex-1 space-y-2 overflow-y-auto" aria-live="polite" data-assistant-thread>
+          <p role="status" className="sr-only" data-assistant-said>
+            {said}
+          </p>
+          <div ref={list} className="mt-3 flex-1 space-y-2 overflow-y-auto" data-assistant-thread>
             {(thread?.turns ?? []).map((t, i) => (
               <div key={`${t.at}-${i}`} className={t.from === "buyer" ? "ml-8 text-right" : "mr-8"}>
                 {t.from === "ai" ? <p className="st-muted mb-0.5 text-xs font-semibold uppercase tracking-wide" data-ai-label>{w.label}</p> : null}
@@ -200,7 +207,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
               </label>
               <p className="st-muted text-xs">{w.handoffConsent(storeName)}</p>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} className="btn st-btn">
+                <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                   {w.handoffSend(storeName)}
                 </button>
                 {!spent ? (
@@ -226,7 +233,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 />
               </label>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} aria-busy={busy} className="btn st-btn">
+                <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                   {w.send}
                 </button>
                 <button type="button" className="st-muted text-xs underline" onClick={startHandoff}>

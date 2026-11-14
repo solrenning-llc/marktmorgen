@@ -105,13 +105,16 @@ const INVOICE_STATUSES: ReadonlySet<unknown> = new Set(["draft", "open", "paid",
 /** Every status Stripe gives a refund: another one is not known, never taken as "no refund". */
 const REFUND_STATUSES: ReadonlySet<unknown> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 /**
- * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own; its `amount_paid`, a whole
+ * An invoice row of this subscription (rule 30), read in its exact shape (CX-123 rule 24): its status, one of Stripe's own; its `amount_paid`, a whole
  * number whatever the status (Stripe lets an invoice be paid in parts, and money then sits on an `open` one, or on one
  * marked `uncollectible`: docs.stripe.com/invoicing/partial-payments, read 08/11/2026); and for one that holds money
  * (paid, or any status with `amount_paid` above zero) every field a refund is decided by. One that does not read is
  * never taken as "no payment".
  */
-const invoiceKnown = (row: Record<string, unknown>) => {
+const invoiceKnown = (subscription: string) => (row: Record<string, unknown>) => {
+  // This plan's own invoice (rule 30): a row of another subscription in the reply is not this list, so the whole list
+  // is not known, and nothing of it is refunded, voided or written to the creator about.
+  if (ownField(row, "subscription") !== subscription) return false;
   const status = ownField(row, "status");
   if (!INVOICE_STATUSES.has(status)) return false;
   const amountPaid = ownField(row, "amount_paid");
@@ -536,7 +539,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     const cutoff = before ? entry.since : (entry.ended ?? entry.since);
     // Every page read before anything is voided, deleted or refunded; a list not known in full throws, and the
     // plan is kept in line (catch below), never settled as having had no payment.
-    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown, 10, OBJECT_ID);
+    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown(id), 10, OBJECT_ID);
     let settled = true;
     let returned = 0;
     let disputed = 0;

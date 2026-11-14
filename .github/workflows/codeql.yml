@@ -43,9 +43,11 @@ jobs:
         run: |
           python3 scripts/test_ci_documentation_scope.py
           python3 scripts/test_ci_full_tree_proof.py
+          python3 scripts/test_ci_codeql_obsolete_merge_group.py
       - name: Compare actual PR trees; uncertainty keeps full coverage
         id: scope
         env:
+          CI_EVENT: ${{ github.event_name }}
           CI_EVENT: ${{ github.event_name }}
           CI_REF: ${{ github.ref }}
           CI_REPOSITORY: ${{ github.repository }}
@@ -77,8 +79,18 @@ jobs:
           build-mode: none
           queries: security-extended
       - uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        id: codeql_analyze
+        # An obsolete merge-group ref may disappear during the long analysis/upload.
+        # Do not mask failures while the ref exists; the following step proves it is gone.
+        continue-on-error: ${{ github.event_name == 'merge_group' }}
         with:
           category: /language:${{ matrix.language }}
+      - name: Accept only a completed analysis whose merge-group ref was retired
+        if: ${{ github.event_name == 'merge_group' && steps.codeql_analyze.outcome == 'failure' }}
+        env:
+          CI_REF: ${{ github.ref }}
+          CODEQL_SARIF_OUTPUT: ${{ steps.codeql_analyze.outputs.sarif-output }}
+        run: python3 scripts/ci_codeql_obsolete_merge_group.py
 
   all-checks:
     # The one check GitHub requires before main (scripts/ci_all_checks.py): it always runs and

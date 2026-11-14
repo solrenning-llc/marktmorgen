@@ -42,7 +42,7 @@ import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
 import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
-import { isLiveSub } from "@/lib/membership-access";
+import { isLiveSub, memberState } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
 import { folderFromPathname, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
@@ -282,8 +282,11 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
         // A course sold as a membership is open while the membership runs.
         if (product.id === meta.product && product.recurring && session.mode === "subscription" && meta.kind !== "plan") {
           const sub = session.subscription as { status?: unknown } | null;
+          // A membership sent missing, as a bare id or without a status in text says nothing about whether it runs:
+          // unknown, never "ended", which would tell a paying member so and forget their places (CX-123 rule 24).
+          if (memberState(sub) === null) throw new StripeListUnreadable("a membership not readable");
           // The same rule as every other door a membership opens (lib/membership-access.ts).
-          if (!sub || typeof sub !== "object" || !isLiveSub(sub)) {
+          if (!isLiveSub(sub)) {
             ended.add(product.id);
             continue;
           }

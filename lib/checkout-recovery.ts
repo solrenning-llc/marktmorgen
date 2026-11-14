@@ -42,7 +42,7 @@ import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { takeDataBytes } from "@/lib/store-data";
 import { saleHandles } from "@/lib/store";
 import { activeIntro } from "@/lib/intro-price";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -72,6 +72,7 @@ import { chargeNow } from "@/lib/call-deposit";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
+import { deriveKey } from "@/lib/secret-box";
 import { suppressedCommand } from "@/lib/suppression";
 import { assistRemindKey } from "@/lib/assistant-reminder-rules";
 
@@ -154,7 +155,57 @@ async function stopLink(store: Store, email: string): Promise<{ token: string; p
   };
 }
 
-type StopGrant = { k: string; e: string; n?: unknown; h?: unknown };
+type StopGrant = { k: string; e: string; n?: unknown; h?: unknown; w?: unknown };
+
+/**
+ * The stop link of an email to a member moved from another platform
+ * (lib/imports.ts, lib/move-members.ts): the same door, page and one-click
+ * address as a checkout reminder's, and the same mark, so pressing it stops
+ * every reminder from that store to that address, the move's among them.
+ *
+ * One link a store and address (review of #3476, MEDIUM 1), the same in the
+ * first email, its reminder and every pass that tries a send again: its
+ * token is signed with a key of our own, so nobody can make the link of an
+ * address, and writing it again only renews it. So a sender that answers
+ * "try again later" for a day leaves one link, not one a pass, and a link
+ * an email already carries is never taken back by a later pass. Its erasure
+ * note is written first and confirmed before the link: a link is never kept
+ * that erasure cannot find, and a note whose link was never written only
+ * names a key that is not there. Throws when either is not confirmed
+ * written, or when there is no key to sign with: nothing is sent then.
+ */
+export async function moveStopLink(store: Store, email: string): Promise<{ page: string; oneClick: string }> {
+  const key = deriveKey("move-stop");
+  if (!key || !store.statsId) throw new Error("no key to sign a moved member's stop link with");
+  const token = createHmac("sha256", key).update(`${store.statsId}|${normaliseEmail(email)}`).digest("hex").slice(0, 40);
+  const grant = { k: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.name, w: "move" };
+  const notes = noteForErasure(store.statsId, email, linkKey(token));
+  const noted = repliesFor(await redisPipeline(notes), notes.length);
+  if (!noted || noted.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a moved member's stop link");
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a moved member's stop link");
+  return {
+    page: `${SITE_URL}/unsubscribe?r=${token}`,
+    oneClick: `${SITE_URL}/api/mail/unsubscribe?r=${token}`,
+  };
+}
+
+/**
+ * Which of these addresses pressed stop on this store's reminders: one
+ * EXISTS each, read exactly (markThere), so an unknown answer throws and is
+ * never "did not press stop". A store with no stats id has no marks.
+ */
+export async function remindersStoppedAmong(store: Pick<Store, "statsId">, emails: string[]): Promise<Set<string>> {
+  const stopped = new Set<string>();
+  if (!store.statsId || !emails.length) return stopped;
+  const statsId = store.statsId;
+  const marks = repliesFor(await redisPipeline(emails.map((email) => ["EXISTS", offKey(statsId, email)])), emails.length);
+  if (!marks) throw new UnknownReplyError("the reminders' stop marks");
+  marks.forEach((mark, i) => {
+    if (markThere(mark, "a reminder's stop mark")) stopped.add(emails[i]);
+  });
+  return stopped;
+}
 
 /**
  * A stop link's grant, read from its GET reply only in its exact shape
@@ -171,8 +222,8 @@ function stopGrantOf(replies: unknown): StopGrant | null {
   try {
     const grant = JSON.parse(raw) as unknown;
     if (!grant || typeof grant !== "object") return null;
-    const { k, e, n, h } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown };
-    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h } : null;
+    const { k, e, n, h, w } = grant as { k?: unknown; e?: unknown; n?: unknown; h?: unknown; w?: unknown };
+    return typeof k === "string" && typeof e === "string" && k && e ? { k, e, n, h, w } : null;
   } catch {
     return null;
   }
@@ -181,7 +232,7 @@ function stopGrantOf(replies: unknown): StopGrant | null {
 /** Who a stop link belongs to, without acting on it. */
 export async function readStopToken(
   token: string,
-): Promise<{ email: string; storeName: string; stopped: boolean; handle: string } | null> {
+): Promise<{ email: string; storeName: string; stopped: boolean; handle: string; move?: true } | null> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return null;
   const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
   if (!grant) return null;
@@ -191,7 +242,8 @@ export async function readStopToken(
   if (count !== 0 && count !== 1) throw new UnknownReplyError("a reminder's stop mark");
   // The store's handle, so the page can speak the store's language.
   const handle = typeof grant.h === "string" ? grant.h : "";
-  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle };
+  // A link from a moved member's email: the page names those emails (lib/buyer-words/move.ts).
+  return { email: grant.e, storeName: typeof grant.n === "string" ? grant.n : "", stopped: count === 1, handle, ...(grant.w === "move" ? { move: true as const } : {}) };
 }
 
 /**

@@ -48,14 +48,19 @@ export default async function MovePage({ params, searchParams }: Params) {
   const say = speech(store);
   const m = moveWords(store.language);
   const product = (await readListing(store, productId)) ?? null;
-  const invite = product ? await readMove(store, product.id, token).catch(() => null) : null;
+  // A read in an unknown shape (lib/move-members.ts, readMove throws) is not "this link no longer works": the member is
+  // asked to try again, and no button is shown on it.
+  const read = product ? await readMove(store, product.id, token).catch(() => undefined) : null;
+  const unknown = read === undefined;
+  const invite = read ?? null;
   const selling = product?.recurring ? canSellProduct(store, product) : false;
   const price = invite && product && selling ? priceWords(store, product, invite.o) : null;
   const first = invite ? firstChargeAt(invite.r) : null;
   // The price the email named is gone (an option removed, even the last): said, never swapped for another (lib/move-members.ts, openMove).
   const priceGone = Boolean(invite && product?.recurring && namedPriceGone(product, invite.o));
   // What stops the member here, and what happened on the last press: a refused page or too many tries leave the button.
-  const blocking = !invite ? m.notices.expired : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
+  // Kept already: said so, with no button, so no second checkout is opened (openMove answers the same).
+  const blocking = unknown ? m.notices.refused : !invite ? m.notices.expired : invite.kept ? m.notices.kept : priceGone ? m.notices.price : !price ? m.notices.unavailable : null;
   // With the price gone there is no button, so never "try again" or "press the button again": only that it is gone.
   // "price" in the address says nothing by itself: only the product does.
   const said = status === "price" ? undefined : m.notices[status as keyof typeof m.notices];

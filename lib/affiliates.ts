@@ -77,7 +77,7 @@ import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
-import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
+import { canonicalEmail, EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -2490,22 +2490,8 @@ async function isSelf(store: Store, aff: string, buyer: string): Promise<boolean
   return Boolean(affiliate) && canonicalEmail(affiliate!.email) === canonicalEmail(buyer);
 }
 
-/**
- * One inbox however it is written: lower case, without a "+" tag, and for
- * Gmail without its dots, which Gmail itself ignores. Two addresses that
- * come out the same here reach the same person.
- */
-export function canonicalEmail(raw: string): string {
-  const email = normaliseEmail(raw);
-  const at = email.lastIndexOf("@");
-  if (at < 1) return email;
-  let name = email.slice(0, at).split("+")[0];
-  // "example.com." is the same domain as "example.com".
-  let domain = email.slice(at + 1).replace(/\.+$/, "");
-  if (domain === "googlemail.com") domain = "gmail.com";
-  if (domain === "gmail.com") name = name.replace(/\./g, "");
-  return `${name}@${domain}`;
-}
+// One inbox however it is written (lib/auth.ts canonicalEmail), kept importable from here for the callers that read it here.
+export { canonicalEmail };
 
 type SessionLike = {
   id?: unknown;

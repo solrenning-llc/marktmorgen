@@ -12,9 +12,10 @@ const ASK = "You have changes that are not saved. Leave without saving them?";
  * or reloading the tab, and following a link inside the site, which a
  * browser alone does not ask about. Only while `dirty`; never on a link that
  * opens a new tab, jumps within the page or is pressed with a key held to
- * open it elsewhere.
+ * open it elsewhere. A page in a store's language passes that language's
+ * `ask`; the studio's editors keep the English one.
  */
-export function useLeaveGuard(dirty: boolean): void {
+export function useLeaveGuard(dirty: boolean, ask: string = ASK): void {
   useEffect(() => {
     if (!dirty) return;
     const onUnload = (event: BeforeUnloadEvent) => {
@@ -31,7 +32,7 @@ export function useLeaveGuard(dirty: boolean): void {
       if (to.pathname === window.location.pathname && to.search === window.location.search) return;
       if (checkedNavigation.has(event)) return;
       checkedNavigation.add(event);
-      if (!window.confirm(ASK)) {
+      if (!window.confirm(ask)) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -43,5 +44,5 @@ export function useLeaveGuard(dirty: boolean): void {
       window.removeEventListener("beforeunload", onUnload);
       document.removeEventListener("click", onClick, true);
     };
-  }, [dirty]);
+  }, [dirty, ask]);
 }

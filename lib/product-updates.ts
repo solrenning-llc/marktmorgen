@@ -593,19 +593,29 @@ export async function readUpdateStop(token: string): Promise<{ email: string; st
   }
 }
 
-/** Stops every update email from that store to that address, for good. Safe to press twice. */
+/**
+ * Stops every update email from that store to that address, for good. Safe
+ * to press twice. False only for a link that is not one; a stop mark's write
+ * that failed or did not answer "OK" throws, never "no such link", so the
+ * door answers "try again" (as stopReviewRequests, CX-123 rule 24).
+ */
 export async function stopUpdates(token: string): Promise<boolean> {
   if (!UPDATE_STOP.test(token) || !isRedisConfigured()) return false;
   const [raw] = await redisPipeline([["GET", stopKey(token)]]);
   if (typeof raw !== "string" || !raw) return false;
+  let grant: { s?: unknown; e?: unknown; h?: unknown } | null;
   try {
-    const grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown };
-    if (typeof grant.s !== "string" || typeof grant.e !== "string") return false;
-    // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
-    const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
-    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]);
-    return true;
+    grant = JSON.parse(raw) as { s?: unknown; e?: unknown; h?: unknown } | null;
   } catch {
     return false;
   }
+  if (!grant || typeof grant.s !== "string" || typeof grant.e !== "string") return false;
+  // Kept for good, so counted in the store's room at what it adds (lib/order-data.ts).
+  const store = typeof grant.h === "string" && grant.h ? await storeForHandle(grant.h).catch(() => null) : null;
+  const written = repliesFor(
+    await orderWrite(store && store.statsId === grant.s ? store : { statsId: grant.s }, [["SET", offKey(grant.s, grant.e), new Date().toISOString()]]),
+    1,
+  );
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("an update stop mark");
+  return true;
 }

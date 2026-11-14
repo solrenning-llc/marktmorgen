@@ -59,7 +59,7 @@ export function LessonNotes({
   const over = length > MAX_NOTE_CHARS;
   const count = w.count(length, MAX_NOTE_CHARS);
   // Guarded while anything in the box is not saved, also while a save is on its way.
-  useLeaveGuard(initial.state !== "unknown" && text !== kept);
+  useLeaveGuard(initial.state !== "unknown" && text !== kept, w.leaveAsk);
 
   // The count is said to a screen reader once typing pauses, not on every key, and never before the student types.
   useEffect(() => {

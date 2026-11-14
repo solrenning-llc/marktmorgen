@@ -251,6 +251,9 @@ async function tellAmazonIsDown(why: string): Promise<void> {
   }
 }
 
+/** A UTF-16 surrogate without its other half. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 /**
  * What goes into a header of an email, made safe to put there.
  *
@@ -262,7 +265,9 @@ async function tellAmazonIsDown(why: string): Promise<void> {
  * space here, runs of space become one, and the length is capped.
  */
 export function headerText(value: string, max = 250): string {
-  return value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, max);
+  // Half of a character outside the Basic Multilingual Plane (an emoji, cut by a caller's length cap) is not text:
+  // it is dropped, and the cap here never splits one either.
+  return value.replace(LONE_SURROGATE, "").replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, max).replace(LONE_SURROGATE, "");
 }
 
 /** One plain address, or null: no spaces, no commas, one @, nothing that could name a second recipient. */

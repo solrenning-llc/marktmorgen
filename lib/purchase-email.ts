@@ -375,11 +375,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   }
 
   if (product.recurring) {
+    // What the first payment will be: paid yearly, the year's price the subscription was made at (lib/yearly-price.ts).
+    const firstCents = meta.every === "year" && product.yearly ? product.yearly.cents : option ? option.priceCents : product.priceCents;
     if (firstChargeAt) {
-      const firstCents = option ? option.priceCents : product.priceCents;
       lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
     } else if (trialDays > 0) {
-      const firstCents = option ? option.priceCents : product.priceCents;
       const tax = store.tax.enabled && !store.tax.included;
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));

@@ -184,8 +184,10 @@ export type RoleChange = "ok" | "gone" | "failed";
 
 function changed(answer: Answer | null): RoleChange {
   if (answer && answer.status >= 200 && answer.status < 300) return "ok";
-  // 10007: the person is not in the server any more; 10011: the role is gone.
-  const code = Number((answer?.data as { code?: unknown } | null)?.code);
+  // 10007: the person is not in the server any more; 10011: the role is gone; 10004: the server is.
+  // Only Discord's own whole number says so: a code of another shape ("10007", [10007]) is not known, never "gone",
+  // which would forget somebody still in the server with their role (CX-123 rule 24).
+  const code = (answer?.data as { code?: unknown } | null)?.code;
   if (answer?.status === 404 && (code === 10007 || code === 10011 || code === 10004)) return "gone";
   return "failed";
 }
@@ -212,5 +214,6 @@ export async function removeMember(serverId: string, userId: string, reason: str
 export async function leaveServer(serverId: string): Promise<boolean> {
   const answer = await call(`/users/@me/guilds/${serverId}`, { method: "DELETE" }).catch(() => null);
   if (answer && answer.status >= 200 && answer.status < 300) return true;
-  return answer?.status === 404 && Number((answer.data as { code?: unknown } | null)?.code) === 10004;
+  // Discord's own whole number only, as in `changed`: "10004" or [10004] is not known (CX-123 rule 24).
+  return answer?.status === 404 && (answer.data as { code?: unknown } | null)?.code === 10004;
 }

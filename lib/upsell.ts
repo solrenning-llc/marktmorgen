@@ -44,6 +44,7 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -63,7 +64,7 @@ import type { Listing, Product, Store } from "@/lib/store";
 import { listingFinder, readListing, readListings, readProduct } from "@/lib/catalog";
 import { funnelProductIds } from "@/lib/funnel";
 import type { ProductFile } from "@/lib/product-file";
-import type { ProductImage } from "@/lib/product-image";
+import { type ProductImage, picturedFrom } from "@/lib/product-image";
 import { bundleFromMeta, bundleMeta, deliverableItems, deliveredIds } from "@/lib/bundle-rules";
 import { type BundleContents, contentsOf, offerableAfterPaying } from "@/lib/bundles";
 import { applyShareToPayment } from "@/lib/platform-share";
@@ -187,7 +188,9 @@ export type TakeResult =
   | { kind: "checking" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
-  | { kind: "consent" };
+  | { kind: "consent" }
+  /** The step no longer has the terms the page showed (offerRef): nothing written, nothing charged; the page shows it as it stands now. */
+  | { kind: "changed" };
 
 type SessionView = {
   status?: unknown;
@@ -239,6 +242,29 @@ export function offerOpen(createdSeconds: number, secret: string | undefined, ke
  */
 const sellableTargets = (store: Store, listings: Listing[]) => listings.filter((p) => canSellProduct(store, p));
 
+/**
+ * How the thanks page's form names the offer it drew: the step's id, a dot, and a fingerprint of every term drawn
+ * with it — the product, its title and price on its own, the offer's price and the store's currency, the creator's
+ * words, the picture and which box to start access at once is asked. The answer counts only while the step still
+ * has those exact terms (takeUpsell), so an edit made while the buyer reads the page is never charged or answered
+ * on their click. Compared, never charged: the charge is the server's own current price.
+ */
+export function offerRef(store: Pick<Store, "currency">, step: FunnelStep, target: Listing): string {
+  const terms = JSON.stringify([
+    step.id,
+    target.id,
+    target.title,
+    target.priceCents,
+    step.priceCents,
+    store.currency,
+    step.headline,
+    step.text,
+    step.imageFrom,
+    deliversDigitally(target) ? consentKind(target) : "",
+  ]);
+  return `${step.id}.${createHash("sha256").update(`marktmorgen-offer-terms:v1:${terms}`).digest("hex").slice(0, 32)}`;
+}
+
 const toAnswers = (records: Map<string, UpsellRecord>) =>
   new Map<string, StepAnswer>([...records].map(([slot, record]) => [slot, record.state]));
 
@@ -255,7 +281,7 @@ export async function takeUpsell(input: {
   session: string;
   secret: string | undefined;
   origin: string;
-  /** The offer the page showed; the answer only counts for that one. */
+  /** The offer the page showed, as its form names it (offerRef); the answer only counts for that one, on those terms. */
   step: string;
   answer: "yes" | "no";
   /**
@@ -302,14 +328,18 @@ export async function takeUpsell(input: {
   // not even at a lower price on a "no thanks" path (lib/cart-offers.ts).
   if (cart) for (const record of records.values()) if (record.state === "declined" || record.state === "failed") owned.add(record.product);
   const position = funnelPosition(funnel, offered, toAnswers(records), owned);
-  if (position.kind !== "offer" || position.step.id !== input.step) {
-    const asked = funnel.steps.find((s) => s.id === input.step);
+  const askedId = input.step.split(".")[0];
+  if (position.kind !== "offer" || position.step.id !== askedId) {
+    const asked = funnel.steps.find((s) => s.id === askedId);
     const record = asked ? records.get(stepSlot(funnel, asked)) : undefined;
     if (record?.state === "failed") return { kind: "failed" };
     if (record?.state === "declined") return { kind: "declined" };
     return record ? { kind: "done" } : { kind: "unavailable" };
   }
   const { step, target } = position;
+  // Answered only on the terms the page drew: a step edited since, or a form that does not name them, is shown
+  // again as it stands now, with nothing written and nothing charged.
+  if (input.step !== offerRef(store, step, target)) return { kind: "changed" };
   const slot = stepSlot(funnel, step);
   // A bundle offered: what it holds now is what this buyer gets, kept with
   // the answer and on the charge.
@@ -416,8 +446,9 @@ export async function takeUpsell(input: {
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
-      await afterPaid(store, session, target, pi, email);
-      await settleAdmitted(store, admitted.hour);
+      // Its place is given back only once the offer is counted (or covered by its share): a count not confirmed
+      // keeps it held until its hours end, never given back as if counted (lib/orders.ts, countOrder).
+      if ((await afterPaid(store, session, target, pi, email)) !== "unknown") await settleAdmitted(store, admitted.hour);
       return { kind: "done" };
     }
     const next = pi.next_action as { redirect_to_url?: { url?: unknown } } | null;
@@ -447,11 +478,12 @@ export async function takeUpsell(input: {
 
 /**
  * What follows an offer being paid, wherever that is learned: the affiliate
- * the order came through is credited, the buyer gets its confirmation, and
- * the creator's phone hears of the sale (lib/sale-events.ts). None can undo
- * the payment, so none failing is passed on.
+ * the order came through is credited, the buyer gets its confirmation, it is
+ * one of the month's orders, and the creator's phone hears of the sale
+ * (lib/sale-events.ts). None can undo the payment, so none failing is passed
+ * on. Answers what counting it answered (lib/orders.ts, countOrder).
  */
-async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
+async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
   const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
@@ -460,10 +492,15 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;
   const metadata = (pi.metadata as Record<string, string> | null) ?? null;
-  await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) =>
-    console.error("sending an offer's confirmation failed", error),
-  );
+  const sent = await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) => {
+    console.error("sending an offer's confirmation failed", error);
+    return "failed" as const;
+  });
+  // One of the month's orders, by its own payment, whether or not its email went: it was paid. Only an offer this
+  // store does not confirm by email ("skip") is left as before.
+  const counted = sent === "skip" ? false : await countOrder(store, `offer:${reference}`, amountCents);
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
+  return counted;
 }
 
 /**
@@ -675,6 +712,8 @@ export type FunnelView = {
   offer: {
     step: FunnelStep;
     target: Listing;
+    /** What the form posts as the step: its id and the terms drawn (offerRef). */
+    ref: string;
     image: ProductImage | null;
     /** Reached by saying no to an earlier offer. */
     afterNo: boolean;
@@ -754,12 +793,14 @@ export async function funnelView(input: {
   }
   if (position.kind !== "offer") return { offer: null, taken, notes, declined };
   const { step, target } = position;
-  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom) ?? null : null;
+  // Never a picture moved after a notice to a name no public page gives out (R44); a draft's, as the editor shows it.
+  const pictured = step.imageFrom ? listed.find((p) => p.id === step.imageFrom && picturedFrom(p)) ?? null : null;
   const afterNo = funnel.steps.some((s) => s.no === step.id && records.get(stepSlot(funnel, s))?.state === "declined");
   return {
     offer: {
       step,
       target,
+      ref: offerRef(store, step, target),
       image: pictured?.image ?? null,
       afterNo,
     },

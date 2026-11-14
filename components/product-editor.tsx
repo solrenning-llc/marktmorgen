@@ -57,6 +57,7 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handOverRefusal,
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
@@ -85,12 +86,14 @@ import { imageUrl } from "@/lib/product-image";
 import { StoreField, useStudioHref, useStudioStore } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { productSegment } from "@/lib/product-slug";
+import { OptionLinkCopy } from "@/components/option-link-copy";
 import { feeWords } from "@/lib/fee-words";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { NewTab } from "@/components/new-tab";
 import { TermsCheckPanel } from "@/components/terms-check-panel";
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
+import { aiDraftHold, freshChecks } from "@/lib/ai-draft-review";
 
 /** The sentences about amounts, in the store's own currency (lib/money.ts). */
 const optionPrice = (currency: Currency) => `Type an amount ${rangeWords(currency)}, like ${priceExample(currency, 39)}.`;
@@ -290,6 +293,8 @@ async function send(
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
     }
+    // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
+    if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -330,6 +335,10 @@ function ProductForm({
   const id = product?.id ?? "new";
   // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
+  // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
+  const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
+  const [aiHeld, setAiHeld] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
   // The preview starts at a phone's width, where most product pages are read.
   const [phone, setPhone] = useState(true);
@@ -386,10 +395,24 @@ function ProductForm({
     : null;
   return (
     <form
+      ref={formRef}
+      id={`product-form-${id}`}
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        if (!busy) onSubmit();
+        if (busy) return;
+        // An AI draft is saved only once the creator has checked it; the focus goes to the first check left.
+        const held = aiDraftHold(aiChecks);
+        setAiHeld(held);
+        if (held) {
+          const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
+          // The checks sit in the AI box, which the creator may have closed: open it, or the focus goes nowhere.
+          const box = first?.closest("details");
+          if (box) box.open = true;
+          requestAnimationFrame(() => first?.focus());
+          return;
+        }
+        onSubmit();
       }}
       className="space-y-4 rounded-2xl border-2 border-violet-brand/30 bg-white p-4"
     >
@@ -436,6 +459,7 @@ function ProductForm({
                     : "download",
         })}
         onResult={(value) => setDraft({ ...draft, summary: value.summary, about: value.about })}
+        onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}
         done="Both descriptions below are filled in. Read them, change anything, then save."
       />
 
@@ -829,6 +853,11 @@ function ProductForm({
           {error}
         </p>
       ) : null}
+      {aiHeld && aiDraftHold(aiChecks) ? (
+        <p className="notice notice-error" role="alert">
+          {aiHeld}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -861,6 +890,7 @@ function ProductForm({
  */
 function OptionsBlock({
   product,
+  handle,
   fileBusyId,
   percent,
   fileError,
@@ -872,6 +902,8 @@ function OptionsBlock({
   tiers,
 }: {
   product: Product;
+  /** The store's address, for each option's link with it chosen (630 [HN6](27)). */
+  handle: string;
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
   /** The plans members switch between (lib/tier-switch.ts): none offers an introductory or yearly price. */
@@ -1206,6 +1238,11 @@ function OptionsBlock({
                       <li key={at}>{line}</li>
                     ))}
                   </ul>
+                ) : null}
+
+                {/* A link that opens the product page with this option chosen, for a sales page or an email (630 [HN6](27)). */}
+                {opens || option.file || option.link ? (
+                  <OptionLinkCopy path={`/@${handle}/p/${productSegment(product)}`} optionId={option.id} label={option.label} />
                 ) : null}
 
                 {!opens && !option.file && !option.link ? (
@@ -1919,8 +1956,9 @@ export function ProductEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; product?: unknown };
       if (data.ok) return null;
+      if (data.error === "last_delivery") return handOverRefusal(data.error, typeof data.product === "string" ? data.product : null);
       return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
     } catch {
       return MESSAGES.server_error;
@@ -2284,7 +2322,8 @@ export function ProductEditor({
                   </dl>
                   <p className="mt-2">{review.note}</p>
                   {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
-                  <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                  {/* It submits the form itself, so an AI draft still unchecked holds it like Save does (756 [STN3]). */}
+                  <button type="submit" form={`product-form-${product.id}`} className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy}>
                     Yes, save what buyers pay
                   </button>
                 </div>
@@ -2514,6 +2553,7 @@ export function ProductEditor({
                 {product.shipping ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}
@@ -2550,6 +2590,7 @@ export function ProductEditor({
                 {(isFree(product) || product.pwyw) && product.options.length === 0 ? null : (
                 <OptionsBlock
                   product={product}
+                  handle={handle}
                   taxOnTop={taxOnTop}
                   tiers={tiers}
                   fileBusyId={fileBusyId}
@@ -2575,6 +2616,7 @@ export function ProductEditor({
                 {(product.course || product.podcast) && !product.recurring && !isFree(product) && !product.pwyw ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}

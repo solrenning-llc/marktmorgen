@@ -22,6 +22,7 @@ import { type Listing, ensureStoreId, normaliseHandle, storeForPage, storeRef } 
 import { formatMoney, toMajor } from "@/lib/money";
 import { linkHost } from "@/lib/product-link";
 import { DOWNLOAD_WINDOW_SECONDS, type Order, readOrder } from "@/lib/store-checkout";
+import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
@@ -115,6 +116,7 @@ const UPSELL_NOTES: Record<string, { always: boolean }> = {
   failed: { always: false },
   checking: { always: false },
   unavailable: { always: true },
+  changed: { always: true },
 };
 
 /**
@@ -587,7 +589,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             : undefined,
         })
       : null;
-  const offer = funnel?.offer ?? null;
+  // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,
+  // no Renew, no affiliate link and no review (its review page is closed then); what was bought stays.
+  const offer = store.suspended ? null : funnel?.offer ?? null;
 
   // A purchase that opens the creator's community says so, with the way in —
   // counting what was ticked at checkout and what was added after paying, as
@@ -686,7 +690,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // for, by this checkout, with money (lib/review-proof.ts has the rule the
   // form is checked against again when it is sent).
   const toReview =
-    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store)
+    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store) && !store.suspended
       ? [order.product, ...order.bumps.map((added) => added.product), ...bundled]
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
@@ -740,7 +744,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const downloadAt = (extra: Record<string, string>) => (id: string) =>
     `/api/store/download?${new URLSearchParams({ handle: store.handle, session_id: sessionId ?? "", ...extra, pid: id })}`;
 
-  const notice = order.state !== "paid" ? t.notices[order.state] : null;
+  // An unpaid checkout is said "not charged" only with proof in the session (648 [WG8], lib/checkout-return.ts).
+  const notice = order.state !== "paid" ? t.notices[order.state === "unpaid" ? unpaidNotice(order.proof) : order.state] : null;
   // Asked once a paid order is shown, unless the creator switched it off.
   const askHeard = order.state === "paid" && Boolean(sessionId) && !booked && !(await heardOff(store.handle).catch(() => true));
   const upsellAnswer = typeof query.upsell === "string" && Object.hasOwn(UPSELL_NOTES, query.upsell) ? UPSELL_NOTES[query.upsell] : null;
@@ -763,7 +768,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       await countFunnelDone(statsId, funnelHereNow.funnel, funnelHereNow.index, funnelVisitor(statsId, funnelHereNow.funnel.id, clientAddress(asker), asker.headers.get("user-agent") ?? ""));
     });
   }
-  const funnelNext = funnelHereNow?.next && !offer ? funnelHereNow.next : null;
+  const funnelNext = funnelHereNow?.next && !offer && !store.suspended ? funnelHereNow.next : null;
 
   // Bought through the checkout script on one of the creator's own sites
   // (lib/embed-sites.ts): the way back there, with the mark that lets the
@@ -897,11 +902,13 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 <div className="st-note mt-7" role="status">
                   <p className="font-bold" style={{ color: "var(--st-text)" }}>{t.endedTitle}</p>
                   <p className="mt-1 text-sm">
-                    {t.endedBody}
+                    {store.suspended ? o.endedClosedNote : t.endedBody}
                   </p>
-                  <Link href={renewPath(store, order.product)} className="btn st-btn mt-4">
-                    {t.renew}
-                  </Link>
+                  {store.suspended ? null : (
+                    <Link href={renewPath(store, order.product)} className="btn st-btn mt-4">
+                      {t.renew}
+                    </Link>
+                  )}
                 </div>
               ) : booked ? (
                 <>
@@ -1228,7 +1235,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   <form action="/api/store/upsell" method="post" className="px-5 py-5 sm:px-6">
                     <input type="hidden" name="handle" value={store.handle} />
                     <input type="hidden" name="session_id" value={sessionId} />
-                    <input type="hidden" name="step" value={offer.step.id} />
+                    <input type="hidden" name="step" value={offer.ref} />
                     <p className="st-label">{offer.afterNo ? t.beforeYouGo : t.oneMoreThing}</p>
                     <h2 id="offer-title" className="mt-1 text-xl font-semibold leading-snug tracking-[-0.01em]">
                       {offer.step.headline || t.titleFor(offer.target.title, money(offer.step.priceCents, store.currency))}
@@ -1308,7 +1315,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
               <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">
                 {notice?.title ?? t.notices.invalid.title}
               </h1>
-              <p className="st-muted mt-4 text-lg">
+              <p className="st-muted mt-4 text-lg" role="status">
                 {notice?.body ?? t.checkLink}
               </p>
               {order.state === "expired" && canRecover(store) ? (
@@ -1401,7 +1408,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         ) : null}
 
         {/* The store lets buyers take their own affiliate link (lib/affiliates.ts, joinAsBuyer). */}
-        {order.state === "paid" && sessionId && buyersJoin(store) ? (
+        {order.state === "paid" && sessionId && buyersJoin(store) && !store.suspended ? (
           <section aria-labelledby="share-title" className="st-card mt-6 p-7 sm:p-10">
             <h2 id="share-title" className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em]">
               {t.earnBy(store.affiliates.percent, store.name)}

@@ -154,6 +154,7 @@ export const es: BuyerWords = {
   unitSaving: (percent) => `ahorras un ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Elige una opción de ${title}`,
   chooseOne: "Elige una",
+  optionFromLink: (label) => `Llegaste aquí por ${label}, así que está elegida abajo. Puedes elegir otra.`,
   recommended: "Recomendado",
   recommendedAfter: " (recomendado)",
   howToPayFor: (title) => `Cómo pagar ${title}`,
@@ -201,6 +202,7 @@ export const es: BuyerWords = {
     busy: { title: "Alguien lo está comprando ahora mismo", body: "No se ha cobrado nada. Vuelve a pulsar comprar en un momento." },
     slow: { title: "Demasiados intentos en pocos minutos", body: "No se ha cobrado nada. Espera unos minutos y vuelve a pulsar comprar." },
     error: { title: "No se pudo abrir la página de pago", body: "No se ha cobrado nada. Vuelve a intentarlo en un momento." },
+    nocharges: { title: "Esta tienda no puede aceptar pagos con tarjeta ahora mismo", body: "No se ha cobrado nada. Volver a intentarlo no funcionará hasta que la tienda lo solucione." },
     paused: { title: "Esta tienda no acepta pedidos nuevos ahora mismo", body: "No se ha cobrado nada. Los pedidos nuevos vuelven a abrirse a principios del mes que viene, o antes." },
     "paypal-declined": {
       title: "PayPal no aceptó el pago",

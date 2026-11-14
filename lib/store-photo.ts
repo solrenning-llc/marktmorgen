@@ -14,6 +14,7 @@
  * SVG is not on the list.
  */
 import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 import { MAX_PHOTO_BYTES, PHOTO_ID_PATTERN } from "@/lib/photo-limits";
 
@@ -58,12 +59,18 @@ export function decodePhoto(raw: unknown): { bytes: Uint8Array; type: PhotoType 
   return { bytes, type };
 }
 
-/** Keeps a photo under a fresh id and returns the id. */
+/**
+ * Keeps a photo under a fresh id and returns the id, once Redis answers the
+ * SET exactly "OK"; any other reply throws UnknownReplyError (CX-123 rule 24),
+ * so the page is never pointed at a photo that may not be there.
+ */
 export async function writePhoto(bytes: Uint8Array, type: PhotoType): Promise<string> {
   const id = crypto.randomUUID().replace(/-/g, "");
-  await redisPipeline([
-    ["SET", photoKey(id), `${type};${Buffer.from(bytes).toString("base64")}`],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([["SET", photoKey(id), `${type};${Buffer.from(bytes).toString("base64")}`]]),
+    1,
+  );
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a page photo saved");
   return id;
 }
 
@@ -73,7 +80,11 @@ export async function readPhoto(
 ): Promise<{ bytes: Uint8Array; type: PhotoType } | null> {
   if (!PHOTO_ID_PATTERN.test(id)) return null;
   const [raw] = await redisPipeline([["GET", photoKey(id)]]);
-  if (typeof raw !== "string") return null;
+  return typeof raw === "string" ? photoFrom(raw) : null;
+}
+
+/** The photo a record holds, or null when what is kept there is not one of ours. */
+function photoFrom(raw: string): { bytes: Uint8Array; type: PhotoType } | null {
   const cut = raw.indexOf(";");
   if (cut < 0) return null;
   const type = raw.slice(0, cut);
@@ -81,8 +92,35 @@ export async function readPhoto(
   return { bytes: new Uint8Array(Buffer.from(raw.slice(cut + 1), "base64")), type };
 }
 
-/** Forgets a photo nothing points at any more. */
+/**
+ * Forgets a photo, once Redis confirms the DEL (a count of 0 or 1); any other
+ * reply throws UnknownReplyError (CX-123 rule 24): /api/photo/<id> reads only
+ * this record, so a photo whose delete is not confirmed is not "removed".
+ */
 export async function deletePhoto(id: string | null): Promise<void> {
   if (!id || !PHOTO_ID_PATTERN.test(id)) return;
-  await redisPipeline([["DEL", photoKey(id)]]);
+  const replies = repliesFor(await redisPipeline([["DEL", photoKey(id)]]), 1);
+  const deleted = replies ? countOf(replies[0]) : null;
+  if (deleted === null || deleted > 1) throw new UnknownReplyError("a page photo deleted");
+}
+
+/**
+ * The photo behind an id, read exactly (CX-123 rule 24), for an answer that a
+ * cache keeps (the home-screen icon, app/[handle]/app-icon): readPhoto answers
+ * null both for no photo and for a reply out of shape. "none" only when Redis
+ * confirms the key absent (an exact null), the id cannot be a photo's, or the
+ * record kept there holds no picture of ours (photo ids are never reused, so
+ * that will not change); "unknown" for a reply of any other shape. A request
+ * that fails throws. The same one GET as readPhoto.
+ */
+export async function readPhotoExactly(
+  id: string,
+): Promise<{ bytes: Uint8Array; type: PhotoType } | "none" | "unknown"> {
+  if (!PHOTO_ID_PATTERN.test(id)) return "none";
+  const replies = repliesFor(await redisPipeline([["GET", photoKey(id)]]), 1);
+  if (!replies) return "unknown";
+  const raw = replies[0];
+  if (raw === null) return "none";
+  if (typeof raw !== "string") return "unknown";
+  return photoFrom(raw) ?? "none";
 }

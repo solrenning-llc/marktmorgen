@@ -68,6 +68,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 // The repository's compare-and-set script (GET equals what was read, then SET), also modelled by lib/redis-memory.ts.
 import { SAVE_CRM_PIPELINES as COMPARE_AND_SET } from "@/lib/crm";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -209,24 +210,35 @@ async function liveEndpoints(store: Pick<Store, "sid">, endpoints: Endpoint[], k
   const keyed = endpoints.filter((e) => e.key);
   if (!keyed.length) return endpoints;
   const ids = keyed.map((e) => e.key as string);
-  let states: Map<string, string>;
-  const unread = new Set<string>();
-  try {
-    states = await keyStates(store.sid ?? "", ids);
-  } catch (error) {
-    if (!keepUnread || !(error instanceof UnknownReplyError)) throw error;
-    states = new Map();
-    for (const id of new Set(ids)) {
-      try {
-        for (const [key, state] of await keyStates(store.sid ?? "", [id])) states.set(key, state);
-      } catch (one) {
-        if (!(one instanceof UnknownReplyError)) throw one;
-        unread.add(id);
-      }
-    }
-    console.error("WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads", store.sid, [...unread]);
-  }
+  const { states, unread } = keepUnread
+    ? await eachKeyState(store.sid ?? "", ids, (error) => error instanceof UnknownReplyError)
+    : { states: await keyStates(store.sid ?? "", ids), unread: new Set<string>() };
+  if (unread.size) console.error("WEBHOOK KEY STATE UNREAD: the endpoints of these API keys are queued and held until their state reads", store.sid, [...unread]);
   return endpoints.filter((e) => !e.key || states.get(e.key) === "live" || unread.has(e.key));
+}
+
+/**
+ * The state of each of these keys, read all at once and, when that answer cannot be read, each key on its own: the
+ * keys whose own state cannot be read come back in `unread`, never as in use, paused or revoked (rule 24), so one
+ * unreadable key never stands for the others. `unreadable` says which errors make a key unread; any other is thrown.
+ */
+async function eachKeyState(sid: string, ids: string[], unreadable: (error: unknown) => boolean): Promise<{ states: Map<string, string>; unread: Set<string> }> {
+  try {
+    return { states: await keyStates(sid, ids), unread: new Set() };
+  } catch (error) {
+    if (!unreadable(error)) throw error;
+  }
+  const states = new Map<string, string>();
+  const unread = new Set<string>();
+  for (const id of new Set(ids)) {
+    try {
+      for (const [key, state] of await keyStates(sid, [id])) states.set(key, state);
+    } catch (one) {
+      if (!unreadable(one)) throw one;
+      unread.add(id);
+    }
+  }
+  return { states, unread };
 }
 
 /** Why one endpoint is sent nothing now, or null when it is sent to. */
@@ -411,6 +423,27 @@ async function readConfig(statsId: string): Promise<Config | null> {
 /** How many times a change is tried again from a fresh read when another one landed first. */
 const CONFIG_WRITE_TRIES = 4;
 
+/** What the studio says when a settings change may or may not have been saved (WebhookSettingsUnsureError). */
+export const WEBHOOK_SETTINGS_UNSURE_WORDS = "We could not confirm whether that change was saved. Reload the page to see your endpoints before you try again.";
+
+/**
+ * A settings change whose write may have landed: its reply could not be read, and neither could the settings read
+ * back, or they hold another change since. It is never said saved, and never said unchanged either.
+ */
+export class WebhookSettingsUnsureError extends UnknownReplyError {
+  constructor() {
+    super("a store's webhook settings after a change");
+    this.name = "WebhookSettingsUnsureError";
+  }
+}
+
+/** A store's webhook settings as text, or null when there are none, read exactly (CX-123 rule 24). */
+async function settingsText(statsId: string): Promise<string | null> {
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
+  return read[0];
+}
+
 /**
  * Changes a store's webhook settings over exactly what was read (378 [TB4]).
  * Every writer reads the whole settings and writes them back; before this, two
@@ -421,15 +454,52 @@ const CONFIG_WRITE_TRIES = 4;
  * few times, and then refused. `change` returns null to write nothing.
  */
 async function changeConfig(statsId: string, change: (config: Config | null) => Config | null): Promise<{ before: Config | null; after: Config } | null> {
+  // The settings read back after an unknown reply, found as they were read: the next try starts from them.
+  let readBack: { raw: string | null } | null = null;
   for (let tries = 0; tries < CONFIG_WRITE_TRIES; tries += 1) {
-    const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+    // Read exactly (CX-123 rule 24): only GET null is "no settings"; another shape, or text that is not settings, is
+    // unknown and nothing is written over it.
+    const raw: string | null = readBack ? readBack.raw : await settingsText(statsId);
+    readBack = null;
     const before = parseConfig(raw);
+    if (raw !== null && !before) throw new UnknownReplyError("a store's webhook settings");
     const after = change(before);
     if (!after) return null;
-    const [saved] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), typeof raw === "string" ? raw : "", JSON.stringify(after)]]);
-    if (Number(saved) === 1) return { before, after };
+    const text = JSON.stringify(after);
+    // Only 1 is saved and only [-1] / [-1, n] is "changed meanwhile, made again" (rules 24 and 30). Any other reply,
+    // or a call that fails, may have landed: the settings are read back once, exactly. The text written is saved;
+    // the text read is not written, and the change is made again from it, as for [-1]; anything else stays unsure.
+    let saved: "saved" | "changed" | "unknown";
+    try {
+      saved = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text]]), "the webhook settings' save");
+    } catch {
+      saved = "unknown";
+    }
+    if (saved === "saved") return { before, after };
+    if (saved === "unknown") {
+      const now = await settingsText(statsId).catch(() => {
+        throw new WebhookSettingsUnsureError();
+      });
+      if (now === text) return { before, after };
+      if (now !== raw) throw new WebhookSettingsUnsureError();
+      readBack = { raw: now };
+    }
   }
   throw new Error("The webhook settings kept changing while being saved.");
+}
+
+/**
+ * The compare-and-set script's reply (SAVE_CRM_PIPELINES v2, modelled by lib/redis-memory.ts), read in its exact
+ * shape: "saved" for 1, "changed" for [-1] (nothing there) or [-1, n] (the length there now, a whole number). Any
+ * other reply, of the pipeline or of the script, is unknown and throws UnknownReplyError (CX-123 rule 24).
+ */
+function compareAndSetReply(replies: unknown, what: string): "saved" | "changed" {
+  const reply = repliesFor(replies, 1);
+  if (reply && reply[0] === 1) return "saved";
+  // The script's own list, read as exactly one or two slots, as a pipeline's replies are (no Proxy, hole or getter).
+  const changed = reply ? (repliesFor(reply[0], 1) ?? repliesFor(reply[0], 2)) : null;
+  if (changed && changed[0] === -1 && (changed.length === 1 || countOf(changed[1]) !== null)) return "changed";
+  throw new UnknownReplyError(what);
 }
 
 /** The source fields of a sale.completed message, read off the order's metadata; null where it carries none. */
@@ -665,8 +735,16 @@ export async function emitEvent(store: Store, type: WebhookEvent, seed: string, 
   const listening = await liveEndpoints(store, config?.endpoints.filter((e) => e.events.includes(type)) ?? [], true);
   if (!listening.length) return 0;
   const eventId = eventIdFor(statsId, type, seed);
-  const [fresh] = await redisPipeline([["SET", eventKey(eventId), "1", "NX", "EX", EVENT_SECONDS]]);
-  if (fresh === null) return 0;
+  // Made and sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an event already sent;
+  // "unknown" makes and sends nothing, lets go of the mark if it holds our own value (it may have landed; nothing was
+  // made on it), and throws, so the caller's retry is not told it went (Claude 2 on #3276).
+  const value = claimValue();
+  const fresh = await claimMark(eventKey(eventId), EVENT_SECONDS, value);
+  if (fresh === "taken") return 0;
+  if (fresh === "unknown") {
+    await releaseMark(eventKey(eventId), value);
+    throw new UnknownReplyError("a webhook event's once-only mark");
+  }
 
   // Every text cleaned and bounded where the message is made (cleanText), so what a delivery keeps is bounded.
   const body = JSON.stringify(cleanData({
@@ -784,26 +862,40 @@ export async function deliverDue(deadline: number, now = Date.now()): Promise<{ 
 
 // ---- The studio ---------------------------------------------------------------
 
-/** What the studio sees of an endpoint: never a secret, only until when the old one still signs. */
-export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string; held?: EndpointHeld };
+/**
+ * What the studio sees of an endpoint: never a secret, only until when the old one still signs. `keyState: "unknown"`:
+ * an API key added it and that key's state could not be read just now, so it is shown as neither sent to nor held.
+ */
+export type EndpointView = { id: string; where: string; events: WebhookEvent[]; addedAt: string; oldSecretUntil?: string; held?: EndpointHeld; keyState?: "unknown" };
 export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | "attempts" | "next" | "lastStatus" | "lastError" | "lastAt" | "createdAt" | "notSentPaused" | "resentFrom" | "resentAs" | "givenUp"> & {
   endpoint: string;
 };
 export type WebhooksView = { endpoints: EndpointView[]; log: DeliveryView[] };
 
-export async function webhooksView(store: Store): Promise<WebhooksView> {
+/**
+ * `log: false` reads only the endpoints, never the delivery log: what the public API's hooks routes answer, inside
+ * one API request (UNIT_COST.api), which the log's LOG_SIZE deliveries at up to DELIVERY_MAX_BYTES each are not.
+ */
+export async function webhooksView(store: Store, { log = true }: { log?: boolean } = {}): Promise<WebhooksView> {
   if (!store.statsId || !isRedisConfigured()) return { endpoints: [], log: [] };
   const [rawConfig, rawLog] = await redisPipeline([
     ["GET", cfgKey(store.statsId)],
-    ["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1],
+    ...(log ? [["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]] : []),
   ]);
   const config = parseConfig(rawConfig);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
   const deliveries = ids.length ? await redisPipeline(ids.map((id) => ["GET", deliveryKey(id)])) : [];
   const names = new Map((config?.endpoints ?? []).map((e) => [e.id, shortAddress(e.url)]));
   const keyed = (config?.endpoints ?? []).filter((e) => e.key);
-  const states = keyed.length ? await keyStates(store.sid ?? "", keyed.map((e) => e.key as string)) : new Map<string, string>();
-  const heldOf = (e: Endpoint): EndpointHeld | null => (!e.key ? null : states.get(e.key) === "live" ? null : states.get(e.key) === "paused" ? "paused" : "revoked");
+  // Each key on its own when they cannot all be read (LOW 3 of #3096, rule 24): an endpoint whose key's state, or the
+  // team record, does not read is marked unknown on its own row, and the rest of the view, its failed deliveries and
+  // their resend with it, is still shown. Whatever stopped the read, the state is unknown, never live or held.
+  const { states, unread } = keyed.length
+    ? await eachKeyState(store.sid ?? "", keyed.map((e) => e.key as string), () => true)
+    : { states: new Map<string, string>(), unread: new Set<string>() };
+  if (unread.size) console.error("WEBHOOK KEY STATE UNREAD: these endpoints are shown as state unknown", store.sid, [...unread]);
+  const heldOf = (e: Endpoint): EndpointHeld | null =>
+    !e.key || unread.has(e.key) ? null : states.get(e.key) === "live" ? null : states.get(e.key) === "paused" ? "paused" : "revoked";
   return {
     endpoints: (config?.endpoints ?? []).map((e) => ({
       id: e.id,
@@ -812,6 +904,7 @@ export async function webhooksView(store: Store): Promise<WebhooksView> {
       addedAt: e.addedAt,
       ...(e.previous && e.previousUntil ? { oldSecretUntil: new Date(e.previousUntil).toISOString() } : {}),
       ...(heldOf(e) ? { held: heldOf(e) as EndpointHeld } : {}),
+      ...(e.key && unread.has(e.key) ? { keyState: "unknown" as const } : {}),
     })),
     log: deliveries
       .map(parseDelivery)
@@ -973,7 +1066,7 @@ export type AddEndpointResult =
  * studio never shows it again. The address is checked now (https, a public
  * host) and again at every send, since what a name points to can change.
  */
-export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = ""): Promise<AddEndpointResult> {
+export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = "", withLog = true): Promise<AddEndpointResult> {
   if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   // 232 [CA1] 4b4b2: a new endpoint is new delivery work; it waits while the plan's costs are paused.
   const paused = integrationPauseWord(store, now / 1000);
@@ -1023,7 +1116,7 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
     ["SADD", STORES_KEY, store.statsId],
     ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
   ]);
-  return { ok: true, secret, view: await webhooksView(store) };
+  return { ok: true, secret, view: await webhooksView(store, { log: withLog }) };
 }
 
 /** Changes which events an endpoint hears. */
@@ -1075,8 +1168,8 @@ export async function endpointsOfKeys(store: Store, keyIds: string[]): Promise<{
   return (config?.endpoints ?? []).filter((e) => e.key && keyIds.includes(e.key)).map((e) => ({ id: e.id, key: e.key as string, where: shortAddress(e.url) }));
 }
 
-/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. */
-export async function removeEndpoint(store: Store, id: string): Promise<WebhooksView> {
+/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. `withLog: false`: the view answered without the delivery log (webhooksView). */
+export async function removeEndpoint(store: Store, id: string, withLog = true): Promise<WebhooksView> {
   if (!store.statsId) return { endpoints: [], log: [] };
   const written = await changeConfig(store.statsId, (fresh) =>
     fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.filter((e) => e.id !== id) } : null,
@@ -1089,8 +1182,26 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
     await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]])
       .catch((error) => console.error("deleting a removed endpoint's sets of passed-over events failed; they expire by themselves", store.handle, id, error));
   }
-  return webhooksView(store);
+  return webhooksView(store, { log: withLog });
 }
+
+/**
+ * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
+ * text read, as COMPARE_AND_SET, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
+ * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
+ * and gives one that has none the delivery's own (ARGV[3] seconds): no command after it has to put the time back, so
+ * no second failure can keep a delivery past its retention (Codex G's MEDIUM on #3444). Modelled by
+ * lib/redis-memory.ts.
+ */
+export const RESEND_MARK = `-- marktmorgen:webhook-resend-mark:v1
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
+redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")
+if redis.call("PTTL", KEYS[1]) < 0 then redis.call("EXPIRE", KEYS[1], ARGV[3]) end
+return 1`;
 
 export type ResendResult =
   | { ok: true; delivery: Delivery; view: WebhooksView }
@@ -1115,7 +1226,13 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Paused like a test while the plan's costs are paused, whoever calls this.
   const paused = integrationPauseWord(store, now / 1000);
   if (paused) return { ok: false, reason: "paused", message: WEBHOOK_TEST_PAUSED_WORDS[paused] };
-  const [raw, ttl] = await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]);
+  // Read exactly (CX-123 rule 24), before anything is marked: the delivery is text or GET null, its time left a whole
+  // number (PTTL -2 gone, -1 none); any other shape could not be read, and nothing is marked, taken or sent. One that
+  // went between the two reads (-2) is missing; the mark keeps whatever time it has (RESEND_MARK).
+  const read = repliesFor(await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]), 2);
+  if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number" || !Number.isSafeInteger(read[1])) return { ok: false, reason: "unavailable" };
+  const [raw, ttl] = read as [string | null, number];
+  if (ttl === -2) return { ok: false, reason: "missing" };
   const before = parseDelivery(raw);
   // A line left by a Stripe event that was passed over carries no message to send.
   if (typeof raw !== "string" || !before || before.statsId !== statsId || before.type === "test" || before.givenUp) return { ok: false, reason: "missing" };
@@ -1124,8 +1241,12 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   if (before.resentFrom) return { ok: false, reason: "resent" };
   // Sent again once: while the last resend is delivered or still being tried, not again.
   if (before.resentAs) {
-    const [rawLast] = await redisPipeline([["GET", deliveryKey(before.resentAs)]]);
-    const last = parseDelivery(rawLast);
+    // Only GET null is a last resend that is gone; one in another shape, or text that is not a delivery, is unknown
+    // and never taken as gone, so it is not sent again on it (CX-123 rule 24).
+    const lastRead = repliesFor(await redisPipeline([["GET", deliveryKey(before.resentAs)]]), 1);
+    if (!lastRead || (lastRead[0] !== null && typeof lastRead[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const last = lastRead[0] === null ? null : parseDelivery(lastRead[0]);
+    if (lastRead[0] !== null && !last) return { ok: false, reason: "unavailable" };
     if (last && last.state !== "failed") return { ok: false, reason: "resent" };
   }
   // A message kept before the bound, larger than it, is not kept again by hand.
@@ -1143,11 +1264,18 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   const againId = `dlv_${randomBytes(12).toString("hex")}`;
   // Two presses at once: only the one that marks the original first goes on (COMPARE_AND_SET over the text read).
   // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
-  const [marked] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]);
-  if (Number(marked) !== 1) return { ok: false, reason: "resent" };
-  // The write cleared the original's expiry; it keeps the time it had left, never more.
-  const left = Number(ttl);
-  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), Number.isFinite(left) && left > 0 ? left : DELIVERY_SECONDS * 1000]]);
+  // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
+  // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
+  // resend that was never written, which reads as gone and allows the next press. The mark keeps the original's
+  // expiry in its own step (RESEND_MARK), so whatever fails after it, the original still goes when it would have.
+  let marked: "saved" | "changed";
+  try {
+    marked = compareAndSetReply(await redisPipeline([["EVAL", RESEND_MARK, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId }), DELIVERY_SECONDS]]), "a webhook resend's mark");
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return { ok: false, reason: "unavailable" };
+  }
+  if (marked !== "saved") return { ok: false, reason: "resent" };
   const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],

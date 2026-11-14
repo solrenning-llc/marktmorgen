@@ -29,9 +29,12 @@
  *     a page is, charged past it like a page is, and rests with the store's
  *     pages where there is no plan to charge.
  *
- * Nothing here touches the network or reads another file: the page, the
- * routes and the tests read the same figures.
+ * Nothing here touches the network or reads another file but the room's
+ * own limits (lib/community-chat-rules.ts): the page, the routes and the
+ * tests read the same figures.
  */
+import { MAX_CHAT_TEXT } from "./community-chat-rules";
+
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
@@ -51,6 +54,53 @@ export const GRANT_MS = ROOM_GRANT_MINUTES * MINUTE;
 /** The most looks one leave allows, at each pace. */
 export const LIVE_LOOKS = GRANT_MS / LIVE_MS;
 export const IDLE_LOOKS = GRANT_MS / IDLE_MS;
+
+/**
+ * The bytes of messages one look gathers, with the answer around them. A
+ * page that is far behind is brought up to date over the next looks, a
+ * little at a time, instead of being sent a whole page of the room at
+ * every look (R20 finding 1). The first message is always sent, even when
+ * it alone is larger, so a page never sticks: a look sends at most
+ * LOOK_BYTES, or one whole message when that message alone is larger, and
+ * so at most LOOK_MOST_BYTES.
+ */
+export const LOOK_BYTES = 2_000;
+
+/** The name a message keeps, in UTF-16 units: the cut say() and parse() make (lib/community-chat.ts). */
+export const LOOK_NAME_UNITS = 80;
+/** A message's author as kept: a member's key (lib/learn.ts, emailKey) or the shorter CREATOR. */
+export const LOOK_KEY_UNITS = 32;
+
+/**
+ * The most bytes one message can be sent as in a look, with the answer
+ * around it: a text of MAX_CHAT_TEXT units, a name of LOOK_NAME_UNITS and a
+ * key of LOOK_KEY_UNITS, every unit at 3 bytes, and the message's number,
+ * its time and the cursor at their most digits. Three bytes is the most a
+ * unit is sent as once the look has made every lone half of a surrogate
+ * pair U+FFFD (wholeUnits, lib/community-chat-rules.ts): a letter of the
+ * BMP is at most 3 bytes, a whole pair 4 for its two units, and an escaped
+ * quotation mark, backslash, tab or line break 2. About 3.5 kB: a
+ * 1,000-letter message in Chinese or Japanese under a long name comes
+ * close to it with no abuse at all.
+ */
+export const LOOK_ONE_MESSAGE_BYTES = (() => {
+  const most = Number.MAX_SAFE_INTEGER;
+  const units = MAX_CHAT_TEXT + LOOK_NAME_UNITS + LOOK_KEY_UNITS;
+  const ascii = JSON.stringify({
+    ok: true,
+    messages: [{ i: most, a: "k".repeat(LOOK_KEY_UNITS), text: "t".repeat(MAX_CHAT_TEXT), at: most, n: "n".repeat(LOOK_NAME_UNITS) }],
+    cursor: most,
+  });
+  return ascii.length + 2 * units;
+})();
+
+/**
+ * The most bytes one look sends, and so what a look is priced at
+ * (tests/traffic-cost.ts, roomLookCost, once it reads this figure instead
+ * of the 2,000 it types; tests/room-look-bounds.test.ts holds ten minutes
+ * at this size within ROOM_LIVE_PARTS meanwhile).
+ */
+export const LOOK_MOST_BYTES = Math.max(LOOK_BYTES, LOOK_ONE_MESSAGE_BYTES);
 
 export type Pace = "live" | "idle" | "stopped";
 

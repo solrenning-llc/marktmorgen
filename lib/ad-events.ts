@@ -57,7 +57,7 @@ import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
@@ -120,17 +120,65 @@ function parse<T>(raw: unknown, fallback: T): T {
   }
 }
 
-async function readStored(statsId: string): Promise<Stored> {
-  if (!isRedisConfigured()) return {};
-  const [raw] = await redisPipeline([["GET", configKey(statsId)]]);
-  return parse<Stored>(raw, {});
+/**
+ * A kept JSON object read exactly (CX-123 rule 24): nil is nothing kept
+ * (null); a string holding a JSON object is it; anything else (no reply, not
+ * JSON, a list, a number) is unknown and throws, so the setup is never taken
+ * for empty and written back over the tokens it holds.
+ */
+function keptObject(raw: unknown, what: string): Record<string, unknown> | null {
+  if (raw === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError(what);
+  return parsed as Record<string, unknown>;
 }
 
+/** The sealed setup: {} when none is kept; every field a string, or it is unknown. */
+function storedOf(raw: unknown): Stored {
+  const kept = keptObject(raw, "the server conversions' setup") ?? {};
+  if (Object.values(kept).some((v) => typeof v !== "string")) throw new UnknownReplyError("the server conversions' setup");
+  return kept as Stored;
+}
+
+async function readStored(statsId: string): Promise<Stored> {
+  if (!isRedisConfigured()) return {};
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  return storedOf(replies[0]);
+}
+
+const KINDS: readonly string[] = ["purchase", "renewal", "lead"] satisfies ConversionKind[];
+
+/**
+ * The platforms' last answers as deliver writes them, { at, kind?, ...answers }:
+ * null when none is kept; any other shape is unknown, never shown as a date.
+ */
+function lastOf(raw: unknown): ServerSetup["last"] {
+  const kept = keptObject(raw, "the platforms' last answers");
+  if (!kept) return null;
+  const exact = Object.entries(kept).every(([key, value]) =>
+    key === "at"
+      ? typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+      : key === "kind"
+        ? typeof value === "string" && KINDS.includes(value)
+        : (SERVER_PLATFORMS as readonly string[]).includes(key) && typeof value === "string",
+  );
+  if (!exact || !("at" in kept)) throw new UnknownReplyError("the platforms' last answers");
+  return kept as ServerSetup["last"];
+}
+
+/** Read exactly: an unknown setup throws, never an empty one (the route answers 503, the studio says so). */
 export async function serverSetup(statsId: string | null): Promise<ServerSetup> {
   if (!statsId || !isRedisConfigured()) return NO_SETUP;
-  const [raw, lastRaw] = await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]);
-  const stored = parse<Stored>(raw, {});
-  const last = parse<ServerSetup["last"]>(lastRaw, null);
+  const replies = repliesFor(await redisPipeline([["GET", configKey(statsId)], ["GET", lastKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the server conversions' setup");
+  const stored = storedOf(replies[0]);
+  const last = lastOf(replies[1]);
   return {
     on: { meta: Boolean(stored.meta), tiktok: Boolean(stored.tiktok), google: Boolean(stored.google), pinterest: Boolean(stored.pinterest && stored.pinterestAccount) },
     pinterestAccount: stored.pinterestAccount ?? "",
@@ -148,7 +196,8 @@ export function platformsOn(setup: ServerSetup): ServerPlatform[] {
  * Keeps a platform's token, sealed, or forgets it (`token` empty). A token
  * that does not look like one is refused, so a pasted pixel id or a sentence
  * is said to be wrong at once rather than failing at the first sale.
- * Pinterest also needs the ad account its events go to.
+ * Pinterest also needs the ad account its events go to. A setup that cannot
+ * be read exactly throws before anything is written (the others' tokens stay).
  */
 export async function setServerToken(
   statsId: string,
@@ -175,7 +224,7 @@ export async function setServerToken(
   return "saved";
 }
 
-/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. */
+/** Meta's test event code, while the creator checks the events arrive (Events Manager, Test events); empty to stop. Throws, writing nothing, on a setup that cannot be read. */
 export async function setTestCode(statsId: string, code: unknown): Promise<boolean> {
   const text = typeof code === "string" ? code.trim().toUpperCase() : "";
   if (text && !TEST_CODE.test(text)) return false;
@@ -630,10 +679,16 @@ export async function customerType(store: Store, email: string | null, sessionId
   if (!email || !store.stripeAccountId) return null;
   try {
     const query = new URLSearchParams({ limit: "10", "customer_details[email]": email });
-    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as AdsSession[];
+    const listed = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions?${query}`)) as { data?: unknown; has_more?: unknown };
+    // A page in an unknown shape is a reading not made (CX-123 rule 24): unknown (null), as a failed read is.
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of checkouts that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more checkouts in a shape that cannot be read");
+    const rows = listed.data as AdsSession[];
     const before = rows.some((row) => row.id !== sessionId && row.payment_status === "paid" && typeof row.created === "number" && row.created < created);
-    return before ? "returning" : "new";
+    if (before) return "returning";
+    // None earlier on this page while Stripe has more: an earlier paid checkout may be on the next one.
+    if (listed.has_more) throw new Error("Stripe has more checkouts for this address than one page");
+    return "new";
   } catch {
     return null;
   }
@@ -771,16 +826,56 @@ type InvoiceRow = {
 };
 
 /**
+ * The most pages of the day's paid invoices one renewals pass reads (100 each), as the member scores read
+ * memberships. A cap of its own, not lib/api-read-rules.ts's RENEWAL_PAGES (the numbers' renewals read).
+ */
+const AD_RENEWAL_PAGES = 10;
+
+/**
  * Each membership renewal paid in the last day, as a purchase of its own, for
- * a membership whose first checkout carried the buyer's yes: one read of the
- * creator's invoices per pass, only on a store that sends from the server.
+ * a membership whose first checkout carried the buyer's yes: the creator's
+ * invoices of the day, every page of them up to AD_RENEWAL_PAGES, read once per
+ * pass, only on a store that sends from the server. A day with more pages than
+ * the cap sends the renewals read and then fails for the unread rest.
  */
 export async function sendRenewals(store: Store, now = Date.now(), deadline = Infinity): Promise<number> {
   if (!store.statsId || !store.stripeAccountId || !sendsFromServer(store) || !isRedisConfigured()) return 0;
   const since = Math.floor(now / 1000) - 86400;
-  const listed = (await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}`)) as { data?: unknown };
+  // A page in an unknown shape, more pages than the cap, or a pass out of time, is a reading not made
+  // (CX-123 rule 24): it fails as Stripe not answering does (the sweep logs it and tries again next pass),
+  // never as "no renewals".
+  const listedRows: InvoiceRow[] = [];
+  let whole = false;
+  let after = "";
+  for (let page = 0; page < AD_RENEWAL_PAGES; page += 1) {
+    // A pass past its deadline asks no page after the first: it fails as a page not read does, and the
+    // sweep tries again next pass, never "no renewals" (Claude 2, review 6707563715 on #3054).
+    if (page > 0 && Date.now() >= deadline) throw new Error("Stripe's paid invoices of the day not read: the pass ran out of time");
+    const listed = await onAccount("GET", store.stripeAccountId, `/invoices?limit=100&status=paid&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    if (!Array.isArray(listed.data)) throw new Error("Stripe gave a page of invoices that is not a list");
+    if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more invoices in a shape that cannot be read");
+    const pageRows = listed.data as InvoiceRow[];
+    listedRows.push(...pageRows);
+    if (!listed.has_more) {
+      whole = true;
+      break;
+    }
+    const last = pageRows[pageRows.length - 1];
+    if (!last || typeof last.id !== "string") throw new Error("Stripe gave a page of invoices with no last one to go on from");
+    after = last.id;
+  }
+  const count = await sendRenewalRows(store, store.statsId, listedRows, now, deadline);
+  // More pages than the cap: the renewals read in their exact shape are sent above, each a purchase of its
+  // own with its own mark, so nothing unread is taken as absent; the pass still fails for the unread rest,
+  // never "no renewals" (Claude 1, independent review on #3054 at 31b99d82: main sent the newest 100).
+  if (!whole) throw new Error(`Stripe has more paid invoices of the day than ${AD_RENEWAL_PAGES} pages; ${count} renewal(s) of the pages read sent`);
+  return count;
+}
+
+/** Sends the renewals among invoice rows read in their exact shape, each once (its own SET NX mark); answers how many went. */
+async function sendRenewalRows(store: Store, statsId: string, listedRows: InvoiceRow[], now: number, deadline: number): Promise<number> {
   const handles = saleHandles(store);
-  const rows = ((Array.isArray(listed.data) ? listed.data : []) as InvoiceRow[]).filter((row) => {
+  const rows = listedRows.filter((row) => {
     if (typeof row.id !== "string" || row.billing_reason !== "subscription_cycle" || row.status !== "paid") return false;
     const meta = row.parent?.subscription_details?.metadata ?? row.subscription_details?.metadata ?? {};
     return Boolean(meta.ads) && handles.has(meta.store ?? "") && typeof row.amount_paid === "number" && row.amount_paid > 0;
@@ -795,7 +890,7 @@ export async function sendRenewals(store: Store, now = Date.now(), deadline = In
   if (!marks) return 0;
   const left = rows.filter((_, i) => markSeen(marks[i]) === false);
   if (!left.length) return 0;
-  const stored = await readStored(store.statsId);
+  const stored = await readStored(statsId);
   if (!SERVER_PLATFORMS.some((p) => stored[p] && store.pixels[p])) return 0;
   const kept = await redisPipeline(left.map((row) => ["GET", subKey(SUB.test(subOf(row)) ? subOf(row) : "none")]));
   let count = 0;

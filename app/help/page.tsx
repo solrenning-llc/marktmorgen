@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { helpAbbr } from "@/components/abbr";
 import { Icon, iconFor } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
@@ -83,7 +84,7 @@ export default function HelpPage() {
                   {section.items.map((item) => (
                     <details key={item.q} id={answerId(item.q)} data-help-item className="group scroll-mt-24">
                       <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-6 px-5 py-5 font-semibold text-ink hover:bg-paper focus-visible:[outline-offset:-3px]! sm:px-6 [&::-webkit-details-marker]:hidden">
-                        {item.q}
+                        {helpAbbr(section, item, null)}
                         <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-ink-soft group-open:border-violet-brand group-open:text-violet-deep">
                           <Icon name="plus" size={16} className="group-open:hidden" />
                           <Icon name="minus" size={16} className="hidden group-open:block" />
@@ -92,7 +93,7 @@ export default function HelpPage() {
                       <div className="space-y-3 px-5 pb-6 sm:px-6">
                         {item.a.map((paragraph) => (
                           <p key={paragraph} className="leading-relaxed text-ink-soft">
-                            {paragraph}
+                            {helpAbbr(section, item, paragraph)}
                           </p>
                         ))}
                         <CopyLink id={answerId(item.q)} />

@@ -478,7 +478,42 @@ export async function advanceAnnouncement(
   }
 }
 
-/** Moves every waiting send on. For the mail job. */
+/** The runs in a row an announcement may fail with an error before it is stopped as failed (advanceAnnouncements). */
+export const ANNOUNCEMENT_ERRORS_MOST = 5;
+
+/**
+ * An announcement whose run threw: logged, and counted on its own record under its lock, so it is tried again by the
+ * next run and, after ANNOUNCEMENT_ERRORS_MOST in a row (a sent batch puts the count back to 0), stopped as failed and
+ * taken out of line, saying so to the creator. A record that cannot be read or locked is left as it is: the next run
+ * tries again.
+ */
+async function countError(id: string, error: unknown): Promise<void> {
+  console.error("a community announcement failed; the others go on", id, error);
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return;
+  try {
+    const job = await readJob(id);
+    if (!job || job.status === "sent" || job.status === "failed") return;
+    const failures = job.failures + 1;
+    const stopped = failures >= ANNOUNCEMENT_ERRORS_MOST;
+    await save({
+      ...job,
+      failures,
+      status: stopped ? "failed" : "waiting",
+      note: stopped
+        ? `This send stopped after the same error ${ANNOUNCEMENT_ERRORS_MOST} times in a row. Nothing more was sent.`
+        : "Paused for a moment: something went wrong on our side. It is tried again by itself.",
+    });
+    if (stopped) await redisPipeline([["SREM", QUEUE, id]]);
+  } finally {
+    await releaseMark(lockKey(id), lock);
+  }
+}
+
+/**
+ * Moves every waiting send on. For the mail job. Each announcement on its own: one that throws is counted against
+ * itself (countError) and never keeps the ones after it from going out (tests/community-mail-isolated.test.ts).
+ */
 export async function advanceAnnouncements(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [raw] = await redisPipeline([["SMEMBERS", QUEUE]]);
@@ -486,7 +521,11 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    try {
+      if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    } catch (error) {
+      await countError(id, error).catch((failure: unknown) => console.error("counting an announcement's error failed", id, failure));
+    }
   }
   return touched;
 }

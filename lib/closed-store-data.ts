@@ -305,7 +305,9 @@ export function ownerOfKey(key: string, rule: Closing, owners: Owners): string |
 /** Whether a member of a company list names a closing store. */
 function namesStore(member: string, owners: Owners): boolean {
   if (owners.byRef.has(member)) return true;
-  return pieces(member).some((part) => owners.byMark.has(part) || owners.byRef.has(part));
+  // A member may be JSON ({"s":"<sid>","i":"<statsId>",...}, lib/welcome-offer-send.ts): its quotes and braces split
+  // too, so an id inside it is read bare, as in a key's name.
+  return member.split(/[:|,"{}]/).some((part) => owners.byMark.has(part) || owners.byRef.has(part));
 }
 
 /**

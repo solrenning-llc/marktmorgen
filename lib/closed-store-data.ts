@@ -205,6 +205,17 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
  * walk's cursor moves, so the store stays in the batch and the next run repeats the same page, never counting as
  * deleted what a reply that said nothing may have left.
  */
+/**
+ * One SREM, ZREM or HDEL answered exactly (rule 24; issue #4518): a single count, an integer from 0 to the distinct
+ * members sent (a scan may name a member twice; Redis counts it once). Any other answer throws UnknownReplyError,
+ * so the removal is repeated by the next run and never counted as done.
+ */
+function exactRemoval(replies: unknown, members: string[], what: string): void {
+  const reply = repliesFor(replies, 1);
+  const gone = reply ? countOf(reply[0]) : null;
+  if (gone === null || gone > new Set(members).size) throw new UnknownReplyError(what);
+}
+
 async function del(keys: string[]): Promise<void> {
   for (let i = 0; i < keys.length; i += DEL_BATCH) {
     const batch = keys.slice(i, i + DEL_BATCH);
@@ -230,12 +241,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
     let cursor = "0";
     for (let round = 0; round < 50; round += 1) {
-      const [reply] = await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]);
-      const [next, flat] = Array.isArray(reply) ? [String(reply[0]), (reply[1] as unknown[]).map(String)] : ["0", []];
+      // Read exactly (rule 24; issue #4518): a page that does not read is never the end of the claims, and an HDEL
+      // whose count does not read is never done. Either throws, so the store is not batched and the next run reads
+      // its hosts' claims again; until then a claim naming the closing store could stay behind.
+      const page = scanPage(await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]));
+      if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("the closing walk's HSCAN of a host's claims");
+      const flat = page.items;
       const mine: string[] = [];
       for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (mine.length) await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
-      cursor = next;
+      if (mine.length) exactRemoval(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), mine, "removing a closing store's claims from a host");
+      cursor = page.next;
       if (cursor === "0") break;
     }
   }
@@ -583,7 +598,7 @@ async function pruneIndex(key: string, owners: Owners): Promise<number> {
   else return 0;
   for (let i = 0; i < gone.length; i += 200) {
     const some = gone.slice(i, i + 200);
-    await redisPipeline([[type === "set" ? "SREM" : type === "zset" ? "ZREM" : "HDEL", key, ...some]]);
+    exactRemoval(await redisPipeline([[type === "set" ? "SREM" : type === "zset" ? "ZREM" : "HDEL", key, ...some]]), some, "pruning a closing store's members from an index");
   }
   return gone.length;
 }

@@ -1590,7 +1590,7 @@ export default async function StudioPage({
               </div>
 
               <details className="mt-5 rounded-2xl bg-paper p-4 ring-1 ring-line">
-                <summary className="cursor-pointer text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
+                <summary className="cursor-pointer py-3 text-sm font-semibold text-ink">Share the store: link, QR code, posts</summary>
                 <div className="mt-4">
                   <SharePanel url={storeBase(store)} title={store.name} what="store" />
                   {may("page") && store.statsId ? (async () => {

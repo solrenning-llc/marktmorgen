@@ -140,7 +140,7 @@ export function KitEditor({
         rating and, if you choose, your visitors, sales and buyers&apos; countries.
       </p>
 
-      <label className="mt-5 flex items-start gap-3 text-ink">
+      <label className="mt-5 flex min-h-11 items-start gap-3 text-ink">
         <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} className="mt-1 size-5 shrink-0 accent-violet-brand" />
         <span className="font-semibold">Publish my media kit, with a link at the foot of my store page</span>
       </label>

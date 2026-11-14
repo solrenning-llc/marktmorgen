@@ -111,7 +111,7 @@ export function StudioNav({ items }: { items: { href: string; label: string }[] 
           <li key={item.href} className="shrink-0">
             <Link
               href={item.href}
-              className="inline-flex h-9 items-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
+              className="inline-flex h-11 items-center rounded-full px-3.5 text-sm font-semibold text-ink-soft transition-colors hover:bg-white hover:text-ink focus-visible:bg-white"
             >
               {item.label}
             </Link>

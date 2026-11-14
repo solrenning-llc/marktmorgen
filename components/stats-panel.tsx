@@ -274,7 +274,7 @@ function HeardTable({
           ? "After paying, buyers are asked this one question, which they can skip. It finds what no link can: a friend who told them, a message, a podcast. Only the answer and the sale's amount are kept, nothing about the buyer. "
           : "When it is on, buyers are asked this one question after paying, and can skip it. "}
         {canSet ? (
-          <button type="button" className="font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
+          <button type="button" className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4" disabled={busy} onClick={() => void toggle()}>
             {asking ? "Stop asking" : "Ask buyers"}
           </button>
         ) : null}
@@ -864,7 +864,7 @@ export function StatsPanel({
             <span>{shortDate(days[days.length - 1].date)}</span>
           </div>
           <details className="mt-2 text-sm">
-            <summary className="cursor-pointer font-semibold text-ink-soft">See each day</summary>
+            <summary className="cursor-pointer py-3 font-semibold text-ink-soft">See each day</summary>
             <div className="max-h-80 overflow-y-auto" tabIndex={0} role="region" aria-label="Each day">
               <table className="mt-2 w-full text-left text-sm">
                 <thead>
@@ -893,7 +893,7 @@ export function StatsPanel({
             if (!shown.length) return null;
             return (
               <details className="mt-2 text-sm" data-auto-marks>
-                <summary className="cursor-pointer font-semibold text-ink-soft">{`Marked on their own: ${shown.length} ${shown.length === 1 ? "event" : "events"}`}</summary>
+                <summary className="cursor-pointer py-3 font-semibold text-ink-soft">{`Marked on their own: ${shown.length} ${shown.length === 1 ? "event" : "events"}`}</summary>
                 <ul className="mt-2 space-y-1">
                   {[...shown].reverse().map((m, i) => (
                     <li key={`${m.day}-${i}`} className="flex items-baseline gap-2" data-mark>

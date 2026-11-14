@@ -42,10 +42,10 @@ export const ACCESSIBILITY_CHECKS: readonly AccessibilityCheck[] = [
   },
   {
     name: "The studio",
-    what: "Two studio pages, the studio's front page and its list of pages, viewed only (nothing is saved), in Chromium, Firefox and WebKit.",
+    what: "Thirteen studio screens, viewed only (nothing is saved), in Chromium, Firefox and WebKit: the studio's front page and its list of pages at five screen widths from 320 to 1920 pixels, and eleven more (the site, people, email, numbers, adding, forms, funnels, deals, reviews, the checkup and the team) on a narrow and a wide screen.",
     workflow: ".github/workflows/accessibility-studio-matrix.yml",
     script: "tests/e2e/accessibility-studio-matrix.mjs",
-    proof: [ENGINES, ...AAA_RULES, "Two authenticated read-only studio/editor surfaces only"],
+    proof: [ENGINES, ...AAA_RULES, '["site","people","email","totals","add","forms","funnels","deals","reviews","checkup","team"]', "[320,1280]", "Thirteen authenticated read-only studio screens"],
   },
   {
     name: "Products",
@@ -99,4 +99,4 @@ export function statementDigest(): string {
  * tests/accessibility-statement.test.ts fails when the records change and this
  * is not reviewed again (DA1 (b)).
  */
-export const STATEMENT_REVIEW = { date: "November 7, 2026", digest: "278f1537bb15c125" } as const;
+export const STATEMENT_REVIEW = { date: "November 12, 2026", digest: "92e941af200182e2" } as const;

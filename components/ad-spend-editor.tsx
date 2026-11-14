@@ -252,7 +252,7 @@ export function AdSpendEditor({
 
   return (
     <details className="mt-3 rounded-[12px] bg-paper px-4 py-3 text-sm ring-1 ring-line" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer font-semibold text-ink">
+      <summary className="cursor-pointer py-3 font-semibold text-ink">
         {typed.length ? `What you spent on ads (${typed.length})` : meta?.connected ? "What you spent on ads" : "Add what you spent on ads"}
         {meta?.connected && !meta.broken && meta.account ? <span className="ml-1.5 font-normal text-ink-soft">· read from Meta</span> : null}
       </summary>

@@ -557,7 +557,7 @@ export function EmailSyncEditor({ view: initial, products }: { view: SyncView; p
         </section>
 
         <details className="rounded-[12px] bg-white px-4 py-3 text-sm ring-1 ring-line">
-          <summary className="cursor-pointer font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
+          <summary className="cursor-pointer py-3 font-semibold text-ink-soft transition hover:text-violet-deep">How sending works</summary>
           <ul className="mt-3 space-y-2 text-ink-soft">
             <li>A free sign-up is sent when the address is confirmed; a buyer when the payment is confirmed, within about five minutes if they never come back from Stripe.</li>
             <li>Mailchimp: added as subscribed. Someone already in the audience is left as they are, so nobody who unsubscribed is subscribed again; tags are still added.</li>

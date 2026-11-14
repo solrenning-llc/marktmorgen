@@ -6,9 +6,13 @@
  *   passes with passedForGate, which turns an unreadable reply into an empty
  *   set, so a student who had passed every required quiz was sent back as
  *   "unfinished". It now answers the same honest 503 as unreadable progress.
+ * - The studio's student list (passedFor) showed such a student as "0 of N"
+ *   quizzes passed and offered to give their tries back. It now reads null
+ *   for that student, and the page says the passes could not be read.
  */
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import type { NextRequest } from "next/server";
 import { store as redis } from "./redis-stub";
 import { answering } from "./security/next-headers";
@@ -17,6 +21,7 @@ import { POST } from "@/app/api/store/course/certificate/route";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { emailKey, markLesson, mintPass, passCookieName, recordEnrollment } from "@/lib/learn";
+import { passedFor } from "@/lib/quiz";
 import { COURSES_WORDS } from "@/lib/buyer-words/courses";
 
 const HOST = "marktmorgen.test";
@@ -124,3 +129,39 @@ test("certificate control: a student who finished the lesson but has not passed 
   assert.equal(response.status, 303);
   assert.match(String(response.headers.get("location")), /\?cert=unfinished#certificate$/);
 });
+
+test("passedFor: a student whose passes read in an unknown shape is null, never 'nothing passed'; the others read as they are", async () => {
+  const w = await world("qpcstudio");
+  await finished(w);
+  const other = "other@example.com";
+  passedReadAnswers(w, (commands) => commands.map((c) => (String(c[1]).endsWith(emailKey(BUYER)) ? null : realPipelineSync(c))));
+  const rows = await passedFor(w.courseId, [emailKey(BUYER), emailKey(other)]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0], null);
+  assert.deepEqual([...(rows[1] ?? ["null"])], []);
+});
+
+test("passedFor control: a whole reply of another length reads every student as unknown", async () => {
+  const w = await world("qpcstudiolen");
+  passedReadAnswers(w, () => [[]]);
+  const rows = await passedFor(w.courseId, [emailKey(BUYER), emailKey("other@example.com")]);
+  assert.deepEqual(rows, [null, null]);
+});
+
+test("passedFor control: passes that read are kept per student", async () => {
+  const w = await world("qpcstudiook");
+  await finished(w);
+  const rows = await passedFor(w.courseId, [emailKey(BUYER), emailKey("other@example.com")]);
+  assert.deepEqual(rows.map((r) => (r ? [...r] : null)), [[w.lessonId], []]);
+});
+
+test("the studio's student list says when a student's passes could not be read, and offers no tries back on a guess", () => {
+  const page = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
+  assert.match(page, /passed\[i\] === null/);
+  assert.match(page, /Could not be read/);
+});
+
+/** An empty set for a student with no passes, as the stand-in Redis answers. */
+function realPipelineSync(command: (string | number)[]): unknown {
+  return command[0] === "SMEMBERS" ? [] : null;
+}

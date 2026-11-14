@@ -31,6 +31,7 @@ import { forAi } from "@/lib/inbox-rules";
 import { handOver } from "@/lib/inbox";
 import { isHouseStore } from "@/lib/house-store";
 import { assistantWords } from "@/lib/buyer-words/assistant";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import {
   ASSISTANT_FACTS_BYTES,
@@ -55,6 +56,7 @@ import {
   assistantWindow,
   heldToFacts,
   readAssistantText,
+  MAX_ASSISTANT_QUESTION,
 } from "@/lib/store-assistant-rules";
 
 export const ASSISTANT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
@@ -458,6 +460,30 @@ export async function assistantMissed(store: Store, limit = 20): Promise<{ quest
     } catch {}
   }
   return out;
+}
+
+/**
+ * The same list read exactly, for a report that stands for the whole of it
+ * (lib/customer-voice.ts): a reply that is not a list, or a row this code
+ * never wrote (not JSON, no question, no time), throws UnknownReplyError
+ * instead of being read as fewer questions or none (rule 24). Never who asked.
+ */
+export async function assistantMissedExact(store: Store, limit = ASSISTANT_MISSED_KEPT): Promise<{ question: string; at: number }[]> {
+  if (!store.statsId || !isRedisConfigured()) return [];
+  const reply = repliesFor(await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]), 1);
+  const rows = reply ? listSlots(reply[0]) : null;
+  if (!rows) throw new UnknownReplyError("the assistant's unanswered questions");
+  return rows.map((row) => {
+    let value: { q?: unknown; at?: unknown } | null = null;
+    try {
+      value = typeof row === "string" ? (JSON.parse(row) as { q?: unknown; at?: unknown }) : null;
+    } catch {}
+    // Read by the shape it was written in (a non-empty question and a time), never by today's length bounds, which
+    // may change after the row was kept (Claude 2 on #3731, LEVE 1); then cleaned for the prompt as before.
+    const question = typeof value?.q === "string" ? value.q.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_ASSISTANT_QUESTION) : "";
+    if (!question || typeof value?.at !== "number" || !Number.isSafeInteger(value.at) || value.at <= 0) throw new UnknownReplyError("an unanswered question of the assistant");
+    return { question, at: value.at };
+  });
 }
 
 /** Forgets the list: the creator has read it. */

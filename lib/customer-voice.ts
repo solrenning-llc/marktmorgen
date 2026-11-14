@@ -8,14 +8,20 @@
  * an AI summary of open answers with their sentiment; Baremetrics'
  * Cancellation Insights groups the reasons members give; Amplitude's
  * feedback agent groups feedback into themes and sends them on a schedule.
- * Here four lists the studio already keeps, each shown on its own, are read
+ * Here six lists the studio already keeps, each shown on its own, are read
  * together:
  *
  *   - what members wrote when canceling (lib/membership-numbers.ts);
  *   - questions a product page or the store's guide could not answer
  *     (lib/answers.ts);
  *   - the words of reviews (lib/reviews.ts);
- *   - what was searched for on the store and found nothing (lib/stats.ts).
+ *   - what was searched for on the store and found nothing (lib/stats.ts);
+ *   - questions the Store assistant could not answer (lib/store-assistant.ts);
+ *   - how many are on the waitlist of each product coming soon so far,
+ *     confirmed or not, never who (lib/waitlist.ts).
+ *
+ * What the last two read is paid for first, in VOICE_EXTRA_STUDIO_UNITS more
+ * of the store's studio requests (app/api/store/voice; review of #3731).
  *
  * A list whose read failed is never taken for an empty one (rule 24): the
  * summary stands for the whole month, so it is made only from every list
@@ -54,6 +60,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
+import { assistantMissedExact } from "@/lib/store-assistant";
+import { waitlistSizes, WAITLIST_VOICE_PRODUCTS } from "@/lib/waitlist";
 import { studioReviews } from "@/lib/reviews";
 import { readStats, studioStats } from "@/lib/stats";
 import { readTitles } from "@/lib/catalog";
@@ -61,8 +69,8 @@ import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { timeLeft } from "@/lib/fetch-timeout";
 import type { Store } from "@/lib/store";
 
-export type VoiceSource = "cancel" | "question" | "review" | "search";
-export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+export type VoiceSource = "cancel" | "question" | "review" | "search" | "assistant" | "waitlist";
+export const VOICE_SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 /** One text from a customer, as the model is handed it, by its number. */
 export type VoiceItem = {
@@ -105,6 +113,12 @@ export type VoiceSummary = {
 };
 
 export const DAYS = 90;
+/**
+ * The studio requests one summary click takes beyond its own, before it reads: one SMEMBERS of the products coming
+ * soon, a HLEN for each of up to WAITLIST_VOICE_PRODUCTS of them and one LRANGE of the assistant's unanswered
+ * questions, against a studio request's twenty commands (UNIT_COST.studio, tests/plan-cost-registry.ts).
+ */
+export const VOICE_EXTRA_STUDIO_UNITS = Math.ceil((1 + WAITLIST_VOICE_PRODUCTS + 1) / 20);
 /** Fewer texts than this, and there is nothing worth sorting. */
 export const MIN_TEXTS = 8;
 /**
@@ -207,7 +221,11 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
     unread.push(source);
     return null;
   };
-  const titles = await readTitles(store).catch(() => new Map<string, string>());
+  let titlesRead = true;
+  const titles = await readTitles(store).catch(() => {
+    titlesRead = false;
+    return new Map<string, string>();
+  });
   const titleOf = (id: string) => (id === STORE_PAGE ? "the store page" : titles.get(id));
 
   if (store.stripeAccountId && sellsMemberships(store)) {
@@ -219,6 +237,10 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
   for (const q of (await missedQuestions(store, 50).catch(failed("question"))) ?? []) {
     if (q.at >= since) items.push({ source: "question", text: q.question, n: 1, product: titleOf(q.productId) });
   }
+  // The Store assistant's own unanswered questions (95 [D2-DEMAND-RADAR]), read exactly: never who asked.
+  for (const q of (await assistantMissedExact(store).catch(failed("assistant"))) ?? []) {
+    if (q.at >= since) items.push({ source: "assistant", text: q.question, n: 1 });
+  }
   const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(failed("review"));
   for (const r of reviews?.rows ?? []) {
     if (r.createdAt / 1000 >= since && r.text.trim()) items.push({ source: "review", text: r.text, n: 1, product: titleOf(r.productId), stars: r.rating });
@@ -228,6 +250,17 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<{ ite
     for (const row of studioStats(store, stats, null, "none", []).searchMisses?.d90 ?? []) {
       if (row.name.trim()) items.push({ source: "search", text: row.name, n: Math.max(1, row.visits) });
     }
+  }
+
+  // Products coming soon that people joined the waitlist for (95 [D2-DEMAND-RADAR]): the name and how many, never who.
+  // The product's name is the text: names that could not be read leave the waitlists unread, never left out.
+  // A product people wait on with no name in the titles read (removed from the catalog while its waitlist stays,
+  // Codex T on #3731) is demand that cannot be named: the waitlists are unread, never a summary that leaves it out.
+  const sizes = await waitlistSizes(store).catch(failed("waitlist"));
+  if (sizes && sizes.some((w) => w.people > 0 && (!titlesRead || !titles.get(w.productId)))) unread.push("waitlist");
+  else for (const w of sizes ?? []) {
+    const title = titles.get(w.productId);
+    if (w.people > 0 && title) items.push({ source: "waitlist", text: title, n: w.people });
   }
 
   const out: VoiceItem[] = [];
@@ -247,9 +280,11 @@ export function voicePrompt(items: VoiceItem[]): string {
     question: "a visitor's question the page could not answer",
     review: "a buyer's review",
     search: "words searched for on the store that found nothing",
+    assistant: "a buyer's question the Store assistant could not answer",
+    waitlist: "a product coming soon people joined the waitlist for",
   };
   return items
-    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, searched ${i.n} times` : ""}) ${i.text}`)
+    .map((i) => `[${i.id}] (${where[i.source]}${i.product ? `, about ${cleanVoice(i.product, 80)}` : ""}${i.stars ? `, ${i.stars} of 5 stars` : ""}${i.n > 1 ? `, ${i.source === "waitlist" ? "joined" : "searched"} ${i.n} times` : ""}) ${i.text}`)
     .join("\n");
 }
 
@@ -345,13 +380,18 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] };
+  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] }
+  // The studio requests the lists' reads are paid with could not be taken: their own refusal and words (review of #3731).
+  | { ok: false; reason: "studio"; refused: string; message: string };
+
+/** Takes what the lists' reads cost (the route's countStudio), just before they are read. */
+export type VoicePay = () => Promise<{ ok: true } | { ok: false; reason: string; message: string }>;
 
 /**
  * This month's summary: the one already made, or, when there is none and
  * enough to sort, made now as one of the month's AI jobs.
  */
-export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceResult> {
+export async function makeVoice(store: Store, now = Date.now(), pay?: VoicePay): Promise<VoiceResult> {
   if (!store.statsId || !isRedisConfigured()) return { ok: false, reason: "off" };
   const month = monthOf(now);
   const [kept] = await redisPipeline([["GET", voiceKey(store.statsId, month)]]);
@@ -363,6 +403,12 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   });
   if (!held) return { ok: false, reason: "busy" };
   try {
+    // The lists' reads are paid for just before they are read: never for a summary already kept this month, nor
+    // while another reading holds the lock (MR; Claude 1's LOW on #3731). Refused: nothing is read.
+    if (pay) {
+      const paid = await pay();
+      if (!paid.ok) return { ok: false, reason: "studio", refused: paid.reason, message: paid.message };
+    }
     const { items, unread } = await gatherVoice(store, now);
     // A list unread: no summary from part of what customers said, since it would stand for the whole month, and
     // too few is then not known to be few. Nothing is asked or counted, so the creator can try again.
@@ -377,7 +423,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     const done = await counted(store, now, async () => {
       const system = [
         "You sort what an online store's customers wrote into the few themes they repeat.",
-        "You are given numbered texts: words members wrote when canceling, questions a product page could not answer, reviews, and words searched for on the store that found nothing.",
+        "You are given numbered texts: words members wrote when canceling, questions a product page or the store's assistant could not answer, reviews, words searched for on the store that found nothing, and products coming soon with how many are on their waitlists.",
         `Group texts that say the same thing into at most ${MAX_THEMES} themes. A theme needs at least two texts. Leave out texts that fit no theme. Each text goes in one theme at most.`,
         "Name each theme in plain American English, at most 8 words, saying what customers said or wanted (for example: \"Wants a printable version\", \"Price feels high for what is inside\"). No numbers in a name, no judgment of the customers, nothing that is not in the texts.",
         "Return only a JSON object: {\"themes\": [{\"title\": string, \"ids\": [numbers of its texts]}]}, the most repeated theme first.",

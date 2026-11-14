@@ -23,8 +23,10 @@ const SOURCE_WORDS: Record<VoiceSource, [string, string]> = {
   question: ["unanswered question", "unanswered questions"],
   review: ["review", "reviews"],
   search: ["search with no result", "searches with no result"],
+  assistant: ["question the assistant could not answer", "questions the assistant could not answer"],
+  waitlist: ["waitlist of a product coming soon", "waitlists of products coming soon"],
 };
-const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search"];
+const SOURCES: VoiceSource[] = ["cancel", "question", "review", "search", "assistant", "waitlist"];
 
 const said = (counts: Partial<Record<VoiceSource, number>>) =>
   SOURCES.filter((s) => counts[s])
@@ -45,7 +47,8 @@ function monthName(month: string): string {
 
 /**
  * What customers are saying (lib/customer-voice.ts): the last 90 days of
- * cancellation words, unanswered questions, reviews and searches that found
+ * cancellation words, unanswered questions (the pages' and the Store
+ * assistant's), reviews and searches that found
  * nothing, sorted into themes once a month, each with its count and the
  * customers' own words.
  */
@@ -62,10 +65,12 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
     setError(null);
     try {
       const response = await fetch("/api/store/voice", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; message?: string; summary?: VoiceSummary; unread?: VoiceSource[] | null };
       if (data.ok && data.summary) setSummary(data.summary);
       else {
-        const message = MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
+        // The studio's requests used up, or not countable: their own words, never "AI jobs" (review of #3731).
+        const own = (data.error === "studio_used" || data.error === "unavailable") && typeof data.message === "string" && data.message ? data.message : "";
+        const message = own || (MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         const named = data.error === "unread" && Array.isArray(data.unread) ? unreadWords(data.unread) : "";
         setError(named ? `${message} Not read: ${named}.` : message);
       }
@@ -82,7 +87,7 @@ export function CustomerVoice({ initial }: { initial: VoiceSummary | null }) {
         What customers are saying
       </p>
       <p className="mt-1 text-xs text-ink-soft">
-        The last 90 days of what members wrote when leaving, questions your pages could not answer, reviews and searches that found nothing, sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
+        The last 90 days of what members wrote when leaving, questions your pages or your Store assistant could not answer, reviews and searches that found nothing, with how many are on the waitlist of each product coming soon so far (confirmed or not), sorted into the themes they repeat. AI only names each theme: the counts and the words under it are your customers&apos; own. What members wrote when leaving is counted but not quoted here: nothing kept with it says who wrote it, so it could not be left out for someone who was deleted. Once a month, as one of the month&apos;s AI jobs.
       </p>
       {summary ? (
         <div className="mt-3">

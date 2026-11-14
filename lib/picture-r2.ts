@@ -32,7 +32,8 @@
  * an object under that name is already there (not checked to be this very
  * picture: no other writer may use the bucket), and is billed as a Class A
  * operation (https://developers.cloudflare.com/r2/pricing/). Storage is
- * $0.015 a GB-month on the same page. No delete and no read here.
+ * $0.015 a GB-month on the same page. No read here; a picture is deleted
+ * (deletePictureFromR2) wherever its file store copy is (#4237, item 4).
  *
  * The key check compares key ids only: the owner's token must be scoped to
  * the pictures' bucket alone. A PutObject keeps Cache-Control and
@@ -147,6 +148,26 @@ export async function copyPictureToR2(config: PictureR2Config, path: string, byt
   if (status === 412) return "already";
   if (status !== 200) throw new Error(`Picture copy failed with status ${status}`);
   return "copied";
+}
+
+/**
+ * Deletes one copied picture from the pictures' bucket (#4237, item 4): a signed DELETE of its own name, a redirect
+ * refused. Gone already (404) counts as gone; R2 answers 204 to a delete. Any other answer, an unreachable store or a
+ * name the picture folder could not hold throws, with nothing sent for a name refused. Priced at the most as a Class
+ * A operation (the dearer class, $4.50 a million, https://developers.cloudflare.com/r2/pricing/, read 31 October
+ * 2026), never as free.
+ */
+export async function deletePictureFromR2(config: PictureR2Config, path: string): Promise<void> {
+  const { folder, file } = pictureParts(path);
+  const url = `${config.endpoint}/${config.bucket}/images/${folder}/${file}`;
+  const payloadHash = hashOf(new Uint8Array(0));
+  const headers = signV4({ method: "DELETE", url, headers: { "x-amz-content-sha256": payloadHash }, payloadHash, region: REGION, service: SERVICE, key: config.key });
+  const status = await timed(TIMEOUT_MS, async (signal) => {
+    const response = await fetch(url, { method: "DELETE", headers, signal, cache: "no-store", redirect: "error" });
+    await response.body?.cancel().catch(() => {});
+    return response.status;
+  });
+  if (status !== 204 && status !== 200 && status !== 404) throw new Error(`Picture delete failed with status ${status}`);
 }
 
 /** The address of a copied picture on the images' own domain. */

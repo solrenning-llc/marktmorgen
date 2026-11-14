@@ -2,6 +2,7 @@ import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
+import { dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
@@ -344,6 +345,8 @@ export async function POST(request: NextRequest) {
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
+        // And its copy in the pictures' own bucket, when it was copied there (#4237, item 4).
+        if (going.image?.r2) await dropMirroredPicture(imagePaths(going.image));
         // A course takes its lessons with it: their records, and their files.
         if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).

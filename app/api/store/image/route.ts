@@ -1,4 +1,4 @@
-import { copyAttachedPicture } from "@/lib/picture-r2-copy";
+import { copyAttachedPicture, dropMirroredPicture } from "@/lib/picture-r2-copy";
 import type { NextRequest } from "next/server";
 import { del, head } from "@/lib/blob";
 import { firstBytes } from "@/lib/uploaded-image";
@@ -164,7 +164,11 @@ export async function POST(request: NextRequest) {
 
     const result = await setProductImage(ref, id, image);
     if (!result.ok) {
-      if (image) await dropFresh(imagePaths(image));
+      if (image) {
+        await dropFresh(imagePaths(image));
+        // Copied to the pictures' own bucket just now: it goes from there too (#4237, item 4).
+        if (image.r2) await dropMirroredPicture(imagePaths(image));
+      }
       return Response.json({ ok: false, error: result.reason }, { status: result.reason === "unknown" ? 404 : 400 });
     }
     // Best effort, and deliberately after the write.
@@ -175,6 +179,8 @@ export async function POST(request: NextRequest) {
       await del(replaced).catch((error: unknown) => {
         console.error("could not delete a replaced product picture", error);
       });
+      // A replaced picture copied to the pictures' own bucket goes from there too (#4237, item 4).
+      if (result.removed?.r2) await dropMirroredPicture(replaced);
     }
     return Response.json({ ok: true });
   } catch (error) {

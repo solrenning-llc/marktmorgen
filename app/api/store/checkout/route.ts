@@ -227,6 +227,11 @@ export async function POST(request: NextRequest) {
     // Another discount wins this checkout (a sale across the store, a fair price here, an introductory price or a
     // price the buyer names): the code could never go on, so nothing is read, held or emailed for it.
     if (otherDiscountWins(store, product, readCountry(request.headers.get("x-vercel-ip-country")), undefined, { plan: plan && activePlan(product) !== null })) return backToField("other");
+    // A member price claimed on the same form (lib/member-price.ts): one discount at a time, and the member's checkout
+    // opens for the proved address alone, so the pair is refused before the link is read, used or sent (Claude 1
+    // cloud, money review on #2999). otherDiscountWins does not count the member price: this check is what keeps
+    // the two apart here, and lib/store-checkout.ts refuses a code that did not go on as a second guard.
+    if (memberAsked) return backToField("other");
     // Each try may read the creator's Stripe account or use a link: a few per connection.
     if (!(await withinLimit("returning-code", `${clientAddress(request)}|${store.handle}`, RETURNING_TRIES, RETURNING_TRIES_SECONDS))) return backToField("busy");
     // For a purchase of the buyer's own, at the price set: never a gift, a group or a pre-order.

@@ -28,6 +28,9 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/tax/settings") return Response.json({ object: "tax.settings", status: "active" });
   if (url.hostname === "api.stripe.com" && url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: [], has_more: false });
+  // The account's currencies, so the currency route reaches the series check (an unknown list is refused first).
+  if (url.hostname === "api.stripe.com" && url.pathname === "/v1/account") return Response.json({ id: "acct_1SerCountUnk1", country: "US" });
+  if (url.hostname === "api.stripe.com" && url.pathname === "/v1/country_specs/US") return Response.json({ id: "US", supported_payment_currencies: ["usd", "eur"] });
   return new Response("{}", { status: 404 });
 }) as typeof fetch;
 

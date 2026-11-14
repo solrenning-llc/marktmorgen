@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { PostCover } from "@/components/post-cover";
 import type { BlogPost } from "@/lib/blog";
-import { formatPostDate } from "@/lib/blog";
+import { formatPostDate } from "@/lib/post-date";
 
 /**
  * The search box and the category picker for the blog index. Everything is

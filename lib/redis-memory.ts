@@ -241,6 +241,12 @@ export class MemoryRedis {
           this.run(["HSET", slots, who, id]);
           return 1;
         }
+        // lib/certificate.ts CERT_SLOT_FREE: a student's slot freed only while it still names the certificate withdrawn.
+        if (key.startsWith("-- marktmorgen:cert-slot-free:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, slots, who, expected] = args;
+          if (this.run(["HGET", slots, who]) !== expected) return 0;
+          return this.run(["HDEL", slots, who]);
+        }
         // lib/assignment.ts HAND_IN_WRITE_IF: a student's work written only over the one it was read as.
         if (key.startsWith("-- marktmorgen:hand-in-write-if:v1\n") && args[0] === "4" && args.length === 12) {
           const [, sub, files, waiting, all, expected, json, path, bytes, review, at, member] = args;
@@ -260,6 +266,40 @@ export class MemoryRedis {
           if (held !== expected) return [0, Buffer.byteLength(held, "utf8")];
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
+        }
+        // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
+        if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, hash, field, value] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          return this.run(["HDEL", hash, field]);
+        }
+        // lib/paypal-delivery.ts TAKE_BACK_OWN: a deleted person's library, bond and purchase taken back together, only while
+        // the purchase is still the record read (-1, nothing touched); the store out of their library only while it is their
+        // only purchase here, the bond only while it names this order's affiliate, the purchase last.
+        if (key.startsWith("-- marktmorgen:paypal-take-back:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 5) {
+          const n = Number(args[0]);
+          const [purchases, bond, ...library] = args.slice(1, 1 + n);
+          const [field, raw, bondField, affiliate, sid] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          if (this.run(["HGET", purchases, field]) !== raw) return -1;
+          if (sid !== "") {
+            this.scriptCalls += 1;
+            if (Number(this.run(["HLEN", purchases])) === 1) {
+              for (const set of library) {
+                this.scriptCalls += 1;
+                this.run(["SREM", set, sid]);
+              }
+            }
+          }
+          if (bondField !== "") {
+            this.scriptCalls += 1;
+            if (this.run(["HGET", bond, bondField]) === affiliate) {
+              this.scriptCalls += 1;
+              this.run(["HDEL", bond, bondField]);
+            }
+          }
+          this.scriptCalls += 1;
+          return this.run(["HDEL", purchases, field]);
         }
         // lib/paypal-sales.ts PAYPAL_REVOKE: a refunded payment's purchase taken back only while nothing else stands for it.
         if (key.startsWith("-- marktmorgen:paypal-revoke:v1\n") && args[0] === "2" && args.length >= 5) {
@@ -730,6 +770,25 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
+        // each address link only while it points at them; the people and links deleted and the people left.
+        if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {
+          const n = Number(args[0]);
+          const [members, due, ...links] = args.slice(1, 1 + n);
+          const [sid, ...pairs] = args.slice(1 + n);
+          this.scriptCalls += 1;
+          let gone = 0;
+          let unlinked = 0;
+          links.forEach((link, i) => {
+            const [id, row] = [pairs[2 * i], pairs[2 * i + 1]];
+            if (this.run(["GET", link]) === id) unlinked += this.run(["DEL", link]) as number;
+            if (this.run(["HGET", members, id]) === row) {
+              gone += this.run(["HDEL", members, id]) as number;
+              this.run(["ZREM", due, `${sid}|${id}`]);
+            }
+          });
+          return [gone, unlinked, this.run(["HLEN", members])];
+        }
         // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
         if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
           this.scriptCalls += 2;
@@ -871,6 +930,20 @@ export class MemoryRedis {
           if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
           if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
           this.data.set(target, args[3]);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry.
+          this.until.delete(target);
+          return 1;
+        }
+        // lib/webhooks.ts RESEND_MARK: the same compare and replies, but the write keeps the key's expiry (SET KEEPTTL),
+        // and a key left with none is given ARGV[3] seconds, in the same step.
+        if (key.startsWith("-- marktmorgen:webhook-resend-mark:v1\n") && args[0] === "1" && args.length === 5) {
+          const target = args[1];
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          if ((held ?? "") !== args[2]) return held === undefined ? [-1] : [-1, new TextEncoder().encode(held).length];
+          this.data.set(target, args[3]);
+          if (!this.until.has(target)) this.until.set(target, this.now() + Number(args[4]) * 1000);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {
@@ -1517,6 +1590,18 @@ export class MemoryRedis {
           for (const k of keys) this.run(["HDEL", k, argv[1]]);
           return 1;
         }
+        // lib/calls.ts CONFIRM_STEP: a booking's confirmation mark moved on only from a stage named, read and written in one step.
+        if (key.startsWith("-- marktmorgen:call-confirm-step:v1\n") && args[0] === "1") {
+          const held = this.run(["GET", args[1]]);
+          if (typeof held !== "string") return [0];
+          for (let i = 3; i + 1 < args.length; i += 2) {
+            if (held === args[i]) {
+              this.run(["SET", args[1], args[i + 1], "XX", "EX", args[2]]);
+              return [1, held];
+            }
+          }
+          return [0, held];
+        }
         // lib/closing-holds.ts CALL_BUDGET_ONCE: a closing's call budget, set once per ending, step for step (Codex S on #3309).
         if (key.startsWith("-- marktmorgen:closing-call-budget:v1\n") && args[0] === "1" && args.length === 4) {
           const [, work, calls, ending] = args;
@@ -1532,6 +1617,15 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
+        // writes nothing, and a command refused inside takes the mark back out.
+        if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
+          const held = this.run(["GET", args[2]]);
+          if (typeof held === "string") return [-2, held];
+          const out = this.orderWrite(args);
+          if (Array.isArray(out) && out.slice(1).some((r) => typeof r === "string" && r.startsWith("\u0000order-write-error:"))) this.run(["DEL", args[2]]);
+          return out;
+        }
         if (key.startsWith("-- marktmorgen:recount-page:v1\n") && args[0] === "2") {
           const [state, sums, from, next, ...pairs] = args.slice(1);
           if (pairs.length % 2 !== 0) return -1;

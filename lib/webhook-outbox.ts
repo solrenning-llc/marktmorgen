@@ -152,13 +152,14 @@ export async function replayKept(deadline: number, now = Date.now()): Promise<{ 
     out.tried += 1;
     try {
       const [raw] = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1) ?? [undefined];
-      // Expired with its week, or never readable: nothing to send.
-      if (raw === null || (raw !== undefined && !readKept(raw))) {
+      // Expired with its week, or text that is not a kept event: nothing to send. Any other answer (none, or one in
+      // another shape) is not proof the record is broken, so it is tried later, as the job promises (Claude 7 on #4319).
+      if (raw === null || (typeof raw === "string" && !readKept(raw))) {
         await forget(id);
         out.dropped += 1;
         continue;
       }
-      const kept = raw === undefined ? null : readKept(raw);
+      const kept = typeof raw === "string" ? readKept(raw) : null;
       if (!kept) throw new Error("a kept webhook event could not be read");
       const store = await storeForIdExactly(kept.sid);
       if (store === "unknown") throw new Error("a kept webhook event's store could not be read");
@@ -170,6 +171,8 @@ export async function replayKept(deadline: number, now = Date.now()): Promise<{ 
       }
       // Never sent about a person deleted from the store since (lib/suppression.ts), read exactly: unknown waits.
       const email = typeof kept.data.email === "string" ? kept.data.email : "";
+      // A store with no list has no deletion marks (they are kept under its list, lib/suppression.ts), so there is
+      // nobody deleted to check against; the day it gets a list, every event from then on is checked (Claude 3 on #4319).
       if (email && store.listId) {
         const [reply] = repliesFor(await redisPipeline([suppressedAmongCommand(store.listId, [email])]), 1) ?? [undefined];
         const [print] = wholeErasedReply(reply, 1);

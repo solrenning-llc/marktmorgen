@@ -42,11 +42,17 @@ const original = redis.pipeline.bind(redis);
 let failDeliveryWrites = 0;
 /** Applies the next write that keeps an event in the outbox, then loses its answer, as a cut connection would (Codex G). */
 let loseAdmission = 0;
+/** Answers the next read of a kept event's record in another shape (a number), once (Claude 7's LEVE on #4319). */
+let garbleRecordRead = 0;
 const keepsAnEvent = (c: Cmd) => (c[0] === "ZADD" && c[1] === "nl:hookout:due") || (c[0] === "EVAL" && c.includes("nl:hookout:due"));
 redis.pipeline = (async (commands: Cmd[]) => {
   if (failDeliveryWrites > 0 && commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:hooks:d:"))) {
     failDeliveryWrites -= 1;
     throw new Error("synthetic: Redis request timed out");
+  }
+  if (garbleRecordRead > 0 && commands.length === 1 && commands[0][0] === "GET" && /^nl:hookout:evt_/.test(String(commands[0][1]))) {
+    garbleRecordRead -= 1;
+    return [7];
   }
   if (loseAdmission > 0 && commands.some(keepsAnEvent)) {
     loseAdmission -= 1;
@@ -141,6 +147,17 @@ async function main(): Promise<void> {
   await quietly(drainAfter);
   const failed = await quietly(() => replayKept(later(1), later(6)));
   is("the second try fails too: kept for later", [failed.later, await queued()], [1, 0]);
+  is("then it goes", [(await replayKept(later(1), later(60))).sent, await queued()], [1, 1]);
+  await original([["DEL", QUEUE_KEY]]);
+
+  part("A record read in another shape is not taken for a broken one: tried later, never dropped (Claude 7 on #4319)");
+  const garbled = await freeLink("gil@example.com");
+  failDeliveryWrites = 1;
+  await quietly(() => press(garbled));
+  await quietly(drainAfter);
+  garbleRecordRead = 1;
+  const odd = await quietly(() => replayKept(later(1), later(6)));
+  is("tried later, not dropped", [odd.later, odd.dropped, await queued()], [1, 0, 0]);
   is("then it goes", [(await replayKept(later(1), later(60))).sent, await queued()], [1, 1]);
   await original([["DEL", QUEUE_KEY]]);
 

@@ -8,6 +8,7 @@
  *
  * Stripe is played by a stand-in for `fetch`; synthetic data only.
  */
+import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setHasDiscounts, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCheckout } from "@/lib/store-checkout";
@@ -75,6 +76,23 @@ async function main(): Promise<void> {
       is(`${what}, the order not admitted (${refusal === "paused" ? "the month's figure reached" : "Redis failing"}): refused, with nothing read from Stripe`, [result === "opened", calls], [false, []]);
     }
   }
+  admission = "real";
+
+  part("A call's deposit code: read from the creator's Stripe only after one of the store's buyer requests is taken");
+  // The booking route (app/api/store/book/route.ts) admits the order deeper (lib/calls.ts); the code it reads first,
+  // for the deposit, is counted against the store's buyer requests before the read, as a returning code is
+  // (lib/returning-code.ts): no room this month, or a count not known, reads nothing and says try again.
+  const route = readFileSync("app/api/store/book/route.ts", "utf8");
+  const taken = route.indexOf("await takeBuyerRead(store, DEPOSIT_CODE_REQUEST_UNITS)");
+  const read = route.indexOf("await readDepositCode(");
+  is("the buyer request is taken, and its refusal answered, before the code is read", [taken > 0, read > 0 && taken < read, /if \(!\(await takeBuyerRead\(store, DEPOSIT_CODE_REQUEST_UNITS\)\.catch\(\(\) => false\)\)\) return back\(/.test(route)], [true, true, true]);
+  admission = "down";
+  const { takeBuyerRead } = await import("@/lib/buyer-actions");
+  redis.pipeline = (async () => {
+    throw new Error("Redis is down (synthetic)");
+  }) as typeof redis.pipeline;
+  is("with Redis failing, the buyer request is not taken, so nothing is read", await takeBuyerRead(store, 1).catch(() => false), false);
+  redis.pipeline = realPipeline;
   admission = "real";
   done();
 }

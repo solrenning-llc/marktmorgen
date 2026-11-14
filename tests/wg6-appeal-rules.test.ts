@@ -186,7 +186,7 @@ part("Each state's words, with its number and the reason of a final answer");
   ]);
   const reversed = { ...base, state: "reversed" as const, moves: [{ state: "reversed" as const, at: "x", by: "operator" as const, reason: "Licence shown." }] };
   is("reversed product, putting it back not confirmed: never 'back as it was'", appealStateWords(reversed).slice(2), [
-    "Why: Licence shown.", "We are putting back what was taken down. This page will say when it is back.",
+    "Why: Licence shown.", "We decided it can come back. Putting it back is a separate step, done by a person at Marktmorgen. If you do not see it back on your store, reply to our email about this request, and a person will read it.",
   ]);
   is("reversed product, putting it back confirmed: back as it was", appealStateWords(reversed, true).slice(2), [
     "Why: Licence shown.", "What was taken down is back as it was.",

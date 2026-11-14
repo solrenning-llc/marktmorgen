@@ -58,7 +58,9 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
   const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
-    replyTo: report.email,
+    // No Reply-To outside the company: this email carries the notice's link, and a Reply quotes it to the notifier
+    // (HIGH on #3612 @0e070fb08). The notifier's address is in the From line, for a new email.
+    replyTo: SUPPORT_EMAIL,
     subject: `${report.kind === "copyright" ? "Copyright notice" : "Notice of illegal content"}${report.handle ? ` about @${report.handle}` : ""}`.slice(0, 200),
     text: [
       `A ${report.kind === "copyright" ? "copyright notice (DMCA, 17 U.S.C. § 512(c)(3))" : "notice of illegal content (EU Digital Services Act, Art. 16)"} was sent from ${origin}/report.`,
@@ -78,7 +80,7 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
       "Open it to act on it (the link works for 60 days):",
       `${origin}/takedown/${token}`,
       "",
-      `Notice ${id}, ${report.at}. Reply to this email to answer the sender.`,
+      `Notice ${id}, ${report.at}. To write to the sender, start a new email to ${report.email}. Do not forward this one: its link acts on the notice.`,
     ]
       .filter((line) => line !== "")
       .join("\n"),
@@ -101,6 +103,25 @@ export async function reportedProduct(report: Report, store: Store): Promise<Lis
   } catch {
     return null;
   }
+}
+
+/**
+ * A new link to this notice for the support inbox, working `seconds` from now (646 [WG6] unit 3; Claude 4 on #3612): a
+ * creator may ask us to look again for six months after being told, and the answer may come later still, while the
+ * notice's own link works for TOKEN_SECONDS only. It opens the same notice, with the same reach, and goes only to the
+ * support inbox, as the first one does. The notice is kept at least as long. Null when the notice itself is no longer
+ * kept (it lives REPORT_SECONDS from when it was sent): there is nothing for a link to open. Every reply is read
+ * exactly: a link whose write is not confirmed is never handed out (rule 24).
+ */
+export async function noticeLinkFor(reportId: string, seconds: number): Promise<string | null> {
+  if (!/^[0-9a-f]{16}$/.test(reportId) || !Number.isSafeInteger(seconds) || seconds <= 0) return null;
+  const kept = repliesFor(await redisPipeline([["EXPIRE", reportKey(reportId), seconds]]), 1);
+  if (!kept || (kept[0] !== 0 && kept[0] !== 1)) throw new UnknownReplyError("a notice's link");
+  if (kept[0] === 0) return null;
+  const token = randomBytes(24).toString("hex");
+  const set = repliesFor(await redisPipeline([["SET", tokenKey(token), reportId, "EX", seconds]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a notice's link");
+  return token;
 }
 
 /** The notice a token opens, and its store when the address names one. */

@@ -130,7 +130,8 @@ test("every picker that cannot be answered from the index is bounded", () => {
   assert.ok(BUMP_CHOICES <= 1_000, "a cap this high stops bounding anything worth bounding");
   assert.ok(BUMP_CHOICES > STUDIO_PAGE_SIZE * 4, "and it has to be comfortably past what one page shows");
 
-  for (const file of ["lib/catalog.ts", "app/studio/funnels/page.tsx", "app/api/store/bundle/route.ts"]) {
+  // The bundle picker reads through lib/bundle-choices.ts, shared by its route and the MCP tool list_bundle_choices.
+  for (const file of ["lib/catalog.ts", "app/studio/funnels/page.tsx", "lib/bundle-choices.ts"]) {
     const src = read(file);
     assert.match(src, /BUMP_CHOICES/, `${file} builds a picker and has to cap what it reads`);
     assert.match(src, /idsOfKind\(store, "(recurring|call|free)"\)/, `${file} should rule out with the index before reading`);

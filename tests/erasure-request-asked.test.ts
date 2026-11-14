@@ -17,7 +17,7 @@ import { claimHandle, ensureListId, ensureStatsId, ensureStoreId, setJoin, setSt
 import { askToJoin, confirmJoin } from "@/lib/store-join";
 import { requestErasureLink } from "@/lib/erasure-request";
 import { sendCourseLink } from "@/lib/learn";
-import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
+
 import type { Listing } from "@/lib/catalog";
 import { paidPeriod } from "./billing-period-fixture";
 import { advance, store as redis } from "./redis-stub";
@@ -48,7 +48,6 @@ async function main(): Promise<void> {
   await setSubscription(owner, { customerId: "cus_eraseasked", subscriptionId: "sub_eraseasked", active: true, tier: "creator", period: paidPeriod() });
   await setJoin(owner, { on: true });
   const store = (await storeForEmail(owner))!;
-  const figure = allowanceFor(store, "transactional");
 
   part("A stranger fills the list, then asks the deletion form for every address");
   let joined = 0;
@@ -73,7 +72,7 @@ async function main(): Promise<void> {
     advance(3_601_000);
   }
   is("some deletion links still go", links > 0, true);
-  is("but confirmations and deletion links together stay within a visitor's share", confirmations + links <= askedCeiling(figure), true);
+  is("but confirmations and deletion links together stay within a visitor's share", confirmations + links <= 75, true);
 
   part("A buyer still gets their way in");
   const course = { id: "c0urse0000", title: "Course" } as unknown as Listing;

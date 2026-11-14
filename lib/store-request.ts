@@ -27,6 +27,10 @@ import { type Need, refusedJson, studioAccess } from "@/lib/studio-route";
  * `act` answers for a route whose deleting write is named another way (an
  * `op`, a `detach: true`).
  *
+ * `units` is how many of the studio's requests this one is counted as, by
+ * its body (one when not given): taken in the same step as the first, before
+ * anything else is read (app/api/store/crm/route.ts, a field saved).
+ *
  * Returns a Response to send back, or who is asking, the store, the key it is
  * kept under, their role and the parsed body.
  */
@@ -35,6 +39,7 @@ export async function guardStoreWrite(
   need: Need | ((body: Record<string, unknown>) => Need | null),
   maxBodyBytes = 4_000,
   act?: (body: Record<string, unknown>) => string,
+  units?: (body: Record<string, unknown>) => number,
 ): Promise<
   | { ok: true; email: string; ref: string; store: Store; role: Role; body: Record<string, unknown> }
   | { ok: false; response: Response }
@@ -74,7 +79,7 @@ export async function guardStoreWrite(
   // something on an object's prototype ("constructor") is not one.
   if (!permission || (permission !== "member" && !isPermission(permission))) return refuse("invalid", 400);
   const action = act ? act(body).slice(0, 40) : typeof body.action === "string" ? body.action.slice(0, 20) : "";
-  const result = await studioAccess(request, permission, action);
+  const result = await studioAccess(request, permission, action, units ? units(body) : 1);
   if (!result.ok) return { ok: false, response: refusedJson(result.reason, result.message) };
   const { access } = result;
 

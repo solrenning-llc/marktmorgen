@@ -191,6 +191,50 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   return notes;
 }
 
+/**
+ * A note a workflow run writes (lib/flows.ts), only while the run still holds its own take of its lease at its exact
+ * score (KEYS[3], ARGV[4] the member, ARGV[5] the score), in the same step as the write: 3, and nothing written, when it
+ * was taken out or taken over by a later run (Codex G2 on #2287, C3-141). KEYS: the notes, the people; ARGV: the
+ * note's id, the note, how long they are kept. Modelled by lib/redis-memory.ts.
+ */
+export const ADD_RUN_NOTE = `-- marktmorgen:person-run-note:v1
+if tonumber(redis.call("ZSCORE", KEYS[3], ARGV[4]) or "-1") ~= tonumber(ARGV[5]) then return 3 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("EXPIRE", KEYS[1], ARGV[3])
+redis.call("SADD", KEYS[2], ARGV[6])
+redis.call("EXPIRE", KEYS[2], ARGV[3])
+return 1`;
+/** What ADD_RUN_NOTE runs inside, which Upstash bills one by one beside the EVAL. */
+export const ADD_RUN_NOTE_CALLS = 5;
+
+/**
+ * A note written by a workflow run's step under its own take (`take`, lib/crm.ts RunTake): "written", "superseded"
+ * (nothing written, its room given back) or null when it is not a note. Kept as addPersonNote keeps notes.
+ */
+export async function addRunNote(statsId: string, person: string, by: string, textRaw: unknown, room: DataStore, take: { key: string; member: string; score: number }, now = Date.now()): Promise<"written" | "superseded" | null> {
+  const text = personNoteText(textRaw);
+  if (!text || !PERSON_KEY.test(person) || !isRedisConfigured()) return null;
+  const id = randomBytes(4).toString("hex");
+  const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
+  const bytes = dataBytes([id, json], 1) + dataBytes([person], 1);
+  await needData(room, [{ slot: NOTES_SLOT, bytes }]);
+  const reply: unknown = await redisPipeline([["EVAL", ADD_RUN_NOTE, 3, notesKey(statsId, person), whoKey(statsId), take.key, id, json, NOTES_SECONDS, take.member, String(take.score), person]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (answer === 3) {
+    await giveData(room, [{ slot: NOTES_SLOT, bytes }]).catch(() => {});
+    return "superseded";
+  }
+  if (answer !== 1) throw new Error("the note could not be confirmed");
+  // As addPersonNote: past MAX_PERSON_NOTES, the oldest go and give their room back.
+  const notes = await readPersonNotes(statsId, person);
+  if (notes.length > MAX_PERSON_NOTES) {
+    const dropped = notes.slice(MAX_PERSON_NOTES);
+    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
+    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+  }
+  return "written";
+}
+
 /** Takes one note away, and gives back its room; the notes as they are after. */
 export async function removePersonNote(statsId: string, person: string, id: unknown, room: DataStore): Promise<PersonNote[]> {
   if (typeof id === "string" && NOTE_ID.test(id) && PERSON_KEY.test(person) && isRedisConfigured()) {

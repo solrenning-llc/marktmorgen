@@ -25,6 +25,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { joinWords } from "@/lib/buyer-words/join";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
+import { personReturned } from "@/lib/crm";
 
 export const JOIN_SECONDS = 7 * 24 * 60 * 60;
 export const JOIN_TOKEN = /^[0-9a-f]{48}$/;
@@ -136,5 +137,8 @@ export async function confirmJoin(token: string, store: Store | null): Promise<C
   });
   if (added.full) return { ok: false, reason: "full" };
   await redisPipeline([["DEL", tokenKey(token)]]);
+  // A confirmed sign-up: they came back on their own, so the CRM may keep fields about them again (lib/crm.ts, personReturned; C3-125).
+  // When they asked to join, not when the link was used: an old link used again is not a return (Codex D, #2287).
+  await personReturned(store.statsId, grant.e, Date.parse(grant.at));
   return { ok: true, grant, added };
 }

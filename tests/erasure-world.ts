@@ -154,7 +154,7 @@ export async function seedPerson(w: World, rawEmail: string, other: string | nul
   await enroll(store, email, { joined: true });
 
   // Fields, deals and notes (lib/crm.ts, lib/buyer-profile.ts).
-  await setValue(statsId, person, w.field, "Gold", ROOM);
+  await setValue(statsId, person, w.field, "Gold", ROOM, 0);
   await writeDeal(statsId, { id: hex(5), title: `Coaching for ${email}`, email, cents: 50_000, stage: "lead00", note: "Wants a call", createdAt: Date.now(), updatedAt: Date.now() }, ROOM);
   await addPersonNote(statsId, person, OWNER, `Called ${email} about the course`, ROOM);
   // The company they work at (lib/crm-companies.ts, 639 [GL7](4)): the store's, linked to them by their person key.

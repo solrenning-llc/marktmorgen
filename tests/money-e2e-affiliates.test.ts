@@ -41,6 +41,11 @@ const SECRET = "EFGHijklMNOPqrstUVWXyz0123456789abcd";
 
 // ---- Stand-ins for Stripe, PayPal and Resend -------------------------------------------------------------------
 type Reply = { status: number; body: unknown };
+/**
+ * A listed row as Stripe gives it: its object type and its currency (every sale here is in dollars), which main's
+ * exact refund reading (#3189) requires; a row's own fields win.
+ */
+const asStripe = (object: string) => (row: Record<string, unknown>) => ({ object, currency: "usd", ...row });
 let refunds: Record<string, unknown>[] = [];
 let disputes: Record<string, unknown>[] = [];
 /** When set, what Stripe answers to the refunds or disputes list instead of the rows above. */
@@ -58,8 +63,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.hostname === "api.resend.com") return answer({ id: "email_1" });
   if (url.hostname === "api.stripe.com") {
-    if (url.pathname === "/v1/refunds") return refundsReply ? answer(refundsReply.body, refundsReply.status) : answer({ object: "list", data: refunds, has_more: false });
-    if (url.pathname === "/v1/disputes") return disputesReply ? answer(disputesReply.body, disputesReply.status) : answer({ object: "list", data: disputes, has_more: false });
+    if (url.pathname === "/v1/refunds") return refundsReply ? answer(refundsReply.body, refundsReply.status) : answer({ object: "list", data: refunds.map(asStripe("refund")), has_more: false });
+    if (url.pathname === "/v1/disputes") return disputesReply ? answer(disputesReply.body, disputesReply.status) : answer({ object: "list", data: disputes.map(asStripe("dispute")), has_more: false });
     return answer({ object: "list", data: [], has_more: false });
   }
   if (url.hostname === "api-m.paypal.com") {

@@ -12,6 +12,7 @@ import { addProduct, claimHandle, ensureStatsId, ensureStoreId, noteTakedown, se
 import { readFileSync } from "node:fs";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { PREVIEW_CODE, PREVIEW_SECONDS, TAKEN_DOWN_SECONDS, clearTakenDown, isTakenDown, makeDraftPreview, markTakenDown, readDraftPreview, revokeDraftPreview } from "@/lib/draft-preview";
+import * as draftPreview from "@/lib/draft-preview";
 import { POST as previewRoute } from "@/app/api/store/draft-preview/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -90,7 +91,19 @@ async function main(): Promise<void> {
   const refusedDown = await send({ action: "make", id: draft.product.id });
   is("the route makes no new link for it", [refusedDown.status, refusedDown.body.error], [409, "taken_down"]);
   is("publishing it again is what clears the mark, never in a switched-off store", readFileSync("app/api/store/product/route.ts", "utf8").includes("body.hidden === false && !guarded.store.suspended) await clearTakenDown("), true);
-  await clearTakenDown(store, draft.product.id);
+  // Codex L's MEDIUM 1 on #3597: the publish cleared the mark after its own write, so a takedown that landed in between
+  // lost its fresh mark and the draft could be previewed again. The publish reads the mark before it writes and clears
+  // only that one: a newer takedown's mark stays.
+  const marks = draftPreview as unknown as { takenDownMark?: (store: unknown, id: string) => Promise<string | null> };
+  const seenBefore = marks.takenDownMark ? await marks.takenDownMark(store, draft.product.id) : null;
+  is("the mark read before publishing is a value of its own", typeof seenBefore === "string" && seenBefore.length > 0, true);
+  await markTakenDown(store, draft.product.id);
+  await (clearTakenDown as (store: unknown, id: string, seen: string | null) => Promise<void>)(store, draft.product.id, seenBefore);
+  is("a takedown that landed after the read keeps its mark through the publish's clear", await isTakenDown(store, draft.product.id), true);
+  const productRoute = readFileSync("app/api/store/product/route.ts", "utf8");
+  const publishAt = productRoute.indexOf("const done = await setProductHidden(ref, id, body.hidden);");
+  is("the product route reads the mark before it publishes, and clears only that one", [productRoute.lastIndexOf("takenDownMark(", publishAt) > 0, productRoute.includes("clearTakenDown(guarded.store, id, seenMark)")], [true, true]);
+  await (clearTakenDown as (store: unknown, id: string, seen: string | null) => Promise<void>)(store, draft.product.id, marks.takenDownMark ? await marks.takenDownMark(store, draft.product.id) : null);
   is("cleared: links work again", [await isTakenDown(store, draft.product.id), (await readDraftPreview((await makeDraftPreview(store, draft.product.id, now)).code, now + 60))?.productId], [false, draft.product.id]);
   is("a mark that cannot be read throws", await throws([], () => isTakenDown(store, draft.product.id)), true);
   const route = readFileSync("app/api/store/draft-preview/route.ts", "utf8");

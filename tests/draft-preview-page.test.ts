@@ -16,7 +16,7 @@ import type { Recurring } from "@/lib/product-recurring";
 import { PriceTag, pricePill } from "@/components/store-product";
 import { writeAbout } from "@/lib/product-about";
 import { readListingExactly } from "@/lib/catalog";
-import { clearTakenDown, makeDraftPreview, markTakenDown, revokeDraftPreview } from "@/lib/draft-preview";
+import { clearTakenDown, makeDraftPreview, markTakenDown, revokeDraftPreview, takenDownMark } from "@/lib/draft-preview";
 import PreviewPage, { metadata } from "@/app/[handle]/preview/[code]/page";
 import { DraftPreviewLink } from "@/components/draft-preview-link";
 import { store as redis } from "./redis-stub";
@@ -136,7 +136,8 @@ async function main(): Promise<void> {
   const down = await makeDraftPreview(store, id);
   await markTakenDown(store, id);
   is("a product taken down after a notice: not shown", (await render("@viewershop", down.code)).includes("Six calm lessons"), false);
-  await clearTakenDown(store, id);
+  // A publish clears only the mark it read before (Codex L on #3597).
+  await clearTakenDown(store, id, await takenDownMark(store, id));
   const late = await makeDraftPreview(store, id);
   is("published again and back to a draft: shown again", (await render("@viewershop", late.code)).includes("Six calm lessons"), true);
   await noteTakedown("viewer@example.com", null, true);

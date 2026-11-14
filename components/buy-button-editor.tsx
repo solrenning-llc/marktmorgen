@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Icon } from "@/components/icons";
@@ -109,7 +110,7 @@ export function BuyButtonEditor({
       <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Sell from your own website</h2>
       <p className="mt-2 text-ink-soft">
         Put one of your products on your blog, portfolio or any other site: a card with its picture, price and buy button, or a plain button
-        in your color. Paste the code into a block that takes HTML, called Embed, Code or Custom HTML in most website builders.
+        in your color. Paste the code into a block that takes <Abbr of="HTML" />, called Embed, Code or Custom HTML in most website builders.
       </p>
 
       <div className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useState } from "react";
 import { toast, toastProblem } from "@/components/toast";
 import type { ServerSetup } from "@/lib/ad-events";
@@ -116,7 +117,7 @@ export function ServerEventsEditor({ setup, pixels, googleId }: { setup: ServerS
               {blocked ? (
                 <p className="text-xs text-ink-soft">
                   Google takes conversions from the server through Google Analytics. Put your Google Analytics tag ID (it starts
-                  with G-) in the Google field above, then add its API secret here. Purchases reach Google Ads when your
+                  with G-) in the Google field above, then add its <Abbr of="API" /> secret here. Purchases reach Google Ads when your
                   Analytics property is linked to it and the purchase is imported as a conversion.
                 </p>
               ) : (

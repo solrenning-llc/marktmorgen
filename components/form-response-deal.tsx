@@ -1,5 +1,6 @@
 "use client";
 
+import { Abbr } from "@/components/abbr";
 import { useState } from "react";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { confirmedFormOpportunity, formDealDraft, matchingFormDeals, formDealMatchKey, type FormDealMatch } from "@/lib/form-deal";
@@ -56,7 +57,7 @@ export function FormResponseDeal({ form, response, responseRef, stages, sid, cur
         <p className="font-semibold">{matches.length} existing {matches.length === 1 ? "opportunity uses" : "opportunities use"} this email.</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">{matches.slice(0, 5).map(deal => <li key={deal.id}>{deal.title} · {stages.find(stage => stage.id === deal.stage)?.name ?? "Stage unavailable"}</li>)}</ul>
         {matches.length > 5 ? <p className="mt-2 text-sm">{matches.length - 5} more matches are available in Deals.</p> : null}
-        <p className="mt-2 text-sm">Check Deals before creating another. These matches come from the CRM data loaded with this page.</p>
+        <p className="mt-2 text-sm">Check Deals before creating another. These matches come from the <Abbr of="CRM" /> data loaded with this page.</p>
         <label className="mt-3 flex min-h-11 items-center gap-2"><input type="checkbox" checked={!needsAcknowledgment} onChange={event => setAcknowledgedMatches(event.target.checked ? matchKey : "")} /><span>I reviewed these opportunities and need a separate one.</span></label>
       </div> : null}
       <label className="block"><span className="field-label">Stage</span><select className="field mt-2" value={draft.stage} onChange={event => setDraft({ ...draft, stage: event.target.value })}>{stages.filter(stage => stage.kind === "open").map(stage => <option key={stage.id} value={stage.id}>{stage.name}</option>)}</select></label>

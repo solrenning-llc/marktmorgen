@@ -194,7 +194,7 @@ export function PaymentsPanel({
                         <li
                           key={way.type}
                           /* A badge, not a button: the 44px floor is for things a thumb presses. */
-                          className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-mint-soft px-3 py-1 text-sm font-semibold text-mint-deep"
+                          className="inline-flex min-h-8 items-center gap-1.5 rounded-full bg-mint-soft px-3 py-1 text-sm font-semibold text-mint-text"
                           title={way.note || undefined}
                         >
                           <Icon name="check" size={14} />

@@ -144,11 +144,11 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           // Already on Pro or Scale, and stopped by an unpaid renewal or a disputed plan payment
           // (lib/plan.ts canUse): moving "up to Pro" is not the way back (lib/checkup-rules.ts says the same).
           <div role="status" className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">
               {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)
                 ? "Email to your list is stopped: your plan's last renewal is not paid."
                 : "Email to your list is stopped while a payment for your plan is disputed."}
-            </p>
+            </h2>
             <p className="mt-2 text-ink-soft">
               {(store.renewalUnpaidSince ?? 0) > 0 || !planDisputed(store)
                 ? "Nothing goes to your list, and your sequences wait, until it is paid. Sign-in links and receipts still go out."

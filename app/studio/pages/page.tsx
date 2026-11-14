@@ -155,7 +155,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
         {templateNotice ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{templateNotice}</p> : null}
         {products.length === 0 || !selected || (!page && !unread) || !action ? (
           <div className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to build a page for yet</p>
+            <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to build a page for yet</h2>
             <p className="mt-2 text-ink-soft">Add a product in the studio and its page can be built here.</p>
             <Link href={`${studioPath(store)}#products`} className="btn btn-primary mt-5">Go to products</Link>
           </div>
@@ -194,7 +194,7 @@ export default async function StudioPagesPage({ searchParams }: Params) {
                           on ? "bg-lilac text-violet-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
                         }`}
                       >
-                        <span className="max-w-[14rem] truncate font-semibold">{p.title}</span>
+                        <span className="min-w-0 max-w-[14rem] break-words font-semibold">{p.title}</span>
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
                             p.page ? "bg-mint-soft text-ink" : "bg-sand text-ink-mute"

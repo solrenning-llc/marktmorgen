@@ -111,8 +111,8 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
                           on ? "bg-lilac text-violet-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
                         }`}
                       >
-                        <span className="max-w-[14rem] truncate font-semibold">{b.title}</span>
-                        <span className="shrink-0 rounded-full bg-mint-soft px-2 py-0.5 text-xs font-bold text-mint-deep">
+                        <span className="min-w-0 max-w-[14rem] break-words font-semibold">{b.title}</span>
+                        <span className="shrink-0 rounded-full bg-mint-soft px-2 py-0.5 text-xs font-bold text-mint-text">
                           {`${b.bundle?.length ?? 0} in it`}
                         </span>
                       </Link>
@@ -150,7 +150,7 @@ export default async function StudioBundlesPage({ searchParams }: Params) {
 
               {refused ? (
                 <div className="card p-6 sm:p-8">
-                  <p className="text-lg font-semibold tracking-[-0.02em] text-ink">{`${target?.title} cannot be a bundle as it is`}</p>
+                  <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">{`${target?.title} cannot be a bundle as it is`}</h2>
                   <p className="mt-2 text-ink-soft">
                     A bundle is a one-off paid product with one price and nothing of its own to hand over. Make a new bundle instead,
                     and put this product in it.

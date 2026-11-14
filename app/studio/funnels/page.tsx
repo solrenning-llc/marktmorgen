@@ -279,7 +279,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
 
         {owners.length === 0 ? (
           <div className="card mt-8 p-6 sm:p-8">
-            <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to follow yet</p>
+            <h3 className="text-lg font-semibold tracking-[-0.02em] text-ink">Nothing to follow yet</h3>
             <p className="mt-2 text-ink-soft">
               Offers follow a one-off paid product: a download, a link or a course. Add one in the studio and it appears here.
             </p>
@@ -322,10 +322,10 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
                           on ? "bg-lilac text-violet-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
                         }`}
                       >
-                        <span className="max-w-[14rem] truncate font-semibold">{p.title}</span>
+                        <span className="min-w-0 max-w-[14rem] break-words font-semibold">{p.title}</span>
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
-                            count ? "bg-mint-soft text-mint-deep" : "bg-sand text-ink-mute"
+                            count ? "bg-mint-soft text-mint-text" : "bg-sand text-ink-mute"
                           }`}
                         >
                           {count > 0 ? `${count} ${count === 1 ? "offer" : "offers"}` : count < 0 ? "Offers" : "None"}

@@ -8,8 +8,11 @@
  * `outOfKeys(...).catch(() => false)`, and false means "keys left": the Buy
  * button, the "N left" line of a limited product and the cart were drawn. The
  * checkout refuses on its own; what was wrong is what the page told the buyer.
- * The product page (app/[handle]/p/[product]/page.tsx) has the same reading;
- * it is left to a later unit because open pull requests change the same lines.
+ * The product page (app/[handle]/p/[product]/page.tsx) had the same reading,
+ * and read a stock count that failed as "no limit" (the A8 proof): with
+ * either count unknown it now draws no buy box, no cart button and no
+ * count, says so in a status line, and gives search engines no offer
+ * (claude7/catalog-hunt, 13 November 2026).
  *
  * With the count unknown, each page now draws no way to buy that product,
  * says "Buying is not available just now. Try again in a moment." in the
@@ -23,6 +26,7 @@ import { renderToReadableStream } from "react-dom/server";
 import { NextRequest } from "next/server";
 import StorePage from "@/app/[handle]/page";
 import CollectionPage from "@/app/[handle]/shop/[collection]/page";
+import ProductPage from "@/app/[handle]/p/[product]/page";
 import { addProduct, claimHandle, ensureStatsId, setCollections, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { readListing } from "@/lib/catalog";
@@ -38,9 +42,12 @@ import { answering } from "./security/next-headers";
 type Command = (string | number)[];
 const real = redis.pipeline.bind(redis);
 let poolKey = "";
+let stockKey = "";
 let inject: (() => unknown[] | Promise<unknown[]>) | null = null;
+let injectStock: (() => unknown[] | Promise<unknown[]>) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   if (inject && batch.some((c) => c[0] === "LLEN" && c[1] === poolKey)) return inject();
+  if (injectStock && batch.some((c) => c[0] === "HGETALL" && c[1] === stockKey)) return injectStock();
   return real(batch);
 }) as typeof redis.pipeline;
 globalThis.fetch = (async () => {
@@ -142,6 +149,26 @@ async function main(): Promise<void> {
       is(`${name}: the product beside it still shows its Buy button`, shown.includes(buy25), true);
     }
     inject = null;
+  }
+
+  part("The product page: a stock or key count that cannot be read is never drawn as buyable (rule 24)");
+  stockKey = `nl:stock:${store.statsId}:${listing.id}`;
+  const productPage = () =>
+    html(`https://marktmorgen.com/@r24keyspages/p/${listing.id}`, () => ProductPage({ params: Promise.resolve({ handle: "@r24keyspages", product: listing.id }), searchParams: Promise.resolve({}) } as never));
+  const known = await productPage();
+  is("control, both read: the Buy button, \"3 left\" and InStock for search", [text(known).includes(buy40), text(known).includes(w.left(3, "3")), known.includes("schema.org/InStock"), text(known).includes(UNREAD)], [true, true, true, false]);
+  for (const [reading, set] of [
+    ["the key count failed", () => { inject = () => Promise.reject(new Error("synthetic Redis failure")); }],
+    ["the key count answered a word", () => { inject = () => ["QUEUED"]; }],
+    ["the stock count failed", () => { injectStock = () => Promise.reject(new Error("synthetic Redis failure")); }],
+    ["the stock count answered no reply", () => { injectStock = () => []; }],
+  ] as const) {
+    set();
+    const markup = await productPage();
+    const shown = text(markup);
+    is(`${reading}: no Buy button, says buying is not available, no count, no InStock offer`, [shown.includes(buy40), shown.includes(UNREAD), shown.includes(w.left(3, "3")), shown.includes(w.soldOut), markup.includes("schema.org/InStock"), markup.includes("/api/store/checkout")], [false, true, false, false, false, false]);
+    inject = null;
+    injectStock = null;
   }
 
   part("The sentence, in every language the store can have");

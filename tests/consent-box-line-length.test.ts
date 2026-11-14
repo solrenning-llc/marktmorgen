@@ -20,13 +20,37 @@ import { readFileSync } from "node:fs";
  */
 const css = readFileSync("app/globals.css", "utf8");
 
-test("the consent box's paragraphs are at most 46ch wide", () => {
-  const selector = "[data-digital-consent] p:not(.st-note, .sr-only)";
-  const at = css.indexOf("\n" + selector + " {");
-  assert.ok(at >= 0, `a rule for ${selector}`);
+/*
+ * Review of #3787 (Claude 1 cloud, MEDIUM): the sentence the buyer checks is a span inside the box's label, not a p,
+ * and ran about 90 characters a line on a course's page at 768 and 1280 px: it is capped with the paragraphs.
+ * Review LOW: the cap sits in @layer components under :where, like the store front's 34ch caps, so where the box is
+ * drawn inside .st-measure or [data-store-layout] the narrower cap still applies (a later rule of the same layer and
+ * weight), and Tailwind's utilities still win.
+ */
+const RULE = ":where([data-digital-consent]) :where(p:not(.st-note, .sr-only), label > span)";
+
+test("the consent box's paragraphs and the sentence the buyer checks are at most 46ch wide", () => {
+  const at = css.indexOf(RULE + " {");
+  assert.ok(at >= 0, `a rule for ${RULE}`);
   const body = css.slice(at, css.indexOf("}", at));
   const cap = /max-width:\s*(\d+(?:\.\d+)?)ch;/.exec(body);
   assert.ok(cap && Number(cap[1]) <= 46, body);
+});
+
+test("the cap is in @layer components, so the store front's narrower caps and Tailwind's utilities still win", () => {
+  const at = css.indexOf(RULE + " {");
+  const layer = css.lastIndexOf("@layer components {", at);
+  assert.ok(layer >= 0 && at > layer, "inside @layer components");
+  // No brace closes the layer between its opening and the rule.
+  const between = css.slice(layer + "@layer components {".length, at);
+  let depth = 1;
+  for (const ch of between) depth += ch === "{" ? 1 : ch === "}" ? -1 : 0;
+  assert.equal(depth, 1, "the rule is directly inside the layer");
+  assert.equal(css.includes("\n[data-digital-consent] p:not(.st-note, .sr-only) {"), false, "no unlayered cap left");
+});
+
+test("the box's sentence is still the label's span the rule caps", () => {
+  assert.match(readFileSync("components/digital-consent-box.tsx", "utf8"), /<span>\{c\.box\[kind\]\}<\/span>\s*<\/label>/);
 });
 
 test("the marker the rule relies on is still drawn by the component", () => {

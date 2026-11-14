@@ -144,7 +144,7 @@ async function main(): Promise<void> {
 
   part("A course");
   sessions["lou@example.com"] = [paid("cs_test_lou000000001", course, "lost")];
-  await recordEnrollment(store, "lou@example.com", course, NOW - 86_400);
+  await recordEnrollment(store, "lou@example.com", course, NOW - 86_400, "stripe");
   is("lost to a dispute: shut, though the thanks page wrote it down", await open("lou@example.com"), []);
   for (const [n, status] of OPEN_STATES.entries()) {
     const email = `open${n}@example.com`;

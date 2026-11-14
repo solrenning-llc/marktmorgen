@@ -81,7 +81,7 @@ async function world(handle: string): Promise<World> {
   assert.ok((await readProduct(store, productId))?.course, "the product carries the course");
 
   // The buyer bought it, and this browser holds the buyer's pass.
-  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60);
+  await recordEnrollment(store, BUYER, productId, Math.floor(Date.now() / 1000) - 60, "stripe");
   const token = await mintPass(store, BUYER, "all");
   const cookie = `${passCookieName(store)}=${token}`;
 

@@ -117,7 +117,7 @@ async function main(): Promise<void> {
     const holder = (await storeForEmail("lotthree@example.com"))!;
     const asked = await askPlace({ store: holder, id: group, email, product, base: "https://marktmorgen.com/@lotthree", from: '"Lot Three" <hello@marktmorgen.com>', ordersLink: async () => null });
     const token = mails.filter((m) => m.to[0] === email).at(-1)?.text.match(/\?take=([0-9a-f]{64})/)?.[1] ?? "";
-    const took = await takePlace({ store: holder, token, recordStart: (who, id, at) => recordEnrollment(holder, who, id, at) });
+    const took = await takePlace({ store: holder, token, recordStart: (who, id, at) => recordEnrollment(holder, who, id, at, "group") });
     const pass = await mintPass(holder, email, [course.id]);
     const cookies = { get: (name: string) => name === passCookieName(holder) ? { value: pass } : undefined };
     is(`${mode}: real grant and course access before refund`, [asked, took.outcome, (await courseAccess(holder, product, cookies)).state], ["sent", "taken", "open"]);

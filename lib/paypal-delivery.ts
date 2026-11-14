@@ -409,7 +409,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
     from: fromStore(store),
     recordStart: async (email, productId, start) => {
       const course = productId === product.id ? product : bundled.get(productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordEnrollment(store, email, productId, start, "paypal");
     },
     ordersLink: (email) => receiptLink(store, email, base, paid.order),
     mayEmail: async () => {
@@ -527,7 +527,7 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     // still there, and no email; only for a product that is a course, as handing over does.
     restoreStart: async (email, productId, start) => {
       const course = await readListing(store, productId);
-      if (course?.course) await recordEnrollment(store, email, productId, start);
+      if (course?.course) await recordEnrollment(store, email, productId, start, "paypal");
     },
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);

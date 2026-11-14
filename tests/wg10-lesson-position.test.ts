@@ -95,7 +95,9 @@ is("both players get that key", (page.match(/learner=\{placeKey\}/g) ?? []).leng
 
 part("The course page: places forgotten once the student's access is not open");
 const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-is("drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off)", /const forgetKey = access\.state !== "open" && access\.learner && !access\.learner\.owner \? devicePlaceKey\(course\.id, access\.learner\.email\) : null;/.test(coursePage) && /\{forgetKey \? <ForgetLessonPositions courseId=\{course\.id\} learner=\{forgetKey\} \/> : null\}/.test(coursePage), true);
+// Regra 23 (Claude 5, claude5/learn-access-exact): the condition also leaves out "unknown" (Stripe could not be read),
+// so a paying student's places are not wiped on a failed read; every state that is really not open still forgets them.
+is("drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off), never while Stripe could not be read", /const forgetKey = access\.state !== "open" && access\.state !== "unknown" && access\.learner && !access\.learner\.owner \? devicePlaceKey\(course\.id, access\.learner\.email\) : null;/.test(coursePage) && /\{forgetKey \? <ForgetLessonPositions courseId=\{course\.id\} learner=\{forgetKey\} \/> : null\}/.test(coursePage), true);
 
 part("The device key cannot be worked out from an address (Revisor 1 on #2728)");
 const dataKey = process.env.NIMBUS_DATA_KEY;

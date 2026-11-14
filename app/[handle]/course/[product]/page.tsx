@@ -83,9 +83,10 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
   // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
-  const forgetKey = access.state !== "open" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
-  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
-  const forgetPerson = access.state !== "open" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
+  // Not while Stripe could not be read: that student may well still have the course.
+  const forgetKey = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2); not while unknown either.
+  const forgetPerson = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -223,6 +224,18 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
+          {access.state === "unknown" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUnknownTitle}</p>
+              <p className="mt-1 text-sm">{w.accessUnknownBody}</p>
+              <p className="mt-2 text-sm">
+                <Link href={base} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
+                  {w.accessUnknownAgain}
+                </Link>
+              </p>
+            </div>
+          ) : null}
+
           {/* Their private lesson notes stay theirs once the course is no longer open to them (a refund, an ended
               membership; Claude 2's review of #3031, M4, and Claude 4's focal return, C4-2): download or delete them
               here, only while they keep notes on it (notesDownloadAfterAccess), never to any signed-in visitor (third
@@ -305,7 +318,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : (
+          ) : access.state === "unknown" ? null : (
             <div className="mt-6 space-y-6">
               {selling ? (
                 <form action="/api/store/checkout" method="post" target="_top" data-checkout="">

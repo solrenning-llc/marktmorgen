@@ -70,6 +70,11 @@ const en = {
   /** Followed by the link `manageMembership` and a full stop. */
   endedPayment: "Did it end because a payment failed, not because you canceled? Updating the card may bring it back: ",
   manageMembership: "manage your membership",
+  /** Stripe could not be read just now: neither open nor shut (lib/learn.ts, courseAccess "unknown"). */
+  accessUnknownTitle: "We could not check your access just now",
+  accessUnknownBody:
+    "Your purchase could not be confirmed with the payment service at this moment. Nothing was changed, and your progress is kept. Try again in a minute.",
+  accessUnknownAgain: "Check my access to this course again",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
   /** Said instead of the count when the lessons done could not be read (rule 24). */
@@ -283,6 +288,8 @@ const en = {
   withdrawnOn: (date: string) => `This certificate was withdrawn on ${date}.`,
   withdrawnBody: (creator: string) =>
     `${creator} withdrew it, so it no longer certifies anything. If it is yours, the course page lets you issue it again.`,
+  /** A certificate withdrawn because its course's payment was given back (lib/certificate-refunds.ts): its page shows no name. */
+  withdrawnRefundBody: "It was withdrawn because the payment for the course was given back, so it no longer certifies anything.",
   certReady: "Your certificate is ready.",
   certGenuine: "This certificate is genuine.",
   onRecord: (store: string, date: string) =>
@@ -401,6 +408,10 @@ const es: CoursesWords = {
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
   endedPayment: "¿Terminó porque falló un pago, y no porque la cancelaste? Actualizar la tarjeta puede reactivarla: ",
   manageMembership: "gestiona tu membresía",
+  accessUnknownTitle: "No pudimos comprobar tu acceso ahora mismo",
+  accessUnknownBody:
+    "No se pudo confirmar tu compra con el servicio de pagos en este momento. No se cambió nada y tu progreso se conserva. Inténtalo de nuevo en un minuto.",
+  accessUnknownAgain: "Comprobar de nuevo mi acceso a este curso",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
   progressUnknown: "No pudimos comprobar tu progreso en este momento. Todas tus lecciones siguen aquí. Vuelve a cargar la página para intentarlo de nuevo.",
@@ -594,6 +605,7 @@ const es: CoursesWords = {
   withdrawnOn: (date) => `Este certificado se retiró el ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} lo retiró, así que ya no certifica nada. Si es tuyo, desde la página del curso puedes volver a emitirlo.`,
+  withdrawnRefundBody: "Se retiró porque se devolvió el pago del curso, así que ya no certifica nada.",
   certReady: "Tu certificado está listo.",
   certGenuine: "Este certificado es auténtico.",
   onRecord: (store, date) =>
@@ -707,6 +719,10 @@ const fr: CoursesWords = {
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
   endedPayment: `A-t-il pris fin parce qu'un paiement a échoué, et non parce que vous l'avez résilié${S}? Mettre à jour la carte peut le rétablir${S}: `,
   manageMembership: "gérer votre abonnement",
+  accessUnknownTitle: "Nous n'avons pas pu vérifier votre accès pour le moment",
+  accessUnknownBody:
+    "Votre achat n'a pas pu être confirmé auprès du service de paiement pour l'instant. Rien n'a été modifié et votre progression est conservée. Réessayez dans une minute.",
+  accessUnknownAgain: "Vérifier à nouveau mon accès à ce cours",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
   progressUnknown: "Nous n'avons pas pu vérifier votre progression pour le moment. Toutes vos leçons sont bien là. Rechargez la page pour réessayer.",
@@ -900,6 +916,7 @@ const fr: CoursesWords = {
   withdrawnOn: (date) => `Ce certificat a été retiré le ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'a retiré, il ne certifie donc plus rien. S'il est à vous, la page de la formation vous permet de le délivrer à nouveau.`,
+  withdrawnRefundBody: "Il a été retiré parce que le paiement de la formation a été rendu : il ne certifie donc plus rien.",
   certReady: "Votre certificat est prêt.",
   certGenuine: "Ce certificat est authentique.",
   onRecord: (store, date) =>
@@ -1007,6 +1024,10 @@ const de: CoursesWords = {
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
   endedPayment: "Ist sie beendet, weil eine Zahlung fehlgeschlagen ist, und nicht, weil Sie gekündigt haben? Eine aktualisierte Karte kann sie zurückbringen: ",
   manageMembership: "Mitgliedschaft verwalten",
+  accessUnknownTitle: "Wir konnten Ihren Zugang gerade nicht prüfen",
+  accessUnknownBody:
+    "Ihr Kauf konnte gerade nicht beim Zahlungsdienst bestätigt werden. Es wurde nichts geändert, und Ihr Fortschritt bleibt erhalten. Versuchen Sie es in einer Minute erneut.",
+  accessUnknownAgain: "Meinen Zugang zu diesem Kurs erneut prüfen",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
   progressUnknown: "Wir konnten Ihren Fortschritt gerade nicht prüfen. Alle Ihre Lektionen sind noch da. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
@@ -1202,6 +1223,7 @@ const de: CoursesWords = {
   withdrawnOn: (date) => `Dieses Zertifikat wurde am ${date} zurückgezogen.`,
   withdrawnBody: (creator) =>
     `${creator} hat es zurückgezogen, es bescheinigt also nichts mehr. Wenn es Ihres ist, können Sie es auf der Kursseite erneut ausstellen.`,
+  withdrawnRefundBody: "Es wurde zurückgezogen, weil die Zahlung für den Kurs zurückgegeben wurde, und bescheinigt daher nichts mehr.",
   certReady: "Ihr Zertifikat ist fertig.",
   certGenuine: "Dieses Zertifikat ist echt.",
   onRecord: (store, date) =>
@@ -1312,6 +1334,10 @@ const it: CoursesWords = {
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
   endedPayment: "È terminata perché un pagamento non è andato a buon fine, e non perché l'hai annullata? Aggiornare la carta può riattivarla: ",
   manageMembership: "gestisci la tua iscrizione",
+  accessUnknownTitle: "Non siamo riusciti a verificare il tuo accesso in questo momento",
+  accessUnknownBody:
+    "Non è stato possibile confermare il tuo acquisto con il servizio di pagamento in questo momento. Non è cambiato nulla e i tuoi progressi sono salvati. Riprova tra un minuto.",
+  accessUnknownAgain: "Verifica di nuovo il mio accesso a questo corso",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
   progressUnknown: "Non siamo riusciti a controllare i tuoi progressi in questo momento. Tutte le tue lezioni sono ancora qui. Ricarica la pagina per riprovare.",
@@ -1505,6 +1531,7 @@ const it: CoursesWords = {
   withdrawnOn: (date) => `Questo attestato è stato revocato il ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} l'ha revocato, quindi non attesta più nulla. Se è tuo, dalla pagina del corso puoi farlo rilasciare di nuovo.`,
+  withdrawnRefundBody: "È stato revocato perché il pagamento del corso è stato restituito, quindi non attesta più nulla.",
   certReady: "Il tuo attestato è pronto.",
   certGenuine: "Questo attestato è autentico.",
   onRecord: (store, date) =>
@@ -1615,6 +1642,10 @@ const nl: CoursesWords = {
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
   endedPayment: "Is het afgelopen omdat een betaling mislukte, en niet omdat je hebt opgezegd? Je kaart bijwerken kan het terugbrengen: ",
   manageMembership: "beheer je lidmaatschap",
+  accessUnknownTitle: "We konden je toegang nu niet controleren",
+  accessUnknownBody:
+    "Je aankoop kon op dit moment niet worden bevestigd bij de betaaldienst. Er is niets veranderd en je voortgang blijft bewaard. Probeer het over een minuut opnieuw.",
+  accessUnknownAgain: "Mijn toegang tot deze cursus opnieuw controleren",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
   progressUnknown: "We konden je voortgang op dit moment niet controleren. Al je lessen staan er nog. Laad de pagina opnieuw om het nog eens te proberen.",
@@ -1809,6 +1840,7 @@ const nl: CoursesWords = {
   withdrawnOn: (date) => `Dit certificaat is ingetrokken op ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} heeft het ingetrokken, dus het bevestigt niets meer. Is het van jou, dan kun je het via de cursuspagina opnieuw laten uitreiken.`,
+  withdrawnRefundBody: "Het is ingetrokken omdat de betaling voor de cursus is teruggegeven, dus het bevestigt niets meer.",
   certReady: "Je certificaat is klaar.",
   certGenuine: "Dit certificaat is echt.",
   onRecord: (store, date) =>
@@ -1919,6 +1951,10 @@ const pt: CoursesWords = {
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",
   endedPayment: "Terminou porque um pagamento falhou, e não porque a cancelou? Atualizar o cartão pode reativá-la: ",
   manageMembership: "gerir a sua subscrição",
+  accessUnknownTitle: "Não foi possível verificar o seu acesso agora",
+  accessUnknownBody:
+    "Não foi possível confirmar a sua compra junto do serviço de pagamentos neste momento. Nada foi alterado e o seu progresso está guardado. Tente novamente dentro de um minuto.",
+  accessUnknownAgain: "Verificar novamente o meu acesso a este curso",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
   progressUnknown: "Não foi possível verificar o seu progresso agora. Todas as suas aulas continuam aqui. Recarregue a página para tentar de novo.",
@@ -2113,6 +2149,7 @@ const pt: CoursesWords = {
   withdrawnOn: (date) => `Este certificado foi retirado a ${date}.`,
   withdrawnBody: (creator) =>
     `${creator} retirou-o, por isso já não certifica nada. Se for seu, pode voltar a emiti-lo na página do curso.`,
+  withdrawnRefundBody: "Foi retirado porque o pagamento do curso foi devolvido, por isso já não certifica nada.",
   certReady: "O seu certificado está pronto.",
   certGenuine: "Este certificado é autêntico.",
   onRecord: (store, date) =>

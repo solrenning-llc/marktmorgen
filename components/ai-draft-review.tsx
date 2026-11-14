@@ -8,16 +8,26 @@ import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, reviewDone } from "@/lib/ai-draft-revi
  * writing help fills in (756 [STN3], unit 1). The badge is words, not a color;
  * each check is a real checkbox in a 44 px row, grouped under a legend, so it
  * works by keyboard and is read by a screen reader. The form that saves finds
- * the first one left by `data-ai-review`.
+ * the first one left by `data-ai-review`. `act` is what waits on the checks:
+ * saving (the default) or copying a draft that is never saved here
+ * (components/next-action-draft.tsx).
  */
-export function AiDraftReview({ checks, onToggle }: { checks: readonly boolean[]; onToggle: (index: number, ticked: boolean) => void }) {
+export function AiDraftReview({
+  checks,
+  onToggle,
+  act = "save",
+}: {
+  checks: readonly boolean[];
+  onToggle: (index: number, ticked: boolean) => void;
+  act?: "save" | "copy";
+}) {
   const base = useId();
   const done = reviewDone(checks);
   return (
     <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review>
       <legend className="flex flex-wrap items-center gap-2 px-1 text-sm font-semibold text-ink">
         <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{AI_DRAFT_BADGE}</span>
-        <span>Before you save it, check:</span>
+        <span>{`Before you ${act} it, check:`}</span>
       </legend>
       <ul className="mt-1 space-y-1">
         {AI_DRAFT_CHECKS.map((check, index) => (
@@ -36,7 +46,7 @@ export function AiDraftReview({ checks, onToggle }: { checks: readonly boolean[]
         ))}
       </ul>
       <p className="mt-1 text-sm text-ink-soft" role="status">
-        {done ? "Checked. You can save it." : "Check each box once you have read the draft."}
+        {done ? `Checked. You can ${act} it.` : "Check each box once you have read the draft."}
       </p>
     </fieldset>
   );

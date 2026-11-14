@@ -189,6 +189,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/mail": row("email", execute, "Drafts are prepared; sending, scheduling and imports to the list are confirmed one at a time."),
   "POST store/mail/picture": row("email", draft),
   "POST store/meta-ads": row("numbers", draft, "Which connected Meta ad account the numbers read; the ads themselves are 632 [AA2]."),
+  "POST store/next-actions/draft": row("email", draft, "Writes one email for the creator to change and send themselves; nothing is saved or sent."),
   "POST store/next-offer": row("offers", draft),
   "POST store/no-count": row("numbers", never(BROWSER)),
   "POST store/notes": row("numbers", draft),

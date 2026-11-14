@@ -149,6 +149,7 @@ import { TodayPanel } from "@/components/today-panel";
 import { NextActionsPanel } from "@/components/next-actions-panel";
 import { nextActions } from "@/lib/next-actions-rules";
 import { nextFactsOf } from "@/lib/next-actions-read";
+import { DRAFTABLE, NEXT_DRAFT_JOBS } from "@/lib/next-action-draft-rules";
 import { bookingCounts, salesCounts, todayView, type TodayCounts, type TodayId } from "@/lib/today-rules";
 import { LinkEditor } from "@/components/link-editor";
 import { JoinBoxEditor } from "@/components/join-box-editor";
@@ -1462,7 +1463,8 @@ export default async function StudioPage({
             ) : null}
             {role === "owner" ? <StudioStart steps={startSteps} activation={activationTiming(store)} launchChecklist={funnelLaunchChecklist(store.name, visibleCount(store) > 0, startSteps.map(step => ({title: step.title, open: step.done, product: step.key === "product" || step.key === "publish", free: false})), startSteps.filter(step => !step.done).map(step => ({title: step.title, detail: step.unknown ? START_STEP_UNKNOWN : step.hint})), "store")} /> : null}
             {todayScreen ? <TodayPanel view={todayScreen} hrefs={todayHrefs} at={today} /> : null}
-            {nextScreen ? <NextActionsPanel view={nextScreen} /> : null}
+            {/* A draft written with AI only when asked (unit 3): for a role that writes drafts, on a store with the writing help. */}
+            {nextScreen ? <NextActionsPanel view={nextScreen} draftable={ai.on && may("draft") ? DRAFTABLE : []} jobs={NEXT_DRAFT_JOBS} /> : null}
             {role === "owner" && !store.suspended ? <PathStudioReminder store={store} role={role} /> : null}
             {/* "How do I…?": answered from the help center's own answers (lib/help-ask.ts). */}
             {ai.on ? <StudioHelp left={ai.left} /> : null}

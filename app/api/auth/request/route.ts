@@ -10,7 +10,7 @@ import {
   sendSignInLink,
   unusedSignInRequest,
 } from "@/lib/auth";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
 import { serviceMailKnownUnavailable } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
@@ -58,10 +58,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientAddress(request);
 
   try {
     // Past the limit is "too many tries"; a count that could not be read is our side's trouble, said as such

@@ -19,12 +19,13 @@ import { headers } from "next/headers";
 import { after } from "next/server";
 import type { Store } from "@/lib/store";
 import { recordVisit } from "@/lib/traffic";
+import { forwardedAddress } from "@/lib/request-guard";
 
 export async function countDay(store: Store): Promise<void> {
   try {
     // Read before the page is done: a page cannot read its request afterwards.
     const from = await headers();
-    const ip = from.get("x-forwarded-for")?.split(",")[0]?.trim() || from.get("x-real-ip") || "";
+    const ip = forwardedAddress(from);
     if (!ip) return;
     after(() => recordVisit(store, ip));
   } catch (error) {

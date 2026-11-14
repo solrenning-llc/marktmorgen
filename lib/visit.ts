@@ -14,13 +14,10 @@ import { requestHost } from "@/lib/request-origin";
 import { maybeBusyAlert } from "@/lib/stats-report";
 import { readTeamMembers } from "@/lib/team";
 import { NO_COUNT_COOKIE, isMarkedDevice } from "@/lib/no-count";
+import { clientAddress } from "@/lib/request-guard";
 
 export function clientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  return clientAddress(request);
 }
 
 /** What is read off a request to know who is asking: a route's request, or a page's cookies and headers. */

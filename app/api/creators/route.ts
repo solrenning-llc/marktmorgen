@@ -8,7 +8,7 @@ import {
 } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
 const RATE_LIMIT = 5;
@@ -108,10 +108,7 @@ export async function POST(request: NextRequest) {
 
   if (!isRedisConfigured()) return fail(503, "unavailable");
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientAddress(request);
   const rateKey = `nl:rl:creators:${await hashIp(ip)}`;
 
   const answer: CreatorAnswer & {

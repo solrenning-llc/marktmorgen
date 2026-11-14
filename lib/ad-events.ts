@@ -55,6 +55,7 @@
  */
 import { keepFor } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { forwardedAddress } from "@/lib/request-guard";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
@@ -605,7 +606,7 @@ type Requested = { headers: Headers; cookies: { get(name: string): { value: stri
 
 /** The address a request came from, as the platform in front of us passed it on. */
 function addressOf(request: Requested): string {
-  return (request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "").slice(0, 60);
+  return forwardedAddress(request.headers).slice(0, 60);
 }
 
 /** The page a request was sent from, without its query, which can name an order. */

@@ -7,7 +7,7 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { countHit, isStorePeople } from "@/lib/visit";
 import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 
 const MAX_BODY_BYTES = 2_000;
@@ -82,10 +82,7 @@ export async function POST(request: NextRequest) {
   // learns nothing, and no email goes anywhere.
   if (honeypot.trim()) return away(`${page}&status=sent`);
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientAddress(request);
 
   try {
     // Sent by an affiliate, where the store pays per free product claimed: credited only once the emailed link is used.

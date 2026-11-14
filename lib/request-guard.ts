@@ -101,13 +101,18 @@ export async function limited(request: Request, maxBytes: number): Promise<Reque
   return new Request(request.url, { method: request.method, headers: request.headers, body: size ? bytes : null });
 }
 
+/**
+ * The address the platform in front of us reports a request came from: the first value of X-Forwarded-For, else
+ * X-Real-IP, else "". The one place this rule is written (tests/client-address-one-place.test.ts): it is only safe
+ * because Vercel overwrites X-Forwarded-For, so a proxy put in front of it changes this function and nothing else.
+ */
+export function forwardedAddress(headers: { get(name: string): string | null }): string {
+  return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip") || "";
+}
+
 /** The address the request came from, as the platform in front of us reports it. */
 export function clientAddress(request: HeaderSource): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown"
-  );
+  return forwardedAddress(request.headers) || "unknown";
 }
 
 async function sha256Hex(value: string): Promise<string> {

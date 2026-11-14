@@ -3,7 +3,7 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { requestOrdersLink } from "@/lib/buyer-orders";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -62,10 +62,7 @@ export async function POST(request: NextRequest) {
   // A field no person can see. Whatever filled it in is told it worked.
   if (honeypot.trim()) return away(`${page}?status=sent`);
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientAddress(request);
 
   try {
     const result = await requestOrdersLink({ store, email, ip, origin: linkOrigin(request, store) });

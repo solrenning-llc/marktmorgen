@@ -70,9 +70,11 @@ export type Contact = {
   unsubAt: string;
   /**
    * Why, when it was not their own unsubscribe: the address bounced for
-   * good, or they marked an email as spam. Absent when they left themselves.
+   * good, they marked an email as spam, or the email service refused the
+   * address itself when an email to the list was handed to it (lib/mail.ts
+   * sendTo). Absent when they left themselves.
    */
-  gone?: "bounced" | "complained";
+  gone?: "bounced" | "complained" | "refused";
   /** The token in their unsubscribe link, made the first time they are sent to. */
   t: string;
   /** Their name, when an import brought one (lib/imports.ts). "" when unknown. */
@@ -169,7 +171,7 @@ export function parseContact(raw: unknown): Contact | null {
       source: value.source === "free" || value.source === "buyer" || value.source === "import" ? value.source : "",
       unsub: value.unsub === true,
       unsubAt: typeof value.unsubAt === "string" ? value.unsubAt : "",
-      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained") ? { gone: value.gone } : {}),
+      ...(value.unsub === true && (value.gone === "bounced" || value.gone === "complained" || value.gone === "refused") ? { gone: value.gone } : {}),
       t: typeof value.t === "string" && UNSUB_TOKEN.test(value.t) ? value.t : "",
       // Contacts written before imports kept names and labels have neither.
       name: typeof value.name === "string" ? value.name.slice(0, MAX_CONTACT_NAME) : "",
@@ -862,13 +864,14 @@ export async function unsubscribe(token: string): Promise<{ listId: string; emai
 
 /**
  * Takes an address off a list because the sender said so: it bounced for
- * good, or its owner marked an email as spam. Counted with those who left,
- * and kept as firmly — an import never puts it back.
+ * good, its owner marked an email as spam, or the email service refused the
+ * address itself. Counted with those who left, and kept as firmly — an
+ * import never puts it back.
  *
  * True when this took somebody off who could be written to until now; false
  * when the list does not hold the address, or it had already left.
  */
-export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained"): Promise<boolean> {
+export async function stopWriting(listId: string, rawEmail: string, why: "bounced" | "complained" | "refused"): Promise<boolean> {
   if (!isRedisConfigured() || !listId) return false;
   const email = normaliseEmail(rawEmail);
   if (!email || email.length > MAX_EMAIL_LENGTH) return false;

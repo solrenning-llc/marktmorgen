@@ -2233,7 +2233,7 @@ export function PageEditor({
         <div className="min-w-0">
           {drafts.length === 0 ? (
             <div className="mt-6 rounded-2xl bg-paper p-5 ring-1 ring-line sm:p-6">
-              <p className="font-semibold text-ink">Start the page</p>
+              <h3 className="font-semibold text-ink">Start the page</h3>
               <p className="mt-1 text-sm text-ink-soft">
                 {site
                   ? "Add blocks one by one below: a headline at the top, then text, pictures, a video, questions, your products and a button."
@@ -2247,7 +2247,7 @@ export function PageEditor({
               )}
               {templates.length > 0 ? (
                 <div className="mt-6 border-t border-line pt-5">
-                  <p className="field-label">Or start from a template</p>
+                  <h3 className="field-label">Or start from a template</h3>
                   <p className="text-xs text-ink-soft">
                     A template is an order of blocks with their headings, under your headline and a button: the words are yours to write, and a block you leave empty is not shown.
                   </p>
@@ -2256,7 +2256,7 @@ export function PageEditor({
                       const outline = templateOutline(t.id);
                       return (
                         <li key={t.id} className="flex flex-col rounded-2xl bg-white p-4 ring-1 ring-line">
-                          <p className="text-sm font-semibold text-ink">{t.label}</p>
+                          <h4 className="text-sm font-semibold text-ink">{t.label}</h4>
                           <p className="mt-1 text-xs text-ink-soft">{t.hint}</p>
                           <ol className="mt-3 flex flex-wrap gap-1.5" aria-label={`The blocks of the ${t.label} template, in order`}>
                             {outline.map((kind, i) => (

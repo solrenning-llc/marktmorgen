@@ -33,7 +33,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -220,17 +220,19 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept; with
+ * `origin` too, the entry may carry that origin's letter, as recordEnrollment writes it since origins are kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number, origin?: EnrollmentOrigin): Promise<void> {
   if (!isRedisConfigured()) return;
-  const replies = repliesFor(
-    await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
-      ["DEL", paidCacheKey(store, email)],
-    ]),
-    2,
-  );
+  const ledger = ledgerKey(store, email);
+  // As this order wrote it (recordEnrollment): its start alone, as written before origins were kept, or its start and
+  // its origin's letter. Each is one HDEL_IF_EQUAL, so at most one matches and an entry another sale wrote is kept.
+  const began = startedAt === undefined ? null : String(Math.floor(startedAt));
+  const written = began === null ? [] : [began, ...(origin ? [`${began}:${ORIGIN_LETTER[origin]}`] : [])];
+  const takes: (string | number)[][] = began === null ? [["HDEL", ledger, productId]] : written.map((value) => ["EVAL", HDEL_IF_EQUAL, 1, ledger, productId, value]);
+  const replies = repliesFor(await redisPipeline([...takes, ["DEL", paidCacheKey(store, email)]]), takes.length + 1);
   if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
@@ -701,7 +703,10 @@ export type CourseAccess =
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
   | { state: "ended"; learner: Learner }
-  /** Stripe could not be read just now: neither open nor shut, said as such, with a way to try again. */
+  /**
+   * Not open, because whether it opens could not be checked just now (Stripe's answer could not be had whole,
+   * CX-123 rule 24): said as such, with a way to load the page again, never as not bought (lib/course-door.ts).
+   */
   | { state: "unknown"; learner: Learner };
 
 /** Whether this browser may take this course, and from when. */
@@ -763,6 +768,16 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
   const row = studentTimes(reply[0]);
   if (!row) throw new UnknownReplyError("a student's course dates");
   return { since: row.s, lastSeen: row.l };
+}
+
+/**
+ * Whether `raw` is the row the course keeps for `email`: JSON with both times as whole seconds and that address. Any
+ * other value is not this learner's record, read as unknown by whoever asks (lib/student-bulk.ts accessStates; Codex G
+ * on #3035, CX-123 rule 24), never as a student.
+ */
+export function isStudentRowOf(raw: unknown, email: string): boolean {
+  const row = studentTimes(raw);
+  return row !== null && typeof row.e === "string" && normaliseEmail(row.e) === normaliseEmail(email);
 }
 
 /** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */

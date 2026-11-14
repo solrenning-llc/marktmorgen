@@ -249,17 +249,20 @@ async function main(): Promise<void> {
   is("the address that bought nothing is emailed nothing", mailedTo("nob@example.com"), 0);
 
   part("The course page says it, in every store language, and sells nothing to the member");
+  // The page draws the unknown state with main's note (lib/course-door.ts, components/access-unchecked-note.tsx), which
+  // took the place of this branch's own one in the merge of main: one note, the same three sentences in each language.
   for (const code of LANGUAGE_CODES) {
     const w = coursesWords(code);
-    is(`${code}: a title, a body and a way to try again`, [w.accessUnknownTitle, w.accessUnknownBody, w.accessUnknownAgain].every((s) => typeof s === "string" && s.length > 0), true);
+    is(`${code}: a title, a body and a way to try again`, [w.uncheckedTitle, w.uncheckedBody, w.uncheckedRetry].every((s) => typeof s === "string" && s.length > 0), true);
   }
   const page = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-  is("the page draws the unknown state", page.includes('access.state === "unknown"'), true);
-  is("the page offers no checkout on it", /\) : access\.state === "unknown" \? null : \(/.test(page), true);
-  is("a device's lesson places are not forgotten on it", page.includes('access.state !== "open" && access.state !== "unknown"'), true);
-  // The way to try again stands alone on its line, not inside a sentence, so it is a 44 px target (WCAG 2.5.5, AX274).
-  const tryAgain = /<Link href=\{base\} className="([^"]*)"[^>]*>\s*\{w\.accessUnknownAgain\}/.exec(page)?.[1] ?? "";
-  is("the way to try again is a 44 px target", ["inline-flex", "min-h-11", "items-center"].every((name) => tryAgain.split(/\s+/).includes(name)), true);
+  const door = readFileSync("lib/course-door.ts", "utf8");
+  const note = readFileSync("components/access-unchecked-note.tsx", "utf8");
+  is("the unknown state opens the 'could not check' door", /if \(access\.state === "unknown"\) return "unchecked";/.test(door), true);
+  is("the page draws the unknown state, and offers no checkout on it", /door === "unchecked" \? \(\s*<AccessUncheckedNote /.test(page) && /\{door === "checkout" \?/.test(page), true);
+  is("a device's lesson places are not forgotten on it", /access\.state !== "open" && access\.state !== "unknown"/.test(door) && /const forgetKey = forgetsOnDevice\(access\)/.test(page), true);
+  // The way to try again is a button-styled link standing alone, so it is a 44 px target (WCAG 2.5.5, AX274).
+  is("the way to try again is a link of its own, said as a status", /role="status"/.test(note) && /<a href=\{href\} className="btn st-btn/.test(note), true);
 
   done();
 }

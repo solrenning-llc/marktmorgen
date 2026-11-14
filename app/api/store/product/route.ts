@@ -281,7 +281,15 @@ export async function POST(request: NextRequest) {
     } else if (action === "remove") {
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
-      if ((await waitingCount(guarded.store, id)) > 0) {
+      // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
+      let waiting: number;
+      try {
+        waiting = await waitingCount(guarded.store, id);
+      } catch (error) {
+        console.error("could not read a product's pre-orders before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      if (waiting > 0) {
         return Response.json({ ok: false, error: "preorders" }, { status: 409 });
       }
       // The product comes back as it was, so the storage its files used can

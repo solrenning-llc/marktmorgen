@@ -88,12 +88,12 @@ async function main(): Promise<void> {
   part("A payment plan, by its first invoice's payment");
   const plan = { mode: "subscription", invoice: "in_TestPlan000001", metadata: { kind: "plan" } };
   invoices.in_TestPlan000001 = { id: "in_TestPlan000001", payment_intent: "pi_TestPlanFirst01" };
-  paymentIntents.pi_TestPlanFirst01 = { object: "payment_intent", latest_charge: charge(2000, 2000) };
+  paymentIntents.pi_TestPlanFirst01 = { id: "pi_TestPlanFirst01", object: "payment_intent", latest_charge: charge(2000, 2000) };
   is("older API versions: the invoice names its payment", await purchaseRefunded(ACCOUNT, plan), true);
   invoices.in_TestPlan000001 = { id: "in_TestPlan000001" };
   invoicePayments.in_TestPlan000001 = [{ status: "paid", payment: { payment_intent: "pi_TestPlanFirst01" } }];
   is("newer ones: the invoice's payments are listed", await purchaseRefunded(ACCOUNT, plan), true);
-  paymentIntents.pi_TestPlanFirst01 = { object: "payment_intent", latest_charge: charge(2000, 500) };
+  paymentIntents.pi_TestPlanFirst01 = { id: "pi_TestPlanFirst01", object: "payment_intent", latest_charge: charge(2000, 500) };
   is("partly refunded: kept", await purchaseRefunded(ACCOUNT, plan), false);
   is("a membership is not judged by this rule", await purchaseRefunded(ACCOUNT, { ...plan, metadata: {} }), false);
   is("no account to ask: not refunded", await purchaseRefunded(null, plan), false);

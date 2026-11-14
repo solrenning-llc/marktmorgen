@@ -42,3 +42,6 @@ next-env.d.ts
 
 .vercel
 zapier/node_modules/
+
+# Compiled Python, from running the scripts/*.py checks locally (Claude 6 on #3426, L1).
+__pycache__/

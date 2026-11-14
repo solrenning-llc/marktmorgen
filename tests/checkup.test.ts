@@ -52,7 +52,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.hostname === "api.stripe.com") {
     if (world.stripe === "down") return new Response("{}", { status: 500 });
     if (world.stripe === "slow") return new Promise<Response>(() => {});
-    return new Response(JSON.stringify({ configuration: { merchant: { capabilities: { card_payments: { status: world.stripe === "on" ? "active" : "inactive" } } } }, requirements: { summary: { minimum_deadline: { status: "eventually_due" } } } }), { status: 200 });
+    return new Response(JSON.stringify({ configuration: { merchant: { capabilities: { card_payments: { status: world.stripe === "on" ? "active" : "restricted" } } } }, requirements: { summary: { minimum_deadline: { status: "eventually_due" } } } }), { status: 200 });
   }
   if (url.hostname === "api.vercel.com") {
     if (/^\/v9\/projects\/[^/]+$/.test(url.pathname)) return new Response(JSON.stringify(world.self === 200 ? { id: "prj_1" } : { error: { code: "not_found" } }), { status: world.self });
@@ -186,7 +186,7 @@ async function main(): Promise<void> {
   part("The page");
   const page = read("app/studio/checkup/page.tsx");
   is("read with the settings permission, the role's own permissions passed on", page.includes('studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "settings")') && page.includes("runCheckup(store, (permission) => can(view.role, permission), checkedAt, undefined, isBillingConfigured())"), true);
-  is("where you are is shown", page.includes('<nav aria-label="Breadcrumb"') && page.includes('<li aria-current="page">'), true);
+  is("where you are is shown, by the studio's shared trail", page.includes('<StudioTrail store={store} here="Something not working?" />'), true);
   is("the page changes nothing", /fetch\(|method: "POST"|<form/.test(page), false);
   world = { ...world, stripe: "off" };
   const shown = await run(with_({ renewalUnpaidSince: 1 }));

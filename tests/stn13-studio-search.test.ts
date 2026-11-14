@@ -157,6 +157,12 @@ async function main(): Promise<void> {
   is("no video in the top bar", ["autoPlay", "<video", "<iframe"].some((piece) => header.includes(piece)), false);
   const terms = readFileSync("app/terms/page.tsx", "utf8");
   is("the Terms say what a search counts as", terms.includes("STUDIO_SEARCH_UNITS") && terms.includes("a search in the studio counts as"), true);
+  // JSX drops the line break between a line of text and an expression on the next line, so "counts as" followed by
+  // {STUDIO_SEARCH_UNITS} on its own line renders "counts as2" (Claude 7's quality review of #3450, MEDIUM). Every line of
+  // the Terms that ends in a word and is followed by a line starting with a {FIGURE} must write the space: {" "}.
+  const termLines = terms.split("\n");
+  const glued = termLines.flatMap((line, i) => (/[A-Za-z;,]$/.test(line.trimEnd()) && /^\s*\{[A-Z_][A-Z0-9_]*\}/.test(termLines[i + 1] ?? "") ? [i + 1] : []));
+  is("no figure in the Terms is glued to the word before it", glued, []);
 
   part("What one search may cost");
   // The search's own work at its worst: the studio request's commands, one HMGET of every card (a card is at most

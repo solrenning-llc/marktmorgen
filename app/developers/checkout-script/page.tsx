@@ -41,7 +41,7 @@ export default async function CheckoutScriptPage() {
     withScript: false,
   });
   return (
-    <LegalPage title="Checkout script" eyebrow="For your own website" effective={null} legalNav={false} lastUpdated="October 17, 2026">
+    <LegalPage title="Checkout script" eyebrow="For your own website" effective={null} legalNav={false} lastUpdated="October 17, 2026" trail={[{ label: "Developers", href: "/developers" }]}>
       <p>
         Put a link on any page of your own site, on WordPress, Webflow, Squarespace, Ghost or plain HTML, and it opens your product&apos;s card, or
         your email list&apos;s sign-up form, over that page. Your buyer pays on Stripe&apos;s checkout page, on your own connected Stripe account:

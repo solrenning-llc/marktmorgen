@@ -2765,6 +2765,7 @@ Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem 
    - Custo e margem: Calcular postagem/renovação/token/filas/franquia e teto antes de fornecedor; nenhuma solicitação de aprovação.
 
 41. **[G3] Documentar Google Business Profile e preparar resposta a avaliações, desligada até aprovação.**
+   - Assumido pelo Claude 3 (TODOS-112), 11/11/2026 16h20 Fortaleza: estudo em docs/google-business-profile-study-2026-11-11.md (fontes oficiais lidas no dia; aprovação depende de perfil verificado da empresa há 60+ dias e de preço oficial, que não está publicado; recomendação em "Depende do dono"). Estado: testado num PR (documento); nenhum código, conta ou pedido de acesso.
    - Pedido: P2 G3; datas/horas e grau de certeza em Proveniência.
    - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 63/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.

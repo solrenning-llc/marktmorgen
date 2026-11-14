@@ -51,6 +51,7 @@ import { addressHash, grantImported, importedKey } from "@/lib/imported-purchase
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
 import { refundRowKnown } from "@/lib/refunds";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -147,8 +148,27 @@ export async function readGroup(id: string): Promise<Group | null> {
   }
 }
 
-async function saveGroup(group: Group, seconds: number): Promise<void> {
-  await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]);
+/**
+ * A purchase's record for settling it, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no purchase", so a paid checkout is
+ * never said as having nothing to settle because Redis answered in another shape.
+ */
+async function readGroupExactly(id: string): Promise<Group | null> {
+  if (!GROUP_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", groupKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a purchase for several's record");
+  if (typeof replies[0] !== "string") return null;
+  try {
+    const g = JSON.parse(replies[0]) as Group;
+    return g && g.id === id && Number.isInteger(g.people) ? g : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Writes a purchase down; true only when Redis answered the write in its exact shape ("OK"). */
+async function saveGroup(group: Group, seconds: number): Promise<boolean> {
+  return repliesFor(await redisPipeline([["SET", groupKey(group.id), JSON.stringify(group), "EX", seconds]]), 1)?.[0] === "OK";
 }
 
 /** A paid purchase of this store's that still hands out places; null for anything else. */
@@ -182,7 +202,10 @@ export async function startGroup(store: Store, product: Listing, people: unknown
   if (count === null) return { ok: false, reason: "people" };
   if (!payable(chosen.option ? chosen.option.priceCents : product.priceCents, count)) return { ok: false, reason: "amount" };
   const group: Group = { id: newGroupId(), s: store.statsId, p: product.id, ...(chosen.option ? { o: chosen.option.id } : {}), people: count, at: now() };
-  await saveGroup(group, GROUP_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a purchase paid for with no record never hands out a place. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGroup(group, GROUP_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, group };
 }
 
@@ -224,11 +247,33 @@ export async function settleGroup(input: {
 }): Promise<SettleOutcome> {
   const { store, session, product } = input;
   const id = session.metadata?.group ?? "";
-  const group = await readGroup(id);
+  const group = await readGroupExactly(id);
   if (!group || group.s !== store.statsId || group.p !== product.id) return "skip";
-  if (group.paid) return "already";
-  const [claimed] = await redisPipeline([["SET", `${groupKey(id)}:settling`, "1", "NX", "EX", 300]]);
-  if (claimed === null) return "already";
+  // Paid already. The receipt with the link that hands out the places comes after the write that marks it paid, so
+  // a run whose reply to that write came back in another shape threw before sending it (#2872 review M1): a later run
+  // with no "sent" mark (the caller checked) still sends it, once (its own idempotency key), while that is recent.
+  // Taken back by a refund, or paid longer ago than a run is retried, there is nothing to send.
+  if (group.paid && (group.revoked || now() - group.paid >= RECEIPT_WITHIN_SECONDS)) return "already";
+  const settling = `${groupKey(id)}:settling`;
+  // Claimed with this run's own value and read exactly (C4-3000): an answer in another shape is read back, never taken
+  // as ours, and the mark is let go only while it still holds this run's value (lib/claim-mark.ts).
+  const mark = claimValue();
+  const claimed = await claimMark(settling, 300, mark);
+  if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
+  if (claimed === "taken") {
+    // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
+    // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
+    // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
+    if ((await readGroupExactly(id))?.paid) return "already";
+    throw new Error("another run is settling this purchase for several right now");
+  }
+  // The mark is kept, not let go, once the purchase is paid: it runs out by itself, after the caller has kept its
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and paid and says "already" instead of sending and
+  // confirming a second time (#2872 review M1).
+  if (group.paid) {
+    await sendPaidReceipt(input, group);
+    return "settled";
+  }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   // Stripe gives the payment as its id, or whole when the caller asked for it.
@@ -239,17 +284,37 @@ export async function settleGroup(input: {
   // The hour its checkout was admitted in, which held room for every place for a day (takePlace).
   const admittedHour = Number(session.metadata?.[ADMITTED_FIELD] ?? "");
   const paid: Group = { ...group, session: sessionId, pi, paid: now(), items: items.length ? items : null, ...(Number.isSafeInteger(admittedHour) && admittedHour > 0 ? { h: admittedHour } : {}) };
-  await saveGroup(paid, GROUP_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(group.s), "1"],
-    ["DEL", `${groupKey(id)}:settling`],
-  ]);
+  // What a refund looks up (the payment's purchase, and that this store sold one) is written first and the purchase
+  // marked paid last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of
+  // the settling mark and throws, so confirmGroup keeps no "sent" mark and the next run does it again, never
+  // "already" on a purchase whose payment a refund could not find.
+  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), group.id, "EX", GROUP_KEPT_SECONDS]] : []), ["SET", anyKey(group.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's payment record");
+  }
+  if (!(await saveGroup(paid, GROUP_KEPT_SECONDS))) {
+    await releaseMark(settling, mark);
+    throw new UnknownReplyError("a paid purchase for several's record");
+  }
+  await sendPaidReceipt(input, paid);
+  return "settled";
+}
 
-  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${group.id}` }).catch((error) =>
+/**
+ * How long after a purchase was paid a run still sends its receipt when the caller kept no "sent" mark: the window
+ * the checkout sweep confirms in (lib/purchase-email.ts CONFIRM_WITHIN_SECONDS, one day), inside the receipt's own
+ * idempotency, so a late run never sends it a second time.
+ */
+const RECEIPT_WITHIN_SECONDS = 24 * 60 * 60;
+
+/** The buyer's receipt for a paid purchase, with the link that hands out its places, under its own idempotency key. */
+async function sendPaidReceipt(input: Parameters<typeof settleGroup>[0], paid: Group): Promise<void> {
+  const { store } = input;
+  await sendReceipt({ ...input, group: paid, lead: givingWords(store.language).thanksReceipt(store.name), idempotencyKey: `nimbus-group-receipt:${paid.id}` }).catch((error) =>
     console.error("a receipt for several people failed", error),
   );
-  return "settled";
 }
 
 /** The buyer's receipt, with the link that hands out the places. False when it has nobody to go to or was not sent. */
@@ -551,7 +616,7 @@ export async function takePlace(input: {
   if (lock === null) throw new Error("this place's link is being opened already");
   if (lock !== "OK") throw new UnknownReplyError("a place's opening");
   try {
-    return await takeOpened(input, group, email, who);
+    return await takeOpened(input, group, email, who, mine);
   } finally {
     // Compared and deleted in one step (Codex C2's proof on #2654): an open that outlived its 30 seconds never
     // takes off the hold of the open that came after it.
@@ -562,6 +627,25 @@ export async function takePlace(input: {
 /** Deletes a place's opening hold only while it is still this open's own (its random token). */
 const PLACE_RELEASE = `-- marktmorgen:group-place-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
+/**
+ * Takes a place's mark off only while it is still exactly the text an open wrote (KEYS[1] the marks, ARGV[1] the
+ * address, ARGV[2] that text): 1 when it did, 0 when it was gone or is another's now (Codex C2 on #2872).
+ */
+const PLACE_DROP = `-- marktmorgen:group-place-drop:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * Claims a place's mark for an open (KEYS[1] the marks, ARGV[1] the address, ARGV[2] the text read, ARGV[3] the open's
+ * own): 1 when it was still the text read and is now the open's, 0 when it changed or is gone.
+ */
+const PLACE_CLAIM = `-- marktmorgen:group-place-claim:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+  return 1
+end
 return 0`;
 
 /**
@@ -585,8 +669,12 @@ return 1`;
 /** How long one open of a link holds it, at most. */
 const OPENING_SECONDS = 30;
 
-/** A place's mark: who, when, the hour its order was admitted in, and whether all that follows the gift was done. */
-type Mark = Member & { h?: number; d?: 1 };
+/**
+ * A place's mark: who, when, the hour its order was admitted in, whether all that follows the gift was done, and the
+ * open that holds it (o, its random token; Codex C2 on #2872): a cleanup takes off only the mark its own open wrote.
+ */
+type Mark = Member & { h?: number; d?: 1; o?: string };
+const OPEN_TOKEN = /^[0-9a-f]{32}$/;
 
 /**
  * A place's mark as HGET answers it: null only for an explicit nil (no
@@ -607,16 +695,17 @@ function markOf(reply: unknown): Mark | null | undefined {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const fields = value as Record<string, unknown>;
-  if (Object.keys(fields).some((name) => !["e", "at", "h", "d"].includes(name))) return undefined;
-  const { e, at, h, d } = fields;
+  if (Object.keys(fields).some((name) => !["e", "at", "h", "d", "o"].includes(name))) return undefined;
+  const { e, at, h, d, o } = fields;
   if (typeof e !== "string" || !e || !Number.isSafeInteger(at) || (at as number) < 1) return undefined;
   if (h !== undefined && !Number.isSafeInteger(h)) return undefined;
   if (d !== undefined && d !== 1) return undefined;
-  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}) };
+  if (o !== undefined && !(typeof o === "string" && OPEN_TOKEN.test(o))) return undefined;
+  return { e, at: at as number, ...(h !== undefined ? { h: h as number } : {}), ...(d === 1 ? { d: 1 as const } : {}), ...(typeof o === "string" ? { o } : {}) };
 }
 
 /** The address's mark and what it was given, in their exact shape; throws when either is not. */
-async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; given: { job: string; at: number } | null }> {
+async function readPlace(group: Group, email: string, who: string): Promise<{ mark: Mark | null; raw: string | null; given: { job: string; at: number } | null }> {
   const read = repliesFor(
     await redisPipeline([
       ["HGET", membersKey(group.id), who],
@@ -627,13 +716,30 @@ async function readPlace(group: Group, email: string, who: string): Promise<{ ma
   const mark = read ? markOf(read[0]) : undefined;
   const given = read ? givenBy(read[1]) : undefined;
   if (mark === undefined || given === undefined) throw new UnknownReplyError("a place's address");
-  return { mark, given };
+  return { mark, raw: mark === null ? null : (read![0] as string), given };
 }
 
-async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string): Promise<Taken> {
+async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, email: string, who: string, token: string): Promise<Taken> {
   const { store } = input;
   const members = membersKey(group.id);
-  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}) });
+  // Every mark this open writes carries its own token (o), so nothing but this open's own cleanup takes it off.
+  const write = (mark: Mark) => JSON.stringify({ e: email, at: mark.at, ...(mark.h !== undefined ? { h: mark.h } : {}), ...(mark.d ? { d: 1 } : {}), o: token });
+  /** The mark as this open last wrote or claimed it: the only one its cleanup may take off. */
+  let own: string | null = null;
+  /**
+   * This address's mark taken off, so the place it was not given is free for another address and its link works
+   * again (Claude 6 on #2872, ported to the marks; CX-123 rules 24 and 30): Upstash runs each command on its own, so
+   * an HDEL whose call failed or whose answer is of another shape is sent once more alone. True only once Redis said
+   * the HDEL ran (0 or 1); false leaves the mark as it is, this address's own, picked up when its link is opened again.
+   */
+  // Compared and deleted in one step (PLACE_DROP; Codex C2's proposed HIGH on #2872): a cleanup that times out and
+  // lands later finds the mark another open has claimed or written since, and leaves it. Nothing written by this open
+  // (own null) is nothing to take off.
+  const dropOnce = () =>
+    own === null
+      ? Promise.resolve(true)
+      : redisPipeline([["EVAL", PLACE_DROP, 1, members, who, own]]).then((r) => bit(repliesFor(r, 1)?.[0]) !== null, () => false);
+  const letGo = async (): Promise<boolean> => (await dropOnce()) || (await dropOnce());
   /**
    * All that follows the gift, each part once: the doors that read gifts
    * opened for this store, a course dated from the day the place was taken,
@@ -658,7 +764,7 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   };
 
   // Read again now that this open holds the link.
-  const { mark, given } = await readPlace(group, email, who);
+  const { mark, raw, given } = await readPlace(group, email, who);
   if (given && given.job === groupJob(group.id)) {
     // Given by this purchase: "already" only once that is so. A gift whose
     // mark went missing has it written back, so it is counted among the
@@ -672,45 +778,61 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   }
   if (given) {
     // Given it some other way: no place is used for it, and a mark left by an
-    // open that stopped half way is taken off.
-    if (mark) await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    // open that stopped half way is taken off, only as it was read.
+    own = raw;
+    if (mark) await letGo();
     return { outcome: "has", email, group };
   }
 
   const at = now();
-  // The mark first, then how many marks there are: the places taken, this
-  // one among them. A mark already there is this address's own, from an open
-  // that stopped before handing anything over, and is picked up here.
+  // A mark already there is this address's own, from an open that stopped before handing anything over, and is
+  // picked up here: claimed for this open first (PLACE_CLAIM, compare-and-set from the text read), so a cleanup of the
+  // earlier open that lands late finds it changed and leaves it (Codex C2 on #2872). Changed since it was read, or an
+  // answer of another shape: nothing is handed out, and the link works again.
+  if (mark) {
+    const claimed = write(mark);
+    const swapped = await redisPipeline([["EVAL", PLACE_CLAIM, 1, members, who, raw as string, claimed]]).then((r) => repliesFor(r, 1)?.[0], () => undefined);
+    if (swapped !== 1) throw new UnknownReplyError("a place's mark, picked up");
+    own = claimed;
+  }
+  // The mark first, then how many marks there are: the places taken, this one among them.
+  const fresh = write({ e: email, at });
+  if (!mark) own = fresh;
   const wrote = await redisPipeline([
-    ...(mark ? [] : [["HSETNX", members, who, write({ e: email, at })] as (string | number)[]]),
+    ...(mark ? [] : [["HSETNX", members, who, fresh] as (string | number)[]]),
     ["HLEN", members],
   ]).then(
     (r) => repliesFor(r, mark ? 1 : 2),
     () => null,
   );
   const set = wrote && !mark ? bit(wrote[0]) : 1;
+  // Not written by this open (another open's mark landed first): it is not this open's to take off.
+  if (!mark && set === 0) own = null;
   const count = wrote ? countOf(wrote.at(-1)) : null;
   if (!wrote || set === null || count === null || count < 1) {
     // The answer never came or is of another shape: the mark may be written,
     // so nothing is given and no place is handed out. The mark is this
     // address's alone: taken off, or, if that is lost too, picked up when the
     // link is opened again. No other address's place moves.
-    await redisPipeline([["HDEL", members, who]]).catch(() => undefined);
+    await letGo();
     throw new UnknownReplyError("a place's count");
   }
-  const giveBack = () => redisPipeline([["HDEL", members, who]]);
   if (count > group.people) {
     // More marks than places: this one comes off. When that leaves a place
     // free (two pressed for the last one in the same instant and both came
     // off), it is not said that every place is taken: the open is said as
-    // not done, and the link works again.
-    const after = await redisPipeline([["HDEL", members, who], ["HLEN", members]]).then(
-      (r) => {
-        const two = repliesFor(r, 2);
-        return two ? countOf(two[1]) : null;
-      },
+    // not done, and the link works again. The marks are counted after the
+    // HDEL is known to have run (its answer 0 or 1): when it was not, it is
+    // sent once more alone and counted again (#2872, ported), so a mark it
+    // was never given a place for is not left counted beside the others.
+    const dropped = await redisPipeline(own === null ? [["HLEN", members]] : [["EVAL", PLACE_DROP, 1, members, who, own], ["HLEN", members]]).then(
+      (r) => (own === null ? [0, ...(repliesFor(r, 1) ?? [])] : repliesFor(r, 2)),
       () => null,
     );
+    let after = dropped && bit(dropped[0]) !== null ? countOf(dropped[1]) : null;
+    if (after === null && (await letGo())) {
+      after = await redisPipeline([["HLEN", members]]).then((r) => countOf(repliesFor(r, 1)?.[0]), () => null);
+    }
     if (after === null) throw new UnknownReplyError("a place given back");
     if (after < group.people) throw new Error("a place was given back in the same instant");
     return { outcome: "full", email, group };
@@ -723,7 +845,9 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   if (!held) {
     const admitted = await admitOrders(store, 1);
     if (!admitted.ok) {
-      await giveBack();
+      // Resting all the same: the mark, when even the second HDEL does not run, is this address's own and is picked up
+      // when its link is opened again.
+      await letGo();
       return { outcome: "resting", email, group };
     }
     hour = admitted.hour;
@@ -731,7 +855,24 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
   const placed: Mark = { e: email, at: mark?.at ?? at, ...(hour !== null ? { h: hour } : {}) };
   await redisPipeline([["EXPIRE", members, GROUP_KEPT_SECONDS]]);
 
-  const [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  // The grant answered in another shape or failed (#2872 review N1, ported): what is on the address is read below,
+  // exactly. Only when it is this purchase's own gift, which this open holds the link for, does it go on as taken;
+  // anything else keeps the mark and says "not done", since a grant whose call failed may still land (rule 24: never
+  // read as a free place).
+  let granted: boolean | null = null;
+  try {
+    [granted] = await grantImported(group.s, groupJob(group.id), [{ email, productId: group.p, items: group.items ?? null, option: group.o ?? null }], placed.at, store.sid);
+  } catch (error) {
+    console.error("a place's grant answered in another shape; read back", error);
+  }
+  if (granted === null) {
+    const one = repliesFor(await redisPipeline([["HGET", importedKey(group.s, email), group.p]]), 1);
+    const landed = one ? givenBy(one[0]) : undefined;
+    // Not landed, not known, or another's: the room this open was admitted with stays held until its day ends, never
+    // given back twice, and the mark stays for the next open of the link, which reads the address again.
+    if (!landed || landed.job !== groupJob(group.id)) throw new UnknownReplyError("a place's gift");
+    granted = true;
+  }
   if (!granted) {
     // This open's order is not counted by this open: the room it was
     // admitted with goes back (another open gives back its own, and an open
@@ -750,14 +891,17 @@ async function takeOpened(input: Parameters<typeof takePlace>[0], group: Group, 
       return { outcome: "already", email, group };
     }
     // It reached this address another way in the same instant.
-    await giveBack();
+    await letGo();
     return { outcome: "has", email, group };
   }
   // The hour goes on the mark once this open's gift is the one made, so an
   // open that stops before all that follows is done gives its room back when
   // the link is opened again; a mark without it leaves the room held until
   // its day ends, never given back twice.
-  if (hour !== null) await redisPipeline([["HSET", members, who, write(placed)]]);
+  if (hour !== null) {
+    await redisPipeline([["HSET", members, who, write(placed)]]);
+    own = write(placed);
+  }
   await finish(placed);
   return { outcome: "taken", email, group };
 }

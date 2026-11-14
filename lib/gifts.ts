@@ -150,6 +150,18 @@ export async function readGift(id: string): Promise<Gift | null> {
   return typeof raw === "string" ? parseKeptGift(raw, id) : null;
 }
 
+/**
+ * A gift's record for handing it over, read exactly (sweep A3; CX-123 rules 24 and 30): no record is null, and an
+ * answer that is not one reply of text or nothing is unknown and throws, never "no gift", so a paid checkout is
+ * never said as having nothing to hand over because Redis answered in another shape.
+ */
+async function readGiftExactly(id: string): Promise<Gift | null> {
+  if (!GIFT_ID.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1);
+  if (!replies || (replies[0] !== null && typeof replies[0] !== "string")) throw new UnknownReplyError("a gift's record");
+  return typeof replies[0] === "string" ? parseKeptGift(replies[0], id) : null;
+}
+
 /** A kept gift's record, when it is one and is this id's. */
 function parseKeptGift(raw: string, id: string): Gift | null {
   try {
@@ -211,7 +223,10 @@ export async function startGift(store: Store, product: Listing, input: GiftInput
     message: cleanText(input.message, MAX_GIFT_MESSAGE),
     at: now(),
   };
-  await saveGift(gift, GIFT_PENDING_SECONDS);
+  // Written down exactly before any checkout opens (sweep A3; CX-123 rules 24 and 30): a write answered in another
+  // shape may not have landed, and a gift paid for with no record is never handed over. Refused instead, as
+  // "unavailable" (the page says nothing was charged), and no checkout is made.
+  if (!(await saveGift(gift, GIFT_PENDING_SECONDS))) return { ok: false, reason: "unavailable" };
   return { ok: true, gift };
 }
 
@@ -249,11 +264,15 @@ export async function deliverGift(input: {
   recordStart: (email: string, courseProductId: string, startSeconds: number) => Promise<void>;
   ordersLink: (email: string) => Promise<string | null>;
 }): Promise<GiftOutcome> {
-  const { store, session, product, base } = input;
+  const { store, session, product } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGift(id);
+  const gift = await readGiftExactly(id);
   if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  // Given already. Its emails come after the write that marks it given, so a run whose reply to that write came back
+  // in another shape threw before sending them (#2872 review M1): a later run with no "sent" mark (the caller checked)
+  // still tells, once (the emails' own idempotency keys), while that is recent. Taken back by a refund, or given
+  // longer ago than a run is retried, there is nothing to tell.
+  if (gift.given && (gift.revoked || now() - gift.given >= TELL_WITHIN_SECONDS)) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
@@ -267,6 +286,13 @@ export async function deliverGift(input: {
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  // The mark is kept, not let go, once the gift is given: it runs out by itself, after the caller has kept its
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and given and says "already" instead of telling and
+  // confirming a second time (#2872 review M1).
+  if (gift.given) {
+    await tellGift(input, gift, gift.session ?? (typeof session.id === "string" ? session.id : ""));
+    return "given";
+  }
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -278,15 +304,35 @@ export async function deliverGift(input: {
   // A course, or a course inside a bundle, is dated from the day it was paid.
   for (const id of [gift.p, ...(grant.items ?? [])]) await input.recordStart(gift.to, id, created);
 
+  // What a refund looks up (the payment's gift, and that this store sold one) is written first and the gift marked
+  // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
+  // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
+  // whose payment a refund could not find.
+  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's payment record");
+  }
   const given: Gift = { ...gift, session: sessionId, pi, given: now() };
-  await saveGift(given, GIFT_KEPT_SECONDS);
-  await redisPipeline([
-    ...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS] as (string | number)[]] : []),
-    ["SET", anyKey(gift.s), "1"],
-  ]);
-  // Let go only while it still holds this run's value: one whose time ran out may be another run's now.
-  await releaseMark(mark, value);
+  if (!(await saveGift(given, GIFT_KEPT_SECONDS))) {
+    await releaseMark(mark, value);
+    throw new UnknownReplyError("a given gift's record");
+  }
+  await tellGift(input, gift, sessionId);
+  return "given";
+}
 
+/**
+ * How long after a gift was given a run still tells about it when the caller kept no "sent" mark: the window the
+ * checkout sweep confirms in (lib/purchase-email.ts CONFIRM_WITHIN_SECONDS, one day), inside the emails' own
+ * idempotency, so a late run never sends them a second time.
+ */
+const TELL_WITHIN_SECONDS = 24 * 60 * 60;
+
+/** Emails the recipient that a gift is theirs, and the buyer their receipt, each under its own idempotency key. */
+async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift, sessionId: string): Promise<void> {
+  const { store, session, product, base } = input;
   const g = givingWords(store.language);
   const who = gift.from || g.someone;
   // Given at one of the product's prices: named with it, as on the receipt.
@@ -336,7 +382,6 @@ export async function deliverGift(input: {
       idempotencyKey: `nimbus-gift-receipt:${gift.id}`,
     }).catch((error) => console.error("a gift receipt failed", error));
   }
-  return "given";
 }
 
 /** The buyer's name on a gift, for the recipient's list of purchases. */

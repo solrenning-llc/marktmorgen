@@ -108,3 +108,53 @@ test("replacement during graceful quit is refused without any signal",async()=>{
  f.options.run=(file,args)=>{const result=run(file,args);if(file.endsWith("osascript")&&args[1].startsWith("tell"))f.state.changed=true;return result;};
  await assert.rejects(resetVoiceOverRunner(f.options),/process changed/);assert.deepEqual(f.signals,[]);
 });
+
+// Job 130080843453 (macOS, 2026-11-10): the graceful quit ended the verified
+// reader between the next pgrep inventory and its ps identity read, so ps
+// exited 1 with no output and the preflight failed although VoiceOver stopped.
+function quitRace(f,{psReadsBeforeExit}){
+ const run=f.options.run;let quitRequested=false,inventoriesAfterQuit=0,psAfterQuit=0;
+ f.options.run=(file,args)=>{
+  if(file.endsWith("osascript")&&args[1].startsWith("tell")){f.requests.push(args[1]);quitRequested=true;return "";}
+  if(quitRequested&&file.endsWith("pgrep")){
+   // The exiting process is still listed once, then the inventory is empty.
+   if(++inventoriesAfterQuit===1)return "42\n";
+   throw Object.assign(Error("no process"),{status:1,signal:null});
+  }
+  if(quitRequested&&file.endsWith("ps")&&++psAfterQuit>psReadsBeforeExit)
+   throw Object.assign(Error("process disappeared"),{status:1,signal:null});
+  return run(file,args);
+ };
+}
+test("a verified reader ending after the graceful quit, before its ps read, is stopped evidence",async()=>{
+ for(let run=0;run<50;run++){
+  const f=fixture();quitRace(f,{psReadsBeforeExit:0});
+  assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:1,forcedProcesses:0});
+  assert.deepEqual(f.signals,[],"an exited reader is never signalled");
+ }
+});
+test("a verified reader ending between its identity read and SIGTERM receives no signal",async()=>{
+ for(let run=0;run<50;run++){
+  const f=fixture();quitRace(f,{psReadsBeforeExit:1});
+  assert.deepEqual(await resetVoiceOverRunner(f.options),{initialProcesses:1,forcedProcesses:0});
+  assert.deepEqual(f.signals,[]);
+ }
+});
+test("after the graceful quit, a pid that was never verified still refuses",async()=>{
+ const f=fixture(),run=f.options.run;let quitRequested=false;
+ f.options.run=(file,args)=>{
+  if(file.endsWith("osascript")&&args[1].startsWith("tell")){quitRequested=true;return "";}
+  if(quitRequested&&file.endsWith("pgrep"))return "43\n";
+  return run(file,args);
+ };
+ await assert.rejects(resetVoiceOverRunner(f.options),/process changed/);assert.deepEqual(f.signals,[]);
+});
+test("after the graceful quit, an unknown ps failure still fails closed",async()=>{
+ const f=fixture(),run=f.options.run;let quitRequested=false;
+ f.options.run=(file,args)=>{
+  if(file.endsWith("osascript")&&args[1].startsWith("tell")){quitRequested=true;return "";}
+  if(quitRequested&&file.endsWith("ps"))throw Object.assign(Error("ps unavailable"),{status:2,signal:null});
+  return run(file,args);
+ };
+ await assert.rejects(resetVoiceOverRunner(f.options),/ps unavailable/);assert.deepEqual(f.signals,[]);
+});

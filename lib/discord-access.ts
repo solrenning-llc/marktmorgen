@@ -81,7 +81,19 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     if (before && before !== user.id) old = await readMember(room, before);
     mine = await readMember(room, user.id);
     if (before && before !== user.id) {
-      for (const role of old?.r ?? []) await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account");
+      // A take that failed (a 429, a 5xx, no answer) leaves the earlier account its role: it is not forgotten and the
+      // join fails, so the earlier account stays in the register and the periodic check, and a later try takes it back.
+      const kept: string[] = [];
+      for (const role of old?.r ?? []) {
+        if ((await takeRole(server.id, before, role, "Marktmorgen: the buyer joined with another Discord account")) === "failed") kept.push(role);
+      }
+      if (kept.length) {
+        // Its record then lists only the roles Discord still gives it: one taken is not held any more, so the next
+        // check (rolesDiff(member.r, wanted)) gives it back while the buyer still holds it, and the failed one stays
+        // on the record to be taken later (#4087 review).
+        if (old) await keepMember(room, store.sid, before, { ...old, r: kept }, input.now);
+        return { ok: false, reason: "failed" };
+      }
       await forgetMember(room, store.sid, before, email);
     }
   } catch (error) {
@@ -104,7 +116,8 @@ export async function joinServer(input: { store: Store; email: string; accessTok
     }
   }
   const at = Math.floor((input.now ?? Date.now()) / 1000);
-  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given.filter((r) => wanted.includes(r)), at: mine?.at || at, checked: at }, input.now);
+  // A role no longer held whose take failed stays in `r`, as checkMember keeps it, so the next check takes it back.
+  await keepMember(room, store.sid, user.id, { e: email, n: user.name, p: held, r: given, at: mine?.at || at, checked: at }, input.now);
   return { ok: true, serverId: server.id, added: placed === "added", roles: wanted.length };
 }
 

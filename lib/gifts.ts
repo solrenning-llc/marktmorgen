@@ -412,6 +412,10 @@ export async function revokeRefundedGifts(
         // No record: nothing of this gift is held as a purchase any more (null). A record that does not read is
         // unknown, never "no items" (rule 30, Claude 4 on #2781).
         let items: string[] = [];
+        // Only what this gift gave (as lib/group-buy.ts and lib/preorders.ts): grantImported writes with HSETNX, so a
+        // gift to an address that already held the product another way (a PayPal purchase, a place, a pre-order, an
+        // import, an earlier gift) wrote nothing, and its refund must leave that other purchase and its course alone.
+        let ours = false;
         if (typeof given === "string") {
           let v: unknown;
           try {
@@ -420,8 +424,17 @@ export async function revokeRefundedGifts(
             v = undefined;
           }
           if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+          const job = (v as { job?: unknown }).job;
+          // A job that is not text is unknown, never "came another way": the row waits to be tried again.
+          if (typeof job !== "string") return false;
+          ours = job === `gift:${gift.id}`;
           const listed = (v as { items?: unknown }).items;
           items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+        }
+        if (typeof given === "string" && !ours) {
+          // Nothing of this gift is held: it is marked taken back, and what came another way stays.
+          if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) return false;
+          return markRead(sid, id);
         }
         // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
         // purchase, so the next run takes both away again; taking a course away twice is harmless.

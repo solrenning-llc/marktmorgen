@@ -498,18 +498,30 @@ export function parseSetup(raw: unknown): CallSetup | null {
   return typeof read === "string" ? null : read;
 }
 
+// One formatter per time zone, built on first use: building one costs far more than reading with it, and a
+// booking window reads thousands of slots (openSlots); the answers are the same.
+const zoneReaders = new Map<string, Intl.DateTimeFormat>();
+function zoneReader(tz: string): Intl.DateTimeFormat {
+  let reader = zoneReaders.get(tz);
+  if (!reader) {
+    reader = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+    });
+    zoneReaders.set(tz, reader);
+  }
+  return reader;
+}
+
 /** The parts of a date as a clock in `tz` shows them at instant `ms`. */
 export function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-  }).formatToParts(new Date(ms));
+  const parts = zoneReader(tz).formatToParts(new Date(ms));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {

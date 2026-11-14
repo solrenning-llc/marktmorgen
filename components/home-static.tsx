@@ -15,7 +15,7 @@ export function Faq({ questions = HOME_QUESTIONS }: { questions?: typeof HOME_QU
         </summary>
         <div className="pb-6 pr-12">
           <p className="text-ink-soft">{item.a}</p>
-          {item.links?.length?<ul className="mt-4 flex flex-wrap gap-x-5 gap-y-3">{item.links.map(link=><li key={link.href}><Link href={link.href} prefetch={false} className="link">{link.label}</Link></li>)}</ul>:null}
+          {item.links?.length?<ul className="mt-4 flex flex-wrap gap-x-5 gap-y-3">{item.links.map(link=><li key={link.href}><Link href={link.href} prefetch={false} className="link inline-flex min-h-11 min-w-11 items-center">{link.label}</Link></li>)}</ul>:null}
         </div>
       </details>
     </li>)}

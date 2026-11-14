@@ -61,7 +61,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { creatorAddress } from "@/lib/mail-from";
 import type { Listing, Store } from "@/lib/store";
 import { listingsNamed, readListing, recordListings } from "@/lib/catalog";
-import { recordEnrollment } from "@/lib/learn";
+import { noteBoughtAgain, recordEnrollment } from "@/lib/learn";
 import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preorders";
 import { speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
@@ -591,6 +591,14 @@ async function confirmOnce(
   const next = await nextOfferForEmail(store, sessionId, session.metadata ?? {}).catch(() => null);
   const letter = confirmationFor(store, session, Date.now() / 1000, await keysFor(store, session, listings), listings, await noteFor(store, session, listings), next);
   if (!letter) return "skip";
+  // A course in it bought again by a student whose row holds an earlier day: the drip job reads their start once, so
+  // the modules open again from this purchase are announced even if the course is not opened (Codex G on #3369).
+  // Noted before the email, whatever the email does; a note not known to have landed takes no mark, so this checkout
+  // is never kept as sent without it and the next pass notes it again (Codex G and Codex L on #3369).
+  const typed = session.customer_details?.email;
+  const buyer = typeof typed === "string" && typed ? typed : typeof session.customer_email === "string" ? session.customer_email : "";
+  const courseIds = listings.flatMap((p) => (p.course ? [p.course.id] : []));
+  if (buyer && courseIds.length && typeof session.created === "number" && !(await noteBoughtAgain(store, courseIds, buyer, session.created))) return "failed";
 
   const [claimed] = await redisPipeline([["SET", key, "sending", "NX", "EX", SENDING_MARK_SECONDS]]);
   if (claimed === null) return "already";

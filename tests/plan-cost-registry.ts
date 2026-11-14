@@ -117,6 +117,7 @@ import { PAGES_PER_VISIT, laterPageCost, visitCost } from "./traffic-cost";
 import { ASSISTANT_IN_PROGRESS_WAIT_MS, ASSISTANT_START_CUTOFF_MS, ASSISTANT_START_LIST_PAGES, ASSISTANT_START_STRIPE_CALLS, assistantMonthWorst } from "@/lib/store-assistant-rules";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
+import { DRIP_MONTH_UNITS_PER_STORE_EMAIL, DRIP_START_COMMANDS } from "@/lib/drip-start-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
 import type { ReadWork } from "@/lib/api-read-rules";
@@ -459,6 +460,19 @@ export function affiliateLoadRead(size: AffiliateLoadSize): number {
 /** What the listings a visitor's affiliate page reads add to the page itself (a later page, counted by isResting). */
 export function publicListingsRead(listings: number): number {
   return listings * PUBLIC_LISTING_BYTES * DB_BYTE + perMegabyte(listings * PUBLIC_LISTING_BYTES);
+}
+/**
+ * What one student's start costs a drip run at the most (lib/learn.ts, sendDripEmails), for a store of `courses`
+ * course products: the course page's own read (courseLedger), as a call waited on at 2 GB with its commands and
+ * counting (DRIP_START_COMMANDS, and for each course its listing read twice, whether the student was taken off it,
+ * and its entries in what is kept and written down, half a kilobyte each), every listing at the most a public
+ * listing weighs, and two calls to the creator's Stripe account, each with a whole page worked through. Taken
+ * as dripStartUnits(courses) units of the store's monthly figure for these reads before it is made, never from the
+ * store's public requests (lib/drip-start.ts, lib/drip-start-rules.ts; COST_LINES "drip-start-read"), each unit at
+ * most a later page's cost, held in tests/plan-cost-registry.test.ts.
+ */
+export function dripStartRead(courses: number): number {
+  return request("wait", DRIP_START_COMMANDS + 3 * courses + TAKE_COMMANDS, 16_384 + courses * 512) + publicListingsRead(2 * courses) + 2 * stripePage();
 }
 /**
  * What one drawing of a store's map costs at the most (lib/store-sitemap.ts):
@@ -1098,6 +1112,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+  },
+  {
+    id: "drip-start-read",
+    feature: "The daily course job's read of a drip student's start before a \"now open\" email: the course page's own read (courseLedger), so the email goes on the day the page opens the module (PR #3369; Claude 2's MEDIUM on it, 10 November 2026)",
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].email * DRIP_MONTH_UNITS_PER_STORE_EMAIL * laterPageCost(),
+    sources: [
+      { file: "lib/drip-start-rules.ts", names: ["DRIP_MONTH_UNITS_PER_STORE_EMAIL", "dripMonthUnits", "DRIP_START_UNITS", "DRIP_START_COURSES_PER_UNIT", "DRIP_START_COMMANDS"] },
+      { file: "lib/drip-start.ts", names: ["takeDripStartUnits", "poolPlace"] },
+      { file: "lib/learn.ts", names: ["takeDripStartUnits(store, units"] },
+    ],
+    basis: "The store's monthly figure for these reads (its email figure times DRIP_MONTH_UNITS_PER_STORE_EMAIL units), counted in its allowance window before each read and refused past it, each unit at most a later page's cost (dripStartRead, held in tests/plan-cost-registry.test.ts); it does not come back with each daily run.",
   },
   {
     id: "ai",
@@ -1747,6 +1772,9 @@ export function nonPayingWorst(): number {
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.
     + ["calendar-feed", "store-readings"].reduce((sum, id) => sum + creator(id), 0)
+    // The drip job's reads of its students' starts, at Store's figure, which is more than a trial's (lib/drip-start.ts:
+    // a store that pays nothing reads only with one of the month's places).
+    + creator("drip-start-read")
     // Its students' work and its community's pictures, kept for the trial and then to its closing day (lib/plan-closing.ts).
     + ((TRIAL_TASK_ROOM_BYTES + TRIAL_COMMUNITY_PICTURES * PICTURE_BYTES) / GB) * STORAGE_PER_GB * (1 + (CLOSING_DAYS + WARN_WEEK_DAYS) / 30)
     // Its data room, and what it keeps outside it at Store's figures, which are more than a trial's, for the trial and to its closing day

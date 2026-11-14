@@ -12,7 +12,8 @@
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts); nothing leaves.
  */
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { emailKey, sendDripEmails } from "@/lib/learn";
+import { emailKey, recordEnrollment, sendDripEmails } from "@/lib/learn";
+import { KIND } from "@/lib/catalog";
 import type { Course } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
@@ -69,13 +70,18 @@ async function main(): Promise<void> {
   await setSubscription("drip-claim@example.com", { customerId: "cus_DripClaim0001", subscriptionId: "sub_DripClaim0001", active: true, tier: "pro", cycle: "month", trialEnds: 0, period: paidPeriod() });
   const real = (await storeForEmail("drip-claim@example.com"))!;
   const product = { id: "prod00000001", title: "The Course", summary: "", priceCents: 6900, createdAt: 1, course: { id: course.id } };
-  const store = { ...real, catalog: { ...real.catalog, items: [{ id: product.id }], inline: [product] } } as unknown as Store;
+  // A paid course item, as the catalog lists one (KIND.paid | KIND.course): the course page and the job read it by kind.
+  const store = { ...real, catalog: { ...real.catalog, items: [{ id: product.id, kind: KIND.paid | KIND.course, options: [] }], inline: [product] } } as unknown as Store;
   await original([["SADD", "nl:courses:drip", `${course.id}|${store.handle}|${product.id}`]]);
   let n = 0;
-  /** A new student, a day and a half in, whose second week opened half a day ago. */
+  /**
+   * A new student, a day and a half in, whose second week opened half a day ago. Bought on that day, written down on
+   * the thanks page: the job announces only what the course page opens, from the same start (courseLedger, #3369).
+   */
   const student = async (): Promise<string> => {
     n += 1;
     const email = `drip-student-${n}@example.com`;
+    await recordEnrollment(store, email, product.id, NOW - 36 * 3600);
     await original([["HSET", `nl:course:${course.id}:students`, emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]);
     return email;
   };

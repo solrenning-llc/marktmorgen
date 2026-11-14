@@ -51,11 +51,13 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readListing } from "@/lib/catalog";
+import { idsOfKind, readKind, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
-import { importedFrom, importedRead } from "@/lib/imported-purchases";
+import { importedFrom, importedFromExact, importedRead } from "@/lib/imported-purchases";
+import { dripStartUnits } from "@/lib/drip-start-rules";
+import { takeDripStartUnits } from "@/lib/drip-start";
 
 /** The secret a course checkout leaves in the buyer's browser. */
 export const BUYER_COOKIE = "nl_buyer";
@@ -221,6 +223,12 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * Courses bought again after a purchase refunded in full. The day written
+   * down on the thanks page may be the refunded purchase's, so the purchase
+   * that stands gives the day.
+   */
+  again?: Set<string>;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
@@ -277,11 +285,12 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   }
   // Joined again after it ended, or bought again after a refund: the
   // purchase that stands is what counts.
+  const again = new Set<string>();
   for (const id of found.keys()) {
     ended.delete(id);
-    refunded.delete(id);
+    if (refunded.delete(id)) again.add(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, again };
 }
 
 /** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
@@ -295,10 +304,15 @@ function parseLedger(cached: string): Ledger | null {
   try {
     const value = JSON.parse(cached) as Record<string, unknown>;
     if (value && typeof value.p === "object" && value.p !== null) {
+      // Bought again after a refund, kept only when there is one (CX-123 rule 24): any other shape is unknown, so
+      // Stripe is asked again rather than reading it as none.
+      const again = value.a;
+      if (again !== undefined && !(Array.isArray(again) && again.every((id) => typeof id === "string"))) return null;
       return {
         paid: new Map(Object.entries(value.p as Record<string, number>)),
         ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
         refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
+        ...(again === undefined ? {} : { again: new Set(again as string[]) }),
       };
     }
     return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
@@ -316,8 +330,11 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * The same answer, with the memberships that ended kept apart. `strict`: a Stripe read that does not answer throws
+ * instead of leaving the courses written down on their own (the drip job, which waits for the next run).
+ */
+async function courseLedger(store: Store, email: string, strict = false): Promise<Ledger> {
   const result = new Map<string, number>();
   if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
   // A store that brought buyers over from another platform reads theirs in
@@ -332,9 +349,11 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   if (!asked) {
     try {
       asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], ...(asked.again?.size ? { a: [...asked.again] } : {}) });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
+      // Unknown, not none, where the caller can wait (CX-123 rule 24): a purchase refunded in full stays shut.
+      if (strict) throw error;
       console.error("reading course purchases failed", error);
       asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
     }
@@ -360,7 +379,9 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   // bundle that was. Nothing was paid through Stripe, so nothing there can
   // take it back; the creator can still take a student off (setBlocked).
   const given = new Map<string, number>();
-  for (const purchase of importedFrom(broughtOver)) {
+  // Read exactly for the drip job (strict): an unreadable reply is unknown, never "nothing was brought over" (Claude 7's
+  // MEDIUM on #3369), so the module's email waits for the next run instead of being lost under a "shut".
+  for (const purchase of strict && imported ? importedFromExact(broughtOver) : importedFrom(broughtOver)) {
     for (const id of [purchase.productId, ...(purchase.items ?? [])]) {
       if (!given.has(id)) given.set(id, purchase.at);
     }
@@ -370,8 +391,9 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   for (const product of courses) {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
-    // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
+    // unless Stripe now says it was refunded in full, or bought again after
+    // such a refund (the purchase that stands gives the day).
+    const start = product.recurring || asked.refunded.has(product.id) || asked.again?.has(product.id)
       ? fromStripe.get(product.id)
       : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
@@ -383,12 +405,14 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
   // new is handed over, and what already was stays.
   if (store.community?.id) {
     try {
-      const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store);
+      const earned = await earnedCourses(store.community.id, emailKey(email), Date.now(), store.community.on, store, strict);
       for (const product of courses) {
         const at = earned.get(product.id);
         if (product.course && !result.has(product.id) && at !== undefined) result.set(product.id, at);
       }
     } catch (error) {
+      // Unknown, not none, where the caller can wait (Claude 7's MEDIUM on #3369).
+      if (strict) throw error;
       console.error("reading courses earned by level failed", error);
     }
   }
@@ -441,23 +465,69 @@ type StudentRow = { e: string; s: number; l: number };
  * student's row takes its room in the store's data room first
  * (lib/store-data.ts); when there is none it is not written, and the course
  * opens all the same: the row is what the studio shows, not their access.
+ *
+ * With `stands`, startSeconds is the day the course page opens the course from
+ * (courseLedger), and the row takes that day even when it held an earlier one
+ * (a course bought again after a full refund): the drip emails that went on the
+ * earlier day for modules not open on this one are forgotten first, so each is
+ * sent again the day it really opens (sendDripEmails). Without it, the row
+ * keeps the earliest day it was given.
  */
-export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore): Promise<void> {
+export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore, stands?: Course): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = studentsKey(courseId);
   const field = emailKey(email);
-  const [raw] = await redisPipeline([["HGET", key, field]]);
-  let row: StudentRow = { e: normaliseEmail(email), s: Math.floor(startSeconds), l: 0 };
+  const raw = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
+  // Null is a student never seen, a string their row (CX-123 rule 24): any other reply is unknown, so nothing is
+  // written over a row that could not be read, and the course opens all the same.
+  if (raw !== null && typeof raw !== "string") return void console.error("reading a student's row failed", courseId);
+  const start = Math.floor(startSeconds);
+  let row: StudentRow = { e: normaliseEmail(email), s: start, l: 0 };
   if (typeof raw === "string") {
     try {
       const old = JSON.parse(raw) as StudentRow;
-      row = { e: old.e || row.e, s: Math.min(old.s || row.s, row.s), l: 0 };
-    } catch {}
+      row = { e: old.e || row.e, s: stands ? start : Math.min(old.s || row.s, row.s), l: 0 };
+      if (stands && countOf(old.s) !== null && old.s !== start) await forgetEarlyDripMails(stands, email, start);
+    } catch (error) {
+      if (error instanceof UnknownReplyError) throw error;
+    }
   }
   row.l = Math.floor(Date.now() / 1000);
   const json = JSON.stringify(row);
   if (typeof raw !== "string" && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }])).ok) return;
   await redisPipeline([["HSET", key, field, json]]);
+}
+
+/**
+ * Forgets the drip emails sent to this student for modules that are not open
+ * on `start`: sent on an earlier day the row held, each goes again the day the
+ * module really opens. Read exactly (CX-123 rule 24): one whole count, or this
+ * throws and the row keeps its day, to be tried again.
+ */
+async function forgetEarlyDripMails(course: Course, email: string, start: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  const shut = course.modules.filter((m) => m.dripDays > 0 && opensAt(course, m, start) > nowSeconds);
+  if (shut.length === 0) return;
+  const removed = countOf(repliesFor(await redisPipeline([["DEL", ...shut.map((m) => dripMailKey(course.id, email, m.id))]]), 1)?.[0]);
+  if (removed === null || removed > shut.length) throw new UnknownReplyError("the drip emails of a student whose start moved");
+}
+
+/**
+ * Moves a student's row to the day the course page opens the course from
+ * (sendDripEmails, when the row held another day): the emails sent for modules
+ * not open on it are forgotten first, then the row takes the day. Throws
+ * UnknownReplyError on a reply it cannot read, and nothing more is written.
+ */
+async function redateStudent(course: Course, email: string, start: number, nowSeconds: number): Promise<void> {
+  const key = studentsKey(course.id);
+  const field = emailKey(email);
+  const raw = repliesFor(await redisPipeline([["HGET", key, field]]), 1)?.[0];
+  if (raw === null) return;
+  const row = studentTimes(raw);
+  if (!row) throw new UnknownReplyError("a student's row whose start moved");
+  if (row.s === start) return;
+  await forgetEarlyDripMails(course, email, start, nowSeconds);
+  const written = countOf(repliesFor(await redisPipeline([["HSET", key, field, JSON.stringify({ e: row.e || normaliseEmail(email), s: start, l: row.l })]]), 1)?.[0]);
+  if (written === null || written > 1) throw new UnknownReplyError("a student's row whose start moved");
 }
 
 /**
@@ -944,6 +1014,52 @@ export async function openCourseLink(token: string): Promise<LinkGrant | null> {
 const DRIP_SET = "nl:courses:drip";
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
+/**
+ * The students of a course who paid for it again after their row's day (lib/purchase-email.ts, noteBoughtAgain), one
+ * place each, so the drip job reads their start once, whatever is due under the row's day (Codex G on #3369): a
+ * course bought again after a full refund and not opened since is found the run after the purchase, and nobody else
+ * is read for it (Claude 7 on #3369). Kept until that read answers; deleted with the person.
+ */
+/**
+ * What one drip read says of a student's start: the day the course page opens it from; "shut" when it does not open
+ * it (refunded in full, taken off, ended); "row" when it was not read (the store's monthly figure spent, or Stripe
+ * not answering) and the row's day is used, as the page and main's job do; "unknown" when the read could not even be
+ * counted, and nothing is sent this run.
+ */
+type DripStart = { open: number } | "shut" | "row" | "unknown";
+
+const againKey = (courseId: string) => `nl:course:${courseId}:again`;
+
+/**
+ * Notes, when a paid checkout is confirmed, that a student whose row holds an earlier day bought one of these courses
+ * again, for the drip job to read their start. A student never seen has no row and nothing to move. Never throws.
+ * True when it is known: written, or nothing to write. False when a reply does not read exactly (CX-123 rule 24):
+ * the write may not have landed, so the caller (lib/purchase-email.ts, confirmOnce) keeps nothing as done and its
+ * next pass notes it again; SADD and DEL repeat harmlessly (Codex G and Codex L on #3369).
+ */
+export async function noteBoughtAgain(store: Store, courseIds: string[], email: string, paidSeconds: number): Promise<boolean> {
+  if (!isRedisConfigured() || !courseIds.length) return true;
+  if (!Number.isFinite(paidSeconds)) return false;
+  const field = emailKey(email);
+  try {
+    const rows = repliesFor(await redisPipeline(courseIds.map((id) => ["HGET", studentsKey(id), field])), courseIds.length);
+    if (!rows || rows.some((raw) => raw !== null && typeof raw !== "string")) return false;
+    const again = courseIds.filter((_, i) => {
+      const raw = rows[i];
+      if (typeof raw !== "string") return false;
+      const row = studentTimes(raw);
+      return row !== null && row.s < Math.floor(paidSeconds);
+    });
+    if (!again.length) return true;
+    // The buyer's kept answer is let go with it, so the drip job's read asks Stripe and sees this purchase.
+    const commands = [...again.map((id) => ["SADD", againKey(id), field]), ["DEL", paidCacheKey(store, email)]];
+    const written = repliesFor(await redisPipeline(commands), commands.length);
+    return written !== null && written.every((reply) => reply === 0 || reply === 1);
+  } catch (error) {
+    console.error("noting a course bought again failed", error);
+    return false;
+  }
+}
 
 /** Remembers that this course opens modules over time, for the daily job. */
 export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
@@ -986,11 +1102,61 @@ export async function sendDripEmails(
     }
     counts.courses += 1;
     const { students } = read;
+    const within = (at: number) => at <= nowSeconds && at >= nowSeconds - 3 * 86_400;
+    // The students who paid for it again after their row's day (noteBoughtAgain): one SMEMBERS, read exactly; unknown
+    // looks at nobody this run, and the next run asks again.
+    const againRead = repliesFor(await redisPipeline([["SMEMBERS", againKey(course.id)]]), 1)?.[0];
+    const boughtAgain = new Set(Array.isArray(againRead) && againRead.every((m) => typeof m === "string") ? (againRead as string[]) : []);
+    if (againRead !== undefined && !Array.isArray(againRead)) console.error("reading a course's students who bought it again failed", course.id);
+    // One student's start, read from the store's monthly figure: what the page opens the course from, undefined
+    // when it does not open it, null when it cannot be counted or read (nothing is sent, the next run asks again).
+    const startOf = async (email: string): Promise<DripStart> => {
+      const units = dripStartUnits(idsOfKind(store, "course").length);
+      const taken = await takeDripStartUnits(store, units, nowSeconds * 1000);
+      if (taken === "unknown") {
+        console.error("a drip run's start read could not be counted; not read this run", course.id);
+        return "unknown";
+      }
+      // Past the store's monthly figure for these reads: the row's day, as main's job sends from it, never a read
+      // more (Claude 1 and Codex L on #3369).
+      if (taken !== "taken") return "row";
+      return courseLedger(store, email, true).then(
+        (ledger) => {
+          const at = ledger.paid.get(product.id);
+          return at === undefined ? "shut" : { open: at };
+        },
+        // Stripe did not answer: the row's day, as the course page opens a one-off course from its record when
+        // Stripe does not answer (Claude 7 on #3369).
+        // A database reply of another shape (UnknownReplyError, CX-123 rule 24) stays unknown: nothing is sent this run.
+        (error: unknown): DripStart => {
+          console.error("reading a student's course start for its drip emails failed", error);
+          return error instanceof UnknownReplyError ? "unknown" : "row";
+        },
+      );
+    };
     for (const student of students) {
       if (student.blocked) continue;
-      for (const unit of dripping) {
-        const at = opensAt(course, unit, student.since);
-        if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
+      // What the course page opens this course from (courseLedger), read once for a student with a module to announce.
+      let start: DripStart | null = null;
+      let since = student.since;
+      const field = emailKey(student.email);
+      if (boughtAgain.has(field)) {
+        // Bought again after the row's day: the start is read now, whatever is due under the row's day.
+        start = await startOf(student.email);
+        let settled = start === "shut";
+        if (typeof start === "object" && start.open !== since) {
+          const at = start.open;
+          const moved = await redateStudent(course, student.email, at, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          if (moved) since = at;
+          else start = "unknown";
+          settled = moved;
+        } else if (typeof start === "object") settled = true;
+        // Answered (open from a day, or not open at all): forgotten. Not read: kept, and the next run reads it again.
+        if (settled) await redisPipeline([["SREM", againKey(course.id), field]]);
+      }
+      for (let i = 0; i < dripping.length; i += 1) {
+        const unit = dripping[i];
+        if (!within(opensAt(course, unit, since))) continue;
         // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
         // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
         // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
@@ -1002,6 +1168,30 @@ export async function sendDripEmails(
           await releaseMark(mark, value);
         }
         if (claimed !== "ours") continue;
+        // Taken from the store's monthly figure for these reads (lib/drip-start.ts, dripMonthUnits in its allowance
+        // window), before the read, never from its public requests.
+        if (start === null) start = await startOf(student.email);
+        if (start === "unknown") {
+          await releaseMark(mark, value);
+          continue;
+        }
+        // Not open to them: nothing is sent, and the mark is kept, so this module is never read for them again (it is
+        // forgotten with the row's day if they buy the course again: forgetEarlyDripMails).
+        if (start === "shut") continue;
+        const stands = start === "row" ? since : start.open;
+        if (stands !== since) {
+          // The row held another day than the page's (a course bought again after a full refund): it takes the
+          // page's, forgetting what went early, and this student's modules are looked at again from it.
+          const moved = await redateStudent(course, student.email, stands, nowSeconds).then(() => true, (error: unknown) => (console.error("moving a student's course start failed", error), false));
+          await releaseMark(mark, value);
+          if (!moved) {
+            start = "unknown";
+            continue;
+          }
+          since = stands;
+          i = -1;
+          continue;
+        }
         const ok = await sendDripEmail(store, product, unit, student.email, origin);
         if (ok) counts.sent += 1;
         // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
@@ -1069,5 +1259,9 @@ export async function forgetLearnerPerson(
   // erasure says this part did not finish (lib/person-erasure.ts).
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
-  return (counts as number[]).reduce((sum, n) => sum + n, 0);
+  // Their place among the students who bought a course again (againKey), read exactly the same way.
+  const again = courses.map((c) => ["SREM", againKey(c.courseId), emailKey(email)]);
+  const left = again.length ? repliesFor(await redisPipeline(again), again.length)?.map(countOf) : [];
+  if (!left || left.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
+  return [...(counts as number[]), ...(left as number[])].reduce((sum, n) => sum + n, 0);
 }

@@ -255,8 +255,18 @@ function centralAliases(file,root,here){
  }
  if(file==='form-response-unavailable.test.ts'){
   for(const name of ['next/headers','next/navigation'])aliases[name]=join(here,'form-response-unavailable-world.tsx');
-  for(const name of ['studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
-  for(const name of ['studio-header','studio-store-pin'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['store','studio-route','store-request','form-store','catalog','crm','team','pipeline-access','form-opportunity','form-response-pdf'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['payment-requests','purchase-email','checkout-recovery','mail-starters','contacts','broadcasts','letters','mail-revenue','flow-stats','flow-list','mail','mail-health','mail-drafts','ai','segments','flow-runs','billing'])aliases['@/lib/'+name]=join(here,'form-response-unavailable-world.tsx');
+  for(const name of ['studio-header','studio-store-pin','email-studio'])aliases['@/components/'+name]=join(here,'form-response-unavailable-world.tsx');
+ }
+ if(file==='form-identity-binding.test.ts')for(const name of ['store-request','store'])aliases['@/lib/'+name]=join(here,'form-identity-binding-world.ts');
+ if(file==='k-form-record-parser.test.ts')aliases['@/lib/studio-route']=join(here,'k-form-record-parser-world.ts');
+ if(file==='k-form-kept-feedback.test.ts')for(const name of ['metered-limits','request-origin','request-guard','store','flows','store-join','affiliate-leads','page-funnel-store','visit'])aliases['@/lib/'+name]=join(here,'k-form-submit-world.ts');
+ if(file==='k-form-submit-unknown.test.ts')for(const name of ['metered-limits','request-origin','request-guard','store','flows','store-join','affiliate-leads','page-funnel-store','visit'])aliases['@/lib/'+name]=join(here,'k-form-submit-world.ts');
+ if(file==='k-form-public-unavailable.test.ts'){
+  for(const name of ['next/headers','next/navigation','next/link'])aliases[name]=join(here,'k-form-public-world.tsx');
+  for(const name of ['store','sales-page-store','catalog','store-join','page-funnel-store'])aliases['@/lib/'+name]=join(here,'k-form-public-world.tsx');
+  for(const name of ['sales-blocks','store-product','picture-viewer','store-tracking','store-pages-nav','store-beacon'])aliases['@/components/'+name]=join(here,'k-form-public-world.tsx');
  }
  if(file==='eu-who-answers.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(file==='r24-keys-pages-unknown.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}

@@ -47,7 +47,7 @@ export default async function FormDonePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store || store.suspended) notFound();
-  const form = await readForm(store.statsId, formId).catch(() => null);
+  const form = await readForm(store.statsId, formId);
   if (!form) notFound();
   const w = formWords(store.language);
   const { lang } = speech(store);

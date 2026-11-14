@@ -55,7 +55,7 @@ async function main(): Promise<void> {
       const [command] = commands;
       if (commands.length === 1 && (
         scenario === "source-unread" && command[0] === "HGET" && command[1] === `nl:pfunnels:${statsId}` && command[2] === funnel.id ||
-        scenario === "receiver-unread" && command[0] === "HVALS" && command[1] === `nl:forms:${statsId}`
+        scenario === "receiver-unread" && command[0] === "HGETALL" && command[1] === `nl:forms:${statsId}`
       )) {
         hits++;
         if (scenario === "source-unread") throw new UnknownReplyError("the selected source funnel");

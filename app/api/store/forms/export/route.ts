@@ -15,7 +15,8 @@ export async function GET(request: NextRequest) {
   const id = request.nextUrl.searchParams.get("id") ?? "";
   const plain = (status: number, body: string) => new Response(body, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   if (!FORM_ID.test(id)) return plain(400, "Which form?");
-  const form = await readForm(store.statsId, id);
+  const form = await readForm(store.statsId, id).catch(() => undefined);
+  if (form === undefined) return plain(503, "unavailable");
   if (!form) return plain(404, "That form is gone.");
   const read = await readResponses(store.statsId, id).catch(() => null);
   if (read === null) return plain(503, "unavailable");

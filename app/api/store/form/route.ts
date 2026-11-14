@@ -5,7 +5,7 @@ import { DataRoomError } from "@/lib/store-data";
 import { originFrom, linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readForm, addResponse } from "@/lib/form-store";
+import { readForm, addResponse, UnconfirmedKeep } from "@/lib/form-store";
 import { enroll } from "@/lib/flows";
 import { FORM_ID, formOpen, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
 import { askToJoin } from "@/lib/store-join";
@@ -57,7 +57,9 @@ export async function POST(request: NextRequest) {
   const back = (status: string) =>
     go(page ? `/@${store.handle}/${page.slug}?form=${formId}&status=${status}${mark ? `&f=${mark}` : ""}#form-${formId}` : `/@${store.handle}`);
 
-  const def = store.suspended ? null : await readForm(store.statsId, formId).catch(() => null);
+  const def = store.suspended ? null : await readForm(store.statsId, formId).catch(() => undefined);
+  // An unreadable definition: nothing is admitted or kept, so the buyer is told exactly that on the form, never a bare error page.
+  if (def === undefined) return back("error");
   if (!def || !store.statsId) return back("closed");
   // Before it opens or after it closes, nothing is taken (639 [GL7](26)).
   if (formOpen(def, Math.floor(Date.now() / 1000)) !== "open") return back("closed");
@@ -102,6 +104,8 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     // No room in the store's data room: the answers were not kept (lib/store-data.ts).
     if (error instanceof DataRoomError) return back("noroom");
+    // The keep was sent and its receipt was lost: the answers may be kept, so never "nothing was sent".
+    if (error instanceof UnconfirmedKeep) return back("unsure");
     console.error("keeping a form's answers failed", error);
     return back("error");
   }

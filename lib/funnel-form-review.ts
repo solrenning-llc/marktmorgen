@@ -4,7 +4,8 @@ import { MAX_PAGE_FUNNELS, MAX_FUNNEL_PAGES, type PageFunnel } from "@/lib/page-
 import { MAX_SITE_PAGES, pageOut, siteKey } from "@/lib/site-page-rules";
 import { MAX_BLOCKS, MAX_STORED_PAGE_BYTES, parsePage, pageProblem } from "@/lib/sales-page";
 import { KIND } from "@/lib/catalog";
-import { FORM_ID, MAX_FORMS, parseForm, type FormDef } from "@/lib/forms";
+import { FORM_ID, MAX_FORMS, type FormDef } from "@/lib/forms";
+import { storedFormRecord } from "@/lib/form-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { FunnelLaunchIssue } from "@/lib/funnel-launch-review";
 
@@ -65,7 +66,8 @@ export async function readFunnelFormReviews(store: Store, funnels: readonly Page
         if (raw === null) { states.set(id, "missing"); return; }
         try {
           if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > MAX_REVIEW_FORM_BYTES) throw new Error("Invalid saved form");
-          const parsed = parseForm(JSON.parse(raw));
+          // The same complete-record rule as the public page and exports (lib/form-store.ts).
+          const parsed = storedFormRecord(raw);
           if (parsed?.id === id && parsed.fields.length > 0) {
             states.set(id, "present");
             definitions.set(id, parsed);

@@ -313,6 +313,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:code-addr:@lib/auth.ts": company("Sign-in code tries for one address in the hour", "An account's, an hour (652 [WG12])."),
   "nl:rl:code-day:@lib/auth.ts": company("Sign-in code tries for one address in a day", "An account's, a day from its first try (652 [WG12], Claude 3 on #2736)."),
   "nl:rl:code-ip:@lib/auth.ts": company("Sign-in code tries from one machine in the hour", "A machine's count under a one-way hash of its address on the internet, an hour (652 [WG12], Claude 3 on #2736)."),
+  "nl:auth:link:@lib/provider-signin-state.ts": company("Provider-separated OAuth verifier/nonce and sign-in context, no person or provider token; default off", "At most 1024 UTF-8 value bytes plus key and Redis overhead, EX 600, one SET NX and one atomic GETDEL. No funded global allowance or provider cost verified; cannot activate."),
   "nl:auth:move:@lib/auth.ts": company("An address change", "An account's, a day."),
   "nl:auth:moving:@lib/auth.ts": company("An address in the middle of a move", "An account's, minutes."),
   "nl:auth:move-broken:@lib/auth.ts": company("A move that could be neither finished nor undone", "An account's, until it is repaired at the next login or move."),

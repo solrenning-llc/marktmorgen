@@ -16,6 +16,19 @@
  * leaves Stripe's page without finishing, it comes back once the hold is
  * over. A package refunded in full books nothing more. A package with a last
  * day to book is kept a year past it, then dropped.
+ *
+ *   nl:pkg:t:<sha(token)>:used  the package's sessions that were paid for, for good; kept exactly as long as the package
+ *
+ * A booked session's own mark (nl:call:confirmed, lib/calls.ts) lives
+ * CONFIRMED_SECONDS, while a package with no last day lives for good (Claude 6,
+ * R40). So the confirmation (confirmBooking) and a move made before it
+ * (moveBooking) write the session down with its package before they write its
+ * mark, and throw when they cannot tell, so a mark is never there without it
+ * (Claude 4 and Claude 6 on #3487): past the time a mark could have expired, a
+ * hold that is not written down was never confirmed, however long nobody read
+ * the package and however many checkouts were left unpaid. A reading that sees
+ * a mark also writes the session down. A hold whose mark or record is not read
+ * for sure counts as spent. Unknown never frees a session.
  */
 import { ADMITTED_FIELD, OrdersPausedError, admitOrders } from "@/lib/order-admission";
 import { createHash, randomBytes } from "node:crypto";
@@ -23,7 +36,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { StripeError, onAccount } from "@/lib/stripe-account";
-import { isConfirmed } from "@/lib/calls";
+import { CONFIRMED_SECONDS, confirmedKey } from "@/lib/calls";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
 import { purchaseRefunded } from "@/lib/refunds";
 import { sendEmail } from "@/lib/email";
@@ -62,6 +75,12 @@ export type Bought = {
 const sha = (v: string) => createHash("sha256").update(v).digest("hex");
 const pkgKey = (checkout: string) => `nl:pkg:${checkout}`;
 const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
+/** A package's sessions that were paid for (usedAs), kept as long as the package: one per confirmed hold. */
+const usedKey = (token: string) => `${tokenKey(token)}:used`;
+/** A paid session in usedKey: "u", then 15 hex characters of its checkout, 16 in all. */
+const usedAs = (session: string) => `u${sha(session).slice(0, 15)}`;
+/** The shape usedAs gives: anything else in a package's record of paid sessions is not one of them. */
+const USED_MEMBER = /^u[0-9a-f]{15}$/;
 /**
  * The packages a store sold (added 18 October 2026): a package with no last
  * day is kept for as long as it can be used, and is named by its checkout,
@@ -69,7 +88,7 @@ const tokenKey = (token: string) => `nl:pkg:t:${sha(token)}`;
  * (lib/closed-store-data.ts). Kept with the store: a checkout's id a package.
  */
 export const packagesKey = (statsId: string) => `nl:pkg:s:${statsId}`;
-export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token)] : [])];
+export const packageKeys = (checkout: string, token: string): string[] => [pkgKey(checkout), `${pkgKey(checkout)}:lock`, ...(token ? [tokenKey(token), usedKey(token)] : [])];
 const now = () => Math.floor(Date.now() / 1000);
 /** Kept a year past its last day to book; a package with no limit is kept as long as it can be used. */
 const KEEP_AFTER_SECONDS = 365 * 86_400;
@@ -94,13 +113,113 @@ export async function boughtByToken(token: string): Promise<{ checkout: string; 
   return bought && bought.token === token ? { checkout, bought } : null;
 }
 
-/** Sessions spent: booked, or held now. */
+/**
+ * How long after a hold's end a missing confirmation mark still means "never
+ * confirmed" by itself: the mark is written after the hold began and lives
+ * CONFIRMED_SECONDS, so it is there until then for sure (two days spare for
+ * the hold itself). Past that, a missing mark may have expired, and the
+ * package's own record of paid sessions says it.
+ */
+const MARK_SURE_SECONDS = CONFIRMED_SECONDS - 2 * 86_400;
+
+/**
+ * Sessions spent: held now, written down as paid with the package, or
+ * confirmed. A hold past its time comes back when Redis answers, for sure,
+ * that its mark is not there, and either the mark could not yet have expired
+ * or the package's record, read for sure, does not have it: a confirmation
+ * writes it there before its mark (packageSessionUsed). Any other answer, or
+ * none, counts it spent (rule 24). A mark seen whose session is not written
+ * down yet is written down now.
+ */
 export async function spent(bought: Bought, at = now()): Promise<number> {
-  let n = 0;
-  for (const hold of bought.holds) {
-    if (hold.until + HOLD_GRACE_SECONDS > at || (await isConfirmed(hold.session))) n += 1;
+  const past = bought.holds.filter((hold) => hold.until + HOLD_GRACE_SECONDS <= at);
+  let n = bought.holds.length - past.length;
+  if (!past.length) return n;
+  let answers: unknown[] | null = null;
+  try {
+    answers = await redisPipeline([["SMEMBERS", usedKey(bought.token)], ...past.map((hold) => ["EXISTS", confirmedKey(hold.session)])]);
+  } catch (error) {
+    console.error("reading a package's spent sessions failed; counted as spent", error);
+  }
+  if (!Array.isArray(answers) || answers.length !== past.length + 1) return bought.holds.length;
+  const listed = answers[0];
+  // Known only when every member is one usedAs makes for one of this package's own holds, and no more than it holds
+  // (Codex G, MEDIUM on #3487): a member in another shape, or of none of its sessions, makes the record unknown, and
+  // an expired confirmed session is then counted spent, never booked again for free.
+  const own = new Set(bought.holds.map((hold) => usedAs(hold.session)));
+  const kept =
+    Array.isArray(listed) && listed.length <= bought.total && listed.every((id) => typeof id === "string" && USED_MEMBER.test(id) && own.has(id))
+      ? new Set<string>(listed as string[])
+      : null;
+  const seen: string[] = [];
+  past.forEach((hold, i) => {
+    const mark = answers[i + 1];
+    const u = usedAs(hold.session);
+    if (kept?.has(u) || mark === 1) {
+      n += 1;
+      if (mark === 1 && kept && !kept.has(u)) seen.push(u);
+    } else if (mark === 0 && (at < hold.until + MARK_SURE_SECONDS || kept !== null)) {
+      return;
+    } else n += 1;
+  });
+  // Never more than the package can hold.
+  const room = kept ? Math.max(0, bought.total - kept.size) : 0;
+  if (room && seen.length) {
+    await writeUsed(bought, seen.slice(0, room)).catch((error) => console.error("writing down a package's spent sessions failed; tried again on the next reading", error));
   }
   return n;
+}
+
+/**
+ * Adds to a package's record of paid sessions, with the package's own expiry,
+ * and takes it away again when the package is gone for sure by then (a closing
+ * store deletes its keys), so nothing is left behind for good. Any answer that
+ * is not exactly "gone" keeps it (rule 24, Claude 4 on #3487). Throws whenever
+ * a reply is not exactly what its command gives (Codex C2 and Claude 4).
+ */
+async function writeUsed(bought: Bought, adds: string[]): Promise<void> {
+  const key = usedKey(bought.token);
+  const ttl = keep(bought);
+  const commands: (string | number)[][] = [["SADD", key, ...adds], ...(ttl.length ? [["EXPIRE", key, ttl[1]]] : []), ["EXISTS", tokenKey(bought.token)]];
+  const replies = await redisPipeline(commands);
+  // Read exactly (rule 24; Codex C2 and Claude 4 on #3487): one reply a command, SADD a whole count of at most the
+  // members sent, EXPIRE 1, EXISTS 0 or 1. Any other shape is not "written down": it throws, so the confirmation is
+  // tried again rather than marked with no paid session in the package's record.
+  const added = Array.isArray(replies) && replies.length === commands.length ? replies[0] : undefined;
+  if (typeof added !== "number" || !Number.isSafeInteger(added) || added < 0 || added > adds.length) throw new Error("writing down a package's paid session gave no clear answer");
+  if (ttl.length && replies[1] !== 1) throw new Error("keeping a package's paid sessions as long as the package gave no clear answer");
+  const has = replies[replies.length - 1];
+  if (has === 0) {
+    await redisPipeline([["DEL", key]]);
+    return;
+  }
+  // Kept on anything but an exact 0 (Claude 4's MEDIUM 2), and not taken as written either: the caller tries again.
+  if (has !== 1) throw new Error("reading a package's token gave no clear answer; its paid sessions are kept");
+}
+
+/**
+ * Writes down, with its package, that a session from it was paid for. Called
+ * by the confirmation (confirmBooking) and a move made before it
+ * (moveBooking), before either writes the session's mark, so a mark is never
+ * there without this (Claude 4 and Claude 6 on #3487). `checkout` is the
+ * package's, from the booking's metadata[package]. Nothing to write when the
+ * package is gone for sure or the session is not one of its holds. Throws
+ * when it cannot tell, so the confirmation is tried again rather than written
+ * without it.
+ */
+export async function packageSessionUsed(checkout: string, session: string): Promise<void> {
+  if (!SESSION_ID.test(checkout) || !isRedisConfigured()) return;
+  const [raw] = await redisPipeline([["GET", pkgKey(checkout)]]);
+  if (raw === null) return;
+  let bought: Bought | null = null;
+  try {
+    bought = typeof raw === "string" ? (JSON.parse(raw) as Bought) : null;
+  } catch {
+    bought = null;
+  }
+  if (!bought || typeof bought.token !== "string" || !Array.isArray(bought.holds)) throw new Error("reading a call package gave no clear answer; its session is confirmed later");
+  if (!bought.holds.some((hold) => hold && hold.session === session)) return;
+  await writeUsed(bought, [usedAs(session)]);
 }
 
 export type PackageState = { left: number; total: number; expired: boolean; until: number };
@@ -188,14 +307,21 @@ type Session = {
 /**
  * Writes a paid package down, once, and emails its buyer the link that books
  * its sessions. Returns the package, or null when this checkout is not one.
+ *
+ * The record is written first (SET NX), then its token and the store's list
+ * in one write with the token's SET NX: a package found without its token
+ * (that write failed, or never answered) is finished by the next call, and
+ * the call whose SET NX made the token is the one that sends the email, once
+ * (audit of the checkout, 9 November 2026). A call that cannot tell whether
+ * the token is there throws, so the thanks page and the sweep try again.
  */
 export async function recordPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }): Promise<Bought | null> {
-  const { store, session, product, base } = input;
+  const { store, session, product } = input;
   const meta = session.metadata ?? {};
   const checkout = typeof session.id === "string" ? session.id : "";
   if (meta.kind !== "package" || !SESSION_ID.test(checkout) || !isSettled(session) || !store.statsId) return null;
   const existing = await readBought(checkout);
-  if (existing) return existing;
+  if (existing) return finishPackage(input, checkout, existing, false);
   const email = typeof session.customer_details?.email === "string" ? normaliseEmail(session.customer_details.email) : "";
   if (!email) return null;
   const at = typeof session.created === "number" ? session.created : now();
@@ -205,9 +331,31 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until: days ? at + days * 86_400 : 0, token, holds: [] };
   // Counted in the store's room at what they really add (lib/order-data.ts).
   const [fresh] = await orderWrite(store, [["SET", pkgKey(checkout), JSON.stringify(bought), "NX", ...keep(bought)]]);
-  if (fresh === null) return readBought(checkout);
-  await orderWrite(store, [["SADD", packagesKey(store.statsId), checkout]]);
-  await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
+  if (fresh === null) {
+    const other = await readBought(checkout);
+    return other ? finishPackage(input, checkout, other, false) : null;
+  }
+  return finishPackage(input, checkout, bought, true);
+}
+
+/**
+ * Writes a recorded package's token and its place in the store's list when
+ * they are not there yet, and then emails the booking link. `made` is a
+ * record this call has just written, whose token cannot be there yet.
+ */
+async function finishPackage(input: { store: Store; session: Session; product: Listing; base: string; from: string }, checkout: string, bought: Bought, made: boolean): Promise<Bought> {
+  const { store, session, product, base } = input;
+  if (!made) {
+    const [has] = await redisPipeline([["EXISTS", tokenKey(bought.token)]]);
+    if (has === 1) return bought;
+    if (has !== 0) throw new Error("reading a package's token gave no clear answer; finished on a later call");
+  }
+  // One write, so the store's list never has a package its token is missing from.
+  const [, set] = await orderWrite(store, [["SADD", packagesKey(bought.s), checkout], ["SET", tokenKey(bought.token), checkout, "NX", ...keep(bought)]]);
+  // Another call made the token first, and sends the email.
+  if (set === null) return bought;
+  if (set !== "OK") throw new Error("writing a package's token gave no clear answer; finished on a later call");
+  const { e: email, total, token } = bought;
   const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
   const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
   // In the store's language (lib/buyer-words/booking.ts), with the amount and

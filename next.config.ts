@@ -188,6 +188,19 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+
+  /**
+   * Next's TypeScript check runs in every build except the CI browser legs that
+   * scripts/ci-build.mjs names (scripts/ci-build-args.mjs, TYPES_CHECKED_IN_VERIFY):
+   * product-checks' verify job runs the identical check on the same commit, and each
+   * of those legs spent about a minute repeating it. Vercel's build, verify's and any
+   * build outside GitHub Actions check types as before. It skips only the check; what
+   * is built and served does not change.
+   */
+  typescript: {
+    ignoreBuildErrors:
+      process.env.GITHUB_ACTIONS === "true" && process.env.MARKTMORGEN_CI_TYPES_CHECKED_IN_VERIFY === "1",
+  },
 };
 
 /*

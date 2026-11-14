@@ -1,3 +1,4 @@
+import { Abbr } from "@/components/abbr";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
@@ -43,7 +44,7 @@ export default async function CheckoutScriptPage() {
   return (
     <LegalPage title="Checkout script" eyebrow="For your own website" effective={null} legalNav={false} lastUpdated="October 17, 2026" trail={[{ label: "Developers", href: "/developers" }]}>
       <p>
-        Put a link on any page of your own site, on WordPress, Webflow, Squarespace, Ghost or plain HTML, and it opens your product&apos;s card, or
+        Put a link on any page of your own site, on WordPress, Webflow, Squarespace, Ghost or plain <Abbr of="HTML" />, and it opens your product&apos;s card, or
         your email list&apos;s sign-up form, over that page. Your buyer pays on Stripe&apos;s checkout page, on your own connected Stripe account:
         the money goes from your buyer to you and never passes through Marktmorgen. Your page is told what happened, and so are your{" "}
         <Link href="/help#can-i-connect-zapier-make-or-my-own-server" className="text-black underline underline-offset-2 hover:no-underline">
@@ -65,7 +66,7 @@ export default async function CheckoutScriptPage() {
           {`The address carries its own tags: utm_source is the place you name (website when you leave it empty), utm_medium is ${SCRIPT_MEDIUM}, and utm_campaign is yours if you give one. A sale made through it carries them to Stripe and to your numbers, where it is listed under Where the money came from. `}
           {c("return")} is the page the receipt sends the buyer back to. {c("via")} is an affiliate&apos;s code, for a link an affiliate puts on
           their own site. It opens your product&apos;s page, so your store&apos;s affiliate and consent rules apply there as they do to any
-          affiliate link. Product ids are in your studio, and in the API&apos;s{" "}
+          affiliate link. Product ids are in your studio, and in the <Abbr of="API" />&apos;s{" "}
           <Link href="/developers#products" className="text-black underline underline-offset-2 hover:no-underline">
             products
           </Link>{" "}

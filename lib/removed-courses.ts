@@ -32,6 +32,13 @@ const MAX_IDS = 5_000;
 const removedKey = (statsId: string) => `nl:coursegone:${statsId}`;
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
+/**
+ * A course's two indexes of people, given by the caller so this file imports no course module (lib/learn.ts and
+ * lib/certificate.ts import lib/course.ts, which imports this file): its students (lib/learn.ts studentsIndexKey) and
+ * its certificates (lib/certificate.ts allKey). lib/certificate.ts courseIndexes builds it.
+ */
+export type CourseIndexes = (courseId: string) => [students: string, certificates: string];
+
 /** One dropped course, as the erasure needs it. */
 export type RemovedCourse = { productId: string; courseId: string; lessonIds: string[]; moduleIds: string[] };
 

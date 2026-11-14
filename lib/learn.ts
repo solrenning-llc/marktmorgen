@@ -480,6 +480,8 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
 // ------------------------------------------------------------ progress
 
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
+/** A course's students, for lib/removed-courses.ts: a dropped course whose row is still there keeps its note. */
+export const studentsIndexKey = (courseId: string): string => studentsKey(courseId);
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
 
 /** Commands answering 1 when this learner (emailKey) has a student row or lessons done in a course: a dropped one's probe (lib/person-erasure.ts). */

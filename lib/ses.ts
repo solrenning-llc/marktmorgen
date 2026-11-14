@@ -56,6 +56,7 @@ import { createHash } from "node:crypto";
 import { type AwsKey, signV4 } from "@/lib/aws-sign";
 import { SES_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 
 export type SesConfig = {
   /** The only identity allowed to send: a role borrowed with the host token. */
@@ -546,6 +547,55 @@ export async function sesSend(config: SesConfig, message: SesMessage): Promise<{
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const didKey = (batchKey: string, to: string) => `nl:ses:did:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
 const DID_SECONDS = 2 * 86_400;
+/**
+ * An email of a batch whose answer was lost (a 5xx, a reply that never came): it may have gone. Not a completion
+ * marker (didKey stays for confirmed acceptance only); the durable checkpoint a caller's retry under the same key
+ * reads (lib/email.ts, dispatchBatch, notMaybeSent), so it is never written to a second time (rule 30;
+ * webhooks/cron audit, Claude 1, 12/11/2026).
+ */
+const maybeKey = (batchKey: string, to: string) => `nl:ses:maybe:${createHash("sha256").update(`${batchKey}\n${to}`).digest("hex").slice(0, 40)}`;
+
+/** Writes a wave's "may have gone" marks before it is sent; true only when every write is confirmed "OK". */
+async function markMaybe(batchKey: string, wave: { to: string }[]): Promise<boolean> {
+  if (!wave.length) return true;
+  try {
+    const read = repliesFor(await redisPipeline(wave.map((m) => ["SET", maybeKey(batchKey, m.to), "1", "EX", DID_SECONDS])), wave.length);
+    return read !== null && read.every((reply) => reply === "OK");
+  } catch {
+    return false;
+  }
+}
+
+/** Lets go of the marks of emails SES answered for. Best effort: a mark left keeps its recipient out, never in twice. */
+async function forgetMaybe(batchKey: string, messages: { to: string }[]): Promise<void> {
+  if (!messages.length) return;
+  await redisPipeline(messages.map((m) => ["DEL", maybeKey(batchKey, m.to)])).catch(() => undefined);
+}
+
+/**
+ * Of these recipients, those whose email under this batch key was never handed to SES with its answer lost.
+ * Read exactly, as notYetTaken: null is evidence unavailable, never permission to send.
+ */
+export async function notMaybeSent<T extends { to: string }>(batchKey: string, messages: T[]): Promise<T[] | null> {
+  if (!messages.length) return messages;
+  if (messages.length > 100) return null;
+  try {
+    const found: unknown = await redisPipeline(messages.map((m) => ["GET", maybeKey(batchKey, m.to)]));
+    if (!Array.isArray(found)) return null;
+    const length = Object.getOwnPropertyDescriptor(found, "length");
+    if (!length || !("value" in length) || length.value !== messages.length) return null;
+    const pending: T[] = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      const item = Object.getOwnPropertyDescriptor(found, String(i));
+      if (!item || !("value" in item)) return null;
+      if (item.value === null) pending.push(messages[i]);
+      else if (item.value !== "1") return null;
+    }
+    return pending;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Recipients whose existing marker explicitly confirms absence. A known
@@ -595,51 +645,74 @@ export async function sesBatch<T extends SesMessage>(
   state: SesState,
   messages: T[],
   batchKey: string,
-): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true }> {
+): Promise<{ taken: T[]; left: T[]; refused: { message: T; why: string }[]; down: string; uncertain?: true; unmarked?: true }> {
   const taken: T[] = [];
   const refused = new Map<T, string>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
   let uncertain = false;
+  let unmarked = false;
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down && !uncertain; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !unmarked; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down && !uncertain; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain && !unmarked; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
       }
       const waveStarted = Date.now();
       const wave = queue.slice(i, i + perSecond);
+      // Written before the wave goes, and confirmed (Codex T on #4361): each email "may have gone" from the moment it
+      // is handed to SES, so its mark (maybeKey) must exist before, never after a reply that may be lost. A mark that
+      // cannot be confirmed sends nothing: the wave and the rest wait for a later call, sent by nobody now.
+      if (!(await markMaybe(batchKey, wave))) {
+        await forgetMaybe(batchKey, wave);
+        again.push(...queue.slice(i));
+        unmarked = true;
+        break;
+      }
       const results = await Promise.all(wave.map((m) => sesSend(config, m)));
       const done: T[] = [];
+      const settled: T[] = [];
       results.forEach((result, j) => {
         if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
-          // Keep it unresolved, with no second attempt in this call.
+          // Keep it unresolved, with no second attempt in this call; its mark stays.
           uncertain = true;
           again.push(wave[j]);
         } else if (result.outcome === "sent") done.push(wave[j]);
         else if (result.outcome === "refused") {
           refused.set(wave[j], result.why);
+          settled.push(wave[j]);
           console.error("Amazon SES refused an email", result.why);
         } else {
           again.push(wave[j]);
+          settled.push(wave[j]);
           if (result.outcome === "account" && !down) down = result.why || "account";
         }
       });
       if (done.length) {
         taken.push(...done);
         // Written down at once, so a batch cut short here and tried again
-        // leaves these people out.
-        await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
+        // leaves these people out. Their "may have gone" mark is let go of only
+        // once this one is confirmed: until then it keeps them out too.
+        const confirmed = await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS]))
+          .then((replies) => {
+            const read = repliesFor(replies, done.length);
+            return read !== null && read.every((reply) => reply === "OK");
+          })
+          .catch(() => false);
+        if (confirmed) settled.push(...done);
       }
+      // SES answered for these: refused, not taken, or taken and written down. Their marks go; one that cannot be
+      // deleted keeps them out of a later call, never in it twice.
+      await forgetMaybe(batchKey, settled);
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && !uncertain && round === 0) {
+    if (queue.length && !down && !uncertain && !unmarked && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
@@ -650,5 +723,6 @@ export async function sesBatch<T extends SesMessage>(
     refused: [...refused].map(([message, why]) => ({ message, why })),
     down,
     ...(uncertain ? { uncertain: true as const } : {}),
+    ...(unmarked ? { unmarked: true as const } : {}),
   };
 }

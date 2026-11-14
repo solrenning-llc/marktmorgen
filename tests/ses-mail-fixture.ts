@@ -181,6 +181,8 @@ export function installSesMailFixture(options: SesMailFixtureOptions = {}) {
     for (const recipient of recipients) {
       const hash = createHash("sha256").update(`${batchKey}\n${recipient}`).digest("hex").slice(0, 40);
       store.run(["DEL", `nl:ses:did:${hash}`]);
+      // And the mark of an email whose answer was lost (lib/ses.ts, maybeKey): a scenario starts with none.
+      store.run(["DEL", `nl:ses:maybe:${hash}`]);
     }
     const rest = createHash("sha256").update(batchKey).digest("hex").slice(0, 40);
     store.run(["DEL", `nl:ses:rest:${rest}`]);

@@ -237,6 +237,23 @@ const CALL = micro(VERCEL_CALL_MICRO_USD_PER_MILLION) / 1_000_000;
 const CPU_SECOND = micro(VERCEL_CPU_MICRO_USD_PER_HOUR) / 3600;
 const MEMORY_SECOND = (micro(VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR) * VERCEL_FUNCTION_GB) / 3600;
 
+/**
+ * One person handed to the creator's email platform at the worst (lib/email-sync.ts, queuePerson and the tries after
+ * it; CI audit of the cost registry, 14 November 2026, until when no line named the file): queued and tried at once
+ * after the answer (up to JOB_MS, 20 s), then refused by the platform and retried by the five-minute job up to
+ * MAX_ATTEMPTS in all (each up to JOB_MS_IN_RUN, 9 s), every try waited on for its whole budget at 2 GB, a call and a
+ * tenth of a second of work each, and the commands and bytes measured in tests/email-sync-cost.test.ts (110 and
+ * 26,368 at the worst: two products, the three tags a job may carry all new to the platform), held here with room.
+ * Every order (lib/sale-events.ts) and free copy (app/api/store/free/download) hands over at most one person, so it is
+ * in ORDER_COST; every confirmed sign-up (app/api/store/join/confirm) is one confirmation email, so it is in each
+ * transactional email's cost (UNIT_COST.transactional). It does not fit in ORDER_COMPUTE beside the cart's stock work.
+ */
+export const EMAIL_SYNC_PERSON = { tries: 7, firstWaitSeconds: 20, retryWaitSeconds: 9, cpuPerTry: 0.1, commands: 120, bytes: 30_000 } as const;
+export const EMAIL_SYNC_PERSON_COST =
+  EMAIL_SYNC_PERSON.tries * (CALL + EMAIL_SYNC_PERSON.cpuPerTry * CPU_SECOND)
+  + (EMAIL_SYNC_PERSON.firstWaitSeconds + (EMAIL_SYNC_PERSON.tries - 1) * EMAIL_SYNC_PERSON.retryWaitSeconds) * MEMORY_SECOND
+  + EMAIL_SYNC_PERSON.commands * COMMAND + EMAIL_SYNC_PERSON.bytes * DB_BYTE;
+
 
 /**
  * What an order leaves that outlives its store, for its whole life (18
@@ -330,7 +347,7 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * No PER_EMAIL/ORDER_COST coefficient, real review, quota protection, paid
  * financial envelope or retention approval is changed/certified here.
  */
-export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
+export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP + EMAIL_SYNC_PERSON_COST;
 
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
@@ -607,7 +624,8 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
-  transactional: PER_EMAIL + (6 + TAKE_COMMANDS) * COMMAND,
+  // A sign-up's confirmation is one of them, and confirming it hands one person to the email platform (EMAIL_SYNC_PERSON_COST).
+  transactional: PER_EMAIL + (6 + TAKE_COMMANDS) * COMMAND + EMAIL_SYNC_PERSON_COST,
   // A call out, waited on at 2 GB for ten seconds.
   integration: request("wait", 10 + TAKE_COMMANDS, 20_000),
   // What a buyer does inside what they bought (lib/buyer-actions.ts): the
@@ -1042,6 +1060,10 @@ export const COST_LINES: CostLine[] = [
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
+      // Each order and free copy hands at most one person to the creator's email platform, priced in ORDER_COST (EMAIL_SYNC_PERSON_COST, 14 November 2026).
+      { file: "lib/email-sync.ts", names: ["export async function queuePerson", "export const RETRY_MINUTES", "const JOB_MS = 20_000", "const JOB_MS_IN_RUN = 9_000", "export const MAX_TAGS_PER_PRODUCT = 3"] },
+      { file: "lib/sale-events.ts", names: ["await queuePerson(store, {"] },
+      { file: "app/api/store/free/download/route.ts", names: ["queuePerson(store, {"] },
       // An affiliate's lead for a free product or a booked call is written inside that order (18 October 2026).
       { file: "lib/calls.ts", names: ["recordLead"] },
       // A booked call's once-only mark and its time kept for good, in one step, and the mark moved on as the rest is
@@ -1082,8 +1104,10 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "transactional"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
+      { file: "lib/store-join.ts", names: ["kind: \"transactional\", asked: true"] },
+      { file: "app/api/store/join/confirm/route.ts", names: ["queuePerson(store, { source: \"free\""] },
     ],
-    basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it.",
+    basis: "The plan's access emails, each at the most an email costs and its count; taken from the store's window before sending, refused past it. A sign-up's confirmation is one of them (lib/store-join.ts), and confirming it hands one person to the creator's email platform (lib/email-sync.ts, queuePerson), so each is priced with EMAIL_SYNC_PERSON_COST, the person's worst over every try (14 November 2026).",
   },
   {
     id: "store-email",

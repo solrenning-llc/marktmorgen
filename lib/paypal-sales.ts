@@ -839,6 +839,19 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * How long after the watch's days an order whose capture PayPal answered in a status the watch does not read waits
+ * before it is asked again (Claude 2 on #4536). It is never dropped as "not refunded", but asking every hour until its
+ * paid record ends (400 days) would be about 9,600 reads an order: PAYPAL_WATCH_LOOKS in tests/plan-cost-registry.ts,
+ * held by tests/paypal-watch-unknown-looks.test.ts.
+ */
+export const LATE_LOOK_SECONDS = 30 * 86_400;
+
+/** When an order whose capture's answer the watch could not read is asked again: the watch's own schedule while it lasts, then every LATE_LOOK_SECONDS. */
+export function unknownLook(paidAt: number, now: number): number {
+  return nextLook(paidAt, now) ?? now + LATE_LOOK_SECONDS;
+}
+
+/**
  * The orders one sweep of a store reads from each of its two lists (pending payments, orders due a refund look): one
  * ZRANGEBYSCORE of each list a run, never more orders than this (NOT_A_COST.PAYPAL_WATCH_BATCH and PAYPAL_WATCH_RANGES
  * in tests/plan-cost-registry.ts, held by tests/paypal-watch-cost.test.ts). The rest wait for the next run.
@@ -929,16 +942,18 @@ export async function watchPayPal(
     let status = "";
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
-      // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
+      // Without PayPal's own status it is not known whether it was refunded: asked again (unknownLook), never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
       // Nor is a reply about another capture this one's (rule 30), nor a status that is not PayPal's word for money
-      // standing or taken back (14 November 2026): every other one is unknown, looked at again in an hour and never
+      // standing or taken back (14 November 2026): every other one is unknown, looked at again (unknownLook) and never
       // dropped from the watch as "not refunded", even past the watch's days.
       if (typeof capture.status !== "string" || !capture.status || capture.id !== paid.capture || !CAPTURE_STATUSES_READ.has(capture.status)) {
         if (typeof capture.status === "string" && capture.id === paid.capture && !CAPTURE_STATUSES_READ.has(capture.status)) {
-          console.error("a PayPal capture is in a status the refund watch does not read; looked at again in an hour", order, capture.status);
+          console.error("a PayPal capture is in a status the refund watch does not read; looked at again later", order, capture.status);
         }
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+        // On the watch's own schedule while its days last, then every LATE_LOOK_SECONDS: never every hour for the
+        // paid record's 400 days (Claude 2 on #4536).
+        await redisPipeline([["ZADD", watchKey(statsId), String(unknownLook(paid.at, now)), order]]);
         continue;
       }
       status = capture.status;

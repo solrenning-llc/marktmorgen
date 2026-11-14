@@ -1295,6 +1295,7 @@
     "components/ai-assist.tsx",
     "components/ai-draft-review.tsx",
     "components/ai-posts.tsx",
+    "components/ai-steps-assist.tsx",
     "components/answers-editor.tsx",
     "components/api-key-editor.tsx",
     "components/app-code-invite.tsx",

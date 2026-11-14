@@ -82,7 +82,7 @@ export default function HelpPage() {
                 <div className="mt-6 divide-y divide-line overflow-hidden rounded-[var(--r-lg)] border border-line bg-white">
                   {section.items.map((item) => (
                     <details key={item.q} id={answerId(item.q)} data-help-item className="group scroll-mt-24">
-                      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-6 px-5 py-5 font-semibold text-ink hover:bg-paper focus-visible:[outline-offset:-3px]! sm:px-6 [&::-webkit-details-marker]:hidden">
+                      <summary className="flex min-h-11 cursor-pointer list-none items-center [overflow-wrap:anywhere] justify-between gap-6 px-5 py-5 font-semibold text-ink hover:bg-paper focus-visible:[outline-offset:-3px]! sm:px-6 [&::-webkit-details-marker]:hidden">
                         {item.q}
                         <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-line text-ink-soft group-open:border-violet-brand group-open:text-violet-deep">
                           <Icon name="plus" size={16} className="group-open:hidden" />

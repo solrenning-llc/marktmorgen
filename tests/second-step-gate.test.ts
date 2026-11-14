@@ -36,6 +36,7 @@ import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
@@ -114,6 +115,9 @@ async function signInWithPasskey(key: ReturnType<typeof makePasskey>): Promise<s
 }
 
 async function main(): Promise<void> {
+  // The lock waits (lib/redis-lock.ts) and the short pauses below pass on a virtual clock, in the order the real
+  // one would give: every check of the time still sees the whole wait.
+  const clock = installVirtualClock({ maxMs: 1_000 });
   redis.clear();
   is("the passkey wait is the app's wait", REMOVAL_DAYS, RESET_DAYS);
 
@@ -1279,6 +1283,7 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  clock.restore();
   done();
 }
 

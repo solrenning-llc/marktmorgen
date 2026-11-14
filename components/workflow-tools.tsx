@@ -8,7 +8,7 @@
  * go through the studio's own request (`request`).
  */
 import { useEffect, useState } from "react";
-import { type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
+import { LAYOUT_HOLD_START, type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
 import { END, type RoutedStep, type SampleContact, previewRun } from "@/lib/flow-paths";
 import type { RunEvent, RunRecord } from "@/lib/flow-runs";
 import { MAX_RETRIES_BY_YOU, MAX_RUN_EVENTS } from "@/lib/flow-limits";
@@ -445,11 +445,15 @@ export function WorkflowRuns({ flowId, steps, request }: { flowId: string; steps
           {open.run.status === "held" ? (
             <div className="notice notice-warn mt-3 text-sm">
               <p className="font-semibold">What should happen with this step?</p>
-              <p className="mt-1">Its outcome could not be confirmed, so it was not repeated. Check what you can (the person&apos;s inbox, their page, your deals board), then choose.</p>
+              {open.run.note.startsWith(LAYOUT_HOLD_START) ? (
+                <p className="mt-1">{open.run.note}</p>
+              ) : (
+                <p className="mt-1">Its outcome could not be confirmed, so it was not repeated. Check what you can (the person&apos;s inbox, their page, your deals board), then choose.</p>
+              )}
               <p className="mt-1">{open.run.retries >= MAX_RETRIES_BY_YOU ? `It has been tried again ${n(MAX_RETRIES_BY_YOU)} times, the most one run may: choose whether it went through, or end it.` : `A run may be tried again up to ${n(MAX_RETRIES_BY_YOU)} times; this one has been tried again ${n(open.run.retries)} ${open.run.retries === 1 ? "time" : "times"}.`}</p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("continue")}>It went through: continue</button>
-                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || open.run.retries >= MAX_RETRIES_BY_YOU} onClick={() => resolve("retry")}>Try it again (may arrive twice)</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("continue")}>{open.run.note.startsWith(LAYOUT_HOLD_START) ? `Skip step ${open.run.step + 1}` : "It went through: continue"}</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={busy || open.run.retries >= MAX_RETRIES_BY_YOU} onClick={() => resolve("retry")}>{open.run.note.startsWith(LAYOUT_HOLD_START) ? `Send step ${open.run.step + 1} now` : "Try it again (may arrive twice)"}</button>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => resolve("end")}>End this run</button>
               </div>
             </div>

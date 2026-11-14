@@ -465,3 +465,32 @@ export async function runPeople(flowId: string, page = 500): Promise<{ person: s
 export const forgetIndexCommand = (flowId: string): (string | number)[] => ["DEL", indexKey(flowId)];
 /** A store's held runs, all of them: for a store being deleted. */
 export const forgetHeldCommand = (listId: string): (string | number)[] => ["DEL", heldKey(listId)];
+
+/**
+ * When this person's run last moved (its `updatedAt`), read with the step's other reads (lib/flows.ts, sendGroup):
+ * every write that queues their next step writes it in the same moment, so it says when the step they are queued
+ * for was chosen. Read only for a workflow whose steps changed places (Flow.layoutAt).
+ */
+export const runStampCommand = (flowId: string, email: string): (string | number)[] => ["HGET", runKey(flowId, personOf(email)), "updatedAt"];
+
+/**
+ * Holds these runs at step `index` without attempting anything (lib/flows.ts: the workflow's steps changed places
+ * after they were queued, so the position they hold may now be another step). The attempt mark is the step now at
+ * that position, so the creator's choice on the held runs screen (resolveHeldRun) sends it ("retry"), skips it
+ * ("continue") or ends the run. Nothing was sent, so nothing is written as attempted.
+ */
+export async function holdRuns(listId: string, flowId: string, index: number, stepId: string, emails: string[], note: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (!emails.length) return;
+  const commands: (string | number)[][] = [];
+  for (const email of emails) {
+    const person = personOf(email);
+    const run = runKey(flowId, person);
+    commands.push(
+      ["HSET", run, "open", `${index}:${stepId}`, "email", normaliseEmail(email), "status", "held", "step", index, "note", note.slice(0, 300), "updatedAt", nowSeconds],
+      ["RPUSH", logKey(flowId, person), event({ at: nowSeconds, step: index, stepId, kind: "run", state: "uncertain", note })],
+      ["ZADD", heldKey(listId), nowSeconds, `${flowId}|${person}`],
+      ["ZADD", indexKey(flowId), nowSeconds, person],
+    );
+  }
+  await redisPipeline(commands);
+}

@@ -96,8 +96,10 @@ export const RUN_START_COMMANDS = 8;
 export const HISTORY_COMMANDS_PER_STEP = 9;
 // The queue's own commands for one person's step: the scan, the take from the queue, the lease, the person's row, the lease entry read with
 // it (since 4 November 2026: a stop step of another workflow may have removed it), the next step queued while leased, and the lease let go: 7.
+// Since 14 November 2026 one more, read in the same step: when the person's run last moved, for a workflow whose steps changed places (Flow.layoutAt in
+// lib/flows.ts), so a step removed or moved while people wait never sends them another step than the one they were due: 8.
 // The actions' own commands (a deal read and moved, a rotate's lock, a stop's removal) are not in it yet: measured and added in the follow-up on workflow step costs.
-export const QUEUE_COMMANDS_PER_STEP = 7;
+export const QUEUE_COMMANDS_PER_STEP = 8;
 /**
  * One wait, at the most, for a batch of one person (the dearest case; a
  * batch shares its reads): the job's queue scans, take and lease (6), the
@@ -110,9 +112,11 @@ export const QUEUE_COMMANDS_PER_STEP = 7;
  * the lease entry is still there (1, one script: QUEUE_IF_LEASED in
  * lib/flows.ts), and the lease let go (1). Measured at 22 for a wait on the
  * day's room and 31 for the month's emails (tests/workflow-retries.test.ts,
- * 4 November 2026, with the lease read); 32 with room to spare.
+ * 4 November 2026, with the lease read); 32 with room to spare. One more since
+ * 14 November 2026: the run's last move, read with the row and the lease entry
+ * for a workflow whose steps changed places (lib/flows.ts, Flow.layoutAt): 33.
  */
-export const WAIT_COMMANDS_PER_TRY = 32;
+export const WAIT_COMMANDS_PER_TRY = 33;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { agreementReply, type AgreementAction, type AgreementReply } from "@/lib/agreement-reply";
 import { agreementEditorVersion } from "@/lib/agreement-editor-version";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import { emailsUsedLine } from "@/lib/store-allowance-rules";
 import { type Currency, fieldPrefix, formatMoney, isCurrency, readMoney } from "@/lib/money";
@@ -145,7 +145,7 @@ export function AgreementsStudio({
     const then: Currency = isCurrency(its) ? its : currency;
     const read = agreementEditorVersion(answer.version, then, latest?.n ?? 0);
     if (!answer.ok || !read || read.sha256 !== latest?.sha256) {
-      toast(answer.message ?? "That agreement can't be read right now. Try again in a moment.");
+      toastProblem(answer.message ?? "That agreement can't be read right now. Try again in a moment.");
       return;
     }
     const v = then === currency ? read : { ...read, lines: read.lines.map((line) => ({ ...line, amount: "" })) };
@@ -202,7 +202,8 @@ export function AgreementsStudio({
     setReviewOf(null);
     setReviewed(null);
     setErrorFor(null);
-    toast(answer.sent ? (editing ? "New version sent. It needs a new signature." : "Sent for signature.") : "Saved, but its email did not go. Send it again from the list.");
+    if (answer.sent) toast(editing ? "New version sent. It needs a new signature." : "Sent for signature.");
+    else toastProblem("Saved, but its email did not go. Send it again from the list.");
     reset();
     // The review is gone with the focus in it: the focus goes back to the start of the form.
     requestAnimationFrame(() => document.getElementById("ag-email")?.focus());
@@ -215,10 +216,11 @@ export function AgreementsStudio({
     const answer = await call({ action, id });
     setBusy("");
     if (!answer.ok) {
-      toast(answer.message ?? "We couldn't confirm the result. Reload to check before trying again.");
+      toastProblem(answer.message ?? "We couldn't confirm the result. Reload to check before trying again.");
       return;
     }
-    toast((action === "resend" || action === "copy") && answer.sent === false ? "The email did not go. Your store's emails for this month may be used." : done);
+    if ((action === "resend" || action === "copy") && answer.sent === false) toastProblem("The email did not go. Your store's emails for this month may be used.");
+    else toast(done);
     router.refresh();
   }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { WHY_NOT, WHY_NOT_NAMES, type WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 import { READ_SAMPLE } from "@/lib/page-read-sample";
@@ -43,9 +43,9 @@ export function PageAnswers({
       if (body.ok && typeof body.ask === "boolean") {
         setOn(body.ask);
         toast(body.ask ? "Your sales pages ask it now." : "Your sales pages no longer ask it.");
-      } else toast("That did not save. Try again.");
+      } else toastProblem("That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

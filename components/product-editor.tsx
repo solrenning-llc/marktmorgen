@@ -32,7 +32,7 @@ import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
 import { LicenceKeyEditor } from "@/components/licence-key-editor";
 import { PdfStampToggle } from "@/components/pdf-stamp-toggle";
 import { PdfPreviewToggle } from "@/components/pdf-preview-toggle";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import {
   MAX_PRODUCTS,
@@ -2056,7 +2056,7 @@ export function ProductEditor({
     // and change, which is not something to read in three seconds.
     setSilenced(quiet);
     // Removed, but its campaign words could not be confirmed deleted (#1947): said, never a plain "removed".
-    if (pending) toast("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
+    if (pending) toastProblem("Product removed. Its campaign words could not be confirmed deleted just now. They stay counted in your store's data until they are, and they go with your store's data if you close it.");
     else if (confirmation) toast(confirmation);
     router.refresh();
   }

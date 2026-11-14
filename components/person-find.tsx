@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toastProblem } from "@/components/toast";
 
 /**
  * Looks up one buyer by their address (lib/buyer-profile.ts). The address is
@@ -29,7 +29,7 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
             window.location.assign(answer.href);
             return;
           }
-          toast(
+          toastProblem(
             // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
             answer.message ? answer.message : answer.error === "email"
               ? "That is not an email address. Check it and try again."
@@ -38,7 +38,7 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
                 : "That did not work. Try again in a moment.",
           );
         } catch {
-          toast("That did not work. Check your connection and try again.");
+          toastProblem("That did not work. Check your connection and try again.");
         }
         setBusy(false);
       }}

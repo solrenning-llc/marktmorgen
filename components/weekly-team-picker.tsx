@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 
 /**
  * Which team members get the weekly email too (lib/stats-report.ts). Only
@@ -19,9 +19,9 @@ export function WeeklyTeamPicker({ members, chosen }: { members: string[]; chose
       if (body.ok && body.emails) {
         setPicked(new Set(body.emails));
         toast("Saved.");
-      } else toast("That did not save. Try again.");
+      } else toastProblem("That did not save. Try again.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

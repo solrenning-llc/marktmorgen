@@ -2,7 +2,7 @@
 
 import { useHydrated } from "@/components/use-hydrated";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { FaqFromInbox } from "@/components/faq-from-inbox";
 import { randomLetters } from "@/lib/random-letters";
 import { browserDrafts, clearDraft, draftIds, oldDraftsStuck, readDraft, saveDraft } from "@/lib/inbox-drafts";
@@ -48,7 +48,7 @@ async function post(body: Record<string, unknown>): Promise<Record<string, unkno
   }
 }
 
-const fail = (error: unknown) => toast(REASONS[String(error)] ?? "That did not work. Check your connection and try again.");
+const fail = (error: unknown) => toastProblem(REASONS[String(error)] ?? "That did not work. Check your connection and try again.");
 
 /** Times the list is asked again by itself for one opening of the page, one a minute while the tab is in view. */
 export const INBOX_AUTO_CHECKS = 30;
@@ -235,7 +235,8 @@ export function InboxStudio({
     setDraftFailed(false);
     setDrafted(draftIds(browserDrafts(me)));
     setDraftSaid("");
-    toast(answer.emailed ? `Sent: in their chat, and emailed to ${next.conversation.email}.` : "Kept in the conversation. The email could not go just now; they see it in their chat.");
+    if (answer.emailed) toast(`Sent: in their chat, and emailed to ${next.conversation.email}.`);
+    else toastProblem("Kept in the conversation. The email could not go just now; they see it in their chat.");
   }
 
   async function act(body: Record<string, unknown>, done: string) {

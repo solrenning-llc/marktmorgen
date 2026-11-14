@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import type { ServerSetup } from "@/lib/ad-events";
 
 type Platform = "meta" | "tiktok" | "google" | "pinterest";
@@ -59,7 +59,7 @@ export function ServerEventsEditor({ setup, pixels, googleId }: { setup: ServerS
         toast(done);
         return true;
       }
-      toast(
+      toastProblem(
         answer.error === "token"
           ? "That does not look like a token. Copy the whole of it from where it was made."
           : answer.error === "account"
@@ -71,7 +71,7 @@ export function ServerEventsEditor({ setup, pixels, googleId }: { setup: ServerS
                 : "That did not save. Try again.",
       );
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "@/components/toast";
+import { toast, toastProblem } from "@/components/toast";
 import { UrlField } from "@/components/url-field";
 import { type ChatKind, MAX_CHAT_URL, chatKind } from "@/lib/chat-kind";
 import { type LinkCheck, checkWith } from "@/lib/url-check";
@@ -30,9 +30,9 @@ export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { 
       if (answer.ok) {
         setSales(answer.sales === true);
         toast(answer.sales ? "Each sale and each alert will be posted too." : "Only the week's and the month's numbers are posted now.");
-      } else toast("That did not save. Try again in a moment.");
+      } else toastProblem("That did not save. Try again in a moment.");
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }
@@ -50,10 +50,10 @@ export function ChatSummaryEditor({ kind: given, sales: salesGiven = false }: { 
         setUrl("");
         toast(answer.result === "saved" ? "Saved: a first message was posted to the channel" : "No longer posted");
       } else {
-        toast(ANSWERS[answer.error ?? ""] ?? "That did not save. Try again in a moment.");
+        toastProblem(ANSWERS[answer.error ?? ""] ?? "That did not save. Try again in a moment.");
       }
     } catch {
-      toast("That did not save. Check your connection and try again.");
+      toastProblem("That did not save. Check your connection and try again.");
     } finally {
       setBusy(false);
     }

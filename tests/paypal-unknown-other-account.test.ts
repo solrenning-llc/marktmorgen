@@ -122,6 +122,40 @@ async function main(): Promise<void> {
   is("the retry goes from A, with the same key", postsBy, ["Bearer tokenA", "Bearer tokenA"]);
   is("now known by PayPal's id, nothing unknown left", (await unknownEntries()).length, 0);
 
+  part("A batch held under PayPal's id (main's `s`) beside a \"?\" entry from another app (`p`): both read, neither is sent");
+  await seed();
+  await linked(store, CLIENT_A, SECRET_A);
+  mode = "drop";
+  await payWithPayPal(store);
+  const [lost] = await unknownEntries();
+  const [rawLost] = await redis.pipeline([["HKEYS", OPEN]]);
+  const lostField = (rawLost as string[]).find((f) => f.startsWith("?")) as string;
+  is("the \"?\" entry keeps the app print as `p`, 64 hex", /^[0-9a-f]{64}$/.test(String(lost.p)), true);
+  is("and no `s` of its own", lost.s, undefined);
+  await seed();
+  await linked(store, CLIENT_A, SECRET_A);
+  mode = "make";
+  await payWithPayPal(store);
+  const [rawHeld] = await redis.pipeline([["HGETALL", OPEN]]);
+  const flatHeld = rawHeld as string[];
+  const heldId = flatHeld[0];
+  const held = JSON.parse(flatHeld[1]) as Record<string, unknown>;
+  is("the made batch is held under PayPal's id with its sender_batch_id as `s`", [heldId.startsWith("?"), String(held.s).startsWith("nl-")], [false, true]);
+  await redis.pipeline([
+    // The same request's "?" left behind (its removal not confirmed), and an unrelated lost batch from app A.
+    ["HSET", OPEN, `?${String(held.s)}`, JSON.stringify({ at: held.at, currency: held.currency, lines: held.lines, p: lost.p })],
+    ["HSET", OPEN, lostField, JSON.stringify(lost)],
+  ]);
+  await linked(store, CLIENT_B, SECRET_B);
+  const before = postsBy.length;
+  let threw = false;
+  await settlePayPal(store).catch(() => { threw = true; });
+  is("the store's batches all read (nothing unavailable)", threw, false);
+  is("no POST at all: the held batch's \"?\" is not sent, the other app's is not resent", postsBy.length, before);
+  const [rawAfter] = await redis.pipeline([["HKEYS", OPEN]]);
+  is("the held batch's leftover \"?\" is dropped", (rawAfter as string[]).includes(`?${String(held.s)}`), false);
+  is("the \"?\" from app A goes to the creator's own check", await paypalChecks(store), { checking: 0, manual: 1 });
+
   part("A batch kept from before the sender was recorded: never sent again, left for the creator's own check");
   await seed();
   await linked(store, CLIENT_A, SECRET_A);

@@ -6,7 +6,6 @@ Only Codex edits this file (owner, through Claude 1's inbox message C3-7, 02/11/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Codex F | 309 [EM1], CX-85: campaign prototype regression; lib/mail-revenue.ts shared with #2192 by explicit inbox exception | codex/f-mail-revenue-proto | `tests/mail-revenue-proto.test.ts` | 04/11/2026 |
 | Codex A3 | CX-101(3) / CX-102(c): confirm a mail route before creating course tokens and retain recoverable fallback refusals; stacked on own #2338, email.ts shared only between these own units | codex/a3-c97b-mail-readiness | `lib/email.ts`, `tests/course-link-mail-unavailable.test.ts`, `tests/course-link-mail-world.ts`, `tests/durable-mail-refusal.test.ts`; lib/learn.ts liberado em série para o #2791 e depois o #2794 até ambos entrarem (C4-1845) | 04/11/2026 |
 | Codex H | 310 [AX2]: copied answer links preserve native modified navigation | codex/h-copy-link-native | `components/copy-link.tsx`, `tests/copy-link-native.test.ts` | 04/11/2026 |
 | Codex F | 476 [TX6]: residual tax risks, aggravating facts and design mitigations; historical research preserved | codex/f-tax-residual-risks | `docs/tax-uncertainty.md`, `tests/tax-residual-risks.test.ts` | 04/11/2026 |

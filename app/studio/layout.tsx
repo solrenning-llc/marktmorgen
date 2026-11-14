@@ -25,7 +25,10 @@ export default function StudioLayout({ children }: LayoutProps<"/studio">) {
   return (
     <>
       <SkipLink />
-      {children}
+      {/* Marks the studio's pages for the 44 px target floor in app/globals.css (WCAG 2.5.5); draws no box of its own. */}
+      <div data-studio="" className="contents">
+        {children}
+      </div>
       <StudioApp />
     </>
   );

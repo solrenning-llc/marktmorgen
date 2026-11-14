@@ -212,6 +212,9 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
 /** Why a payment page could not be opened, in the buyer's notice's words (lib/buyer-words/requests.ts, notices). */
 export type CheckoutRefusal = "closed" | "paused" | "error" | "busy" | "gone";
 
+/** The states Stripe documents for a Checkout Session (open, complete, expired): any other reply is not read. */
+const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expired"]);
+
 /**
  * Opens the payment for one request and returns where to send the buyer:
  * the checkout already opened for it in the last day, while Stripe still
@@ -230,21 +233,27 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
         // A checkout Stripe no longer has is no checkout: a new one is opened.
-        if (error instanceof StripeError && error.status === 404) return {};
+        if (error instanceof StripeError && error.status === 404) return null;
         throw error;
-      })) as Record<string, unknown>;
-      // Within 23 hours, the same page again.
-      if (known.status === "open" && typeof known.url === "string" && known.url && now - request.sessionAt < REUSE_SECONDS * 1000) return { ok: true, url: known.url };
-      if (isSettled(known)) {
-        await markPaid(store, request.id, known, now);
-        return { ok: false, reason: "gone" };
-      }
-      // Being paid (a payment that settles later): no second checkout beside it.
-      if (known.status === "complete") return { ok: false, reason: "busy" };
-      // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
-      if (known.status === "open") {
-        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-        if (closed.status !== "expired") return { ok: false, reason: "error" };
+      })) as Record<string, unknown> | null;
+      // Read only from a reply about this very checkout in a state Stripe documents: any other 200 reply (no status, a
+      // status not known here, another checkout's id) says nothing about whether it is still payable, so nothing new
+      // opens beside it (Claude 7, 14 November 2026).
+      if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      if (known) {
+        // Within 23 hours, the same page again.
+        if (known.status === "open" && typeof known.url === "string" && known.url && now - request.sessionAt < REUSE_SECONDS * 1000) return { ok: true, url: known.url };
+        if (isSettled(known)) {
+          await markPaid(store, request.id, known, now);
+          return { ok: false, reason: "gone" };
+        }
+        // Being paid (a payment that settles later): no second checkout beside it.
+        if (known.status === "complete") return { ok: false, reason: "busy" };
+        // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
+        if (known.status === "open") {
+          const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+          if (closed.status !== "expired") return { ok: false, reason: "error" };
+        }
       }
     }
     const opened = await createRequestCheckout(store, request, origin, now);

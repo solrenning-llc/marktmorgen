@@ -95,6 +95,24 @@ async function main(): Promise<void> {
   const whilePaying = await openRequestCheckout(store, second.id, "https://marktmorgen.com", now + 23.5 * 3_600_000);
   is("control: the first opened", firstSecond.ok, true);
   is("refused while it is being paid", whilePaying, { ok: false, reason: "busy" });
+
+  part("A malformed 200 reply for the earlier checkout opens no second one: the answer is an error");
+  for (const [label, reply] of [
+    ["no status", (s: Record<string, unknown>) => { const { status: _drop, ...rest } = s; return rest; }],
+    ["an unknown status", (s: Record<string, unknown>) => ({ ...s, status: "processing" })],
+    ["another checkout's id", (s: Record<string, unknown>) => ({ ...s, id: "cs_test_someoneelse0000000000000", status: "expired" })],
+  ] as const) {
+    const cN = await createRequest(store, (readDraft(draftBody({ email: `odd-${label.length}@example.com` }), "usd", now) as { ok: true; draft: Parameters<typeof createRequest>[1] }).draft, now);
+    const req = cN.ok ? cN.request : null!;
+    const opened = await openRequestCheckout(store, req.id, "https://marktmorgen.com", now);
+    const sid = [...sessions.keys()].find((k) => (sessions.get(k)!.metadata as Record<string, string>).request === req.id)!;
+    sessions.set(sid, reply(sessions.get(sid)!));
+    const before = checkouts.length;
+    const again = await openRequestCheckout(store, req.id, "https://marktmorgen.com", now + 23.5 * 3_600_000);
+    is(`control: the first opened (${label})`, opened.ok, true);
+    is(`no new checkout is opened (${label})`, checkouts.length, before);
+    is(`the answer is an error (${label})`, again.ok ? again : again.reason, "error");
+  }
   done();
 }
 

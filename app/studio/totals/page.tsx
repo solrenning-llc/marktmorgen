@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
 import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
@@ -83,7 +84,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Numbers</p>
+          <StudioTrail store={store} here="Numbers" />
           <h1 className="t-h2 mt-3">All your stores</h1>
           {!several ? (
             <p className="mt-3 max-w-2xl text-ink-soft">

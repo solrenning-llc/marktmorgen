@@ -3978,12 +3978,16 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
       return done;
     }
     if (!read.complete) return done;
+    // An instalment paid is activity, as a sale is: a plan still paying restarts the idle count, so an affiliate
+    // paid up between two instalments is never removed while the plan pays (second review of #3906, MEDIUM 1).
     for (const line of read.lines) {
       if (line.self) continue;
+      active(line.aff, line.at);
       if (line.currency !== store.currency) foreign.add(line.aff);
       earn(line.aff, (line.base * line.rate) / 100);
       const up = inviter.get(line.aff);
       if (up) {
+        active(up.id, line.at);
         if (line.currency !== store.currency) foreign.add(up.id);
         earn(up.id, (line.base * up.percent) / 100);
       }

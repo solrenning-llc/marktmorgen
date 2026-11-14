@@ -106,7 +106,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                   Some sales could not be read in full, so the sales and money below may be lower than they are. Each store&apos;s studio home says when its numbers were last read and when they are read again.
                 </p>
               ) : null}
-              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8">
+              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8" tabIndex={0}>
                 <h2 id="sums-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Visits and sales</h2>
                 <table className="mt-4 w-full text-sm">
                   <caption className="sr-only">Visitors, checkouts started, sales and money from sales, for all your stores added up</caption>

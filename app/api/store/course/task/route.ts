@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, handIn, noteTaskUpload, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -86,26 +86,39 @@ export async function POST(request: NextRequest) {
           // A path in this student's own folder, let in through the door and not handed in before.
           if (!ownsTaskPath(asked.path, folder) || !(await takeTaskUpload(asked.path))) return no("invalid");
           const path = asked.path;
+          // From here the upload is off the daily sweep's list (takeTaskUpload). A file refused below whose delete
+          // fails, or one the file store does not answer for, goes back on it: never left in the store with nothing
+          // pointing at it, never erased and counted for good (outage drill, 14 November 2026).
+          const backToSweep = () =>
+            noteTaskUpload(path, 0).catch((error: unknown) => console.error("could not hand a refused task upload to the daily sweep", error));
+          const drop = () =>
+            deleteFile(path).catch(async (error: unknown) => {
+              console.error("could not delete a refused task upload; it goes to the daily sweep", error);
+              await backToSweep();
+            });
           const found = await headFile(path).catch(() => null);
-          if (!found) return no("missing");
+          if (!found) {
+            await backToSweep();
+            return no("missing");
+          }
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
-            await deleteFile(path).catch(() => {});
+            await drop();
             return no("type");
           }
           if (found.size > MAX_TASK_FILE_BYTES) {
-            await deleteFile(path).catch(() => {});
+            await drop();
             return no("too_big");
           }
           // An unknown reply from the room's counter throws (CX-123 rule 24): the file sent is deleted first, never left
           // in the store unaccounted for, and the bytes it may have taken are given back only if its mark says they entered.
           const roomTaken = await takeRoom(room, found.size, taskRoomFor(store), path).catch(async (error: unknown) => {
-            await deleteFile(path).catch(() => {});
+            await drop();
             await undoTakeRoom(room, found.size, path).catch((undoError: unknown) => console.error("giving back a task file's room failed", undoError));
             throw error;
           });
           if (!roomTaken) {
-            await deleteFile(path).catch(() => {});
+            await drop();
             return no("full");
           }
           taken = found.size;

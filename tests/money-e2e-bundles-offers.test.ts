@@ -287,7 +287,7 @@ async function main(): Promise<void> {
     ],
   });
   is("saved while the bundle does not hold the Cheat Sheet", saved.ok, true);
-  is("and the Cheat Sheet put in the bundle afterwards", (await setProductBundle(OWNER, pack, [guide, sheet, extra])).ok, true);
+  is("and the Cheat Sheet put in the bundle afterward", (await setProductBundle(OWNER, pack, [guide, sheet, extra])).ok, true);
   store = (await storeForEmail(OWNER))!;
   const origin = "https://marktmorgen.com";
   const browser = newUpsellKey();

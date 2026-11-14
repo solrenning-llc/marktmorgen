@@ -300,7 +300,7 @@ async function main(): Promise<void> {
   is("an offer at checkout: the kit for $7.99", bumped.ok, true);
   const withBump = await checkoutOf(guide, OWNER, { bumps: [kit] });
   // The page draws the box at salePrice(bump, off) (components/store-product.tsx) and the coupon takes the same off every line.
-  is("the offer ticked during the sale: the page's total is what Stripe charges", [stripeCharges(withBump), salePrice(1999, 15) + salePrice(799, 15)], [2378, 2378]);
+  is("the offer checked during the sale: the page's total is what Stripe charges", [stripeCharges(withBump), salePrice(1999, 15) + salePrice(799, 15)], [2378, 2378]);
   // lib/affiliates.ts orderLines weighs each line by `<bump>_cents` against Stripe's `amount_subtotal`, which is
   // "Total of all items before discounts or taxes are applied": the subtotal of the lines as sent. So the front
   // product's part (subtotal − bump_cents) must be its own line, and the box's its own, both before the coupon.

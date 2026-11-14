@@ -470,6 +470,21 @@ export async function livePromotionId(account: string, code: string): Promise<st
 }
 
 /**
+ * What a fixed-amount coupon takes off in `currency`, from its expanded `currency_options`: whole units, or 0 when
+ * it has no option there (Stripe then takes nothing off in that currency); null when the options do not read.
+ */
+function currencyOption(row: Record<string, unknown>, currency: string): number | null {
+  const promotion = row.promotion as { coupon?: unknown } | undefined;
+  const coupon = (promotion?.coupon ?? row.coupon) as { currency_options?: unknown } | undefined;
+  const options = coupon?.currency_options;
+  if (options === undefined || options === null || typeof options !== "object" || Array.isArray(options)) return null;
+  const option = (options as Record<string, unknown>)[currency.toLowerCase()];
+  if (option === undefined) return 0;
+  const amount = (option as { amount_off?: unknown } | null)?.amount_off;
+  return typeof amount === "number" && Number.isSafeInteger(amount) && amount >= 0 ? amount : null;
+}
+
+/**
  * What the codes on this creator's account may take off a checkout in this
  * currency, for the share of the sale (lib/platform-share.ts): the fee set on
  * a checkout must never be more than the buyer pays, and the box on Stripe's
@@ -481,7 +496,7 @@ export async function livePromotionId(account: string, code: string): Promise<st
 export async function codesMayTakeOff(account: string | null, currency: string): Promise<MayComeOff[]> {
   if (!account) return [{ kind: "unknown" }];
   try {
-    const page = await onAccount("GET", account, "/promotion_codes?limit=100&active=true&expand[]=data.promotion.coupon", undefined, API_VERSION);
+    const page = await onAccount("GET", account, "/promotion_codes?limit=100&active=true&expand[]=data.promotion.coupon&expand[]=data.promotion.coupon.currency_options", undefined, API_VERSION);
     if (page.has_more === true || !Array.isArray(page.data)) return [{ kind: "unknown" }];
     let percent = 0;
     let cents = 0;
@@ -490,6 +505,13 @@ export async function codesMayTakeOff(account: string | null, currency: string):
       if (!off) return [{ kind: "unknown" }];
       if (off.kind === "percent") percent = Math.max(percent, off.percent);
       else if (off.currency.toLowerCase() === currency.toLowerCase()) cents = Math.max(cents, off.cents);
+      else {
+        // A fixed amount in another currency comes off here by the coupon's option in this currency, read with it
+        // (DISC-C-2); an option that does not read is unknown, never nothing off.
+        const optionCents = currencyOption(row, currency);
+        if (optionCents === null) return [{ kind: "unknown" }];
+        cents = Math.max(cents, optionCents);
+      }
     }
     const out: MayComeOff[] = [];
     if (percent > 0) out.push({ kind: "percent", percent });

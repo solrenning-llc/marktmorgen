@@ -99,7 +99,7 @@ async function main(): Promise<void> {
   const given = await keyForSale(store, app, "cs_test_keyrefund0001", "buyer@example.com");
   if (given?.state !== "issued") throw new Error("no key");
   sessionsByPayment.pi_TestKeyRefund1 = [{ id: "cs_test_keyrefund0001", metadata: { store: "kilnworks", product: tool.product.id } }];
-  refunds = [{ id: "re_TestKeyRefund1", object: "refund", created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
+  refunds = [{ id: "re_TestKeyRefund1", object: "refund", amount: 2900, created: NOW - 30, status: "succeeded", payment_intent: "pi_TestKeyRefund1", charge: { object: "charge", amount: 2900, amount_refunded: 2900, refunded: true } }];
   const saleRead = (b: Batch) => b.length === 1 && b[0][0] === "HGET" && String(b[0][1]).includes(":sale") && b[0][2] === "cs_test_keyrefund0001";
   for (const [label, reply] of [["no reply", []], ["a number", [7]], ["an object", [{}]]] as [string, unknown[]][]) {
     redis.pipeline = (async (b: Batch) => (saleRead(b) ? reply : pipeline(b))) as typeof redis.pipeline;

@@ -35,7 +35,7 @@ is("no movement", /transition|rotate|animate|duration-/.test(block), false);
 part("Target, focus and contrast");
 is("at least 44 pixels high", /<summary className="[^"]*\bmin-h-11\b/.test(flat), true);
 is("the focus ring drawn inside the box that clips it, over the global offset", [flat.includes("overflow-hidden"), /<summary className="[^"]*focus-visible:\[outline-offset:-3px\]!/.test(flat)], [true, true]);
-is("the global focus ring reaches a summary", css.includes(":where(a, button, [role=\"button\"], input, select, textarea, summary):focus-visible"), true);
+is("the global focus ring reaches a summary", (/:where\(([^)]*)\):focus-visible/.exec(css)?.[1] ?? "").split(",").map((s) => s.trim()).includes("summary"), true);
 const hex = (name: string) => (css.match(new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`)) ?? [])[1];
 const lum = (h: string) => { const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
 const ratio = (h: string) => (1 + 0.05) / (lum(h) + 0.05);

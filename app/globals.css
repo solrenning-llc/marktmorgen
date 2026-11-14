@@ -246,7 +246,9 @@ body {
   color: var(--violet-ink);
 }
 
-:where(a, button, [role="button"], input, select, textarea, summary):focus-visible,
+/* [tabindex="0"]: a region made focusable so a keyboard can scroll it (a table or code block wider than the
+   screen) shows this ring too, not only the browser's own (2.4.7, 2.4.13; tests/focus-ring-tabindex.test.ts). */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex="0"]):focus-visible,
 :where(input[type="radio"]):focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;

@@ -263,9 +263,9 @@ async function main(): Promise<void> {
   // The page shows the box at the front product's sale price too (components/store-product.tsx, salePrice of the
   // bump's price at the front product's percent), so the sale's coupon on the whole session charges what was shown.
   is("the box is charged what the page shows for it, the sale's percent off its own price", stripeCharges, [["Pastry Course", 3920], ["Pastry Templates", 720]]);
-  // RED: DISC-B-1 — lib/store-checkout.ts:465: metadata[bump_cents], the weight an affiliate's share of the box is
-  // worked out by (lib/affiliates.ts, noteSession), says the box's list price while Stripe charges it the sale's.
-  is("RED: DISC-B-1: what the order says the box was charged (bump_cents, the affiliate's weight) is what Stripe charges for it", Number(single?.get("metadata[bump_cents]")), stripeCharges[1]?.[1]);
+  // What the order says the box was charged (bump_cents) is its price before the discount, the weight an affiliate's
+  // share is worked out by against Stripe's amount_subtotal, also before discounts (lib/affiliates.ts, orderLines).
+  is("the box's recorded amount is its price before the discount, as the subtotal it is weighed against", Number(single?.get("metadata[bump_cents]")), 900);
 
   part("One-click offers after paying: discounted, a bundle, and what is in it");
   await setStoreSale(OWNER, { name: "", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });

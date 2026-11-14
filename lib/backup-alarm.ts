@@ -20,7 +20,9 @@ import type { BackupRunResult } from "@/lib/backup-run";
 /** Hours without a sign of life before the monitor warns, and before it calls it critical. */
 export const BACKUP_ALARM_WARN_HOURS = 26;
 export const BACKUP_ALARM_CRITICAL_HOURS = 48;
-const TIMEOUT_MS = 10_000;
+/** The monitor's answer is given up after this, in ms: part of the route's time budget (app/api/cron/backup/route.ts). */
+export const BACKUP_ALARM_TIMEOUT_MS = 10_000;
+const TIMEOUT_MS = BACKUP_ALARM_TIMEOUT_MS;
 
 export type BackupAlarmSignal = { kind: "alive" } | { kind: "fail"; reason: string };
 export type BackupAlarmConfig = { url: string };

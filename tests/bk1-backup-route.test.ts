@@ -4,7 +4,10 @@
  * off: BACKUP_COST_REVIEW is null, and the route then sends nothing at all.
  *
  * What fails here:
- *   - BACKUP_RUN_CUTOFF_MS above 700 s, a route without maxDuration of 800 s, a route that runs without CRON_SECRET in
+ *   - a route's maxDuration above 300 s, which a deployment accepts only with Fluid compute (none did: C2-20261113-1415
+ *     ADOTAR-5, #3273 out of the merge queue), anywhere under app/; the run's cutoff with the requests sent outside
+ *     it (the lock, the day's count, the outcome, the lock let go) and the alarm not ending 30 s before the route's
+ *     maxDuration; BACKUP_RUN_CUTOFF_MS other than 240 s; a route that runs without CRON_SECRET in
  *     production, a route that sends a single database command or request while BACKUP_COST_REVIEW is null;
  *   - vercel.json without the backup route twice a day, hours apart;
  *   - the alarm's sign of life sent after anything but a clean success, or no failure signal on prune_*, room_* and
@@ -13,7 +16,10 @@
  *     one (Claude 6's N3);
  *   - the cost model pricing a route duration other than the route's maxDuration, or still saying no route runs.
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import * as backupRun from "@/lib/backup-run";
+import * as backupAlarm from "@/lib/backup-alarm";
 import { BACKUP_COST_REVIEW, BACKUP_LOCK_MS, BACKUP_RUN_CUTOFF_MS, type BackupRunResult } from "@/lib/backup-run";
 import * as backupCost from "@/lib/backup-cost";
 import { BACKUP_ALARM_CRITICAL_HOURS, BACKUP_ALARM_WARN_HOURS, backupAlarmConfig, backupAlarmSignal, sendBackupAlarm } from "@/lib/backup-alarm";
@@ -31,9 +37,33 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
 
   part("The run's cutoff and its route on Vercel (C4-36 item 4)");
-  is("the cutoff: 700 s", BACKUP_RUN_CUTOFF_MS, 700_000);
+  // C2-20261113-1415-ADOTAR-5: 800 s needs Fluid compute, which no deployment accepted; a build that refuses it on
+  // main would stop every publication. 300 s is what the other long routes already declare.
+  is("the route's maxDuration: 300 s, explicit, never past what a deployment accepts without Fluid compute", maxDuration, 300);
+  is("the cutoff: 240 s", BACKUP_RUN_CUTOFF_MS, 240_000);
+  {
+    const outside = (backupRun as Record<string, unknown>).BACKUP_REQUESTS_OUTSIDE_CUTOFF;
+    const alarmMs = (backupAlarm as Record<string, unknown>).BACKUP_ALARM_TIMEOUT_MS;
+    is("the requests sent outside the cutoff: the lock, the day's count, the outcome and the lock let go", outside, 4);
+    is("the alarm's own time limit: 10 s", alarmMs, 10_000);
+    const worstMs = BACKUP_RUN_CUTOFF_MS + Number(outside) * REDIS_TIMEOUT_MS + Number(alarmMs);
+    is("the run's cutoff, every request outside it and the alarm end at least 30 s before the route's maxDuration", worstMs + 30_000 <= maxDuration * 1_000, true);
+  }
   is("the lock still outlives the cutoff and the admission's two requests", BACKUP_LOCK_MS >= BACKUP_RUN_CUTOFF_MS + 2 * REDIS_TIMEOUT_MS + 60_000, true);
-  is("the route's maxDuration: 800 s, explicit", maxDuration, 800);
+  {
+    const past: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (/\.(ts|tsx)$/.test(name)) {
+          for (const m of readFileSync(path, "utf8").matchAll(/export const maxDuration\s*=\s*(\d+)/g)) if (Number(m[1]) > 300) past.push(`${path}: ${m[1]}`);
+        }
+      }
+    };
+    walk("app");
+    is("no route or page under app/ declares a maxDuration above 300 s", past, []);
+  }
   is("no reviewed cost ceiling exists: the backup is off", BACKUP_COST_REVIEW, null);
   // Claude 5's LOW (6732278950, 6732268011): the cost model prices the route this PR built, at its own maxDuration.
   is("the cost model's route duration is the route's maxDuration", (backupCost as Record<string, unknown>).BACKUP_ROUTE_SECONDS, maxDuration);

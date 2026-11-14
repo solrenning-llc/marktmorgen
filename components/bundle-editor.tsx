@@ -12,6 +12,8 @@ import { MAX_SUMMARY_LENGTH, MAX_TITLE_LENGTH } from "@/lib/catalog";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { SaidLine, useSaid } from "@/components/said-line";
 import { endWords, movedWords } from "@/lib/move-words";
+import { focusAfterRemoval } from "@/lib/block-insert";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 
 /** A product as the picker shows it. */
 export type PickerProduct = {
@@ -79,6 +81,19 @@ export function BundleEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+
+  // The "Take … out" button goes with its product: the focus moves to the product now in its place, or the one
+  // before, or to "Add your products" once none is left, never to the top of the page (2.4.3, the page editor's rule).
+  function takeOut(at: number) {
+    const gone = items[at];
+    if (!gone) return;
+    const left = items.filter((_, i) => i !== at);
+    const next = focusAfterRemoval(at, left.length);
+    const nextId = next === null ? null : left[next].id;
+    setItems((current) => current.filter((x) => x.id !== gone.id));
+    const button = (id: string) => document.querySelector<HTMLElement>(`button[data-take-out="${CSS.escape(id)}"]`);
+    focusWhenDrawn(() => (button(gone.id) ? null : nextId === null ? document.getElementById("bundle-find") : button(nextId)), browserFrames());
+  }
   // A bundle its buyers build: how many of its products each one chooses (lib/bundle-rules.ts).
   const [choosing, setChoosing] = useState(Boolean(owner?.pick));
   const [pick, setPick] = useState(owner?.pick ?? MIN_PICK);
@@ -318,7 +333,8 @@ export function BundleEditor({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setItems((current) => current.filter((x) => x.id !== p.id))}
+                    onClick={() => takeOut(i)}
+                    data-take-out={p.id}
                     aria-label={`Take ${p.title} out`}
                     className="grid h-11 w-11 place-items-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                   >

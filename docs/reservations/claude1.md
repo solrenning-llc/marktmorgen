@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | Defect (custo): PayPal batch settling paced in the studio | claude1/cost-api-paypal-settle | `lib/paypal-payouts.ts`, `app/studio/affiliates/page.tsx`, `app/api/store/affiliates/paypal/route.ts`, `tests/c1-cost-paypal-settle.test.ts`, `components/paypal-payouts.tsx` (the settle toast only), `lib/data-families.ts` (the PayPal pace entry), `tests/store-data-registry.ts` and `tests/closing-families.test.ts` (one line each) | 12/11/2026 17h30 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

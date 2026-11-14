@@ -67,6 +67,7 @@ import { everyPhrase, speechFor } from "@/lib/buyer-words";
 import { paidEveryOf } from "@/lib/recurring-every-rules";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
+import { firstChargeCents } from "@/lib/yearly-price";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
@@ -379,11 +380,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   }
 
   if (product.recurring) {
+    // The first charge is what the checkout made it: the year's price when paid yearly (lib/yearly-price.ts).
+    const firstCents = firstChargeCents(product, option, every, store.tiers);
     if (firstChargeAt) {
-      const firstCents = option ? option.priceCents : product.priceCents;
-      lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
-    } else if (trialDays > 0) {
-      const firstCents = option ? option.priceCents : product.priceCents;
+      if (firstCents !== null) lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
+    } else if (trialDays > 0 && firstCents !== null) {
       const tax = store.tax.enabled && !store.tax.included;
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));
@@ -529,7 +530,9 @@ export async function confirmPurchase(
   // by the checkout, and not at all when its sale paid a share.
   if (outcome === "sent") {
     const paid = typeof read.session?.amount_total === "number" ? read.session.amount_total : 0;
-    await countOrder(store, `checkout:${sessionId}`, paid, Date.now());
+    // A count not confirmed keeps the place its checkout was admitted with until its hours end, never given back as
+    // if counted (lib/orders.ts, countOrder).
+    if ((await countOrder(store, `checkout:${sessionId}`, paid, Date.now())) === "unknown") return outcome;
     // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts).
     await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
   }
@@ -825,8 +828,7 @@ export async function confirmOffer(store: Store, offer: TakenOffer): Promise<Con
   } finally {
     await redisPipeline(sent ? [["SET", mark, "sent", "EX", SENT_MARK_SECONDS]] : [["DEL", mark]]);
   }
-  // One of the month's orders (lib/orders.ts), by its own payment.
-  if (sent) await countOrder(store, `offer:${offer.reference}`, offer.amountCents);
+  // Counted by the caller, which knows it was paid, whether or not this email went (lib/upsell.ts, afterPaid).
   return sent ? "sent" : "failed";
 }
 

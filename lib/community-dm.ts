@@ -55,6 +55,7 @@ import { CREATOR } from "@/lib/community";
 import { stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { SET_TAKE_COUNT } from "@/lib/redis-take";
 
 /**
  * Where messages are counted in the store's data room (lib/store-data.ts):
@@ -556,7 +557,7 @@ export async function searchMessages(id: string, who: string, used: string[]): P
  * requests and people they declined. Somebody else's choice to decline them
  * stays with that person.
  */
-export async function forgetDmPerson(id: string, who: string): Promise<number> {
+export async function forgetDmPerson(id: string, who: string, room?: DataStore): Promise<number> {
   // Both lists in their exact shape (CX-123 rule 24): a lost or off-shape reply
   // is not "no conversations", so nothing is deleted, their own lists included,
   // and the erasure stays pending to be retried. Only exact empty lists have
@@ -568,19 +569,32 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
   if (!mine || !asked) throw new UnknownReplyError(what);
   const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
   const commands: (string | number)[][] = [];
+  const at: number[] = [];
   for (const pair of pairs) {
     const other = pair.split(".").find((k) => k !== who) ?? "";
+    at.push(commands.length);
     commands.push(["DEL", chatKey(id, pair), readKey(id, pair)]);
     if (other) commands.push(["ZREM", inboxKey(id, other), pair], ["ZREM", askedKey(id, other), pair]);
   }
   // The conversations first, each deletion answered with its count; their own
   // lists only after that, so a retry can still find every conversation.
+  let replies: unknown[] = [];
   if (commands.length) {
-    const replies = repliesFor(await redisPipeline(commands), commands.length);
-    if (!replies || replies.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
+    const read = repliesFor(await redisPipeline(commands), commands.length);
+    if (!read || read.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
+    replies = read;
   }
-  const gone = repliesFor(await redisPipeline([["DEL", ...dmKeys(id, who)]]), 1);
-  if (replyCount(gone?.[0]) === null) throw new UnknownReplyError(what);
+  // Then their own lists: the people they declined counted and deleted in one step, so they are given back once,
+  // and their lists of conversations and requests; every reply exact.
+  const tail = repliesFor(await redisPipeline([["EVAL", SET_TAKE_COUNT, 1, shutKey(id, who)], ["DEL", inboxKey(id, who), askedKey(id, who)]]), 2);
+  const declined = replyCount(tail?.[0]);
+  if (declined === null || replyCount(tail?.[1]) === null) throw new UnknownReplyError(what);
+  if (room) {
+    // A conversation this deletion removed gives its whole slot back, as declining one does.
+    const gone = pairs.filter((_, i) => (replyCount(replies[at[i]]) ?? 0) > 0);
+    const back = [...gone.map((pair) => ({ slot: PAIR_SLOT(pair), bytes: 0, set: true })), ...(declined > 0 ? [{ slot: DECLINED_SLOT, bytes: declined * DECLINED_BYTES }] : [])];
+    if (back.length) await giveData(room, back);
+  }
   return pairs.length;
 }
 

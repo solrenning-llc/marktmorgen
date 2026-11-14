@@ -10,12 +10,14 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { takeData } from "@/lib/store-data";
+import { type DataStore, giveData, noteData, takeData } from "@/lib/store-data";
+import { HASH_SWAP_IF, HASH_TAKE_ALL, HASH_TAKE_FIELD, takenPairs } from "@/lib/redis-take";
+import { UnknownReply, exactReplies, plainList } from "@/lib/redis-exact";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -44,6 +46,7 @@ import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
+import { erasedWithinCommand } from "@/lib/suppression";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
@@ -119,28 +122,116 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
-    ["HGET", listKey(sid, product.id), email],
-    ["HLEN", listKey(sid, product.id)],
-  ]);
-  const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
-
-  const leave = before?.t ?? newToken();
-  const asked = Boolean(before?.c) || consent;
-  const entry: WaitEntry = { at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t: leave };
+  const startedAt = Math.floor(Date.now() / 1000);
   const confirm = newToken();
-  const grant = (k: TokenGrant["k"]): string => JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant);
-  // A new address takes room in the store's data room, with its link to leave
-  // (kept as long as the list); with no room the list is full for it.
-  if (!before && !(await takeData(store, [{ slot: `wl:${product.id}`, bytes: dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1) }])).ok) return "full";
-  await redisPipeline([
-    ["HSET", listKey(sid, product.id), email, JSON.stringify(entry)],
-    ["SET", tokenKey(confirm), grant("confirm"), "EX", CONFIRM_SECONDS],
-    ["SET", tokenKey(leave), grant("leave"), "EX", WAIT_SECONDS],
-    ...noteForErasure(sid, email, tokenKey(confirm)),
-    ...noteForErasure(sid, email, tokenKey(leave)),
-  ]);
+  const grant = (k: TokenGrant["k"], t: string): (string | number)[] => ["SET", tokenKey(t), JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant), "EX", k === "confirm" ? CONFIRM_SECONDS : WAIT_SECONDS];
+  // The links go before the place, noted for a deletion of the person: one
+  // that runs in between deletes them too, and never leaves a link with the
+  // address on it or a link to leave nobody counted.
+  const links = (leave: string) =>
+    redisPipeline([grant("confirm", confirm), grant("leave", leave), ...noteForErasure(sid, email, tokenKey(confirm)), ...noteForErasure(sid, email, tokenKey(leave))]);
+
+  // A place written by another request between the read and the write (a
+  // double click) is read again and asked again; one deleted in between is
+  // not made again.
+  let leave = "";
+  let mustExist = false;
+  let lastLink = "";
+  for (let tries = 0; tries < 3 && !leave; tries += 1) {
+    // Read exactly (Claude 4 cloud R on #3707): a size that is not a whole count would be NaN, and NaN is never at
+    // the ceiling, so the public list would grow past it; a place of another shape is not "absent". Either is unknown.
+    const read = repliesFor(
+      await redisPipeline([
+        ["HGET", listKey(sid, product.id), email],
+        ["HLEN", listKey(sid, product.id)],
+      ]),
+      2,
+    );
+    const existing = read?.[0];
+    const size = countOf(read?.[1]);
+    if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
+    if (typeof existing !== "string") {
+      if (mustExist) {
+        // Deleted in between: the links this request wrote go with it.
+        await redisPipeline([["DEL", tokenKey(confirm), ...(lastLink ? [tokenKey(lastLink)] : [])]]);
+        return "error";
+      }
+      if (size >= MAX_WAITLIST) return "full";
+      const t = newToken();
+      const value = JSON.stringify({ at: now(), ok: 0, c: consent, ...(consent && input.clicks ? { k: true } : {}), t } satisfies WaitEntry);
+      // A new address takes room in the store's data room, with its link to leave
+      // (kept as long as the list); with no room the list is full for it.
+      const taken = placeBytes(sid, product.id, email, value);
+      if (!(await takeData(store, [{ slot: waitSlot(product.id), bytes: taken }])).ok) return "full";
+      await links(t);
+      const [added] = await redisPipeline([["HSETNX", listKey(sid, product.id), email, value]]);
+      if (added === 1) {
+        leave = t;
+        break;
+      }
+      if (added !== 0) {
+        // Not known whether it was written: its room stays taken, since the place may be there (Claude 5 on #2576),
+        // and it reads again. Written, the place is found as it is and kept; not written, its links go and it fails.
+        lastLink = t;
+        mustExist = true;
+        continue;
+      }
+      // Another request wrote it first (an exact 0): this one's room and its unused link to leave go, and it asks again.
+      await giveData(store, [{ slot: waitSlot(product.id), bytes: taken }]);
+      await redisPipeline([["DEL", tokenKey(t)]]);
+      mustExist = true;
+      continue;
+    }
+    // Asked again: written only over the place as it was read, counted at what
+    // it changed. A place that cannot be read is replaced by a new one.
+    const before = parseEntry(existing);
+    const t = before?.t ?? newToken();
+    const asked = Boolean(before?.c) || consent;
+    const value = JSON.stringify({ at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t } satisfies WaitEntry);
+    await links(t);
+    lastLink = t;
+    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
+    if (swapped === 1) {
+      await settleEntry(store, sid, product.id, email, existing, value);
+      leave = t;
+      break;
+    }
+    if (swapped !== 0) {
+      // Not known whether it was written: what it would grow by is counted, never given back, and it reads again.
+      await noteGrowth(store, sid, product.id, email, existing, value);
+      mustExist = true;
+      continue;
+    }
+    if (!before) await redisPipeline([["DEL", tokenKey(t)]]);
+    mustExist = true;
+  }
+  if (!leave) {
+    // Changed under it every time: its link to confirm leads nowhere and goes.
+    await redisPipeline([["DEL", tokenKey(confirm)]]);
+    return "error";
+  }
+
+  // A deletion of the person that began while this request ran takes its
+  // places before the links it noted: a place written between the two would
+  // be left with the address on it. The deletion's first step is the
+  // address's fingerprint, with its time (lib/suppression.ts), so a place
+  // written now, under a fingerprint that recent, is taken back with its
+  // links and room, and nothing is sent. ERASURE_SECONDS is how long a
+  // deletion may still be running; an address deleted that recently is
+  // asked to try again later.
+  if (store.listId) {
+    // Judged on Redis's clock alone (Claude 1 cloud's LEVE on #2576): the mark is written in seconds of Redis's TIME,
+    // and read against TIME in the same step, over ERASURE_SECONDS and how long this request has run (a duration, so
+    // no instance's clock is ever compared with Redis's). Only an exact 0 is "not deleted that recently"; a mark that
+    // is not whole seconds (-1) or a missing or other reply is unknown and taken as a recent deletion (rule 24).
+    const ran = Math.max(0, Math.ceil(Date.now() / 1000) - startedAt);
+    const recent = repliesFor(await redisPipeline([erasedWithinCommand(store.listId, email, ERASURE_SECONDS + ran)]), 1)?.[0];
+    if (recent !== 0) {
+      const [taken] = await redisPipeline([["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, product.id), email], ["DEL", tokenKey(confirm), tokenKey(leave)]]);
+      if (typeof taken === "string") await giveData(store, [{ slot: waitSlot(product.id), bytes: placeBytes(sid, product.id, email, taken) }]);
+      return "error";
+    }
+  }
 
   const link = `${origin}/@${store.handle}/waitlist?token=${confirm}`;
   const g = givingWords(store.language);
@@ -177,12 +268,28 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
-  const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
-  const entry = parseEntry(raw);
-  if (!entry) return { ok: false };
-  if (!entry.ok) {
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+  // Written only over the place as it was read, so a place deleted in between
+  // is not made again and two presses at once count its growth once.
+  let entry: WaitEntry | null = null;
+  for (let tries = 0; tries < 3 && !entry; tries += 1) {
+    const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
+    const read = parseEntry(raw);
+    if (!read) return { ok: false };
+    if (read.ok) {
+      entry = read;
+      break;
+    }
+    const next = JSON.stringify({ ...read, ok: now() });
+    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(grant.s, grant.p), grant.e, raw as string, next]]);
+    if (swapped !== 1) {
+      // Not known whether it was written (not an exact 0): what it would grow by is counted, never given back.
+      if (swapped !== 0) await noteGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
+      continue;
+    }
+    await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
+    entry = read;
   }
+  if (!entry) return { ok: false };
   if (entry.c && store.listId) {
     await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
@@ -191,14 +298,87 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   return { ok: true, productId: grant.p };
 }
 
-/** Takes an address off a waitlist. */
-export async function leaveWaitlist(token: string): Promise<boolean> {
+/** How long a deletion of a person may still be running after its first step: a sign-up that close to one is taken back (joinWaitlist). */
+export const ERASURE_SECONDS = 15 * 60;
+
+/** Where one product's waitlist is counted in the store's data room (lib/store-data.ts). */
+const waitSlot = (productId: string) => `wl:${productId}`;
+
+/** The longest handle a store may have (HANDLE_PATTERN, lib/store-handle-pattern.ts). */
+export const LONGEST_HANDLE = 24;
+
+/**
+ * What a place's link to leave is counted at, the same when it is taken and
+ * whenever it is given back: as if the store had the longest handle, so a
+ * store renamed afterwards never has more given back than was taken.
+ */
+const leaveBytes = (sid: string, productId: string, email: string, token: string) =>
+  dataBytes([tokenKey(token), JSON.stringify({ s: sid, h: "x".repeat(LONGEST_HANDLE), p: productId, e: email, k: "leave" } satisfies TokenGrant)], 1);
+
+/** What one place, as it is kept, gives back when it goes: itself and its link to leave. */
+function placeBytes(sid: string, productId: string, email: string, raw: string): number {
+  const entry = parseEntry(raw);
+  return dataBytes([email, raw], 1) + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+}
+
+/**
+ * Every place of one product's waitlist, read and deleted in one step, for a
+ * launch: the places' room goes back to `room`, but each link to leave is
+ * still kept (the launch email carries it), so what it takes moves to a
+ * record that comes off by itself once the link has expired.
+ */
+async function takeList(room: DataStore, sid: string, productId: string, at = Date.now()): Promise<boolean> {
+  let places: [string, string][];
+  try {
+    const [taken] = await redisPipeline([["EVAL", HASH_TAKE_ALL, 1, listKey(sid, productId)]]);
+    places = takenPairs(taken, "a launched waitlist's deletion");
+  } catch (error) {
+    // Unknown whether the list went: nothing is given back, the room erring fuller, and the launch stays on the
+    // queue (JOBS), unfinished, so the next run deletes it again (Claude 1 on #2576): a list already gone answers
+    // an empty take, which confirms it.
+    console.error("launching a waitlist: its deletion was not confirmed, so it is tried again next run", error);
+    return false;
+  }
+  const freed = places.reduce((sum, [email, raw]) => sum + placeBytes(sid, productId, email, raw), 0);
+  const kept = places.reduce((sum, [email, raw]) => {
+    const entry = parseEntry(raw);
+    return sum + (entry ? leaveBytes(sid, productId, email, entry.t) : 0);
+  }, 0);
+  if (freed > 0) await giveData(room, [{ slot: waitSlot(productId), bytes: freed }], at);
+  if (kept > 0) await noteData(room, [{ until: at + WAIT_SECONDS * 1000, bytes: kept }], at);
+  return true;
+}
+
+/**
+ * Counts what rewriting a place changed (confirmed, or asked again with the
+ * boxes checked), as it is and never refused, so the room always holds what
+ * each place weighs and a deletion gives back exactly that.
+ */
+/** A change of a place that may or may not have been written: its growth is counted, a shrink is never given back. */
+async function noteGrowth(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
+  const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
+  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
+}
+
+async function settleEntry(store: DataStore, sid: string, productId: string, email: string, before: string, after: string): Promise<void> {
+  // Its link to leave too: a place that could not be read held none counted.
+  const grown = placeBytes(sid, productId, email, after) - placeBytes(sid, productId, email, before);
+  if (grown > 0) await noteData(store, [{ slot: waitSlot(productId), bytes: grown }]);
+  else if (grown < 0) await giveData(store, [{ slot: waitSlot(productId), bytes: -grown }]);
+}
+
+/**
+ * Takes an address off a waitlist. Its place is read and deleted in one step
+ * and gives back to `room` (the store, when it is found) what it took, once.
+ */
+export async function leaveWaitlist(token: string, room?: DataStore | null): Promise<boolean> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "leave") return false;
-  await redisPipeline([
-    ["HDEL", listKey(grant.s, grant.p), grant.e],
+  const [taken] = await redisPipeline([
+    ["EVAL", HASH_TAKE_FIELD, 1, listKey(grant.s, grant.p), grant.e],
     ["DEL", tokenKey(token)],
   ]);
+  if (room && typeof taken === "string") await giveData(room, [{ slot: waitSlot(grant.p), bytes: placeBytes(grant.s, grant.p, grant.e, taken) }]);
   return true;
 }
 
@@ -247,25 +427,46 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
   if (!store.statsId) return { ok: false, reason: "busy" };
   const sid = store.statsId;
-  const [rawJob, rawList] = await redisPipeline([
-    ["GET", jobKey(sid, product.id)],
-    ["HGETALL", listKey(sid, product.id)],
-  ]);
+  const [rawJob, rawList] = exactReplies(
+    await redisPipeline([
+      ["GET", jobKey(sid, product.id)],
+      ["HGETALL", listKey(sid, product.id)],
+    ]),
+    2,
+    "a launch's job and waitlist",
+  );
+  // Unknown is never "no launch running" or "nobody waiting" (Claude 4's sweep, C4-2910, sweepA7 P4): read as
+  // nobody, the list would be deleted with its room and nobody emailed; read as no launch, a second one could
+  // start over one still sending. Either throws before anything is written.
+  if (rawJob !== null && (typeof rawJob !== "string" || !parseJob(rawJob))) throw new UnknownReply("a launch's job");
+  const pairs = plainList(rawList);
+  if (!pairs || pairs.length % 2 !== 0 || pairs.some((value) => typeof value !== "string")) throw new UnknownReply("a launch's waitlist");
+  // Every place must read as one: a value that is not a place ("{cut", "{}") is not "not waiting", or the launch would
+  // delete a list it could not read whole (Codex G on #2576).
+  for (let i = 1; i < pairs.length; i += 2) if (!parseEntry(pairs[i])) throw new UnknownReply("a launch's waitlist");
   const running = parseJob(rawJob);
   if (running && !running.finished) return { ok: false, reason: "busy" };
-  const confirmed = entriesOf(rawList).filter(([, e]) => e.ok > 0).map(([email]) => email).sort();
+  const confirmed = entriesOf(pairs).filter(([, e]) => e.ok > 0).map(([email]) => email).sort();
   const total = confirmed.length;
   // A postal address is the law's for an email that offers something for sale (CAN-SPAM).
   if (total > 0 && !address) return { ok: false, reason: "address" };
-  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now() };
+  // The launch goes on the queue (JOBS) unfinished even with nobody to email, so a deletion of the list that is
+  // not confirmed here is done by the next run (Claude 1 on #2576); it is finished here once it is.
+  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: 0 };
   await redisPipeline([
     ["SREM", soonKey(sid), product.id],
     ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", 120 * 86_400],
     ["DEL", sendKey(sid, product.id)],
-    ...(total
-      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]]
-      : [["DEL", listKey(sid, product.id)]]),
+    ...(total ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400]] : []),
+    ["SADD", JOBS, `${sid}|${product.id}`],
   ]);
+  // Nobody to email: the waitlist goes now, and its room comes back.
+  if (!total && (await takeList(store, sid, product.id))) {
+    await redisPipeline([
+      ["SET", jobKey(sid, product.id), JSON.stringify({ ...job, finished: now() }), "EX", 90 * 86_400],
+      ["SREM", JOBS, `${sid}|${product.id}`],
+    ]);
+  }
   return { ok: true, total };
 }
 
@@ -419,12 +620,15 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       await redisPipeline([["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 120 * 86_400]]);
     }
     if (job.cursor >= job.total) {
-      job.finished = now();
       // The waitlist has done its one job: its addresses go. Whoever asked to
-      // hear more is on the creator's list already (confirmSpot).
+      // hear more is on the creator's list already (confirmSpot). The launch
+      // is finished and leaves the queue only once that deletion is confirmed:
+      // one that failed or answered in another shape is tried again next run,
+      // with nothing sent again (the cursor is at the end) (Claude 1 on #2576).
+      if (!(await takeList(store, sid, pid))) continue;
+      job.finished = now();
       await redisPipeline([
         ["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 90 * 86_400],
-        ["DEL", listKey(sid, pid)],
         ["DEL", sendKey(sid, pid)],
         ["SREM", JOBS, member],
       ]);
@@ -436,13 +640,26 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 /**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
+ * Each place is read and deleted in one step, and what joining took for it
+ * (the place as it now is, and its link to leave) goes back to `room`, when
+ * it is given, once.
  */
-export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
+export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string, room?: DataStore): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  const what = "the deletion of a person's waitlist places";
+  // One reply per product, each the place or a confirmed none (null); a
+  // pipeline that answered another number of replies is unknown as a whole.
+  const replies = productIds.length ? exactReplies(await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])), productIds.length, what) : [];
+  const freed = productIds.flatMap((p, i) => {
+    const raw = replies[i];
+    return typeof raw === "string" ? [{ slot: waitSlot(p), bytes: placeBytes(sid, p, address, raw) }] : [];
+  });
+  // What was confirmed taken comes back; a place whose reply is unknown keeps its room.
+  if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  if (replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReply(what);
+  return freed.length + blanked;
 }
 
 /**

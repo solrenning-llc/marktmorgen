@@ -147,7 +147,7 @@ export async function vote(
   const traceIn = picked.length > 0 && before.length === 0;
   const traceOut = picked.length === 0 && before.length > 0;
   if (grown > 0 || traceIn) await needData(room, [...(grown > 0 ? [{ slot: `cm:p:${post}`, bytes: grown }] : []), ...(traceIn ? [TRACE_ENTRY] : [])]);
-  await redisPipeline([
+  const replies = await redisPipeline([
     ...gone.map((one) => ["HINCRBY", tallyKey(id, post), one, -1]),
     ...added.map((one) => ["HINCRBY", tallyKey(id, post), one, 1]),
     picked.length
@@ -156,7 +156,9 @@ export async function vote(
     ...(traceIn ? [["SADD", traceKey(id, who), `v:${post}`]] : []),
     ...(traceOut ? [["SREM", traceKey(id, who), `v:${post}`]] : []),
   ]);
-  if (grown < 0 || traceOut) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(traceOut ? [TRACE_ENTRY] : [])]);
+  // The trace's entry comes back only when this took it out (a deletion of the member takes the whole trace).
+  const untraced = traceOut && Number(replies[replies.length - 1]) === 1;
+  if (grown < 0 || untraced) await giveData(room, [...(grown < 0 ? [{ slot: `cm:p:${post}`, bytes: -grown }] : []), ...(untraced ? [TRACE_ENTRY] : [])]);
   return true;
 }
 

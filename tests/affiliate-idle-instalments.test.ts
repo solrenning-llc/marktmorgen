@@ -13,7 +13,10 @@
  *   - the invoices unreadable: "still owed" is not known, so nobody is removed;
  *   - once the creator wrote the commission down as paid: removed, as before;
  *   - a store with no Stripe account (PayPal only) has no invoices, so nothing is unknown: an idle affiliate owed
- *     nothing is removed, as before this change (review of #3906, MÉDIO 1).
+ *     nothing is removed, as before this change (review of #3906, MÉDIO 1);
+ *   - a plan still paying its instalments is activity, as a sale is: an affiliate paid up between two instalments
+ *     is not removed, since every later instalment would then drop out of every payout (second review of #3906 by
+ *     Claude 1 cloud, MEDIUM 1, confirmed by Claude 2 nuvem H and Claude 3 nuvem E).
  */
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { idleSweep, readAffiliate } from "@/lib/affiliates";
@@ -31,6 +34,8 @@ const ms = (days: number) => (T0 + days * DAY) * 1000;
 const PLANNER = "a1b2c3d4e5f6";
 
 let invoicesDown = false;
+/** Invoices of other synthetic stores, answered with the first store's (each store reads only its own handle's). */
+const moreInvoices: unknown[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -53,6 +58,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
           parent: { subscription_details: { metadata: { store: "planhouse", product: "prod01", via: PLANNER, via_rate: "30", kind: "plan" } } },
           payments: { data: [{ payment: { type: "payment_intent", payment_intent: "pi_PlanInstal0001" } }] },
         },
+        ...moreInvoices,
       ],
     });
   }
@@ -103,6 +109,35 @@ async function main(): Promise<void> {
   ]);
   is("an idle affiliate owed nothing is removed", await idleSweep(noStripe, ms(414)), { warned: 0, removed: 1 });
   is("their record stays, removed", (await readAffiliate(noStripe, QUIET))?.status, "removed");
+
+  part("A plan still paying is activity: paid up between two instalments, not removed");
+  const STILL = "still.paying@example.com";
+  const PAYING = "1a2b3c4d5e6f";
+  await claimHandle(STILL, "planstill", "Plan Still", "");
+  await ensureStatsId(STILL);
+  await setStripeAccount(STILL, "acct_1TestIdlePlan02", true);
+  await setAffiliateSetting(STILL, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, recurring: 0, idle: 90, idleOn: T0 + 300 * DAY }));
+  const still = (await storeForEmail(STILL))!;
+  const instalment = (n: number, day: number) => ({
+    id: `in_PlanStill000${n}`,
+    status: "paid",
+    amount_paid: 10_000,
+    currency: "usd",
+    customer_email: "student2@example.com",
+    created: T0 + day * DAY,
+    status_transitions: { paid_at: T0 + day * DAY },
+    total_taxes: [],
+    parent: { subscription_details: { metadata: { store: "planstill", product: "prod02", via: PAYING, via_rate: "30", kind: "plan" } } },
+    payments: { data: [{ payment: { type: "payment_intent", payment_intent: `pi_PlanStill000${n}` } }] },
+  });
+  moreInvoices.push(instalment(1, 380), instalment(2, 410));
+  await redis.pipeline([
+    ["HSET", `nl:aff:${still.statsId}:people`, PAYING, JSON.stringify({ id: PAYING, email: "paying.aff@example.com", code: "paying", status: "approved", appliedAt: ms(0), decidedAt: ms(0), note: "", warned: T0 + 400 * DAY })],
+    // Both instalments' commission written down as paid: owed nothing until the next one.
+    ["HSET", `nl:aff:${still.statsId}:payouts`, "po_still01", JSON.stringify({ id: "po_still01", aff: PAYING, cents: 6_000, currency: "usd", date: "2026-10-01", reference: "cash", at: 1 })],
+  ]);
+  is("warned before the last instalment, swept four days after it: nobody removed", await idleSweep(still, ms(414)), { warned: 0, removed: 0 });
+  is("still approved, so the next instalment is paid", (await readAffiliate(still, PAYING))?.status, "approved");
 
   done();
 }

@@ -29,6 +29,7 @@ import {
 } from "@/lib/buyer-profile";
 import { leadsKey } from "@/lib/contacts";
 import { markLesson, touchStudent } from "@/lib/learn";
+import { parseCourse, saveCourse } from "@/lib/course";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -254,6 +255,17 @@ async function main(): Promise<void> {
   part("Membership, course, list");
   is("the membership, paying", profile.memberships.map((m) => [m.title, m.status]), [["Bakers' Club", "active"]]);
   is("the course, two of four lessons", profile.courses.map((c) => [c.title, c.done, c.lessons, c.lastSeen > 0]), [["Bread School", 2, 4, true]]);
+  // The creator took lessons 3 and 4 out and put 5 and 6 in; the student had
+  // marked 3 and 4 done before. Their marks stay in the set, and are not
+  // lessons of the course any more: two of four, never four of four.
+  await markLesson(COURSE, "buyer@example.com", "lesson000003", true, ROOM);
+  await markLesson(COURSE, "buyer@example.com", "lesson000004", true, ROOM);
+  const lesson = (id: string) => ({ id, title: id, preview: false, video: null, files: [], link: null, hasBody: false, quiz: null });
+  const outline = parseCourse(JSON.stringify({ id: COURSE, modules: [{ id: "module000001", title: "Week 1", dripDays: 0, lessons: ["lesson000001", "lesson000002", "lesson000005", "lesson000006"].map(lesson) }], certificate: false, startsAt: null }));
+  if (!outline) throw new Error("the outline did not read");
+  await saveCourse(outline, ROOM);
+  const later = await buyerProfile(store, "buyer@example.com");
+  is("marks on lessons taken out of the course are not counted", later.courses.map((c) => [c.done, c.lessons]), [[2, 4]]);
   is("on the list, agreed, with its labels", [profile.contact?.agreed, profile.contact?.tags], [true, ["vip"]]);
   is("Stripe was read in full", [profile.partial, profile.stripeError], [false, false]);
 

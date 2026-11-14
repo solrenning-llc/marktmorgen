@@ -51,6 +51,7 @@ import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
 import { readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
+import { lessonsInOrder, readCourse } from "@/lib/course";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
@@ -620,11 +621,15 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     seen.add(id);
     const listing = await find(id);
     if (!listing?.course) continue;
-    const [done, dates] = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email)]);
+    const [done, dates, outline] = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email), readCourse(listing.course.id)]);
+    // Counted against the course's lessons now: a mark kept for a lesson the
+    // creator took out is not a lesson done, and the listing's count can be
+    // older than the outline. Without the outline, the listing's count, as before.
+    const current = outline ? lessonsInOrder(outline).map(({ lesson }) => lesson.id) : null;
     courses.push({
       title: listing.title,
-      done: Math.min(done.size, listing.course.lessons),
-      lessons: listing.course.lessons,
+      done: current ? current.filter((id) => done.has(id)).length : Math.min(done.size, listing.course.lessons),
+      lessons: current ? current.length : listing.course.lessons,
       since: dates?.since ?? 0,
       lastSeen: dates?.lastSeen ?? 0,
     });

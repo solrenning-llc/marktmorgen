@@ -129,6 +129,28 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/flow-runs.ts SETTLE_IF_OPEN: a workflow step's outcome written only while its run still holds the claimed attempt.
+        if (key.startsWith("-- marktmorgen:flow-settle-if-open:v1\n") && args[0] === "4" && args.length === 18) {
+          const [, run, log, index, held, open, mode, logOp, ev, email, status, step, note, now, person, member, keep, terminal] = args;
+          // Not this.run(["HGET", ...]) on a missing run: the stand-in's hash read makes an empty one, and Redis does not.
+          this.live(run);
+          if (!this.data.has(run) || this.run(["HGET", run, "open"]) !== open) return 0;
+          if (mode === "u") {
+            this.run(["RPUSH", log, ev]);
+            this.run(["HSET", run, "email", email, "status", "held", "step", step, "note", note, "updatedAt", now]);
+            this.run(["ZADD", held, now, member]);
+          } else {
+            this.run(["HDEL", run, "open"]);
+            if (logOp === "push") this.run(["RPUSH", log, ev]);
+            else this.run(["LREM", log, "-1", ev]);
+            this.run(["HSET", run, "email", email, "status", status, "step", step, "note", note, "updatedAt", now]);
+          }
+          this.run(["ZADD", index, now, person]);
+          for (const k of [run, log]) {
+            if (terminal === "1" || Number(this.run(["TTL", k])) < 0) this.run(["EXPIRE", k, keep]);
+          }
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

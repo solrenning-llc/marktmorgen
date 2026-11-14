@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -365,16 +366,24 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  const [rows] = await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]);
+  const what = "a person's invitations to keep a membership";
+  // Read exactly (CX-123 rule 24): one value or a confirmed none (null) per field asked; a reply of another shape, or a
+  // kept invitation that does not read, throws, so the part is said as not finished and a retry finds it.
+  const rows = repliesFor(repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1)?.[0], fields.length);
+  if (!rows) throw new UnknownReplyError(what);
   const held = fields.flatMap((field, i) => {
-    const invite = parseInvite(Array.isArray(rows) ? rows[i] : null);
-    return invite ? [{ field, invite }] : [];
+    if (rows[i] === null) return [];
+    const invite = parseInvite(rows[i]);
+    if (!invite) throw new UnknownReplyError(what);
+    return [{ field, invite }];
   });
   if (!held.length) return 0;
-  await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-  ]);
+  ]), 3);
+  const counted = replies?.map(countOf);
+  if (!counted || counted.some((n) => n === null || n > held.length)) throw new UnknownReplyError(`the deletion of ${what}`);
   return held.length;
 }

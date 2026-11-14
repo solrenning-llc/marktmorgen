@@ -13,7 +13,7 @@ import {
   sendCourseLink,
   touchStudent,
 } from "@/lib/learn";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, essentialLimitState, limited } from "@/lib/request-guard";
 import { courseToStart } from "@/lib/order-courses";
 
 /**
@@ -50,12 +50,14 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   // A press may email the buyer a link, so it is counted like the other
   // forms that send one: per connection, and per order.
-  if (
-    !(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer")) ||
-    !(await withinLimit("course-start-order", sessionId.slice(0, 220), 5, 3600))
-  ) {
+  if (!(await withinStore("course-start", `${clientAddress(request)}|${store.handle}`, 10, 3600, store, "buyer"))) {
     return away(`/@${store.handle}`);
   }
+  // Per order, read once and before the order is read from Stripe or anything written (Revisor 2 LEVE):
+  // past it, back to the store, as before. A count that cannot be read stops only the email below
+  // (Claude 5 LOW 2 on #2608): an instant start sends none.
+  const tries = await essentialLimitState("course-start-order", sessionId.slice(0, 220), 5, 3600);
+  if (tries === "exceeded") return away(`/@${store.handle}`);
 
   const order = await readOrder(store, sessionId);
   if (order.state !== "paid" || order.gift || order.group || order.preorder) return away(`/@${store.handle}`);
@@ -73,6 +75,8 @@ export async function POST(request: NextRequest) {
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }
+  // An unreadable count is said as a link that could not go, on the course's own page, never a silent trip back.
+  if (tries === "unknown") return away(`${path}?link=error`);
   const sent = await sendCourseLink(store, product, order.email, linkOrigin(request, store));
   return away(`${path}?link=${sent ? "sent" : "error"}`);
 }

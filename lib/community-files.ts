@@ -216,16 +216,33 @@ export async function takeCommunityUpload(path: string, author: string): Promise
  */
 export async function dropCommunityImage(path: string | undefined | null): Promise<void> {
   if (!path) return;
+  // With nothing else naming it, false means only that the delete failed.
+  if (await removeCommunityImage(path)) return;
+  console.error("a community picture whose delete failed is listed for the daily sweep");
+  await redisPipeline([["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
+    console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
+  );
+}
+
+/**
+ * Deletes a picture, then, once the file is gone, lets `forget` take away what names it (a held post's line), and only
+ * once that is confirmed gives its place back: a picture whose file could not be deleted keeps its name where an
+ * erasure finds it again (Codex G on #3020, 6751455863). `forget` answers true when this call took the name away (its
+ * own one-time right to give the place back), "gone" when the name was already gone (somebody else took it, and gave
+ * the place back), and false when that is not confirmed: only true gives the place back, so a picture deleted by two
+ * callers at once is given back once (Codex P on #3020). True when the file and the name are both confirmed gone.
+ * Never throws.
+ */
+export async function removeCommunityImage(path: string, forget: () => Promise<boolean | "gone"> = async () => true): Promise<boolean> {
   try {
     await del(path);
   } catch (error) {
-    console.error("could not delete a community picture; listed for the daily sweep", error);
-    await redisPipeline([["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
-      console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
-    );
-    return;
+    console.error("could not delete a community picture", error);
+    return false;
   }
-  await givePicturePlace(path);
+  const forgot = await forget().catch(() => false as const);
+  if (forgot === true) await givePicturePlace(path);
+  return forgot !== false;
 }
 
 /**

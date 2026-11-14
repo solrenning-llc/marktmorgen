@@ -1342,6 +1342,7 @@
     "components/clickfunnels-funnel.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
+    "components/color-scheme-switch.tsx",
     "components/community-approval-studio.tsx",
     "components/community-composer.tsx",
     "components/community-event-room.tsx",

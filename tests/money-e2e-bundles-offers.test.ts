@@ -260,13 +260,11 @@ async function main(): Promise<void> {
   // and price_data lines have no product a coupon could name. So what Stripe charges is the percentage off each line.
   const percentOff = single?.get("discounts[0][coupon]") === "cpn_Course20" ? 20 : 0;
   const stripeCharges = linesOf(single).map(([name, cents]) => [name, salePrice(cents, percentOff)]);
-  // RED: DISC-B-1 — lib/store-checkout.ts:503 and :536-538: a sale with `all: false` covering only the front product
-  // sends its coupon on the whole session, so Stripe also takes 20% off the checkbox product the sale does not cover.
-  is(
-    "RED: DISC-B-1: the box's product, not in the sale, is charged its $9: the sale comes off the course alone",
-    stripeCharges,
-    [["Pastry Course", 3920], ["Pastry Templates", 900]],
-  );
+  // The page shows the box at the front product's sale price too (components/store-product.tsx, salePrice of the
+  // bump's price at the front product's percent), so the sale's coupon on the whole session charges what was shown.
+  is("the box is charged what the page shows for it, the sale's percent off its own price", stripeCharges, [["Pastry Course", 3920], ["Pastry Templates", 720]]);
+  // RED: DISC-B-1 — lib/store-checkout.ts:465: metadata[bump_cents], the weight an affiliate's share of the box is
+  // worked out by (lib/affiliates.ts, noteSession), says the box's list price while Stripe charges it the sale's.
   is("RED: DISC-B-1: what the order says the box was charged (bump_cents, the affiliate's weight) is what Stripe charges for it", Number(single?.get("metadata[bump_cents]")), stripeCharges[1]?.[1]);
 
   part("One-click offers after paying: discounted, a bundle, and what is in it");

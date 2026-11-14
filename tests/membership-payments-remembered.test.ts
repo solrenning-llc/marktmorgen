@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     return made.product.id;
   };
   const three = await add("Three months of letters", "50", { interval: "month", trialDays: 0, payments: 3 });
-  const open = await add("Letters until cancelled", "50", { interval: "month", trialDays: 0, payments: 0 });
+  const open = await add("Letters until canceled", "50", { interval: "month", trialDays: 0, payments: 0 });
   const once = await add("One guide", "50", null);
   const store = (await storeForEmail(OWNER))!;
   const pending = async () => (await redis.pipeline([["SMEMBERS", "nl:plans:pending"]]))[0] as string[];
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
   const before = (await pending()).length;
   await createCheckout(store, await product(open), "https://marktmorgen.com", undefined, { digitalConsent: TEST_CONSENT });
   await createCheckout(store, await product(once), "https://marktmorgen.com", undefined, { digitalConsent: TEST_CONSENT });
-  is("a membership until cancelled and a one-off product: the list is as it was", (await pending()).length, before);
+  is("a membership until canceled and a one-off product: the list is as it was", (await pending()).length, before);
 
   done();
 }

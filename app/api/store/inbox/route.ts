@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       case "reply": {
         if (!id) return refuse("none", 404);
         const result = await replyTo(store, id, guarded.email, body.text);
-        return result.ok ? answer({ ok: true, thread: result.thread, emailed: result.emailed }) : refuse(result.reason, result.reason === "none" ? 404 : 400);
+        return result.ok ? answer({ ok: true, thread: result.thread, emailed: result.emailed }) : refuse(result.reason, result.reason === "none" ? 404 : result.reason === "error" ? 503 : result.reason === "limited" ? 429 : 400);
       }
       case "status": {
         const conversation = id ? await setStatus(store, id, body.status) : null;

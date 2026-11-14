@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { SiteFooter } from "@/components/site-footer";
 import { storeForHandle } from "@/lib/store";
 import { readErasureLink } from "@/lib/erasure-request";

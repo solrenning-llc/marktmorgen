@@ -6,7 +6,7 @@ import Link from "next/link";
 import { BlogBrowser } from "@/components/blog-browser";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import {
   BLOG_CATEGORIES,
   featuredPost,

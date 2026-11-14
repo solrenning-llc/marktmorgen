@@ -11,7 +11,7 @@
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
  *   nl:grp:<store>:refunds   string  how far the refunds were read for these
- *   nl:grp:<store>:seen      set     refunds already handled
+ *   nl:grp:<store>:seen      set     refunds already handled, thirty days from the last
  *
  * A place is handed over the way a gift is (lib/gifts.ts): written down under
  * the address that took it (lib/imported-purchases.ts), so every door that
@@ -106,6 +106,10 @@ export const groupKeys = (id: string, pi: string): string[] => [...(id ? [groupK
 const anyKey = (sid: string) => `nl:grp:${sid}:any`;
 const anchorKey = (sid: string) => `nl:grp:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
+/** The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts): each mark
+ * gives the set its expiry again. Past it a row is only read again, and handling it again changes nothing (the record
+ * it took back is marked revoked and kept on its own). */
+const SEEN_KEEP_SECONDS = 30 * 86_400;
 /** Pages of a hundred refunds read in one run; a pass longer than that goes on from where it stopped in the next. */
 const REFUND_PAGES = 10;
 /** Where a pass over the refunds stands, kept between runs (revokeRefundedGroups). */
@@ -891,7 +895,8 @@ export async function revokeRefundedGroups(
       }
     }
     // Marked handled only now, once everything it takes back was written.
-    return oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+    return !!marked && oneWrite(marked[0]) && marked[1] === 1;
   };
 
   /** One page of refunds: its rows read in their exact shape, or null when the page itself could not be read. */

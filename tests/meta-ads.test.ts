@@ -14,6 +14,8 @@
  *     without asking;
  *   - the lines come back with the typed ones, marked as Meta's, and only
  *     while connected; an account in another currency is not read;
+ *   - a read whose kept lines cannot be read, or hold a line in another shape,
+ *     replaces nothing: the older lines are never lost (Claude 6 on #2924);
  *   - a token Meta refuses marks it broken and the owner is told once;
  *   - disconnecting, or Meta's signed notice, gives it back and forgets it;
  *   - the daily pass reads each store once a day.
@@ -192,6 +194,43 @@ async function main(): Promise<void> {
   ]);
   const view = (await metaView(statsId, store.currency))!;
   is("the studio says when and how much", [view.read?.day, view.read?.cents, view.read?.campaigns, view.read?.problem], [today, 4550, 2, ""]);
+
+  part("A read whose kept lines cannot be read replaces nothing (Claude 6 on #2924)");
+  const [keptBefore] = await redis.pipeline([["GET", linesKey(statsId)]]);
+  // A $77 line from 60 days ago, outside the 30 days a read replaces: only the kept lines carry it.
+  const OLD = { id: "meta-77aa77aa77aa", channel: "facebook", campaign: "spring", cents: 7700, from: daysAgo(60), to: daysAgo(60) };
+  const plantOld = async (extra: unknown[] = []) => {
+    await redis.pipeline([["SET", linesKey(statsId), JSON.stringify([...(JSON.parse(String(keptBefore)) as unknown[]), OLD, ...extra])]]);
+  };
+  // Kept as its own line or folded into its week's (a new id), its $77 over its day is still there.
+  const oldKept = async () => {
+    const [raw] = await redis.pipeline([["GET", linesKey(statsId)]]);
+    const list = typeof raw === "string" ? (JSON.parse(raw) as unknown[]) : [];
+    return list.some((line) => !!line && typeof line === "object" && (line as { cents?: unknown }).cents === 7700 &&
+      spendWithin(line as { cents: number; from: string; to: string }, OLD.from, OLD.to) === 7700);
+  };
+  await plantOld();
+  is("control: a read keeps the line before its 30 days", [await readMetaSpend(statsId, store.currency), await oldKept()], ["read", true]);
+  const realPipeline = redis.pipeline.bind(redis);
+  for (const [label, reply] of [["not JSON", ["{"]], ["no reply", []], ["a number", [7]], ["a list that is not text", [[1]]]] as [string, unknown[]][]) {
+    await plantOld();
+    // Only the read's own GET of the kept lines (a pipeline of that one command) answers in another shape.
+    redis.pipeline = (async (commands: (string | number)[][]) =>
+      commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === linesKey(statsId) ? reply : realPipeline(commands)) as typeof redis.pipeline;
+    let result: string;
+    try {
+      result = await readMetaSpend(statsId, store.currency);
+    } finally {
+      redis.pipeline = realPipeline;
+    }
+    is(`kept lines read as ${label}: not read, and the older line is still kept`, [result === "read", await oldKept()], [false, true]);
+  }
+  for (const [label, member] of [["a line with no id", { channel: "facebook", cents: 100, from: today, to: today }], ["a line of no amount", { ...OLD, id: "meta-0000aaaa0000", cents: -1 }], ["text", "junk"], ["null", null]] as [string, unknown][]) {
+    await plantOld([member]);
+    is(`kept lines holding ${label}: not read, and nothing kept is replaced`, [(await readMetaSpend(statsId, store.currency)) === "read", await oldKept()], [false, true]);
+  }
+  await redis.pipeline([["SET", linesKey(statsId), String(keptBefore)]]);
+  is("back as it was: read again", await readMetaSpend(statsId, store.currency), "read");
 
   part("Another currency is not read");
   accounts = [...accounts, { id: "act_222", name: "Euro Ads", currency: "EUR", account_status: 1 }];

@@ -4,11 +4,14 @@ import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readOrder } from "@/lib/store-checkout";
+import { takePublicRequest } from "@/lib/traffic";
 import {
   BUYER_COOKIE,
   buyerFingerprint,
   mintPass,
+  noteStudentStamp,
   passCookie,
+  purchaseStamp,
   recordEnrollment,
   sendCourseLink,
   touchStudent,
@@ -68,13 +71,24 @@ export async function POST(request: NextRequest) {
   const path = `/@${store.handle}/course/${product.id}`;
   if (!order.email) return away(`${path}?link=ask`);
 
-  await recordEnrollment(store, order.email, product.id, order.created);
+  const email = order.email;
+  await recordEnrollment(store, email, product.id, order.created);
+  // The end the gate now holds for this learner (24 [E7]), kept on their student row so the drip emails follow it at
+  // once, without waiting for a visit to the course page.
+  const stampNow = () => purchaseStamp(store, email, product.id).catch(() => "unknown" as const);
   const secret = request.cookies.get(BUYER_COOKIE)?.value ?? "";
   if (secret && order.buyerKey && buyerFingerprint(secret) === order.buyerKey) {
-    await touchStudent(course.id, order.email, order.created, store);
+    // This browser goes to the course page next, which reads the same answer, then cached.
+    const stamp = await stampNow();
+    await touchStudent(course.id, order.email, order.created, store, stamp === "unknown" ? undefined : stamp);
     const token = await mintPass(store, order.email, [course.id]);
     return away(path, passCookie(store, token, origin.startsWith("https://")));
   }
+  // Elsewhere: only a student row that already exists is updated, and the courses are read only then (C2's L-1 on
+  // #3445), paid first as one more public request: a reading the press's own one does not cover. Refused, the row is
+  // left as it is and the course page sets it on the next visit.
+  const paidStampNow = async () => ((await takePublicRequest(store, "buyer").catch(() => false)) ? stampNow() : ("unknown" as const));
+  await noteStudentStamp(course.id, order.email, paidStampNow, store).catch((error) => console.error("keeping a student's end failed", error));
   // An unreadable count is said as a link that could not go, on the course's own page, never a silent trip back.
   if (tries === "unknown") return away(`${path}?link=error`);
   const sent = await sendCourseLink(store, product, order.email, linkOrigin(request, store));

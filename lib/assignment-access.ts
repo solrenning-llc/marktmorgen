@@ -26,7 +26,7 @@ export async function studentOnTask(handle: unknown, productId: unknown, lessonI
   const course = await readCourse(product.course.id);
   const found = course ? findLesson(course, typeof lessonId === "string" ? lessonId.slice(0, 20) : "") : null;
   if (!course || !found?.lesson.task) return { ok: false, reason: "unknown" };
-  const access = await courseAccess(store, product, cookies);
+  const access = await courseAccess(store, product, cookies, course);
   if (access.state !== "open" || !isOpen(course, found.unit, access.start)) return { ok: false, reason: "closed" };
   if (access.learner.owner) return { ok: false, reason: "owner" };
   const who = emailKey(access.learner.email);

@@ -195,7 +195,8 @@ function pageLink() {
   // Rule 23 (merge with the other fix branch, Claude 4's focal return C4-2): the control is shown when
   // notesDownloadAfterAccess says so (a student the course is no longer open to, refunded or ended, who keeps notes on
   // it); tests/sq1-lesson-notes-review.test.ts C4-2 holds that a signed-in visitor with no notes there is not offered it.
-  is("the notes control is shown only when the student keeps notes on a course no longer open to them", /\{notesAfter \? \(\s*<LessonNotesKept\b/.test(page) && /const notesAfter = await notesDownloadAfterAccess\(/.test(page), true);
+  // #3445 (24 [E7]): an access that could not be checked offers no notes and asks nothing more of the store.
+  is("the notes control is shown only when the student keeps notes on a course no longer open to them", /\{notesAfter \? \(\s*<LessonNotesKept\b/.test(page) && /const notesAfter = (?:access\.state === "unchecked" \? false : )?await notesDownloadAfterAccess\(/.test(page), true);
   const w = lessonNotesWords("en");
   const html = renderToStaticMarkup(createElement(LessonNotesKept, { handle: "bakery", product: "p1", language: "en" }));
   is("the ended course's page offers the download", html.includes(w.download) && html.includes('href="/api/store/course/note?h=bakery&amp;p=p1"'), true);

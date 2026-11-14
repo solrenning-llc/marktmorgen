@@ -8,7 +8,7 @@ import { readListing } from "@/lib/catalog";
 import { GROUP_ID, PLACE_TOKEN, placesWords } from "@/lib/group-rules";
 import { type Taken, groupTitle, placeNotice, placesTaken, readGroup, takePlace } from "@/lib/group-buy";
 import { ordersLinkFor } from "@/lib/buyer-orders";
-import { recordEnrollment } from "@/lib/learn";
+import { recordOpenEnrollment } from "@/lib/learn";
 import { storeBase } from "@/lib/purchase-email";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -105,7 +105,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       token,
       recordStart: async (email, productId, start) => {
         const course = productId === product.id ? product : await readListing(store, productId);
-        if (course?.course) await recordEnrollment(store, email, productId, start);
+        if (course?.course) await recordOpenEnrollment(store, email, productId, start); // no end date was shown (24 [E7])
       },
     }).then(
       (value) => ({ value }),

@@ -6,6 +6,8 @@ import { UrlField } from "@/components/url-field";
 import { LessonText } from "@/components/lesson-text";
 import { type StoreLook, lookStyle } from "@/lib/store-look";
 import { LANGUAGES, type LanguageCode } from "@/lib/store-language";
+import { accessEndWhen } from "@/lib/course-access-end";
+import { useHydrated } from "@/components/use-hydrated";
 import { useRouter } from "next/navigation";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
@@ -1600,6 +1602,146 @@ export function CourseStart({ productId, startsAt }: { productId: string; starts
       </div>
       {error ? (
         <p className="notice notice-error mt-2" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * When access to the course ends (24 [E7]). Fair to every buyer: the date reaches only people who buy the course on
+ * its own page while it is said there (the checkout stamps the date they were shown). Moving it later or removing it
+ * reaches them too, including people whose access already ended; it never moves earlier (lib/course.ts). A membership
+ * course never takes one: members keep it while they pay.
+ */
+export function CourseAccessEnd({
+  productId,
+  endsAt,
+  passed,
+  membership = false,
+  planOffered = false,
+}: {
+  productId: string;
+  endsAt: number | null;
+  passed: boolean;
+  membership?: boolean;
+  /** The course offers its payment plan (lib/product-extras.ts): buyers who take it are never held to the date. */
+  planOffered?: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // A date input wants "YYYY-MM-DD" in the viewer's own zone; the end is the close of that day, there. Drawn only once
+  // the page runs in the browser (useHydrated), so the server's zone never decides the day shown and the two renders
+  // agree; until the creator types, the field shows the day of the end already set.
+  const hydrated = useHydrated();
+  const [typed, setTyped] = useState<string | null>(null);
+  const savedDay = (() => {
+    if (!hydrated || endsAt === null) return "";
+    const d = new Date(endsAt * 1000 - 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const day = typed ?? savedDay;
+  const setDay = setTyped;
+  // The same moment on the creator's own clock, beside the UTC one the buyers read.
+  const local = hydrated && endsAt !== null ? new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeStyle: "short" }).format(new Date(endsAt * 1000)) : null;
+  const id = `access-end-${productId}`;
+
+  async function send(at: number | null) {
+    setBusy(true);
+    setError(null);
+    const answer = await post({ id: productId, action: "access-end", at });
+    setBusy(false);
+    if (!answer.ok) {
+      setError(
+        answer.error === "access_end_earlier"
+          ? "The date can only move later. Buyers were told the current date. To end sooner for new buyers, remove the date and set a new one. People who already bought keep the date they were shown."
+          : answer.error === "access_end"
+            ? "Pick a day after today and at most ten years ahead."
+            : answer.error === "access_end_membership"
+              ? "A membership course has no end date: members keep it while they pay."
+              : problem(answer),
+      );
+      return;
+    }
+    toast(at === null ? "Access to this course no longer ends." : "The end date is set.");
+    router.refresh();
+  }
+
+  if (membership) {
+    return (
+      <div>
+        <p className="field-label">The day access ends</p>
+        <p className="field-hint mt-1">This course is sold as a membership, so it has no end date: members keep it while they pay.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="field-label" htmlFor={id}>
+        The day access ends
+      </label>
+      <p id={`${id}-hint`} className="field-hint mt-1">
+        Leave it empty and students keep this course with no end, which is how it works now. Set a day and access closes
+        at the end of that day. The date applies only to people who buy this course on its own page, where it is shown
+        before they pay. People who bought before, or through your store page, the cart, a bundle, a gift, a group or a
+        pre-order, keep the course with no end. In the last 24 hours before the date, it is no longer shown, and people
+        who buy then keep the course with no end too. You can move the date later or remove it, but not earlier. Moving
+        it later or removing it also gives access back to students whose access already ended.
+        {planOffered ? " People who pay in a payment plan keep the course with no end, as members do." : null}
+      </p>
+      {endsAt !== null ? (
+        <p className="mt-2 text-sm" role="status">
+          {passed ? "Access ended on " : "Students see: access ends on "}
+          <strong>{accessEndWhen(endsAt, "en")}</strong>
+          {local ? <> (your time: {local})</> : null}.
+        </p>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <input
+          id={id}
+          type="date"
+          value={day}
+          disabled={busy}
+          className="field w-auto"
+          aria-describedby={error ? `${id}-hint ${id}-error` : `${id}-hint`}
+          aria-invalid={error ? true : undefined}
+          onChange={(event) => setDay(event.target.value)}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={busy || !day}
+          onClick={() => {
+            // The close of the chosen day, in this browser's own zone: midnight at the start of the next one.
+            const [y, m, d] = day.split("-").map(Number);
+            if (!y || !m || !d) {
+              setError("Type the whole date: month, day and year.");
+              return;
+            }
+            void send(Math.floor(new Date(y, m - 1, d + 1, 0, 0, 0, 0).getTime() / 1000));
+          }}
+        >
+          {busy ? "Saving…" : endsAt === null ? "Set the end date" : "Move the date later"}
+        </button>
+        {endsAt !== null ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={() => {
+              setDay("");
+              void send(null);
+            }}
+          >
+            Remove the date
+          </button>
+        ) : null}
+      </div>
+      {error ? (
+        <p id={`${id}-error`} className="notice notice-error mt-2" role="alert">
           {error}
         </p>
       ) : null}

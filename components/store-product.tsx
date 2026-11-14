@@ -1,4 +1,5 @@
 import { EmailField } from "@/components/email-field";
+import { ACCESS_END_FIELD } from "@/lib/course-access-end";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
 import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
@@ -175,6 +176,7 @@ export function ProductFacts({
   linkCourse = true,
   bundleItems = null,
   videoLine = null,
+  accessEndLine = null,
 }: {
   store: Store;
   product: Listing;
@@ -187,6 +189,11 @@ export function ProductFacts({
    * and null when any video's length is unknown.
    */
   videoLine?: string | null;
+  /**
+   * For a course: when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays;
+   * only the page that read the course passes it.
+   */
+  accessEndLine?: string | null;
 }) {
   const pwyw = activePwyw(product);
   const options = sellableOptions(product);
@@ -246,6 +253,7 @@ export function ProductFacts({
           ) : null}
         </p>
       ) : null}
+      {course && accessEndLine ? <p className="mt-1 text-sm font-semibold" style={{ color: "var(--st-text)" }}>{accessEndLine}</p> : null}
     </>
   );
 }
@@ -570,6 +578,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  accessEnd = null,
   chosenOption = null,
 }: {
   store: Store;
@@ -615,6 +624,12 @@ export function BuyBox({
    * C4-20261106-0520-TODOS-19), not repeated on every card.
    */
   stepped?: boolean;
+  /**
+   * For a course on its own sales page (24 [E7]): the end that page says ("none" or the end in seconds), sent with the
+   * form so the checkout refuses a sale whose end changed and stamps the one shown. Null everywhere else: a card that
+   * draws no date sells with no end.
+   */
+  accessEnd?: string | null;
   /**
    * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
    * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
@@ -770,6 +785,7 @@ export function BuyBox({
     <form id={formId} action="/api/store/checkout" method="post" target="_top" className="mt-4" data-checkout="">
       <input type="hidden" name="handle" value={store.handle} />
       <input type="hidden" name="product" value={product.id} />
+      {accessEnd !== null ? <input type="hidden" name={ACCESS_END_FIELD} value={accessEnd} /> : null}
       {embed?.site ? <input type="hidden" name="site" value={embed.site} /> : null}
       {embed?.back ? <input type="hidden" name="return" value={embed.back} /> : null}
       {/*

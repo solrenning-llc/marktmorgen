@@ -38,8 +38,8 @@ export async function POST(request: NextRequest) {
   if (!store || !product?.course) return new Response("Not found.", { status: 404 });
   const base = `${origin}/@${store.handle}/course/${product.id}`;
 
-  const access = await courseAccess(store, product, await cookies());
   const course = await readCourse(product.course.id);
+  const access = await courseAccess(store, product, await cookies(), course);
   const found = course ? findLesson(course, lessonId) : null;
   if (!course || access.state !== "open" || !found || !isOpen(course, found.unit, access.start)) {
     return new Response(null, { status: 303, headers: { Location: base } });

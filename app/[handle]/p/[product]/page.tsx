@@ -78,8 +78,9 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
-import { readCourse } from "@/lib/course";
+import { coursesWords } from "@/lib/buyer-words/courses";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
+import { accessEndFact, readCourseForSale, shownAccessEnd } from "@/lib/course-access-end";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -325,7 +326,16 @@ export default async function ProductPage({ params, searchParams }: Params) {
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
-    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
+    // And when access to it ends, a date the creator set and still ahead (24 [E7]), said before anyone pays: a term
+    // of the sale, so the record is read exactly. When it cannot be read, no way to buy the course is drawn (the buy
+    // box says buying is not available just now), never a buy box without the date. The video total stays lenient.
+    product.course ? readCourseForSale(product.course.id).then(async ({ course, unread }) => ({
+          facts: course ? await readCourseFacts(course).catch(() => null) : null,
+          accessEndLine: course && !product.recurring ? accessEndFact(course, store.language) : null,
+          // What the buy form sends back (24 [E7]): the end this page says, or "none"; never for a membership.
+          shownEnd: course && !product.recurring ? shownAccessEnd(course) : product.recurring ? null : "none",
+          unread,
+        })) : Promise.resolve(null),
   ]);
   // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
   if (savedPage === "unread") {
@@ -339,7 +349,9 @@ export default async function ProductPage({ params, searchParams }: Params) {
       </div>
     );
   }
-  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
+  const videoLine = courseFacts?.facts?.videoSeconds != null ? videoTotalLine(courseFacts.facts.videoSeconds, store.language) : null;
+  const accessEndLine = courseFacts?.accessEndLine ?? null;
+  const courseUnread = courseFacts?.unread === true;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -453,8 +465,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
-      {cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {query.terms === "changed" && product.course ? <p className="st-note mt-4 text-sm" role="alert">{coursesWords(store.language).accessEndChanged}</p> : null}
+      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} unread={courseUnread} accessEnd={courseFacts?.shownEnd ?? null} chosenOption={linkedChoice} />
+      {/* A course whose exact read failed offers no way to buy here, the cart included (Codex L on #3445): the BuyBox is closed on the same reading. */}
+      {!courseUnread && cartOn && !soon && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -605,7 +619,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} accessEndLine={accessEndLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -673,7 +687,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} accessEndLine={accessEndLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

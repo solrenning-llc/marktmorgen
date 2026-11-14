@@ -198,6 +198,12 @@ export default function RefundsPage() {
           terms, and the law, still apply to anything that was not as
           described or did not work.
         </p>
+        <p id="course-access-end">
+          <strong className="text-black">A course with an end date.</strong>{" "}
+          Access to a course you bought ends only on a date its page showed
+          you before you paid. If no date was shown when you bought it, your
+          access has no end.
+        </p>
         <p id="store-closes">
           <strong className="text-black">If the store closes.</strong>{" "}
           From the day the store&rsquo;s plan ends, we pause the payments of

@@ -267,6 +267,12 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/learn.ts DROP_COURSE_IF_STARTED: a course and its "no end" mark deleted only while the course holds the start given.
+        if (key.startsWith("-- marktmorgen:course-drop-if-started:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, field, value, mark] = args;
+          if (this.run(["HGET", hash, field]) !== value) return 0;
+          return this.run(["HDEL", hash, field, mark]);
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

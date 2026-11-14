@@ -110,6 +110,15 @@ const slotsKey = (session: string) => `nl:upsell-slots:${session}`;
 const PENDING_KEY = "nl:upsell:pending";
 /** How long an offer waiting on the bank is looked at before the job lets it be. */
 const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
+/**
+ * A payment Stripe still says is "processing" (a bank debit can take days to clear) is not let go after
+ * PENDING_WATCH_MS: it is looked at again every PROCESSING_RECHECK_MS, until it settles or PROCESSING_WATCH_MS
+ * have passed, so a late success still gets its confirmation, count and commission (afterPaid). Seven days covers
+ * a US bank debit (Link paid from a bank account, lib/instant-pay.ts) and stays inside the record's own
+ * RECORD_SECONDS, so nothing is kept longer than before.
+ */
+const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
+const PROCESSING_RECHECK_MS = 6 * 60 * 60 * 1000;
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
 
 /**
@@ -571,9 +580,12 @@ export async function findOfferCharge(
   throw new StripeListUnreadable("more payments than are read");
 }
 
-/** Settles one offer still waiting on an answer. Nothing is ever charged here. */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
-  if (record.state !== "pending" || !store.stripeAccountId) return;
+/**
+ * Settles one offer still waiting on an answer. Nothing is ever charged here.
+ * Answers the payment's status as Stripe gave it, or null when none was read.
+ */
+async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<string | null> {
+  if (record.state !== "pending" || !store.stripeAccountId) return null;
   try {
     let pi: Record<string, unknown> | null;
     if (record.pi) {
@@ -586,13 +598,13 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
           await writeUpsell(session, slot, { ...record, state: "failed" });
           await unwatchPending(store, session, slot);
         }
-        return;
+        return null;
       }
     } else {
-      return;
+      return null;
     }
     const meta = pi.metadata as Record<string, string> | null;
-    if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
+    if (meta?.parent !== session || (meta?.step ?? "") !== slot) return null;
     const id = typeof pi.id === "string" ? pi.id : record.pi;
     if (pi.status === "succeeded" || pi.status === "requires_payment_method" || pi.status === "canceled") {
       await unwatchPending(store, session, slot);
@@ -608,8 +620,10 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
     } else if (id !== record.pi) {
       await writeUpsell(session, slot, { ...record, pi: id });
     }
+    return typeof pi.status === "string" ? pi.status : null;
   } catch (error) {
     console.error("settling an upsell failed", error);
+    return null;
   }
 }
 
@@ -631,7 +645,8 @@ export async function settleUpsells(store: Store, session: string): Promise<void
  * store: each is settled from what Stripe says (settleOne), so a paid offer
  * gets its confirmation email and its affiliate credit without waiting for
  * the buyer to come back, and one the bank never confirmed is let go after
- * two days. Nothing is ever charged here. `storeFor` is passed in, as the
+ * two days (seven while Stripe still says it is processing, looked at every
+ * six hours after the second day). Nothing is ever charged here. `storeFor` is passed in, as the
  * other jobs do, so this file does not depend on the store record's.
  */
 export async function settlePendingOffers(
@@ -664,13 +679,18 @@ export async function settlePendingOffers(
         if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
         continue;
       }
-      await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
+      const status = await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;
         await drop();
       } else if (Date.now() - after.at > PENDING_WATCH_MS) {
-        await drop();
+        // Still clearing at the bank: looked at again later, so a late success is handed over in full.
+        if (status === "processing" && Date.now() - after.at <= PROCESSING_WATCH_MS) {
+          await redisPipeline([["ZADD", PENDING_KEY, Date.now() + PROCESSING_RECHECK_MS, pendingMember(handle, session, slot)]]);
+        } else {
+          await drop();
+        }
       }
     } catch (error) {
       console.error("settling a waiting offer failed", error);

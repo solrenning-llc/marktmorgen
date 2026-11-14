@@ -271,6 +271,20 @@ async function main(): Promise<void> {
     is("the next run erases the store and only then finishes it (its owner emailed)", [second, finished, await leftBehind()], ["done:true finished:1", [entry.ref], []]);
   }
 
+  part("Issue #4390: an unreadable DEL never advances or finishes the closing walk");
+  for (const [name, reply] of [["no reply", NO_REPLY], ["two replies", TWO_REPLIES], ["null", null], ["text", "OK"], ["a negative count", -1], ["a count past the batch", 1_000_000]] as const) {
+    await closingWorld();
+    answering("DEL", () => reply);
+    is(`${name}: unknown, still batched, data kept`, [
+      await outcome(walk),
+      finished,
+      (await leftBehind()).includes("its batch entry"),
+      // A batch that ran but answered twice may have deleted them; one that did not run kept them.
+      reply === TWO_REPLIES || (await leftBehind()).includes("its contacts"),
+    ], ["unknown", [], true, true]);
+    is(`${name}: the next exact run erases and finishes`, [await outcome(walk), finished, await leftBehind()], ["done:true finished:1", [entry.ref], []]);
+  }
+
   done();
 }
 

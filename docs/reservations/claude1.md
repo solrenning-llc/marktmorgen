@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 cloud | Fixes #4111: store routes check the store's own custom domain | claude/blissful-carson-2v8k2m-route-domain-check | `app/[handle]/certificate/[id]/pdf/route.ts`, `app/[handle]/contact/vcard/route.ts`, `app/[handle]/go/[funnel]/route.ts`, `app/[handle]/store-robots/route.ts`, `app/[handle]/store-sitemap/route.ts`, `lib/domain-gate.ts`, `tests/aliases/route-domain-check.test.ts.json`, `tests/route-domain-check.test.ts`; small shared edits, not reserved: proxy.ts, app/[handle]/layout.tsx | 12/11/2026 19h10 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

@@ -166,6 +166,25 @@ for (const label of [
   "Email and password, then rate your experience",
   "Email and password then rate your experience",
   "Your email and password experience",
+  // Claude 7 @7d51b87bcc (MEDIUM): the experience exception covers only "<login> and <secret> <process> experience";
+  // a second item, a filler word or no process word before "experience" is the pair itself, as on main.
+  "Email and password and experience",
+  "Email and password here experience",
+  "Admin email and password feedback",
+  "Gmail email and password feedback",
+  "Email and password feedback",
+  "Shop login and password satisfaction",
+  "Login and password experience",
+  "Email and passcode impressions",
+  // Claude 2 (cloud K), the same head: a named service with a credential, refused at 49382e2bb8.
+  "Instagram login password feedback",
+  "Bank email password impressions",
+  // Claude 7 @7d51b87bcc (LEVE): "reveal", "display" and "show us" hand over a named secret as "show it" does.
+  "Do you have a Netflix password? Show us",
+  "Do you have a Netflix password? Reveal it",
+  "Do you have a Netflix password? Display it here",
+  "Do you have the Gmail password? Give us",
+  "Reveal your password",
 ] as const) {
   is(`refused: ${label}`, sensitiveKindOf(label), "password");
   const field = { id: "field1", type: "short" as const, label, required: true, options: [] };
@@ -177,6 +196,14 @@ for (const label of [
   // Codex P @49382e2bb8 (LOW): a label that names an experience to describe, not a credential pair to type.
   "Email and password reset experience",
   "Email and password sign-in experience",
+  "Username and password recovery feedback",
+  "Login or passcode setup satisfaction",
+  "Email and password log-in experience",
+  "Email address and password reset experience",
+  // Controls for Claude 7's LEVE: a bare "Tell us" invites the answer to a survey question about passwords.
+  "Have you changed the password recently? Tell us",
+  "How do you store the password for your shop? Tell me",
+  "What was the hardest part of choosing a strong password? Tell us",
   // Codex U @49382e2bb8 control: "show it" after a password manager shows the manager, not a secret.
   "Do you have a password manager? Show it in your workflow",
   // Claude 1 cloud (rev-prs-novos) @fff18e7784: advice before the secret, and an event pass's number (LOW: "pass"

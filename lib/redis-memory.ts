@@ -926,6 +926,29 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
+        // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
+        if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
+          const n = Number(args[0]);
+          const [record, index, list, episode, token] = args.slice(1, 1 + n);
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n);
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") {
+            call(["RPUSH", list, message]);
+            call(["LTRIM", list, -Number(max), -1]);
+          }
+          call(["EXPIRE", list, keep]);
+          if (n === 5) call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;
@@ -985,6 +1008,15 @@ export class MemoryRedis {
           if (this.run(["ZSCORE", notes, member]) === null) return 0;
           this.run(["SET", link, value, "EX", seconds]);
           return 1;
+        }
+        // lib/flows.ts FLOW_MOVE: each member off KEYS[1] and onto KEYS[2] at ARGV[1], only by whoever took it off; 1 or 0 each.
+        if (key.startsWith("-- marktmorgen:flow-move:v1\n") && args[0] === "2" && args.length >= 4) {
+          const [, from, to, score, ...members] = args;
+          return members.map((member) => {
+            if (this.run(["ZREM", from, member]) !== 1) return 0;
+            this.run(["ZADD", to, score, member]);
+            return 1;
+          });
         }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
@@ -2035,6 +2067,8 @@ export class MemoryRedis {
         const set = this.set(key);
         let gone = 0;
         for (const one of args) if (set.delete(one)) gone += 1;
+        // As redis-server: a set left empty is no longer a key (#4263's "log out of all devices" removes its members).
+        if (!set.size) this.data.delete(key);
         return gone;
       }
       case "SISMEMBER":

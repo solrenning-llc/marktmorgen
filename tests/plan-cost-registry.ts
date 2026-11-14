@@ -307,6 +307,18 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  * cleanup/failures/retention must precede first activation; lifecycle is not
  * financial evidence. Never restore never_activated after any use while
  * payloads or uncertain reserves remain. Future tails are unknown/rejected.
+ * CX-121 physical-refusal construction adds two individually expiring
+ * HASH fields (state/date/checkout only;400days) in the existing company
+ * pools. Before enqueue, HLEN+pending reserves finite summary cardinality
+ * (technical10000), separately from pending globalItems/storeItems. No new
+ * key family or public limit. Strict Lua snapshots precede value transfer;
+ * personal copy/erasure and full-pool fulfillment add bounded operations.
+ * Redis7.4.12 isolated EVAL+internal observed maxima: enqueue27, claim16,
+ * dispatch16, refusal32, explicit no-POST16; these are component measurements,
+ * not full lifetime
+ * costs, supplier invoices, reviewed funding or an amendment to ORDER.
+ * Refusal-field copies, failure tails and erasure/trigger costs remain
+ * UNKNOWN/rejected until a complete independent admission precedes IO.
  * The new account-wide Resend budget is also NOT funded by this order
  * coefficient or by a paid provider quota alone. Its permanent schema1
  * ledger, schema2 claims, pending/unknown holds without TTL, exact35-day
@@ -1324,6 +1336,14 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },
       { file: "lib/community-walk.ts", names: ["walkUnits(", "indexedWords(", "INDEXED_WORDS_BYTES"] },
+      // A member's locked spaces read their products as a collection page reads its cards, paid before they are read (542 [CM1], 6 November 2026);
+      // read in rounds since 7 November 2026, each round paying what its first reads add; nothing is read twice (the pre-orders once, every
+      // listing and bundle item kept and handed on, never read again in a later round), so the rounds pay and read what one read of them would.
+      { file: "lib/community-locked.ts", names: ["MAX_UNLOCK_PRODUCTS = MAX_COLLECTION_PRODUCTS", "units <= 0 || (await take(units))", "pay(collectionUnits(read.size + ids.length) - collectionUnits(read.size))", "pay(bundleItemUnits(items.size + fresh.length) - bundleItemUnits(items.size))", "ids.filter((id) => !asked.has(id))", "soon ??= await soonState(store)", "productsBuyableNow(store, listings, Date.now(), { soon, listings: known })"] },
+      { file: "lib/mail-product-sellable.ts", names: ["known ? known.soon : await soonState(store)", "deliverableItems(p, [...bundles, ...known.listings.values()])"] },
+      { file: "app/[handle]/community/page.tsx", names: ["takePublicRequest(store, \"buyer\", undefined, units)"] },
+      // The studio's "View as a member" reads them the same way, paid in studio requests before it reads.
+      { file: "app/studio/community/page.tsx", names: ["unlocksOf(store, config, (units) => countStudio(store, null, units)"] },
       { file: "lib/traffic.ts", names: ["countRequest", "takePublicRequest", "requestsKey"] },
       { file: "lib/metered-limits.ts", names: ["withinStore"] },
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
@@ -1888,6 +1908,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
   FORGET_TRY_COMMANDS: "lib/store-forget-retry.ts forgetBoth adds assistant-note deletion to webhook and API-key cleanup. This is a company obligation after the original essential deletion request, not a per-plan allowance. The declared formula includes MEMORY_FORGET_COMMANDS but does not certify Lua-internal command costs, bytes, runtime or retention; its complete fixed-cost ceiling remains unknown and cannot approve a finite company base.",
   FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",

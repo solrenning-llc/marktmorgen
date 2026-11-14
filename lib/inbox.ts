@@ -34,11 +34,14 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, monthOf, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { withinLimit } from "@/lib/request-guard";
+import { alertCreator, messageEpisodeKey, messageEpisodeSeed } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { chatWords } from "@/lib/buyer-words/chat";
 import type { Store } from "@/lib/store";
 import { stringList } from "@/lib/redis-reply";
+import { type Member, readTeam } from "@/lib/team";
+import { can } from "@/lib/team-roles";
 import {
   CHAT_TOKEN,
   CONVERSATION_ID,
@@ -141,6 +144,8 @@ async function write(store: Store, statsId: string, handle: string, conversation
   }
   commands.push(["EXPIRE", msgKey(statsId, conversation.id), KEEP]);
   if (conversation.token) commands.push(["SET", tokenKey(conversation.token), `${statsId}|${conversation.id}|${handle}`, "EX", KEEP]);
+  // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
+  if (conversation.unread === 0) commands.push(["DEL", messageEpisodeKey(statsId, conversation.id)]);
   await redisPipeline(commands);
   return conversation;
 }
@@ -226,16 +231,21 @@ export async function startChat(input: { store: Store; email: unknown; name: unk
   });
   if (!made.ok) return made;
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a chat failed", error));
+  await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
-/** A message sent with the store's contact form, filed in the inbox too. Nothing more is sent: the form already emailed the creator. */
+/**
+ * A message sent with the store's contact form, filed in the inbox too. No email more is sent: the form already
+ * emailed the creator. The installed studios that asked to hear of messages are told, as for a chat.
+ */
 export async function fileContact(input: { store: Store; email: string; name: string; text: string; now?: number }): Promise<boolean> {
   if (!input.store.statsId || !isRedisConfigured()) return false;
   const made = await open({ ...input, source: "contact" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const };
     throw error;
   });
+  if (made.ok) await tellPhones(input.store, made.conversation, 0, made.conversation.startedAt);
   return made.ok;
 }
 
@@ -255,6 +265,7 @@ export async function handOver(input: { store: Store; email: unknown; name: unkn
   });
   if (!made.ok) return made;
   await tellTeam(store, made.conversation, made.messages[0].text).catch((error) => console.error("telling a store of a handed-over question failed", error));
+  await tellPhones(store, made.conversation, 0, made.conversation.startedAt);
   return { ok: true, thread: forVisitor(made.conversation, made.messages) };
 }
 
@@ -312,10 +323,86 @@ export async function visitorSend(
     throw error;
   }
   await tellTeam(store, next, text).catch((error) => console.error("telling a store of a chat failed", error));
+  await tellPhones(store, next, conversation.unread, now);
   return { ok: true, thread: forVisitor(next, await readMessages(found.statsId, found.id)) };
 }
 
+/**
+ * Who is told of a buyer's new message (`to`: whoever the conversation is
+ * given to, else the owner): the person it was given to only while they still
+ * may answer buyers, read again at every send as lib/phone-alerts.ts reads
+ * roles: the owner, or someone on the store's team now whose role may see
+ * orders (lib/team-roles.ts). A person taken off the team, or moved to a
+ * role that does not see orders, is never sent the buyer's words: the owner
+ * is told instead, and the conversation goes back to nobody. A team that
+ * cannot be read, or reads in an unknown shape (CX-123 rule 24), tells the
+ * owner and leaves the conversation as it is.
+ */
+async function answering(store: Store, id: string, to: string): Promise<string> {
+  const given = normaliseEmail(to);
+  if (!given || given === normaliseEmail(store.email)) return store.email;
+  let members: Member[];
+  try {
+    members = store.sid ? (await readTeam(store.sid)).members : [];
+  } catch (error) {
+    console.error("an inbox conversation's team could not be read; the owner is told", error instanceof UnknownReplyError ? error.message : error);
+    return store.email;
+  }
+  const member = members.find((m) => normaliseEmail(m.email) === given);
+  if (member && can(member.role, "orders")) return given;
+  await giveBack(store, id, to).catch((error) => console.error("giving back a conversation whose person left failed", error));
+  return store.email;
+}
+
+/**
+ * The conversation's record written over only while it is still exactly the text read, its expiry kept: a
+ * compare-and-set that never re-creates a record deleted meanwhile (a buyer's erasure, forgetInboxPerson) and
+ * never overwrites a change made meanwhile (another assignee). Modelled by lib/redis-memory.ts. 1 written, 0 not.
+ */
+export const INBOX_GIVE_BACK = `-- marktmorgen:inbox-give-back:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  redis.call('SET', KEYS[1], ARGV[2], 'KEEPTTL')
+  return 1
+end
+return 0`;
+
+/**
+ * Gives a conversation back to nobody, if it is still given to `stale` when read now. Only the record's
+ * `assigned` changes (INBOX_GIVE_BACK): no index entry, chat link or expiry is written, so nothing a buyer's
+ * erasure removed in between comes back, and the record only gets smaller, so the data room it was counted
+ * in still covers it. A reply in an unknown shape throws UnknownReplyError (rule 24); the caller tells the owner.
+ */
+async function giveBack(store: Store, id: string, stale: string): Promise<void> {
+  if (!store.statsId || !CONVERSATION_ID.test(id)) return;
+  const key = convKey(store.statsId, id);
+  const [raw] = await redisPipeline([["GET", key]]);
+  if (typeof raw !== "string") return;
+  const current = parseKept(raw);
+  if (!current || current.assigned !== stale) return;
+  const swapped = repliesFor(await redisPipeline([["EVAL", INBOX_GIVE_BACK, 1, key, raw, JSON.stringify({ ...current, assigned: "" })]]), 1)?.[0];
+  if (swapped !== 0 && swapped !== 1) throw new UnknownReplyError("giving back a conversation whose person left");
+}
+
 /** One email to whoever has the conversation (the owner when nobody does), at most every half hour for one conversation. */
+/**
+ * Tells the store's installed studios that asked for "message" (lib/phone-alerts.ts, 451 [AP3] complement): once
+ * while a conversation is unread, so a buyer writing five times before anyone reads is one notification, and again
+ * only after it was read. The once is atomic: the seed is the conversation's unread episode, not the message, so
+ * two messages written at the same moment by two workers make one claim (alertCreator's SET NX), and the write
+ * that marks it read deletes that claim. An unknown claim answer sends nothing, and the message is kept anyway. Says "New message from a buyer": never their words, name or address, which a lock screen
+ * would show; the tap opens the conversation. A failure is written down, never the visitor's message lost.
+ */
+async function tellPhones(store: Store, conversation: Kept, unreadBefore: number, at: number): Promise<void> {
+  if (unreadBefore !== 0) return;
+  const sid = store.sid ? `store=${encodeURIComponent(store.sid)}&` : "";
+  await alertCreator(
+    store,
+    "message",
+    { title: "New message from a buyer", body: `In ${store.name}'s inbox. Open it to read and answer.`, url: `/studio/inbox?${sid}c=${conversation.id}` },
+    { seed: messageEpisodeSeed(conversation.id), at },
+  ).catch((error) => console.error("telling a store's phones of a message failed", error));
+}
+
 async function tellTeam(store: Store, conversation: Kept, text: string): Promise<void> {
   if (!isSenderConfigured() || !store.statsId) return;
   if (!(await withinLimit("inbox-tell", `${store.statsId}:${conversation.id}`, 1, 1_800))) return;
@@ -324,7 +411,7 @@ async function tellTeam(store: Store, conversation: Kept, text: string): Promise
   const sid = store.sid ? `store=${store.sid}&` : "";
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
-    to,
+    to: await answering(store, conversation.id, to),
     subject: `New message from ${who.slice(0, 60)} on ${store.name}`.slice(0, 200),
     text: [
       `${who} wrote in ${store.name}'s inbox:`,

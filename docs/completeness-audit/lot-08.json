@@ -1,0 +1,1480 @@
+{
+ "lote": 8,
+ "main": "6725b5c97 (docs/codex-queue.md idêntico ao d7bbf9d35 usado na conferência)",
+ "pedido": "C4-20261105-2040-C5-6 (itens 617–645, sem 630, 635 e 637)",
+ "itens": [
+  {
+   "n": 617,
+   "etiqueta": "SZ1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:21909 (item) e queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; nenhuma outra linha de estado na fila. No GitHub: PR #1776 \"617 [SZ1] unit 1: the factual part of a store's policies, from its settings\" incorporado em 02/11/2026 21:52:41 UTC; PR #1824 \"617 [SZ1] units 2-3: the store's policy page, from its settings, in its language\" aberto (testado num PR). No main, lib/store-policy-facts.ts só é usado pelo próprio teste (nenhuma página ainda).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1776, commit aeb11013e8a851a836b0f950e077ebe3f380d5d1, 02/11/2026 18h52 Fortaleza (unidade 1: a parte factual das políticas, só regras, nada mostrado ao comprador). Fica \"em andamento\": unidades 2-3 (traduções nos sete idiomas de comprador e a página /@handle/policies) no PR aberto #1824; depois, pelo próprio PR #1776, o texto do criador conferido por lib/terms-check-rules.ts, as versões guardadas com data, o link no rodapé, no checkout e no e-mail de confirmação, e as regiões de envio quando lib/shipping.ts estiver livre.",
+   "pedidos": [
+    {
+     "o_que": "Parte factual gerada pelo código a partir das configurações: quem cobra e onde (conta Stripe do criador, PayPal só quando ligado)",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:56-66; tests/store-policy-facts.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte factual: consentimento de conteúdo digital e direito de 14 dias por tipo do que a loja vende",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:70-79",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte factual: cancelamento das assinaturas pelo próprio membro",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:80-88",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte factual: pixels ligados e o que fazem",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:90-100",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte factual: contato (endereço postal da loja, só quando definido)",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:102-104",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte factual: como cada tipo de produto é entregue e regiões/prazos de envio",
+     "situacao": "prevista",
+     "prova": "Não está em lib/store-policy-facts.ts (seções só seller/cancel/memberships/measurement/contact, linha 47); o PR #1776 registra que as regiões de envio entram quando lib/shipping.ts estiver livre (PRs da Claude 2)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Texto diz que não é aconselhamento jurídico e nunca promete conformidade",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:49 (NOT_ADVICE); tests/store-policy-facts.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Frase muda sozinha quando a configuração muda; versão (impressão digital) para guardar com data",
+     "situacao": "presente",
+     "prova": "lib/store-policy-facts.ts:108-111 (policyFingerprint)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Versões guardadas com data e criação de nova versão ao mudar configuração (teste de aceitação)",
+     "situacao": "prevista",
+     "prova": "Nenhum armazenamento de versões no main (busca por policyFingerprint só acha lib/store-policy-facts.ts e o teste); listado como próxima unidade no PR #1776",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Páginas de políticas da loja (reembolso e cancelamento, termos de venda, privacidade do criador, envio, contato/aviso legal)",
+     "situacao": "prevista",
+     "prova": "Nenhuma rota em app/[handle]/ (ls não mostra policies); PR aberto #1824 cria app/[handle]/policies/page.tsx e lib/buyer-words/policies.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Parte do criador conferida por lib/terms-check-rules.ts antes de publicar, com o aviso de \"no refunds\" contra a lei europeia",
+     "situacao": "prevista",
+     "prova": "Não ligado no main; listado como próxima unidade no PR #1776",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Link no rodapé de toda página da loja",
+     "situacao": "prevista",
+     "prova": "Fora do PR #1824 por reserva de arquivos de outros agentes (descrição do PR #1824)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Link no e-mail de confirmação e link \"Terms and policies\" no checkout (teste no checkout simulado)",
+     "situacao": "prevista",
+     "prova": "Listado como próxima unidade no PR #1776 e fora do PR #1824",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso legal com o que o estudo de 568 [GD2](a) concluir sobre identificação do vendedor",
+     "situacao": "prevista",
+     "prova": "Depende do 568 [GD2](a), outro item da fila",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nenhuma página mostra recurso desligado (VR)",
+     "situacao": "prevista",
+     "prova": "Só verificável com a página do PR #1824; lib/store-policy-facts.ts só gera frases do que se aplica (linhas 56-104)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 618,
+   "etiqueta": "SZ2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21912 (item). queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; a busca de \"[SZ2]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação no GitHub (busca por \"SZ2\" e \"618\" no título: nada). No main não há histórico de preço, menor preço de 30 dias, preço por unidade nem campos GPSR (busca por priceHistory, lowest, unitPrice, GPSR, 2023/988, manufacturer: nada).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 619,
+   "etiqueta": "SZ3",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:21915 (item) e queue.md:21903: \"Estado inicial: na fila.\"; nenhuma outra linha de estado na fila (busca por COPY_DOOR na queue.md: 0). Decisões do dono pela caixa: docs/agent-inbox.md:344 (C3-5, pedido de cópia sempre atendido, custo numa exposição financiada, uma cópia por pessoa a cada 30 dias por loja), :350 (C3-7) e :367 (C3-12, porta fechada pela trava COPY_DOOR_OPEN até COPY_COMPLETE e política de exposição aprovada; \"Registre ... na fila que a abertura da porta depende da aprovação da política de exposição pelo dono, para entrar no Bloco de abertura\"). No GitHub: PR #1854 (unidades 2-5, incluindo a 1) incorporado 03/11/2026 10:04:58 UTC; PR #1843 (unidade 1) incorporado 03/11/2026 16:49:33 UTC; PR #2083 (tarefas da equipe na cópia) 05/11/2026 02:58:16 UTC; PR #2609 (Codex, evidência de checkout incompleta recusada) 05/11/2026 17:28:59 UTC; PRs abertos #2627 e #2629 (Codex, endurecimento da cópia de pontos e do chat).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1854, commit b7d17247839e24f837e40c4a0ce9d3f821d46c05, 03/11/2026 07h04 Fortaleza (unidades 1 a 5: a cópia lê todos os módulos, COPY_COMPLETE verdadeiro); também PR #1843, commit f147db0a10eeff05fb19f1b23ebe9c982b6c81fc, 03/11/2026 13h49; PR #2083, commit fc4dd1d2aa8c9ec7b3bcb62deddbcc5fb1e39cf1, 04/11/2026 23h58; PR #2609, commit 579f4b11c889ccaced3d02ad1ab71277dda7f0a5, 05/11/2026 14h28. Fica \"em andamento\": falta a porta (página, link de uso único por e-mail, JSON e CSV, limites, aviso ao criador, botão no estúdio, seção 8 de /privacy), que deve ser construída atrás de COPY_DOOR_OPEN, com teste (a trava ainda não existe no código), cuja abertura depende da aprovação da política de exposição pelo dono e entra no Bloco de abertura (C3-12); os PRs #2629 (commit e48d114daaa25fe547e6a09c40ca1b259cd6bcb8, 06/11/2026 02h10 Fortaleza) e #2627 (commit 138eec869865a2f77159639cfc3dc4c53bd9848e, 06/11/2026 16h51), incorporados depois da auditoria, endurecem leitores.",
+   "pedidos": [
+    {
+     "o_que": "A cópia lê tudo o que a loja guarda sobre a pessoa segundo o registro de person-data (lista, campos, notas, formulários, cursos, comunidade, importados, consentimentos/acordos com versão)",
+     "situacao": "presente",
+     "prova": "lib/person-copy.ts:84-142 (COPY_PLAN), :182 (COPIERS), :447 (copyPerson); lib/person-copy-stripe.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nenhum dado de outra pessoa no arquivo",
+     "situacao": "presente",
+     "prova": "tests/person-copy.test.ts:82-83",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Teste falha se um módulo novo com dado pessoal não entrar na cópia (como na exclusão)",
+     "situacao": "presente",
+     "prova": "tests/person-copy.test.ts:41-44; COPY_COMPLETE em lib/person-copy.ts:144 e tests/person-copy.test.ts:46",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "A cópia só lê (nenhuma escrita) e falha em vez de sair incompleta",
+     "situacao": "presente",
+     "prova": "tests/person-copy.test.ts:72-73; tests/person-copy-stripe.test.ts; PR #2609",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Página/porta pelo link do rodapé da loja e por marktmorgen.com/privacy",
+     "situacao": "prevista",
+     "prova": "tests/person-copy.test.ts:47 confirma que app/privacy/copy/page.tsx e app/api/privacy/copy/route.ts ainda não existem (\"its door is the next unit\"); C3-12 (docs/agent-inbox.md:367) define a trava COPY_DOOR_OPEN",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Link de uso único que expira e não abre duas vezes",
+     "situacao": "prevista",
+     "prova": "Parte da porta (próxima unidade, PR #1854 e tests/person-copy.test.ts:47)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Arquivo legível em JSON e CSV",
+     "situacao": "prevista",
+     "prova": "Parte da porta (PR #1854: \"A porta (página, link por e-mail, JSON e CSV ...) é a próxima unidade\")",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "A página responde igual exista ou não o endereço",
+     "situacao": "prevista",
+     "prova": "O leitor já devolve cópia vazia para endereço desconhecido (tests/person-copy.test.ts:88); a resposta da página é parte da porta",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Limites por pessoa e por dia antes do gasto (uma cópia nova por pessoa a cada 30 dias por loja, C3-5)",
+     "situacao": "prevista",
+     "prova": "Parte da porta; docs/agent-inbox.md:344-351",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Criador avisado e capaz de gerar o mesmo arquivo na página do comprador no estúdio",
+     "situacao": "prevista",
+     "prova": "Parte da porta; busca por person-copy em components/ e app/: nada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "app/privacy/page.tsx seção 8 deixa de mandar escrever ao criador",
+     "situacao": "prevista",
+     "prova": "C3-12: \"a política de privacidade não muda agora\"; muda com a abertura da porta",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Registro na fila de que a abertura da porta depende da aprovação da política de exposição pelo dono e entra no Bloco de abertura (pedido em C3-12)",
+     "situacao": "falta",
+     "prova": "Busca por COPY_DOOR e por qualquer linha de estado do 619 na queue.md: nada; docs/agent-inbox.md:367 pede o registro na fila",
+     "onde_deveria_estar": "docs/codex-queue.md, item 619 [SZ3] (linha de estado/andamento) e Bloco de abertura"
+    },
+    {
+     "o_que": "Fontes oficiais datadas dos arts. 15 e 20 do RGPD",
+     "situacao": "presente",
+     "prova": "docs/official-texts-eu-2026-11-02.md:5-16",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta registrar em docs/codex-queue.md, no item 619 [SZ3] e no Bloco de abertura, o que a mensagem C3-12 (docs/agent-inbox.md:367) mandou gravar na fila: a porta da cópia (página, link de uso único, JSON e CSV, limites, aviso ao criador e botão no estúdio) deve ser construída atrás da trava COPY_DOOR_OPEN, com teste (a trava ainda não existe no código; hoje só a mensagem C3-12 a descreve), e a abertura dela depende de COPY_COMPLETE e da aprovação, pelo dono, da política de exposição (CURRENT_EXPOSURE_BUDGET_POLICY diferente de null); hoje nenhuma linha da fila cita COPY_DOOR_OPEN nem o estado do item. Falta documental pequena; a porta em si continua prevista como próxima unidade.",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #2629 (commit e48d114daaa25fe547e6a09c40ca1b259cd6bcb8, 06/11/2026 02h10 Fortaleza) e o PR #2627 (commit 138eec869865a2f77159639cfc3dc4c53bd9848e, 06/11/2026 16h51 Fortaleza), que a auditoria registrou como abertos; eles endurecem leitores da cópia; a porta e a trava COPY_DOOR_OPEN continuam por fazer."
+  },
+  {
+   "n": 620,
+   "etiqueta": "SZ4",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21918 (item). queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; a busca de \"[SZ4]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação no GitHub (busca por \"SZ4\" e \"620\" no título: nada). No main, busca por \"Member price\"/memberPrice: nada.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 621,
+   "etiqueta": "SZ5",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21921 (item). queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; a busca de \"[SZ5]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação no GitHub (busca por \"SZ5\" só acha #2696, auditoria de completude aberta). No main, busca por hreflang em lib/app/components: nada.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2696 (commit 9d8abcc8b5987595d45785ddba9488cda67186c0, 05/11/2026 23h20 Fortaleza), que a auditoria registrou como aberto; ele é a auditoria de completude do lote 1, um documento; o estado do item não muda."
+  },
+  {
+   "n": 622,
+   "etiqueta": "SZ6",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21924 (item). queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; a busca de \"[SZ6]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. queue.md:22198 só cita o gatilho em outro item (HighLevel). Nenhum PR de implementação no GitHub (busca por \"SZ6\" e \"622\": nada). No main, busca por viewedProduct/browse_abandon: nada.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 623,
+   "etiqueta": "SZ7",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:21927 (item). queue.md:21903 (seção SZ): \"Estado inicial: na fila.\"; a busca de \"[SZ7]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação no GitHub (busca por \"SZ7\" só acha #1654, que gravou o item). No main, busca por \"Email me when it's back\"/backInStock: nada.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 624,
+   "etiqueta": "SZ8",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:21930 (item) e queue.md:21903: \"Estado inicial: na fila.\"; queue.md:22064 só cita o subitem (31) a partir de outro item; nenhuma linha de estado do 624. No GitHub, subitens incorporados: (9) PR #1778, (5) PR #1777, (42) PR #1877, (29) PR #1891, (47) PR #1875, (35) PR #1925; aberto: (23) PR #1928. PR #1657 só acrescentou os subitens 50 a 54 (documento).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1778, commit 1aa5e55d0b0b76337689a44276c75eceb0f3062b, 02/11/2026 18h45 Fortaleza (subitem 9); PR #1777, commit c7d8fd3cf1eb5f27996e85b96571fb7ff1af24d6, 02/11/2026 22h13 (subitem 5); PR #1877, commit f7764f68512d3862a6d6a3ecc8cb08481bc30e0a, 03/11/2026 06h17 (subitem 42); PR #1891, commit b1724a1090f4cbd7a1bcf0ba85b06f82aa3529cd, 03/11/2026 07h39 (subitem 29); PR #1875, commit 84622248bfda970665993fb0a8e5964af9b6552a, 03/11/2026 13h50 (subitem 47); PR #1925, commit 56f4b4557a6fb73ff8182f4b018d5b85d17ec159, 04/11/2026 04h04 (subitem 35). Fica \"em andamento\": o subitem 23 foi incorporado depois da auditoria, no PR #1928 (commit c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, 06/11/2026 19h35 Fortaleza), e os demais subitens seguem na fila do próprio item.",
+   "pedidos": [
+    {
+     "o_que": "(1) Visualizador de modelo 3D no produto físico",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(2) Filtros e ordenação na busca da loja e relatório das buscas",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(3) Coleções automáticas por regra",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(4) Modo férias",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(5) Plugin oficial para WordPress que insere o cartão e o checkout embutido",
+     "situacao": "presente",
+     "prova": "wordpress/marktmorgen-embed/marktmorgen-embed.php (159 linhas); tests/wordpress-plugin.test.ts; PR #1777",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(5) Publicação do plugin no diretório do WordPress",
+     "situacao": "fora do escopo",
+     "prova": "O próprio subitem diz que depende do dono (conta/termos de terceiro)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(6) Painel de desempenho com visitantes reais, depois de 281 [SF1]",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(7) Vários domínios para a mesma loja",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(8) Publicação de produto em data e hora marcadas",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(9) Revisão da página pelo olhar de três tipos de comprador, sem número de conversão",
+     "situacao": "presente",
+     "prova": "lib/page-coach.ts:340-349 (BUYER_LENSES, PREDICTS); components/page-coach.tsx:373-377; tests/page-review-buyers.test.ts; PR #1778",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(10) Comemoração curta na página de obrigado",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(11) Idiomas de comprador da direita para a esquerda",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(12) Pré-venda com sinal ou cobrança no lançamento",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(13) Edição em lote de produtos e preços com desfazer",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(14) Código de barras/GTIN por produto e variante",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(15) Presente entregue em data escolhida",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(16) Sugestão de preço a partir das vendas",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(17) Vários arquivos num mesmo produto",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(18) Limite opcional de downloads por compra",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(19) Cancelamento pelo comprador antes do envio do físico",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(20) Etiqueta de devolução pela conta Shippo do criador e janela de devolução",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(21) Lista de separação e documentos imprimíveis do pedido físico em PDF marcado",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(22) Bloqueio de caixa postal e valor mínimo/máximo do pedido físico",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(23) Link de carrinho pronto com vários produtos e cupom",
+     "situacao": "prevista",
+     "prova": "PR aberto #1928 (claude3/sz8-cart-link), testado num PR, não incorporado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(24) Gorjeta opcional no próprio checkout",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(25) Mensagem de parcelamento do Stripe só com BNPL ligado",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(26) Seção de mais vendidos e novidades preenchida sozinha no e-mail",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(27) Botão de compra no e-mail que abre o checkout",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(28) Calendário único do que está agendado",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(29) Modelos sazonais de e-mail sem urgência inventada",
+     "situacao": "presente",
+     "prova": "lib/mail-body.ts:319-343 (venda/Black Friday, fim de ano, volta às aulas); lib/template-library.ts; tests/seasonal-mail-templates.test.ts; PR #1891",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(30) Mensagens de WhatsApp pela conta do criador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(31) Segmento por país do comprador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(32) Compre X e ganhe Y",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(33) Cupom de frete grátis",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(34) Resposta automática fora do horário no chat",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(35) Aprovação automática opcional de candidatos a afiliado",
+     "situacao": "presente",
+     "prova": "lib/affiliates.ts:934-943; components/affiliate-studio.tsx:638 e :761; tests/affiliate-auto-approve.test.ts; PR #1925",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(36) Ferramentas WebMCP na loja com confirmação do comprador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(37) \"Entrar com Google\" e passkey para compradores",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(38) \"Buy again\" para produto físico",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(39) Pontos de fidelidade trocados por desconto",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(40) Atalhos de comandos salvos no assistente do criador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(41) Botão de compra dentro da resposta do Store assistant",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(42) Verificador de prontidão para agentes de IA no estúdio",
+     "situacao": "presente",
+     "prova": "lib/store-search-check.ts:32-36 e :78-88; tests/store-search-check.test.ts; PR #1877",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(43) Automação em horário fixo",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(44) Acesso de parceiro (agência) que expira após 90 dias sem uso",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(45) \"Entrar com Apple\" para o criador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(46) Link \"Your privacy choices\" em toda loja",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(47) Página de transparência com a contagem de pedidos de remoção atendidos, só números reais",
+     "situacao": "presente",
+     "prova": "app/transparency/page.tsx; lib/transparency.ts:30-65; link em app/report/page.tsx:31; tests/transparency.test.ts; PR #1875",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(47) Contagem de pedidos de autoridades na mesma página",
+     "situacao": "incerto",
+     "prova": "app/transparency/page.tsx:35 diz \"Orders from courts or authorities are not counted on this page\"; o PR #1875 explica que não existe canal de entrada desses pedidos para contar e que a página não mostra um zero inventado. Não está claro se falta criar o canal ou se a frase basta",
+     "onde_deveria_estar": "app/transparency e lib/transparency.ts"
+    },
+    {
+     "o_que": "(48) Preço por volume para equipe",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(49) Página que explica a cobrança do Marktmorgen na fatura do cartão do criador (a parte do comprador passou a 569 [NC1](d))",
+     "situacao": "prevista",
+     "prova": "Atualização de 02/11/2026 01h03 no próprio subitem; sem PR",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(50) Lista de desejos do comprador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(51) Comandos de voz no assistente do criador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(52) Imagens de produto por IA no estúdio",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(53) Seguro de envio pela conta Shippo do criador",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(54) Encaminhamento de e-mail no domínio da loja",
+     "situacao": "prevista",
+     "prova": "Subitem ainda na fila do próprio item 624 (\"cada um conferido de novo contra o código e a fila antes de construir\"); nenhum PR com \"SZ8\" e este número",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #1928 (commit c366e58ab40a1d9c9f4a42f60e62eb0ec1f67a92, 06/11/2026 19h35 Fortaleza), que a auditoria registrou como aberto; ele traz o subitem (23); o item continua em andamento pelos demais subitens."
+  },
+  {
+   "n": 625,
+   "etiqueta": "HN1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22014 (item). queue.md:22008 (seção HN): \"Estado inicial: na fila.\"; a busca de \"[HN1]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. O PR #1852 (incorporado 03/11/2026) só gravou trechos oficiais em docs/official-texts-eu-2026-11-02.md:18-32 e diz \"Open for HN1 ... Not decided here\" (linha 28): fontes reunidas, sem o documento de conclusões, sem coleta e sem a seção de IA dos Termos. Nenhum PR de implementação.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 626,
+   "etiqueta": "HN2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22017 (item). queue.md:22008 (seção HN): \"Estado inicial: na fila.\"; a busca de \"[HN2]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação (busca por \"HN2\" só acha #2686, documento de fila aberto). No main não há campo estruturado de garantia por produto nem pedido de reembolso em /orders por prazo.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2686 (commit 07c7a963132e56d21b6d2038edc522c314746d49, 06/11/2026 01h00 Fortaleza), que a auditoria registrou como aberto; ele é um documento de fila; o estado do item não muda."
+  },
+  {
+   "n": 627,
+   "etiqueta": "HN3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22020 (item). queue.md:22008 (seção HN): \"Estado inicial: na fila.\"; a busca de \"[HN3]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação (busca por \"HN3\" e \"627\": nada); queue.md:22190 e :22249 só citam o item a partir de outros.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 628,
+   "etiqueta": "HN4",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22023 (item). queue.md:22008 (seção HN): \"Estado inicial: na fila.\"; a busca de \"[HN4]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. A caixa (docs/agent-inbox.md:409, C3-26) passou a parte (b) à Claude 3; há só o PR aberto #1932 \"628 [HN4](b) unit 1: the course's 'More from' shelf, rules and data\" (testado num PR, não incorporado). Nada incorporado, então a linha da fila não muda por merge.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 629,
+   "etiqueta": "HN5",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22026 (item). queue.md:22008 (seção HN): \"Estado inicial: na fila.\"; a busca de \"[HN5]\" e do número na queue.md não acha nenhuma linha de estado, complemento, cancelamento ou duplicado posterior. Nenhum PR de implementação (busca por \"HN5\" só acha #1676, que gravou o item).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 631,
+   "etiqueta": "AA1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22103 'Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 571 [VS1].'; queue.md:160 status Claude 3 'Em PR: unidade 1 (#1743...), unidade 2 (#1745...), unidade 3 (#1746...)'; queue.md:355 faixa do Claude 3. GitHub: incorporados #1743, #1745, #1746, #1749, #1751, #1753, #1754, #1759, #1760 (02/11/2026); abertos #1821, #1856, #1929, #1933.",
+   "linha_estado": "Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 571 [VS1].",
+   "correcao_estado": "PR #1743, commit 8fcc9bf771b00691b119550855bef15b12c56da8, 02/11/2026 15h11 Fortaleza (unidade 1, inventário de cobertura); fica 'em andamento': também incorporados #1745 (fdd097ca042ca3341b6579bf1205feb3a94d582f, 15h01, regras de proposta/confirmação/desfazer), #1746 (8ff380b37be07a32d9df78931a449f0852e11e09, 15h02, chaves de agente por escopo), #1749 (75c8f63182b10696b51f948530d0866ff8bf3a5f, 16h56, conferência do código gerado), #1751 (1d45828025f545f6b3d93eabdd6870df159409bd, 16h41, /llms.txt), #1753 (79f0756a7e7a6b4a216baccd3ab35e44e5263d72, 17h32, linha de comando), #1754 (b0a95bd099529dec25f66ccd367e41b810ba6eb6, 16h26, regras de isolamento dos apps gerados), #1759 (310badaa8e4acda3f4c827ea25dc390f0d2c6c07, 15h57, plano OAuth) e #1760 (474f097a75e9f6bea06e534c79ec1771c7b87dca, 17h01, regras OAuth); depois da auditoria, também incorporados #1821 (commit 835b70a531c45271c2e8fc7517b53dc0df302f3d, 06/11/2026 10h32 Fortaleza) e #1856 (commit 7903ae96aa2b4218086d3250b2e44c0a43990426, 07/11/2026 01h58); em PR aberto: #1929, #1933; o resto segue as unidades de docs/ai-agent-store.md.",
+   "pedidos": [
+    {
+     "o_que": "(a) inventário de todas as ações do estúdio com ferramenta ou motivo, e teste que falha quando falta",
+     "situacao": "presente",
+     "prova": "lib/agent-coverage.ts:1-56 (tool/read/draft/execute/never); tests/agent-coverage.test.ts; docs/ai-agent-store.md:7-17",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(a) cada ação do estúdio como ferramenta do agente, com os papéis da equipe e os limites do plano",
+     "situacao": "prevista",
+     "prova": "só 1 ação é ferramenta no main (docs/ai-agent-store.md:17); PRs abertos #1821, #1933 (ferramentas de leitura) e #1856, #1929 (rascunhos); unidade 6 em docs/ai-agent-store.md:26",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) assistente dentro do estúdio, em linguagem simples",
+     "situacao": "prevista",
+     "prova": "unidade 7 em docs/ai-agent-store.md:27; nenhum código no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) servidor MCP para Claude, ChatGPT e outros",
+     "situacao": "presente",
+     "prova": "app/api/mcp/route.ts; lib/mcp-catalog.ts (PR #1751)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) linha de comando",
+     "situacao": "presente",
+     "prova": "cli/marktmorgen.mjs:28-75, cli/README.md, cli/package.json; tests/cli.test.ts, tests/cli-protocol.test.ts (PR #1753)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) documentação gerada do código (llms.txt e Markdown)",
+     "situacao": "presente",
+     "prova": "lib/llms-text.ts:21; app/llms.txt/route.ts:1-9 (text/markdown); tests/llms-txt.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) prévia antes/depois, confirmação uma a uma ou em lote, histórico 'What the AI did' e desfazer: regras",
+     "situacao": "presente",
+     "prova": "lib/agent-proposal-rules.ts:127 (propose), :154 (planConfirm, lote BATCH_MAX), :181 (recordDone), :197 (planUndo); tests/agent-proposal-rules.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) gravação das propostas, rota e tela do histórico com botão de desfazer",
+     "situacao": "prevista",
+     "prova": "sem uso de lib/agent-proposal-rules.ts em rota/tela no main; PR aberto #1856 (descrição do produto); unidade 5 em docs/ai-agent-store.md:25",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) chaves separadas para leitura, rascunho e execução, revogáveis",
+     "situacao": "presente",
+     "prova": "lib/api-key-rules.ts:39-47 (AgentScope none/draft/execute, agentMay); lib/api-guard.ts:121,161; lib/api-keys.ts:192-195; tests/agent-keys.test.ts. Observação: app/api/store/api-keys/route.ts:54 ainda cria toda chave com agent 'none' (escolha do escopo no estúdio vem com as ferramentas de escrita)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) dinheiro nunca movido pelo agente",
+     "situacao": "presente",
+     "prova": "lib/agent-coverage.ts:22,56 (rotas de dinheiro só 'never') e tests/agent-coverage.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) conferência automática do código gerado (scripts de terceiros, imitação de login/checkout, coleta de senha ou cartão, acessibilidade)",
+     "situacao": "presente",
+     "prova": "lib/generated-code-check.ts:217 (checkGeneratedCode), :79 NOT_CHECKED_HERE; lib/form-sensitive.ts; tests/generated-code-check.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) isolamento em domínio próprio de apps com CSP restrita",
+     "situacao": "presente",
+     "prova": "lib/generated-app-policy.ts:48 (separateSite), :75 (appPolicy), :104 (appHeaders), :117 (iframe); tests/generated-app-policy.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) geração de blocos, componentes e apps a partir de pedido, código à vista, edição, exportação e publicação após aprovação",
+     "situacao": "prevista",
+     "prova": "nenhum gerador no main; unidade 9 em docs/ai-agent-store.md:29",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(e) página pública e de recursos com a loja controlada por IA e comparação datada com o Whop",
+     "situacao": "prevista",
+     "prova": "só depois de (a)-(d) funcionarem (VR); unidade 10 em docs/ai-agent-store.md:30",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(f) pacote e texto da listagem do conector (publicação depende do dono)",
+     "situacao": "prevista",
+     "prova": "unidade 11 em docs/ai-agent-store.md:31; docs/mcp-oauth-plan.md e lib/mcp-oauth-rules.ts (pré-requisito OAuth, PRs #1759/#1760) presentes; publicação nos diretórios é do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo: reserva antes de cada chamada de IA e teto mensal por loja; apps gerados no armazenamento e visitas do plano",
+     "situacao": "prevista",
+     "prova": "sem chamada de IA do agente nem hospedagem de apps no main ainda; docs/ai-agent-store.md:33",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes: cobertura, nenhuma ação sem confirmação, desfazer restaura, chave de leitura não escreve, código gerado conferido",
+     "situacao": "presente",
+     "prova": "tests/agent-coverage.test.ts, tests/agent-proposal-rules.test.ts, tests/agent-keys.test.ts, tests/generated-code-check.test.ts, tests/generated-app-policy.test.ts (sintéticos, sobre regras puras)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Documento do item com o estado das unidades",
+     "situacao": "falta",
+     "prova": "docs/ai-agent-store.md:21-23 diz 'Tested in a PR' (unidade 1) e 'On the queue' (unidades 2 e 3) para o que já foi incorporado em #1743/#1745/#1746, e não lista as unidades incorporadas #1749, #1751, #1753, #1754, #1759, #1760; os PRs abertos #1821/#1856 mexem no arquivo mas mantêm essas palavras de estado",
+     "onde_deveria_estar": "docs/ai-agent-store.md, seção Units"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta atualizar em docs/ai-agent-store.md (seção Units, linhas 21-23 e seguintes) as palavras de estado das unidades já incorporadas: unidade 1 (#1743), regras de proposta/confirmação/desfazer (#1745) e chaves de agente por escopo (#1746) como 'merged' em vez de 'Tested in a PR'/'On the queue', e registrar como incorporadas a conferência do código gerado (#1749), /llms.txt (#1751), a linha de comando (#1753), as regras de isolamento dos apps gerados (#1754) e o plano e as regras de OAuth do MCP (#1759, #1760); nenhum código muda.",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1821 (commit 835b70a531c45271c2e8fc7517b53dc0df302f3d, 06/11/2026 10h32 Fortaleza) e o PR #1856 (commit 7903ae96aa2b4218086d3250b2e44c0a43990426, 07/11/2026 01h58 Fortaleza), que a auditoria registrou como abertos; eles trazem as ferramentas de leitura das unidades 9 a 14 e a descrição do produto preparada pelo agente; continuam em PR aberto #1929 e #1933, e as palavras de estado de docs/ai-agent-store.md (complemento) seguem desatualizadas no main."
+  },
+  {
+   "n": 632,
+   "etiqueta": "AA2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22133 'Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].'; queue.md:355 faixa do Claude 3. GitHub: incorporados #1758, #1766, #1769, #1770, #1869, #1893, #1894, #1941; abertos #1947, #1950, #2581, #1990.",
+   "linha_estado": "Estado: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1, logo depois de 631 [AA1].",
+   "correcao_estado": "PR #1758, commit 3c5edc1131423105e304b4c69d548f60ca39206e, 02/11/2026 17h39 Fortaleza (estudo (a)); fica 'em andamento': também incorporados #1766 (ba1aa38d86b1703b2d34afcb9349ba9012ec97eb, 02/11 15h29, conferência oficial), #1770 (cc4e3c9229b27b0de588d05c8db6350c0f37f0ad, 02/11 18h47, textos de anúncio), #1769 (50f884d85f5e1ed590097e27adadaef05c1bce4e, 02/11 23h14, plano de campanha pausado), #1869 (2386afab09194bdff4f8ca527be37351d2dcc457, 03/11 02h11, proteções de gasto), #1894 (5078ae24e140e630e0afae6c095a23dea4a21555, 03/11 07h31, teste de criativos), #1893 (98cb90051dc20b232c80a70849780f59ee20d0db, 03/11 07h34, piloto automático) e #1941 (93c613e08dc7d3d93637bf0eb95ddcbd39f0803b, 05/11 08h36, regras da página de destino); depois da auditoria, também incorporados #2581 (l) (commit 7760b146fa645849bfefa357dc4c17f7c76d8ea3, 06/11/2026 08h35 Fortaleza) e #1990 (lacunas do estudo) (commit 9bca8b16b12721c07b6a21aea1b187ad9c384ccd, 06/11/2026 02h38); em PR aberto: #1947, #1950 (m).",
+   "pedidos": [
+    {
+     "o_que": "(a) estudo com fontes oficiais datadas de Meta, Google e TikTok, com o passo de cada revisão de aplicativo para o dono",
+     "situacao": "presente",
+     "prova": "docs/ad-platforms-study.md:1-58 (passos do dono em :48-54); docs/ad-platforms-official-check-2026-11-02.md; lacunas fechadas em 04/11 no PR aberto #1990",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) plano de campanha criado pausado, gasto máximo possível mostrado e ativação só com confirmação: regras",
+     "situacao": "presente",
+     "prova": "lib/ad-campaign-plan.ts:95 (worstCaseCents), :112 (planCampaign), :141 (activationAllowed); tests/ad-campaign-plan.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) lançar de dentro do estúdio na conta de anúncios do criador (rota, tela, chamada à API)",
+     "situacao": "prevista",
+     "prova": "nenhuma rota/tela usa lib/ad-campaign-plan.ts no main; a permissão ads_management depende da revisão de aplicativo do dono (docs/ad-platforms-study.md:52)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) conferência de honestidade dos textos de anúncio",
+     "situacao": "presente",
+     "prova": "lib/ad-creative-check.ts:67 (checkAdText); tests/ad-creative-check.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) geração de textos e imagens por IA, rotulada, com reserva antes",
+     "situacao": "prevista",
+     "prova": "não iniciado no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) painel por campanha e por produto (gasto, vendas atribuídas, resultado depois de reembolsos, dias para se pagar)",
+     "situacao": "prevista",
+     "prova": "já existe por canal em lib/ad-spend-rules.ts e lib/meta-ads.ts; por campanha depende de campanhas criadas daqui",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(e) pausar, ajustar orçamento, encerrar, aviso e pausa automática no limite do dia",
+     "situacao": "presente",
+     "prova": "lib/ad-spend-guard.ts:35 (changeBudget), :65 (limitState, autoPause); tests/ad-spend-guard.test.ts (regras; sem tela ainda)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(f) página pública só quando funcionar",
+     "situacao": "prevista",
+     "prova": "depende de (b)-(e) funcionarem (VR)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(g) mais redes, uma de cada vez depois da Meta",
+     "situacao": "prevista",
+     "prova": "não iniciado; Google e TikTok só no estudo",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(h) piloto automático dentro dos limites do criador, com histórico e desfazer",
+     "situacao": "presente",
+     "prova": "lib/ad-autopilot-rules.ts:90 (AUTOPILOT_KIND com undo, pelo histórico do 631), :95 (checkRules), :113 (withinLimits), :131 (autopilotChanges); tests/ad-autopilot-rules.test.ts (regras)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(i) teste de criativos com orçamento para a versão que vende mais depois de medida",
+     "situacao": "presente",
+     "prova": "lib/ad-creative-test-rules.ts:100 (creativeTest); tests/ad-creative-test-rules.test.ts (regras)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(j) vídeos de anúncio a partir do conteúdo do criador",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(k) públicos do próprio criador com consentimento (reengajamento e semelhantes)",
+     "situacao": "prevista",
+     "prova": "arquivo de compradores com consentimento já existe em lib/ad-audience.ts (11/10/2026); reengajamento por pixel e saída de quem retira consentimento não iniciados",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(l) conferência de política de anúncio antes de enviar",
+     "situacao": "prevista",
+     "prova": "PR aberto #2581; regras confirmadas parciais em docs/ad-platforms-study.md:16",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(m) página de destino por campanha a partir da página de venda",
+     "situacao": "presente",
+     "prova": "regras em lib/campaign-landing.ts:57 (landingFrom), :71 (landingPage); tests/campaign-landing.test.ts; gravação e rota nos PRs abertos #1947 e #1950 (prevista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(n) caminho completo da venda com atribuição explicada",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(o) próximo passo recomendado para os anúncios",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(p) relatório semanal dos anúncios",
+     "situacao": "presente",
+     "prova": "o e-mail semanal já lê o gasto (lib/stats-report.ts, conforme docs/ad-platforms-study.md:65); a seção por campanha fica para quando houver campanhas criadas daqui (prevista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(q) QR code de campanha com medição de vendas",
+     "situacao": "presente",
+     "prova": "lib/short-links.ts e components/short-links.tsx (QR SVG/PNG e linha de vendas), registrado em docs/ad-platforms-study.md:64",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes: pausada até confirmar, máximo mostrado igual ao enviado, pausa no limite, promessa de ganho recusada, nenhum público de outra loja",
+     "situacao": "presente",
+     "prova": "tests/ad-campaign-plan.test.ts, tests/ad-spend-guard.test.ts, tests/ad-creative-check.test.ts; o de público de outra loja fica com (k) (prevista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Revisão de aplicativos e chaves da Meta/Google/TikTok",
+     "situacao": "fora do escopo",
+     "prova": "contas e termos de terceiros, só do dono (docs/ad-platforms-study.md:48-54)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1990 (commit 9bca8b16b12721c07b6a21aea1b187ad9c384ccd, 06/11/2026 02h38 Fortaleza) e o PR #2581 (commit 7760b146fa645849bfefa357dc4c17f7c76d8ea3, 06/11/2026 08h35 Fortaleza), que a auditoria registrou como abertos; eles trazem as lacunas do estudo e (l); continuam em PR aberto #1947 e #1950."
+  },
+  {
+   "n": 633,
+   "etiqueta": "GL1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22178 'Estado inicial: na fila.' (seção GL); docs/agent-inbox.md:33 e :342 passam o 633 à faixa do Claude 2; nenhum PR com GL1/DPA/subprocessadores/sanções no GitHub; nada em app/ ou lib/ (busca por subprocessor, OFAC, sanctioned).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 634,
+   "etiqueta": "GL2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22188 'Andamento (Claude 2, 02/11/2026): unidade 1, modelos salvos, **testada num PR**...'; queue.md:22189 'unidade 2a ... **testada num PR**'; GitHub: #1837, #1871 e #2027 incorporados.",
+   "linha_estado": "queue.md:22188 'Andamento (Claude 2, 02/11/2026): unidade 1, modelos salvos, **testada num PR** (ramo claude2/gl2-agreement-templates; ...' e queue.md:22189 'Andamento (Claude 2, 02/11/2026): unidade 2a, quanto tempo um modelo fica guardado e quanto ele ocupa, as regras, **testada num PR** (ramo claude2/gl2-template-keep, ...'",
+   "correcao_estado": "PR #1837, commit 78d4cf51d4a7842ca840b41c98503fdd934e8596, 03/11/2026 00h06 Fortaleza (unidade 1 incorporada); PR #1871, commit bdbf26de374d3640c654f8093b6ece94f5eb3b61, 04/11/2026 05h58 Fortaleza (unidade 2a incorporada); também #2027 (b93713b94d80ae51d063d8280f79b9c8b25d2080, 04/11/2026 04h22, texto do criador guardado como digitado). Item segue 'em andamento': gravação na loja, escolha no estúdio, vários signatários, campos, assinatura desenhada, validade, contra-assinatura e pagamento ainda por fazer.",
+   "pedidos": [
+    {
+     "o_que": "Modelos salvos com {client_name}/{store_name}, até 20 por loja: regras",
+     "situacao": "presente",
+     "prova": "lib/agreement-template-rules.ts:43-47, :225 (templateProblem), :243 (draftFrom); tests/agreement-templates.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Tempo de guarda e tamanho do modelo na sala de dados: regras",
+     "situacao": "presente",
+     "prova": "lib/agreement-template-rules.ts:68-121 (TEMPLATE_KEEP_DAYS, MAX_TEMPLATE_BYTES, keptTemplate), :146 (templateExport); tests/agreement-template-keep.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Guardar o modelo na loja e escolher no estúdio (gravação e exportação reais)",
+     "situacao": "prevista",
+     "prova": "'Próximas unidades' em queue.md:22188; nenhuma rota/tela usa lib/agreement-template-rules.ts (só lib/agreement-rules.ts); a espera pelo #1502 acabou (incorporado em 04/11/2026)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Até 5 signatários com ordem opcional e cópia só leitura",
+     "situacao": "prevista",
+     "prova": "queue.md:22188 'depois os vários signatários em ordem'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Campos posicionados obrigatórios ou não",
+     "situacao": "prevista",
+     "prova": "queue.md:22188",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Assinatura desenhada com a digitada sempre válida",
+     "situacao": "prevista",
+     "prova": "queue.md:22188",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Validade com um lembrete",
+     "situacao": "prevista",
+     "prova": "queue.md:22188",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Contra-assinatura de alguém da equipe",
+     "situacao": "prevista",
+     "prova": "queue.md:22188",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Pagamento aberto só depois da última assinatura",
+     "situacao": "prevista",
+     "prova": "descrição do item (queue.md:22190); não citado nas próximas unidades, mas parte do item em andamento",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Envio por automação e gatilhos 'visto' e 'assinado'",
+     "situacao": "prevista",
+     "prova": "descrição do item; gatilho 'assinou' já em 635 [GL3] (fora deste lote)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Cópia assinada em HTML e PDF/UA; edição cria versão nova e cancela pendentes",
+     "situacao": "prevista",
+     "prova": "descrição do item; não iniciado",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 636,
+   "etiqueta": "GL4",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22178 'Estado inicial: na fila.' (seção GL), sem linha de andamento no item (queue.md:22200-22202); docs/agent-inbox.md:342 mantém o 636 com o Claude 3; GitHub: #1795, #1792, #1873, #1973, #2066 e #2138 incorporados; reserva liberada (docs/agent-inbox.md:783-784, C3-103).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1795, commit 652c0de4cd65be826de82be2994e67d36187097d, 02/11/2026 20h52 Fortaleza ((b) QR e (c) avaliações por mês); fica 'em andamento': também incorporados #1792 (7afa9b0b7ff58077be237961b2950cb5b6057da4, 03/11 06h55, (a) lembrete), #1873 (047c675f3161a51127cb617e350524d1fd1a47c2, 03/11 13h49, (c) temas), #1973 (59face0e363a412997b3dd1a6aeee00cae3da14e, 04/11 03h14, (d) resumo por IA no estúdio), #2066 (9ecb38a7bd7cd8ce4d110f71785fd80e9453e0a3, 04/11 07h44) e #2138 (deb1e84c19c2594dabfda3a1997ac7d56de601b8, 04/11 10h28); falta o resumo na página pública do produto.",
+   "pedidos": [
+    {
+     "o_que": "(a) um único lembrete opcional, só a quem não avaliou, contado nos e-mails, respeitando descadastro",
+     "situacao": "presente",
+     "prova": "lib/review-ask.ts:30-46; lib/review-requests.ts:16-30, :154; tests/review-reminder.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(b) QR e link da página de avaliação só para comprador verificado",
+     "situacao": "presente",
+     "prova": "components/review-qr.tsx:8-15 (aponta para /orders, compra verificada); app/studio/reviews/page.tsx:240; tests/review-qr.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) média e quantidade por mês e por produto, sem nota inventada",
+     "situacao": "presente",
+     "prova": "lib/review-overview.ts:1-20; app/studio/reviews/page.tsx:63-65, :205; tests/review-overview.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(c) temas repetidos nas palavras dos compradores (lib/customer-voice.ts)",
+     "situacao": "presente",
+     "prova": "components/review-themes.tsx:2-6; app/studio/reviews/page.tsx:286; tests/review-themes.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) resumo por IA só com o que as avaliações dizem, no máximo uma vez por semana, com reserva e teto",
+     "situacao": "presente",
+     "prova": "lib/review-ai-summary-rules.ts:1-27 (heldToFacts, SUMMARY_REFRESH_SECONDS); lib/review-ai-summary.ts:1-10; app/api/store/review-summary/route.ts; components/review-ai-summaries.tsx; tests/review-ai-summary-rules.test.ts, tests/review-ai-summary.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "(d) resumo por IA mostrado na página do produto, rotulado como IA",
+     "situacao": "falta",
+     "prova": "lib/review-ai-summary.ts:10-11 'Nothing is drawn yet for buyers: the product page is reserved by other open work'; app/[handle]/p/[product]/page.tsx e app/[handle]/p/[product]/reviews/page.tsx não leem o resumo (só summaryOf de lib/reviews.ts); nenhum PR aberto nem linha da fila carrega essa unidade",
+     "onde_deveria_estar": "app/[handle]/p/[product]/page.tsx (e a página de avaliações app/[handle]/p/[product]/reviews/page.tsx)"
+    },
+    {
+     "o_que": "Uma estrela pesa igual na média e nos temas; nunca filtrar por satisfação",
+     "situacao": "presente",
+     "prova": "lib/review-overview.ts:6-9; lib/review-ai-summary-rules.ts:13-14; testes acima",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta desenhar para os compradores o resumo por IA das avaliações de 636 [GL4](d), já feito e guardado (lib/review-ai-summary.ts, lib/review-ai-summary-rules.ts) mas mostrado só no estúdio: na página do produto app/[handle]/p/[product]/page.tsx (e na página de avaliações app/[handle]/p/[product]/reviews/page.tsx), com o rótulo de IA desenhado pela página, só os temas e contagens guardados, sem nova chamada de IA ao abrir a página e com teste de que um resumo apagado ou fora das avaliações não aparece; o próprio lib/review-ai-summary.ts:10-11 diz que isso ficou para depois porque a página do produto estava reservada pelo PR #1730 (513 [PF1]) da Claude 2, que estava em andamento na auditoria e foi incorporado depois dela (commit 8f73f9d31b1cc912bb127ce9259601d739732981, 06/11/2026 18h51 Fortaleza); o resumo continua só no estúdio."
+  },
+  {
+   "n": 638,
+   "etiqueta": "GL6",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22178 'Estado inicial: na fila.' (seção GL); docs/agent-inbox.md:33 e :342 passam o 638 à faixa do Claude 2; nenhum PR com GL6 ou Lead Ads; nada de leadgen em app/ ou lib/.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 639,
+   "etiqueta": "GL7",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22178 'Estado inicial: na fila.' (seção GL), sem linha de andamento no item (queue.md:22219-22262); docs/agent-inbox.md:342 mantém o 639 com o Claude 3; GitHub: 22 PRs do 639 incorporados entre 03/11 e 05/11/2026 e 9 abertos (#1927, #1962, #1963, #1965, #1969, #2036, #2048, #2571, #2574).",
+   "linha_estado": "Estado inicial: na fila.",
+   "correcao_estado": "PR #1796, commit c686aa325549447179bfbd39f4b1b7af71553615, 03/11/2026 07h12 Fortaleza (primeiro recurso, (8)); fica 'em andamento': incorporados também (2) #1903, (3) #1968, (6) #1954/#1959/#1960, (7) #1972/#2007, (9) #1952, (20) #2063, (22) #1961, (26) #1910/#1911/#1912, (30) #1804, (31) #1937, (32) #1838, (34) #1966, (38) #1840, (40) #1939/#1949/#1951; depois da auditoria, também incorporados (22) #1962 (commit 6c8f5c40918311bd81a7e29344f080ddafb323c5, 06/11/2026 16h36 Fortaleza) e #1963 (commit 749dac81607b76156be9eea039e34eb1f733c081, 06/11/2026 17h26) e (34) #1969 (commit 0ade0faf3478ca554226b3f80e1866de82276ca9, 07/11/2026 02h22); em PR aberto: #1927, #1965, #2036, #2048, #2571, #2574; os demais recursos não iniciados.",
+   "pedidos": [
+    {
+     "o_que": "1. Oferta de retorno a criadores que cancelaram, um e-mail com consentimento",
+     "situacao": "prevista",
+     "prova": "não iniciado; desconto e duração dependem do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Campos de URL, várias escolhas e telefone no CRM",
+     "situacao": "presente",
+     "prova": "lib/crm-rules.ts:41-53, :129-145; tests/crm-url.test.ts, tests/crm-several.test.ts, tests/crm-phone.test.ts (#1903, #1882)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "2. Pastas de campos e campo que só aparece em certas etapas",
+     "situacao": "prevista",
+     "prova": "não iniciado; nenhuma pasta/visibilidade por etapa em lib/crm-rules.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "3. Pôr e tirar etiqueta em lote com desfazer",
+     "situacao": "presente",
+     "prova": "lib/bulk-labels.ts:2-40; lib/bulk-label-rules.ts; app/studio/labels/page.tsx; app/api/store/contact-labels/route.ts; tests/bulk-labels.test.ts (#1968; sem disparar automações por decisão C3-33)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "4. Empresa como registro com várias pessoas",
+     "situacao": "prevista",
+     "prova": "PR aberto #2574",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "5. Seguidores de negócio ou contato",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "6. Tarefas por pessoa com prazo e responsável, na página da pessoa e na agenda",
+     "situacao": "presente",
+     "prova": "lib/person-tasks.ts; app/api/store/person-tasks/route.ts; components/person-tasks.tsx; components/tasks-agenda.tsx; lib/person-agenda.ts; tests/person-tasks.test.ts, tests/person-agenda.test.ts (#1954, #1959, #1960)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "6. Aviso das tarefas no celular (lib/web-push.ts)",
+     "situacao": "prevista",
+     "prova": "não está no main; anunciado como próxima unidade no PR #1954 ('then the notice on the phone')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "7. Permissão por funil para cada pessoa da equipe",
+     "situacao": "presente",
+     "prova": "lib/pipeline-access-rules.ts, lib/pipeline-access.ts; tests/pipeline-access.test.ts, tests/pipeline-access-board.test.ts (#1972, #2007); escolha pelo dono no PR aberto #2036 (prevista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "8. Duplicar funil com as etapas, sem negócios",
+     "situacao": "presente",
+     "prova": "lib/crm-rules.ts:384-410; tests/pipeline-copy.test.ts (#1796)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "9. Valor dos negócios por canal de origem",
+     "situacao": "presente",
+     "prova": "lib/deal-channels.ts:3; components/deal-channels-table.tsx; tests/deal-channels.test.ts (#1952)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "10. Importar do HubSpot",
+     "situacao": "prevista",
+     "prova": "PR aberto #2048 (servidor)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "11. Cartão de visita por foto com IA",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "12. Caixa de entrada de equipe (@menção, metas de resposta, visões, busca)",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "13. Vídeo de boas-vindas no chat",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "14. Conversa por voz com o Store assistant",
+     "situacao": "prevista",
+     "prova": "não iniciado; fornecedor depende do 'sim' do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "15. Prévia do e-mail em caixas reais por serviço de teste",
+     "situacao": "fora do escopo",
+     "prova": "fornecedor pago de terceiro depende do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "16. Google Postmaster e Microsoft SNDS",
+     "situacao": "prevista",
+     "prova": "não iniciado; depois de 356 [ES2]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "17. Página pública mensal de entregabilidade",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "18. Assinatura de e-mail por pessoa da equipe",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "19. Histórico de versões das automações com restauração",
+     "situacao": "prevista",
+     "prova": "PR aberto #1927",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "20. Dados estruturados Course",
+     "situacao": "presente",
+     "prova": "lib/page-structured-data.ts:118 (#2063)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "20. Dados estruturados Event, ProfilePage e PodcastSeries",
+     "situacao": "prevista",
+     "prova": "não iniciado (#2063 é a unidade 1)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "21. Biblioteca maior de ícones e ilustrações",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "22. Cartão de visita digital com 'Save contact'",
+     "situacao": "presente",
+     "prova": "lib/creator-card.ts:2; app/api/store/creator-card/route.ts; tests/creator-card.test.ts (#1961); unidades 2-4 (endereço da loja, estúdio, troca de contato com consentimento) nos PRs abertos #1962, #1963, #1965 (prevista)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "23. Ingresso, certificado e cupom na carteira Apple e Google",
+     "situacao": "fora do escopo",
+     "prova": "exige contas da Apple e do Google do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "24. Fotos de banco gratuito no seletor",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "25. Tempo médio na página, sem cookie",
+     "situacao": "prevista",
+     "prova": "PR aberto #2571",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "26. Formulários: salvar progresso, PDF/UA da resposta, abertura e encerramento agendados",
+     "situacao": "presente",
+     "prova": "lib/forms.ts:143, :154; lib/form-response-pdf.ts:2; app/api/store/forms/response-pdf/route.ts; components/form-keep.tsx; tests/form-schedule.test.ts, tests/form-response-pdf.test.ts, tests/form-keep.test.ts (#1910, #1911, #1912)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "27. Formulário embutido no site do criador",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "28. Reserve with Google",
+     "situacao": "fora do escopo",
+     "prova": "parceria com o Google depende do dono; depois de 520 [LB1]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "29. Fatura com parcelas, pagamento parcial e gorjeta",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "30. Pedido de pagamento marcado como pago por fora, com recibo",
+     "situacao": "presente",
+     "prova": "lib/payment-request-rules.ts:88-95; lib/payment-request-reply.ts:3; tests/payment-request-outside.test.ts (#1804)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "31. Selos honestos no cartão do produto: regras",
+     "situacao": "presente",
+     "prova": "lib/product-badges.ts:1-25; tests/product-badges.test.ts (#1937)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "31. Selos desenhados nos cartões",
+     "situacao": "prevista",
+     "prova": "lib/product-badges.ts:5 'drawing them on the cards is the next unit' (após PRs da Claude 2 em components/store-product.tsx)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "32. Validade do certificado",
+     "situacao": "presente",
+     "prova": "lib/certificate.ts:57, :71, :255; components/certificate-validity.tsx; tests/certificate-validity.test.ts (#1838)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "32. Lembretes antes de vencer",
+     "situacao": "prevista",
+     "prova": "PR #1838: 'the reminders ... come after' o #1502 (incorporado em 04/11/2026)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "33. Importador do Skool",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "34. Pedidos de pagamento e acordos abertos em /orders",
+     "situacao": "presente",
+     "prova": "lib/buyer-waiting.ts:1-20; app/[handle]/orders/page.tsx:26, :371; tests/buyer-waiting.test.ts (#1966)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "34. O mesmo na biblioteca, com as próximas sessões",
+     "situacao": "prevista",
+     "prova": "PR aberto #1969",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "35. Agendador de posts em lote etc.",
+     "situacao": "prevista",
+     "prova": "depende de 228 [HL9]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "36. Escuta social",
+     "situacao": "prevista",
+     "prova": "não iniciado; depende de 228 [HL9]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "37. Desempenho por pessoa da equipe",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "38. Visão somada das lojas de uma conta",
+     "situacao": "presente",
+     "prova": "lib/account-totals.ts:2; app/studio/totals/page.tsx; tests/account-totals.test.ts (#1840)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "39. Estudo de SOC 2 Type II e ISO 27001",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "40. Memória do assistente do criador: regras, armazenamento e rota",
+     "situacao": "presente",
+     "prova": "lib/assistant-memory-rules.ts; lib/assistant-memory-store.ts:2; app/api/store/assistant-memory/route.ts:9; tests/assistant-memory-*.test.ts (#1939, #1949, #1951)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "40. Tela no estúdio para ver, editar e apagar a memória e uso pelo assistente",
+     "situacao": "prevista",
+     "prova": "lib/assistant-memory-rules.ts:5 'the studio screen and the model call come in the next units'; o assistente do estúdio é a unidade 7 de 631 [AA1]",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "41. Atualizações oferecidas às lojas criadas de um modelo",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "42. Integrações com Notion, Typeform e Airtable",
+     "situacao": "prevista",
+     "prova": "não iniciado",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foram incorporados o PR #1962 (commit 6c8f5c40918311bd81a7e29344f080ddafb323c5, 06/11/2026 16h36 Fortaleza), o PR #1963 (commit 749dac81607b76156be9eea039e34eb1f733c081, 06/11/2026 17h26 Fortaleza) e o PR #1969 (commit 0ade0faf3478ca554226b3f80e1866de82276ca9, 07/11/2026 02h22 Fortaleza), que a auditoria registrou como abertos; eles trazem as unidades 2 e 3 de (22) e a unidade 2 de (34); continuam em PR aberto #1927, #1965, #2036, #2048, #2571 e #2574."
+  },
+  {
+   "n": 640,
+   "etiqueta": "TF1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22294 (item) e 22286-22292 (seção TF): \"Estado inicial: na fila, desligado. Faixa: Codex ... Ordem: depois do Bloco de abertura\"; o próprio item diz \"VR: registro na fila; nada construído\". queue.md:10181 só aplica o complemento TF (8%) ao 350 [DN2]. No main, lib/plan.ts:67 ainda traz COMMISSION_BPS 625/275/0 e lib/plan.ts:93/99 COMMISSION_LIVE e COMMISSION_PLANS_PUBLISHED false, coerente com não construído. Nenhum PR de implementação achado (busca 'TF1' só acha #1938, que gravou o item, e #2704, auditoria aberta).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2704 (commit e3be1cd01bd3234727f13fa4a7cb3aef9559279c, 06/11/2026 08h54 Fortaleza), que a auditoria registrou como aberto; ele é uma auditoria de completude, um documento; o estado do item não muda."
+  },
+  {
+   "n": 641,
+   "etiqueta": "WG1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22300-22304, gravado em 05/11/2026 pelo PR #2673 (incorporado 05/11/2026 16h18 Fortaleza): \"registro na fila; nada construído\"; sem linha 'Estado:' nem andamento em outro lugar da fila. No main não há concessão de dias grátis pelo criador (lib/membership-pause.ts é a pausa pedida pelo próprio membro, outro recurso). Nenhum PR aberto encontrado com 'WG1' além do #2673.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 642,
+   "etiqueta": "WG2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22305-22309: \"registro na fila; nada construído\"; nenhuma linha de andamento ou reserva na fila nem em docs/reservations.md. Observação: há dois PRs abertos da Claude 2 ainda não registrados na fila, #2685 (claude2/wg2-option-off-sale, \"642 [WG2], unit 1\") e #2690 (claude2/wg2-option-count, \"642 [WG2] unit 2\"), ambos sem merge em 05/11/2026; pelo GitHub o item está de fato em andamento em PR, mas nada foi incorporado, então não cabe correção de estado com merge.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 643,
+   "etiqueta": "WG3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:22310-22314: \"registro na fila; nada construído\". No main, lib/checkout-branding.ts:50 (checkoutBranding) só lê o tema da loja; lib/short-link-rules.ts não tem tema por link. Nenhum PR aberto encontrado com 'WG3'.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 644,
+   "etiqueta": "WG4",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22315-22319: \"Dono: Codex T (estudo já aberto no PR #2565)\". PR #2565 (codex/t-external-page-attribution-study, \"docs: study external-page attribution boundaries\") está aberto, sem merge, estado 'blocked'; arquivos docs/external-page-attribution-study.md, tests/external-page-attribution-study.test.ts e docs/codex-queue.md.",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Estudo em docs/ do script para páginas externas (atribuição de visitas e vendas, como o Whop Pixel), antes de qualquer código",
+     "situacao": "prevista",
+     "prova": "ausente no main (docs/external-page-attribution-study.md não existe; docs/ só tem ht10-pixels-attribution.md, mobile-render-attribution.md e x-reddit-pixels-official-check-2026-11-02.md, de outros itens); carregado pelo PR aberto #2565, citado no item",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Responder consentimento e Global Privacy Control antes de qualquer contagem; nenhum dado pessoal",
+     "situacao": "prevista",
+     "prova": "parte do estudo do PR #2565 (aberto); conteúdo não conferido linha a linha porque não está no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo por visita com teto mensal por plano, no pior mês, com fontes oficiais datadas (teste de aceitação do estudo)",
+     "situacao": "prevista",
+     "prova": "PR #2565 traz tests/external-page-attribution-study.test.ts; não incorporado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "O que reaproveita de lib/pixels.ts e da atribuição de 196 [HT10]; riscos de abuso",
+     "situacao": "prevista",
+     "prova": "PR #2565 (aberto)",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": "",
+   "atualizacao": "Atualização de 07/11/2026 (revisão do PR #2718): as provas acima descrevem o main 6725b5c97 de 05/11/2026; depois dele, foi incorporado o PR #2565 (commit ba310cc2c9021032f745d801c1e2fee989f19c16, 06/11/2026 00h09 Fortaleza), que a auditoria registrou como aberto; ele traz o estudo: docs/external-page-attribution-study.md e tests/external-page-attribution-study.test.ts estão agora no main; a conferência do estudo, pedido por pedido, não foi refeita nesta atualização, e o estado acima continua o da auditoria."
+  },
+  {
+   "n": 645,
+   "etiqueta": "WG5",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:22320-22325: registro do que \"o Codex AA construiu desligado pelas travas\" nos PRs #2529, #2534 e #2536. Pelo GitHub (05/11/2026) os três estão abertos e sem merge: #2529 (codex/aa-discord-signin, mergeable_state 'dirty'), #2534 (codex/aa-apple-signin, 'unstable'), #2536 (codex/aa-buyer-provider-signin, 'unstable'). No main não existem app/api/auth/discord, app/api/auth/apple, lib/discord-signin.ts, lib/apple-signin.ts nem components/buyer-provider-signin.tsx; só lib/google-signin.ts:57 (GOOGLE_SIGNIN_APPROVED false, item 276).",
+   "linha_estado": "",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Entrar com Discord (PKCE e e-mail verificado), desligado",
+     "situacao": "prevista",
+     "prova": "ausente no main; carregado pelo PR aberto #2529 (app/api/auth/discord/route.ts, lib/discord-signin.ts, lib/discord-signin-policy.ts, components/discord-signin.tsx, docs/discord-signin.md, tests/discord-signin.test.ts), citado no item; PR com conflito ('dirty')",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Entrar com Apple (segredo do cliente em JWT), desligado",
+     "situacao": "prevista",
+     "prova": "ausente no main; carregado pelo PR aberto #2534 (app/api/auth/apple/route.ts, lib/apple-signin.ts, lib/apple-signin-policy.ts, components/apple-signin.tsx, docs/apple-signin.md, tests/apple-signin.test.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Escolha de Google, Apple ou Discord também para compradores",
+     "situacao": "prevista",
+     "prova": "ausente no main; carregado pelo PR aberto #2536 (components/buyer-provider-signin.tsx, lib/buyer-provider-signin-rules.ts, lib/buyer-words/provider-signin.ts, tests/buyer-provider-signin.test.ts)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Mesma regra do 276 [H3-1]: sessão só com e-mail confirmado pelo provedor, sem guardar token; provedor desligado não aparece em nenhuma página (teste de aceitação)",
+     "situacao": "prevista",
+     "prova": "testes nos PRs #2529/#2534/#2536 (abertos); não conferíveis no main",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Ligar: Apple Developer Program (custo anual com fonte oficial, nos custos fixos) e app OAuth do Discord criado pelo dono",
+     "situacao": "fora do escopo",
+     "prova": "exige conta, pagamento e decisão do dono; o próprio item diz \"Ligar depende do dono\"",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  }
+ ]
+}

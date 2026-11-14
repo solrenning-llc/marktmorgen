@@ -26,7 +26,7 @@
  * so moving the account to another address takes the list along untouched.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
-import { allValues, readFields } from "@/lib/crm";
+import { PERSON_ARG_BYTES, readFieldsWhole, valuesOf } from "@/lib/crm";
 import { personKey } from "@/lib/person-key";
 import { countOrder, storeOrdersThisMonth } from "@/lib/orders";
 import { freeCopiesLimitFor } from "@/lib/order-rules";
@@ -40,15 +40,20 @@ import { type Listing, type Store, isFree } from "@/lib/store";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
   type AddResult,
+  LIST_PAGE_READ_BYTES,
+  type ListRead,
   MAX_LEADS,
+  agreedKey,
   leadsKey,
-  listCounts,
   mailable,
   parseContact,
   upsertContact,
   orderRoom,
+  unsubKey,
+  plainRead,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
+import { contactOpen } from "@/lib/store-contact";
 
 export { MAX_LEADS };
 
@@ -254,12 +259,17 @@ export async function requestCopy(input: {
       "",
       g.freeIgnore,
       "",
+      // Replies do not reach the store, and its own address is never handed to whoever typed one: when its page has
+      // the contact form open (lib/store-contact.ts), this is how to write to it (755 [STN2]).
+      ...(contactOpen(store) ? [g.freeContact(name, `${origin}/@${store.handle}#contact`), ""] : []),
       g.freeSentBy(name),
     ].join("\n"),
   });
-  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts.
-  if (sent) await countOrder(store, `free:${token}`, 0);
-  await settleAdmitted(store, admitted.hour);
+  // One of the month's orders (lib/orders.ts): nothing was paid, so it always counts. A count not confirmed keeps
+  // the room it was admitted with until its hours end, never given back as if counted. A free copy has no recount:
+  // past those hours that one copy is in neither the count nor the room (one per copy whose every try failed).
+  const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
+  if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";
 }
 
@@ -304,14 +314,23 @@ export type UseResult =
   | { ok: true; claim: Claim }
   | { ok: false; reason: "expired" | "spent" };
 
-/** Counts one use of an emailed link, and says whether it is still good. */
+/**
+ * Counts one use of an emailed link, and says whether it is still good.
+ *
+ * Each reply is read only in its exact shape (CX-123 rule 24): a claim that is
+ * not a string or nothing, or a use count that is not a whole number, throws
+ * UnknownReplyError. A count nobody read is never a good link: `Number(x) >
+ * MAX_CLAIM_USES` was false for NaN, so a used-up link answered good again
+ * (sweep A2). The download route says it as a temporary error.
+ */
 export async function spendClaim(token: string): Promise<UseResult> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) {
     return { ok: false, reason: "expired" };
   }
   const key = await claimKey(token);
-  const [raw] = await redisPipeline([["GET", key]]);
-  const claim = parseClaim(raw);
+  const read = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a free copy's claim");
+  const claim = parseClaim(read[0]);
   if (!claim) return { ok: false, reason: "expired" };
 
   const uses = await usesKey(token);
@@ -369,15 +388,39 @@ export async function recordLead(
 
 export type ListSize = { total: number; agreed: number; full: boolean };
 
-/** How many addresses the list holds, and how many may be written to. */
+/** A counter kept with GET/INCR: nothing yet is 0; a whole number as Redis sends it; anything else unknown (null). */
+function counterOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  if (typeof reply === "number") return Number.isSafeInteger(reply) ? reply : null;
+  if (typeof reply !== "string" || !/^-?\d{1,15}$/.test(reply)) return null;
+  return Number(reply);
+}
+
+/**
+ * How many addresses the list holds, and how many may be written to.
+ *
+ * The same counts as lib/contacts.ts listCounts, read only in their exact
+ * shape: an unknown read throws (UnknownReplyError, or the read's own error),
+ * never a list of 0, because the store export is priced from this total
+ * (lib/store-export.ts exportShape) and the studio shows it (sweep A2).
+ */
 export async function listSize(store: Store): Promise<ListSize> {
-  try {
-    const counts = await listCounts(store.listId);
-    return { total: counts.total, agreed: counts.mailable, full: counts.full };
-  } catch (error) {
-    console.error("could not read a list's size", error);
-    return { total: 0, agreed: 0, full: false };
-  }
+  if (!store.listId || !isRedisConfigured()) return { total: 0, agreed: 0, full: false };
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HLEN", leadsKey(store.listId)],
+      ["GET", agreedKey(store.listId)],
+      ["GET", unsubKey(store.listId)],
+    ]),
+    3,
+  );
+  const total = replies ? countOf(replies[0]) : null;
+  const agreed = replies ? counterOf(replies[1]) : null;
+  const left = replies ? counterOf(replies[2]) : null;
+  if (total === null || agreed === null || left === null) throw new UnknownReplyError("a list's size");
+  const a = Math.min(total, agreed);
+  const l = Math.min(a, Math.max(0, left));
+  return { total, agreed: a - l, full: total >= MAX_LEADS };
 }
 
 /**
@@ -395,6 +438,31 @@ function cell(value: string): string {
 }
 
 /**
+ * The people whose fields' values listAsCsv reads in one go: a read a field
+ * for each of them, gathered across the walk's pages, so the reads never
+ * depend on how many contacts a page of HSCAN holds (COUNT is only a hint;
+ * third cost review of #3354).
+ */
+export const LIST_VALUES_PER_READ = 1_000;
+
+/**
+ * What listAsCsv reads beside the list's own pages: the store's fields'
+ * values for the people on it, a read a field for each LIST_VALUES_PER_READ
+ * of them, each person's key sent with each field once (lib/crm.ts,
+ * valuesOf). Priced into a whole export before it is read
+ * (lib/store-export.ts, exportShape). The fields and the list's length are
+ * read exactly (CX-123 rule 24): an unknown answer throws, never a shape
+ * without them (second cost review of #3354).
+ */
+export async function listValuesShape(store: Store): Promise<{ bytes: number; commands: number }> {
+  const fields = (await readFieldsWhole(store.statsId)).length;
+  if (!fields || !store.listId || !isRedisConfigured()) return { bytes: 0, commands: 0 };
+  const contacts = countOf(repliesFor(await redisPipeline([["HLEN", leadsKey(store.listId)]]), 1)?.[0]);
+  if (contacts === null) throw new UnknownReplyError("a list's HLEN");
+  return { bytes: contacts * fields * PERSON_ARG_BYTES, commands: Math.ceil(contacts / LIST_VALUES_PER_READ) * fields };
+}
+
+/**
  * The whole list as CSV, ready for any email tool.
  *
  * Read in pages, so a large list never has to fit in one answer from Redis.
@@ -407,10 +475,19 @@ function cell(value: string): string {
  * download then answers that the list could not be read just now
  * (app/api/store/leads/route.ts), and the store's whole export says that part
  * could not be read (lib/store-export.ts).
+ *
+ * The store's fields' values are read for the people the file holds only
+ * (lib/crm.ts, valuesOf), never the whole of a field's values, which outlive
+ * a person's leaving the list (second cost review of #3354): gathered across
+ * the walk's pages, LIST_VALUES_PER_READ people at a read, and each address
+ * read once however often HSCAN hands it back, as listValuesShape prices
+ * them (third cost review of #3354);
+ * the fields themselves are read exactly too, so a file never goes without a
+ * column it should have. Every read goes through `through`: a download's
+ * metered read holds its units before it is made (lib/list-download.ts).
  */
-export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<string> {
-  const fields = await readFields(store.statsId).catch(() => []);
-  const answers = fields.length ? await allValues(store.statsId, fields).catch(() => ({}) as Record<string, Record<string, string>>) : {};
+export async function listAsCsv(store: Store, onlyAgreed: boolean, through: ListRead = plainRead): Promise<string> {
+  const fields = await readFieldsWhole(store.statsId);
   const rows = [
     // And the store's own fields, each a column of its own (lib/crm-rules.ts).
     ["email", "agreed_to_emails", "agreed_at", "first_at", "last_at", "asked_for", "unsubscribed_at", "name", "tags", "source", "imported_at", ...fields.map((f) => f.name)]
@@ -420,9 +497,22 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   if (!store.listId || !isRedisConfigured()) return `${rows.join("\r\n")}\r\n`;
 
   const key = leadsKey(store.listId);
+  const statsId = store.statsId;
   // By address: HSCAN may hand the same field back twice during a walk, and the file holds each address once, as
-  // last read (null when that reading is not one the file holds).
+  // last read: its contact's cells, or null when that reading is not one the file holds.
   const byEmail = new Map<string, string | null>();
+  // An address's fields' values, as cells, once read: a later reading of it keeps them, never reads them again.
+  const valued = new Map<string, string>();
+  // The addresses whose values are still to be read, in the order they came.
+  const waiting = new Set<string>();
+  const readValues = async (count: number) => {
+    const batch = [...waiting].slice(0, count);
+    for (const email of batch) waiting.delete(email);
+    const values = statsId && fields.length ? await valuesOf(statsId, fields, batch.map((email) => personKey(statsId, email)), through) : {};
+    batch.forEach((email, k) => valued.set(email, fields.map((f) => cell(values[f.id]?.[k] ?? "")).join(",")));
+  };
+  // Kept but unreadable, by address (a later reading of the same field that reads takes it off): counted and said.
+  const unreadable = new Set<string>();
   let cursor = "0";
   // Bounded, so a cursor that never comes back to zero cannot hold the
   // function forever; a list not read to its end by then is unknown.
@@ -430,16 +520,24 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
   for (let page = 0; ; page += 1) {
     // At or past it, a whole number of pages whatever MAX_LEADS is (review of #3134, L4).
     if (page >= pages) throw new UnknownReplyError(`a list's HSCAN, not at its end after ${pages} pages,`);
-    const read = scanPage(await redisPipeline([["HSCAN", key, cursor, "COUNT", 1000]]));
+    const read = scanPage(await through([["HSCAN", key, cursor, "COUNT", 1000]], LIST_PAGE_READ_BYTES));
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a list's HSCAN");
     cursor = read.next;
     const flat = read.items;
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const email = flat[i];
       const lead = parseContact(flat[i + 1]);
-      if (!lead) continue;
+      if (!lead) {
+        unreadable.add(email);
+        byEmail.delete(email);
+        // Left out of the file, so its values are not read (a later reading that reads puts it back in line).
+        waiting.delete(email);
+        continue;
+      }
+      unreadable.delete(email);
       if (onlyAgreed && !mailable(lead)) {
         byEmail.set(email, null);
+        waiting.delete(email);
         continue;
       }
       byEmail.set(
@@ -456,14 +554,38 @@ export async function listAsCsv(store: Store, onlyAgreed: boolean): Promise<stri
           lead.tags.join("; "),
           lead.source,
           lead.importedAt,
-          ...fields.map((f) => (store.statsId ? answers[f.id]?.[personKey(store.statsId, email)] ?? "" : "")),
         ]
           .map(cell)
           .join(","),
       );
+      if (!valued.has(email)) waiting.add(email);
     }
+    while (waiting.size >= LIST_VALUES_PER_READ) await readValues(LIST_VALUES_PER_READ);
     if (cursor === "0") break;
   }
-  for (const row of byEmail.values()) if (row !== null) rows.push(row);
-  return `${rows.join("\r\n")}\r\n`;
+  if (waiting.size) await readValues(waiting.size);
+  for (const [email, row] of byEmail) if (row !== null) rows.push(fields.length ? `${row},${valued.get(email)}` : row);
+  const csv = `${rows.join("\r\n")}\r\n`;
+  if (unreadable.size) throw new ListNotWholeError(csv, unreadable.size);
+  return csv;
+}
+
+/**
+ * listAsCsv's list holds contacts kept but unreadable (CX-123 rule 24): the
+ * file of the readable ones is never handed over as the whole list without a
+ * word. It carries that file and how many could not be read, so a caller
+ * that can say so hands it over saying so (the download's "-partial" file,
+ * app/api/store/leads/route.ts; the store export's contactsNote,
+ * lib/store-export.ts), and any other caller fails as for a list it could
+ * not read.
+ */
+export class ListNotWholeError extends Error {
+  readonly csv: string;
+  readonly unreadable: number;
+  constructor(csv: string, unreadable: number) {
+    super(`${unreadable} contact(s) on a list could not be read`);
+    this.name = "ListNotWholeError";
+    this.csv = csv;
+    this.unreadable = unreadable;
+  }
 }

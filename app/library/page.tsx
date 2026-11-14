@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { StudioEmptyState } from "@/components/empty-state";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
@@ -10,6 +11,8 @@ import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
+import { LibraryContinue } from "@/components/library-continue";
+import { deviceLastKey } from "@/lib/lesson-position";
 import { WAITING_LATER, waitingFor, waitingLine } from "@/lib/buyer-waiting";
 import { LIBRARY_WAITING_UNITS } from "@/lib/public-read-rules";
 import { takePublicRequest } from "@/lib/traffic";
@@ -45,6 +48,8 @@ export default async function LibraryPage({ searchParams }: Params) {
   // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
   const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
   const email = owner?.email ?? null;
+  // The last lesson this address opened in this browser, read there only (650 [WG10], unit 2).
+  const continuePerson = email ? deviceLastKey(email) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
   const shelves: { store: Store; open: string | null; waiting: string }[] = [];
@@ -88,6 +93,12 @@ export default async function LibraryPage({ searchParams }: Params) {
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));
   }
+  // Whether the list of stores or a store this address bought from could not be read: then the library cannot tell which
+  // stores are open, and the "Continue" card shows nothing rather than a lesson from a store it may not show (rule 24;
+  // Claude 6 on #3060).
+  const unread = listUnread || storesUnread > 0;
+  // The handles of the stores the library shows, the only ones whose last lesson the card may offer.
+  const openHandles = unread ? null : shelves.map(({ store }) => store.handle);
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
@@ -111,6 +122,7 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
+              {continuePerson ? <LibraryContinue person={continuePerson} open={openHandles} /> : null}
               {listUnread || storesUnread ? (
                 <p role="status" className="notice notice-error mt-6">
                   {listUnread
@@ -154,7 +166,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                   ))}
                 </ul>
               ) : listUnread || storesUnread ? null : (
-                <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
+                <StudioEmptyState level={2} className="mt-6" title="No purchases listed" body="Nothing is listed for this address anymore. If you bought with another email address, ask for a link with that one." action={{ href: "/library", label: "Use another email address" }} />
               )}
             </>
           ) : (

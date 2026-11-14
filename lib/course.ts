@@ -582,14 +582,16 @@ export async function readCourses(ids: string[]): Promise<Map<string, Course>> {
 
 /**
  * readCourses, read exactly (rule 24), for a person's deletion
- * (lib/person-erasure.ts erasureScope): a course is left out only when Redis
- * answers the exact null for it. A reply that is not a whole list of the ids
- * asked, or an outline kept but unreadable, throws UnknownReply, so the
- * deletion never takes an unknown read for "no such course" and answers done
- * while the person's records in that course are still kept.
+ * (lib/person-erasure.ts erasureScope) and a store's whole export
+ * (lib/store-export.ts): a course is left out only when Redis answers the
+ * exact null for it. A reply that is not a whole list of the ids asked, or an
+ * outline kept but unreadable, throws UnknownReply, so the deletion never
+ * takes an unknown read for "no such course" and answers done while the
+ * person's records in that course are still kept, and an export never hands
+ * over a file without a course as if the store had none. `what` names the
+ * reading in the error.
  */
-export async function readCoursesExact(ids: string[]): Promise<Map<string, Course>> {
-  const what = "the course outlines a person's deletion goes through";
+export async function readCoursesExact(ids: string[], what = "the course outlines a person's deletion goes through"): Promise<Map<string, Course>> {
   const found = new Map<string, Course>();
   const valid = [...new Set(ids.filter((id) => COURSE_ID_PATTERN.test(id)))];
   if (valid.length === 0) return found;

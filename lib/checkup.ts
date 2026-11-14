@@ -29,6 +29,7 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import type { Permission } from "@/lib/team-roles";
 import { readAccount } from "@/lib/stripe-connect";
+import { keepChargesState } from "@/lib/stripe-charges";
 import { domainCheckup } from "@/lib/domains";
 import { healthId, pauseForSending } from "@/lib/mail-health";
 import { readTroubleStrict } from "@/lib/checkout-trouble";
@@ -108,7 +109,8 @@ export async function within<T, F>(read: () => Promise<T>, fallback: F, ms = CHE
   }
 }
 
-type CheckedStore = Pick<Store, "sid" | "listId" | "statsId" | "stripeAccountId" | "domain" | "subscriptionActive" | "tier" | "renewalUnpaidSince" | "planDisputes"> & AllowanceStore;
+type CheckedStore = Pick<Store, "sid" | "listId" | "statsId" | "stripeAccountId" | "domain" | "subscriptionActive" | "tier" | "renewalUnpaidSince" | "planDisputes"> & AllowanceStore &
+  Partial<Pick<Store, "email" | "extra" | "stripeChargesEnabled">>;
 
 /** The studio card each fix leads to, and the permission that draws it (app/studio/page.tsx). */
 const CARD_NEEDS: [string, Permission][] = [
@@ -153,6 +155,12 @@ export async function runCheckup(store: CheckedStore, can: (permission: Permissi
     within(() => allowancesUsedStrict(store, ALLOWANCE_KINDS, now), null, ms),
     account ? within(() => readDisputes(account, now, ms), null, ms) : Promise.resolve(null),
   ]);
+  // What Stripe said about card payments is written down, so the store stops (or starts again) offering "Buy"
+  // without the creator pressing "Ask Stripe again" (lib/stripe-charges.ts). A write that fails leaves it as it was.
+  if (stripe && account && store.email !== undefined && store.extra !== undefined && store.stripeChargesEnabled !== undefined) {
+    const known = { email: store.email, sid: store.sid, extra: store.extra, stripeAccountId: account, stripeChargesEnabled: store.stripeChargesEnabled };
+    await within(() => keepChargesState(known, stripe), null, ms);
+  }
   const checks = orderChecks([
     stripeCheck(Boolean(account), stripe),
     domainCheck(domain, resting ? "resting" : site),

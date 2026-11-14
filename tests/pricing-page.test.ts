@@ -7,6 +7,7 @@ import { SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { PIPELINES_BY_TIER } from "@/lib/crm-rules";
 import { ASSISTANT_PRICE_CENTS, ASSISTANT_MESSAGES_MONTHLY } from "@/lib/store-assistant-rules";
 import { autoCaptionCents } from "@/lib/auto-captions-rules";
+import { uploadBackendOpen } from "@/lib/upload-budget-policy";
 import sitemap from "@/app/sitemap";
 
 const allRows=PRICING_GROUPS.flatMap(group=>group.rows);
@@ -28,7 +29,10 @@ test("pricing has complete distinct rows for every plan and preserves independen
 test("pricing add-ons use the real separate subscription and caption quote",()=>{
  assert.ok(PRICING_ADDONS[0].price.includes("$"+ASSISTANT_PRICE_CENTS/100));
  assert.ok(PRICING_ADDONS[0].body.includes(String(ASSISTANT_MESSAGES_MONTHLY)));
- assert.ok(PRICING_ADDONS[1].body.includes("$"+autoCaptionCents(600,2)/100));
+ // The captions add-on is listed only while a lesson video can be kept by the video service (tests/r47-honest-video.test.ts).
+ const captions=PRICING_ADDONS.find(addon=>addon.key==="captions");
+ assert.equal(captions!==undefined,uploadBackendOpen("stream"));
+ if(captions)assert.ok(captions.body.includes("$"+autoCaptionCents(600,2)/100));
  assert.match(PRICING_QUESTIONS.find(q=>q.q.includes("refund"))!.a,/different refund terms/);
 });
 test("pricing is discoverable and uses a real comparison link, native FAQ and scoped accessible tables",()=>{

@@ -303,6 +303,56 @@ export async function orderWrite(owner: DataOwner, commands: Command[]): Promise
 }
 
 /**
+ * ORDER_WRITE behind a once-only mark, in the same step (Claude 5, 9 November 2026; rules 24 and 30): KEYS[2], the
+ * key of the first command (a SET ... NX of the mark), is read first, and when it holds a value the script answers
+ * {-2, that value} and writes nothing; otherwise it runs ORDER_WRITE as it is, every command and the room's charge,
+ * and when any command was refused (a key of another type: ORDER_WRITE runs the rest, as a pipeline does) the mark is
+ * deleted again before the answer, so the next try writes it all anew. So a mark is never left without the records
+ * it stands for, nor those records written twice. ORDER_WRITE itself runs unchanged inside, its sizes held on a real
+ * Redis by scripts/test_order_data_redis.py.
+ */
+export const ORDER_WRITE_ONCE = `-- marktmorgen:order-write-once:v1
+local held = redis.call('GET', KEYS[2])
+if held then return {-2, held} end
+local function write()
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+local out = write()
+for c = 2, #out do
+  if type(out[c]) == 'string' and string.sub(out[c], 1, 19) == string.char(0) .. 'order-write-error:' then
+    redis.call('DEL', KEYS[2])
+    return out
+  end
+end
+return out`;
+
+/**
+ * Writes an order's records under a once-only mark, in one script (ORDER_WRITE_ONCE), never split: the first command
+ * is the mark's SET NX, the rest what it stands for. Answers { held } with the mark's value when it was there already
+ * (nothing written), or the replies as orderWrite does. Any other answer is unknown and thrown (rule 24): never taken
+ * for either.
+ */
+export async function orderWriteOnce(owner: DataOwner, commands: Command[]): Promise<{ held: string } | { replies: unknown[] }> {
+  const [mark] = commands;
+  if (!mark || mark[0] !== "SET" || !mark.slice(3).some((a) => String(a).toUpperCase() === "NX")) throw new Error("an order's once-only write starts with its mark's SET NX");
+  if (commands.length > ORDER_WRITE_MAX) throw new Error("an order's once-only write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room || !isRedisConfigured()) throw new Error("an order's once-only write needs its store's room");
+  const script = scriptOf(room, commands);
+  script[1] = ORDER_WRITE_ONCE;
+  const reply = repliesFor(await redisPipeline([script]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === -2) {
+    if (typeof reply[1] !== "string") throw new UnknownReplyError("an order's once-only mark");
+    return { held: reply[1] };
+  }
+  const { replies } = readScript(reply, commands);
+  // The guard found no mark, so its SET NX ran in the same step: "OK", and nothing else.
+  if (replies[0] !== "OK") throw new UnknownReplyError("an order's once-only mark");
+  return { replies };
+}
+
+/**
  * What deleting one field an order wrote gives back to the room: its own
  * part of what it was charged (its name, its value and ORDER_ENTRY_BYTES, a
  * quarter more), rounded down, so a deletion never gives back more than the

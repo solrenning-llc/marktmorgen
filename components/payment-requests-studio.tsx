@@ -294,8 +294,8 @@ export function PaymentRequestsStudio({
           <p className="mt-5 text-sm text-ink-soft">
             {`Each email, the request and each reminder, is one of your store's emails for this month: ${emailsUsedLine(emails.used, emails.limit)} Open requests: ${openNow.toLocaleString("en-US")} of ${limits.open.toLocaleString("en-US")}.`}
           </p>
-          <label className="mt-4 flex items-start gap-3">
-            <input id="pr-consent" type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
+          <label className="mt-4 flex min-h-11 items-center gap-3">
+            <input id="pr-consent" type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
             <span className="text-sm text-ink">This person agreed to pay me for what this request lists, and expects it.</span>
           </label>
           {error && !reviewing && (errorFor === null || errorFor === snapshot) ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}

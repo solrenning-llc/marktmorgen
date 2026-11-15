@@ -1378,6 +1378,42 @@ export async function accountStores(email: string): Promise<Store[]> {
 }
 
 /**
+ * accountStores read exactly (rule 24), for a decision that moves money (lib/closing-plan-guard.ts): every reply has
+ * the shape Redis gives, and a record there that does not read throws UnknownReplyError, never "no such store".
+ */
+export async function accountStoresExact(email: string): Promise<Store[]> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("an account's stores (no Redis)");
+  const address = email.toLowerCase();
+  const head = repliesFor(await redisPipeline([["GET", await ownerKey(address)], ["SMEMBERS", await accountKey(address)]]), 2);
+  const members = head ? stringList(head[1]) : null;
+  if (!head || (head[0] !== null && typeof head[0] !== "string") || !members) throw new UnknownReplyError("an account's stores");
+  const main = head[0] === null ? null : parseStore(head[0]);
+  if (head[0] !== null && !main) throw new UnknownReplyError("an account's first store");
+  const ids = members.filter((id) => STORE_ID_PATTERN.test(id));
+  const records = ids.length ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length) : [];
+  if (!records) throw new UnknownReplyError("an account's stores");
+  const others: Store[] = [];
+  for (const raw of records) {
+    if (raw === null) continue;
+    const store = typeof raw === "string" ? parseStore(raw) : null;
+    if (!store) throw new UnknownReplyError("one of an account's stores");
+    if (store.extra && store.email.toLowerCase() === address) others.push(store);
+  }
+  return main ? [main, ...others] : others;
+}
+
+/**
+ * The plan subscriptions the account's OTHER stores keep, read exactly (accountStoresExact): the one place that decides
+ * whether a plan met on the account's one Stripe customer belongs to another of its stores (money HIGH, 15 November
+ * 2026). The way back, the daily sync, the subscription search and the closing paths all ask it before they write a
+ * plan on a store or end one for it. Throws UnknownReplyError when the account does not read: never "no other store".
+ */
+export async function keptElsewhere(store: Pick<Store, "email" | "sid">): Promise<Set<string>> {
+  const others = (await accountStoresExact(store.email)).filter((other) => other.sid !== store.sid);
+  return new Set(others.map((other) => other.subscriptionId).filter((id): id is string => typeof id === "string" && id !== ""));
+}
+
+/**
  * Gives a store its own id, if it has none yet, and returns it. Called from
  * the owner's own studio and before a store is first named anywhere by id,
  * so a store made before there could be several gets one the first time it

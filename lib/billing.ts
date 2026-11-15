@@ -32,11 +32,12 @@ import {
   isSharedPrice,
 } from "@/lib/plan";
 import { inTheCurrencyShown } from "@/lib/instant-pay";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { normaliseEmail } from "@/lib/auth";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import {
   CUSTOMER_PATTERN,
-  accountStores,
+  keptElsewhere,
   storeForRestartSource,
   HANDLE_PATTERN,
   SUBSCRIPTION_PATTERN,
@@ -595,9 +596,14 @@ export async function readStartedSubscription(
   if (!metadata || !via) return null;
   if (via === "account" && typeof session.subscription === "string" && session.subscription !== store.subscriptionId) {
     // The account's one customer cannot tell its stores apart: a subscription another store of the account keeps is
-    // that store's (review of 7c3aae961). Accounts' stores read as the checkout route reads them.
-    const kept = await accountStores(store.email);
-    if (kept.some((other) => other.sid !== store.sid && other.subscriptionId === session.subscription)) return null;
+    // that store's (keptElsewhere). An account that does not read is not known: nothing is written, said unconfirmed.
+    let elsewhere: Set<string>;
+    try { elsewhere = await keptElsewhere(store); }
+    catch (error) {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      return { customerId, subscriptionId: session.subscription, active: false, tier: "creator", cycle: "month", trialEnds: 0, shared: false, period: null, unverified: true };
+    }
+    if (elsewhere.has(session.subscription)) return null;
   }
 
   const subscriptionId =
@@ -1913,10 +1919,18 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
     released,
   };
   const observedStore = {
+    // Its own id too (review of 090840a90): a plan carrying store_sid is this store's only by it (ownedBy).
+    sid: store.sid,
     handle: store.handle, previousHandles: [...store.previousHandles],
     releasedHandles: [...ownership.released], stripeCustomerId: ownership.customerId,
     email: store.email, statsId: store.statsId,
   } as Store;
+  // The plans the account's other stores keep (keptElsewhere): never this store's live plan, nor one it ends as
+  // lapsed or in its closing. An account that does not read makes every answer below unknown.
+  let elsewhere: Set<string> | null = null;
+  let elsewhereError: Error | null = null;
+  try { elsewhere = await keptElsewhere(observedStore); }
+  catch (error) { elsewhereError = error instanceof Error ? error : new Error("an account's stores are unknown"); }
   const query = new URLSearchParams({
     query: handles.map(handle => `metadata['store']:'${handle}'`).join(" OR "),
     limit: String(SEARCH_LIMIT),
@@ -1949,6 +1963,7 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
       } else unique.set(id, entry);
     }
     return [...unique.values()]
+      .filter(({ subscription }) => !elsewhere?.has(subscription.id as string))
       .filter(({ subscription, terminalOwn }) => terminalOwn || ownedBy(observedStore, subscription))
       .map(({ subscription }) => subscription)
       .sort((a, b) => (b.created as number) - (a.created as number));
@@ -1991,6 +2006,7 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
   };
   return Object.freeze({
     find: async () => {
+      if (elsewhereError) throw elsewhereError;
       if (searchError) throw searchError;
       if (ownError) throw ownError;
       const rows = rowsFor([...searchEntries, ...ownEntries]);
@@ -2003,10 +2019,12 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
       return { live, customerId: last ?? null, lapsed };
     },
     customerLive: async () => {
+      if (elsewhereError) throw elsewhereError;
       if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
       return liveFrom(ownRows);
     },
     customerPlans: () => {
+      if (elsewhereError) throw elsewhereError;
       if (ownError || ownRows === null) throw ownError ?? new Error("Subscription customer coverage is unknown");
       return ownRows.map(row => ({ id: row.id as string, status: row.status as string, customerId: ownership.customerId! }));
     },

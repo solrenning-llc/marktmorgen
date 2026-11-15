@@ -44,7 +44,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, saleHandles, storeRef } from "@/lib/store";
+import { CUSTOMER_PATTERN, SUBSCRIPTION_PATTERN, type Store, keptElsewhere, saleHandles, storeRef } from "@/lib/store";
 import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { formatMoney } from "@/lib/money";
@@ -310,6 +310,13 @@ export async function refusePlanIfClosing(input: { store: Store | null; handle: 
   if (!SUBSCRIPTION_PATTERN.test(input.subscriptionId)) return "no";
   const times = input.store ? await closingSince(input.store) : await shutOf(input.handle);
   if (times === null) return "no";
+  // The account's one Stripe customer cannot tell its stores apart (money HIGH, 15 November 2026): a plan another
+  // store of the account keeps is that store's, never ended for this one's closing. "no", so a closing pass counts it
+  // as not done and the sync never writes it down here; an account read that does not read throws (fail closed).
+  if (input.store && (await keptElsewhere(input.store)).has(input.subscriptionId)) {
+    console.error(`closing-plan-guard: ${input.subscriptionId} is kept by another store of the account; not ended for this one`);
+    return "no";
+  }
   const entry: Undo = {
     h: input.handle,
     c: CUSTOMER_PATTERN.test(input.customerId) ? input.customerId : "",

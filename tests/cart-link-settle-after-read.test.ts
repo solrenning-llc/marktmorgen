@@ -1,7 +1,7 @@
 /**
  * The cart-link builder settles at what it really read (Claude 4,
  * C4-20261106-1740-C3-104, #1928): when listing records grow between their
- * STRLEN and their GET, the bytes beyond what was taken before the read are
+ * STRLEN and their read (GET or MGET), the bytes beyond what was taken before the read are
  * debited from the same studio count afterwards, with no new read, past the
  * figure if it must (C4-20261106-1810-C3-107): it was already spent. The next
  * opening is then refused as usual.
@@ -12,6 +12,7 @@ import { addDraftProducts, claimHandle, ensureStatsId, setProductFile, setProduc
 import { allowanceUsed, takeAllowance } from "@/lib/store-allowance";
 import { allowanceFor } from "@/lib/store-allowance-rules";
 import { store as redis } from "./redis-stub";
+import { listingKeysRead, listingValues } from "./listing-reads";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is } from "./check";
 
@@ -47,14 +48,15 @@ async function main(): Promise<void> {
   let paidBeforeRead = -1;
   let grown = false;
   const spy = (async (commands: (string | number)[][]) => {
-    const isGet = commands.some((c) => c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1])));
-    if (isGet && paidBeforeRead < 0) paidBeforeRead = debits.reduce((a, b) => a + b, 0);
+    // A product record read alone (GET) or LISTINGS_PER_MGET at one MGET (lib/catalog.ts getMany).
+    const reads = commands.some((c) => listingKeysRead(c).length > 0);
+    if (reads && paidBeforeRead < 0) paidBeforeRead = debits.reduce((a, b) => a + b, 0);
     const answer = await base(commands);
-    commands.forEach((c, i) => {
+    commands.forEach((c) => {
       if (c[0] === "INCRBY" && String(c[1]).includes(":studio:")) debits.push(Number(c[2]));
-      if (c[0] === "GET" && /^nl:catalog:.*:l:/.test(String(c[1]))) bytes += Buffer.byteLength(String(answer[i] ?? ""));
     });
-    // Between the STRLENs and the GETs, every record grows (real writers, synthetic file metadata).
+    for (const { value } of listingValues(commands, answer)) bytes += Buffer.byteLength(String(value ?? ""));
+    // Between the STRLENs and the read (GETs or MGETs), every record grows (real writers, synthetic file metadata).
     if (!grown && commands.some((c) => c[0] === "STRLEN" && /^nl:catalog:.*:l:/.test(String(c[1])))) {
       grown = true;
       redis.pipeline = base;

@@ -1580,6 +1580,22 @@ export async function paymentOfStoreInvoice(store: Store, paymentIntent: string)
 }
 
 /**
+ * The payments among `payments` confirmed as this store's by their own invoice payment (paymentOfStoreInvoice): each
+ * asked once, at most OLD_PAYMENT_LOOKUPS_PER_READING of them, in order; a lookup that fails proves nothing.
+ */
+export async function confirmOldPayments(store: Store, payments: string[]): Promise<Set<string>> {
+  const confirmed = new Set<string>();
+  for (const pi of [...new Set(payments)].slice(0, OLD_PAYMENT_LOOKUPS_PER_READING)) {
+    const ours = await paymentOfStoreInvoice(store, pi).catch((error) => {
+      console.error("reading a refunded payment's invoice failed", error);
+      return false;
+    });
+    if (ours) confirmed.add(pi);
+  }
+  return confirmed;
+}
+
+/**
  * The paid renewals of this store since `since` (seconds), each with the
  * buyer's address as the invoice has it: the same invoices renewalEntries
  * counts (paidAfterCheckout, this store's handles),
@@ -2015,14 +2031,7 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own
     // invoice payment, at most OLD_PAYMENT_LOOKUPS_PER_READING a reading (#4549); a lookup that fails proves nothing.
     if (store.stripeAccountId) {
-      const unknownPayments = [...new Set(adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))];
-      for (const pi of unknownPayments.slice(0, OLD_PAYMENT_LOOKUPS_PER_READING)) {
-        const ours = await paymentOfStoreInvoice(store, pi).catch((error) => {
-          console.error("reading a refunded payment's invoice failed", error);
-          return false;
-        });
-        if (ours) renewalPayments.add(pi);
-      }
+      for (const pi of await confirmOldPayments(store, adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))) renewalPayments.add(pi);
     }
     const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {
       const entry: Entry = { day: dayKey(row.created), cents: row.cents, currency: row.currency, source: placed(row.paymentIntent) };

@@ -8,7 +8,7 @@
  */
 import { readFileSync } from "node:fs";
 import { claimHandle, setStripeAccount, storeForEmail } from "@/lib/store";
-import { OLD_PAYMENT_LOOKUPS_PER_READING, paymentOfStoreInvoice } from "@/lib/stats";
+import { OLD_PAYMENT_LOOKUPS_PER_READING, confirmOldPayments, paymentOfStoreInvoice } from "@/lib/stats";
 import { done, is, part } from "./check";
 import { NOT_A_COST } from "./plan-cost-registry";
 
@@ -76,9 +76,20 @@ async function main(): Promise<void> {
   part("Bounded: at most OLD_PAYMENT_LOOKUPS_PER_READING lookups a reading, and a failed one proves nothing");
   is("ten at most", OLD_PAYMENT_LOOKUPS_PER_READING, 10);
   is("the lookups are in the cost registry, by name", typeof NOT_A_COST.OLD_PAYMENT_LOOKUPS_PER_READING, "string");
+  is("its registry line says what it is not", /not a line of lib\/llc-fixed-costs\.ts, not certified, never zero/.test(NOT_A_COST.OLD_PAYMENT_LOOKUPS_PER_READING), true);
+  const fifteen = Array.from({ length: 15 }, (_, i) => `pi_OldRenewal${String(i).padStart(4, "0")}`);
+  asked.length = 0;
+  reply = list([row()]);
+  const confirmed = await confirmOldPayments(store, [...fifteen, fifteen[0]]);
+  is("fifteen unknown payments (one twice): Stripe is asked ten times, no more", asked.length, 10);
+  is("only the payment each answer names is confirmed", [...confirmed], [PI].filter((pi) => fifteen.slice(0, 10).includes(pi)));
+  asked.length = 0;
+  status = 500;
+  reply = { error: { message: "down" } };
+  is("every lookup failing: still ten calls, nothing confirmed", [(await confirmOldPayments(store, fifteen)).size, asked.length], [0, 10]);
+  status = 200;
   const src = readFileSync("lib/stats.ts", "utf8");
-  is("the reading slices the unknown payments to the cap", /unknownPayments\.slice\(0, OLD_PAYMENT_LOOKUPS_PER_READING\)/.test(src), true);
-  is("a lookup that throws is read as not confirmed", /paymentOfStoreInvoice\(store, pi\)\.catch\(\(error\) => \{[\s\S]{0,120}return false;/.test(src), true);
+  is("the reading confirms its unknown payments through confirmOldPayments", /confirmOldPayments\(store, adjustments\.map/.test(src), true);
   done();
 }
 

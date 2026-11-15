@@ -28,7 +28,10 @@ async function main() {
   is("empty page with more results stays unavailable", await read([{ data: [], has_more: true }]), null);
   is("missing cursor stays unavailable", await read([{ data: [paid("", now - 20 * day)], has_more: true }]), null);
   is("paid checkout without its date stays unavailable", await read([{ data: [{ ...paid("cs_1", now), created: null }], has_more: false }]), null);
-  is("capped history stays unavailable", await read([{ data: [paid("cs_1", now - 20 * day)], has_more: true }]), null);
+  // Three distinct pages that each promise more (a repeated page would now stop at its repeated id, before the cap).
+  is("capped history stays unavailable", await read([1, 2, 3].map((i) => ({
+    data: [paid(`cs_${i}`, now - (19 + i) * day)], has_more: true,
+  }))), null);
   is("history cap remains three calls", calls, 3);
   is("complete third page is available", await read([
     { data: [paid("cs_1", now - 20 * day)], has_more: true },
@@ -36,6 +39,34 @@ async function main() {
     { data: [paid("cs_3", now - 40 * day)], has_more: false },
   ]), [now - 20 * day, now - 30 * day, now - 40 * day]);
   is("other stores and unpaid sessions excluded", await read([{ data: [paid("cs_1", now - day), { ...paid("cs_2", now - day), payment_status: "unpaid" }, { ...paid("cs_3", now - day), metadata: { store: "elsewhere" } }], has_more: false }]), [now - day]);
+  is("a checkout with unknown payment state leaves the history unknown", await read([{
+    data: [{ ...paid("cs_recent", now - day), payment_status: null }], has_more: false,
+  }]), null);
+  is("a checkout with unknown status leaves the history unknown", await read([{
+    data: [{ ...paid("cs_recent", now - day), status: "processing" }], has_more: false,
+  }]), null);
+  is("a paid checkout without readable metadata leaves the history unknown", await read([{
+    data: [{ ...paid("cs_recent", now - day), metadata: "harbor" }], has_more: false,
+  }]), null);
+  is("a paid checkout with an unreadable store mark leaves the history unknown", await read([{
+    data: [{ ...paid("cs_recent", now - day), metadata: { store: 7 } }], has_more: false,
+  }]), null);
+  is("a paid checkout dated in the future leaves the history unknown", await read([{
+    data: [paid("cs_future", now + day)], has_more: false,
+  }]), null);
+  is("a repeated checkout cannot inflate the baseline", await read([{
+    data: [paid("cs_repeated", now - 42 * day), paid("cs_repeated", now - 42 * day)], has_more: false,
+  }]), null);
+  is("a repeated checkout across pages leaves the history unknown", await read([
+    { data: [paid("cs_repeated", now - 42 * day)], has_more: true },
+    { data: [paid("cs_repeated", now - 42 * day)], has_more: false },
+  ]), null);
+  is("open, expired and unpaid checkouts are not sales", await read([{ data: [
+    paid("cs_1", now - day),
+    { ...paid("cs_2", now - day), status: "open", payment_status: "unpaid" },
+    { ...paid("cs_3", now - day), status: "expired", payment_status: "unpaid" },
+    { ...paid("cs_4", now - day), payment_status: "no_payment_required" },
+  ], has_more: false }]), [now - day]);
   const times = Array.from({ length: 30 }, (_, i) => now - (20 + i) * day);
   is("complete quiet history still qualifies", isQuiet(times, now).quiet, true);
   redis.clear(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: true }]; calls = 0;
@@ -45,6 +76,15 @@ async function main() {
   is("provider failure skips notification", await checkQuiet(store, now), "skipped");
   is("no email from provider failure", emails, 0);
   fail = false;
+  redis.clear(); pages = [{ data: [...times.map((at, i) => paid(`cs_${i}`, at)),
+    { ...paid("cs_recent", now - day), payment_status: null }], has_more: false }]; calls = 0;
+  is("an unreadable recent checkout cannot send a quiet-sales alert", await checkQuiet(store, now), "skipped");
+  is("an unreadable recent checkout did not send an email", emails, 0);
+  emails = 0;
+  redis.clear(); pages = [{ data: Array.from({ length: 8 }, () => paid("cs_same", now - 42 * day)), has_more: false }]; calls = 0;
+  is("eight copies of one sale do not qualify for an alert", await checkQuiet(store, now), "skipped");
+  is("the repeated checkout did not send an email", emails, 0);
+  emails = 0;
   redis.clear(); pages = [{ data: times.map((at, i) => paid(`cs_${i}`, at)), has_more: false }]; calls = 0;
   is("complete quiet reading sends notification", await checkQuiet(store, now), "sent");
   is("exactly one mocked email", emails, 1);

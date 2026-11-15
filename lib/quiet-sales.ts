@@ -27,6 +27,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
+import { type StripePage, StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
@@ -55,31 +56,59 @@ export function isQuiet(sales: number[], now: number): { quiet: boolean; days: n
   return { quiet, days: Math.floor(days), perWeek: Math.round(pace * 7 * 10) / 10, last };
 }
 
-/** The paid checkouts of this store over the last QUIET_PACE_DAYS days, as times; at most three pages of a hundred. */
+/** A Checkout Session id as Stripe gives it. */
+const CHECKOUT_ID = /^cs_[A-Za-z0-9_]+$/;
+
+/**
+ * The paid checkouts of this store over the last QUIET_PACE_DAYS days, as times; at most three pages of a hundred.
+ * Null unless the whole history was read exactly (CX-123 rule 24, #4744): a page in another shape, a row that is not
+ * readable, a checkout whose status, payment state or store mark is not one of Stripe's known values, a date outside
+ * the window, or an id seen twice (on one page or across pages) leaves it unknown, so the quiet alert is never sent
+ * from a history that hides a recent sale or counts one sale many times.
+ */
 export async function saleTimes(store: Store, now: number): Promise<number[] | null> {
   const handles = saleHandles(store);
-  const since = Math.floor(now / 1000) - QUIET_PACE_DAYS * 86400;
+  const nowSeconds = Math.floor(now / 1000);
+  const since = nowSeconds - QUIET_PACE_DAYS * 86400;
   const times: number[] = [];
+  const seen = new Set<string>();
   let after = "";
   for (let page = 0; page < 3; page += 1) {
-    const list = (await onAccount(
+    const raw = await onAccount(
       "GET",
       store.stripeAccountId as string,
       `/checkout/sessions?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-    )) as { data?: unknown; has_more?: unknown };
-    if (!Array.isArray(list.data) || typeof list.has_more !== "boolean") return null;
-    const rows = list.data as Record<string, unknown>[];
-    for (const row of rows) {
-      const meta = (row.metadata ?? {}) as Record<string, string>;
-      if (row.status !== "complete" || row.payment_status !== "paid" || !handles.has(meta.store ?? "")) continue;
-      if (typeof row.created !== "number" || !Number.isFinite(row.created)) return null;
-      times.push(row.created * 1000);
+    );
+    let list: StripePage;
+    try {
+      list = readStripePage(raw, undefined, CHECKOUT_ID);
+    } catch (error) {
+      if (error instanceof StripeListUnreadable) return null;
+      throw error;
     }
-    if (!list.has_more) return times;
-    if (rows.length === 0) return null;
-    const last = rows[rows.length - 1];
-    after = typeof last.id === "string" ? last.id : "";
-    if (!after) return null;
+    if (list.unreadable) return null;
+    for (const row of list.rows) {
+      if (seen.has(row.id)) return null;
+      seen.add(row.id);
+      const status = ownField(row, "status");
+      const paidState = ownField(row, "payment_status");
+      if (status === "open" || status === "expired") continue;
+      if (status !== "complete") return null;
+      if (paidState === "unpaid" || paidState === "no_payment_required") continue;
+      if (paidState !== "paid") return null;
+      const meta = ownField(row, "metadata");
+      if (!plainObject(meta)) return null;
+      const handle = ownField(meta, "store");
+      if (hasOwnField(meta, "store") && (typeof handle !== "string" || !handle)) return null;
+      if (typeof handle !== "string" || !handles.has(handle)) continue;
+      const created = ownField(row, "created");
+      if (typeof created !== "number" || !Number.isSafeInteger(created) || created < since || created > nowSeconds) return null;
+      times.push(created * 1000);
+    }
+    if (!list.hasMore) return times;
+    // A page that promises more needs a readable last id that moves the read on.
+    if (!list.lastId || list.lastId === after) return null;
+    after = list.lastId;
   }
   return null;
 }

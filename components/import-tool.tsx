@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { useStudioStore } from "@/components/studio-store-pin";
-import { type ParsedCsv, csvLine, guessColumn, parseCsv, readConsent } from "@/lib/csv";
+import { type ParsedCsv, csvLine, decodeCsvBytes, guessColumn, parseCsv, readConsent } from "@/lib/csv";
 import { CLICKFUNNELS_EXAMPLES, CLICKFUNNELS_HEADERS, CLICKFUNNELS_LAST_NAME, readClickFunnelsStatus } from "@/lib/clickfunnels-csv";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { IMPORTS_PAUSED } from "@/lib/import-limits";
@@ -376,7 +376,8 @@ export function ImportTool({
       setError("That file is over 25 MB. Split it and bring it in parts.");
       return;
     }
-    const text = await file.text();
+    // Its bytes as the spreadsheet wrote them: UTF-8, UTF-16 or Excel's Windows-1252, never accents made into "�" (lib/csv.ts).
+    const text = decodeCsvBytes(new Uint8Array(await file.arrayBuffer()));
     const read = parseCsv(text, LIMITS[kind]);
     if (read.unclosedQuote !== null) {
       setError(`Line ${read.unclosedQuote.toLocaleString("en-US")} of that file opens a quote (") that never closes, so the rows after it cannot be read. Fix that line in your spreadsheet, save it again as CSV, and choose it here.`);

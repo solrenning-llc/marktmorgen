@@ -16,6 +16,7 @@
  * affiliates, text already for contacts — so no tool has to guess the unit.
  */
 import { apiError } from "@/lib/api-guard";
+import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
@@ -207,6 +208,62 @@ async function scannedPage<T>(hold: Hold, most: ReadWork, read: () => Promise<{ 
 /** A page of the list, with how many contacts it holds that could not be read (only when there are any): never left out without a word (rule 24). */
 type LeadsPage = Page<Record<string, unknown>> & { unreadable?: number };
 
+/** One contact as the API sends it: the same fields for a page of the list and for a lookup by address. */
+function leadRow(email: string, c: NonNullable<ReturnType<typeof parseContact>>): Record<string, unknown> {
+  return {
+    email,
+    name: c.name || null,
+    agreed: c.agreed,
+    agreed_at: isoFromText(c.agreedAt),
+    unsubscribed: c.unsub,
+    unsubscribed_at: isoFromText(c.unsubAt),
+    first_at: isoFromText(c.firstAt),
+    last_at: isoFromText(c.lastAt),
+    products: c.titles,
+    product_ids: c.ids,
+    tags: c.tags,
+    source: c.source || null,
+  };
+}
+
+/** The address a lookup asks for, as the list keeps it (lowercased, trimmed), or null when it cannot be one. */
+export function leadAddress(raw: string | null): string | null {
+  const email = normaliseEmail(raw ?? "");
+  return email && email.length <= MAX_EMAIL_LENGTH && EMAIL_PATTERN.test(email) ? email : null;
+}
+
+/** What a lookup of one address can take at its most: one contact read and sent at its longest. */
+export const LEAD_LOOKUP_MOST = listPageMost("leads", 1);
+
+/**
+ * One contact of the list by its address (GET /api/v1/leads?email=), paid for
+ * first: one row at its longest (LEAD_LOOKUP_MOST) is set aside before it is
+ * read, then settled at what was read and sent. The answer is a page of at
+ * most one row, with no next page. Nobody under that address is an empty
+ * page; a contact kept there that cannot be read is `unreadable: 1`, and an
+ * answer Redis gives in any other shape throws (502 in the route), so a
+ * lookup is never told "not on the list" when the list was not read (rule 24).
+ * With `onlyAgreed`, a contact who did not agree or left is not sent.
+ */
+export async function chargedLead(store: Store, email: string, onlyAgreed: boolean, hold: Hold): Promise<LeadsPage | Response> {
+  if (!store.listId || !isRedisConfigured()) return { data: [], next: null };
+  const listId = store.listId;
+  return scannedPage(hold, LEAD_LOOKUP_MOST, async () => {
+    const reply = repliesFor(await redisPipeline([["HGET", leadsKey(listId), email]]), 1);
+    if (!reply) throw new UnknownReplyError("a contact of a store's list");
+    const raw = reply[0];
+    if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a contact of a store's list");
+    const c = raw === null ? null : parseContact(raw);
+    const page: LeadsPage =
+      raw === null ? { data: [], next: null }
+      : !c ? { data: [], next: null, unreadable: 1 }
+      : onlyAgreed && !(c.agreed && !c.unsub) ? { data: [], next: null }
+      : { data: [leadRow(email, c)], next: null };
+    const readBytes = raw === null ? 0 : Buffer.byteLength(email) + Buffer.byteLength(raw);
+    return { out: page, work: scannedPageWork(1, readBytes, sentBytes(page)) };
+  });
+}
+
 async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolean): Promise<{ page: LeadsPage; readBytes: number }> {
   if (!store.listId || !isRedisConfigured()) return { page: { data: [], next: null }, readBytes: 0 };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
@@ -225,22 +282,8 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
       unreadable += 1;
       continue;
     }
-    const mailable = c.agreed && !c.unsub;
-    if (onlyAgreed && !mailable) continue;
-    data.push({
-      email: flat[i],
-      name: c.name || null,
-      agreed: c.agreed,
-      agreed_at: isoFromText(c.agreedAt),
-      unsubscribed: c.unsub,
-      unsubscribed_at: isoFromText(c.unsubAt),
-      first_at: isoFromText(c.firstAt),
-      last_at: isoFromText(c.lastAt),
-      products: c.titles,
-      product_ids: c.ids,
-      tags: c.tags,
-      source: c.source || null,
-    });
+    if (onlyAgreed && !(c.agreed && !c.unsub)) continue;
+    data.push(leadRow(flat[i], c));
   }
   // The bytes the scan answered with, for the reading that pays for them (chargedLeads).
   const readBytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);

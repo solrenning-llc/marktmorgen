@@ -22,6 +22,7 @@ import { makeKey } from "@/lib/api-keys";
 import { MAX_ENDPOINTS, WEBHOOK_EVENTS, emitEvent, webhooksView } from "@/lib/webhooks";
 import { DELETE as deleteHook, POST as postHook } from "@/app/api/v1/hooks/route";
 import { GET as getEvents } from "@/app/api/v1/events/route";
+import { LEAD_FIELDS } from "@/lib/api-read";
 import { GET as getStore } from "@/app/api/v1/store/route";
 import { POST as postLeads } from "@/app/api/v1/leads/route";
 import { POST as postLabels } from "@/app/api/v1/leads/labels/route";
@@ -58,6 +59,7 @@ type ZapierApp = {
   afterResponse: ((r: Res, z: Z) => Res)[];
   triggers: Record<string, { display: { hidden?: boolean }; operation: Op }>;
   creates: Record<string, { operation: Op & { inputFields: { key: string; required?: boolean }[] } }>;
+  searches: Record<string, { operation: { perform: Op["perform"]; inputFields: { key: string; required?: boolean }[]; sample: Record<string, unknown> } }>;
   EVENTS: { key: string; event: string }[];
 };
 type Req = { url: string; method?: string; body?: unknown; params?: Record<string, string | number>; headers?: Record<string, string> };
@@ -266,6 +268,8 @@ async function main(): Promise<void> {
   is("the product list is hidden from the trigger menu", app.triggers.product_list.display.hidden, true);
   is("adding a subscriber requires the agreement the list requires", app.creates.add_subscriber.operation.inputFields.some((f) => f.key === "agreed" && f.required === true), true);
   is("the four actions are the API's writes", Object.keys(app.creates).sort(), ["add_subscriber", "change_labels", "create_discount_code", "give_access"]);
+  is("the one search is a lookup of the list by address, its email required", [Object.keys(app.searches), app.searches.find_contact.operation.inputFields.map((f) => [f.key, f.required])], [["find_contact"], [["email", true]]]);
+  is("its example has the fields a contact of the list is sent with", Object.keys(app.searches.find_contact.operation.sample).sort(), [...LEAD_FIELDS].sort());
 
   part("A discount code is made only where the studio would make one, through the real route");
   const codeRefused = await app.creates.create_discount_code.operation

@@ -601,6 +601,9 @@ test("an API reading that reads more than a page takes further requests that cov
   for (const bytes of [1, 999, 50_000, 400_000, NUMBERS_KEPT_BYTES + 64]) for (const sent of [0, 2, 30_000, NUMBERS_SENT_BYTES, 3_000_000]) covers(keptNumbersWork(bytes, sent), `numbers from the copy ${bytes}/${sent}`);
   // A page of the list or the members at its most, and what buyers bought next with its cards.
   for (const list of ["leads", "members"] as const) for (let rows = 0; rows <= API_PAGE_ROWS; rows += 25) covers(listPageMost(list, rows), `${list} page at its most ${rows}`);
+  // A lookup of one address (GET /api/v1/leads?email=, lib/api-read.ts chargedLead): one contact at its longest.
+  covers(listPageMost("leads", 1), "a lookup of one contact at its most");
+  assert.ok(read("lib/api-read.ts").includes('export const LEAD_LOOKUP_MOST = listPageMost("leads", 1);'), "a lookup is held at one contact at its most");
   for (const paths of [0, 28, 5_000, 262_144]) for (const sent of [0, 1_200, undefined]) covers(boughtNextWork(paths, sent), `bought next ${paths}/${sent}`);
   // The bundle choices and the imports (631 [AA1] (a), port of #1933): every page and history at every size, and their most.
   for (let cards = 0; cards <= BUNDLE_SEARCH_STRETCH; cards += 1) for (let listings = 0; listings <= BUNDLE_PAGE_LISTINGS; listings += 1) covers(bundleChoicesWork(cards, listings), `bundle choices ${cards}/${listings}`);
@@ -686,6 +689,7 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/api-read.ts", "const settle = await hold(held);", "const { out, work } = await read();");
   before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"leads\", API_PAGE)", "await scanLeads(store, cursor, onlyAgreed)");
   before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"members\", API_PAGE)", "await memberPage(id, start, API_PAGE)");
+  before("lib/api-read.ts", "return scannedPage(hold, LEAD_LOOKUP_MOST", '["HGET", leadsKey(listId), email]');
   before("lib/api-numbers.ts", "const settle = await hold(most);", '["GET", key]');
   before("lib/api-numbers.ts", "const refused = await charge(units, taken);", "await readNumbers(store, now)");
   assert.ok(!read("lib/mcp-tools.ts").includes("readTitles("), "the MCP tools never read every card, nor the listings' fall-back that reads every product");

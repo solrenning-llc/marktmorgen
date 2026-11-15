@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
-import { API_PAGE } from "@/lib/api-read";
+import { API_PAGE, LEAD_LOOKUP_MOST } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { FIELD_NAME_MAX, MAX_FIELDS_ASKED } from "@/lib/api-fields";
 import { DELIVERY_WRITE_MAX_BYTES, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
@@ -32,6 +32,8 @@ const LIST_PAGE_EXAMPLE = 1 + apiReadUnits(scannedPageWork(1, ROWS_EXAMPLE.rows 
 const LIST_PAGE_LEAST = 1 + apiReadUnits(scannedPageWork(1, 1, 1));
 const LIST_PAGE_HELD = 1 + apiReadUnits(listPageMost("leads", API_PAGE));
 const MEMBERS_PAGE_HELD = 1 + apiReadUnits(listPageMost("members", API_PAGE));
+/** A lookup of one address (lib/api-read.ts, chargedLead): what it needs free, one contact at its longest. */
+const LEAD_LOOKUP_HELD = 1 + apiReadUnits(LEAD_LOOKUP_MOST);
 const NUMBERS_COUNT = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: true, stripe: true, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
 const NUMBERS_COUNT_NO_SALES = 1 + apiReadUnits(addWork(numbersWork({ kept: true, sales: false, stripe: false, paypalSales: 0, paypalRefunds: 0 }), NUMBERS_KEEP_WORK));
 /** Numbers read from the copy kept an hour: as few as this, and at most this for the largest copy and answer. */
@@ -217,7 +219,15 @@ export default function DevelopersPage() {
           read, it leaves that contact out and says how many in <code className="font-mono">unreadable</code>; a page
           without that field left nobody out.
         </Endpoint>
-        <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read.`}</p>
+        <p>
+          To look up one person, add <code className="font-mono">?email=dana@example.com</code>. The answer is the same
+          kind of page with that one contact, or with no contact when nobody on your list has that address, and{" "}
+          <code className="font-mono">next</code> is always null. If the contact kept under that address could not be
+          read, the page says <code className="font-mono">unreadable</code>: 1, never that nobody is there. It can go
+          with <code className="font-mono">?agreed=true</code>, but not with a cursor. An address that is not one is
+          refused with 400 and <code className="font-mono">invalid_email</code>, and nothing is read.
+        </p>
+        <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read. A lookup by email counts the same way too, and needs ${n(LEAD_LOOKUP_HELD)} free before it is read.`}</p>
         <Code>{`{
   "data": [
     {

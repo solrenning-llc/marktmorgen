@@ -45,6 +45,14 @@ not already.
     payments; letters already used there are refused, so a repeated run makes
     no second code.
 
+- **Searches** (any key, as the API's reads):
+  - Find Contact by Email (`GET /api/v1/leads?email=`) — the one contact kept
+    under that address, with the fields a page of the list has. Nobody there
+    is "nothing found"; a contact there that could not be read, or an answer
+    in another shape, stops the run with the reason, never "nothing found".
+    It counts toward the store's API requests as the API's other reads do,
+    taken before it is read.
+
 The five endpoints a store may have (`MAX_ENDPOINTS`) count those a Zap adds,
 so a creator cannot run past the store's own limit from Zapier. Every endpoint
 a Zap adds is reported to the creator's inbox, exactly as one added in the

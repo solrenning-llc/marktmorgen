@@ -555,6 +555,50 @@ const createDiscountCode = {
   },
 };
 
+/**
+ * One contact of the store's list by address (GET /api/v1/leads?email=). The
+ * API answers a page of at most one row: nobody under the address is the only
+ * "not found"; a contact there that could not be read stops the run with the
+ * reason, and any other answer is unknown, so a Zap never goes on as if the
+ * person were not on the list when the list was not read.
+ */
+const findContact = {
+  key: "find_contact",
+  noun: "Contact",
+  display: {
+    label: "Find Contact by Email",
+    description: "Finds someone on your store's email list by their email address.",
+  },
+  operation: {
+    inputFields: [{ key: "email", label: "Email", required: true, type: "string" }],
+    perform: async (z, bundle) => {
+      const asked = String((bundle.inputData && bundle.inputData.email) || "").trim().toLowerCase();
+      const response = await z.request({ url: `${API}/leads`, params: { email: asked } });
+      const body = response.data;
+      const rows = readResult(response, z);
+      if (!plain(body) || body.next !== null || rows.length > 1 || rows.some((row) => row.email !== asked)) unknownRead(z);
+      if (body.unreadable !== undefined) {
+        throw new z.errors.Error("The contact kept under this address could not be read just now. Try again in a moment.", "unreadable", 502);
+      }
+      return rows;
+    },
+    sample: {
+      email: "ada@example.com",
+      name: "Ada Lovelace",
+      agreed: true,
+      agreed_at: "2026-09-12T14:03:22.000Z",
+      unsubscribed: false,
+      unsubscribed_at: null,
+      first_at: "2026-09-12T14:03:22.000Z",
+      last_at: "2026-09-20T09:41:10.000Z",
+      products: ["The Weeknight Cookbook"],
+      product_ids: ["p_8f2c1a"],
+      tags: ["vip"],
+      source: "free",
+    },
+  },
+};
+
 const byKey = (list) => Object.fromEntries(list.map((item) => [item.key, item]));
 
 module.exports = {
@@ -564,7 +608,7 @@ module.exports = {
   beforeRequest: [addKey],
   afterResponse: [explain],
   triggers: byKey(triggers),
-  searches: {},
+  searches: byKey([findContact]),
   creates: byKey([addSubscriber, changeLabels, giveAccess, createDiscountCode]),
   resources: {},
   // For the site's own checks: which events the triggers stand for.

@@ -125,9 +125,11 @@ export const COMMANDS = {
    * one visitor in READ_SAMPLE: one command, and an expiry the first time a
    * block of a sales page is counted at all, which is once per block and not
    * per visit. Until October 11, 2026 this went through the store's general
-   * count at seven commands and was in none of these sums.
+   * count at seven commands and was in none of these sums. Since MM-SA-43
+   * (15 November 2026) two more before it: the window per connection and
+   * store (lib/window-count.ts, INCR and EXPIRE NX), as app/api/store/hit.
    */
-  readBeacon: 1,
+  readBeacon: 3,
   /**
    * Handing a member's page ten minutes' leave to ask the room, at the
    * route that knows who is asking: the store, the community's settings,

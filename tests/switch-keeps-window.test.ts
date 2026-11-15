@@ -552,12 +552,16 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.11, 313.83 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.83", "703.26"]);
+    // MM-SA-43 (15 November 2026): a read beacon also takes its window per connection and store (INCR and EXPIRE NX,
+    // COMMANDS.readBeacon 1 -> 3 in tests/traffic-cost.ts), so each visit costs a little more: 1 to 5 cents less kept,
+    // all still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 313.81 and 703.21 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.81", "703.21"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.70 and 579.98 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.98"]);
+    // MM-SA-43 (15 November 2026): the read beacon's window, as above: 258.69 and 579.93 where 258.70 and 579.98 were.
+    is("11: and 37.05, 258.69 and 579.93 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.93"]);
   } finally {
     Date.now = realNow;
   }

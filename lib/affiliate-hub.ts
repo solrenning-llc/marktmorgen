@@ -91,10 +91,12 @@ export async function requestHubLink(input: { email: string; ip: string; origin:
   const token = randomBytes(32).toString("hex");
   await redisPipeline([["SET", linkKey(token), email, "EX", HUB_LINK_SECONDS]]);
   const link = `${input.origin}/affiliate?token=${token}`;
-  // One of the access emails of the first store in the list (lib/store-allowance-rules.ts).
+  // One of the access emails of the first store in the list (lib/store-allowance-rules.ts), from the share that
+  // confirmations to an address a visitor typed may take (`asked`, MM-SA-05 and MM-SA-47): anybody can type a known
+  // affiliate's address, so these never spend the part kept for buyers' own links.
   const charged = await storeForId(stores[0]).catch(() => null);
   if (!charged) return "error";
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional", asked: true },
     from: NIMBUS_FROM,
     to: email,
     subject: "Your affiliate programs on Marktmorgen",

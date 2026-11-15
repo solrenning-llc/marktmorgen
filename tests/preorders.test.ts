@@ -183,6 +183,36 @@ async function main(): Promise<void> {
   is("its course start dropped too", dropped, ["ana@example.com|breadbook1"]);
   is("and the same refund is read once", await revokeRefundedPreorders(store, Date.now() + 10_000, async () => {}), 0);
 
+  // Issue #4730 (Codex X8, reproduced by Claude 2): a refund mark not confirmed never takes the release off the queue.
+  part("A refund that was read but not recorded keeps the release queued");
+  const retry = session(4, "retry@example.com");
+  const jobs = "nl:pre:jobs";
+  const member = `${STATS}|${product.id}|${store.handle}`;
+  const entries = `nl:pre:${STATS}:${product.id}`;
+  await redis.pipeline([["SADD", `nl:wl:${STATS}:soon`, product.id]]);
+  await confirmPreorder(store, retry, product, deps);
+  await redis.pipeline([["SREM", `nl:wl:${STATS}:soon`, product.id]]);
+  await queueRelease(store, product.id);
+  refunded.add(retry.payment_intent);
+  const pipeline = redis.pipeline.bind(redis);
+  try {
+    redis.pipeline = async (commands) => {
+      const [first] = commands;
+      if (first?.[0] === "HSET" && first[1] === entries && first[2] === retry.id) return [null];
+      return pipeline(commands);
+    };
+    is("a refunded pre-order is not handed over", await runPreorderReleases(async () => store, async () => product, () => deps, Date.now() + 10_000), 0);
+    is("the unconfirmed refund mark leaves the release queued", await pipeline([["SISMEMBER", jobs, member]]), [1]);
+    is("the synthetic write did not record the refund", Boolean((await readPreorder(store, product.id, retry.id))?.revoked), false);
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the exact retry marks the refund without handing anything over", await runPreorderReleases(async () => store, async () => product, () => deps, Date.now() + 10_000), 0);
+  is("the release is removed only once its pre-order is marked refunded", [
+    Boolean((await readPreorder(store, product.id, retry.id))?.revoked),
+    await redis.pipeline([["SISMEMBER", jobs, member]]),
+  ], [true, [0]]);
+
   done();
 }
 

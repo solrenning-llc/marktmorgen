@@ -24,8 +24,11 @@ import {
   countryRule,
   countryWords,
   draftLinks,
+  pitchImitation,
+  pitchImitationPart,
   pitchText,
 } from "@/lib/outreach-rules";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
 
@@ -65,6 +68,8 @@ async function post(payload: Record<string, unknown>): Promise<{ ok: true; data:
     const response = await fetch("/api/store/outreach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     if (data.ok === true) return { ok: true, data };
+    // Posing as Marktmorgen (568 [GD2] (c)): where, the passage, why and the fix, from the server.
+    if (data.error === "brand_imitation") return { ok: false, error: imitationMessage(data.passage, pitchImitationPart(data.passage), "Your email was not saved") };
     // The server's own words first, where it gave them (a figure used, no place this month: lib/metered-limits.ts).
     if (typeof data.message === "string" && data.message) return { ok: false, error: data.message };
     return { ok: false, error: MESSAGES[typeof data.error === "string" ? data.error : ""] ?? MESSAGES.server_error };
@@ -103,6 +108,14 @@ function PitchCard({ pitch, onChange, onGone }: { pitch: Pitch; onChange: (next:
 
   // What was opened is what is kept: a change is saved before the draft leaves the page.
   async function saveThen(open: () => void) {
+    // Never opened or copied while its words pose as Marktmorgen (568 [GD2] (c)), changed or as first written, with
+    // where, the passage, why and the fix. The server refuses keeping such a change as well; the text stays as typed.
+    const posing = pitchImitation(subject, body);
+    if (posing) {
+      setError(imitationMessage(posing, pitchImitationPart(posing), "Your email was not opened or copied"));
+      return;
+    }
+    setError(null);
     if (changed) {
       const answer = await post({ action: "edit", id: pitch.id, subject, body });
       if (!answer.ok) {

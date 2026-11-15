@@ -5,7 +5,7 @@ import { withinEssentialLimit } from "@/lib/request-guard";
 import { ensureStatsId, storeRef } from "@/lib/store";
 import { AI_PER_MINUTE, MAX_AI_NOTES } from "@/lib/ai-rules";
 import { dropPitch, editPitch, readStoreSite, saveSender, setPitchStatus, startPitch } from "@/lib/outreach";
-import { MAX_PITCH_BODY, MAX_PITCH_SUBJECT, PITCH_STATUSES, type PitchStatus, isGoal } from "@/lib/outreach-rules";
+import { MAX_PITCH_BODY, MAX_PITCH_SUBJECT, PITCH_STATUSES, type PitchStatus, isGoal, pitchImitation } from "@/lib/outreach-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 
 /** Reading somebody else's website and asking the model can each take seconds. */
@@ -67,7 +67,14 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: true, pitch: done.pitch, left: done.left, replaced: done.replaced });
     }
     if (action === "edit") {
-      const pitch = await editPitch(store, text(body.id, 40), text(body.subject, MAX_PITCH_SUBJECT + 20), text(body.body, MAX_PITCH_BODY + 200));
+      const subject = text(body.subject, MAX_PITCH_SUBJECT + 20);
+      const words = text(body.body, MAX_PITCH_BODY + 200);
+      // The words the creator opens in their own mailbox are the ones kept here (components/outreach-studio.tsx,
+      // saveThen): never words that pose as Marktmorgen itself (568 [GD2] (c), lib/outreach-rules.ts pitchImitation).
+      // Nothing is written, the kept draft stays as it was, and the creator's text is left as typed.
+      const posing = pitchImitation(subject, words);
+      if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: posing }, { status: 409 });
+      const pitch = await editPitch(store, text(body.id, 40), subject, words);
       return pitch ? Response.json({ ok: true, pitch }) : fail("unknown", 404);
     }
     if (action === "status") {

@@ -44,6 +44,8 @@
  * rules in the browser that the server holds a pitch to.
  */
 
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
+
 export type OutreachGoal = "sponsor" | "partner" | "business";
 
 export const OUTREACH_GOALS: { id: OutreachGoal; label: string; hint: string }[] = [
@@ -476,6 +478,33 @@ export function pitchFooter(input: { sender: Sender; storeUrl: string; page: str
 
 /** The key in a pitch's own stop link (lib/outreach.ts): it is the whole key, so it is long and random. */
 export const STOP_LINK = /^[0-9a-f]{32}$/;
+
+/** Where in a pitch words posing as Marktmorgen were found, with the passage, why and the fix (568 [GD2] (c)). */
+export type PitchImitation = { field: "subject" | "body"; excerpt: string; why: string; fix: string };
+
+/**
+ * The part of a pitch that poses as Marktmorgen itself, or null (568 [GD2] (c), lib/brand-imitation-rules.ts). A first
+ * email to a business signed "Marktmorgen Support", or about its Marktmorgen account being locked, is a phishing email
+ * with our name on it and the store's link in its footer, so it is neither kept nor opened to be sent from here. Read
+ * on the words as typed; the footer is ours and is not read.
+ */
+export function pitchImitation(subject: unknown, body: unknown): PitchImitation | null {
+  const parts = [
+    ["subject", typeof subject === "string" ? subject.slice(0, MAX_PITCH_SUBJECT + 20) : ""],
+    ["body", typeof body === "string" ? body.slice(0, MAX_PITCH_BODY + 200) : ""],
+  ] as const;
+  for (const [field, words] of parts) {
+    const found = imitationIn(words);
+    if (found) return { field, excerpt: excerptAt(words.slice(0, MAX_TEXT), found.at, found.length), why: imitationWhy("the email cannot be kept or opened to send with it"), fix: IMITATION_FIX };
+  }
+  return null;
+}
+
+/** Where it was found, as the studio names it. */
+export function pitchImitationPart(passage: unknown): string {
+  const field = passage && typeof passage === "object" ? (passage as Record<string, unknown>).field : null;
+  return field === "subject" ? "the subject line" : "the email's text";
+}
 
 /** The whole email as it is opened: the creator's words, then the footer. */
 export function pitchText(body: string, footer: string): string {

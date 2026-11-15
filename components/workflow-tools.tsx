@@ -10,6 +10,8 @@
 import { useEffect, useState } from "react";
 import { type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
 import { END, type RoutedStep, type SampleContact, previewRun } from "@/lib/flow-paths";
+import { flowMapLayout } from "@/lib/flow-map";
+import { WorkflowDiagram } from "@/components/workflow-diagram";
 import type { RunEvent, RunRecord } from "@/lib/flow-runs";
 import { MAX_RETRIES_BY_YOU, MAX_RUN_EVENTS } from "@/lib/flow-limits";
 import { runEffects } from "@/lib/run-effects";
@@ -73,19 +75,29 @@ export function routeWords(steps: readonly MapStep[], index: number): string {
   return `if yes, ${then}; if not, ${stepName(otherwise)}`;
 }
 
-/** The map of a workflow: every step with what it does and where it leads. */
+/** What a step says, in its box and in its line of the list: its condition, then what it does. One copy, so the two never differ. */
+export const stepText = (step: MapStep, conditionText: (when: StepCondition) => string) =>
+  `${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`;
+
+/** A step's box: its number, then stepText. */
+export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) => `${i + 1}. ${stepText(step, conditionText)}`;
+
+/** The map of a workflow: its picture (391 [CX2]), then every step with what it does and where it leads. */
 export function WorkflowMap({ steps, conditionText }: { steps: readonly MapStep[]; conditionText: (when: StepCondition) => string }) {
   return (
+    <>
+    <WorkflowDiagram layout={flowMapLayout(steps, steps.map((step, i) => stepLine(step, i, conditionText)))} steps={steps.length} />
     <ol className="mt-2 space-y-1 text-sm text-ink-soft" data-workflow-map>
       {steps.map((step, i) => (
         <li key={step.id} className="flex flex-wrap gap-x-2">
           <span className="font-semibold text-ink">{`${i + 1}.`}</span>
-          <span>{`${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`}</span>
+          <span>{stepText(step, conditionText)}</span>
           <span aria-hidden="true">→</span>
           <span>{routeWords(steps, i)}</span>
         </li>
       ))}
     </ol>
+    </>
   );
 }
 

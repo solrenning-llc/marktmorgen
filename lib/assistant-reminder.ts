@@ -19,7 +19,7 @@
  */
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";

@@ -247,6 +247,32 @@ export function handsOver(product: Listing): boolean {
 }
 
 /**
+ * Whether taking the file or the link off `id` (the product itself or one of
+ * its price options) would leave a product that is on the store with nothing
+ * to hand over, by the checkout's own rule (handsOver; 754 [STN1]). A draft,
+ * or a product that already handed nothing over, is never held up by this.
+ */
+export function takesLastDelivery(product: Listing, id: string, what: "file" | "link"): boolean {
+  if (product.hidden || !handsOver(product)) return false;
+  const off = <T extends { file: unknown; link: unknown }>(holder: T): T => ({ ...holder, [what]: null });
+  const after: Listing =
+    product.id === id ? off(product) : { ...product, options: product.options.map((option) => (option.id === id ? off(option) : option)) };
+  return !handsOver(after);
+}
+
+/**
+ * What the studio says when a product would be on the store with nothing to
+ * hand over (754 [STN1]): publishing it (`nothing_to_hand_over`), or taking
+ * off the last file or link of one already published (`last_delivery`). It
+ * names the product, so the sentence says which one among several (WCAG 3.3.1).
+ */
+export function handOverRefusal(error: "nothing_to_hand_over" | "last_delivery", product: string | null): string {
+  const named = product ? `\u201c${product}\u201d` : "This product";
+  if (error === "last_delivery") return `${named} is on your store, and this is the only thing it hands over. Put another file or link in its place, or unpublish it first.`;
+  return `${named} has nothing to hand over yet. Add what buyers get (a file or link, its lessons, episodes or products), give each price option one, or sell a call at one price, then publish it.`;
+}
+
+/**
  * Whether the price an email named is no longer offered: the option it named
  * (`optionId`) was removed, or it named the product's own price (no option)
  * and the product is now sold only at its options. A member's moving-in link

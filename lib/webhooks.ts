@@ -63,6 +63,7 @@
  *   nl:hooks:q                  deliveries waiting for a try, by when
  *   nl:hooks:anchor:<statsId>   the last Stripe event read for this store
  *   nl:hooks:wait:<statsId>     the event its reading waits on, and for how many runs
+ *   nl:hooks:anchor:<statsId>:back  a read with no anchor still walking back: the oldest event read so far
  */
 import { StripeUnreadableReply } from "@/lib/stripe-http-error";
 import { createHash, createHmac, randomBytes } from "node:crypto";
@@ -85,6 +86,7 @@ import { keyStates } from "@/lib/api-keys";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress } from "@/lib/webhook-limits";
+import { type FixedEndSub, stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -330,6 +332,8 @@ export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
 /** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
+/** A read with no anchor that has not reached the oldest event yet: the oldest event it read, to walk on from (#4285). */
+const backKey = (statsId: string) => `nl:hooks:anchor:${statsId}:back`;
 /** The passed-over events said to one endpoint of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
 const givenUpDayKey = (statsId: string, day: number, endpoint: string) => `nl:hooks:wait:${statsId}:day:${day}:${endpoint}`;
 /** The endpoints of a store told of passed-over events on one UTC day, at most MAX_ENDPOINTS, so removing and adding endpoints makes no more day sets. */
@@ -424,6 +428,27 @@ async function readConfig(statsId: string): Promise<Config | null> {
 /** How many times a change is tried again from a fresh read when another one landed first. */
 const CONFIG_WRITE_TRIES = 4;
 
+/** What the studio says when a settings change may or may not have been saved (WebhookSettingsUnsureError). */
+export const WEBHOOK_SETTINGS_UNSURE_WORDS = "We could not confirm whether that change was saved. Reload the page to see your endpoints before you try again.";
+
+/**
+ * A settings change whose write may have landed: its reply could not be read, and neither could the settings read
+ * back, or they hold another change since. It is never said saved, and never said unchanged either.
+ */
+export class WebhookSettingsUnsureError extends UnknownReplyError {
+  constructor() {
+    super("a store's webhook settings after a change");
+    this.name = "WebhookSettingsUnsureError";
+  }
+}
+
+/** A store's webhook settings as text, or null when there are none, read exactly (CX-123 rule 24). */
+async function settingsText(statsId: string): Promise<string | null> {
+  const read = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!read || (read[0] !== null && typeof read[0] !== "string")) throw new UnknownReplyError("a store's webhook settings");
+  return read[0];
+}
+
 /**
  * Changes a store's webhook settings over exactly what was read (378 [TB4]).
  * Every writer reads the whole settings and writes them back; before this, two
@@ -434,15 +459,52 @@ const CONFIG_WRITE_TRIES = 4;
  * few times, and then refused. `change` returns null to write nothing.
  */
 async function changeConfig(statsId: string, change: (config: Config | null) => Config | null): Promise<{ before: Config | null; after: Config } | null> {
+  // The settings read back after an unknown reply, found as they were read: the next try starts from them.
+  let readBack: { raw: string | null } | null = null;
   for (let tries = 0; tries < CONFIG_WRITE_TRIES; tries += 1) {
-    const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+    // Read exactly (CX-123 rule 24): only GET null is "no settings"; another shape, or text that is not settings, is
+    // unknown and nothing is written over it.
+    const raw: string | null = readBack ? readBack.raw : await settingsText(statsId);
+    readBack = null;
     const before = parseConfig(raw);
+    if (raw !== null && !before) throw new UnknownReplyError("a store's webhook settings");
     const after = change(before);
     if (!after) return null;
-    const [saved] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), typeof raw === "string" ? raw : "", JSON.stringify(after)]]);
-    if (Number(saved) === 1) return { before, after };
+    const text = JSON.stringify(after);
+    // Only 1 is saved and only [-1] / [-1, n] is "changed meanwhile, made again" (rules 24 and 30). Any other reply,
+    // or a call that fails, may have landed: the settings are read back once, exactly. The text written is saved;
+    // the text read is not written, and the change is made again from it, as for [-1]; anything else stays unsure.
+    let saved: "saved" | "changed" | "unknown";
+    try {
+      saved = compareAndSetReply(await redisPipeline([["EVAL", COMPARE_AND_SET, 1, cfgKey(statsId), raw ?? "", text]]), "the webhook settings' save");
+    } catch {
+      saved = "unknown";
+    }
+    if (saved === "saved") return { before, after };
+    if (saved === "unknown") {
+      const now = await settingsText(statsId).catch(() => {
+        throw new WebhookSettingsUnsureError();
+      });
+      if (now === text) return { before, after };
+      if (now !== raw) throw new WebhookSettingsUnsureError();
+      readBack = { raw: now };
+    }
   }
   throw new Error("The webhook settings kept changing while being saved.");
+}
+
+/**
+ * The compare-and-set script's reply (SAVE_CRM_PIPELINES v2, modelled by lib/redis-memory.ts), read in its exact
+ * shape: "saved" for 1, "changed" for [-1] (nothing there) or [-1, n] (the length there now, a whole number). Any
+ * other reply, of the pipeline or of the script, is unknown and throws UnknownReplyError (CX-123 rule 24).
+ */
+function compareAndSetReply(replies: unknown, what: string): "saved" | "changed" {
+  const reply = repliesFor(replies, 1);
+  if (reply && reply[0] === 1) return "saved";
+  // The script's own list, read as exactly one or two slots, as a pipeline's replies are (no Proxy, hole or getter).
+  const changed = reply ? (repliesFor(reply[0], 1) ?? repliesFor(reply[0], 2)) : null;
+  if (changed && changed[0] === -1 && (changed.length === 1 || countOf(changed[1]) !== null)) return "changed";
+  throw new UnknownReplyError(what);
 }
 
 /** The source fields of a sale.completed message, read off the order's metadata; null where it carries none. */
@@ -815,11 +877,15 @@ export type DeliveryView = Pick<Delivery, "id" | "eventId" | "type" | "state" | 
 };
 export type WebhooksView = { endpoints: EndpointView[]; log: DeliveryView[] };
 
-export async function webhooksView(store: Store): Promise<WebhooksView> {
+/**
+ * `log: false` reads only the endpoints, never the delivery log: what the public API's hooks routes answer, inside
+ * one API request (UNIT_COST.api), which the log's LOG_SIZE deliveries at up to DELIVERY_MAX_BYTES each are not.
+ */
+export async function webhooksView(store: Store, { log = true }: { log?: boolean } = {}): Promise<WebhooksView> {
   if (!store.statsId || !isRedisConfigured()) return { endpoints: [], log: [] };
   const [rawConfig, rawLog] = await redisPipeline([
     ["GET", cfgKey(store.statsId)],
-    ["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1],
+    ...(log ? [["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]] : []),
   ]);
   const config = parseConfig(rawConfig);
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
@@ -1005,7 +1071,7 @@ export type AddEndpointResult =
  * studio never shows it again. The address is checked now (https, a public
  * host) and again at every send, since what a name points to can change.
  */
-export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = ""): Promise<AddEndpointResult> {
+export async function addEndpoint(store: Store, rawUrl: string, events: unknown, now = Date.now(), byKey = "", withLog = true): Promise<AddEndpointResult> {
   if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   // 232 [CA1] 4b4b2: a new endpoint is new delivery work; it waits while the plan's costs are paused.
   const paused = integrationPauseWord(store, now / 1000);
@@ -1053,9 +1119,9 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
   if (!written) return refused ?? { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   await redisPipeline([
     ["SADD", STORES_KEY, store.statsId],
-    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
+    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", backKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
   ]);
-  return { ok: true, secret, view: await webhooksView(store) };
+  return { ok: true, secret, view: await webhooksView(store, { log: withLog }) };
 }
 
 /** Changes which events an endpoint hears. */
@@ -1107,8 +1173,8 @@ export async function endpointsOfKeys(store: Store, keyIds: string[]): Promise<{
   return (config?.endpoints ?? []).filter((e) => e.key && keyIds.includes(e.key)).map((e) => ({ id: e.id, key: e.key as string, where: shortAddress(e.url) }));
 }
 
-/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. */
-export async function removeEndpoint(store: Store, id: string): Promise<WebhooksView> {
+/** Removes an endpoint. Anything still waiting to be sent to it is dropped at its next try. `withLog: false`: the view answered without the delivery log (webhooksView). */
+export async function removeEndpoint(store: Store, id: string, withLog = true): Promise<WebhooksView> {
   if (!store.statsId) return { endpoints: [], log: [] };
   const written = await changeConfig(store.statsId, (fresh) =>
     fresh && fresh.endpoints.some((e) => e.id === id) ? { ...fresh, handle: store.handle, endpoints: fresh.endpoints.filter((e) => e.id !== id) } : null,
@@ -1121,8 +1187,26 @@ export async function removeEndpoint(store: Store, id: string): Promise<Webhooks
     await redisPipeline([["DEL", givenUpDayKey(store.statsId, today, id)], ["DEL", givenUpDayKey(store.statsId, today - 1, id)]])
       .catch((error) => console.error("deleting a removed endpoint's sets of passed-over events failed; they expire by themselves", store.handle, id, error));
   }
-  return webhooksView(store);
+  return webhooksView(store, { log: withLog });
 }
+
+/**
+ * A resend's mark on the original delivery (resendDelivery): written only while the original still holds the very
+ * text read, as COMPARE_AND_SET, with the same replies (1 written; [-1] or [-1, n] the text there was another), so
+ * compareAndSetReply reads it. Unlike that script, its write keeps the original's expiry in the same step (KEEPTTL),
+ * and gives one that has none the delivery's own (ARGV[3] seconds): no command after it has to put the time back, so
+ * no second failure can keep a delivery past its retention (Codex G's MEDIUM on #3444). Modelled by
+ * lib/redis-memory.ts.
+ */
+export const RESEND_MARK = `-- marktmorgen:webhook-resend-mark:v1
+local current = redis.call("GET", KEYS[1])
+if (current or "") ~= ARGV[1] then
+  if current then return {-1, string.len(current)} end
+  return {-1}
+end
+redis.call("SET", KEYS[1], ARGV[2], "KEEPTTL")
+if redis.call("PTTL", KEYS[1]) < 0 then redis.call("EXPIRE", KEYS[1], ARGV[3]) end
+return 1`;
 
 export type ResendResult =
   | { ok: true; delivery: Delivery; view: WebhooksView }
@@ -1147,7 +1231,13 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Paused like a test while the plan's costs are paused, whoever calls this.
   const paused = integrationPauseWord(store, now / 1000);
   if (paused) return { ok: false, reason: "paused", message: WEBHOOK_TEST_PAUSED_WORDS[paused] };
-  const [raw, ttl] = await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]);
+  // Read exactly (CX-123 rule 24), before anything is marked: the delivery is text or GET null, its time left a whole
+  // number (PTTL -2 gone, -1 none); any other shape could not be read, and nothing is marked, taken or sent. One that
+  // went between the two reads (-2) is missing; the mark keeps whatever time it has (RESEND_MARK).
+  const read = repliesFor(await redisPipeline([["GET", deliveryKey(deliveryId)], ["PTTL", deliveryKey(deliveryId)]]), 2);
+  if (!read || (read[0] !== null && typeof read[0] !== "string") || typeof read[1] !== "number" || !Number.isSafeInteger(read[1])) return { ok: false, reason: "unavailable" };
+  const [raw, ttl] = read as [string | null, number];
+  if (ttl === -2) return { ok: false, reason: "missing" };
   const before = parseDelivery(raw);
   // A line left by a Stripe event that was passed over carries no message to send.
   if (typeof raw !== "string" || !before || before.statsId !== statsId || before.type === "test" || before.givenUp) return { ok: false, reason: "missing" };
@@ -1156,8 +1246,12 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   if (before.resentFrom) return { ok: false, reason: "resent" };
   // Sent again once: while the last resend is delivered or still being tried, not again.
   if (before.resentAs) {
-    const [rawLast] = await redisPipeline([["GET", deliveryKey(before.resentAs)]]);
-    const last = parseDelivery(rawLast);
+    // Only GET null is a last resend that is gone; one in another shape, or text that is not a delivery, is unknown
+    // and never taken as gone, so it is not sent again on it (CX-123 rule 24).
+    const lastRead = repliesFor(await redisPipeline([["GET", deliveryKey(before.resentAs)]]), 1);
+    if (!lastRead || (lastRead[0] !== null && typeof lastRead[0] !== "string")) return { ok: false, reason: "unavailable" };
+    const last = lastRead[0] === null ? null : parseDelivery(lastRead[0]);
+    if (lastRead[0] !== null && !last) return { ok: false, reason: "unavailable" };
     if (last && last.state !== "failed") return { ok: false, reason: "resent" };
   }
   // A message kept before the bound, larger than it, is not kept again by hand.
@@ -1175,11 +1269,18 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   const againId = `dlv_${randomBytes(12).toString("hex")}`;
   // Two presses at once: only the one that marks the original first goes on (COMPARE_AND_SET over the text read).
   // A press refused below (the minute's limit, the month's deliveries) leaves a mark naming nothing, which allows the next.
-  const [marked] = await redisPipeline([["EVAL", COMPARE_AND_SET, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId })]]);
-  if (Number(marked) !== 1) return { ok: false, reason: "resent" };
-  // The write cleared the original's expiry; it keeps the time it had left, never more.
-  const left = Number(ttl);
-  await redisPipeline([["PEXPIRE", deliveryKey(deliveryId), Number.isFinite(left) && left > 0 ? left : DELIVERY_SECONDS * 1000]]);
+  // The mark read exactly (rules 24 and 30): [-1] / [-1, n] is another press first ("resent"); any other reply is
+  // unknown, never marked: nothing is taken or sent, and it could not be sent just now. A mark that did land names a
+  // resend that was never written, which reads as gone and allows the next press. The mark keeps the original's
+  // expiry in its own step (RESEND_MARK), so whatever fails after it, the original still goes when it would have.
+  let marked: "saved" | "changed";
+  try {
+    marked = compareAndSetReply(await redisPipeline([["EVAL", RESEND_MARK, 1, deliveryKey(deliveryId), raw, JSON.stringify({ ...before, resentAs: againId }), DELIVERY_SECONDS]]), "a webhook resend's mark");
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    return { ok: false, reason: "unavailable" };
+  }
+  if (marked !== "saved") return { ok: false, reason: "resent" };
   const tests = repliesFor(await redisPipeline([
     ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
     ["INCR", testsKey(statsId)],
@@ -1570,7 +1671,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       product: await product(meta.product),
       status: ended ? "ended" : "ending",
       ends_at: ended ? iso(object.ended_at) ?? iso(event.created) : iso(endsAt),
-      reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
+      // Ended at the end that was sold; stopped before it, somebody cancelled it (lib/fixed-end-rules.ts).
+      reason: ended && meta.ends_after && !stopsBeforeSoldEnd(object as FixedEndSub) ? "completed" : str(details.reason) ?? "cancellation_requested",
       buyer: { email, customer },
     }, created);
     return true;
@@ -1668,10 +1770,13 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
   if (!ended) {
     // Only the change that sets an end. A membership with a set number of
     // payments is given its end when it is bought; that is not a cancellation.
+    // Moving that end earlier is (lib/fixed-end-rules.ts).
     const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
     const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
     const set = "cancel_at_period_end" in previous || "cancel_at" in previous;
-    cancels = ending && !wasEnding && set && !meta.ends_after;
+    cancels = meta.ends_after
+      ? set && stopsBeforeSoldEnd(object as FixedEndSub) && !stopsBeforeSoldEnd({ ...object, ...previous } as FixedEndSub)
+      : ending && !wasEnding && set;
   }
   return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
 }
@@ -2008,28 +2113,80 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
   };
 
   if (!anchor) {
-    // The first run, or an anchor Stripe no longer has: collect bounded pages
-    // going back in time, then send them oldest first. History beyond the
-    // first-run page cap still needs a separate durable continuation.
+    // The first run, or an anchor Stripe no longer has. Stripe lists newest first, so a read with no anchor walks back
+    // in bounded pages; until it reaches the oldest event it sends nothing and sets no anchor, only keeps the oldest
+    // event it read (backKey) to walk on from next run. Sending the newest pages and anchoring on the newest event would
+    // leave the older ones, still inside Stripe's thirty days, unread for good (#4285). Once the walk reaches the
+    // oldest event, the pages of this run are sent oldest first and the anchor is set: the events newer than them,
+    // read on earlier runs of the walk, are read forward from it as on every later run.
+    const [backRaw] = await redisPipeline([["GET", backKey(statsId)]]);
+    const back = typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw) ? backRaw : "";
     const pages: StripeEvent[][] = [];
-    let older = "";
+    let older = back;
+    let reachedEnd = false;
     for (let page = 0; page < FIRST_RUN_PAGES; page += 1) {
-      const list = await onAccount(
-        "GET",
-        account,
-        `/events?limit=100&${types}&created[gte]=${Math.max(config.since - 60, 0)}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
-      );
+      let list: Record<string, unknown>;
+      try {
+        list = await onAccount(
+          "GET",
+          account,
+          `/events?limit=100&${types}&created[gte]=${Math.max(config.since - 60, 0)}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
+        );
+      } catch (error) {
+        // A cursor Stripe no longer knows (aged out while the walk went on): let go of, and the walk starts again
+        // from the newest event; the events older than it are gone from Stripe too.
+        if (back && older === back && error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+          await redisPipeline([["DEL", backKey(statsId)]]);
+          return handled + (await watchStore(store, statsId, config, now));
+        }
+        throw error;
+      }
       const rows = stripeEventPage(list);
-      if (!rows.length) break;
+      if (!rows.length) {
+        reachedEnd = true;
+        break;
+      }
       pages.push(rows);
-      const last = str(rows[rows.length - 1].id);
-      if (list.has_more !== true || !last) break;
-      older = last;
-      if (page === FIRST_RUN_PAGES - 1) console.error("a store has more Stripe events than one first run reads; the oldest are left", store.handle);
+      const oldest = str(rows[rows.length - 1].id);
+      if (list.has_more !== true || !oldest) {
+        reachedEnd = true;
+        break;
+      }
+      older = oldest;
+    }
+    if (!reachedEnd) {
+      // More than one run reads: walk on next run from the oldest read, nothing sent and no anchor moved.
+      // Read exactly (rule 24): a write that cannot be confirmed throws, and the next run walks from the cursor it had.
+      const kept = repliesFor(await redisPipeline([["SET", backKey(statsId), older, "EX", ANCHOR_SECONDS]]), 1);
+      if (!kept || kept[0] !== "OK") throw new UnknownReplyError("a Stripe read's cursor");
+      await settle();
+      return handled;
+    }
+    if (!pages.length && back) {
+      // Nothing older than the cursor: the cursor is the oldest event, read on its own, then forward from it.
+      let event: Record<string, unknown>;
+      try {
+        event = await onAccount("GET", account, `/events/${encodeURIComponent(back)}`);
+      } catch (error) {
+        if (error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+          await redisPipeline([["DEL", backKey(statsId)]]);
+          return handled + (await watchStore(store, statsId, config, now));
+        }
+        throw error;
+      }
+      const rows = stripeEventPage({ data: [event], has_more: false });
+      if (rows.length !== 1 || str(rows[0].id) !== back) throw new Error("A Stripe event did not read as itself");
+      pages.push(rows);
     }
     if (!pages.length) return 0;
     for (const rows of [...pages].reverse()) if (!(await send(rows, true))) break;
-    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]);
+    if (last) {
+      // The anchor first, confirmed, and only then the cursor let go of (Codex P on #4362): a refused or unread anchor
+      // write keeps the cursor, so the walk is never left with neither and read again from the newest pages.
+      const anchored = repliesFor(await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]), 1);
+      if (!anchored || anchored[0] !== "OK") throw new UnknownReplyError("a Stripe read's anchor");
+      await redisPipeline([["DEL", backKey(statsId)]]);
+    }
     await settle();
     return handled;
   }
@@ -2145,6 +2302,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
+    ["DEL", backKey(statsId)],
     ["DEL", waitKey(statsId)],
     // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
     ...[...told].flatMap((endpoint) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, endpoint)])),

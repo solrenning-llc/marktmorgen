@@ -323,7 +323,7 @@ function RunEffectCounts({ events }: { events: readonly RunEvent[] }) {
       <p className="flex flex-wrap gap-2">
         <span className="tag">{`Attempted ${n(counts.attempted)}`}</span>
         <span className="tag tag-live">{`Confirmed ${n(counts.confirmed)}`}</span>
-        <span className="tag text-danger">{`Failed ${n(counts.failed)}`}</span>
+        <span className="tag text-danger!">{`Failed ${n(counts.failed)}`}</span>
         <span className="tag tag-next">{`Uncertain ${n(counts.uncertain)}`}</span>
       </p>
       {waiting ? <p className="mt-1 text-ink-soft">{`${n(waiting)} of them ${waiting === 1 ? "has" : "have"} no outcome written yet, so ${waiting === 1 ? "it is" : "they are"} counted as uncertain, not done.`}</p> : null}

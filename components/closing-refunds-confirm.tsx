@@ -93,7 +93,7 @@ export function ClosingRefundsConfirm({ mark, label, back }: { mark: string; lab
             </p>
           </div>
         ) : state.kind === "error" ? (
-          <p className="notice notice-warn text-ink">{state.message}</p>
+          <p className="notice notice-warn text-ink!">{state.message}</p>
         ) : null}
       </div>
     </div>

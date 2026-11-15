@@ -1101,7 +1101,7 @@ function AiWritingVisual() {
           </p>
           <div className="mt-2 space-y-2.5">
             <p className="break-words text-[12px] text-ink-soft">{`A full draft — headline, what the buyer gets, what is inside, questions and buttons — from ${product}'s name, price and description. Add anything else it should know below, or leave the box empty. It replaces the blocks here; nothing is saved until you press Save.`}</p>
-            <p className="field min-h-16 break-words text-[12px] text-ink-mute">Who it is for, what makes it different, what buyers ask you most. Your refund promise, if you have one.</p>
+            <p className="field min-h-16 break-words text-[12px] text-ink-mute!">Who it is for, what makes it different, what buyers ask you most. Your refund promise, if you have one.</p>
             <div className="flex flex-wrap items-center gap-2">
               <span className="btn btn-secondary btn-sm pointer-events-none">Write a draft</span>
               <span className="text-[11.5px] text-ink-soft">{`${left} left this month. Started attempts count, even if they fail.`}</span>

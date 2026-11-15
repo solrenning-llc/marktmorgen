@@ -264,7 +264,7 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         ) : null}
         {post.id ? (
           <span className="ml-auto">
-            <ConfirmAction className="btn btn-ghost text-danger" disabled={busy !== null} busy={busy === "delete"} question="Delete this post? It cannot be brought back." yes={busy === "delete" ? "Deleting…" : "Yes, delete"} onConfirm={remove}>
+            <ConfirmAction className="btn btn-ghost text-danger!" disabled={busy !== null} busy={busy === "delete"} question="Delete this post? It cannot be brought back." yes={busy === "delete" ? "Deleting…" : "Yes, delete"} onConfirm={remove}>
               <Icon name="trash" size={15} />
               Delete
             </ConfirmAction>

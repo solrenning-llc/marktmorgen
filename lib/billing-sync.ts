@@ -205,6 +205,9 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   // person to sort out — a refund is not something to decide in a loop.
   const started = startedFrom(subscription);
   if (!started || !ownedBy(store, subscription)) return false;
+  // The account's one Stripe customer cannot tell its stores apart (review of 7c3aae961, 15 November 2026): a
+  // subscription another store of the account keeps is that store's, never written down here too.
+  if ((await accountStores(store.email)).some((other) => other.sid !== store.sid && other.subscriptionId === id)) return false;
   if (store.subscriptionActive && store.subscriptionId) {
     console.error(`store ${store.handle} has a second subscription in good standing: ${id}`);
     return false;

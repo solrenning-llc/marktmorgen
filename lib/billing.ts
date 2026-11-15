@@ -36,6 +36,7 @@ import { normaliseEmail } from "@/lib/auth";
 import { MAX_ADDRESSES } from "@/lib/store-field-rules";
 import {
   CUSTOMER_PATTERN,
+  accountStores,
   storeForRestartSource,
   HANDLE_PATTERN,
   SUBSCRIPTION_PATTERN,
@@ -416,8 +417,8 @@ export async function createBillingCheckout(
     "subscription_data[metadata][tier]": tier,
     "metadata[store]": store.handle,
     // The store itself, not only the address it had (STORE_SID_META): an address let go can be another store's later.
-    "subscription_data[metadata][store_sid]": store.sid,
-    "metadata[store_sid]": store.sid,
+    // A record with no id yet writes none, so the earlier rules decide for it.
+    ...(store.sid ? { "subscription_data[metadata][store_sid]": store.sid, "metadata[store_sid]": store.sid } : {}),
     // The store rides along, so an owner of several comes back to the one
     // they were paying for, and the way back writes it down on that one.
     success_url: `${origin}/api/billing/return?session_id={CHECKOUT_SESSION_ID}${store.sid ? `&store=${store.sid}` : ""}`,
@@ -516,13 +517,16 @@ export type StartedSubscription = {
  * counts first, as it always did: one it let go of and took back stays on the
  * released list, and a first plan's checkout makes a new customer.
  */
-function sessionOwnedBy(store: Store, named: unknown, customerId: string, sid?: unknown): "sid" | "handle" | "other" | null {
-  // A checkout that carries its store's id is that store's, and no other's, whatever address it names.
-  if (sid !== undefined) return typeof sid === "string" && sid !== "" && sid === store.sid ? "sid" : null;
+function sessionOwnedBy(store: Store, named: unknown, customerId: string, sid?: unknown): "sid" | "handle" | "account" | "other" | null {
+  // A checkout that carries its store's id is that store's, and no other's, whatever address it names. An empty one
+  // (a store with no id yet wrote none) reads as none.
+  if (sid !== undefined && sid !== "") return typeof sid === "string" && sid === store.sid ? "sid" : null;
   if (typeof named !== "string" || !named) return null;
   // Its current address only from when the store holds it (holdsSince, checked against the subscription once read):
-  // another store may have let it go and been paid under it before (money HIGH, 15 November 2026).
-  if (named === store.handle) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId ? "other" : "handle";
+  // another store may have let it go and been paid under it before (money HIGH, 15 November 2026). On the store's own
+  // customer, which is the whole account's (a second store's checkout uses the first's), it is never one another store
+  // of the account keeps (checked once the subscription is known, "account").
+  if (named === store.handle) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId ? "account" : "handle";
   if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId ? "other" : null;
   return (store.previousHandles ?? []).includes(named) ? "other" : null;
 }
@@ -589,6 +593,12 @@ export async function readStartedSubscription(
   const customerId = typeof session.customer === "string" ? session.customer : "";
   const via = metadata ? sessionOwnedBy(store, metadata.store, customerId, ownField(metadata, STORE_SID_META)) : null;
   if (!metadata || !via) return null;
+  if (via === "account" && typeof session.subscription === "string" && session.subscription !== store.subscriptionId) {
+    // The account's one customer cannot tell its stores apart: a subscription another store of the account keeps is
+    // that store's (review of 7c3aae961). Accounts' stores read as the checkout route reads them.
+    const kept = await accountStores(store.email);
+    if (kept.some((other) => other.sid !== store.sid && other.subscriptionId === session.subscription)) return null;
+  }
 
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : "";
@@ -1599,7 +1609,7 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   const meta = subscription.metadata as Record<string, string> | null | undefined;
   // Carrying a store's own id (STORE_SID_META), it is that store's and no other's (money HIGH, 15 November 2026).
   const sid = meta ? ownField(meta, STORE_SID_META) : undefined;
-  if (sid !== undefined) return typeof sid === "string" && sid !== "" && sid === store.sid;
+  if (sid !== undefined && sid !== "") return typeof sid === "string" && sid === store.sid;
   const named = meta?.store ?? "";
   const customer = customerOf(subscription);
   const sameCustomer = Boolean(store.stripeCustomerId) && customer.id === store.stripeCustomerId;
@@ -1616,9 +1626,14 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   if (store.releasedHandles.includes(named)) return sameCustomer;
   const handles = new Set([store.handle, ...store.previousHandles]);
   if (!handles.has(named)) return false;
+  // Under its current address, a subscription the store does not keep counts only when made while the store held it,
+  // whoever pays: the same owner's other store may have been paid under that address before letting it go, on the
+  // account's one customer or by the owner's email (money HIGH, 15 November 2026, and the review of 7c3aae961).
+  // On the store's own customer, as before: it is the whole account's, so where a plan is written down from Stripe's
+  // list (lib/billing-sync.ts applyListed) one another store of the account keeps is refused there.
   if (sameCustomer) return true;
   // By the email alone under its current address, only a subscription made while the store held it: the same owner's
-  // other store may have been paid under that address before letting it go.
+  // other store may have been paid under that address before letting it go (money HIGH, 15 November 2026).
   if (named === store.handle && !store.previousHandles.includes(named) && !madeWhileHeld(store, subscription)) return false;
   return customer.email !== "" && normaliseEmail(customer.email) === normaliseEmail(store.email);
 }

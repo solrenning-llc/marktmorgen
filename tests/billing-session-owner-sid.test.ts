@@ -13,6 +13,7 @@ import { NextRequest } from "next/server";
 import { GET as back } from "@/app/api/billing/return/route";
 import { HELD_SLACK_DAYS, createBillingCheckout, ownedBy } from "@/lib/billing";
 import { applyListedAssistant } from "@/lib/assistant-billing";
+import { syncSubscriptions } from "@/lib/billing-sync";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { RELEASE_QUARANTINE_DAYS, claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, storeRef, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -27,6 +28,8 @@ type Reply = Record<string, unknown>;
 const sessions = new Map<string, Reply>();
 const subscriptions = new Map<string, Reply>();
 let lastCheckout: URLSearchParams | null = null;
+/** What Stripe's list of subscriptions holds, for the daily sync. */
+let listed: Reply[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -41,6 +44,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (session) return sessions.has(session[1]) ? json(sessions.get(session[1])) : json({ error: { message: "No such checkout session" } }, 404);
   const sub = url.pathname.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
   if (sub && method === "GET") return subscriptions.has(sub[1]) ? json(subscriptions.get(sub[1])) : json({ error: { message: "No such subscription" } }, 404);
+  if (url.pathname === "/v1/subscriptions" && method === "GET") return json({ object: "list", data: listed, has_more: false, url: "/v1/subscriptions" });
   if (url.pathname.startsWith("/v1/prices") || url.pathname.startsWith("/v1/products") || url.pathname.startsWith("/v1/subscriptions") || url.pathname.startsWith("/v1/customers")) {
     return json({ object: "list", data: [], has_more: false });
   }
@@ -146,9 +150,12 @@ async function main() {
     const before = (await storeForId(s.b.sid))!;
     is("B is on the account's customer, its own plan ended", [before.stripeCustomerId, before.subscriptionId, before.subscriptionActive], [s.customer, own, false]);
     const record = { ...subscriptions.get(s.sub)!, customer: { id: s.customer, email: s.owner } };
-    is("the daily sync's ownedBy: A's subscription is not B's, though the customer is the same", ownedBy(before, record), false);
-    is("A's own is still A's", ownedBy((await storeForId(s.a.sid))!, record), true);
-    is("B's own (made while it holds the address) is still B's", ownedBy(before, { ...subscriptions.get(own)!, customer: { id: s.customer, email: s.owner } }), true);
+    listed = [record];
+    await syncSubscriptions(Date.now() + 60_000);
+    listed = [];
+    const synced = (await storeForId(s.b.sid))!;
+    is("the daily sync does not write A's subscription, which A keeps, on B", [synced.subscriptionId, synced.subscriptionActive], [own, false]);
+    is("A still keeps it", (await storeForId(s.a.sid))?.subscriptionId, s.sub);
     const answer = await s.comeTo(before);
     const after = (await storeForId(s.b.sid))!;
     is("the way back with A's earlier session on B: not written", [billingOf(answer) === "on", after.subscriptionId, after.subscriptionActive], [false, own, false]);

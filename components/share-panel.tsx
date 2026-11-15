@@ -6,6 +6,7 @@ import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { CAMPAIGN_MEDIA, type CampaignMedium, campaignLink, POST_PLACES, postName, qrFileName, qrSvg, shareLinks, taggedFor } from "@/lib/share-links";
 import { NewTab } from "@/components/new-tab";
+import { CampaignQr } from "@/components/campaign-qr";
 
 /**
  * Sharing a page (added 8 October 2026): its address to copy, a QR code to
@@ -165,6 +166,11 @@ export function SharePanel({ url, title, what = "page" }: { url: string; title: 
                 <Icon name="copy" size={16} />
                 Copy
               </button>
+            </div>
+          ) : null}
+          {forPost ? (
+            <div className="mt-3">
+              <CampaignQr url={url} title={title} campaign={post} content={postContent} />
             </div>
           ) : null}
           <p className="mt-1 text-xs text-ink-soft">

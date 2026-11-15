@@ -41,11 +41,13 @@ async function main() {
   };
   const pendingSave = saveDraft(store, "owner@example.com", { ...input, id, body: "First writer", expectedSavedAt: current.savedAt });
   await reached;
+  // The first holder's own lease value (lib/claim-mark.ts claimValue), not a fixed constant.
+  const holder = (await original.call(redis, [["GET", lock]]))[0];
   is("second writer is refused while the first holds the draft", await saveDraft(store, "other@example.com", { ...input, id, expectedSavedAt: current.savedAt }), { ok: false, reason: "draft_busy" });
   let deleteBlocked = false;
   try { await removeDraft(store, id); } catch (e) { deleteBlocked = e instanceof DraftRemovalUnconfirmed; }
   is("delete cannot enter during a save", deleteBlocked, true);
-  is("refused operations retain the first holder's lease", (await original.call(redis, [["GET", lock]]))[0], "1");
+  is("refused operations retain the first holder's lease", typeof holder === "string" && (await original.call(redis, [["GET", lock]]))[0] === holder, true);
   pauseGet = false; release();
   is("first writer completes", (await pendingSave).ok, true);
   redis.pipeline = original;

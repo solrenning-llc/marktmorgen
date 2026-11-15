@@ -81,9 +81,10 @@ import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOL
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
+import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
-import { COURSE_BYTES } from "@/lib/api-read-rules";
+import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
@@ -220,12 +221,13 @@ export const ORDER_COMPUTE = 0.0003;
  * A cart's stock work at its worst (lib/stock.ts, withCartStockHolds; 513 [PF1], the independent review of 5 November 2026):
  * every limited product of a cart of MAX_CART, its lock taken at its most tries, its count, its provisional hold, the admission
  * and the hand-over scripts with the commands they run inside, the hand-over's failure path, and the previous checkout's units
- * handed back first (releaseCartStockHolds). Measured in tests/cart-stock.test.ts and held to a declared share of ORDER_COMPUTE,
+ * handed back first (releaseCartStockHolds, with its one hand-back taken by a SET NX in the same round trip as the HDELs since
+ * Codex X5's and Codex L's MÉDIO on #4409, one command more). Measured in tests/cart-stock.test.ts and held to a declared share of ORDER_COMPUTE,
  * so the rest of it is left for the order's pages and jobs. Stripe is never asked while a lock is held; the holds that ran out
  * are asked about after the locks are let go, every product at once, at most MAX_CHECKS times each at CHECK_MS (lib/stock.ts),
  * so the waiting is at most CART_STOCK_STRIPE_WAIT_MS besides the locks' own short waits.
  */
-export const CART_STOCK_COMMANDS_MOST = 70;
+export const CART_STOCK_COMMANDS_MOST = 71;
 export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**
@@ -274,7 +276,8 @@ export const ORDER_RENEWAL_STOP = (STRIPE_WAIT_SECONDS / RENEWALS_AT_ONCE + STRI
  * member's last payment kept until the store closes or stays, a few
  * kilobytes for the closing days, the day its notice may come early and the
  * week a late last notice adds; its share of a page of a hundred of the
- * store's own payments read to find it (lib/closing-buyers.ts, buyerPagesCap); and, as if every one were a member, the calls to Stripe a
+ * store's own payments read to find it (lib/closing-buyers.ts, buyerPagesCap); the
+ * closing's PayPal pages (CLOSING_PAYPAL_PAGE, below), priced per page; and, as if every one were a member, the calls to Stripe a
  * membership's closing makes at the most, STRIPE_CALLS_PER_MEMBER, taken
  * from the closing's call budget before each is made (lib/closing-holds.ts,
  * takeCalls; its end is its order's, ORDER_RENEWAL_STOP), each waited on
@@ -290,9 +293,18 @@ export const CLOSING_STRIPE_CALLS = STRIPE_CALLS_PER_MEMBER;
 export const CLOSING_BUYER_COST = EMAILS_PER_BUYER_PER_ENDING * PER_EMAIL
   + 2 * 1024 * ((CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS) / 30) * DB_BYTE_MONTH
   + (CLOSING_STRIPE_CALLS + 1 / 100) * STRIPE_WAIT_SECONDS * MEMORY_SECOND + 6 * COMMAND;
+/**
+ * One page of a closing store's PayPal buyers (lib/closing-buyers.ts, PAYPAL_PAGE; #4258): its range and one MGET of
+ * PAYPAL_PAGE records at MAX_PAID_BYTES each through the database, the probe past the cap, the told list's read and
+ * write for the page and, at the most, two commands a sale to count one not told (HSETNX and its read-back), and its
+ * wait at 2 GB as a page of Stripe payments is waited on. At most buyerPagesCap pages a closing, PayPal's and
+ * Stripe's together, so a closing reads no more than buyerPagesCap of them, whatever its buyers' count.
+ */
+export const CLOSING_PAYPAL_PAGE = PAYPAL_PAGE * MAX_PAID_BYTES * DB_BYTE + (5 + 2 * PAYPAL_PAGE) * COMMAND + STRIPE_WAIT_SECONDS * MEMORY_SECOND;
 /** One closing's buyers and members at its cap, in dollars: a store of this plan that paid, or one that never did. */
 export function closingBuyersCost(tier: Tier, paid = true): number {
-  return buyerNoticeCap(tier, paid) * CLOSING_BUYER_COST;
+  const cap = buyerNoticeCap(tier, paid);
+  return cap * CLOSING_BUYER_COST + buyerPagesCap(cap) * CLOSING_PAYPAL_PAGE;
 }
 
 /** The existing two-email order envelope: confirmation, shipment email,
@@ -525,11 +537,14 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
-  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  // Up to REFUND_MARKS_PER_READ fields could be a sale, share or lead whose refund is kept on it (lib/affiliates.ts,
+  // AFFILIATE_REFUND_MARK): its whole new text sent, one script for each of the three hashes.
+  const marks = 3;
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + Math.min(size.fields, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
-  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes, bytes + kept) + perMegabyte(bytes + kept)
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes + marks, bytes + kept) + perMegabyte(bytes + kept)
     + size.stripePages * stripePage();
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
@@ -1434,10 +1449,10 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
       { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? await isResting(store) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
-    basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+    basis: "Each render of a card is one of the store's public requests, taken once, after the store and the listing are read and before anything else (stock, keys, bumps, the summary, the script's open), as the store's own product page does (isResting, #4634); an open by the script does not take a second one, and an open of a product that cannot be read takes its own (readScriptOpen's counted, Claude 7 on #4645); a resting store's card reads nothing more. Its worst product render (limited stock with lapsed holds, keys, a bump, the summary, opened by the script) and a weekly call's times in a frame on a listed site (view=times: slotsForProduct, its held and booked times, the calendar and the call's sessions, Stripe stood in; not a team's) are each measured against COMMANDS.laterPage + COMMANDS.laterCount in tests/embed-card-metered.test.ts; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
   },
   {
     id: "certificate-page",
@@ -2046,12 +2061,29 @@ export const ADD_ON_LINES: AddOnLine[] = [
  */
 export const PAYPAL_WATCH_RANGES = { rangeReadsPerStoreRun: 2, ordersPerRangeRead: 25 } as const;
 
+/**
+ * The PayPal watch's capture reads for one order (lib/paypal-sales.ts, watchPayPal, nextLook and unknownLook; Claude 2
+ * on #4536), held to what the real watch asks by tests/paypal-watch-unknown-looks.test.ts, each sweep run at the
+ * moment the order is next due:
+ * - looksPerOrderWatched: an order whose capture stays standing is asked hourly for 7 days, every 6 hours to day 30,
+ *   then daily to the end of the watch's 180 days, and leaves the watch;
+ * - lateLookSeconds, lateLooksPerOrder: an order whose capture PayPal answers in a status the watch does not read (or
+ *   about another capture) is never dropped, so after the watch's days it is asked every lateLookSeconds
+ *   (LATE_LOOK_SECONDS) until its paid record ends at 400 days: at most lateLooksPerOrder more reads. Before this it
+ *   was asked hourly to the end, about 9,600 reads an order.
+ * A read PayPal fails, or a paid record Redis does not answer, is still looked at again in an hour; those are not
+ * counted here, so they are not certified, never zero. Like the rest of the five-minute job (NOT_A_COST.PAYPAL_WATCH_BATCH),
+ * a company fixed cost, not a plan's allowance, and not yet a dollar line of lib/llc-fixed-costs.ts.
+ */
+export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 30 * 86_400, lateLooksPerOrder: 8 } as const;
+
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };
 export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  HOLDS_PER_ADDRESS: "lib/stock.ts: how many limited units one connection may hold on a store within one hold's time, an abuse bound that keeps a never-paying connection from holding a drop. Not a plan allowance; each press is still counted by the checkout's own lines.",
   TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
   FORGET_TRY_COMMANDS: "lib/store-forget-retry.ts forgetBoth adds assistant-note deletion to webhook and API-key cleanup. This is a company obligation after the original essential deletion request, not a per-plan allowance. The declared formula includes MEMORY_FORGET_COMMANDS but does not certify Lua-internal command costs, bytes, runtime or retention; its complete fixed-cost ceiling remains unknown and cannot approve a finite company base.",
@@ -2164,6 +2196,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
+  "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),
   "mail-clicked": guard("A click beacon from a store page opened from an email link, which the page itself counts: a few commands and no work, per connection."),
   "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost."),

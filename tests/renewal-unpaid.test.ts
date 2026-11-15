@@ -195,7 +195,7 @@ async function main() {
     }
     is("costPauseCode says renewal_unpaid for it", costPauseCode({ subscriptionActive: true, renewalUnpaidSince: 5 }), "renewal_unpaid");
     const usage = readFileSync("app/api/cron/usage/route.ts", "utf8");
-    is("the usage job does not send a 'video hours used' email for an unpaid renewal", usage.indexOf("if (costsPaused(store)) continue;") > 0 && usage.indexOf("if (costsPaused(store)) continue;") < usage.indexOf("videoUsageNotice({"), true);
+    is("the usage job does not send a 'video hours used' email for an unpaid renewal", usage.indexOf("if (costsPaused(store)) return;") > 0 && usage.indexOf("if (costsPaused(store)) return;") < usage.indexOf("videoUsageNotice({"), true);
         is("the studio has the sentence", /renewal payment did not go through/.test(STUDIO_MESSAGES.renewal_unpaid ?? ""), true);
   }
 

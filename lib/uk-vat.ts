@@ -31,9 +31,14 @@
  * understates the tax; whether an e-publication's zero rate applies (VAT Notice 701/10 not read): the standard rate.
  */
 import type { EuSupply } from "@/lib/eu-vat-supply";
+import { ukVatCollectOn } from "@/lib/vat-registrations";
 
-/** Collecting UK VAT is built but off until a reviewer checks the treatment and the owner's UK VAT registration. */
-export const UK_VAT_COLLECT_REVIEWED = false;
+/**
+ * Collecting UK VAT is built but off: the constant lives in lib/vat-registrations.ts (unit 4), whose ukVatCollectOn()
+ * also needs the owner's UK VAT registration and commercial review; a checkout asks that switch unless a test passes
+ * its own `reviewed`.
+ */
+export { UK_VAT_COLLECT_REVIEWED } from "@/lib/vat-registrations";
 
 export const UK_VAT_RATE = { basisPoints: 2000, source: "https://www.gov.uk/vat-rates", readOn: "2026-11-14", publicUpdatedAt: "2014-12-12" } as const;
 /** The rate is read again before this day; past it no UK sale is collected. */
@@ -103,7 +108,7 @@ export function ukCheckout(input: { supply: EuSupply; priceCents: number; items:
   if (input.supply === "goods") return { kind: "refuse", reason: "goods" };
   if (input.supply === "human") return { kind: "refuse", reason: "human" };
   if (input.supply !== "ess") return { kind: "refuse", reason: "supply" };
-  if ((input.reviewed ?? UK_VAT_COLLECT_REVIEWED) !== true) return { kind: "refuse", reason: "review" };
+  if ((input.reviewed ?? ukVatCollectOn({ now })) !== true) return { kind: "refuse", reason: "review" };
   if (now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return { kind: "refuse", reason: "rate-expired" };
   const vat = ukVatOnTop(input.priceCents);
   if (!vat) return { kind: "refuse", reason: "supply" };

@@ -28,14 +28,16 @@ import { type ConsumerPlace, type EuSupply, consumerPlace } from "@/lib/eu-vat-s
 import { type EuVatRate, type VatOnTop, EU_VAT_RATES, euVatRatesExpired, vatOnTop } from "@/lib/eu-vat-amount";
 import { type ViesAnswer, splitVatNumber, viesValidFor } from "@/lib/eu-vat-vies";
 import { recordedTreatment } from "@/lib/deemed-supplier";
+import { euVatCollectOn } from "@/lib/vat-registrations";
 
 /**
  * Collecting EU VAT and reverse-charging a business (coordinator IVA-2, 13/11/2026: Stripe Tax does not calculate the
- * VAT for the platform on direct charges, so the table in lib/eu-vat-amount.ts is used) are built but locked: false
- * until a reviewer checks the whole treatment, the owner's non-Union OSS registration and the VIES reading. It never
+ * VAT for the platform on direct charges, so the table in lib/eu-vat-amount.ts is used) are built but locked. The
+ * constant lives in lib/vat-registrations.ts (unit 4), whose euVatCollectOn() also needs the owner's non-Union OSS
+ * registration and commercial review; a checkout asks that switch unless a test passes its own `reviewed`. It never
  * opens sales by itself (PLANS_ON_SALE and DEEMED_SUPPLIER_RECORDS stay as they are).
  */
-export const EU_VAT_COLLECT_REVIEWED = false;
+export { EU_VAT_COLLECT_REVIEWED } from "@/lib/vat-registrations";
 
 export type EuCheckout =
   | { kind: "outside"; country: string }
@@ -59,7 +61,7 @@ export function euCheckout(input: {
   records?: unknown;
   /** A business buyer: the VAT number it typed and what VIES answered at the sale (lib/eu-vat-vies.ts checkVies). */
   business?: { vatNumber: unknown; vies: unknown } | null;
-  /** EU_VAT_COLLECT_REVIEWED unless a test passes its own. */
+  /** euVatCollectOn() (lib/vat-registrations.ts) unless a test passes its own. */
   reviewed?: boolean;
   /** The moment of the sale; the clock unless a test passes its own. */
   now?: Date;
@@ -74,7 +76,7 @@ export function euCheckout(input: {
   if (input.supply !== "ess") return { kind: "refuse", reason: "supply" };
   const treatment = recordedTreatment("EU", input.records);
   if (treatment === null) return { kind: "refuse", reason: "record" };
-  const reviewed = (input.reviewed ?? EU_VAT_COLLECT_REVIEWED) === true;
+  const reviewed = (input.reviewed ?? euVatCollectOn({ now })) === true;
   const business = input.business ?? null;
   const vies = business ? keptAnswer(business.vies) : null;
   if (business) {

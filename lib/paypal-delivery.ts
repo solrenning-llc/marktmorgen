@@ -420,7 +420,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
   if (store.statsId && listId && (await erasedSincePaid(listId, paid, true))) {
     console.error("a PayPal purchase's person was deleted from the store at their request after paying; nothing of them is handed over or written again", store.handle, paid.order);
     await takeBack(store, paid, product, bundled);
-    await creditPayPalSale(store, paid, product.title, false).catch((error) => console.error("crediting a PayPal sale failed", error));
+    await creditPayPalSale(store, paid, product.title, false).catch((error) => oweCredit(store, paid.order, error));
     await countOrder(store, `paypal:${paid.order}`, paid.cents);
     await handedOver(store.statsId, paid.order);
     return "handed";

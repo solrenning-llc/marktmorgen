@@ -7,7 +7,7 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { notFound, redirect } from "next/navigation";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { normaliseHandle, storeFolder, storeForPage, storeRef } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { linkHost } from "@/lib/product-link";
 import { readableSize } from "@/lib/product-file";
@@ -20,7 +20,7 @@ import { LessonText } from "@/components/lesson-text";
 import { LessonQuiz } from "@/components/lesson-quiz";
 import { LessonTask } from "@/components/lesson-task";
 import { readTaskFor, submissionOf } from "@/lib/assignment";
-import type { Submission } from "@/lib/assignment-rules";
+import { type Submission, taskFolder } from "@/lib/assignment-rules";
 import { readListing } from "@/lib/catalog";
 import { LessonComments } from "@/components/lesson-comments";
 import { commenterName, commentsOn, lessonComments } from "@/lib/lesson-comments";
@@ -41,6 +41,7 @@ import { videoStampText } from "@/lib/video-stamp";
 import { LessonNotes } from "@/components/lesson-notes";
 import { readNote } from "@/lib/lesson-notes";
 import { EmptyState } from "@/components/empty-state";
+import { AccessUncheckedNote } from "@/components/access-unchecked-note";
 
 type Params = {
   params: Promise<{ handle: string; product: string; lesson: string }>;
@@ -107,7 +108,9 @@ export default async function LessonPage({ params, searchParams }: Params) {
   const open = access.state === "open" && isOpen(course, found.unit, access.start);
   // A free preview is open to anyone; everything else to a student whose
   // module has opened.
-  if (!open && !found.lesson.preview) redirect(base);
+  // Not even a free preview while the store is switched off after a report (lib/takedown.ts), except to its
+  // students: they keep every lesson they could open, a preview in a module not open yet included.
+  if (!open && (!found.lesson.preview || (store.suspended && access.state !== "open"))) redirect(base);
 
   const { lesson, unit } = found;
   const start = access.state === "open" ? access.start : null;
@@ -166,6 +169,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
     lesson.task && student ? submissionOf(course.id, lesson.id, who) : Promise.resolve<Submission | null>(null),
   ]);
   const quizMode = access.state === "open" && access.learner.owner ? "owner" : student && open ? "student" : "visitor";
+  // Where this student's file for the assignment is sent (lib/assignment-rules.ts): the upload door checks the name in it.
+  const taskFolderFor = task?.file && quizMode === "student" ? taskFolder(await storeFolder(storeRef(store)), course.id, lesson.id, who) : "";
   // A student sees only the questions their try draws from a bank (lib/quiz.ts).
   const asked = quiz && attempt && quizMode === "student" ? studentQuiz(quiz, course.id, lesson.id, who, attempt) : null;
   // Comments are for the course's students and its creator; a visitor on a
@@ -365,7 +370,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
 
             {body ? (
               <div className="mt-6" style={{ color: "var(--st-text)" }}>
-                <LessonText text={body} codeLabel={w.codeBlock} />
+                <LessonText text={body} codeLabel={w.codeBlock} lang={said.lang.locale} />
               </div>
             ) : null}
 
@@ -422,6 +427,7 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 mode={quizMode}
                 where={{ handle: store.handle, product: product.id, lesson: lesson.id }}
                 storeName={store.name}
+                folder={taskFolderFor}
                 language={store.language}
               />
             ) : null}
@@ -476,8 +482,14 @@ export default async function LessonPage({ params, searchParams }: Params) {
             <div className="mt-3">
               <CourseOutline course={course} base={base} start={start} done={done ?? new Set<string>()} current={lesson.id} held={held} language={store.language} />
             </div>
+            {/* A student whose access could not be checked just now is told so, never sent to buy what they may own
+                (lib/course-door.ts); on a free preview, the only lesson such a student reaches. */}
             {!open ? (
-              <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              access.state === "unknown" ? (
+                <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={`${base}/${lesson.id}`} className="mt-5" />
+              ) : (
+                <Link href={base} className="btn st-btn btn-block mt-5">{w.getWhole}</Link>
+              )
             ) : null}
           </aside>
 

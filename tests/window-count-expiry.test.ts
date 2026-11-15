@@ -59,7 +59,8 @@ async function main(): Promise<void> {
   };
   walk("lib");
   walk("app");
-  const pair = /\["SET", ([^,\]]+), "0", "EX", [^\]]+, "NX"\],\s*\["INCR(?:BY)?", \1/;
+  // Either order of the SET's options: `"EX", n, "NX"` and `"NX", "EX", n` race the same way (Claude 7 on #3369).
+  const pair = /\["SET", ([^,\]]+), "0", (?:"EX", [^\]]+, "NX"|"NX", "EX", [^\]]+)\],\s*\["INCR(?:BY)?", \1/;
   const left = files.filter((f) => f !== join("lib", "redis-memory.ts") && pair.test(readFileSync(f, "utf8"))).sort();
   // Reserved by other agents (docs/reservations/): their owners move them to lib/window-count.ts in their own units.
   // lib/letter-access.ts keeps the pattern on purpose (no EXPIRE option, tests/letter-members.test.ts) and reads the

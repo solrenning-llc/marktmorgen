@@ -41,8 +41,8 @@ const teachableFees: OfficialPriceSource = { label: "Teachable plan fees, proces
 const substackPricing: OfficialPriceSource = { label: "Substack publishing, subscription and Stripe fees", url: "https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost", readOn: "2026-10-20" };
 const patreonPricing: OfficialPriceSource = { label: "Patreon standard plan and publishing", url: "https://www.patreon.com/pricing", readOn: "2026-10-20" };
 const patreonFees: OfficialPriceSource = { label: "Patreon standard and legacy fee rules", url: "https://support.patreon.com/hc/en-us/articles/11111747095181-Creator-fees-overview", readOn: "2026-10-20" };
-const linktreePricing: OfficialPriceSource = { label: "Linktree monthly prices and annual-billing display", url: "https://linktr.ee/s/pricing", readOn: "2026-10-20" };
-const linktreeFees: OfficialPriceSource = { label: "Linktree direct and partner earnings fees", url: "https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree", readOn: "2026-10-20" };
+const linktreePricing: OfficialPriceSource = { label: "Linktree monthly prices and annual-billing display", url: "https://linktr.ee/s/pricing", readOn: "2026-11-15" };
+const linktreeFees: OfficialPriceSource = { label: "Linktree direct and partner earnings fees", url: "https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree", readOn: "2026-11-15" };
 const podiaPricing: OfficialPriceSource = { label: "Podia annual invoices, fees and migration help", url: "https://www.podia.com/pricing", readOn: "2026-10-20" };
 const thinkificPricing: OfficialPriceSource = { label: "Thinkific prices, course limits and trial", url: "https://www.thinkific.com/pricing/", readOn: "2026-10-20" };
 const thinkificFees: OfficialPriceSource = { label: "Thinkific conditional third-party gateway fees", url: "https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ", readOn: "2026-10-20" };
@@ -182,15 +182,15 @@ export const COMPETITOR_PRICES = {
     name: "Linktree", currency: "USD",
     plans: [
       { name: "Free", monthlyCents: 0, annualCents: 0, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
-      { name: "Starter", monthlyCents: 800, annualCents: null, annualEquivalentMonthlyCents: 600, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
-      { name: "Pro", monthlyCents: 1500, annualCents: null, annualEquivalentMonthlyCents: 1200, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
+      { name: "Starter", monthlyCents: 900, annualCents: null, annualEquivalentMonthlyCents: 700, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
+      { name: "Pro", monthlyCents: 1700, annualCents: null, annualEquivalentMonthlyCents: 1400, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
       { name: "Premium", monthlyCents: 3500, annualCents: null, annualEquivalentMonthlyCents: 3000, source: linktreePricing, platformFeeBps: null, feeSource: linktreeFees },
     ] satisfies CompetitorPlanPrice[],
     feeScope: "The pricing page advertises 0% selling fees on Pro, while its link-in-bio feature page still lists a 9% Pro digital-product fee. The applicable platform rate remains unconfirmed, not zero. Direct earnings have separate Stripe processing; the $0.25 partner-earnings payout fee is not a per-purchase fee.",
-    annualScope: "Paid annual-billing displays are $6, $12 and $30 per month equivalent; exact annual invoices are not verified here. Digital-product selling is documented for eligible Pro and Premium accounts in supported countries.",
+    annualScope: "Paid annual-billing displays are $7, $14 and $30 per month equivalent; exact annual invoices are not verified here. Digital-product selling is documented for eligible Pro and Premium accounts in supported countries.",
     trial: { days: 7, scope: "Pro and Premium only", source: linktreePricing },
-    eligibility: { source: { label: "Linktree digital-product eligibility", url: "https://linktr.ee/help/en/articles/10631437-how-to-share-and-sell-digital-products-on-your-linktree", readOn: "2026-10-20" } },
-    conflictingDisplay: { source: { label: "Linktree older Pro fee display", url: "https://linktr.ee/features/link-in-bio", readOn: "2026-10-20" } },
+    eligibility: { source: { label: "Linktree digital-product eligibility", url: "https://linktr.ee/help/en/articles/10631437-how-to-share-and-sell-digital-products-on-your-linktree", readOn: "2026-11-15" } },
+    conflictingDisplay: { source: { label: "Linktree older Pro fee display", url: "https://linktr.ee/features/link-in-bio", readOn: "2026-11-15" } },
   },
   podia: {
     name: "Podia", currency: "USD",

@@ -14,6 +14,8 @@ Lista gerada em 15/11/2026 a partir do main `3e71d00ac` com os lotes 1 a 5 aplic
 
 **Lote 5, lido em 15/11/2026 por Claude 2 (nuvem E, continuando Claude 1 cloud), as 8 linhas que venciam em 17/01/2027 (Kajabi).** Confirmadas, só com a data trocada: a página de preços da Kajabi (www.kajabi.com/pricing): Basic US$ 179, Growth US$ 249 e Pro US$ 499 por mês, ou US$ 1.716, US$ 2.388 e US$ 4.788 por ano; 0% de participação na receita; cartão nos EUA a 2,9%, 2,8% e 2,7% + 30¢; 2%, 1% e 0,5% a mais com processador de fora (sem PayPal nem Kajabi Payments); 5, 50 e ilimitados produtos; e-mails de marketing sem limite nos três planos; app próprio incluído no Pro; 14 dias de teste. "Kajabi Branded App FAQs" (atualizado nesta semana): incluído no Pro sem custo e complemento de US$ 199 por mês no Basic e no Growth. "Kajabi Trial Information" (atualizado ontem): teste grátis de 14 dias, com limites durante o teste. As três frases de /proof/kajabi (selo, nota da tabela e introdução das fontes) e as cinco fontes de `lib/competitor-prices.ts` (três planos, teste e app) passaram para 15/11/2026; nenhum valor mudou.
 
+**Lote 6, parte Linktree, lida em 15/11/2026 por Claude 2 (nuvem E, continuando Claude 1 cloud).** As 11 fontes de `lib/competitor-prices.ts`. **Mudou na fonte, e os números foram corrigidos:** a página de preços (linktr.ee/s/pricing, baixada duas vezes no dia com o mesmo resultado) mostra agora Starter a US$ 9 por mês, ou US$ 7 com cobrança anual, e Pro a US$ 17, ou US$ 14 (antes US$ 8 e US$ 6, e US$ 15 e US$ 12); o Premium segue a US$ 35, ou US$ 30. Corrigidos os planos e o `annualScope` ("$7, $14 and $30"). Confirmados sem mudança: "Sell and earn with 0% fees" no Pro, enquanto a página "link in bio" ainda mostra 9% no Pro (o conflito continua e a taxa segue não confirmada, nunca zero); o artigo de taxas (atualizado em 12/10/2026): taxa da Linktree que depende do plano, Stripe a 2,9% + US$ 0,30 por compra e US$ 0,25 por repasse nos ganhos de parceiros; 7 dias de teste no Pro e no Premium; venda de produtos digitais só no Pro e no Premium, em certos países (artigo atualizado em 27/10/2026). As 6 frases de /proof/linktree vêm do gerador comum de `lib/final-comparison-pages.ts` (selo e nota com uma só data para Substack, Patreon, Linktree, Podia, Thinkific e Systeme) e mudam de data quando os seis forem relidos.
+
 **Como reler (VR/7):** abrir a página oficial no dia; se ela ainda sustenta o fato, trocar só a data da leitura; se mudou, reescrever o fato com o que a página diz agora, ou retirá-lo; nunca inventar conteúdo, nunca afrouxar o teste nem mudar `REVIEW_DAYS`. Lotes de cerca de 15 linhas, na ordem desta lista, cada um provado com o teste rodando com o relógio em 30/06/2027. Esta lista não muda preço, limite, comissão, trava nem flag.
 
 ## Vencimentos por dia
@@ -24,9 +26,9 @@ Lista gerada em 15/11/2026 a partir do main `3e71d00ac` com os lotes 1 a 5 aplic
 | 2026-12-19 | 1 |
 | 2026-12-27 | 1 |
 | 2027-01-03 | 1 |
-| 2027-01-18 | 153 |
+| 2027-01-18 | 142 |
 | 2027-02-03 | 1 |
-| 2027-02-13 | 56 |
+| 2027-02-13 | 67 |
 
 ## Linhas, do vencimento mais próximo
 
@@ -138,58 +140,58 @@ Lista gerada em 15/11/2026 a partir do main `3e71d00ac` com os lotes 1 a 5 aplic
 | 104 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[2].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
 | 105 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.sponsorship.source | Kit newsletter sponsorships | <https://kit.com/features/newsletter-sponsorships> |
 | 106 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.trial.source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
-| 107 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.conflictingDisplay.source | Linktree older Pro fee display | <https://linktr.ee/features/link-in-bio> |
-| 108 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.eligibility.source | Linktree digital-product eligibility | <https://linktr.ee/help/en/articles/10631437-how-to-share-and-sell-digital-products-on-your-linktree> |
-| 109 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[0].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
-| 110 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[0].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
-| 111 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[1].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
-| 112 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[1].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
-| 113 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[2].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
-| 114 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[2].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
-| 115 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[3].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
-| 116 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[3].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
-| 117 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.trial.source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
-| 118 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].feeSource | Patreon standard and legacy fee rules | <https://support.patreon.com/hc/en-us/articles/11111747095181-Creator-fees-overview> |
-| 119 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
-| 120 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.trial.source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
-| 121 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[0].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
-| 122 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[1].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
-| 123 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[2].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
-| 124 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.trial.source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
-| 125 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.discovery.source | Skool Discovery eligibility | <https://help.skool.com/article/153-discovery-faqs> |
-| 126 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.live.source | Skool native live calls | <https://help.skool.com/article/210-how-to-go-live-on-skool> |
-| 127 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[0].feeSource | Skool payment fees, payouts and Growth Boost | <https://help.skool.com/article/86-subscriptions-faq> |
-| 128 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[0].source | Skool plans | <https://www.skool.com/pricing> |
-| 129 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[1].feeSource | Skool payment fees, payouts and Growth Boost | <https://help.skool.com/article/86-subscriptions-faq> |
-| 130 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[1].source | Skool plans | <https://www.skool.com/pricing> |
-| 131 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.trial.source | Skool subscription and cancellation policy | <https://help.skool.com/article/227-payment-terms-and-policy> |
-| 132 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.webinar.source | Skool webinars on Pro | <https://help.skool.com/article/214-how-to-create-webinar> |
-| 133 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.discovery.source | Substack reader app and discovery feed | <https://support.substack.com/hc/en-us/articles/19291693034004-Getting-started-on-the-Substack-app> |
-| 134 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.plans[0].source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
-| 135 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.trial.source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
-| 136 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[0].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
-| 137 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[1].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
-| 138 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[2].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
-| 139 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[3].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
-| 140 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.trial.source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
-| 141 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[0].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
-| 142 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[0].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
-| 143 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[1].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
-| 144 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[1].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
-| 145 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[2].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
-| 146 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[2].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
-| 147 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.trial.source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
-| 148 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 149 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 150 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 151 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 152 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 153 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 154 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.trial.source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 155 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.discovery.source | Whop Discover directory | <https://whop.com/discover/> |
-| 156 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.plans[0].source | Whop standard payment and payout prices | <https://whop.com/network/pricing/> |
-| 157 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.trial.source | Whop standard payment and payout prices | <https://whop.com/network/pricing/> |
-| 158 | 2027-02-03 | 2026-11-05 | /blog/skool-alternatives-community-platforms | Sources read November 5, 2026. Plans, limits and rules for moving may differ. These sources do not predict earnings, audience growth or search rankings. | citada no próprio texto |
+| 107 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].feeSource | Patreon standard and legacy fee rules | <https://support.patreon.com/hc/en-us/articles/11111747095181-Creator-fees-overview> |
+| 108 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
+| 109 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.trial.source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
+| 110 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[0].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
+| 111 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[1].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
+| 112 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.plans[2].source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
+| 113 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.podia.trial.source | Podia annual invoices, fees and migration help | <https://www.podia.com/pricing> |
+| 114 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.discovery.source | Skool Discovery eligibility | <https://help.skool.com/article/153-discovery-faqs> |
+| 115 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.live.source | Skool native live calls | <https://help.skool.com/article/210-how-to-go-live-on-skool> |
+| 116 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[0].feeSource | Skool payment fees, payouts and Growth Boost | <https://help.skool.com/article/86-subscriptions-faq> |
+| 117 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[0].source | Skool plans | <https://www.skool.com/pricing> |
+| 118 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[1].feeSource | Skool payment fees, payouts and Growth Boost | <https://help.skool.com/article/86-subscriptions-faq> |
+| 119 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.plans[1].source | Skool plans | <https://www.skool.com/pricing> |
+| 120 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.trial.source | Skool subscription and cancellation policy | <https://help.skool.com/article/227-payment-terms-and-policy> |
+| 121 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.skool.webinar.source | Skool webinars on Pro | <https://help.skool.com/article/214-how-to-create-webinar> |
+| 122 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.discovery.source | Substack reader app and discovery feed | <https://support.substack.com/hc/en-us/articles/19291693034004-Getting-started-on-the-Substack-app> |
+| 123 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.plans[0].source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
+| 124 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.trial.source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
+| 125 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[0].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
+| 126 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[1].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
+| 127 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[2].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
+| 128 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.plans[3].source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
+| 129 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.systeme.trial.source | Systeme.io plan prices and FAQ limits | <https://systeme.io/pricing> |
+| 130 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[0].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
+| 131 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[0].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
+| 132 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[1].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
+| 133 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[1].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
+| 134 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[2].feeSource | Teachable plan fees, processing and bundles | <https://support.teachable.com/en/articles/15661316-understand-your-transaction-fees-and-bundles> |
+| 135 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.plans[2].source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
+| 136 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.teachable.trial.source | Teachable plan prices and product limits | <https://www.teachable.com/pricing> |
+| 137 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 138 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 139 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 140 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 141 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 142 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 143 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.trial.source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 144 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.discovery.source | Whop Discover directory | <https://whop.com/discover/> |
+| 145 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.plans[0].source | Whop standard payment and payout prices | <https://whop.com/network/pricing/> |
+| 146 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.whop.trial.source | Whop standard payment and payout prices | <https://whop.com/network/pricing/> |
+| 147 | 2027-02-03 | 2026-11-05 | /blog/skool-alternatives-community-platforms | Sources read November 5, 2026. Plans, limits and rules for moving may differ. These sources do not predict earnings, audience growth or search rankings. | citada no próprio texto |
+| 148 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.conflictingDisplay.source | Linktree older Pro fee display | <https://linktr.ee/features/link-in-bio> |
+| 149 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.eligibility.source | Linktree digital-product eligibility | <https://linktr.ee/help/en/articles/10631437-how-to-share-and-sell-digital-products-on-your-linktree> |
+| 150 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[0].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
+| 151 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[0].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
+| 152 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[1].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
+| 153 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[1].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
+| 154 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[2].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
+| 155 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[2].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
+| 156 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[3].feeSource | Linktree direct and partner earnings fees | <https://linktr.ee/help/en/articles/11410206-understanding-transaction-and-processing-fees-on-linktree> |
+| 157 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.plans[3].source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
+| 158 | 2027-02-13 | 2026-11-15 | `lib/competitor-prices.ts` COMPETITOR_PRICES.linktree.trial.source | Linktree monthly prices and annual-billing display | <https://linktr.ee/s/pricing> |
 | 159 | 2027-02-13 | 2026-11-15 | /proof/kajabi | Sources read November 15, 2026 | citada no próprio texto |
 | 160 | 2027-02-13 | 2026-11-15 | /proof/kajabi | USD. Official Kajabi sources were read November 15, 2026 and are linked below. Annual prices require annual payment. Processing, applicable taxes and optional services can add to either side. | citada no próprio texto |
 | 161 | 2027-02-13 | 2026-11-15 | /proof/kajabi | Read November 15, 2026. These are public USD quotes, not a negotiated offer or a promise that every payment method is available in every country. | citada no próprio texto |

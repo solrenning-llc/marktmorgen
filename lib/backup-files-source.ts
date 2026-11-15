@@ -63,7 +63,7 @@
  *   - at most BACKUP_FILES_PAGES_PER_STORE provider pages a listing: a store
  *     with more objects is answered "over_bound", never complete (item 8);
  *   - at most the review's maxPagesPerDay pages a UTC day for each source,
- *     counted before the provider is asked (one SET NX EX and one INCRBY, read
+ *     counted before the provider is asked (one INCR and one EXPIRE NX, lib/window-count.ts, read
  *     in their exact shape, rule 24): past it 429, unreadable 503.
  *
  *   nl:backup:files:day:<YYYY-MM-DD>:<source>   the day's pages of one source, kept two days
@@ -88,6 +88,7 @@ import {
 import { backupFilesR2Config, listR2Page, presignR2Get } from "@/lib/backup-files-r2";
 import type { BackupFilesRouteReview } from "@/lib/backup-files-review";
 import { redisPipeline } from "@/lib/redis";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 
 /** The shortest route secret taken as set. */
 export const BACKUP_FILES_SECRET_MIN = 32;
@@ -108,15 +109,27 @@ export const BACKUP_FILES_ROUTE_SECONDS = 10;
 
 /**
  * What one admitted page can cost, in whole micro-dollars, at the dearest prices read in docs/backup-costs-2026-11-08.md
- * section 2, no free quota (Claude 7's MÉDIO on #3313): the function call ($0.60 a million), held the whole
+ * section 2, no free quota (Claude 7's MÉDIO on #3313), the same parts as the route's ceiling per call of section 5b
+ * ($0.00154736): the function call ($0.60 a million), held the whole
  * BACKUP_FILES_ROUTE_SECONDS at 2 GB with every second on CPU in the dearest region (gru1: $0.221 a CPU-hour, $0.0183 a
- * GB-hour); its answer at BACKUP_FILES_PAGE_BYTES as Fast Origin Transfer ($0.43 a GB); the day's count, two Upstash
- * commands ($2.00 a million; its few bytes are under a micro-dollar, inside the rounding); one listing and one Blob
+ * GB-hour); its answer at BACKUP_FILES_PAGE_BYTES as Fast Origin Transfer and Fast Data Transfer ($0.43 + $0.35 a GB)
+ * and one CDN Request ($3.20 a million); the day's count, two Upstash commands ($2.00 a million) and a page of Upstash
+ * bandwidth ($0.03 a GB); one listing and one Blob
  * signing token, each as a Blob Advanced Operation ($7.00 a million), the dearer of the two sources on (an R2
  * ListObjectsV2 is a $4.50 Class A, and R2 signs locally).
  */
 export const BACKUP_FILES_PAGE_MICRO_USD = Math.ceil(
-  0.6 + (221_000 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (18_300 * 2 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (BACKUP_FILES_PAGE_BYTES / 1e9) * 430_000 + 2 * 2 + 7 + 7,
+  0.6 +
+    (221_000 * BACKUP_FILES_ROUTE_SECONDS) / 3600 +
+    (18_300 * 2 * BACKUP_FILES_ROUTE_SECONDS) / 3600 +
+    // The answer as Fast Origin Transfer and Fast Data Transfer at the top of their ranges, and its CDN Request.
+    (BACKUP_FILES_PAGE_BYTES / 1e9) * (430_000 + 350_000) +
+    3.2 +
+    // The count's two Upstash commands, and up to a page of Upstash bandwidth (the deletion records' page).
+    2 * 2 +
+    (BACKUP_FILES_PAGE_BYTES / 1e9) * 30_000 +
+    7 +
+    7,
 );
 /** R2 bills operations in blocks of a million, rounded up: one more block a month for the source that lists on R2. */
 const R2_BLOCK_MICRO_USD = 4_500_000;
@@ -235,10 +248,11 @@ export function decodeFilesCursor(text: string, source: BackupFilesSource, store
 export async function takeDayPage(source: BackupFilesSource, review: BackupFilesRouteReview, now = Date.now()): Promise<"ok" | "over" | "unknown"> {
   const key = `nl:backup:files:day:${new Date(now).toISOString().slice(0, 10)}:${source}`;
   try {
-    // Exactly two replies: the SET's "OK" or null, and the INCRBY's own integer. Anything else is unknown (rule 24).
-    const reply: unknown = await redisPipeline([["SET", key, "0", "NX", "EX", 2 * 86_400], ["INCRBY", key, 1]]);
-    const count = Array.isArray(reply) && reply.length === 2 && (reply[0] === null || reply[0] === "OK") ? reply[1] : undefined;
-    if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 1) return "unknown";
+    // The window count (lib/window-count.ts): INCR, then the expiry only when the key has none, so a key that expired
+    // between two commands can never come back without one and hold the day's ceiling for good (Claude 2's MEDIUM on
+    // #3313). Read only in its exact shape (windowCountOf, rule 24): anything else is unknown.
+    const count = windowCountOf(await redisPipeline(windowCount(key, 2 * 86_400)));
+    if (count === null) return "unknown";
     return count > review.maxPagesPerDay ? "over" : "ok";
   } catch {
     return "unknown";
@@ -280,6 +294,18 @@ async function listBlob(prefix: string, cursor: string | null): Promise<Listed> 
 
 type Signer = (key: string) => Promise<{ url: string; expiresAt: number }>;
 
+/** Whether a signed address requests exactly `/${key}`: its path, each part decoded, is the key, with no fragment. */
+function leadsTo(address: string, key: string): boolean {
+  try {
+    const url = new URL(address);
+    if (url.hash !== "" || address.includes("#")) return false;
+    const decoded = url.pathname.split("/").map((piece) => decodeURIComponent(piece)).join("/");
+    return decoded === `/${key}`;
+  } catch {
+    return false;
+  }
+}
+
 /** Blob's signer: one get-only token for "*" made on the first object to sign, then a local signature each. */
 function blobSigner(now: () => number): Signer {
   let token: { delegationToken: string; clientSigningToken: string; validUntil: number } | null = null;
@@ -296,6 +322,11 @@ function blobSigner(now: () => number): Signer {
     const signed: unknown = await blob.presignUrl({ delegationToken: held.delegationToken, clientSigningToken: held.clientSigningToken }, { operation: "get", pathname: key, access: "private", validUntil: held.validUntil });
     const url = (signed as { presignedUrl?: unknown } | null)?.presignedUrl;
     if (typeof url !== "string" || !url.startsWith("https://") || url.includes(held.clientSigningToken)) fail("a signed URL it cannot hand out");
+    // Blob signs the raw pathname and puts it into the address as it is (@vercel/blob 2.8.0, constructBlobUrl): a key
+    // with "?", "#" or an encoded part gives an address whose request path is not the signed one. As R2's signer
+    // checks (lib/backup-files-r2.ts), the address must decode back to exactly this key, with no fragment, or the page
+    // is not answered, never handed out as signed (Claude 7's LEVE on #3313).
+    if (!leadsTo(url as string, key)) fail("a signed URL whose address is not the key's");
     return { url: url as string, expiresAt: held.validUntil };
   };
 }

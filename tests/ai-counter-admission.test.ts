@@ -18,12 +18,12 @@ async function refused() {
   assert.equal(state.commands.length, 2, "one counter attempt, no retry or readback");
 }
 async function main() {
-  const sparse = new Array(2); sparse[1] = 1;
+  const sparse = new Array(2); sparse[0] = 1;
   for (const [name, reply] of [
     ["missing", undefined], ["empty", []], ["partial SET", sparse],
-    ["extra", ["OK", 1, "extra"]], ["text", ["OK", "1"]],
-    ["null", ["OK", null]], ["negative", ["OK", -1]],
-    ["zero", ["OK", 0]], ["fractional", ["OK", 0.5]], ["unknown SET", [false, 1]],
+    ["extra", [1, 1, "extra"]], ["text", ["1", 1]],
+    ["null", [null, 1]], ["negative", [-1, 1]],
+    ["zero", [0, 1]], ["fractional", [0.5, 1]], ["unknown EXPIRE", [1, false]],
   ] as [string, unknown][]) {
     await check(`AI route refuses ${name} acknowledgment before the model`, async () => {
       reset(); state.override = true; state.reply = reply; await refused();
@@ -45,7 +45,7 @@ async function main() {
     assert.equal(state.modelCalls, AI_PER_MINUTE);
     assert.equal(state.commands.length, 2 * (AI_PER_MINUTE + 1));
     assert.match(String(state.commands[0][1]), /^nl:rl:ai:[0-9a-f]{32}$/);
-    assert.deepEqual(state.commands[0].slice(2), ["0", "EX", 60, "NX"]);
+    assert.deepEqual([state.commands[0][0], ...state.commands[1]], ["INCR", "EXPIRE", state.commands[0][1], 60, "NX"]);
     assert.deepEqual([state.permission, state.bodyLimit], ["page", 280_000]);
   });
   await check("authorization refusal stays before counters and model work", async () => {

@@ -827,10 +827,13 @@ export async function runOrderConfirmationMail(deadline: number, dispatch: Shipm
       } catch { /* Dispatch barrier and accounting evidence are still retained. */ }
       counts.unknown++; continue;
     }
-    if (outcome === "unknown" || outcome === "waiting") { counts.unknown++; continue; }
-    const changed = await confirmationMutation(outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : "refused", found, p, runtime, owner);
+    // Only a known refusal is terminal. An explicit no-POST outcome restores
+    // custody like a non-acceptance; any other value keeps the barrier.
+    const op = outcome === "accepted" ? "accepted" : outcome === "not_accepted" ? "not-accepted" : outcome === "not_posted" ? "not-posted" : outcome === "refused" ? "refused" : null;
+    if (!op) { counts.unknown++; continue; }
+    const changed = await confirmationMutation(op, found, p, runtime, owner);
     if (outcome === "accepted" && changed?.[0] === "accepted") counts.accepted++;
-    else if (outcome === "not_accepted" && changed?.[0] === "queued") counts.waiting++;
+    else if ((outcome === "not_accepted" || outcome === "not_posted") && changed?.[0] === "queued") counts.waiting++;
     else counts.unknown++;
   }
   return counts;

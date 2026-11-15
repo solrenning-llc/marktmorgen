@@ -3,7 +3,8 @@ import { Logo, LogoMark } from "@/components/logo";
 import { Icon } from "@/components/icons";
 import type { Store } from "@/lib/store";
 import { MAX_STORES_PER_ACCOUNT } from "@/lib/store";
-import { type Role, ROLE_NAMES } from "@/lib/team-roles";
+import { type Role, ROLE_NAMES, can } from "@/lib/team-roles";
+import { StudioSearch } from "@/components/studio-search";
 
 type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
 
@@ -16,6 +17,10 @@ type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
  * request on the page then carries that store (components/studio-store-pin).
  * People on a team see the stores they help run beside their own, with their
  * role on each.
+ *
+ * Under the bar, in the page rather than over it, the studio's one search box
+ * (components/studio-search.tsx, 766 [STN13]), with a buyer's address offered
+ * only to the roles that may read orders.
  */
 export function StudioHeader({
   current,
@@ -34,6 +39,7 @@ export function StudioHeader({
 }) {
   const room = owned > 0 && owned < MAX_STORES_PER_ACCOUNT;
   return (
+    <>
     <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur-xl">
       <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
         <Link href="/" className="shrink-0 rounded-[10px]" aria-label="Marktmorgen, home">
@@ -139,5 +145,7 @@ export function StudioHeader({
         </div>
       </div>
     </header>
+    <StudioSearch sid={current.sid} buyers={can(role, "orders")} />
+    </>
   );
 }

@@ -221,3 +221,15 @@ test("uncertain quotes, legacy cohorts and conditional payment fees are not favo
  assert.ok(COMPETITOR_PRICES.thinkific.plans.every(p=>p.annualCents===null));
  assert.ok(COMPETITOR_PRICES.systeme.plans.slice(1).every(p=>p.annualCents===null && p.platformFeeBps===0));
 });
+
+test("Whop comparison does not claim a directory its cited address no longer shows", () => {
+ // #4571 batch 6: read November 15, 2026, https://whop.com/discover/ is one business's page named Discover (22 members,
+ // no posts) and Whop's home page links no directory; the directory read there in October is unconfirmed, not assumed.
+ const w=COMPETITOR_PRICES.whop.discovery.source;
+ assert.equal(w.readOn,"2026-11-15");
+ assert.ok(!/directory/i.test(w.label));
+ const page=findPage("proof","whop");assert.ok(page);
+ const text=JSON.stringify(page);
+ assert.ok(!text.includes("Whop has a public discovery directory") && !text.includes("A public Discover directory with business search"));
+ assert.ok(text.includes("could not be confirmed"));
+});

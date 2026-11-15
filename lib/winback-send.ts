@@ -15,7 +15,7 @@
  *   nl:wb:<account>:<subscription>     that membership's email went
  *   nl:wb:once:<statsId>:<hash>        that person heard about that product lately
  *   nl:wb:link:<token>                 who a link in an email is for
- *   nl:wb:n:<statsId>                  how many have been sent, for the studio
+ *   nl:wb:n:<statsId>                  how many have been sent, for the studio (all time, no expiry; erased with the store)
  */
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
 import { OrdersPausedError } from "@/lib/order-admission";

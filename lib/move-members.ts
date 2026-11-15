@@ -284,21 +284,40 @@ export async function keptAlready(store: Store, email: string, productId: string
   return false;
 }
 
-/** Reminders due now, taken off the line: "<store id>|<field>". A reminder not sent is put back by the caller. */
+/** How long a run holds the reminders it took (dueReminders) before they come due again on their own. */
+export const REMINDER_LEASE_SECONDS = 15 * 60;
+
+/**
+ * Reminders due now, "<store id>|<field>", leased rather than taken off the line (webhooks/cron audit, Claude 1,
+ * 12/11/2026): each is moved REMINDER_LEASE_SECONDS ahead, only while still in line (XX, so one forgotten in between
+ * is never added back). The caller puts one back for later (remindLater) or takes it off once finished
+ * (dropReminder); one a run never finishes (the function cut off, Redis failing for the put-back too) comes due again
+ * when the lease runs out, instead of being lost.
+ */
 export async function dueReminders(now = Date.now(), limit = 50): Promise<{ sid: string; field: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).map(String);
-  if (entries.length) await redisPipeline([["ZREM", DUE_KEY, ...entries]]);
+  const until = Math.floor(now / 1000) + REMINDER_LEASE_SECONDS;
+  if (entries.length) await redisPipeline([["ZADD", DUE_KEY, "XX", ...entries.flatMap((entry) => [until, entry])]]);
   return entries.flatMap((entry) => {
     const [sid, field] = [entry.slice(0, entry.indexOf("|")), entry.slice(entry.indexOf("|") + 1)];
     return sid && FIELD_PATTERN.test(field) ? [{ sid, field }] : [];
   });
 }
 
-/** Puts a reminder back in line, to be tried again in an hour. */
+/** Takes a finished reminder off the line: sent, nothing to send, or no longer wanted. */
+export async function dropReminder(sid: string, field: string): Promise<void> {
+  await redisPipeline([["ZREM", DUE_KEY, `${sid}|${field}`]]);
+}
+
+/**
+ * Puts a leased reminder back in line, to be tried again in an hour: only while it is still in line (XX), so one taken
+ * off meanwhile (a deletion, a membership kept) is never made again (Codex U on #4359). New reminders are put in line
+ * where the invite is made, never here.
+ */
 export async function remindLater(sid: string, field: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
+  await redisPipeline([["ZADD", DUE_KEY, "XX", Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
 }
 
 /** Who a member's link is for, on this store and membership, while it works. */

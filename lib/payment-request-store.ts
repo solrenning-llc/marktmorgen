@@ -530,6 +530,9 @@ if redis.call("ZCARD", KEYS[1]) == 0 then
 end
 return 0`;
 
+/** Redis commands REMOVE_IDLE_STORE sends, counted as Upstash bills a script: the EVAL and its three calls. */
+export const REMOVE_IDLE_STORE_COMMANDS = 4;
+
 /**
  * Leaves a store off that list once it has no open request: only after a count read exactly as zero (an unknown count
  * keeps it on), and then in one step that counts again inside Redis (REMOVE_IDLE_STORE), so a request opened between

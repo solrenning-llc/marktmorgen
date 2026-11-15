@@ -7,13 +7,14 @@
  * still added). Now nothing is filed, and tell still never throws into the
  * caller (a comment never fails because its notification did).
  *
- * The confirmed-empty and healthy controls stay as they were: ZCARD, the
- * room taken, ZADD, the trim.
+ * The confirmed-empty and healthy controls: ZCARD, the room taken, then the
+ * filing.
  *
- * Since #3390, tell first asks who is still in (lib/community-push.ts
- * stillMembers, one EVAL, shown here as "STILL"): the members below are seeded
- * as members who are in, so the controls still reach them, and the read of the
- * sizes comes right after that one ask.
+ * Since #3390, only a member who is in is told; since #4788 that is decided in
+ * the same step as the filing (lib/community-member-gate.ts NOTICES_IF_MEMBER,
+ * one EVAL for every member, shown here as "FILE", in place of the ask before
+ * and the ZADD and trim of each list). The members below are seeded as members
+ * who are in, so the controls still reach them.
  *
  * Runs the real code against the in-memory Redis (tests/redis-stub.ts),
  * synthetic ids only, no provider. Built from claude6/r24-community-handle
@@ -32,9 +33,9 @@ const LIST = `nl:cm:${COMMUNITY}:nt:${MEMBER}`;
 const SECOND_LIST = `nl:cm:${COMMUNITY}:nt:${SECOND}`;
 const room = { sid: "notice-size-replies-1", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_synthetic", trialEnds: 0, planEndedAt: "" };
 const TAKE_DATA = "-- marktmorgen:store-data:v1";
-const STILL_IN = "-- marktmorgen:community-still-in:v1";
+const FILE = "-- marktmorgen:community-notices-if-member:v1";
 const MEMBERS = `nl:cm:${COMMUNITY}:m`;
-// Members who are in, in the shape lib/community.ts keeps them (what STILL_IN reads).
+// Members who are in, in the shape lib/community.ts keeps them (what FILE reads).
 const seedMembers = () =>
   store.pipeline([MEMBER, SECOND].map((k) => ["HSET", MEMBERS, k, JSON.stringify({ k, e: `${k.slice(0, 8)}@noticesize.example`, removed: false, muted: false })]));
 
@@ -51,7 +52,7 @@ async function withPipeline(answer: (batch: Batch, original: (batch: Batch) => P
 }
 
 const names = (sent: Batch) =>
-  sent.map((c) => (c[0] === "EVAL" && String(c[1]).startsWith(TAKE_DATA) ? "TAKE" : c[0] === "EVAL" && String(c[1]).startsWith(STILL_IN) ? "STILL" : String(c[0])));
+  sent.map((c) => (c[0] === "EVAL" && String(c[1]).startsWith(TAKE_DATA) ? "TAKE" : c[0] === "EVAL" && String(c[1]).startsWith(FILE) ? "FILE" : String(c[0])));
 const size = (key: string) => store.pipeline([["ZCARD", key]]).then(([v]) => v);
 
 test("tell: a confirmed empty list takes the notice's room before filing it", async () => {
@@ -61,7 +62,7 @@ test("tell: a confirmed empty list takes the notice's room before filing it", as
   await withPipeline(async (batch, original) => { sent.push(...batch); return original(batch); }, async () => {
     await tell(COMMUNITY, [MEMBER], { kind: "mention", post: "p2", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(names(sent), ["STILL", "ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK"]);
+  assert.deepEqual(names(sent), ["ZCARD", "TAKE", "FILE"]);
   assert.equal(await size(LIST), 1);
 });
 
@@ -73,7 +74,7 @@ test("tell: two healthy lists both grow, each with its room", async () => {
   await withPipeline(async (batch, original) => { sent.push(...batch); return original(batch); }, async () => {
     await tell(COMMUNITY, [MEMBER, SECOND], { kind: "mention", post: "p2", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(names(sent), ["STILL", "ZCARD", "ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK", "ZADD", "ZREMRANGEBYRANK"]);
+  assert.deepEqual(names(sent), ["ZCARD", "ZCARD", "TAKE", "FILE"]);
   assert.equal(await size(LIST), 2);
   assert.equal(await size(SECOND_LIST), 1);
 });
@@ -90,7 +91,7 @@ test("tell: a list size in an unknown shape files nothing, so nothing is kept wi
     }, async () => {
       await tell(COMMUNITY, [MEMBER], { kind: "mention", post: "p3", comment: "", by: OTHER, words: "synthetic" }, room);
     });
-    assert.deepEqual(names(sent), ["STILL", "ZCARD"], `ZCARD reply ${JSON.stringify(reply)}`);
+    assert.deepEqual(names(sent), ["ZCARD"], `ZCARD reply ${JSON.stringify(reply)}`);
     assert.equal(await size(LIST), 0, `ZCARD reply ${JSON.stringify(reply)}`);
   }
 });
@@ -105,7 +106,7 @@ test("tell: one unknown size among two files nothing for either", async () => {
   }, async () => {
     await tell(COMMUNITY, [MEMBER, SECOND], { kind: "mention", post: "p4", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(names(sent), ["STILL", "ZCARD", "ZCARD"]);
+  assert.deepEqual(names(sent), ["ZCARD", "ZCARD"]);
   assert.equal(await size(LIST), 0);
   assert.equal(await size(SECOND_LIST), 0);
 });

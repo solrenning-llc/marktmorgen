@@ -128,9 +128,14 @@ async function main(): Promise<void> {
   is("control: and filed again", (await rows(anaKey)) - filed, 1);
 
   part("A member's record that does not read (rule 24): nobody is reached on a guess");
-  // lib/community-push.ts stillMembers asks Redis for one mark per key (its STILL_IN script); a reply of another shape.
+  // lib/community-push.ts stillMembers asks Redis for one mark per key (its STILL_IN script), and a notice is filed by
+  // a script that decides the same marks in the step that writes (lib/community-member-gate.ts NOTICES_IF_MEMBER,
+  // #4788); a reply of another shape to either.
   const memberRead = (commands: Command[]) =>
-    commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:community-still-in:v1\n") && commands[0][3] === members;
+    commands.length === 1 &&
+    commands[0][0] === "EVAL" &&
+    (String(commands[0][1]).startsWith("-- marktmorgen:community-still-in:v1\n") || String(commands[0][1]).startsWith("-- marktmorgen:community-notices-if-member:v1\n")) &&
+    commands[0][3] === members;
   const held = await rows(anaKey);
   const unreached = async (what: string) => {
     looked.length = 0;

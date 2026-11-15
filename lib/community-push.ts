@@ -282,6 +282,16 @@ export async function stillMembers(id: string, keys: readonly string[]): Promise
   return unique.filter((key) => key === CREATOR || here.has(key)) as unknown as StillIn;
 }
 
+/**
+ * The keys a write decided in its own step are still in (lib/community-member-gate.ts NOTICES_IF_MEMBER, #4788): each
+ * member whose mark is "y", and the creator when asked. The same answer stillMembers gives, read in the step that
+ * filed the notice, so the push says what was filed and nothing more. Marks of any other length throw (rule 24).
+ */
+export function stillInFromMarks(members: readonly string[], marks: string, creator: boolean): StillIn {
+  if (marks.length !== members.length || !/^[ynr?]*$/.test(marks)) throw new UnknownReplyError("the community members a notice reached");
+  return [...(creator ? [CREATOR] : []), ...members.filter((_, i) => marks[i] === "y")] as unknown as StillIn;
+}
+
 export type MemberAlert = { title: string; body: string; url: string; tag?: string };
 
 function payloadFor(alert: MemberAlert): string {

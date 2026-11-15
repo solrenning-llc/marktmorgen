@@ -30,9 +30,11 @@
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
-import { type StillIn, pushMembers, stillMembers } from "@/lib/community-push";
+import { type StillIn, pushMembers, stillInFromMarks, stillMembers } from "@/lib/community-push";
+import { NOTICES_IF_MEMBER, memberRecordsKey } from "@/lib/community-member-gate";
+import { CREATOR } from "@/lib/community";
 import { communityWords } from "@/lib/buyer-words/community";
-import { type DataStore, takeData } from "@/lib/store-data";
+import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 /** Where notices are counted in the store's data room (lib/store-data.ts): one slot for every member's lists. */
@@ -103,17 +105,14 @@ export async function tell(
 ): Promise<void> {
   const named = [...new Set(to)].filter((one) => one && one !== notice.by);
   if (!named.length) return;
-  // Only the creator, or a member still in (lib/community-push.ts stillMembers): somebody taken out, never in or
-  // erased is told nothing, and a record that does not read tells nobody (CX-123 rule 24). Asked once: the push
-  // below takes this very answer.
-  let who: StillIn;
-  try {
-    who = await stillMembers(id, named);
-  } catch (error) {
-    console.error("reading who a community notification reaches failed", error);
-    return;
-  }
-  if (!who.length) return;
+  // Only the creator, or a member still in: somebody taken out, never in or erased is told nothing, and somebody whose
+  // record does not read is not told either (CX-123 rule 24). Decided in the same step as the filing (#4788,
+  // lib/community-member-gate.ts NOTICES_IF_MEMBER): an erasure deletes the member record first, so a notice admitted
+  // before it and landing after it files nothing for them. The push below takes that very answer, so it says what
+  // was filed: asked once.
+  const members = named.filter((one) => one !== CREATOR);
+  const creator = named.includes(CREATOR);
+  let who: StillIn | null = null;
   const row = JSON.stringify({ ...notice, words: notice.words.slice(0, SNIP), at: now() } satisfies Notice);
   try {
     // Each list that is not yet full grows by the notice; a full one lets its
@@ -121,21 +120,33 @@ export async function tell(
     // counted at the most a notice weighs). With no room left, nothing is
     // filed: what it is about was written, and that is what matters.
     // Rule 24: a size in an unknown shape files nothing, so no list grows without its room.
-    const sizes = repliesFor(await redisPipeline(who.map((one) => ["ZCARD", listKey(id, one)])), who.length)?.map(countOf);
+    const sizes = repliesFor(await redisPipeline(named.map((one) => ["ZCARD", listKey(id, one)])), named.length)?.map(countOf);
     if (!sizes || sizes.some((n) => n === null)) throw new UnknownReplyError("a community notice list's size");
-    const growing = sizes.filter((n) => n !== null && n < MAX_NOTICES).length;
+    const grows = (one: string) => (sizes[named.indexOf(one)] ?? MAX_NOTICES) < MAX_NOTICES;
+    const growing = named.filter(grows).length;
     const taken = growing ? await takeData(room, [{ slot: NOTICES_SLOT, bytes: growing * NOTICE_BYTES }]) : { ok: true as const };
     if (taken.ok) {
-      await redisPipeline(
-        who.flatMap((one) => [
-          ["ZADD", listKey(id, one), now(), row],
-          ["ZREMRANGEBYRANK", listKey(id, one), 0, -(MAX_NOTICES + 1)],
-        ]),
-      );
+      const commands: (string | number)[][] = [];
+      if (members.length) {
+        commands.push(["EVAL", NOTICES_IF_MEMBER, 1 + members.length, memberRecordsKey(id), ...members.map((one) => listKey(id, one)), now(), row, MAX_NOTICES, ...members]);
+      }
+      if (creator) commands.push(["ZADD", listKey(id, CREATOR), now(), row], ["ZREMRANGEBYRANK", listKey(id, CREATOR), 0, -(MAX_NOTICES + 1)]);
+      const filed = repliesFor(await redisPipeline(commands), commands.length);
+      if (!filed) throw new UnknownReplyError("community notices filed for members still in");
+      const marks = members.length ? filed[0] : "";
+      if (typeof marks !== "string") throw new UnknownReplyError("community notices filed for members still in");
+      who = stillInFromMarks(members, marks, creator);
+      // The room taken for a list that was not filed (not in, or erased meanwhile) goes back.
+      const unfiled = members.filter((one, i) => marks[i] !== "y" && grows(one)).length;
+      if (unfiled) await giveData(room, [{ slot: NOTICES_SLOT, bytes: unfiled * NOTICE_BYTES }]);
+    } else {
+      // Nothing filed for lack of room: the phones are still told, of whoever is still in.
+      who = await stillMembers(id, named);
     }
   } catch (error) {
     console.error("filing a community notification failed", error);
   }
+  if (!who?.length) return;
   if (!phone) return;
   // The words are deliberately absent: a notification is read on a lock
   // screen, and this one says who did what and where, nothing more.

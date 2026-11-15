@@ -30,7 +30,10 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { type DataOwner, orderWrite } from "@/lib/order-data";
+import { createHash } from "node:crypto";
+import { type DataOwner, orderWrite, orderWriteIfSame } from "@/lib/order-data";
+import { dataKey } from "@/lib/store-data";
+import { memberMark, memberRecordsKey } from "@/lib/community-member-gate";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
 export { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel };
@@ -86,24 +89,31 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   const day = dayKey(id, dayOf(now));
   if (delta > 0) {
     // Only someone still in the community earns (Claude 7, 13 November 2026): a like on a post an erased member left
-    // wrote their points and their place on the board again, and a removed member kept climbing it. A record that
-    // cannot be read is not "still in" (rule 24): no point is given on it. Imported when needed: lib/community.ts,
-    // which lib/community-push.ts reads, imports this file.
-    const { stillMembers } = await import("@/lib/community-push");
-    let still: readonly string[];
-    try {
-      still = await stillMembers(id, [who]);
-    } catch (error) {
-      console.error("reading whether a community member is still in failed; no point given", error);
-      return;
+    // wrote their points and their place on the board again, and a removed member kept climbing it. Decided in the
+    // same step as the write (#4789): the points are written only while the member record still holds what was read,
+    // so a like admitted before an erasure (which deletes the record first) and landing after it gives nothing. A
+    // record that cannot be read is not "still in" (rule 24): no point is given on it.
+    if (!dataKey(owner)) return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const read = repliesFor(await redisPipeline([["HGET", memberRecordsKey(id), who]]), 1);
+      const raw = read?.[0];
+      if (!read || (raw !== null && typeof raw !== "string")) {
+        console.error("reading whether a community member is still in failed; no point given");
+        return;
+      }
+      const mark = memberMark(raw, who);
+      if (mark === "?") console.error("a community member record did not read; no point given");
+      if (mark !== "y" || typeof raw !== "string") return;
+      // A member's first point puts them on the boards for good: counted in the store's room (lib/order-data.ts).
+      const written = await orderWriteIfSame(owner, [{ key: memberRecordsKey(id), field: who, sha1: createHash("sha1").update(raw).digest("hex") }], [
+        ["ZINCRBY", allKey(id), 1, who],
+        ["ZINCRBY", day, 1, who],
+        ["EXPIRE", day, DAYS_KEPT * 86_400],
+      ]);
+      if (written !== null) return;
+      // The record changed between the read and the write (a visit, a name): read again and decided on what it is now.
     }
-    if (!still.includes(who)) return;
-    // A member's first point puts them on the boards for good: counted in the store's room (lib/order-data.ts).
-    await orderWrite(owner, [
-      ["ZINCRBY", allKey(id), 1, who],
-      ["ZINCRBY", day, 1, who],
-      ["EXPIRE", day, DAYS_KEPT * 86_400],
-    ]);
+    console.error("a community member record kept changing; no point given");
     return;
   }
   // A like taken back comes off today only when today has a point to give;

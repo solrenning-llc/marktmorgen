@@ -67,6 +67,7 @@ import { type Video, parseVideo, readVideo } from "@/lib/sales-page";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
 import { holdsAnyOf } from "@/lib/community-access";
 import { type CommunityConfig, newItemId } from "@/lib/community";
+import { RSVP_IF_MEMBER, memberRecordsKey } from "@/lib/community-member-gate";
 import { LockBusyError, setIfHeld, withLock } from "@/lib/redis-lock";
 import { indexEvent, unindexEvent } from "@/lib/community-index";
 import { indexBytes } from "@/lib/community-search";
@@ -714,11 +715,24 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   if (Number(already) === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
-    ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
-    ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  // Taken only while they are still a member, decided in the same step (#4786): an erasure deletes the member record
+  // first, so an RSVP admitted before it and landing after it writes nothing, and the place's room goes back.
+  const reply = repliesFor(
+    await redisPipeline([["EVAL", RSVP_IF_MEMBER, 2, memberRecordsKey(id), rsvpKey(id, event.id), member, String(Math.floor(now / 1000))]]),
+    1,
+  )?.[0];
+  const mark = Array.isArray(reply) && reply.length === 3 ? reply[0] : null;
+  const added = Array.isArray(reply) ? countOf(reply[1]) : null;
+  const length = Array.isArray(reply) ? countOf(reply[2]) : null;
+  if ((mark !== "y" && mark !== "r" && mark !== "n" && mark !== "?") || added === null || added > 1 || length === null) {
+    // Not known whether the place was taken (rule 24): its room stays counted, never less than what may be kept.
+    throw new UnknownReplyError("an RSVP taken while a member");
+  }
+  if (mark !== "y") {
+    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    return "closed";
+  }
+  if (added !== 1) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }

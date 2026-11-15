@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { memberMark } from "@/lib/community-member-gate";
 import { PATH_BOARD_ROOM_BYTES, readPathBoard, pathBoardMember } from "@/lib/path-board-rules";
 
 /** lib/store-data.ts NOTES_TOTAL_FIELD: the room's one slot for every student's lesson notes (lib/lesson-notes.ts). */
@@ -198,6 +199,30 @@ export class MemoryRedis {
             if (fields.k !== who || typeof fields.e !== "string" || typeof fields.removed !== "boolean" || typeof fields.muted !== "boolean") return "?";
             return fields.removed ? "r" : "y";
           }).join("");
+        }
+        // lib/community-member-gate.ts RSVP_IF_MEMBER: an RSVP taken only while the member record reads "y" (#4786).
+        if (key.startsWith("-- marktmorgen:community-rsvp-if-member:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, members, rsvps, who, at] = args;
+          const mark = memberMark(this.run(["HGET", members, who]), who);
+          if (mark !== "y") return [mark, 0, 0];
+          const added = this.run(["HSETNX", rsvps, who, at]);
+          return [mark, added, this.run(["HLEN", rsvps])];
+        }
+        // lib/community-member-gate.ts NOTICES_IF_MEMBER: a notice filed for each member whose record reads "y" (#4788).
+        if (key.startsWith("-- marktmorgen:community-notices-if-member:v1\n") && Number(args[0]) >= 2 && args.length === 1 + 2 * Number(args[0]) + 2) {
+          const n = Number(args[0]);
+          const [members, ...lists] = args.slice(1, 1 + n);
+          const [at, row, most, ...whos] = args.slice(1 + n);
+          return lists
+            .map((list, i) => {
+              const mark = memberMark(this.run(["HGET", members, whos[i]]), whos[i]);
+              if (mark === "y") {
+                this.run(["ZADD", list, at, row]);
+                this.run(["ZREMRANGEBYRANK", list, 0, -(Number(most) + 1)]);
+              }
+              return mark;
+            })
+            .join("");
         }
         // lib/community-push.ts DEVICES_TO_SEND: each device's endpoint, p256dh, auth and key id, four strings a device,
         // only those within their byte bounds and pattern, at most ARGV[1] of them; a row of any other shape is left out.

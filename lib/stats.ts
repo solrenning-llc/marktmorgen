@@ -1178,10 +1178,11 @@ const currencyOf = (row: { currency?: unknown }) => (typeof row.currency === "st
  * Why a reading of paid sales is partial, so what says so names the source
  * truly (lib/store-export.ts, its orders' note): the PayPal sales not all read
  * ("paypal"), more pages on the Stripe account than were read
- * ("stripe-pages"), or a Stripe sale whose currency was not named, kept with
- * its currency blank ("currency").
+ * ("stripe-pages"), a Stripe sale whose currency was not named, kept with
+ * its currency blank ("currency"), or one whose amount does not read, left out
+ * rather than counted at $0 ("amount", lib/paid-amount.ts).
  */
-export type SalesGap = "paypal" | "stripe-pages" | "currency";
+export type SalesGap = "paypal" | "stripe-pages" | "currency" | "amount";
 
 /**
  * Every paid sale of this store since `since` (seconds), newest first, read
@@ -1261,10 +1262,17 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       partial = true;
       gaps.add("currency");
     }
+    // A sale whose amount does not read is never a $0 sale (lib/paid-amount.ts): left out, and the reading says so.
+    const amount = row.amount_total;
+    if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     sales.push({
       created: typeof row.created === "number" ? row.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof row.amount_total === "number" ? row.amount_total : 0,
+      cents: amount,
       currency,
       row: raw,
       upsell: false,

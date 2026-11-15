@@ -64,6 +64,7 @@ import { type Store, saleHandles } from "@/lib/store";
 import { toMajor } from "@/lib/money";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { ADS_SERVER_PLATFORMS, type AdsServerPlatform, LEAD_ID, adsCookieName, readAdsCookie } from "@/lib/ad-consent";
+import { paidMoneyOf } from "@/lib/paid-amount";
 
 export const META_GRAPH_VERSION = "v25.0";
 export type ServerPlatform = AdsServerPlatform;
@@ -703,16 +704,22 @@ function conversionOf(store: Store, session: AdsSession, customer: Conversion["c
     kind: "purchase",
     id: adEventId(session.id as string),
     at: typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000),
-    cents: typeof session.amount_total === "number" ? session.amount_total : 0,
-    currency: typeof session.currency === "string" ? session.currency : store.currency,
+    // Read exactly (ordinary admits only one whose money reads); the store's currency is never put in its place.
+    cents: paidMoneyOf(session)?.cents ?? 0,
+    currency: paidMoneyOf(session)?.currency ?? store.currency,
     products: productsOf(meta),
     email: emailOf(session),
     customer,
   };
 }
 
-const ordinary = (store: Store, s: AdsSession) =>
-  s.status === "complete" && s.payment_status === "paid" && saleHandles(store).has(s.metadata?.store ?? "") && s.metadata?.kind !== "tip";
+/** A paid order of this store, not a gift of support, whose amount and currency read (lib/paid-amount.ts): never sent as $0. */
+const ordinary = (store: Store, s: AdsSession) => {
+  if (s.status !== "complete" || s.payment_status !== "paid" || !saleHandles(store).has(s.metadata?.store ?? "") || s.metadata?.kind === "tip") return false;
+  if (paidMoneyOf(s)) return true;
+  console.error("a paid order's amount or currency does not read; no purchase sent to the ad platforms", s.id);
+  return false;
+};
 
 /** Keeps what a membership's renewals are sent with: the cookies and clicks, never an address or a browser. */
 async function keepForRenewals(session: AdsSession, buyer: BuyerRequest): Promise<void> {

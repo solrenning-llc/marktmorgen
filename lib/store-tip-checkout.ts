@@ -23,6 +23,7 @@ import { isHouseStore } from "@/lib/house-store";
 import { tipsWords } from "@/lib/buyer-words/tips";
 import { MAX_TIP_MESSAGE, tipInRange } from "@/lib/store-tips";
 import { applyShare } from "@/lib/platform-share";
+import { paidMoneyOf } from "@/lib/paid-amount";
 
 /** What the creator's list of sales calls it, in the studio's English. */
 export const TIP_TITLE = "Support";
@@ -169,11 +170,14 @@ export async function readTip(store: Store, sessionId: string): Promise<TipOutco
     };
     const meta = session.metadata ?? {};
     if (meta.kind !== "tip" || !saleHandles(store).has(meta.store ?? "") || !isSettled(session)) return { state: "waiting" };
-    return {
-      state: "paid",
-      amount: typeof session.amount_total === "number" ? session.amount_total : 0,
-      currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
-    };
+    // What Stripe took, read exactly (lib/paid-amount.ts): one that does not read is never thanked for $0 or in the
+    // store's currency; the page waits, as for a gift not confirmed yet.
+    const money = paidMoneyOf(session);
+    if (!money) {
+      console.error("a paid gift's amount or currency does not read; not shown as thanked", sessionId);
+      return { state: "waiting" };
+    }
+    return { state: "paid", amount: money.cents, currency: money.currency };
   } catch (error) {
     if (!(error instanceof StripeError && error.status === 404)) console.error("reading a gift's checkout failed", error);
     return { state: "waiting" };

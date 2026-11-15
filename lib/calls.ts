@@ -318,7 +318,8 @@ export async function paidCalls(store: Store): Promise<
     /** What the buyer answered to the creator's questions at checkout. */
     answers: Answer[];
     /** What was paid, in cents. */
-    amount: number;
+    /** What it was paid, in minor units; null when Stripe's answer did not read (never taken for 0). */
+    amount: number | null;
     /** The currency it was paid in, as the checkout session says (chargedIn); empty when it says none or another shape (22 [E5], unit 2b). */
     currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
@@ -407,7 +408,9 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     buyerTz: isTimeZone(meta.tz) ? meta.tz : "UTC",
     moves: 0,
     answers: readAnswers(row),
-    amount: typeof row.amount_total === "number" ? row.amount_total : 0,
+    // Read exactly (lib/paid-amount.ts): one that does not read is unknown (null), never 0, which says a package's
+    // session with nothing charged; the booking keeps its time.
+    amount: Number.isSafeInteger(row.amount_total) && Number(row.amount_total) >= 0 ? Number(row.amount_total) : null,
     currency: chargedIn(row.currency) ?? "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",

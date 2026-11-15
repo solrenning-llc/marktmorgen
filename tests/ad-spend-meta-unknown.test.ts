@@ -1,15 +1,15 @@
 /**
  * What a creator spent on ads is the typed lines and, while the store is
  * connected to Meta, the lines read from its ad account (lib/ad-spend.ts,
- * readSpends). Every figure that uses spend uses both: the studio's "after
+ * readSpendLines). Every figure that uses spend uses both: the studio's "after
  * ads", the weekly email and the numbers the AI answers from. Before, a read
  * of the Meta lines that failed, or that Redis answered in another shape,
- * was swallowed: readSpends handed back the typed lines alone, as if they
- * were all the spend, and every return on ads read higher than it was. Now
- * such a read throws, so each caller shows the spend as not read (the AI is
- * told it is missing, never zero). Synthetic data only.
+ * was swallowed: the typed lines alone came back as if they were all the
+ * spend, and every return on ads read higher than it was. Now such a read is
+ * marked unread (metaUnread, from main's #2924 design, merged into #4027), so
+ * each caller shows the spend as not read, never zero. Synthetic data only.
  */
-import { readSpends } from "@/lib/ad-spend";
+import { readSpendLines } from "@/lib/ad-spend";
 import { linesKey } from "@/lib/meta-ads";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -29,7 +29,9 @@ async function run(swap?: (real: unknown[]) => unknown): Promise<unknown> {
     return original(commands);
   };
   try {
-    return (await readSpends(statsId)).map((s) => s.cents);
+    const read = await readSpendLines(statsId);
+    // Unread Meta lines are unknown: never the typed lines alone as all of the spend.
+    return read.metaUnread ? "unknown" : read.spends.map((s) => s.cents);
   } catch {
     return "unknown";
   } finally {

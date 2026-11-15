@@ -1,17 +1,17 @@
 /**
  * An ad spend line added while the Meta read fails is never kept twice (review of #4027, Claude 3, MEDIUM 1).
  *
- * addSpend wrote the typed line and then read every line back, the Meta ones included (readSpends); since #4027 a
- * Meta read that fails throws instead of answering the typed lines alone. The line was then kept but the creator was
- * told the add failed, and adding it again kept a second copy: every figure that uses spend counted it twice. The Meta
- * lines are now read, exactly, before anything is written: a failed read writes nothing, and the retry adds the one
- * line. removeSpend reads them first too, so a removal is never told as failed after it was done.
+ * addSpend wrote the typed line and then read every line back, the Meta ones included; a Meta read that failed made
+ * the add throw after the line was kept, so the creator was told it failed and adding it again kept a second copy:
+ * every figure that uses spend counted it twice. Since the merge of main's #2924 design into #4027, a failed Meta
+ * read never makes the add or the removal fail: the one line is kept (or removed) and told so, with Meta's lines
+ * said to be unread (metaUnread), never left out as $0. So nothing is ever done and told as failed.
  *
  * Synthetic data only; real MemoryRedis, with the Meta read made to fail.
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { addSpend, removeSpend } from "@/lib/ad-spend";
+import { addSpend, readSpendLines, removeSpend } from "@/lib/ad-spend";
 import { linesKey } from "@/lib/meta-ads";
 import { store as redis } from "./redis-stub";
 
@@ -43,24 +43,24 @@ async function metaFailing<T>(work: () => Promise<T>): Promise<T | "failed"> {
 }
 const kept = () => (redis.run(["HLEN", spendKey]) as number) ?? 0;
 
-test("an add told as failed keeps nothing, and the retry keeps the one line", async () => {
+test("an add while Meta cannot be read keeps the one line and says so, never told as failed", async () => {
   connected();
-  assert.equal(await metaFailing(() => addSpend(statsId, line, NOW)), "failed");
-  assert.equal(kept(), 0, "nothing is kept when the add is told as failed");
-  const again = await addSpend(statsId, line, NOW);
-  assert.ok(again.ok);
-  assert.equal(kept(), 1, "the retry keeps one line, not two");
-  assert.deepEqual(again.ok && again.spends.map((s) => s.cents).sort((a, b) => a - b), [1_000, 50_000]);
+  const added = await metaFailing(() => addSpend(statsId, line, NOW));
+  assert.notEqual(added, "failed", "a line that is kept is never told as failed");
+  assert.ok(added !== "failed" && added.ok && added.metaUnread, "Meta's lines are said to be unread, not taken as none");
+  assert.equal(kept(), 1, "the one line is kept, once");
+  assert.deepEqual((await readSpendLines(statsId)).spends.map((s) => s.cents).sort((a, b) => a - b), [1_000, 50_000]);
 });
 
-test("a removal told as failed removed nothing", async () => {
+test("a removal while Meta cannot be read is done and told as done", async () => {
   connected();
   const added = await addSpend(statsId, line, NOW);
   assert.ok(added.ok);
   const id = added.ok ? added.spends.find((s) => s.cents === 1_000)?.id : undefined;
   assert.ok(id);
-  assert.equal(await metaFailing(() => removeSpend(statsId, id)), "failed");
-  assert.equal(kept(), 1, "a removal told as failed did not happen");
-  assert.deepEqual((await removeSpend(statsId, id)).map((s) => s.cents), [50_000]);
-  assert.equal(kept(), 0);
+  const removed = await metaFailing(() => removeSpend(statsId, id));
+  assert.notEqual(removed, "failed", "a removal that happened is never told as failed");
+  assert.ok(removed !== "failed" && removed.metaUnread, "Meta's lines are said to be unread");
+  assert.equal(kept(), 0, "the line is removed");
+  assert.deepEqual((await readSpendLines(statsId)).spends.map((s) => s.cents), [50_000]);
 });

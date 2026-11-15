@@ -17,12 +17,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatsPanel } from "@/components/stats-panel";
 import { weeklyMessage } from "@/lib/stats-report";
+import { SPEND_FIGURES_UNREAD } from "@/lib/ad-spend-rules";
 import { readStats, studioStats, type StatsData } from "@/lib/stats";
 import { claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 const OWNER = "spend-unread@example.com";
-const UNREAD = "Ad spend could not be read just now";
+// Since the merge of main's #2924 design, the panel says SPEND_FIGURES_UNREAD and leaves the figures after ads out.
+const UNREAD = SPEND_FIGURES_UNREAD;
 
 function sources(dir: string): string[] {
   return readdirSync(join(process.cwd(), dir), { withFileTypes: true }).flatMap((entry) => {
@@ -55,14 +57,15 @@ test("no reader of ad spend takes an unread spend for none", () => {
 
 test("the studio's numbers show an unread spend as not read, never $0.00", async () => {
   const { data } = await figures();
-  const html = renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false, spends: null }));
+  const html = renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false, spends: [], spendsUnread: "typed" }));
   assert.ok(html.includes(UNREAD), "says the spend was not read");
-  const tile = html.slice(html.indexOf(">Ad spend recorded<"), html.indexOf(">Ad spend recorded<") + 200);
-  assert.ok(html.includes(">Ad spend recorded<"), "the payments tiles are still shown");
-  assert.ok(!/\$0\.00/.test(tile), "no spend of $0.00 is claimed");
-  // Control: a spend read as none is said as none.
+  // Main's #2924 design leaves every figure that uses ad spend out while a part is unread, so the spend tile is not
+  // drawn at all: no spend of $0.00 is claimed.
+  assert.ok(!html.includes(">Ad spend recorded<"), "no ad spend figure is drawn, so no $0.00 is claimed");
+  // Control: a spend read as none is said as none, and its tile is drawn.
   const none = renderToStaticMarkup(createElement(StatsPanel, { data, canExport: false, askHeard: false, spends: [] }));
   assert.ok(!none.includes(UNREAD));
+  assert.ok(none.includes(">Ad spend recorded<"), "the control draws the spend tile");
 });
 
 test("the weekly email says an unread spend was not read", async () => {

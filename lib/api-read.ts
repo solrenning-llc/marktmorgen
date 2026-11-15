@@ -83,6 +83,17 @@ export function storeInfo(store: Store) {
 }
 
 /**
+ * A list's cursor as it was sent: none (absent or empty) starts the list, one this list could have given is read, and
+ * anything else is answered 400 invalid_cursor before anything is read or taken, as /api/v1/sales does, never a
+ * silent first page that a sync would loop on (tests/api-cursor-invalid.test.ts).
+ */
+function listCursor(cursor: string | null, given: RegExp): { ok: true; cursor: string | null } | { ok: false; refused: Response } {
+  if (cursor === null || cursor === "") return { ok: true, cursor: null };
+  if (given.test(cursor)) return { ok: true, cursor };
+  return { ok: false, refused: apiError(400, "invalid_cursor", "This cursor is not one this list gave. Send the next value of the page before, or leave cursor out to start from the first page.") };
+}
+
+/**
  * Every product, in the creator's order, a page at a time. What reading the
  * page's listings costs is taken first, counted from the listings the store's
  * own record does not hold (lib/api-read-rules.ts, productsPageWork).
@@ -90,8 +101,10 @@ export function storeInfo(store: Store) {
 export async function products(store: Store, cursor: string | null, charge: Charge): Promise<Page<Record<string, unknown>> | Response> {
   // The order is in the store's own index, so only the page asked for is
   // read. It used to read the whole catalogue to answer for twenty of it.
+  const asked = listCursor(cursor, /^\d{1,6}$/);
+  if (!asked.ok) return asked.refused;
   const ids = productIds(store);
-  const from = cursor && /^\d{1,6}$/.test(cursor) ? Number(cursor) : 0;
+  const from = asked.cursor === null ? 0 : Number(asked.cursor);
   const page = ids.slice(from, from + API_PAGE);
   const refused = await charge(apiReadUnits(productsPageWork(page.length, listingsToRead(store, page))));
   if (refused) return refused;
@@ -131,6 +144,8 @@ export async function leads(store: Store, cursor: string | null, onlyAgreed: boo
  * not left. What /api/v1/leads answers.
  */
 export async function chargedLeads(store: Store, cursor: string | null, onlyAgreed: boolean, hold: Hold): Promise<LeadsPage | Response> {
+  const asked = listCursor(cursor, /^\d{1,20}$/);
+  if (!asked.ok) return asked.refused;
   if (!store.listId || !isRedisConfigured()) return { data: [], next: null };
   return scannedPage(hold, listPageMost("leads", API_PAGE), async () => {
     const { page, readBytes } = await scanLeads(store, cursor, onlyAgreed);
@@ -241,6 +256,8 @@ async function scanLeads(store: Store, cursor: string | null, onlyAgreed: boolea
  * sends before anything is sent, as the list's.
  */
 export async function members(store: Store, cursor: string | null, hold: Hold): Promise<Page<Record<string, unknown>> | Response> {
+  const asked = listCursor(cursor, /^\d{1,20}$/);
+  if (!asked.ok) return asked.refused;
   const id = store.community?.id;
   if (!id) return { data: [], next: null };
   const start = cursor && /^\d{1,20}$/.test(cursor) ? cursor : "0";
@@ -277,6 +294,8 @@ export async function students(
   cursor: string | null,
   charge: Charge,
 ): Promise<{ data: Record<string, unknown>[]; total: number; next: string | null } | Response | null> {
+  const asked = listCursor(cursor, /^\d{1,20}$/);
+  if (!asked.ok) return asked.refused;
   // One product by id, which is one read — not every product in the store.
   const product = await readListing(store, productId);
   if (!product?.course) return null;

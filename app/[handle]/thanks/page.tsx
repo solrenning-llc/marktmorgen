@@ -26,7 +26,7 @@ import { unpaidNotice } from "@/lib/checkout-return";
 import { noteKept } from "@/lib/move-members";
 import { lookStyle } from "@/lib/store-look";
 import { canManage } from "@/lib/membership-manage";
-import { canMove, confirmBooking, moveLink, paidCall } from "@/lib/calls";
+import { canMove, chargedIn, confirmBooking, moveLink, paidCall } from "@/lib/calls";
 import { type DueInPerson, dueLines } from "@/lib/call-deposit";
 import type { CancelPromise } from "@/lib/call-setup";
 import { readableTime, zoneName } from "@/lib/call-setup";
@@ -57,7 +57,7 @@ import { saleClock } from "@/lib/store-sale";
 import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { after } from "next/server";
-import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, fromStore, introOf, storeBase } from "@/lib/purchase-email";
+import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, firstChargeSaid, fromStore, introOf, storeBase, type SessionRecord } from "@/lib/purchase-email";
 import { firstChargeCents } from "@/lib/yearly-price";
 import { readConfig } from "@/lib/community";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
@@ -447,7 +447,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       moves: order.call.moves,
       answers: order.answers,
       amountCents: order.amount,
-      currency: order.currency,
+      currency: order.record.currency,
       lead: order.call.lead,
       pi: order.call.pi,
       due,
@@ -644,6 +644,11 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const firstCents = order.state === "paid" && order.product.recurring ? firstChargeCents(order.product, order.option, paidEvery, store.tiers) : null;
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
+  // A membership whose discount came off its first charge, said as the confirmation email says it, never "$10 a month"
+  // when only the first charge was $10 (rule 27; lib/purchase-email.ts, firstChargeSaid); "unread" names no price.
+  const firstChargeLine = order.state === "paid" && order.product.recurring && !introPaid ? firstChargeSaid(store, order.record as SessionRecord, order.product) : null;
+  // A paid call's amounts in person, only in the currency Stripe charged, read exactly (lib/calls.ts, chargedIn).
+  const dueIn = order.state === "paid" ? chargedIn(order.record.currency) : null;
 
   // Each license key this order earns: given here if the five-minute job
   // that sends the confirmation has not given it already. A sale only ever
@@ -836,7 +841,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   ? t.nothingChargedToday
                   : booked && order.record.metadata && (order.record.metadata as Record<string, string>).package
                     ? t.oneSessionOfPackage
-                  : t.forPrice(
+                  : firstChargeLine !== null ? "" : t.forPrice(
                       order.product.recurring
                         ? introPaid
                           ? speech(store).w.introThen(
@@ -874,6 +879,15 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     order.trialDays,
                     longDate(order.created + order.trialDays * 86400),
                   )}
+                </p>
+              ) : null}
+              {firstChargeLine && firstChargeLine !== "unread" && !ended ? (
+                <p
+                  className="mt-3 rounded-2xl px-4 py-3 text-sm"
+                  style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
+                  data-first-charge=""
+                >
+                  {firstChargeLine}
                 </p>
               ) : null}
               {order.plan ? (
@@ -953,7 +967,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     <p className="mt-5 text-sm" data-call-place="">{bookingWords(store.language).whereAt(placeLine(booked.setup.place))}</p>
                   ) : null}
                   {/* The code and what is left to pay in person, as Stripe's page said before paying (lib/call-deposit.ts). */}
-                  {dueLines(bookingWords(store.language), due ?? null, { currency: order.currency || store.currency, locale, storeName: store.name }).map((line) => (
+                  {(dueIn ? dueLines(bookingWords(store.language), due ?? null, { currency: dueIn, locale, storeName: store.name }) : []).map((line) => (
                     <p key={line} className="mt-2 text-sm" data-call-due="">{line}</p>
                   ))}
                   {/* The cancellation deadline promised when paying (lib/call-setup.ts, readCancelPromise). */}
@@ -992,7 +1006,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 </>
               ) : order.items ? (
                 <>
-                  {contents(order.items, "main", downloadAt({ item: "bundle" }))}
+                  {contents(order.items, "main", downloadAt({ item: "bundle" }), o.whatIsInside)}
                   <p className="st-muted mt-5 text-sm">
                     {t.bundleDownloads(hours, store.name)}
                   </p>
@@ -1471,7 +1485,10 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
   const handing = ours !== null && handed === false;
   // Refunded in full by PayPal and taken back by the refund watch: said so, with no link, no purchase event and no
   // hand-over or receipt promised (the Claude 4 team's second money review of #2911).
-  const refunded = ours !== null && handed === "refunded";
+  // Taken back by another way than a refund (reversed, failed or declined): the same, in words true of it, never
+  // "refunded" (pre-review MEDIUM on C4-13).
+  const reversed = ours !== null && handed === "reversed";
+  const refunded = (ours !== null && handed === "refunded") || reversed;
   // A product that cannot be read (or is gone) never sends a paid buyer to the error page or to "not found"
   // (Claude 5's LOW 2 on #2911): the page then says it was paid and opens the list of purchases.
   const product = delivered ? await readListing(store, ours.product).catch(() => null) : null;
@@ -1493,8 +1510,8 @@ async function PayPalThanks({ store, order }: { store: Store; order: string }) {
           {ours && refunded ? (
             <>
               <p className="st-price text-sm">{t.paidWithPayPal}</p>
-              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{t.ppRefunded}</h1>
-              <p className="st-muted mt-4">{t.ppRefundedBody}</p>
+              <h1 className="font-display mt-5 text-3xl font-semibold leading-tight sm:text-4xl">{reversed ? t.ppTakenBack : t.ppRefunded}</h1>
+              <p className="st-muted mt-4">{reversed ? t.ppTakenBackBody : t.ppRefundedBody}</p>
               <p className="st-muted mt-3 text-sm">{t.ppPaidTo(store.name)}</p>
             </>
           ) : ours && handing ? (

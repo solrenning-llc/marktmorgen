@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, keepWhileUnconfirmed, voidDeclined, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -250,15 +250,7 @@ export async function switchYearly(store: Store, token: string, subscription: st
         console.error("a move to yearly's reply was not one this code knows", subscription);
         return { ok: false, reason: "unconfirmed" };
       }
-      if (answered === "pending") {
-        const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
-        if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
-          await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, new URLSearchParams()).catch((error) =>
-            console.error("voiding a declined move to yearly failed", error),
-          );
-        }
-        return { ok: false, reason: "declined" };
-      }
+      if (answered === "pending") return { ok: false, reason: await voidDeclined(account, updated, "move to yearly") };
       // As a membership bought yearly says it (lib/store-checkout.ts).
       await onAccount(
         "POST",

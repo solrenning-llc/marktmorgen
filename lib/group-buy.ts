@@ -274,8 +274,13 @@ async function sendReceipt(input: {
   const title = groupTitle(product, group);
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (!buyer) return false;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents * group.people;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What was charged and in what, only as Stripe returned it (#4705): a whole number of the currency's smallest unit
+  // and its code. Otherwise the receipt and its link still go, with no "Paid" line, never the catalog price times the
+  // places or the store's currency in its place.
+  const charged =
+    Number.isSafeInteger(session.amount_total) && Number(session.amount_total) >= 0 && typeof session.currency === "string" && /^[a-z]{3}$/.test(session.currency)
+      ? { amount: Number(session.amount_total), currency: session.currency }
+      : null;
   const g = givingWords(store.language);
   return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order" },
     from: input.from,
@@ -285,7 +290,7 @@ async function sendReceipt(input: {
       input.lead,
       "",
       g.forWho(title, peopleWords(group.people, store.language)),
-      g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+      ...(charged ? [g.paidLine(formatMoney(charged.amount, charged.currency, speech(store).lang.locale))] : []),
       g.orderRef(group.session ?? ""),
       ...consentEmailLines(store, input.session?.metadata),
       "",

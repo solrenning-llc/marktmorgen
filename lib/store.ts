@@ -1330,6 +1330,28 @@ export async function storeForId(sid: string): Promise<Store | null> {
 }
 
 /**
+ * storeForId on Redis's exact answer only (rule 24; Claude 6 on #2969): null only where the id leads to no store
+ * (nil), or the record it leads to is not there or is another store's; a reply missing or in another shape, and a
+ * record that is there but cannot be read, throw UnknownReplyError, never "no such store". The same two GETs.
+ */
+export async function storeForIdExact(sid: string): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const [ref] = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1) ?? unknownIdReply();
+  if (ref === null) return null;
+  if (typeof ref !== "string" || !ref) unknownIdReply();
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1) ?? unknownIdReply();
+  if (raw === null) return null;
+  const store = (typeof raw === "string" ? parseStore(raw) : null) ?? unknownIdReply();
+  // As storeForEmail and storeForId: a record that belongs to another owner key, or carries another id, is not this store.
+  if (typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) return null;
+  return store.sid === sid ? store : null;
+}
+
+function unknownIdReply(): never {
+  throw new UnknownReplyError("the store behind an id");
+}
+
+/**
  * Every store an account owns, its first store first and the others in the
  * order they were made. A store whose record says it belongs to someone
  * else — which only a half-finished move could leave — is not listed.
@@ -1882,11 +1904,18 @@ export async function createStore(
   const sid = newListId();
   const ref = extraRef(sid);
   const account = await accountKey(email);
-  const [, count] = await redisPipeline([
+  const added = repliesFor(await redisPipeline([
     ["SADD", account, sid],
     ["SCARD", account],
-  ]);
-  if (Number(count) + 1 > MAX_STORES_PER_ACCOUNT) {
+  ]), 2);
+  // Read exactly (unknown is never zero): each store brings free allowances the company pays for, so a count in
+  // another shape (NaN before, which passed the ceiling) takes the new id back out and makes no store.
+  const count = added ? countOf(added[1]) : null;
+  if (count === null) {
+    await redisPipeline([["SREM", account, sid]]);
+    throw new UnknownReplyError("an account's count of stores");
+  }
+  if (count + 1 > MAX_STORES_PER_ACCOUNT) {
     await redisPipeline([["SREM", account, sid]]);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
@@ -1915,7 +1944,7 @@ export async function createStore(
 
 export type DeleteResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" | "closing" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -1937,6 +1966,11 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
     if (store.domain) return { ok: false, reason: "domain" };
+    // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
+    // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
+    // at Stripe for good, unrefunded and never told (Claude 7's hunt). It is removed by its closing instead, as a
+    // move to another sign-in is refused (closingUnderway); a line that does not read throws and deletes nothing.
+    if (await closingUnderway(store)) return { ok: false, reason: "closing" };
 
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
     const handles = [store.handle, ...store.previousHandles];

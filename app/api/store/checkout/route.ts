@@ -226,11 +226,14 @@ export async function POST(request: NextRequest) {
 
   // Asked before a gift or a group is written down, so a refused yes leaves
   // nothing behind; the charge itself checks again, with what was added.
-  const consentBack = from
-    ? `/@${store.handle}/${from}/${product.id}?consent=needed`
-    : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
-  // Sent back for the box, a buyer who came from the emailed link keeps it, so the code still goes on.
-  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(linkToken && !from ? `/@${store.handle}/p/${product.id}?consent=needed&rtoken=${encodeURIComponent(linkToken)}#returning` : consentBack);
+  // Sent back for the box, a buyer who came from the emailed link keeps it, so the code still goes on: at this first
+  // check and at the second, when a digital extra on a shipped product asks for the box (DigitalConsentMissing, #4742).
+  const consentBack = linkToken && !from
+    ? `/@${store.handle}/p/${product.id}?consent=needed&rtoken=${encodeURIComponent(linkToken)}#returning`
+    : from
+      ? `/@${store.handle}/${from}/${product.id}?consent=needed`
+      : `/@${store.handle}/p/${product.id}?consent=needed${giftTo.trim() && !preorder ? "&gift=consent#gift" : people.trim() && !preorder ? "&group=consent#group" : preorder ? "#preorder" : "#buy"}`;
+  if (!digitalConsent && deliversDigitally(product, optionId || null)) return away(consentBack);
 
   if (linkToken) {
     const redeemed = await redeemReturningLink(store, product.id, linkToken);

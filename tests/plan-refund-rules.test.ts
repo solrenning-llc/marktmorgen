@@ -150,6 +150,19 @@ part("Bad data is never read as money");
     is(what, planRefund(base({}, charge as Partial<PlanRefundInput["charge"]>)), { kind: "unknown", reason: "unreadable" });
   }
   is("a yearly monthly price that is not money", planRefund(base({ cycle: "year", firstPayment: false, monthlyCents: -3, nowSeconds: T0 + 40 * DAY }, { amountCents: 49_000 })), { kind: "unknown", reason: "unreadable" });
+  // Issue #4776: a finite period start a date cannot hold twelve months after made every month comparison NaN.
+  is("addMonthsLikeStripe of 9e12 seconds is NaN", Number.isNaN(addMonthsLikeStripe(9e12, 12)), true);
+  is("a yearly period starting at 9e12 seconds is unreadable, never no month used", planRefund(base({ cycle: "year", firstPayment: false, periodStartSeconds: 9e12, nowSeconds: T0 + 40 * DAY }, { amountCents: 49_000 })), { kind: "unknown", reason: "unreadable" });
+  is("a yearly period starting at a fraction of a second is unreadable", planRefund(base({ cycle: "year", firstPayment: false, periodStartSeconds: T0 + 0.5, nowSeconds: T0 + 40 * DAY }, { amountCents: 49_000 })), { kind: "unknown", reason: "unreadable" });
+}
+
+part("A yearly period starting after its payment does not read");
+{
+  const yearly = (start: number) => planRefund(base({ cycle: "year", firstPayment: false, periodStartSeconds: start, monthlyCents: 4_900, nowSeconds: T0 + 400 * DAY }, { amountCents: 49_000, invoiceTotalCents: 49_000, paidAtSeconds: T0, feeCents: 1_500 }));
+  is("a period starting a year after the payment is unreadable, never the whole year back", yearly(T0 + 365 * DAY), { kind: "unknown", reason: "unreadable" });
+  is("a period starting a day and a second after the payment is unreadable", yearly(T0 + DAY + 1), { kind: "unknown", reason: "unreadable" });
+  is("a period starting within a day of the payment still reads (skew)", yearly(T0 + DAY).kind !== "unknown", true);
+  is("a period starting at the payment reads", yearly(T0).kind !== "unknown", true);
 }
 
 part("Months start on Stripe's billing anchor");

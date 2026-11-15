@@ -50,6 +50,8 @@
 import { REFUND_DAYS } from "@/lib/plan";
 
 const DAY_SECONDS = 86_400;
+/** How far a yearly period may start after its payment and still be read: clock and webhook skew, never a month. */
+const PERIOD_START_SLACK_SECONDS = DAY_SECONDS;
 
 export type PlanRefundCharge = {
   /** Stripe's lowercase three-letter code. */
@@ -176,6 +178,10 @@ export function planRefund(input: PlanRefundInput): PlanRefund {
   if (c.feeCents === null) return { kind: "unknown", reason: "fee_unread" };
   if (c.feeCurrency !== c.currency) return { kind: "unknown", reason: "currency" };
 
+  // A yearly payment is taken at or after the start of the year it pays for (a renewal invoice is made at the new
+  // period's start and paid then or on a later retry). A period starting more than a day after the payment is a line
+  // that does not read: counted as it is, its months would not have started and the whole year would come back.
+  if (input.periodStartSeconds > c.paidAtSeconds + PERIOD_START_SLACK_SECONDS) return { kind: "unknown", reason: "unreadable" };
   const kept = monthsStarted(input.periodStartSeconds, input.nowSeconds);
   const preTaxPaid = c.amountCents - c.taxCents;
   const keptCents = Math.min(preTaxPaid, kept * input.monthlyCents);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 /**
  * The six-digit code from the login email (652 [WG12]), for when the email
@@ -29,13 +29,21 @@ export function EmailCodeForm({ request }: { request: string }) {
   const [code, setCode] = useState("");
   const [sending, setSending] = useState(false);
   const [problem, setProblem] = useState("");
+  // Where the focus goes back to when a code is refused: the button is switched off while it is checked, and
+  // a switched-off button loses the focus, so without this a wrong code left the person at the top of the
+  // page instead of in the field to type it again (WCAG 2.4.3, 3.3.1).
+  const field = useRef<HTMLInputElement>(null);
+  const refuse = (message: string) => {
+    setProblem(message);
+    field.current?.focus();
+  };
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (sending) return;
     const digits = code.replace(/[\s-]/g, "");
     if (!/^\d{6}$/.test(digits)) {
-      setProblem(CODE_MESSAGES.code_shape);
+      refuse(CODE_MESSAGES.code_shape);
       return;
     }
     setSending(true);
@@ -52,12 +60,13 @@ export function EmailCodeForm({ request }: { request: string }) {
         window.location.assign(data.next);
         return;
       }
-      if (data.error === "code_wrong" && typeof data.left === "number") setProblem(wrongCodeMessage(data.left));
-      else setProblem(typeof data.error === "string" && Object.hasOwn(CODE_MESSAGES, data.error) ? CODE_MESSAGES[data.error] : CODE_MESSAGES.server_error);
+      setSending(false);
+      if (data.error === "code_wrong" && typeof data.left === "number") refuse(wrongCodeMessage(data.left));
+      else refuse(typeof data.error === "string" && Object.hasOwn(CODE_MESSAGES, data.error) ? CODE_MESSAGES[data.error] : CODE_MESSAGES.server_error);
     } catch {
-      setProblem(CODE_MESSAGES.server_error);
+      setSending(false);
+      refuse(CODE_MESSAGES.server_error);
     }
-    setSending(false);
   }
 
   return (
@@ -71,6 +80,7 @@ export function EmailCodeForm({ request }: { request: string }) {
         </p>
         <input
           id={`${id}-code`}
+          ref={field}
           name="code"
           type="text"
           inputMode="numeric"

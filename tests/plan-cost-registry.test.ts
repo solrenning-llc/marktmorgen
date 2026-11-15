@@ -6,6 +6,7 @@ import { MAX_BUMPS } from "@/lib/product-extras";
 import { MAX_COLLECTION_PRODUCTS } from "@/lib/store-collections";
 import { bundleItemRead, collectionRead } from "./plan-cost-registry";
 import { checkUnits, searchUnits, walkUnits } from "@/lib/community-read-rules";
+import { MAX_UNLOCK_PRODUCTS } from "@/lib/community-locked";
 import { SEARCH_CONVERSATIONS } from "@/lib/community-dm";
 import { ACCESS_CHECK_READ, searchRead, walkRead } from "./plan-cost-registry";
 import { PATH_GROWTH_READ } from "./plan-cost-registry";
@@ -54,6 +55,7 @@ import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
 import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
+import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
 import { SHELF_REQUEST_UNITS } from "@/lib/course-shelf";
 import { ASSIST_REMIND_REQUEST_UNITS } from "@/lib/assistant-reminder-rules";
 import { DOWNLOAD_LOOKUP_READ, ORDERS_BUNDLE_READ, ORDERS_OLDER_READ, ORDERS_OPEN_READ, ORDERS_METERED_COMMAND, ORDERS_METERED_LISTING, ORDERS_METERED_MOVES, ORDERS_METERED_PROGRESS } from "./plan-cost-registry";
@@ -258,6 +260,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
     assert.ok(searchUnits({ room, conversations }) * laterPageCost() >= searchRead({ room, conversations }), `search ${room} ${conversations}`);
   }
   for (const checks of [1, 2, 20]) assert.ok(checkUnits(checks) * laterPageCost() >= checks * ACCESS_CHECK_READ, `${checks} checks`);
+  // A member's locked spaces read at most one collection page's products, so the collection's figures above hold them (542 [CM1]).
+  assert.ok(MAX_UNLOCK_PRODUCTS <= MAX_COLLECTION_PRODUCTS, `${MAX_UNLOCK_PRODUCTS} unlock products > ${MAX_COLLECTION_PRODUCTS}`);
+  // The studio's "View as a member" reads the same products, paid in studio requests (542 [CM1]): each covers what a public one does.
+  for (let products = 1; products <= MAX_UNLOCK_PRODUCTS; products += 1) assert.ok(collectionUnits(products) * UNIT_COST.studio >= collectionRead(products), `studio: unlock of ${products}`);
+  for (let items = 1; items <= MAX_UNLOCK_PRODUCTS * MAX_BUNDLE_ITEMS; items += 1) assert.ok(bundleItemUnits(items) * UNIT_COST.studio >= bundleItemRead(items), `studio: ${items} bundle items`);
   for (const commands of [0, 1, 24, 25, 26, 600, 30_000]) for (const bytes of [0, 1, 999_999, 1_000_000, 1_000_001, 51_200_000]) {
     assert.ok(walkUnits(commands, bytes) * laterPageCost() >= walkRead(commands, bytes), `walk step ${commands} commands ${bytes} bytes`);
   }
@@ -271,6 +278,8 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   // The offers after a cart read what the buyer owns with the same reads and Stripe calls (ownedHere), without the model or the choice's
   // product reads, and count as many requests (lib/cart-offers.ts): the same ceiling holds them.
   assert.equal(CART_OFFER_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
+  // A code only for people who bought here before reads the same purchases the same way (lib/returning-code.ts): the same ceiling holds it.
+  assert.equal(RETURNING_CODE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   // A course's "More from" shelf (lib/course-shelf.ts) reads what a student owns the same way, plus its PayPal counts, and counts
   // SHELF_REQUEST_UNITS requests before it reads: more than its reads and Stripe calls cost.
   assert.ok(SHELF_REQUEST_UNITS * laterPageCost() >= SHELF_READ, `${SHELF_REQUEST_UNITS} x ${laterPageCost()} < ${SHELF_READ}`);

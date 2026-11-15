@@ -46,6 +46,8 @@ let senderRefuses = false;
 let emailsAccepted = 0;
 /** What the next one-click charge answers. */
 let nextCharge: "succeeded" | "requires_action" = "succeeded";
+/** Whether the next one-click charge answers with no readable amount (#4802's siblings). */
+let amountUnreadable = false;
 /** Run once a one-click charge is made (after its checkout was admitted), then cleared. */
 let onCharge: (() => Promise<void>) | null = null;
 const made: Record<string, unknown>[] = [];
@@ -68,7 +70,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const pi = {
       id: `pi_TestOffer${String(made.length + 1).padStart(10, "0")}`,
       object: "payment_intent",
-      amount: Number(body.get("amount")),
+      amount: amountUnreadable ? null : Number(body.get("amount")),
       currency: body.get("currency"),
       status: nextCharge,
       receipt_email: body.get("receipt_email"),
@@ -222,6 +224,17 @@ async function main(): Promise<void> {
     is("taken", (await take(session)).kind, "done");
     is("its confirmation went", emailsAccepted - before[2], 1);
     is("counted once, and its place given back", [(await counted()) - before[0], (await held()) - before[1]], [1, 0]);
+  }
+
+  part("A paid offer whose amount does not read: never confirmed or counted at $0 (#4802's siblings)");
+  {
+    const before = [await counted(), await held(), emailsAccepted];
+    const session = offerCheckout();
+    amountUnreadable = true;
+    const kind = (await take(session).catch(() => ({ kind: "threw" }))).kind;
+    amountUnreadable = false;
+    is("taken: it was paid", kind, "done");
+    is("no confirmation saying $0, not counted, and its place stays held", [emailsAccepted - before[2], (await counted()) - before[0], (await held()) - before[1]], [0, 0, 1]);
   }
 
   part("A paid offer whose count keeps failing keeps its place held");

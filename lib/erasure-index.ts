@@ -93,6 +93,21 @@ redis.call('ZREM', KEYS[2], unpack(KEYS, 3))
 return gone`;
 
 /**
+ * The keys noted for this address that start with `prefix`, read exactly (rule 24): both notes must answer a list of
+ * text, or UnknownReplyError is thrown and nothing is taken as "none noted". For a module whose records point at
+ * something outside Redis (a stamped copy's file, lib/pdf-stamp.ts), so it can delete that before forgetNoted
+ * deletes the records. Reads only; two commands.
+ */
+export async function notedKeys(statsId: string | null | undefined, email: string, prefix: string): Promise<string[]> {
+  if (!statsId || !email || !isRedisConfigured()) return [];
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", indexKey(statsId, email)], ["ZRANGEBYSCORE", notesKey(statsId, email), "-inf", "+inf"]]), 2);
+  const raw = stringList(replies?.[0]);
+  const scored = stringList(replies?.[1]);
+  if (!raw || !scored) throw new UnknownReplyError("the notes of an address's records");
+  return [...new Set([...raw, ...scored].filter((k) => k.startsWith(prefix)))];
+}
+
+/**
  * Deletes every record noted for this address in this store, and the note itself.
  *
  * The note is the only way to the records (audit SG2, finding 4): a reply

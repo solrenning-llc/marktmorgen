@@ -47,6 +47,7 @@ import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
 import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
+import { forgetStampedPerson } from "@/lib/pdf-stamp";
 import { repliesFor } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
@@ -214,7 +215,9 @@ export const ERASERS: Eraser[] = [
   // The month's summary of what customers say quotes their reviews (rule 28): it goes after them, and a reading under way is not kept.
   { module: "lib/customer-voice.ts", run: (s) => forgetVoicePerson(s.statsId) },
   { module: "lib/buyer-library.ts", run: (s) => forgetLibraryPerson(s.sid, s.email) },
-  { module: "lib/erasure-index.ts", run: (s) => forgetNoted(s.statsId, s.email) },
+  // A stamped copy's file, found through its record's note, before forgetNoted deletes the records (lib/pdf-stamp.ts).
+  { module: "lib/pdf-stamp.ts", run: (s) => forgetStampedPerson(s.statsId, s.email) },
+  { module: "lib/erasure-index.ts", after: ["lib/pdf-stamp.ts"], run: (s) => forgetNoted(s.statsId, s.email) },
   { module: "lib/contacts.ts", after: ["lib/mail-clicks.ts"], run: (s) => forgetContactPerson(s.listId, s.email) },
 ];
 

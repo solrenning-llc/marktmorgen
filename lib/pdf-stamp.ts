@@ -42,6 +42,8 @@ import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/pr
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import { isSuppressed, suppressedCommand, wasSuppressed } from "@/lib/suppression";
+import { noteForErasure, notedKeys } from "@/lib/erasure-index";
 import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -173,7 +175,7 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 export async function stampedCopy(
   file: ProductFile,
   sale: { reference: string; email: string; paidAt: number },
-  store: DataStore & { language?: LanguageCode },
+  store: DataStore & { language?: LanguageCode; listId?: string | null },
 ): Promise<ProductFile | null> {
   if (!isStampable(file) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
@@ -196,6 +198,10 @@ export async function stampedCopy(
       // new file is a new path. A size note is not trusted this way, since a
       // failed read is noted as one too.
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return null;
+      // A person deleted from the store (lib/suppression.ts) never has a new copy made with their address in it, and
+      // none is kept (Claude 7 on main 4865799f53): the original is handed over instead, and a check that does not
+      // read throws (rule 24), which hands over the original too. Whether they keep the download is not decided here.
+      if (await isSuppressed(store.listId, sale.email)) return null;
     }
     const original = await readWhole(file.pathname, MAX_STAMP_BYTES);
     if (!original) {
@@ -238,8 +244,27 @@ export async function stampedCopy(
     // Its record is kept only while the store's data room has space for it
     // (lib/store-data.ts): without it the buyer still gets this copy, and the
     // next download stamps another.
-    if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
-      await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
+    if (isRedisConfigured()) {
+      // The record is noted under the buyer's address (lib/erasure-index.ts), so deleting the person finds the copy
+      // and its file (forgetStampedPerson). The deletion mark is read again after the write: a person deleted while
+      // the copy was made gets neither the copy nor its record (STAMP_ERASURE_COMMANDS, measured in
+      // tests/c7-stamped-copy-erasure.test.ts).
+      const kept = await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS);
+      const write = kept ? [["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS], ...noteForErasure(store.statsId, sale.email, key)] : [];
+      const replies = repliesFor(await redisPipeline([...write, suppressedCommand(store.listId, sale.email)]), write.length + 1);
+      let erased = true;
+      try {
+        erased = wasSuppressed(replies?.[write.length]);
+      } catch {}
+      if (erased) {
+        if (kept) await redisPipeline([["DEL", key]]);
+        // The file store failing here leaves the sale's folder on DROP_QUEUE, never the copy kept unlisted.
+        await deleteFile(pathname).catch(async (error: unknown) => {
+          const folder = SALE_COPY.exec(pathname)?.[1];
+          if (!folder || !(await noteDrop(folder))) console.error(`a copy made for a deleted person could not be deleted: ${folder ?? "an unknown path"}`, error);
+        });
+        return null;
+      }
     }
     // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
     // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
@@ -261,6 +286,10 @@ export const DROP_QUEUE = "nl:stamp:drop";
 const RETRY_PER_CALL = 2;
 /** What copyFolder makes, and so the only thing read from the list that is ever listed and deleted. */
 const COPY_FOLDER = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/$`);
+/** One sale's folder inside it, put down by a person's deletion (forgetStampedPerson): only that buyer's copy. */
+const SALE_FOLDER = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/[0-9a-f]{24}/$`);
+/** A sale's copy as stampedCopy writes it: the only path a person's deletion ever deletes. */
+const SALE_COPY = new RegExp(`^((?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/[0-9a-f]{24}/)[^/]+$`);
 
 /** Deletes every file in a folder of stamped copies. Throws when the folder cannot be listed whole or a file not deleted. */
 async function deleteFolder(folder: string): Promise<void> {
@@ -294,7 +323,7 @@ export async function retryStampDrops(limit: number, keep?: string): Promise<num
   for (const folder of folders) {
     // `keep` is the folder of a copy being handed over right now: it stays on the list for a later try, so a new
     // copy is never deleted by its own call (Codex M on #3312).
-    if (!COPY_FOLDER.test(folder) || folder === keep) continue;
+    if (!(COPY_FOLDER.test(folder) || SALE_FOLDER.test(folder)) || folder === keep || (keep && folder.startsWith(keep))) continue;
     await deleteFolder(folder);
     const gone = repliesFor(await redisPipeline([["SREM", DROP_QUEUE, folder]]), 1);
     const count = gone ? countOf(gone[0]) : null;
@@ -319,4 +348,43 @@ export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | 
     if (await noteDrop(folder)) console.error("could not delete stamped copies; put down to be tried again", error);
     else console.error(`could not delete stamped copies in ${folder}, and nothing will try again: the list could not be written`, error);
   }
+}
+
+/** Redis commands a new copy adds for a person's deletion: the mark read before (1) and after (1) it is made, and its note (3). */
+export const STAMP_ERASURE_COMMANDS = 5;
+
+/**
+ * Deletes the stamped copies made for a person (lib/person-erasure.ts): each record noted under their address
+ * (lib/erasure-index.ts) names its file, which is deleted here; the records themselves go with the notes
+ * (forgetNoted). A file the store could not delete is put down in DROP_QUEUE (its sale's folder) and tried again;
+ * when even that cannot be confirmed, this throws and the deletion says it is not finished. A record that does not
+ * read, or names a path that is not a sale's copy, throws (rule 24). Answers how many copies were found.
+ */
+export async function forgetStampedPerson(statsId: string | null | undefined, email: string): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const keys = await notedKeys(statsId, email, "nl:stamp:copy:");
+  if (!keys.length) return 0;
+  const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...keys]]), 1)?.[0], keys.length);
+  if (!rows) throw new UnknownReplyError("a person's stamped copies");
+  const paths: string[] = [];
+  for (const raw of rows) {
+    if (raw === null) continue;
+    let pathname: unknown;
+    try {
+      pathname = typeof raw === "string" ? (JSON.parse(raw) as { pathname?: unknown }).pathname : undefined;
+    } catch {}
+    if (typeof pathname !== "string" || !SALE_COPY.test(pathname)) throw new UnknownReplyError("a person's stamped copy");
+    paths.push(pathname);
+  }
+  if (!paths.length) return 0;
+  try {
+    await deleteFile(paths);
+  } catch (error) {
+    for (const path of paths) {
+      const folder = SALE_COPY.exec(path)?.[1] as string;
+      if (!(await noteDrop(folder))) throw new Error("a person's stamped copy could not be deleted, nor put down to be tried again", { cause: error });
+    }
+    console.error("a person's stamped copies could not be deleted yet; put down to be tried again", error);
+  }
+  return paths.length;
 }

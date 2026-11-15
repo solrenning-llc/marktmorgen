@@ -68,6 +68,22 @@ async function main(): Promise<void> {
   const again = await erasePerson(world2.store, bo, { kind: "person" });
   is("a repeat erasure with the queue back finishes", again.ok, true);
   is("and the file it could not queue before is queued now", (await queued()).length > 0, true);
+  part("Review 3rjdf (MEDIUM): the paths' own set, the queue and the file store all failing: nothing is deleted on a guess");
+  redis.clear();
+  const world3 = await makeWorld();
+  const cy = normaliseEmail("cy@example.com");
+  await seedPerson(world3, cy, null);
+  redis.pipeline = (async (c: Commands) => {
+    if (doors(c) || c.some((x) => x[0] === "SADD" && String(x[1]).startsWith("nl:erase:files:"))) throw new Error("synthetic redis failure");
+    return real(c);
+  }) as typeof redis.pipeline;
+  const third = await erasePerson(world3.store, cy, { kind: "person" }).then((r) => (r.ok ? "ok" : "incomplete"), () => "threw");
+  redis.pipeline = real;
+  is("said as incomplete", third, "incomplete");
+  const repeat = await erasePerson(world3.store, cy, { kind: "person" });
+  is("the repeat, everything back, finishes", repeat.ok, true);
+  is("and the file is queued for deletion: its record was kept until its path was", (await queued()).length > 0, true);
+  is("nothing left of the paths' set once done", redis.keys().filter((k) => k.startsWith("nl:erase:files:") && JSON.stringify(redis.run(["SMEMBERS", k])) !== "[]").length, 0);
   done();
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

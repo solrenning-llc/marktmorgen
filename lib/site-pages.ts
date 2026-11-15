@@ -458,11 +458,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Kajabi",
     intro: "A Kajabi alternative where your store, products and direct Stripe payments share one studio. Compare the published limits as well as the subscription price.",
     seo: { title: "Marktmorgen vs Kajabi", description: "A Kajabi alternative where store setup and direct Stripe payments share one studio. Compare prices, email limits and branded apps. Paid plans are not on sale yet." },
-    badge: { label: "Sources read October 19, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Choose by the features you need. Marktmorgen starts at " + publishedPriceWords("creator", "month") + "; list email starts on " + PLAN_TITLES.pro + " at " + publishedPriceWords("pro", "month") + ". Kajabi Basic includes marketing email. A lower entry price does not mean every plan is cheaper or every allowance matches." },
-      { kind: "table", title: "Prices, limits and payment fees", head: ["Compare", "Kajabi", "Marktmorgen"], note: "USD. Official Kajabi sources were read October 19, 2026 and are linked below. Annual prices require annual payment. Processing, applicable taxes and optional services can add to either side.", rows: [
+      { kind: "table", title: "Prices, limits and payment fees", head: ["Compare", "Kajabi", "Marktmorgen"], note: "USD. Official Kajabi sources were read November 15, 2026 and are linked below. Annual prices require annual payment. Processing, applicable taxes and optional services can add to either side.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.kajabi.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual subscription", COMPETITOR_PRICES.kajabi.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Product catalog", "Basic: 5; Growth: 50; Pro: unlimited.", "Up to " + MAX_PRODUCTS.toLocaleString("en-US") + " products per store. Storage, traffic, order and other plan limits still apply."],
@@ -481,7 +481,7 @@ export const PAGES: TopicPage[] = [
         "Kajabi includes marketing email on Basic and publishes unlimited marketing emails on its plans. Marktmorgen's Store plan has no list email, and Studio and Scale have the monthly send limits above.",
         "Kajabi sells paid plans today. Marktmorgen's paid plans are still closed; a prepared store is not an open paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 19, 2026. These are public USD quotes, not a negotiated offer or a promise that every payment method is available in every country.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. These are public USD quotes, not a negotiated offer or a promise that every payment method is available in every country.", items: [
         { icon: "list", title: COMPETITOR_PRICES.kajabi.plans[0].source.label, body: "Monthly and annual subscriptions, products, marketing email and regional payment-fee conditions.", href: COMPETITOR_PRICES.kajabi.plans[0].source.url },
         { icon: "info", title: COMPETITOR_PRICES.kajabi.trial.source.label, body: "The standard trial is 14 days; its exact term and locked features are described by Kajabi.", href: COMPETITOR_PRICES.kajabi.trial.source.url },
         { icon: "info", title: COMPETITOR_PRICES.kajabi.brandedApp.source.label, body: "Branded listings on Apple App Store and Google Play, plan inclusion and the Basic/Growth add-on.", href: COMPETITOR_PRICES.kajabi.brandedApp.source.url },

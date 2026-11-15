@@ -14,7 +14,9 @@ import { done, is, part } from "./check";
 const source = readFileSync("components/topic-page.tsx", "utf8");
 const badge = /<span className=\{([^}]*BADGE_CLASS\[page\.badge\.tone\][^}]*)\}>\{page\.badge\.label\}<\/span>/.exec(source)?.[1] ?? "";
 const plan = /<span className=\{?"?([^">{}]*)"?\}?>\{PLAN_LINE\[page\.plan\]\}<\/span>/.exec(source)?.[1] ?? "";
-const wraps = (cls: string) => /\bwhitespace-normal\b/.test(cls) && /\bh-auto\b/.test(cls) && /\bmin-h-\[26px\]/.test(cls);
+// `.tag` is an unlayered rule in app/globals.css, which beats Tailwind's layered utilities: only the important
+// variants ("!") override its nowrap and its fixed height (measured: a plain whitespace-normal left it nowrap).
+const wraps = (cls: string) => /\bwhitespace-normal!/.test(cls) && /\bh-auto!/.test(cls) && /\bmin-h-\[26px\]/.test(cls);
 
 part("1.4.12: a topic page's badges wrap instead of being cut");
 is("the badge is found", badge.length > 0, true);

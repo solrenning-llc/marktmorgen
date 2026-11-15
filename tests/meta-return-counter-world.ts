@@ -9,14 +9,14 @@ export const state={configured:true,session:true,access:true,paused:'',funding:t
 export function reset(){store.clear();Object.assign(state,{configured:true,session:true,access:true,paused:'',funding:true,counter:'normal',commands:[],providerCalls:0,fundingCalls:0,accessCalls:0});}
 export async function redisPipeline(commands:(string|number)[][]):Promise<unknown[]>{
  state.commands.push(...commands);
- if(commands[0]?.[0]==='SET' && String(commands[0][1]).startsWith('nl:rl:')){
+ if(commands[0]?.[0]==='INCR' && String(commands[0][1]).startsWith('nl:rl:')){
   if(state.counter==='timeout')throw new Error('Synthetic lost counter response');
-  if(state.counter==='false-set')return [false,1];
-  if(state.counter==='null-count')return ['OK',null];
-  if(state.counter==='text-count')return ['OK','1'];
+  if(state.counter==='false-expire')return [1,false];
+  if(state.counter==='null-count')return [null,1];
+  if(state.counter==='text-count')return ['1',1];
   if(state.counter==='empty')return [];
-  if(state.counter==='partial')return ['OK'];
-  if(state.counter==='exceeded')return ['OK',31];
+  if(state.counter==='partial')return [1];
+  if(state.counter==='exceeded')return [31,0];
  }
  return normal(commands);
 }

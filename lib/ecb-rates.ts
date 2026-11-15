@@ -35,7 +35,7 @@ const realDay = (value: string) => {
 
 /** The address of the daily reference rates of `currencies` against the euro from `from` to `to`, as CSV. */
 export function ecbRatesUrl(currencies: readonly string[], from: string, to: string): string | null {
-  if (currencies.length === 0 || currencies.some((c) => !CURRENCY.test(c) || c === "EUR") || !realDay(from) || !realDay(to) || from > to) return null;
+  if (!Array.isArray(currencies) || currencies.length === 0 || currencies.some((c) => !CURRENCY.test(c) || c === "EUR") || !realDay(from) || !realDay(to) || from > to) return null;
   return `${ECB_DATA_API}/D.${[...new Set(currencies)].sort().join("+")}.EUR.SP00.A?startPeriod=${from}&endPeriod=${to}&format=csvdata`;
 }
 
@@ -93,8 +93,9 @@ export function readEcbCsv(text: unknown): EcbRates | null {
 export function periodEndRate(rates: EcbRates, currency: string, lastDay: string): { perEuro: string; day: string } | null {
   if (!realDay(lastDay)) return null;
   if (currency === "EUR") return { perEuro: "1", day: lastDay };
+  if (!(rates instanceof Map)) return null;
   const byDay = rates.get(currency);
-  if (!byDay) return null;
+  if (!(byDay instanceof Map)) return null;
   const start = Date.parse(`${lastDay}T00:00:00Z`);
   for (let i = 0; i <= ECB_NEXT_PUBLICATION_DAYS; i += 1) {
     const day = new Date(start + i * 86_400_000).toISOString().slice(0, 10);
@@ -108,10 +109,10 @@ type Fetcher = (url: string, init: { headers: Record<string, string>; signal: Ab
 
 /** One request for the rates; null on any failure (network, status, size, a body that does not read). Never throws. */
 export async function fetchEcbRates(currencies: readonly string[], from: string, to: string, fetcher?: Fetcher): Promise<EcbRates | null> {
-  const url = ecbRatesUrl(currencies, from, to);
-  if (!url) return null;
   const get: Fetcher = fetcher ?? ((u, init) => fetch(u, init));
   try {
+    const url = ecbRatesUrl(currencies, from, to);
+    if (!url) return null;
     const response = await get(url, { headers: { accept: "text/csv" }, signal: AbortSignal.timeout(ECB_TIMEOUT_MS) });
     if (response.status !== 200) return null;
     return readEcbCsv(await response.text());

@@ -103,6 +103,7 @@ export function ossDeadlines(day: string): { deadline: string; correctableUntil:
  * the records' currencies need at the end of this quarter and of each quarter corrected.
  */
 export function ossReturn(records: readonly EuVatRecord[], input: { year: number; quarter: number; rates: EcbRates; filedOn: string }): OssReturn | null {
+  if (!input || typeof input !== "object" || !(input.rates instanceof Map)) return null;
   if (!whole(input.year) || input.year < 2000 || input.year > 9000 || ![1, 2, 3, 4].includes(input.quarter)) return null;
   if (!Array.isArray(records) || !input.rates || !realDay(input.filedOn)) return null;
   const q: Quarter = { year: input.year, quarter: input.quarter };
@@ -139,6 +140,8 @@ export function ossReturn(records: readonly EuVatRecord[], input: { year: number
     for (const adjustment of record.adjustments) {
       const when = quarterOf(adjustment?.date);
       if (!when || !whole(adjustment.taxableCents) || !whole(adjustment.vatCents)) return null;
+      // An adjustment before its own sale is not a record that reads (it would correct a later quarter).
+      if (adjustment.date < record.date) return null;
       if (label(when) !== period) continue;
       if (soldHere) {
         taxable += adjustment.taxableCents;

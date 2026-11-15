@@ -42,7 +42,7 @@ function listSessions(url: URL): Response {
   let rows = all.filter((row) => row.created >= since && (!status || row.status === status));
   if (after) {
     const anchor = all.find((row) => row.id === after);
-    if (!anchor) return new Response(JSON.stringify({ error: { type: "invalid_request_error", message: `No such checkout.session: '${after}'` } }), { status: 400 });
+    if (!anchor) return new Response(JSON.stringify({ error: { type: "invalid_request_error", code: "resource_missing", param: "starting_after", message: `No such checkout.session: '${after}'` } }), { status: 400 });
     rows = rows.filter((row) => order(anchor, row) < 0);
   }
   return new Response(JSON.stringify({ object: "list", data: rows.slice(0, limit), has_more: rows.length > limit }));

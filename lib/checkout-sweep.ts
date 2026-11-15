@@ -392,7 +392,7 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
         listed = await onAccount("GET", account, query);
       } catch (error) {
         // The place is let go only when Stripe says the very session it starts after is not there (#4733): a 400 or 404
-        // naming it, so the next run is not stuck on it. Any other failure (a 500, a 429, a timeout, another session
+        // resource_missing naming it, so the next run is not stuck on it. Any other failure (a 500, a 429, a timeout, another session
         // named) keeps it, so the next run goes on from there instead of from the newest, and an older paid order is
         // not left unread past its confirmation window.
         if (page === 0 && resumed && placeGone(error, kept)) place = "";
@@ -423,9 +423,14 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
   }
 }
 
-/** Whether a failed page answer is Stripe saying the session the walk started after is gone: 400 or 404, naming it. */
+/**
+ * Whether a failed page answer is Stripe saying the session the walk started after is gone: a 400 or 404 with its code
+ * resource_missing, naming that session. Decided by the code, not Stripe's exact sentence, which it words more than one
+ * way ("checkout.session", "checkout session"): a gone place that is never let go would fail the store's first page
+ * every run and leave its paid orders unread for the whole confirmation window (review of the same family on #4733).
+ */
 function placeGone(error: unknown, session: string): boolean {
-  return error instanceof StripeError && (error.status === 400 || error.status === 404) && error.stripeMessage === `No such checkout.session: '${session}'`;
+  return error instanceof StripeError && (error.status === 400 || error.status === 404) && error.code === "resource_missing" && session !== "" && error.stripeMessage.includes(session);
 }
 
 export type SweepCounts = {

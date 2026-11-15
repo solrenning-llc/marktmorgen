@@ -41,6 +41,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   checkup: ["Whose account is the buyer charged on?", "Can I use my own domain?", "Does a buyer who leaves the checkout get a reminder?"],
   "closing-refunds": ["What happens when my plan ends?"],
   community: ["Can I run a community or a webinar?", "How do live events in the community work?"],
+  companies: ["Can I keep my own details about people, and track deals?"],
   copy: ["Can I copy a whole store into another of my stores?"],
   course: ["Can I sell a course?"],
   deals: ["Can I keep my own details about people, and track deals?"],

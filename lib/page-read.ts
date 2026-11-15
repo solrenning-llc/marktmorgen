@@ -35,6 +35,14 @@ import { deriveKey } from "@/lib/secret-box";
 
 export { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
 
+/**
+ * How many read beacons one connection may have counted for one store in READ_WINDOW_SECONDS (MM-SA-43;
+ * app/api/store/read, as app/api/store/hit has its own). A visitor sends one as they leave a page, and only one
+ * in READ_SAMPLE is asked, so this is far above anything a person sends; past it nothing more is counted.
+ */
+export const READ_PER_CONNECTION = 60;
+export const READ_WINDOW_SECONDS = 600;
+
 /** What the store's own page is called where a product's id would go. */
 export const STORE_SCOPE = "~store";
 

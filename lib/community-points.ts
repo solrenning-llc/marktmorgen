@@ -29,6 +29,7 @@
  *   nl:cm:<id>:unl:<member>   when each reward reached this member (hash)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
@@ -84,6 +85,19 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   if (!COMMUNITY.test(id) || !MEMBER.test(who) || !isRedisConfigured()) return;
   const day = dayKey(id, dayOf(now));
   if (delta > 0) {
+    // Only someone still in the community earns (Claude 7, 13 November 2026): a like on a post an erased member left
+    // wrote their points and their place on the board again, and a removed member kept climbing it. A record that
+    // cannot be read is not "still in" (rule 24): no point is given on it. Imported when needed: lib/community.ts,
+    // which lib/community-push.ts reads, imports this file.
+    const { stillMembers } = await import("@/lib/community-push");
+    let still: readonly string[];
+    try {
+      still = await stillMembers(id, [who]);
+    } catch (error) {
+      console.error("reading whether a community member is still in failed; no point given", error);
+      return;
+    }
+    if (!still.includes(who)) return;
     // A member's first point puts them on the boards for good: counted in the store's room (lib/order-data.ts).
     await orderWrite(owner, [
       ["ZINCRBY", allKey(id), 1, who],
@@ -101,17 +115,36 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   }
 }
 
-/** Each member's all-time points; 0 for anybody with none. */
+/**
+ * Each member's all-time points; 0 for anybody with none. Read exactly (CX-123 rule 24): ZSCORE answers nil for no
+ * points or the score; any other answer throws UnknownReplyError, never 0 points, since points set the level that
+ * opens a community's spaces.
+ */
 export async function pointsOf(id: string, keys: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const unique = [...new Set(keys)].filter((k) => MEMBER.test(k));
   if (!unique.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(unique.map((k) => ["ZSCORE", allKey(id), k]));
-  unique.forEach((k, i) => out.set(k, Math.max(0, Number(rows[i]) || 0)));
+  const rows = repliesFor(await redisPipeline(unique.map((k) => ["ZSCORE", allKey(id), k])), unique.length);
+  if (!rows) throw new UnknownReplyError("a community's points");
+  unique.forEach((k, i) => {
+    const row = rows[i];
+    const score = row === null ? 0 : (typeof row === "string" && row.trim() !== "") || typeof row === "number" ? Number(row) : Number.NaN;
+    if (!Number.isFinite(score)) throw new UnknownReplyError("a member's community points");
+    out.set(k, Math.max(0, score));
+  });
   return out;
 }
 
 export type Standing = { key: string; points: number };
+
+/**
+ * The board as members see it: a member the creator removed is left off, the others in their order (Claude 7,
+ * 13 November 2026). Only a member read as not removed is shown: a record not found, or not read, could be a removed
+ * member's, so it is left off too (rule 24; Claude 1 cloud R on #4546).
+ */
+export function boardShown<T extends { key: string }>(top: T[], members: Map<string, { removed: boolean }>): T[] {
+  return top.filter((s) => members.get(s.key)?.removed === false);
+}
 
 /**
  * The top of the board for a period, most points first, and where this

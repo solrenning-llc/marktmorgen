@@ -17,6 +17,7 @@
 import { NextRequest } from "next/server";
 import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
 import { POST as act } from "@/app/api/takedown/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addStoreLink, claimHandle, closeStoreRecord, createStore, deleteStore, dropHeldLink, ensureStatsId, imageFolder, setLinkImage, storeForEmail, storeRef } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { type Report, actOnHeld, fileReport, noticeSentAt, openReport, settleHeld, takeDown } from "@/lib/takedown";
@@ -152,7 +153,12 @@ async function main(): Promise<void> {
   is("still held, its picture kept", [(await current()).heldLinks?.length, kept.has(keptAs)], [1, true]);
 
   part("A counter-notice: the same link and the same picture, back at the same address, 10 to 14 business days later");
-  const answered = await act(new NextRequest(`${ORIGIN}/api/takedown`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN, host: "marktmorgen.com" }, body: JSON.stringify({ token, action: { type: "held", id: first.id, op: "counter" } }) }));
+  // Only the operator's session acts on a notice (#4036, app/api/takedown): the token alone, as a quoting reply could
+  // hand it to the sender, records nothing and is answered as an unknown token is.
+  const counter = (cookie: string | null) => act(new NextRequest(`${ORIGIN}/api/takedown`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN, host: "marktmorgen.com", ...(cookie ? { cookie: `${SESSION_COOKIE}=${cookie}` } : {}) }, body: JSON.stringify({ token, action: { type: "held", id: first.id, op: "counter" } }) }));
+  const alone = await counter(null);
+  is("the token alone records no counter-notice", [alone.status, (await current()).heldLinks?.find((h) => h.link.id === first.id)?.counter ?? null], [404, null]);
+  const answered = await counter(await openSession(process.env.DEMO_STUDIO_ADMIN ?? ""));
   const answer = await answered.json() as { ok?: boolean; done?: string };
   is("recorded from the notice's page", [answered.status, answer.ok, typeof answer.done === "string" && answer.done.length > 0], [200, true, true]);
   const back = restoreFrom(Date.now());

@@ -31,6 +31,7 @@ import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { imageType } from "@/lib/product-image";
 import { SITE_URL } from "@/lib/site-url";
 import { HELD_INDEX, type HeldLink, NOTICE_PAGE_AFTER_HOLD_DAYS, heldDue, holdUntil, restoreFrom } from "@/lib/takedown-hold";
+import { noteTaskUpload } from "@/lib/assignment";
 import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
@@ -307,7 +308,17 @@ async function apply(ref: string, store: Store, action: Exclude<TakedownAction, 
       if (done.reason === "unknown") return false;
       throw new Error("the store could not be written");
     }
-    if (done.removed) await del(done.removed.path).catch(() => {});
+    // The notice says the link and its file are deleted. A delete the file store fails is not lost: nothing points
+    // at the picture any more, so it goes to the daily job that deletes files nobody keeps (app/api/cron/courses),
+    // already past its day, as a deleted person's files do (lib/person-erasure.ts). If even that cannot be written,
+    // the takedown throws, so it is seen and finished again rather than told as done.
+    if (done.removed) {
+      const path = done.removed.path;
+      await del(path).catch(async (error: unknown) => {
+        console.error("could not delete a taken-down link's picture; it goes to the daily job", error);
+        await noteTaskUpload(path, 0);
+      });
+    }
     return true;
   }
   if (action.type === "product") {

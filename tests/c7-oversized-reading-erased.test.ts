@@ -5,12 +5,16 @@
  * nobody (the guard's `without`, marked `unnamed`), with no Redis call added; one that names nobody, or has no guard,
  * is shown as read. Synthetic data, in-memory Redis.
  */
+import { readFileSync } from "node:fs";
 import { type Store, storeForEmail } from "@/lib/store";
 import { READING_COPY_MAX_BYTES, keptReading } from "@/lib/store-readings";
 import { suppressCommand } from "@/lib/suppression";
 import { normaliseEmail } from "@/lib/auth";
 import { OWNER, makeWorld } from "./erasure-world";
 import { store as redis } from "./redis-stub";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { BuyerNumbers } from "@/components/buyer-numbers";
 import { done, is, part } from "./check";
 
 type Reading = { total: number; filler: string; names: string[] };
@@ -56,7 +60,7 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = real;
   }
-  is("it names nobody, never the erased person, and says so", [oversized?.value.names, oversized?.unnamed], [[], true]);
+  is("it names nobody, never the erased person, and says why", [oversized?.value.names, oversized?.unnamed, oversized?.tooLarge], [[], true, true]);
   is("its totals are kept, shown fresh, and it is not kept", [oversized?.value.total, oversized?.stale, redis.run(["EXISTS", copy])], [1234, false, 0]);
   // GET of the copy, the day's reading unit, the suppression the test makes: nothing more for the oversized reading.
   const control = { n: 0 };
@@ -76,6 +80,14 @@ async function main(): Promise<void> {
   is("naming nobody: whole, not marked", [nobody?.value.total, nobody?.value.names, nobody?.unnamed], [1234, [], undefined]);
   const unguarded = await run(big, [erased], false);
   is("a kind with no guard names nobody by address: shown as read", [unguarded?.value.total, unguarded?.unnamed], [1234, undefined]);
+
+  part("The studio says why, and never that they come back on their own");
+  const windows = { d7: { buyers: 2, orders: 2, cents: 5_000, returning: 0, repeat: 0 }, d30: { buyers: 2, orders: 2, cents: 5_000, returning: 0, repeat: 0 }, d90: { buyers: 2, orders: 2, cents: 5_000, returning: 0, repeat: 0 } };
+  const shown = renderToStaticMarkup(createElement(BuyerNumbers, { windows, range: "d90", span: "90 days", currency: "usd", top: [], buyersLater: "too-large" } as never)).replace(/\s+/g, " ");
+  is("too large: said plainly, no promise of when",
+    [shown.includes("Your biggest buyers are not shown this time. These numbers are too large for us to check them against people who asked us to delete their details."), shown.includes("show here again")], [true, false]);
+  const page = readFileSync("app/studio/page.tsx", "utf8");
+  is("the studio page passes the reason on", /salesRead\.tooLarge \? \("too-large" as const\)/.test(page), true);
 
   done();
 }

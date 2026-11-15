@@ -171,7 +171,15 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
  * try failed (counted), and whether who it would name was left out for lack of a list to look them up in (keptReading;
  * the studio says so, never inferring it from an empty list).
  */
-export type Kept<T> = { value: T; at: number; stale: boolean; failed?: boolean; unnamed?: boolean };
+export type Kept<T> = {
+  value: T;
+  at: number;
+  stale: boolean;
+  failed?: boolean;
+  unnamed?: boolean;
+  /** Who it would name was left out because it was too large to keep and check (#4758): not back on its own. */
+  tooLarge?: boolean;
+};
 
 /**
  * The copy kept only when nobody it names was deleted from the store, in one
@@ -238,9 +246,16 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     if (kept) return { ...kept, stale: true, failed: true };
     throw new ReadingFailed();
   }
+  if (value === null || value === undefined) return { value, at: now, stale: false };
   const text = JSON.stringify({ at: now, value });
-  if (value === null || value === undefined || Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) return { value, at: now, stale: false };
   const names = guard ? [...new Set(guard.names(value))] : [];
+  if (Buffer.byteLength(text, "utf8") > READING_COPY_MAX_BYTES) {
+    // Too large to keep, so never through READING_COPY, the check where a copy is written of who was deleted since
+    // `read` looked (#4758): shown with its totals and naming nobody, marked as such, as a store with no list is; with
+    // nobody named it is shown as read. Nothing more is asked of Redis.
+    if (guard && names.length) return { value: guard.without(value, new Set(names)), at: now, stale: false, unnamed: true, tooLarge: true };
+    return { value, at: now, stale: false };
+  }
   if (!guard || !names.length) {
     await redisPipeline([["SET", key, text, "EX", READING_KEEP_SECONDS]]).catch(() => {});
     return { value, at: now, stale: false };

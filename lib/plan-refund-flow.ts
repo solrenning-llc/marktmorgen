@@ -393,8 +393,15 @@ export async function endPlanNow(store: Store, id: string): Promise<boolean> {
       if (page.hasMore || page.unreadable > 0) return false;
       for (const invoice of page.rows) {
         const invoiceId = invoice.id as string;
-        if (status === "open") await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `plan-refund-void:${invoiceId}` });
-        else await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
+        // Done only once Stripe confirms that very invoice void, or that very draft deleted (#4689): an answer still
+        // open, about another invoice, or `deleted: false` leaves the plan for the daily job, never written as ended.
+        if (status === "open") {
+          const voided = await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/void`, new URLSearchParams(), { version: AT, idempotencyKey: `plan-refund-void:${invoiceId}` });
+          if (!voided || voided.id !== invoiceId || voided.status !== "void") return false;
+        } else {
+          const removed = await onPlatform("DELETE", `/invoices/${encodeURIComponent(invoiceId)}`, undefined, { version: AT });
+          if (!removed || removed.id !== invoiceId || removed.deleted !== true) return false;
+        }
       }
     }
     // Only the subscription this store still names: a plan started since is not this one's to end.

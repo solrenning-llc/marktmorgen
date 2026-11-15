@@ -236,7 +236,8 @@ export function StoreChat({ handle, storeName, language }: { handle: string; sto
               />
             </label>
             <div className="flex items-center justify-between gap-3">
-              <button type="submit" disabled={busy} className="btn st-btn">
+              {/* aria-disabled, not disabled: a disabled button loses the keyboard focus to the page while the message is in flight (2.4.3); the handler refuses a second send while busy. */}
+              <button type="submit" aria-disabled={busy} className="btn st-btn">
                 {w.send}
               </button>
               {token ? (

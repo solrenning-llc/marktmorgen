@@ -246,7 +246,7 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
               </label>
               <p className="st-muted text-xs">{w.handoffConsent(storeName)}</p>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} className="btn st-btn">
+                <button type="submit" aria-disabled={busy} className="btn st-btn">
                   {w.handoffSend(storeName)}
                 </button>
                 {!spent ? (
@@ -272,7 +272,8 @@ export function StoreAssistant({ handle, storeName, language }: { handle: string
                 />
               </label>
               <div className="flex items-center justify-between gap-3">
-                <button type="submit" disabled={busy} aria-busy={busy} className="btn st-btn">
+                {/* aria-disabled, not disabled: a disabled button loses the keyboard focus to the page while the message is in flight (2.4.3); the handler refuses a second send while busy. */}
+                <button type="submit" aria-disabled={busy} aria-busy={busy} className="btn st-btn">
                   {w.send}
                 </button>
                 <button type="button" className="st-muted text-xs underline" onClick={startHandoff}>

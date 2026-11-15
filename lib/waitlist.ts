@@ -237,7 +237,7 @@ function entriesOf(raw: unknown): [string, WaitEntry][] {
   return pairs.map(([k, v]) => [k, parseEntry(v)] as [string, WaitEntry | null]).filter((p): p is [string, WaitEntry] => p[1] !== null);
 }
 
-export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" };
+export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" | "draft" };
 
 /**
  * Puts the product on sale and starts the one email to everyone who
@@ -246,6 +246,9 @@ export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "a
 export async function launch(store: Store, product: Listing, input: { note: unknown; address: unknown }): Promise<LaunchResult> {
   const address = cleanLine(input.address, MAX_LAUNCH_ADDRESS);
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
+  // A draft is not on sale: the email would tell everyone who confirmed that it is, and spend the store's email on
+  // nothing they can buy. Refused with its reason before anything is read, written or sent (MM-SA-53).
+  if (product.hidden) return { ok: false, reason: "draft" };
   if (!store.statsId) return { ok: false, reason: "busy" };
   const sid = store.statsId;
   const [rawJob, rawList] = await redisPipeline([

@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   free: "A free product already takes addresses. A waitlist is for something paid.",
   address: "Add a postal address for the bottom of the email: US law asks for one in any email about something for sale.",
   busy: "The launch email is still going out. Wait for it to finish.",
+  draft: "This product is a draft. Publish it first: the launch email tells everyone it is on sale.",
   unknown: "That product is no longer in your store. Reload the page.",
   empty: "Buyers have pre-ordered it, and they get it the moment it goes on sale. Add its file, its link or a lesson first.",
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",

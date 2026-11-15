@@ -17,7 +17,7 @@ import { NewTab } from "@/components/new-tab";
 import { isAiEmailCopy, isAiSequenceDraft } from "@/lib/ai-response";
 import { RFM_GROUPS, type RfmGroup } from "@/lib/rfm-rules";
 import { MAX_TAG_LENGTH, readTags } from "@/lib/contact-rules";
-import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, type MailAnswer } from "@/lib/mail-response";
+import { confirmedRecipientCount, confirmedDraftId, draftRemovalAnswer, confirmedMailCopy, keptWaitHours, mailAnswer, sequenceImitationWords, type MailAnswer } from "@/lib/mail-response";
 import { toast } from "@/components/toast";
 import { MailAccent, MailBodyEditor } from "@/components/mail-designer";
 import { flowConfigurationIssues } from "@/lib/flow-review";
@@ -1666,7 +1666,7 @@ function History({
     setBusy(false);
     if (!a.ok) {
       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
-      return setError(a.error === "too_many" ? MESSAGES.too_many_flows : message(a));
+      return setError(a.error === "too_many" ? MESSAGES.too_many_flows : a.error === "brand_imitation" ? sequenceImitationWords(a, "This email was not kept sending") : message(a));
     }
     const waitHours = keptWaitHours(a);
     if (waitHours === null) {
@@ -2262,7 +2262,7 @@ function Flows({
     setBusy(false);
     if (!a.ok) {
       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
-      setError(message(a));
+      setError(a.error === "brand_imitation" ? sequenceImitationWords(a, "Your sequence was not saved") : message(a));
       return;
     }
     setDraft(null);
@@ -2279,7 +2279,7 @@ function Flows({
     setBusy(false);
     if (!a.ok) {
       if (a.error === "flow_write_unconfirmed") onWriteUnconfirmed();
-      setError(message(a));
+      setError(a.error === "brand_imitation" ? sequenceImitationWords(a, "The sequence was not switched on") : message(a));
       return;
     }
     setActivating(null);

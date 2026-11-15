@@ -3,6 +3,7 @@ import { sameDraftAudience } from "@/lib/mail-draft-audience";
 import { readTags } from "@/lib/contact-rules";
 import { readNarrow, type Narrow, sameNarrow } from "@/lib/segments-rules";
 import { MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 export type MailAnswer = Record<string, unknown> & { ok?: boolean; error?: string };
 /** A malformed response or failed HTTP request never confirms a mail operation. */
 export function mailAnswer(responseOk: boolean, raw: unknown, sequenceWrite = false, draftWrite = false): MailAnswer {
@@ -12,6 +13,17 @@ export function mailAnswer(responseOk: boolean, raw: unknown, sequenceWrite = fa
   if (responseOk && answer.ok === true) return answer as MailAnswer;
   if (answer.ok === false && typeof answer.error === "string") return answer as MailAnswer;
   return unconfirmed;
+}
+
+/**
+ * A sequence refused because one of its emails poses as Marktmorgen (568 [GD2] (c), lib/flows.ts flowImitation):
+ * what did not happen, which step and part, the passage, why and the fix, as the composer says it.
+ */
+export function sequenceImitationWords(answer: MailAnswer, lead: string): string {
+  const p = answer.passage && typeof answer.passage === "object" ? (answer.passage as Record<string, unknown>) : {};
+  const part = p.field === "subject" ? "the subject" : "the text";
+  const step = typeof p.step === "number" && Number.isInteger(p.step) && p.step > 0 ? ` of step ${p.step}` : " of one of its emails";
+  return imitationMessage(answer.passage, `${part}${step}`, lead);
 }
 
 /** Only a confirmed numeric wait can be described as a kept-email result. */

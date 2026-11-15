@@ -79,6 +79,7 @@ import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
 // As a namespace, so it never clashes with a named import of the same helpers elsewhere in this file.
 import * as exactReply from "@/lib/redis-reply";
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -316,7 +317,28 @@ const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw =
 
 export type FlowResult =
   | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" }
+  | { ok: false; reason: "brand_imitation"; passage: FlowImitation };
+
+/** Where a sequence's email poses as Marktmorgen itself: the step (from 1), its subject or text, the passage, why and the fix. */
+export type FlowImitation = { field: "subject" | "body"; step: number; excerpt: string; why: string; fix: string };
+
+/**
+ * The first email of a sequence whose subject or words pose as Marktmorgen itself (568 [GD2] (c),
+ * lib/brand-imitation-rules.ts), or null. A sequence sends itself to everyone it starts, so it is never switched on
+ * with one; switched off, it may keep it, as a draft does. Steps that act send nothing and are passed over.
+ */
+export function flowImitation(steps: readonly Pick<FlowStep, "subject" | "body" | "action">[]): FlowImitation | null {
+  for (const [index, step] of steps.entries()) {
+    if (step.action) continue;
+    for (const field of ["subject", "body"] as const) {
+      const words = typeof step[field] === "string" ? step[field].slice(0, MAX_TEXT) : "";
+      const found = imitationIn(words);
+      if (found) return { field, step: index + 1, excerpt: excerptAt(words, found.at, found.length), why: imitationWhy("the sequence cannot send it"), fix: IMITATION_FIX };
+    }
+  }
+  return null;
+}
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -398,6 +420,9 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   if (!id && flows.length >= MAX_FLOWS) return { ok: false, reason: "too_many" };
   const active = at >= 0 ? raw.active === true : opts.activate === true;
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
+  // Saved on, it sends itself: never with an email posing as Marktmorgen (568 [GD2] (c)). Nothing is written.
+  const posing = active ? flowImitation(steps) : null;
+  if (posing) return { ok: false, reason: "brand_imitation", passage: posing };
   // Where a written-for-you sequence came from stays with it through an edit.
   const starter = starterOf(raw.starter) ?? (at >= 0 ? flows[at].starter : undefined);
   const flow: Flow = {
@@ -524,6 +549,9 @@ export async function setFlowActive(store: Store, id: string, active: boolean): 
   if (at < 0) return { ok: false, reason: "unknown" };
   if (flows[at].active === active) return { ok: true, flows };
   if (active && !flows[at].steps.length) return { ok: false, reason: "steps" };
+  // Switched on, it sends itself: never with an email posing as Marktmorgen (568 [GD2] (c)). It stays off.
+  const posing = active ? flowImitation(flows[at].steps) : null;
+  if (posing) return { ok: false, reason: "brand_imitation", passage: posing };
   if (active && flows.filter((f) => f.active).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
   const next = flows.map((f, i) => (i === at ? { ...f, active } : f));
   await writeFlows(store, store.listId, next);

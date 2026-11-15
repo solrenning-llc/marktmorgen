@@ -120,6 +120,8 @@ export async function POST(request: NextRequest) {
   const { email, ref, body } = guarded;
   const action = text(body.action, 20);
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // A sequence's email posing as Marktmorgen (568 [GD2] (c), lib/flows.ts flowImitation): which step and part, the passage, why and the fix.
+  const sequenceImitation = (passage: unknown) => Response.json({ ok: false, error: "brand_imitation", passage }, { status: 409 });
   // The store's buyers not read because what reading them costs could not be counted (lib/segments.ts, buyerLedger).
   const notCounted = (message: string) => Response.json({ ok: false, error: "studio_used", message: message || NOT_COUNTED }, { status: 429 });
 
@@ -298,6 +300,7 @@ export async function POST(request: NextRequest) {
     if (action === "flow") {
       const raw = body.flow && typeof body.flow === "object" ? (body.flow as Record<string, unknown>) : {};
       const result = await saveFlow(store, raw);
+      if (!result.ok && result.reason === "brand_imitation") return sequenceImitation(result.passage);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason);
     }
 
@@ -311,6 +314,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "flow-activate") {
       const result = await setFlowActive(store, text(body.id, 40), body.active === true);
+      if (!result.ok && result.reason === "brand_imitation") return sequenceImitation(result.passage);
       return result.ok ? Response.json({ ok: true, flows: result.flows }) : fail(result.reason, result.reason === "unknown" ? 404 : 400);
     }
 
@@ -369,6 +373,7 @@ export async function POST(request: NextRequest) {
       // it: one record read, never the catalogue.
       const current = store;
       const kept = await keepSending(current, text(body.id, 40), async (id) => (await readListings(current, [id]))[0]?.title ?? null);
+      if (!kept.ok && kept.reason === "brand_imitation") return sequenceImitation(kept.passage);
       if (!kept.ok) return fail(KEEP_REFUSALS.has(kept.reason) ? `keep_${kept.reason}` : kept.reason);
       return Response.json({ ok: true, flows: kept.flows, name: kept.name, waitHours: kept.waitHours, position: kept.position });
     }

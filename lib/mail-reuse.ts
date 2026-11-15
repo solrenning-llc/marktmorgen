@@ -135,7 +135,8 @@ export function planKeep(broadcast: Broadcast | null, listId: string | null, flo
 
 export type KeepResult =
   | { ok: true; flows: Flow[]; name: string; waitHours: number; position: number }
-  | { ok: false; reason: KeepRefusal | Exclude<FlowResult, { ok: true }>["reason"] };
+  | { ok: false; reason: KeepRefusal }
+  | Exclude<FlowResult, { ok: true }>;
 
 /** Makes a sent email part of a sequence that sends itself. Under the store's own list only. */
 export async function keepSending(

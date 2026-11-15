@@ -551,11 +551,13 @@ async function main(): Promise<void> {
     // With the line winback-commands (#4807, 15 November 2026: a come-back offer's Redis commands for each store
     // email), Store keeps 45.11 where 45.12 was, Studio 313.82 where 313.83 was and Scale 703.23 where 703.26 was,
     // still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.23 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.23"]);
+    // The offer at its dearest (WINBACK_OFFER_COMMANDS 39, 3rjdf on #4807): Studio 313.81, Scale 703.21.
+    is("11: Store, Studio and Scale keep 45.11, 313.81 and 703.21 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.81", "703.21"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same line (#4807): Studio's yearly month keeps 258.69 where 258.71 was, Scale's 579.96 where 579.99 was.
-    is("11: and 37.06, 258.69 and 579.96 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.69", "579.96"]);
+    // And the yearly months: Store 37.05, Scale 579.94.
+    is("11: and 37.05, 258.69 and 579.94 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.94"]);
   } finally {
     Date.now = realNow;
   }

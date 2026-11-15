@@ -57,13 +57,14 @@ export const OFFER_DAYS = 14;
 /** At most one come-back email per person and product in this long. */
 export const ONCE_PER_DAYS = 180;
 /**
- * Redis commands one come-back offer costs at the most (lib/winback-send.ts, sweepStore), every script's own counted:
- * a store's run that sends one offer, with WINBACK_CLAIM's six commands inside it and the deletion print read again
- * before the email (#4807), and the once-mark read back when the claim answers in another shape. Measured by
- * tests/i4807-winback-erased.test.ts (24, and 25 with the read-back); priced on every store email of a plan (line
- * winback-commands in tests/plan-cost-registry.ts).
+ * Redis commands one come-back offer that is sent costs at the most (lib/winback-send.ts, sweepStore), every script's
+ * own counted: a store's run that sends one offer (24 when nothing is contested), with the list token's contact write
+ * lost twice to a row that changed (tokensFor's rounds: the most that still hand out a token, a third lost hands out
+ * none and sends nothing), the third's answer lost and read back, and the membership's claim and the offer's claim
+ * (WINBACK_CLAIM, #4807) each read back: 39. Measured by tests/i4807-winback-erased.test.ts; priced on every store
+ * email of a plan (line winback-commands in tests/plan-cost-registry.ts).
  */
-export const WINBACK_OFFER_COMMANDS = 25;
+export const WINBACK_OFFER_COMMANDS = 39;
 export const MAX_WINBACK_ADDRESS = 200;
 
 export const NO_WINBACK: WinBack = { percent: 0, months: 1, days: 7, coupon: "", address: "" };

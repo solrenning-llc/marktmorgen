@@ -14,7 +14,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 
 | Line | Store monthly ($69) | Store yearly ($690) | Studio monthly ($449) | Studio yearly ($4490) | Scale monthly ($999) | Scale yearly ($9990) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Net today | 55.69% | 55.18% | 59.65% | 59.21% | 60.11% | 59.66% |
+| Net today | 55.69% | 55.17% | 59.64% | 59.21% | 60.11% | 59.66% |
 | AI drafts / answers a month | none today | none today | 40 / 250 → **14 / 93** | 40 / 250 → **4 / 25** | 80 / 400 | 80 / 400 → **31 / 160** |
 | Video hours watched a month | 4 | 4 | 32 | 32 → **3** | 64 | 64 |
 | Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **15 GiB** | 80 GiB | 80 GiB |
@@ -24,8 +24,8 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | List emails a month | none today | none today | 7,000 | 7,000 | 10,000 | 10,000 |
 | Visits a month | 3,400 | 3,400 | 10,000 | 10,000 | 40,000 | 40,000 |
 | Net with the cuts | not reachable | not reachable | **60.00%** | **60.00%** | **60.11%** | **60.00%** |
-| Every printed line at 10% / at zero | 57.43% / 57.62% | 57.12% / 57.33% | 62.03% / 62.29% | 61.89% / 62.18% | 62.44% / 62.70% | 62.30% / 62.59% |
-| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 86.85% of today | 73.54% of today | 100.00% of today | 88.63% of today |
+| Every printed line at 10% / at zero | 57.43% / 57.62% | 57.11% / 57.33% | 62.03% / 62.29% | 61.88% / 62.18% | 62.44% / 62.70% | 62.30% / 62.59% |
+| Or every printed line cut alike to | none reaches 60% | none reaches 60% | 86.80% of today | 73.49% of today | 100.00% of today | 88.56% of today |
 
 Not reachable by printed cuts within the 10% floor: Store monthly (even with every printed line at zero it keeps 57.62%: its hidden lines and receiving alone take more than the floor leaves); Store yearly (even with every printed line at zero it keeps 57.33%: its hidden lines and receiving alone take more than the floor leaves).
 

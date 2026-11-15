@@ -552,7 +552,10 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.11, 313.83 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.83", "703.26"]);
+    // #3929 (review, 15 November 2026): a cart reminder's carts note, two commands priced in every store email
+    // (CART_NOTE_COMMANDS in UNIT_COST.email), and the erasure's read of it (ERASE_FIXED_COMMANDS 551 -> 552): one cent
+    // less kept on Studio and Scale monthly, 313.82 and 703.25; still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.25 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.25"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's

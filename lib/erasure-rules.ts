@@ -78,9 +78,11 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (review of #3929) the read of the
+ * note of the carts the person was reminded of (lib/checkout-recovery.ts, forgetRecoveryPerson), one SMEMBERS, the note
+ * itself deleted inside the marks' one DEL: 551 before it.
  */
-export const ERASE_FIXED_COMMANDS = 551;
+export const ERASE_FIXED_COMMANDS = 552;
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
 export const ERASE_FIXED_BYTES = 310_000;
 /** Per thing counted: [commands, bytes]. */

@@ -388,6 +388,12 @@ export const PAUSED_PER_DAY = 20;
 
 /** Commands a store figure costs to take (lib/store-allowance.ts): its count kept, and a store that pays nothing's place. */
 export const TAKE_COMMANDS = 4;
+/**
+ * The note of the carts an address was reminded of (lib/checkout-recovery.ts, cartsKey): a cart reminder writes its
+ * SADD and EXPIRE before it takes the cart's mark, so deleting the person finds that mark. Priced in every store email
+ * (UNIT_COST.email), as if each were a cart reminder (review of #3929; tests/cart-reminder.test.ts counts them).
+ */
+export const CART_NOTE_COMMANDS = 2;
 /** What a function sends on to the browser, by the byte ("Fast Origin Transfer", tests/traffic-cost.ts). */
 export const ORIGIN_PER_BYTE = 0.06 / 1e9;
 /**
@@ -718,7 +724,7 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // A message written to the inbox, and its index.
   inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
   // An email sent from inside a request or a job already counted, and its count.
-  email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
+  email: PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS) * COMMAND,
   transactional: PER_EMAIL + (6 + TAKE_COMMANDS) * COMMAND,
   // A call out, waited on at 2 GB for ten seconds.
   integration: request("wait", 10 + TAKE_COMMANDS, 20_000),
@@ -1268,8 +1274,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
+      { file: "lib/checkout-recovery.ts", names: ["[\"SADD\", cartsKey(statsId, email), onceFor]", "[\"EXPIRE\", cartsKey(statsId, email), CARTS_NOTE_SECONDS]"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count, with a cart reminder's two note commands (CART_NOTE_COMMANDS) on every one; the daily and per-person limits only spread them.",
   },
   {
     id: "ai",

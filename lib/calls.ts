@@ -43,6 +43,7 @@
  * booking also takes its hosts' time on every store at once, atomically
  * (lib/host-claims.ts), under the same lock as everything here.
  */
+import { minorUnits } from "@/lib/paid-amount";
 import type { DepositFigures } from "@/lib/deposit-code";
 import { chargeNow, creatorDueLine, type DueInPerson, dueLines, readDue } from "@/lib/call-deposit";
 import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-place";
@@ -1939,12 +1940,20 @@ export async function confirmBooking(input: {
     }
     // Booked: the orders it was admitted as are the window's (lib/orders.ts), once each by its reference, however
     // often this is tried, by the checkout.
-    for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
+    // What was paid, read exactly (lib/paid-amount.ts): one that did not read is never counted as an order of $0
+    // (the amount decides whether a sale's share covers it) nor written on an affiliate's lead as paid 0 (a refund
+    // takes back only a lead whose paid is above 0). Unknown: logged, its orders' places stay held until their hours
+    // end, as an offer's whose amount does not read (lib/upsell.ts), and no lead is written for it.
+    const paidCents = minorUnits(input.amountCents);
+    if (paidCents === null) console.error("a paid booking's amount does not read; its orders are not counted and no lead is written", session);
+    if (paidCents !== null) {
+      for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, paidCents);
+    }
     // Booked through an affiliate's link, where the store pays per call that takes place: written down now (once:
     // the lead's HSETNX), earning only once the call's time has passed, it was not refunded and the creator approves
     // it (lib/affiliate-leads.ts).
-    if (input.lead && buyerEmail) {
-      await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: input.amountCents ?? 0, title: product.title });
+    if (input.lead && buyerEmail && paidCents !== null) {
+      await recordLead(store, { aff: input.lead, kind: "booking", email: buyerEmail, end: Math.floor(end / 1000), ref: session, pi: input.pi ?? "", paid: paidCents, title: product.title });
     }
     if (team) {
       await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));

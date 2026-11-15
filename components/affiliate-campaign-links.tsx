@@ -19,6 +19,7 @@ export function AffiliateCampaignLinks({ products, language }: { products: { id:
     <p className="st-muted mt-2 text-sm">{t.linksIntro}</p>
     <label htmlFor={id} className="st-label mt-3">{t.product}<select id={id} className="field mt-1 w-full" value={product.id} onChange={event=>setSelected(event.target.value)}>{products.map(item=><option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
     <p className="st-muted mb-3 mt-1 text-xs">{t.productsLoaded(MOST_PRODUCTS)}</p>
-    <SharePanel key={product.id} url={product.url} title={t.shareTitle(product.title)} what="affiliate product" />
+    {/* The shared share panel is written only in English: marked so, inside a page in the store's language (WCAG 3.1.2). */}
+    <div lang="en-US"><SharePanel key={product.id} url={product.url} title={t.shareTitle(product.title)} what="affiliate product" /></div>
   </details>;
 }

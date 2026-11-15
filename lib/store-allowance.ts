@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { types } from "node:util";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
+import { BILLING_COUNTER_KEEP_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { standingOf } from "@/lib/plan-standing";
@@ -208,8 +208,10 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
  */
 export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind, n: number, window: string, now = Date.now()): Promise<void> {
   if (!Number.isSafeInteger(n) || n < 1 || !WINDOW_ID.test(window)) return;
-  // A window long over has no counter left to give back to: one would be made, below zero and kept for ever.
-  if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (LONGEST_WINDOW_DAYS + 1) * 86_400_000) return;
+  // A window long over has no counter left to give back to: one would be made, below zero and kept for ever. A billing
+  // counter is kept BILLING_COUNTER_KEEP_DAYS from its start (keepSecondsFor), so a give-back in a stretched last window
+  // still finds it (Claude 6 on #4561, LOW).
+  if (now > Date.parse(window.length === 7 ? `${window}-01T00:00:00Z` : `${window}T00:00:00Z`) + (BILLING_COUNTER_KEEP_DAYS + 1) * 86_400_000) return;
   const id = idOf(store);
   if (!id || !isRedisConfigured()) return;
   const k = key(kind, id, window);
@@ -218,7 +220,7 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
     const reply = ownAllowanceReplies(await redisPipeline([["DECRBY", k, n]]), 1);
     const after = reply?.[0];
     // Redis integer commands answer numbers. A missing counter can fall no lower than -n.
-    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (BILLING_COUNTER_KEEP_DAYS + 1) * 86_400]]);
   } catch {
     // Best effort: counted higher, never lower.
   }

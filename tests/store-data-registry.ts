@@ -261,7 +261,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:affhub:link:@lib/affiliate-hub.ts": company("An emailed link to an affiliate's page, a day", "Per affiliate across stores, behind a per-address limit."),
   "nl:sdemo:@lib/studio-demo-rules.ts": company("The studio demo's day: its counts and caps (nl:sdemo:day:<day>), and the day's sessions and refusals by a keyed fingerprint of each address or network, with the day's count of refusals (nl:sdemo:addr:<day>)", "The company's, no store's (256 [KJ1], off): the day's hash holds only the fields of DEMO_COUNTS and the caps' counters, kept 400 days; the addresses' hash holds at most DEMO_SESSIONS_PER_DAY fields of sessions, DEMO_REFUSALS_PER_DAY fields of an address's refusals and the day's count of refusals, and ends with the day (EXPIREAT)."),
   "nl:sdemo:{<session>}:<family>[:<part>]@lib/studio-demo-rules.ts": company("A studio demo session: its record and the drafts it changed, one key a family of DEMO_KEY_FAMILIES", "The company's, no store's (256 [KJ1], off): written only through sandboxKey, at most DEMO_SESSIONS_PER_DAY sessions a day, each held under DEMO_BYTES_PER_SESSION and ending all at once DEMO_SESSION_SECONDS (21 hours) after it opened (EXPIREAT, never extended), so two days of openings are alive at the most (docs/studio-demo.md)."),
-  "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),
+  "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window, the window's kept at least as long as it (lib/allowance-window.ts windowKeySeconds)", "ai", 63),
   "nl:aff:payday:@lib/affiliate-payday.ts": short("A store's monthly payday claimed", "day", 40),
   "nl:aff:@lib/affiliates.ts": {
     what: "Affiliates: their records, addresses, codes, clicks, sales and shares, and what the creator says was paid",
@@ -282,7 +282,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rl:aff:ip:@lib/affiliates.ts": short("Applications per connection, an hour", "request", 1, KEY, REQ("affiliate")),
   "nl:ai-spend:v2:{@lib/ai-spend-policy.ts": company("The company's AI spending ledger, a month", "One key a month with a field a store: the company's ledger, carried by its fixed costs."),
   "nl:ai-spend:v2:{YYYY-MM}@lib/ai-spend-policy.ts": company("The ledger's name, as the policy states it", "The same ledger."),
-  "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window", "day", 40, 128),
+  "nl:ai:@lib/ai.ts": short("Writing jobs counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
   "nl:assist:pool:@lib/store-assistant.ts": { what: "The Store assistant's pool of replies for one month of the add-on", line: "store-assistant" },
   "nl:assist:c:@lib/store-assistant.ts": { what: "A conversation with the Store assistant, a day after its last message", line: "store-assistant" },
   "nl:assist:missed:@lib/store-assistant.ts": { what: "Questions the Store assistant could not answer, for the creator", line: "store-assistant" },
@@ -292,7 +292,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:assist:remind:@lib/assistant-reminder-rules.ts": short("A buyer's yes to one checkout reminder, three days from the checkout", "day", 3, ASSIST_REMINDERS_PER_STORE_DAY * LINK_BYTES),
   "nl:assist:remindwho:@lib/assistant-reminder.ts": short("The checkouts one address said yes on, by a one-way hash, three days", "day", 3, ASSIST_REMINDERS_PER_STORE_DAY * KEY),
   "nl:assist:remindq@lib/assistant-reminder.ts": company("Store assistant checkout reminders due", "One sorted set for every store, each member a store, its handle and a checkout, never an address, gone when sent or dropped within hours: at most ASSIST_REMINDERS_PER_STORE_DAY a store a day."),
-  "nl:ask:@lib/answers.ts": short("Visitors' answers counted in the window", "day", 40, 128),
+  "nl:ask:@lib/answers.ts": short("Visitors' answers counted in the window, kept at least as long as it (windowKeySeconds)", "day", 63, 128),
   "nl:ask:a:@lib/answers.ts": short("An answer already given to a question about a page, a day", "ai", 1, 8 * KB),
   "nl:ask:missed:@lib/answers.ts": { what: "Questions a page did not answer, for the creator", parts: [capped(100 * KB, "The newest MISSED_KEPT, trimmed on every write.", src("lib/answers.ts", "MISSED_KEPT", "LTRIM"))] },
   "nl:api:k:@lib/api-keys.ts": { what: "The lookup an API request makes", parts: [capped(20 * KEY, "A key's lookup for each of the store's keys (MAX_KEYS).", src("lib/api-key-rules.ts", "MAX_KEYS"))] },
@@ -631,7 +631,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:copy:@lib/store-copy.ts": room("A copy of a whole store's progress, seven days, counted in the receiving store's data room until it goes", "lib/store-copy.ts"),
   "nl:copy:lock:@lib/store-copy.ts": short("One step of a store copy at a time, a minute", "studio", 1, 128),
   "nl:fuse:@lib/funnel-share-store.ts": { what: "A store's imports and previews counted, by the share and the month", parts: [capped(64 * KEY, "A count a share link used and a month, two months.")] },
-  "nl:fuse:m:@lib/funnel-share-store.ts": short("A store's uses counted a month", "day", 62, 128),
+  "nl:fuse:m:@lib/funnel-share-store.ts": short("A store's uses counted a month, kept at least as long as its window (windowKeySeconds)", "day", 63, 128),
 
   // ---------------------------------------------------------------- lib/ g–l
   "nl:gift:@lib/gifts.ts": { what: "Gifts: the gift, its payment, the refunds read", parts: [per("order", 400, 2_560, "A gift and its payment: two addresses, a message of MAX_GIFT_MESSAGE and a name of MAX_GIFT_FROM in any script, GIFT_KEPT_SECONDS.", KIND("gift")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days) and where an unfinished pass over them stands (lib/gifts.ts passKey, a JSON of under 300 bytes, a week).")] },

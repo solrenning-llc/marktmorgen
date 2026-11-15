@@ -8,7 +8,7 @@
  *   nl:affkit:<statsId>:<YYYY-MM>                  drafts the store's affiliates asked for that month
  *   nl:ai:<statsId>:<YYYY-MM>                      the store's month of writing jobs, which each draft is one of (lib/ai.ts)
  */
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { randomUUID } from "node:crypto";
 import { affiliateCampaignLink } from "@/lib/affiliate-promotion";
@@ -83,13 +83,15 @@ export async function draftKit(store: Store, affiliate: Affiliate, productId: st
   const month = monthKey(store, now);
   const jobs = aiMonthKey(store, now);
   if (!month || !jobs) return { ok: false, reason: "month" };
+  // Kept at least as long as the window they are counted in (Claude 6 on #4561).
+  const kept = windowKeySeconds(store, 40 * 86_400, now.getTime());
   const [today, , thisMonth, , storeMonth] = await redisPipeline([
     ["INCR", day],
     ["EXPIRE", day, 2 * 86_400],
     ["INCR", month],
-    ["EXPIRE", month, 40 * 86_400],
+    ["EXPIRE", month, kept],
     ["INCR", jobs],
-    ["EXPIRE", jobs, 40 * 86_400],
+    ["EXPIRE", jobs, kept],
   ]);
   if (![today, thisMonth, storeMonth].every(value => (typeof value === "number" || (typeof value === "string" && /^\d+$/.test(value))) && Number.isSafeInteger(Number(value)) && Number(value) >= 1)) return { ok: false, reason: "off" };
   const giveBack = () => redisPipeline([["DECR", day], ["DECR", month], ["DECR", jobs]]).catch(() => null);

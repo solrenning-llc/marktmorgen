@@ -17,7 +17,7 @@
  */
 import { placeLine } from "@/lib/call-place";
 import { listedLengths } from "@/lib/call-lengths";
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { SHIP_REGIONS, activeShipping } from "@/lib/shipping";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -413,7 +413,7 @@ export async function answerQuestion(input: {
 export async function takeAnswer(store: Store, now = Date.now()): Promise<boolean> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !key) return false;
-  const [used, expires] = await redisPipeline([["INCR", key], ["EXPIRE", key, 40 * 86_400]]);
+  const [used, expires] = await redisPipeline([["INCR", key], ["EXPIRE", key, windowKeySeconds(store, 40 * 86_400, now)]]);
   const count = typeof used === "number" ? used : typeof used === "string" && /^[1-9]\d*$/.test(used) ? Number(used) : NaN;
   if (!Number.isSafeInteger(count) || count < 1 || (expires !== 1 && expires !== "1")) return false;
   if (count > answersAllowance(store, now)) {

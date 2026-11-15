@@ -1,6 +1,6 @@
 import { countOf, repliesFor, UnknownReplyError } from '@/lib/redis-reply';
 import { type SourceHooks, readSourcePage, sourceReadingOn } from "@/lib/source-page";
-import { allowanceWindow, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
@@ -395,7 +395,7 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "off" };
   const replies = repliesFor(await redisPipeline([
     ["INCRBY", key, jobs],
-    ["EXPIRE", key, 40 * 86_400],
+    ["EXPIRE", key, windowKeySeconds(store, 40 * 86_400, now)],
   ]), 2);
   const count = countOf(replies?.[0]);
   // A partial reservation is unknown; never undo an unconfirmed increment.

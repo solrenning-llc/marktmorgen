@@ -424,6 +424,17 @@ export function keepSecondsFor(window: AllowanceWindow, now = Date.now()): numbe
   return Math.max(86_400, Math.ceil((until - now) / 1000) + 86_400);
 }
 
+/**
+ * Seconds a counter keyed by this store's window id (windowId) must be kept, at least `atLeast`: its own fixed keep,
+ * and never less than the window's (keepSecondsFor), so a window stretched to its period's end never outlives a
+ * counter made in it, which would open a second allowance under the same id (Claude 6 on #4561, rule 30). With no
+ * window, `atLeast`.
+ */
+export function windowKeySeconds(store: WindowFields, atLeast: number, now = Date.now()): number {
+  const window = allowanceWindow(store, now);
+  return window ? Math.max(atLeast, keepSecondsFor(window, now)) : atLeast;
+}
+
 /** "November 19" (or "November 19, 2027" in another year): the day an allowance opens again. */
 export function opensAgainWords(window: AllowanceWindow, now = Date.now()): string {
   const at = new Date(window.end);

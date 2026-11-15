@@ -995,22 +995,40 @@ export const STORE_SEARCH_LIMIT = STORE_PAGE_SIZE * 2;
 /** The longest search the store page takes. */
 export const MAX_STORE_SEARCH = 80;
 
-/** Words as a search compares them: no accents, no case, letters and digits only. */
+/** Letters NFD does not take apart, as a buyer types them on a plain keyboard. */
+const PLAIN_LETTERS: Record<string, string> = { "\u00df": "ss", "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+
+/**
+ * Words as a search compares them: no accents, no case, letters and digits only. An apostrophe is part of its
+ * word ("Beginner’s" is "beginners", as typed without it), and the letters NFD keeps whole are spelled plainly.
+ */
 export function searchWords(text: string): string[] {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc`]/g, "")
+    .replace(/[\u00df\u0142\u00f8\u00e6\u0153\u0111\u00f0\u00fe\u0131]/g, (letter) => PLAIN_LETTERS[letter])
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }
 
-/** Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one). */
+/** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
+const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
+
+/**
+ * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
+ * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
+ */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
-  const asked = searchWords(query);
-  if (asked.length === 0) return false;
-  const has = searchWords(`${listing.title} ${listing.summary}`);
-  return asked.every((word) => has.some((one) => one.startsWith(word)));
+  const text = `${listing.title} ${listing.summary}`;
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
+  return [searchWords(query), searchWords(unhyphened(query))].some(
+    (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
+  );
 }
 
 /**
@@ -1186,6 +1204,45 @@ export async function readCardsFor(store: Store, ids: Iterable<string>): Promise
   return found;
 }
 
+/**
+ * Every product's card, in the creator's order, for the studio's search (766
+ * [STN13], lib/studio-search.ts): what the store record holds (inline, or in
+ * the head) with no read, the rest in one HMGET of the card hash, read
+ * exactly. Never filled in from the products' own records, so a search's
+ * reads stay one command whatever the store: a product whose card is absent
+ * or in an older shape is counted in `missing` and left out (the studio's
+ * Sales pages fill them, readCards). Anything but one string or nil for each
+ * product throws UnknownReplyError (rule 24), never "no products".
+ */
+export async function readCardsExact(store: Store): Promise<{ cards: Card[]; missing: number }> {
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  if (catalog.inline) return { cards: catalog.inline.map(cardOf), missing: 0 };
+  const ids = productIds(store);
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const rest = ids.filter((id) => !head.has(id));
+  const found = new Map<string, Card>();
+  for (const id of ids) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  let missing = 0;
+  if (rest.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cards");
+    const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+    const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+    if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+    rest.forEach((id, i) => {
+      const raw = slots[i];
+      if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+      const card = raw === null ? null : parseCard(id, raw);
+      if (card) found.set(id, card);
+      else missing += 1;
+    });
+  }
+  return { cards: ids.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])), missing };
+}
+
 /** When the studio's list is one page of a longer one, as the studio page read it. */
 export type ProductPaging = {
   page: number;
@@ -1252,9 +1309,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;
@@ -1348,9 +1409,13 @@ export function movedMark(catalog: string, count: number): Command {
 /** How many products the index listed when this catalog was last written, or null when it was never moved. */
 export async function movedCount(catalog: string): Promise<number | null> {
   if (!CATALOG_ID_PATTERN.test(catalog) || !isRedisConfigured()) return null;
-  const [found] = await redisPipeline([["GET", movedKey(catalog)]]);
-  if (typeof found !== "string") return null;
-  return /^\d{1,6}$/.test(found) ? Number(found) : 0;
+  // Read exactly (rule 24): only GET's exact null is "never moved" and only digits are a count. Anything else throws, so
+  // moveToRecords writes nothing, never null or 0 that skipped its guard and wrote a lost index over the products.
+  const read = repliesFor(await redisPipeline([["GET", movedKey(catalog)]]), 1);
+  const found = read?.[0];
+  if (read && found === null) return null;
+  if (!read || typeof found !== "string" || !/^\d{1,6}$/.test(found)) throw new UnknownReplyError("how many products a moved catalog listed");
+  return Number(found);
 }
 
 /** Sends writes in pipelines of a few hundred. */

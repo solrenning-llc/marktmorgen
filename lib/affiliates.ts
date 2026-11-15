@@ -73,6 +73,7 @@
  *   nl:aff:<id>:sales    hash  Stripe reference -> the sale
  *   nl:aff:<id>:payouts  hash  payout id -> what the creator says they paid
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
@@ -88,7 +89,7 @@ import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion
 import { onAccount } from "@/lib/stripe-account";
 import { hasOwnField, ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
-import { DISPUTE_TAKES } from "@/lib/retained-revenue";
+import { DISPUTE_SETTLED, DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
 import { SITE_URL } from "@/lib/site-url";
 import {
@@ -105,7 +106,7 @@ import {
 } from "@/lib/affiliate-setting";
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
-import type { BookSizes } from "@/lib/api-read-rules";
+import { type BookSizes, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -116,7 +117,7 @@ import { plainAmount } from "@/lib/money";
 import { alertCreator } from "@/lib/phone-alerts";
 import { bumpsFromMeta } from "@/lib/bundle-rules";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
-import { type LeadKind, type LeadReason, type LeadStatus, type SettledLead, leadsKey, parseLead, settleLeads } from "@/lib/affiliate-lead-rules";
+import { type LeadKind, type LeadReason, type LeadStatus, type SettledLead, leadsKey, parseLead, readRefundMark, settleLeads } from "@/lib/affiliate-lead-rules";
 import { readMoves } from "@/lib/call-records";
 import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
@@ -141,6 +142,14 @@ const RATE_WINDOW_SECONDS = 60 * 60;
 export const REFUND_PAGES = 10;
 /** And of a hundred disputes, which are far fewer. */
 export const DISPUTE_PAGES = 3;
+/**
+ * Days after a sale (a booked call: after the later of its booking and its call) during which a refund or a dispute
+ * can still take its money back, for a sale paid into another Stripe account than the store's, whose refunds readBook
+ * cannot read: the longest dispute window the code reads (lib/checkup.ts DISPUTE_DAYS, 180), longer than the plan
+ * charges' (lib/refund-reserve-rules.ts DISPUTE_DAYS, 120) and than any hold a creator may set on sales or leads (90).
+ * tests/affiliate-book-account-switch.test.ts holds it at least as long as each of them.
+ */
+export const OTHER_ACCOUNT_DAYS = 180;
 // DISPUTE_TAKES, the dispute states that take the money, is lib/retained-revenue.ts's: the numbers read the same set.
 
 /** The cookie an affiliate's own browser is signed in with, one per store. */
@@ -264,6 +273,12 @@ export type Referral = {
   how: Credit;
   /** Optional campaign labels recorded at checkout; absent on older records. */
   promotion?: AffiliatePromotion | null;
+  /**
+   * The connected Stripe account a Stripe sale was paid into, written with the
+   * sale since 13 November 2026; absent on PayPal sales and older records. Its
+   * refunds and disputes can only be read there (readBook).
+   */
+  acct?: string;
 };
 
 /**
@@ -296,6 +311,8 @@ export type PartnerEarning = {
   percent: number;
   /** Bought by the partner themselves: written down, earns nothing. */
   self: boolean;
+  /** The connected Stripe account the sale was paid into, as on Referral; absent on PayPal sales and older records. */
+  acct?: string;
   /**
    * Set when `base` is the part of some lines of an order (notePartners, `lines`): what the whole order paid before
    * tax. A refund names no line, so it is settled against this (settleLine). Absent: `base` is the whole order.
@@ -610,6 +627,8 @@ function parseReferral(raw: unknown): Referral | null {
       rate: n(value.rate),
       self: value.self === true,
       ...(readAffiliatePromotion(value.promotion) ? { promotion: readAffiliatePromotion(value.promotion) } : {}),
+      // Kept exactly as written: any other value is still another account than the store's, never "the same one".
+      ...(value.acct !== undefined ? { acct: typeof value.acct === "string" ? value.acct : "" } : {}),
       // Sales written down before a code or a bond could credit anybody have
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
@@ -643,6 +662,7 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
       currency: readCurrencyCode(value.currency),
       percent: n(value.percent),
       self: value.self === true,
+      ...(value.acct !== undefined ? { acct: typeof value.acct === "string" ? value.acct : "" } : {}),
       // Written by notePartners as whole cents; one that does not read is settled as if the refund were all before tax.
       ...(value.whole !== undefined ? { whole: Number.isSafeInteger(value.whole) && (value.whole as number) >= 0 ? (value.whole as number) : Number.MAX_SAFE_INTEGER } : {}),
     };
@@ -675,25 +695,31 @@ function readCurrencyCode(raw: unknown): string {
   return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : "usd";
 }
 
-/** A Redis hash reply, as pairs. */
-function pairs(reply: unknown): [string, string][] {
-  const list = Array.isArray(reply) ? reply.map(String) : [];
-  const out: [string, string][] = [];
-  for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
-}
-
 /**
  * A HGETALL reply as pairs, read exactly: one reply for the one command, a list of strings with an even count, or
  * UnknownReplyError (CX-123 rule 24). HGETALL answers an empty list for a hash with nothing in it, so a reply missing,
  * cut short or of another shape is never "nobody".
  */
 function hashPairsExact(replies: unknown, what: string): [string, string][] {
-  const list = stringList(repliesFor(replies, 1)?.[0]);
-  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
-  const out: [string, string][] = [];
-  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
+  return hashesExact(replies, 1, what)[0];
+}
+
+/**
+ * Several HGETALL replies as pairs, each read exactly as hashPairsExact reads one: one reply a command, each a list
+ * of strings with an even count, or UnknownReplyError. The book's reads (readBook, idleSweep) used to take a reply of
+ * another shape for an empty hash, so a payouts hash that did not read showed every payout ever made as owed again,
+ * and a sales hash that did not read made an affiliate look idle (rule 24 sweep of Claude 4, cloud F).
+ */
+function hashesExact(replies: unknown, count: number, what: string): [string, string][][] {
+  const all = repliesFor(replies, count);
+  if (!all) throw new UnknownReplyError(what);
+  return all.map((reply) => {
+    const list = stringList(reply);
+    if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+    const out: [string, string][] = [];
+    for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+    return out;
+  });
 }
 
 /**
@@ -939,27 +965,13 @@ export async function signInLinkFor(store: Store, email: string, origin: string)
   return `${origin}/@${store.handle}/affiliates?token=${token}`;
 }
 
-/** A whole number from one up after INCR, or null when the reply is not exactly that. */
-function incremented(reply: unknown): number | null {
-  const count = countOf(reply);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /**
  * Whether one more request fits in the hour: true or false on a count read in
  * its exact shape, null when the answer is missing, cut short or of another
  * shape, which is never taken as room (CX-123 rule 24).
  */
 async function within(key: string, limit: number): Promise<boolean | null> {
-  const both = repliesFor(
-    await redisPipeline([
-      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-      ["INCR", key],
-    ]),
-    2,
-  );
-  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
-  const count = incremented(both[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count === null ? null : count <= limit;
 }
 
@@ -999,8 +1011,26 @@ export type ApplyRequest = "sent" | "email" | "limited" | "unavailable" | "owner
  *
  * `r` is the affiliate whose invitation link they applied through, when the
  * programme has a second tier (lib/affiliate-setting.ts secondTier).
+ *
+ * `t` is when an invitation (`k`) was made, in ms, read against a later
+ * removal or decline (invitedAfter, #4045).
  */
-type LinkGrant = { s: string; e: string; n: string; k?: 1; p?: PartnerShare; r?: string };
+type LinkGrant = { s: string; e: string; n: string; k?: 1; p?: PartnerShare; r?: string; t?: number };
+
+/**
+ * Whether an invitation was made after the record's last decision, so it is the creator changing their mind about
+ * somebody they declined or removed. An invitation made before the removal is not (#4045): the removal came later
+ * and stands. Either time missing or unreadable is not known to be later, so it never lets them back in.
+ */
+function invitedAfter(grant: LinkGrant, affiliate: Affiliate): boolean {
+  const made = grant.t;
+  const decided = affiliate.decidedAt;
+  return typeof made === "number" && Number.isSafeInteger(made) && made > 0 && Number.isSafeInteger(decided) && decided > 0 && made > decided;
+}
+
+/** Somebody declined or removed whom this invitation does not let back in (invitedAfter). */
+const refusedBy = (grant: LinkGrant, affiliate: Affiliate) =>
+  grant.k === 1 && (affiliate.status === "removed" || affiliate.status === "declined") && !invitedAfter(grant, affiliate);
 
 /**
  * The affiliate whose invitation link this is, when it may bring anybody: the
@@ -1156,7 +1186,7 @@ export async function invitePartner(input: {
   }
 
   const token = randomBytes(32).toString("hex");
-  const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share };
+  const grant: LinkGrant = { s: statsId, e: email, n: "Invited as a partner", k: 1, p: share, t: Date.now() };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", AFFILIATE_LINK_SECONDS]]);
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: `"${displayName(store.name)} via Marktmorgen" <${senderAddress()}>`,
@@ -1191,10 +1221,21 @@ export async function invitePartner(input: {
  * app, not a worse one. It goes through the same grant the email would have
  * carried, so the record is made exactly as it is made everywhere else.
  */
-export async function acceptPartnership(store: Store, email: string, share: PartnerShare, charge: Charge = PAID): Promise<OpenResult> {
+export async function acceptPartnership(
+  store: Store,
+  email: string,
+  share: PartnerShare,
+  charge: Charge = PAID,
+  /**
+   * When the offer was made (PartnerInvite.at), in ms: a record declined or removed after it stays out (#4045). The
+   * studio's answer always passes its offer's time (0 when that time is unreadable, which never lets anybody back
+   * in); left out, the offer is one made now.
+   */
+  invitedAt: number = Date.now(),
+): Promise<OpenResult> {
   if (!affiliatesOn(store)) return { ok: false, reason: "unavailable" };
   const token = randomBytes(32).toString("hex");
-  const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share };
+  const grant: LinkGrant = { s: store.statsId as string, e: normaliseEmail(email), n: "Accepted a partnership", k: 1, p: share, t: invitedAt };
   await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", 600]]);
   return openAffiliateLink(store, token, charge);
 }
@@ -1212,6 +1253,7 @@ function parseGrant(raw: unknown): LinkGrant | null {
       ...(value.k === 1 ? { k: 1 as const } : {}),
       ...(share ? { p: share } : {}),
       ...(typeof value.r === "string" && AFFILIATE_ID_PATTERN.test(value.r) ? { r: value.r } : {}),
+      ...(typeof value.t === "number" && Number.isSafeInteger(value.t) && value.t > 0 ? { t: value.t } : {}),
     };
   } catch {
     return null;
@@ -1245,9 +1287,10 @@ export type OpenResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
   /** "committed" and "crowded": an accepted share no longer fits the cap (lib/partner-share.ts); the link or offer is kept. */
   /** "resting": the requests that pay for reading the program's people were not taken; nothing read or written, the link or offer kept. */
-  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" | "resting" };
+  /** "withdrawn": an invitation made before the creator declined or removed this person (#4045); nothing written. */
+  | { ok: false; reason: "expired" | "full" | "unavailable" | "committed" | "crowded" | "resting" | "withdrawn" };
 
-type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" };
+type Recorded = { ok: true; affiliate: Affiliate; created: boolean } | { ok: false; reason: "expired" | "full" | "committed" | "crowded" | "withdrawn" };
 
 /**
  * The record an opened link (or an accepted studio offer) makes or approves. With `fence`, the grant carries a share:
@@ -1261,6 +1304,8 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   let created = false;
   const [knownId] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
   if (typeof knownId === "string") affiliate = await readAffiliate(store, knownId);
+  // Declined or removed after this invitation was made: the later decision stands, before anything is read or paid.
+  if (affiliate && refusedBy(grant, affiliate)) return { ok: false, reason: "withdrawn" };
   if (fence) {
     // The people read paid for first, by whoever pays for this path (openAffiliateLink's `charge`), rule 30.
     const problem = await partnerShareProblem(store, fence.share, affiliate?.id ?? null, fence.charge);
@@ -1269,11 +1314,21 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   }
   // An invitation the creator sent (grant.k) arrives already decided: opening
   // it approves them and attaches the share the email stated. Somebody the
-  // creator had declined or removed is let back in by it, because inviting
-  // them is the creator changing their mind, in their own words.
+  // creator had declined or removed is let back in by it only when it was made
+  // after that decision, because then inviting them is the creator changing
+  // their mind, in their own words; an older invitation is not (#4045).
   if (affiliate && grant.k === 1) {
     // Only the decision and the share are changed, over exactly the record read: an address set meanwhile is kept.
-    const changed = await changeAffiliate(store, affiliate.id, (now) => ({ ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share }));
+    // Checked again on that record, so a removal written meanwhile is never overwritten by an older invitation.
+    let refused = false;
+    const changed = await changeAffiliate(store, affiliate.id, (now) => {
+      if (refusedBy(grant, now)) {
+        refused = true;
+        return null;
+      }
+      return { ...now, status: "approved", decidedAt: Date.now(), share: grant.p ?? now.share };
+    });
+    if (refused) return { ok: false, reason: "withdrawn" };
     if (!changed?.next) return { ok: false, reason: "expired" };
     affiliate = changed.next;
   }
@@ -2436,7 +2491,9 @@ async function writeReferral(store: Store, referral: Referral): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   // Once per sale, whichever of the thanks page and the five-minute job is
   // first, counted in the store's room at what it really adds (lib/order-data.ts).
-  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify(referral)]]);
+  // A Stripe sale names the account it was paid into, so its refunds are never looked for on another one (readBook).
+  const paidInto = !referral.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {};
+  await orderWrite(store, [["HSETNX", salesKey(store.statsId), referral.ref, JSON.stringify({ ...referral, ...paidInto })]]);
 }
 
 /**
@@ -2499,6 +2556,8 @@ export async function notePartners(
       percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
       self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
+      // The account a Stripe sale was paid into, as writeReferral writes it (readBook).
+      ...(!sale.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
       ...(whole ? {} : { whole: sale.base }),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);
@@ -2574,6 +2633,36 @@ type SessionLike = {
   /** The codes typed into it, which can credit an affiliate on their own. */
   discounts?: unknown;
 };
+
+/** Stripe's answer about a paid order in a shape not known: asking again later reads it whole. */
+class UnknownStripeAmount extends Error {
+  constructor(what: string) {
+    super(`Stripe gave ${what} in an unknown shape`);
+    this.name = "UnknownStripeAmount";
+  }
+}
+/**
+ * What Stripe says a paid order or charge was, in its exact shape: whole cents
+ * from 0, and its money as three lower-case letters. Anything else, missing
+ * included, is not known and throws UnknownStripeAmount: never $0, never untaxed
+ * and never dollars, which writeReferral and notePartners would keep for good
+ * (HSETNX). The sweep keeps the order for its next run.
+ */
+function paidCents(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new UnknownStripeAmount(what);
+  return value;
+}
+function paidCurrency(value: unknown, what: string): string {
+  if (typeof value !== "string" || !/^[a-z]{3}$/.test(value)) throw new UnknownStripeAmount(what);
+  return value;
+}
+/** A paid checkout's amount, its tax (Stripe's `total_details.amount_tax`, 0 only when Stripe says 0) and its money. */
+function paidOrder(session: SessionLike): { total: number; tax: number; currency: string } {
+  const total = paidCents(session.amount_total, "a paid order's amount");
+  const tax = paidCents(session.total_details?.amount_tax, "a paid order's tax");
+  if (tax > total) throw new UnknownStripeAmount("a paid order's tax");
+  return { total, tax, currency: paidCurrency(session.currency, "a paid order's money") };
+}
 
 /**
  * The share an order carries for the affiliate whose link it came through
@@ -2653,8 +2742,8 @@ export async function noteSession(
   const handles = saleHandles(store);
   if (!handles.has(meta.store ?? "")) return;
 
-  const total = typeof session.amount_total === "number" ? session.amount_total : 0;
-  const tax = typeof session.total_details?.amount_tax === "number" ? session.total_details.amount_tax : 0;
+  // Read before anything is written (rule 24): never set down at $0, untaxed or in dollars for good (paidOrder).
+  const { total, tax, currency } = paidOrder(session);
   const pi =
     typeof session.payment_intent === "string"
       ? session.payment_intent
@@ -2662,9 +2751,8 @@ export async function noteSession(
         ? ((session.payment_intent as { id: string }).id)
         : "";
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
-  const base = Math.max(0, total - tax);
+  const base = total - tax;
   const at = typeof session.created === "number" ? session.created : Math.floor(Date.now() / 1000);
-  const currency = readCurrencyCode(session.currency);
 
   // Partners first, and whatever happens next. A partner shares in the
   // product, so how the buyer arrived is beside the point — and this is the
@@ -2796,7 +2884,9 @@ export async function noteSession(
 export async function noteCharge(store: Store, pi: Record<string, unknown>): Promise<void> {
   const meta = (pi.metadata ?? {}) as Record<string, string>;
   if (pi.status !== "succeeded" || typeof pi.id !== "string") return;
-  const amount = typeof pi.amount === "number" ? pi.amount : 0;
+  // Read before anything is written (rule 24): never a $0 or a dollars sale set down for good (paidCents).
+  const amount = paidCents(pi.amount, "a paid offer's amount");
+  const currency = paidCurrency(pi.currency, "a paid offer's money");
   const buyer = typeof pi.receipt_email === "string" ? pi.receipt_email : "";
   const at = typeof pi.created === "number" ? pi.created : Math.floor(Date.now() / 1000);
 
@@ -2811,7 +2901,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // A one-click charge never carries tax: the whole amount is the base.
     base: amount,
     total: amount,
-    currency: readCurrencyCode(pi.currency),
+    currency,
     buyer,
   }).catch((error) => console.error("noting a partner's share failed", error));
 
@@ -2829,7 +2919,7 @@ export async function noteCharge(store: Store, pi: Record<string, unknown>): Pro
     // A one-click charge never carries tax: the whole amount is the base.
     base: amount,
     total: amount,
-    currency: readCurrencyCode(pi.currency),
+    currency,
     rate,
     self: await isSelf(store, aff, buyer),
     promotion: affiliatePromotionFrom(meta) ?? undefined,
@@ -2851,6 +2941,12 @@ export type Line = Referral & {
   status: LineStatus;
   /** For a lead (how "lead"): which, what kind, whose address, and when it can be approved. */
   lead?: LeadView;
+  /**
+   * Its refunds could not be read: paid into another Stripe account than the store's (or while none is connected),
+   * past OTHER_ACCOUNT_DAYS, and never read on its own account before (readBook's refund mark). What it earns is not
+   * known, so it is never payable (Row.payable leaves it out), while the rest of the book still is.
+   */
+  unchecked?: true;
 };
 
 /** A lead as the book shows it (lib/affiliate-lead-rules.ts). The address is masked on an affiliate's own page. */
@@ -3004,6 +3100,12 @@ function paymentOf(row: Record<string, unknown>): string | null | undefined {
  * amount exactly (takenBack), and the last page said there was no more. A
  * page that says there is more without a readable last row, or a list still
  * not finished after `pages` pages, is not complete, never "nothing more".
+ * For disputes, beside it, for the refund mark only (AFFILIATE_REFUND_MARK):
+ * `settled`, what was taken in a state that never changes again
+ * (DISPUTE_SETTLED), and `open`, every payment with a dispute that can still
+ * change, so a mark never keeps a dispute that may yet be won as if it were
+ * final. A dispute that can still change whose payment does not read leaves
+ * the reading not complete.
  */
 async function takenSince(
   store: Store,
@@ -3012,10 +3114,13 @@ async function takenSince(
   since: number,
   deadline: number | undefined,
   currencyOf: ReadonlyMap<string, string>,
-): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+): Promise<{ byIntent: Map<string, number>; settled: Map<string, number>; open: Set<string>; complete: boolean }> {
   const byIntent = new Map<string, number>();
+  const settled = new Map<string, number>();
+  const open = new Set<string>();
   const seen = new Set<string>();
-  const incomplete = { byIntent, complete: false };
+  const seenSettled = new Set<string>();
+  const incomplete = { byIntent, settled, open, complete: false };
   if (!store.stripeAccountId) return incomplete;
   const kind = list === "refunds" ? "refund" : "dispute";
   const states = list === "refunds" ? REFUND_STATES : DISPUTE_STATES;
@@ -3047,12 +3152,20 @@ async function takenSince(
     }
     if (read.unreadable > 0) return incomplete;
     for (const row of read.rows) {
-      if (!takes.has(row.status as string)) continue;
+      const status = row.status as string;
+      const final = list === "disputes" && DISPUTE_SETTLED.has(status);
+      if (list === "disputes" && !final) {
+        const pi = paymentOf(row);
+        if (pi === undefined) return incomplete;
+        if (pi !== null) open.add(pi);
+      }
+      if (!takes.has(status)) continue;
       const pi = paymentOf(row);
       if (pi === undefined) return incomplete;
       if (pi !== null && !takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;
+      if (pi !== null && final && !takenBack(settled, seenSettled, row, pi, currencyOf)) return incomplete;
     }
-    if (!read.hasMore) return { byIntent, complete: true };
+    if (!read.hasMore) return { byIntent, settled, open, complete: true };
     if (!read.lastId) return incomplete;
     after = read.lastId;
   }
@@ -3078,14 +3191,68 @@ function refundsSince(
  * oldest sale on the book on: the disputed amount of every dispute the bank
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
+ * Beside it, for the refund mark only (AFFILIATE_REFUND_MARK): `settled`, what
+ * was taken in a state that never changes again (DISPUTE_SETTLED), and `open`,
+ * every payment with a dispute that can still change or whose state does not
+ * read, so a mark never keeps a dispute that may yet be won as if it were final.
  */
 export function disputesSince(
   store: Store,
   since: number,
   deadline: number | undefined,
   currencyOf: ReadonlyMap<string, string>,
-): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+): Promise<{ byIntent: Map<string, number>; settled: Map<string, number>; open: Set<string>; complete: boolean }> {
   return takenSince(store, "disputes", DISPUTE_PAGES, since, deadline, currencyOf);
+}
+
+/**
+ * A refund read on the account a Stripe sale, a partner's share of it or a booked call's lead was paid into, kept on
+ * its record, so it still counts once the creator moved to another account and it can no longer be read (readBook).
+ * The mark is one field, `rf`: what was refunded then, plus what disputes took in a state that never changes again
+ * (DISPUTE_SETTLED: lost, prevented), in cents, written in base 36 as a string
+ * (REFUND_MARK_MAX_BYTES at the most, counted in an order's parts and a lead's room). The account it was read on is
+ * the record's own `acct`, the account the line was paid into, written once with it and never changed: a mark is only
+ * written while that `acct` is the store's account, into the same text, so it names exactly that account and can
+ * never be taken for another one; a record without `acct` has no mark. Each record's field is written only over
+ * exactly the text read (its SHA-1), with `rf` the larger of what was kept and what was read, so it only ever rises:
+ * a record changed in between is left for the next reading. A dispute that can still change (an inquiry, one the bank
+ * holds, one whose state does not read) is not kept: while one is open on the payment the record keeps no mark, and a
+ * mark kept before it opened is taken off, so after a move the line is held (unchecked), never settled as if the
+ * dispute were lost or as if it never came. Never on a line, a file, a kept book or a person's copy.
+ */
+export const AFFILIATE_REFUND_MARK = `-- marktmorgen:affiliate-refund-mark:v1
+local n = 0
+for i = 1, #ARGV, 3 do
+  local cur = redis.call('HGET', KEYS[1], ARGV[i])
+  if cur and redis.sha1hex(cur) == ARGV[i + 1] then
+    redis.call('HSET', KEYS[1], ARGV[i], ARGV[i + 2])
+    n = n + 1
+  end
+end
+return n`;
+
+type RefundMark = { rf: number; rfa: string };
+
+/**
+ * A record's kept refund (AFFILIATE_REFUND_MARK), read exactly: whole cents from 0 up in base 36 and the record's own
+ * account (`acct`, a string that is not empty); else none.
+ */
+function refundMarkOf(raw: string): RefundMark | null {
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const rf = typeof value.rf === "string" ? readRefundMark(value.rf) : null;
+    return rf !== null && typeof value.acct === "string" && value.acct !== "" ? { rf, rfa: value.acct } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A sale without the account it was paid into (Referral.acct), which only readBook's check reads. */
+function withoutAccount(referral: Referral): Referral {
+  if (referral.acct === undefined) return referral;
+  const line = { ...referral };
+  delete line.acct;
+  return line;
 }
 
 /**
@@ -3195,6 +3362,42 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 }
 
 /**
+ * Keeps each refund read on its own account on its record (AFFILIATE_REFUND_MARK): the record's text with `rf` set, written only over exactly the text read, one script per hash, all in one pipeline. Only records whose
+ * kept refund rises are sent, REFUND_MARKS_PER_READ at the most, so what a reading costs stays bounded: a kept refund
+ * that rises first (one kept lower would be paid on after a move), then those never kept, newest first; the rest at
+ * the next reading. A reading with none sends nothing.
+ */
+async function markRefunds(account: string, marks: { key: string; field: string; raw: string; rf: number | null; at: number; rises: boolean }[]): Promise<void> {
+  if (!marks.length) return;
+  const chosen = [...marks].sort((a, b) => Number(b.rises) - Number(a.rises) || b.at - a.at).slice(0, REFUND_MARKS_PER_READ);
+  const byKey = new Map<string, (string | number)[]>();
+  for (const m of chosen) {
+    let next: string;
+    try {
+      const record = JSON.parse(m.raw) as Record<string, unknown>;
+      // Only into a record that names this account as its own (the mark's account is its `acct`).
+      if (record.acct !== account) continue;
+      // `null` takes the mark off (a dispute that can still change opened since it was kept).
+      if (m.rf === null) {
+        const { rf: _taken, ...rest } = record;
+        void _taken;
+        next = JSON.stringify(rest);
+      } else {
+        if (!Number.isSafeInteger(m.rf) || m.rf < 0) continue;
+        next = JSON.stringify({ ...record, rf: m.rf.toString(36) });
+      }
+    } catch {
+      continue;
+    }
+    const script = byKey.get(m.key) ?? ["EVAL", AFFILIATE_REFUND_MARK, 1, m.key];
+    script.push(m.field, createHash("sha1").update(m.raw).digest("hex"), next);
+    byKey.set(m.key, script);
+  }
+  const commands = [...byKey.values()];
+  if (commands.length) await redisPipeline(commands);
+}
+
+/**
  * The program's book, or one affiliate's (`only`). With `deadline` (epoch
  * milliseconds), Stripe is asked nothing past it, and what was not read is
  * marked incomplete (invoicesChecked, refundsChecked): the affiliate page's
@@ -3206,18 +3409,23 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", clicksKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-    ["HGETALL", sharesKey(statsId)],
-    ["HGETALL", paidClicksKey(statsId)],
-    // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
-    ["HGETALL", leadsKey(statsId)],
-  ]);
+  // Each hash read exactly: a reply that does not read throws, and nothing is shown as owed or paid on it.
+  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", clicksKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+      ["HGETALL", sharesKey(statsId)],
+      ["HGETALL", paidClicksKey(statsId)],
+      // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
+      ["HGETALL", leadsKey(statsId)],
+    ]),
+    7,
+    "an affiliate program's book",
+  );
   // Everybody, for the checks that compare one affiliate with the others.
-  const everyone = pairs(people)
+  const everyone = people
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const affiliates = everyone.filter((a) => !only || a.id === only);
@@ -3225,10 +3433,16 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // those of the people who joined through their invitation link.
   const recruits = new Set(everyone.filter((a) => only && a.by?.id === only).map((a) => a.id));
   const mine = (aff: string) => !only || aff === only || recruits.has(aff);
-  const clickCount = new Map(pairs(clicks).map(([id, n]) => [id, Number(n) || 0]));
-  const paidCount = new Map(pairs(paidClicks).map(([id, n]) => [id, Number(n) || 0]));
-  const referrals = pairs(sales)
-    .map(([, raw]) => parseReferral(raw))
+  const clickCount = new Map(clicks.map(([id, n]) => [id, Number(n) || 0]));
+  const paidCount = new Map(paidClicks.map(([id, n]) => [id, Number(n) || 0]));
+  // Where each kept sale, partner share and lead was read from, for its refund mark (AFFILIATE_REFUND_MARK).
+  const origins = new Map<object, { key: string; field: string; raw: string; mark: RefundMark | null }>();
+  const referrals = sales
+    .map(([field, raw]) => {
+      const r = parseReferral(raw);
+      if (r) origins.set(r, { key: salesKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return r;
+    })
     .filter((r): r is Referral => r !== null && mine(r.aff));
   // A partner's standing share of a sale reads as one more Referral, credited
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
@@ -3236,14 +3450,16 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // and one sale can produce several of these alongside a commission.
   // A share of some lines of an order is settled against the whole order's base (settleLine), kept beside the line.
   const partOf = new Map<string, number>();
-  const partnerLines: Referral[] = pairs(shares)
-    .map(([, raw]) => parsePartnerEarning(raw))
+  const partnerLines: Referral[] = shares
+    .map(([field, raw]) => {
+      const e = parsePartnerEarning(raw);
+      if (e) origins.set(e, { key: sharesKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return e;
+    })
     .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
     .map((e) => {
       if (e.whole !== undefined) partOf.set(`${e.ref}:${e.aff}`, e.whole);
-      return e;
-    })
-    .map((e) => ({
+      const line: Referral = {
       ref: `${e.ref}:${e.aff}`,
       pi: e.pi,
       aff: e.aff,
@@ -3256,10 +3472,17 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       rate: e.percent,
       self: e.self,
       how: "partner" as const,
-    }));
-  const paid = pairs(payouts)
-    .map(([, raw]) => parsePayout(raw))
-    .filter((p): p is Payout => p !== null && (!only || p.aff === only))
+      ...(e.acct !== undefined ? { acct: e.acct } : {}),
+      };
+      const origin = origins.get(e);
+      if (origin) origins.set(line, origin);
+      return line;
+    });
+  // Each payout row read exactly as addPayout writes it (exactPayout): a row that does not read makes the book unknown,
+  // never "not paid", so a payout already made is never shown as owed again (Revisor 1 on #3719).
+  const paid = payouts
+    .map(([, raw]) => exactPayout(raw))
+    .filter((p) => !only || p.aff === only)
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.at - a.at);
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
@@ -3276,13 +3499,28 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     }
   }
   const everything = [...referrals, ...partnerLines, ...recurringLines];
-  const leads = pairs(leadsReply)
-    .map(([, raw]) => parseLead(raw))
+  const leads = leadsReply
+    .map(([field, raw]) => {
+      const l = parseLead(raw);
+      if (l) origins.set(l, { key: leadsKey(statsId), field, raw, mark: refundMarkOf(raw) });
+      return l;
+    })
     .filter((l): l is NonNullable<typeof l> => l !== null);
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
   const bookings = leads.filter((l) => l.kind === "booking" && l.pi);
   let refunds = new Map<string, number>();
   let refundsChecked = true;
+  // Whether Stripe's refunds and disputes were both read in full on the store's account: only then is a mark written.
+  let stripeRefundsRead = false;
+  let stripeDisputesRead = false;
+  // What a mark keeps (AFFILIATE_REFUND_MARK): Stripe's refunds, which only ever grow, and disputes taken in a state
+  // that never changes again; a payment with a dispute that can still change is kept with no mark at all.
+  let finalTaken = new Map<string, number>();
+  let disputeOpen = new Set<string>();
+  // Lines on another account past the window, never read on their own (held: not payable), by ref; and what was kept
+  // of those that were (their refund mark), by the line or lead.
+  const unchecked = new Set<string>();
+  const kept = new Map<object, number>();
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
     // Each payment's currency, so a refund or dispute in another one is never added to its cents.
@@ -3299,7 +3537,9 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     try {
       const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline, currencyOf) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
+      finalTaken = new Map(read.byIntent);
       refundsChecked = read.complete;
+      stripeRefundsRead = Boolean(store.stripeAccountId) && read.complete;
       // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
       // sale, one in another currency than its sale's means nothing in its cents, and one whose cents are not a
       // whole positive amount, or not its sale's whole amount (a PayPal refund here is in full), would count as a
@@ -3335,14 +3575,75 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       try {
         const disputed = await disputesSince(store, since, limits.deadline, currencyOf);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
+        for (const [pi, cents] of disputed.settled) finalTaken.set(pi, (finalTaken.get(pi) ?? 0) + cents);
+        disputeOpen = disputed.open;
         refundsChecked = refundsChecked && disputed.complete;
+        stripeDisputesRead = disputed.complete;
       } catch (error) {
         console.error("reading disputes for the affiliate book failed", error);
         refundsChecked = false;
       }
     }
+    // Refunds and disputes are read on the account the store names now. A Stripe sale paid into another one (the
+    // creator disconnected it or moved to a new one since), or any Stripe sale while none is connected, cannot be
+    // judged there: what it earns is not known (refundsChecked), so no payout is made on a refund nobody read.
+    // A booking's lead is reversed by its refund in the same way (settleLeads), so it is judged with the sales.
+    // Only while a refund or a dispute can still come (OTHER_ACCOUNT_DAYS): a sale past it is settled for good, so one
+    // old sale on a former account never holds every affiliate's payout for ever. A time that does not read is inside.
+    const account = store.stripeAccountId;
+    const cut = Math.floor(Date.now() / 1000) - OTHER_ACCOUNT_DAYS * 86_400;
+    const open = (at: number) => !(Number.isFinite(at) && at > 0) || at >= cut;
+    const unread = (r: { pi: string; acct?: string }) => r.pi !== "" && !r.pi.startsWith("paypal:") && (!account || (r.acct !== undefined && r.acct !== account));
+    if (everything.some((r) => unread(r) && open(r.at)) || bookings.some((l) => unread(l) && (open(l.at) || open(Math.max(l.at, l.end))))) {
+      refundsChecked = false;
+    }
+    // A line on another account uses the refund kept when it was last read on its own (AFFILIATE_REFUND_MARK). Past
+    // the window, with that mark it is checked; without one, what it earns is not known: only that line is held, not
+    // payable, never read as a refund of nothing, and the rest of the book stays payable.
+    const markOf = (r: object & { acct?: string }) => {
+      const mark = origins.get(r)?.mark;
+      return mark && r.acct !== undefined && mark.rfa === r.acct ? mark : null;
+    };
+    for (const r of everything) {
+      if (!unread(r)) continue;
+      const mark = markOf(r);
+      if (mark) kept.set(r, mark.rf);
+      else if (!open(r.at)) unchecked.add(r.ref);
+    }
+    for (const l of bookings) {
+      if (!unread(l)) continue;
+      const mark = markOf(l);
+      if (mark) kept.set(l, mark.rf);
+      else if (!(open(l.at) || open(Math.max(l.at, l.end)))) unchecked.add(`lead:${l.id}`);
+    }
+    // Read in full on the account each was paid into: what was given back is kept on its record, rising only.
+    if (account && stripeRefundsRead && stripeDisputesRead) {
+      try {
+        await markRefunds(account, [
+          ...[...referrals, ...partnerLines].map((r) => ({ r, cap: r.total })),
+          ...bookings.map((l) => ({ r: l, cap: l.paid > 0 ? l.paid : Number.MAX_SAFE_INTEGER })),
+        ].flatMap(({ r, cap }): { key: string; field: string; raw: string; rf: number | null; at: number; rises: boolean }[] => {
+          const origin = origins.get(r);
+          if (!origin || r.acct !== account || r.pi === "" || r.pi.startsWith("paypal:")) return [];
+          const before = origin.mark && origin.mark.rfa === account ? origin.mark.rf : -1;
+          // A dispute that can still be won is not a refund: while one is open the record keeps no mark, so after a
+          // move it is held (unchecked), never settled on what the dispute took for now nor on a mark kept before it.
+          if (disputeOpen.has(r.pi)) return before >= 0 ? [{ ...origin, rf: null, at: r.at, rises: true }] : [];
+          const read = Math.min(Math.max(0, finalTaken.get(r.pi) ?? 0), cap);
+          return read > before ? [{ ...origin, rf: read, at: r.at, rises: before >= 0 }] : [];
+        }));
+      } catch (error) {
+        // Not kept this time: the next reading on the same account writes it. Until then nothing is read from it.
+        console.error("keeping the affiliate book's refunds failed", error);
+      }
+    }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0, r.how === "partner" ? partOf.get(r.ref) : undefined));
+  // The account a sale was paid into is for the check above only: never on a line, so no page, file or kept book shows it.
+  const refundOf = (r: Referral) => kept.get(r) ?? (r.pi ? refunds.get(r.pi) ?? 0 : 0);
+  const settled = everything.map((r) => ({
+    ...settleLine(withoutAccount(r), refundOf(r), r.how === "partner" ? partOf.get(r.ref) : undefined),
+    ...(unchecked.has(r.ref) ? { unchecked: true as const } : {}),
+  }));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -3354,14 +3655,23 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       ends = new Map();
     }
   }
-  const leadLines = settleLeads(leads, Math.floor(Date.now() / 1000), (pi) => refunds.get(pi) ?? 0, ends)
+  // A booking on another account is settled with its kept refund (by its payment, as settleLeads asks).
+  const keptByPayment = new Map(bookings.filter((l) => kept.has(l)).map((l) => [l.pi, kept.get(l) as number]));
+  const leadLines = settleLeads(leads, Math.floor(Date.now() / 1000), (pi) => keptByPayment.get(pi) ?? refunds.get(pi) ?? 0, ends)
     .filter((s) => !only || s.lead.aff === only)
-    .map(leadLine);
+    .map((s) => (unchecked.has(`lead:${s.lead.id}`) ? { ...leadLine(s), unchecked: true as const } : leadLine(s)));
   const flagsOf = holdFlags(store, everyone, paidCount);
   // A goal reached in a month adds its bonus, and a sale by somebody an
   // affiliate brought adds their second tier, both worked out from the sales
   // as they stand after refunds. Then only the one affiliate's, when it is one.
-  const lines = [...settled, ...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf), ...leadLines]
+  // A second tier on a held sale is held with it, and so is a bonus of a month with a held sale among its sales.
+  const heldMonths = new Set(settled.filter((l) => l.unchecked).map((l) => `${l.aff}:${new Date(l.at * 1000).toISOString().slice(0, 7)}:`));
+  const derived = [...bonusLines(store, settled), ...tierLines(everyone, settled, flagsOf)].map((l) =>
+    (l.how === "tier2" && unchecked.has(l.ref.slice("tier2:".length))) || (l.how === "bonus" && [...heldMonths].some((m) => l.ref.startsWith(`bonus:${m}`)))
+      ? { ...l, unchecked: true as const }
+      : l,
+  );
+  const lines = [...settled, ...derived, ...leadLines]
     .filter((l) => !only || l.aff === only)
     .sort((a, b) => b.at - a.at);
 
@@ -3376,9 +3686,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const out = paid.filter((p) => p.aff === affiliate.id && p.currency === store.currency).reduce((sum, p) => sum + p.cents, 0);
       // A lead waits until the creator approves it (lib/affiliate-leads.ts decideLeads); a sale, until the store's wait has passed.
       const waiting = own.filter((l) => (l.how === "lead" ? l.status !== "approved" : l.at > until)).reduce((sum, l) => sum + l.commission, 0);
+      // A held line (its refunds never read) is never paid, whether or not it is still waiting.
+      const holding = own.filter((l) => l.unchecked && !(l.how === "lead" ? l.status !== "approved" : l.at > until)).reduce((sum, l) => sum + Math.max(0, l.commission), 0);
       const owed = earned - out;
       const flags = flagsOf.get(affiliate.id) ?? [];
-      const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - out));
+      const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - holding - out));
       return {
         affiliate,
         clicks: clickCount.get(affiliate.id) ?? 0,
@@ -3921,13 +4233,18 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
   const statsId = store.statsId as string;
   const now = Math.floor(nowMs / 1000);
-  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", leadsKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const everyone = pairs(peopleReply)
+  // Read exactly: a sales or payouts hash that does not read never makes an affiliate look idle (throws instead).
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", leadsKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+    ]),
+    4,
+    "an affiliate program's book",
+  );
+  const everyone = peopleReply
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
@@ -3937,7 +4254,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
   const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
   const salesByMonth = new Map<string, number>();
-  for (const [, raw] of pairs(salesReply)) {
+  for (const [, raw] of salesReply) {
     const sale = parseReferral(raw);
     if (!sale || sale.self) continue;
     active(sale.aff, sale.at);
@@ -3958,7 +4275,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     const aff = month.slice(0, month.indexOf(":"));
     for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
   }
-  for (const [, raw] of pairs(leadsReply)) {
+  for (const [, raw] of leadsReply) {
     const lead = parseLead(raw);
     if (!lead) continue;
     active(lead.aff, lead.at);
@@ -3966,7 +4283,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     if (lead.currency !== store.currency) foreign.add(lead.aff);
   }
   const paid = new Map<string, number>();
-  for (const [, raw] of pairs(payoutsReply)) {
+  for (const [, raw] of payoutsReply) {
     const payout = parsePayout(raw);
     if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
   }

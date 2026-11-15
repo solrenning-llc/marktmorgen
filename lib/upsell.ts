@@ -135,6 +135,11 @@ export function newUpsellKey(): { secret: string; fingerprint: string } {
   return { secret, fingerprint: fingerprint(secret) };
 }
 
+/** Whether a cookie has the shape newUpsellKey gives a secret: 24 random bytes as lowercase hex. */
+export function secretShaped(secret: string | undefined): secret is string {
+  return typeof secret === "string" && /^[0-9a-f]{48}$/.test(secret);
+}
+
 export function fingerprint(secret: string): string {
   return createHash("sha256").update(`nimbus-upsell:${secret}`).digest("hex").slice(0, 40);
 }
@@ -315,6 +320,9 @@ export async function takeUpsell(input: {
   // after notices, plan not paid, Stripe not cleared) takes no offer: refused
   // before Stripe is asked anything and before anything is written.
   if (!store.stripeAccountId || !isRedisConfigured() || !canSell(store)) return { kind: "unavailable" };
+  // Only the paying browser holds the secret (newUpsellKey): with none, or one we never make, the creator's Stripe
+  // account is not asked anything (MM-SA-44). Its fingerprint is still checked against the checkout below.
+  if (!secretShaped(secret)) return { kind: "unavailable" };
   const found = await paidSession(store, session);
   if (!found) return { kind: "unavailable" };
   const { view, product, cart } = found;

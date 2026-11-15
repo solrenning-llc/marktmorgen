@@ -56,7 +56,8 @@ import { paidPeriod } from "./billing-period-fixture";
 const OWNER = "owner@example.com";
 const ACCOUNT = "acct_1TestJourney001";
 const SESSION = `cs_test_${"j".repeat(24)}`;
-const SECRET = "browser-secret-of-the-buyer";
+// Shaped as newUpsellKey makes a secret (24 bytes as lowercase hex): a cookie of any other shape never reaches Stripe (MM-SA-44).
+const SECRET = "b0".repeat(24);
 
 const checkouts: URLSearchParams[] = [];
 const charges: URLSearchParams[] = [];

@@ -64,6 +64,12 @@ Sources read on 15/11/2026:
 - The main-red alarm never takes CodeQL's merge-group run as main's result (`NOT_FROM_QUEUE`), so
   main is green for CodeQL only when its own push or daily run analyzed the head. Without this,
   the alarm could have closed on a merge group that skipped the analysis.
+- The alarm takes no longer to close than before: it used a merge-queue run only when the head
+  had no counted push or daily run of that workflow. CodeQL's push run on main is never canceled
+  while it runs (cancel-in-progress only on pull requests), so a running or waiting one already
+  held the close until it finished. What changes is the rare head with no CodeQL push run at all
+  (a missing run, or a commit message with `[skip ci]`): it now waits for the daily run, which
+  analyzes that head, instead of trusting a merge-group run that no longer analyzes.
 - Security coverage stays the same: the alerts in code scanning always came from the pull
   request and main runs. What the queue loses is only a non-uploaded repeat that could not fail
   on a finding.
@@ -72,6 +78,15 @@ Expected gain: a merge group's longest check drops from about 64 minutes median 
 slowest required workflow; CodeQL itself answers in the time of its documentation-scope job
 (about one minute). The new figure is to be measured on the queue after the change; nothing here
 claims it.
+
+## Follow-up, not in this change
+
+`scripts/queue_health_report.mjs` takes the p90 of CodeQL's analyze jobs from the last 20
+completed CodeQL runs of every event. Skipped jobs were already left out (documentation-only pull
+requests); merge-group runs now add more of them (about 343 merge-group, 500 pull request and 67
+push runs in the 24 hours before 15/11/2026, 03:00 UTC), so the warning reads fewer real samples.
+It still warns. Listing `event=pull_request` and `event=push` apart would restore the sample; a
+small PR of its own, with the report's tests.
 
 ## Evaluated and left out (B): `paths-ignore` for `tests/**` and `proofs/**`
 

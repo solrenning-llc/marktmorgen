@@ -307,7 +307,9 @@ part("a merge_group run that passed on main's very head is that workflow's resul
   is("(1) the push runs passed too (they reused the queue's proof): close, nothing from the queue needed",
     [withQueue(queueGreen(), allGreen()).action, fromQueue(withQueue(queueGreen(), allGreen()))], ["close", []]);
   is("(1) eight passed in the queue and one has no result anywhere on the head: nothing yet",
-    withQueue(queueGreen().slice(0, 8), REQUIRED.map((_, i) => run(i, stopped))).action, "none");
+    withQueue(queueGreen().slice(0, 8), butCodeql(REQUIRED.map((_, i) => run(i, stopped)))).action, "none");
+  is("control: the same with product-checks green in the queue too: close (so the case above is product-checks alone)",
+    withQueue(queueGreen(), butCodeql(REQUIRED.map((_, i) => run(i, stopped)))).action, "close");
   is("(1) an earlier head red, the current head's push canceled, the queue green on the current head: close (the current head decides)",
     [withQueue([], [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action,
       withQueue(queueGreen(), [...restGreen(), run(PC, "failure", { head_sha: OLD }), run(PC, stopped)]).action], ["open", "close"]);

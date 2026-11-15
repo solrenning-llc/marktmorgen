@@ -3,11 +3,19 @@
  * browser: run it after seed.ts, against the same stand-in database. It adds
  * to the owner's store, through the same functions the studio's routes use:
  * a product with a course (two modules, three lessons) and a quiz on one
- * lesson; a funnel of two product pages; a form with a question of every
- * kind; and a quiz-style form with two results. Synthetic data only.
- * Prints one JSON line: { course, product, funnel, form, quizForm }.
+ * lesson; a funnel with one product page; a form with a question of every
+ * kind; a quiz-style form with two results; the community switched on, open
+ * to the course's buyers; a private podcast; and a buyer (student@example.com)
+ * who holds the course and the podcast through an import, with a signed-in
+ * session, so the course, its lessons, the quiz and the community can be seen
+ * as a student. Synthetic data only.
+ * Prints one JSON line: { podcast, studentSession, course, product, lesson, funnel, form, quizForm }.
  */
-import { addProduct, setProductCourse, storeForEmail, ensureStatsId } from "@/lib/store";
+import { setProductPodcast, addProduct, setCommunity, setPastBuyers, setProductCourse, storeForEmail, ensureStatsId } from "@/lib/store";
+import { openSession } from "@/lib/auth";
+import { grantImported } from "@/lib/imported-purchases";
+import { freshConfig, saveConfig } from "@/lib/community";
+import { newPodcastId, savePodcast } from "@/lib/podcast";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { readQuiz, saveQuiz, setupOf } from "@/lib/quiz";
 import { type FormDef, newFormId, parseForm } from "@/lib/forms";
@@ -90,7 +98,23 @@ async function main(): Promise<void> {
   if (!quizForm) throw new Error("the quiz form did not parse");
   if (!(await writeForm(statsId, quizForm))) throw new Error("the quiz form was not written");
 
-  console.log(JSON.stringify({ course: course.id, product, lesson: lessonId, funnel: funnel.id, form: form.id, quizForm: quizForm.id }));
+  // The community switched on, and a buyer who holds the course through an import (no Stripe needed), with a session.
+  const on = await setCommunity(OWNER, true);
+  if (!on?.community) throw new Error("the community was not switched on");
+  // Its buyers of the course are let in.
+  await saveConfig(on.community.id, { ...freshConfig(on.name), access: [product] });
+  const STUDENT = "student@example.com";
+  // A private podcast, with no episode yet, held by the same buyer.
+  const cast = must(await addProduct(OWNER, "Bread Talk Podcast", "A private feed about bread, one episode a week.", "5", null), "the podcast product");
+  const podcastId = newPodcastId();
+  await savePodcast({ id: podcastId, episodes: [] });
+  must(await setProductPodcast(OWNER, cast.product.id, { id: podcastId, episodes: 0 }), "the podcast");
+  const granted = await grantImported(statsId, "0123456789abcdef01234567", [{ email: STUDENT, productId: product, items: null }, { email: STUDENT, productId: cast.product.id, items: null }]);
+  if (!granted.every(Boolean)) throw new Error("the course or the podcast was not granted to the student");
+  await setPastBuyers(OWNER);
+  const studentSession = await openSession(STUDENT);
+
+  console.log(JSON.stringify({ podcast: cast.product.id, studentSession, course: course.id, product, lesson: lessonId, funnel: funnel.id, form: form.id, quizForm: quizForm.id }));
 }
 
 main().catch((error) => {

@@ -18,7 +18,7 @@
  *
  * The original is always where it can go back to.
  */
-import { bodyHtml } from "@/lib/mail-body";
+import { bodyHtml, parseMailBlocks } from "@/lib/mail-body";
 import { isOwnLink } from "@/lib/mail-links";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -69,6 +69,18 @@ export function linksOf(body: string): string[] {
     return href;
   });
   return seen.slice(0, SENT_LINKS_MAX);
+}
+
+/**
+ * Which of linksOf's links can change after sending, in linksOf's own order (its numbering is the one emails already
+ * sent are signed with, so it never moves): only a button's (124 [F2-EDIT-SENT-LINKS] unit 3a). A link written in the
+ * text shows its own address as its words; changed, the words would say one address while the link goes to another,
+ * which mail filters take for phishing and which would mislead the reader. An address that is also on a button can
+ * change, and only that button goes through the redirect (lib/mail.ts).
+ */
+export function changeableLinks(body: string): boolean[] {
+  const buttons = new Set(parseMailBlocks(body).flatMap((block) => (block.kind === "button" ? [block.href] : [])));
+  return linksOf(body).map((href) => buttons.has(href));
 }
 
 /** Where link `n` goes now: its last change, or null when it was never changed. */

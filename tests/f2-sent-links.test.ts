@@ -90,13 +90,15 @@ async function main(): Promise<void> {
   await upsertContact(dock.listId!, "cy@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
 
   part("The links an email can have changed, read the way the email draws them");
+  // Buttons: since unit 3a (tests/f2-sent-link-buttons.test.ts) only a button's link can change after sending.
   const body = [
-    `Our new plan: ${home}/p/plan.`,
-    "Watch the recipe: https://youtube.com/watch?v=1",
+    `[Our new plan](${home}/p/plan)`,
+    "[Watch the recipe](https://youtube.com/watch?v=1)",
     "[Join the call](https://zoom.us/j/1)",
-    `The plan again: ${home}/p/plan`,
+    `[The plan again](${home}/p/plan)`,
   ].join("\n\n");
-  is("distinct, in order, the full stop left with the sentence", linksOf(body), [`${home}/p/plan`, "https://youtube.com/watch?v=1", "https://zoom.us/j/1"]);
+  is("distinct, in order", linksOf(body), [`${home}/p/plan`, "https://youtube.com/watch?v=1", "https://zoom.us/j/1"]);
+  is("the full stop is left with the sentence", linksOf(`Our new plan: ${home}/p/plan.`), [`${home}/p/plan`]);
   const many = Array.from({ length: SENT_LINKS_MAX + 2 }, (_, i) => `https://example.com/page-${i}`).join("\n\n");
   is("at most SENT_LINKS_MAX an email", linksOf(many).length, SENT_LINKS_MAX);
 
@@ -117,7 +119,7 @@ async function main(): Promise<void> {
   is("the same for every reader: nothing of the reader in it", ana, ben);
   is("nothing of the reader's address or token is on it", ana.some((href) => /ana|ben|%40|t=/.test(href.split("?")[0]) || /ana%40|ben%40/.test(href)), false);
   const html = byReader.get("ana@example.com") ?? "";
-  is("the words are the address as typed", html.includes(`>${home}/p/plan</a>`) && html.includes(">https://youtube.com/watch?v=1</a>"), true);
+  is("the words are the button's own", html.includes(">Our new plan</a>") && html.includes(">Watch the recipe</a>"), true);
   is("the unsubscribe line is not wrapped", /href="[^"]*\/unsubscribe\?t=/.test(html) && !/\/go\/[^"]*unsubscribe/.test(html), true);
 
   part("The redirect goes where the link was sent to");

@@ -110,7 +110,8 @@ async function main(): Promise<void> {
   await setMailSettings(OWNER, { fromName: "Harbor Kitchen", address: "1 Main St, Portland, OR 97201" });
   harbor = (await storeForEmail(OWNER))!;
 
-  const body = [`Our plan: ${home}/p/plan`, "Watch: https://youtube.com/watch?v=1", "[Join the call](https://zoom.us/j/1)"].join("\n\n");
+  // Buttons: only a button's link can change after sending (unit 3a).
+  const body = [`[Our plan](${home}/p/plan)`, "[Watch](https://youtube.com/watch?v=1)", "[Join the call](https://zoom.us/j/1)"].join("\n\n");
   is("the email has three links that can be changed", linksOf(body).length, 3);
   const email = (id: string): SentEmail => ({ id, listId: harbor!.listId!, handle: harbor!.handle, body, sent: 2, links: true });
 

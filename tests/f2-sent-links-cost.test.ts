@@ -80,7 +80,8 @@ async function main(): Promise<void> {
 
   /** An email at its longest on the wire: twenty links, then characters JSON writes as six bytes each, and sent. */
   const makeSent = async (subject: string): Promise<{ id: string; body: string; email: SentEmail }> => {
-    const links = Array.from({ length: rules.SENT_LINKS_MAX }, (_, i) => `https://youtube.com/watch?v=${i}`);
+    // Buttons: only a button's link can change after sending (unit 3a).
+    const links = Array.from({ length: rules.SENT_LINKS_MAX }, (_, i) => `[Watch ${i}](https://youtube.com/watch?v=${i})`);
     let body = `${links.join("\n\n")}\n\n`;
     body += `x${"\u0001".repeat(20_000 - body.length - 2)}x`;
     const created = await createBroadcast(store, { subject, body, productId: "", notProductId: "", sendAt: undefined });

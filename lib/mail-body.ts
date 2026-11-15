@@ -169,7 +169,14 @@ export type BodyPaint = { text: string; link: string; line: string; headFont: st
  * starting colour of a button, adjusted only when its text cannot reach 7:1;
  * `paint`, when given, draws it in the store's email colors instead.
  */
-export function bodyHtml(body: string, goesTo?: (href: string) => string, accent = "#4c1d95", paint?: BodyPaint): string {
+export function bodyHtml(
+  body: string,
+  goesTo?: (href: string) => string,
+  accent = "#4c1d95",
+  paint?: BodyPaint,
+  /** Where a button leads, when not where `goesTo` sends every link: only buttons go through the sent-link redirect (lib/sent-link-rules.ts, changeableLinks). */
+  buttonTo?: (href: string) => string,
+): string {
   const colors = paint ? paint.button : buttonColours(accent);
   const link = paint?.link ?? "#4c1d95";
   const headingStyle = paint ? `color:${paint.text};font-family:${paint.headFont}` : "color:#1c1917";
@@ -182,7 +189,7 @@ export function bodyHtml(body: string, goesTo?: (href: string) => string, accent
         out.push(`<h2 style="margin:0 0 12px;font-size:22px;line-height:1.3;font-weight:700;${headingStyle}">${escape(block.text)}</h2>`);
         break;
       case "button": {
-        const href = goesTo ? goesTo(block.href) : block.href;
+        const href = buttonTo ? buttonTo(block.href) : goesTo ? goesTo(block.href) : block.href;
         out.push(
           `<p style="margin:8px 0 24px"><a href="${escape(href)}" style="display:inline-block;padding:12px 22px;border-radius:999px;background:${colors.fill};color:${colors.ink};font-weight:700;text-decoration:none">${escape(block.label)}</a></p>`,
         );

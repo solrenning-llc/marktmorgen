@@ -6,10 +6,14 @@ import { type LinkChange, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, SENT_LINK_
 /** One sent email whose links can be changed, as the page reads it. `changes` null: they could not be read just now. */
 /** `own`: whether each link went to the store, which then can only go to another page of it. */
 /** `noRoom`: its changes have no room left in bytes for another one, though fewer than the most (lib/sent-links.ts, sentLinksNoRoom). */
-export type SentEmailLinks = { id: string; subject: string; sentOn: string; links: string[]; own: boolean[]; changes: LinkChange[] | null; noRoom: boolean };
+/** `changeable[n]`: whether link `n` (linksOf's numbering) is a button, the only links that can change (lib/sent-link-rules.ts, changeableLinks). */
+export type SentEmailLinks = { id: string; subject: string; sentOn: string; links: string[]; changeable: boolean[]; own: boolean[]; changes: LinkChange[] | null; noRoom: boolean };
 
 /** Said when the change may or may not have been saved. */
 const UNKNOWN = "We could not confirm whether the change was saved. Reload the page to see where the link goes now.";
+
+/** How many of the email's links are buttons, the ones that can change. */
+const buttonCount = (email: SentEmailLinks) => email.changeable.filter(Boolean).length;
 
 const day = (seconds: number) => new Date(seconds * 1000).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
 
@@ -102,7 +106,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
               <section aria-labelledby={`${email.id}-title`} className="card p-5 sm:p-6">
                 <h2 id={`${email.id}-title`} tabIndex={-1} className="text-xl font-semibold break-words">{email.subject}</h2>
                 <p className="mt-1 text-ink-soft">
-                  Sent {email.sentOn}. {email.links.length === 1 ? "1 link" : `${email.links.length} links`} you can change.
+                  Sent {email.sentOn}. {buttonCount(email) === 1 ? "1 button" : `${buttonCount(email)} buttons`} you can change. Links written in the text keep going to the address they show.
                   {email.changes ? ` ${used} of ${SENT_LINK_CHANGES_MAX} changes used.` : ""}
                 </p>
                 {email.changes === null ? (
@@ -121,6 +125,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                 {email.changes === null ? null : (
                   <ol className="mt-5 space-y-6">
                     {email.links.map((original, n) => {
+                      if (!email.changeable[n]) return null;
                       const field = `${email.id}-${n}`;
                       const changes = email.changes ?? [];
                       const now = currentOf(changes, n) ?? original;
@@ -130,7 +135,7 @@ export function SentLinksEditor({ emails: initial, home }: { emails: SentEmailLi
                       const working = busy === field;
                       return (
                         <li key={field} className="border-t border-line pt-5">
-                          <h3 className="font-semibold">Link {n + 1}</h3>
+                          <h3 className="font-semibold">Button {email.changeable.slice(0, n + 1).filter(Boolean).length}</h3>
                           <dl className="mt-2 space-y-1">
                             <div>
                               <dt className="inline text-ink-soft">Written in the email: </dt>

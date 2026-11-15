@@ -7,7 +7,7 @@ import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { isOwnLink } from "@/lib/mail-links";
 import { storeBase } from "@/lib/purchase-email";
-import { SENT_LINKS_MAX, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, linksOf } from "@/lib/sent-link-rules";
+import { SENT_LINKS_MAX, SENT_LINK_CHANGES_MAX, SENT_LINK_KEEP_DAYS, changeableLinks, linksOf } from "@/lib/sent-link-rules";
 import { type ShownEmails, type ShownSentLinks, readShownSentEmails, readShownSentLinks } from "@/lib/sent-links";
 import { type SentEmailLinks, SentLinksEditor } from "@/components/sent-links-editor";
 
@@ -48,7 +48,8 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
   const listed: ShownEmails | null = await readShownSentEmails(store.listId, pay).catch(() => null);
   const all = listed?.ok ? listed.emails : null;
   const sent = (all ?? []).filter((b) => b.sent > 0);
-  const changeable = sent.filter((b) => b.links === true && linksOf(b.body).length > 0).slice(0, SHOWN);
+  // Only an email with a button: a link written in the text never changes after sending (changeableLinks).
+  const changeable = sent.filter((b) => b.links === true && changeableLinks(b.body).some(Boolean)).slice(0, SHOWN);
   const before = sent.filter((b) => b.links !== true).length;
   const unread: ShownSentLinks = { ok: true, kept: new Map(), noRoom: new Set() };
   const shown: ShownSentLinks = changeable.length ? await readShownSentLinks(changeable.map((b) => b.id), pay).catch(() => unread) : unread;
@@ -60,6 +61,7 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
       subject: b.subject,
       sentOn: day(b.finishedAt || b.sendAt),
       links,
+      changeable: changeableLinks(b.body),
       own: links.map((href) => { try { return isOwnLink(new URL(href), store); } catch { return false; } }),
       changes: kept.has(b.id) ? (kept.get(b.id)?.changes ?? []) : null,
       noRoom: shown.ok ? shown.noRoom.has(b.id) : false,
@@ -84,7 +86,8 @@ export default async function StudioSentLinksPage({ searchParams }: Params) {
           </p>
           <h2 className="mt-8 text-lg font-semibold">What you can change</h2>
           <ul className="mt-2 max-w-2xl list-disc space-y-1 pl-6 text-ink-soft">
-            <li>Links in one-off emails sent from November 6, 2026. The first {SENT_LINKS_MAX} links of each email.</li>
+            <li>Buttons in one-off emails sent from November 6, 2026, among the first {SENT_LINKS_MAX} links of each email.</li>
+            <li>A link written in the text shows its own address, so it always goes there and cannot be changed. That way the words people read never say one address while the link goes to another.</li>
             <li>A link to your store can go to another page of your store. Any other link can go to another page on the same site, or to a page of your store.</li>
             <li>Up to {SENT_LINK_CHANGES_MAX} changes for each email, sending a link back included. Each change is listed. Until they are all used, you can send a link back to where it first went.</li>
             <li>Changes last {SENT_LINK_KEEP_DAYS} days from the first one. After that, the link goes where the email first sent it.</li>

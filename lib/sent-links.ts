@@ -57,6 +57,7 @@ import {
   SENT_LINK_RECORD_MAX_BYTES,
   currentOf,
   destinationProblem,
+  changeableLinks,
   linksOf,
 } from "@/lib/sent-link-rules";
 
@@ -433,13 +434,14 @@ export type SentEmail = { id: string; listId: string; handle: string; body: stri
 
 export type ChangeResult =
   | { ok: true; changes: LinkChange[] }
-  | { ok: false; reason: "none" | "old" | "unsent" | "link" | "to" | "full" | "busy"; message: string };
+  | { ok: false; reason: "none" | "old" | "unsent" | "link" | "text" | "to" | "full" | "busy"; message: string };
 
 export const CHANGE_REFUSALS: Record<Exclude<ChangeResult, { ok: true }>["reason"], string> = {
   none: "That email is not one of this store's.",
   old: "This email was sent before links could be changed. Its links go straight to the addresses written in it.",
   unsent: "This email has not gone to anybody yet. Change its words instead, before it goes.",
   link: "That link is not one of this email's.",
+  text: "That link is written in the email's text, where its words are its own address, so it keeps going there. Only a button's link can change after sending, so the words a reader sees never say one address while the link goes to another.",
   to: "That address cannot be used.",
   full: `This email's links have been changed ${SENT_LINK_CHANGES_MAX} times, the most kept for one email. Each one keeps going where it goes now.`,
   busy: "This email's links were being changed somewhere else at the same moment, so this change was not saved. Reload the page to see where each link goes now, then try again.",
@@ -518,6 +520,8 @@ export async function changeLink(store: Store, email: SentEmail, n: number, raw:
   if (!(email.sent > 0)) return refuse("unsent");
   const hrefs = linksOf(email.body);
   if (!Number.isSafeInteger(n) || n < 0 || n >= hrefs.length) return refuse("link");
+  // Only a button's link (unit 3a): a link in the text shows its own address, which a change would make untrue.
+  if (!changeableLinks(email.body)[n]) return refuse("text");
   const problem = destinationProblem(raw, hrefs[n], store);
   if (problem) return refuse("to", problem);
   const to = raw.trim();

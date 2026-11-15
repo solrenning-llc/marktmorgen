@@ -218,6 +218,9 @@ async function main(): Promise<void> {
   is("and so is what an import gave", (await importedFor(store, "zed@example.com")).length, 1);
   is("closed for good", [await openGroup(store, id), Boolean((await readGroup(id))?.revoked)], [null, true]);
   is("read once", await revokeRefundedGroups(store, Date.now() + 10_000, async () => {}), 0);
+  // The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts), never for good.
+  const groupSeenTtl = redis.run(["TTL", `nl:grp:${store.statsId}:seen`]) as number;
+  is("the refunds already handled keep an expiry of at most thirty days", [groupSeenTtl > 0, groupSeenTtl <= 30 * 86_400], [true, true]);
 
   part("At one of several prices");
   const pack = await addProduct("owner@example.com", "Meal Planner", "", "27", null);

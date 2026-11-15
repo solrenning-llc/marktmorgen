@@ -100,3 +100,27 @@ Caminhos já limitados, que não leem o catálogo inteiro:
 - **Unidade 5:** construção só do que não muda limite nenhum.
 
 Nenhum preço, limite, comissão, trava ou flag foi alterado.
+
+---
+
+# Unidade 2, primeiro esboço: o desenho que tira as leituras do catálogo inteiro
+
+Também só documento; nada construído. Cada peça reaproveita o que o catálogo já tem: `nl:catalog:<id>:l:<produto>` (cada produto), `:t` (o hash dos títulos), `:x:<produto>` (os extras) e `:moved` (`lib/catalog.ts:313`, `:334`, `:357`, `:1329`). Os comandos abaixo são contados por desenho e precisam ser confirmados nos testes de carga da unidade 4. Até lá, cada número é uma estimativa, não um teto provado.
+
+| Peça | O que muda | Custo por operação depois, sem crescer com o catálogo |
+| --- | --- | --- |
+| 1. Índice fora do registro da loja | a ordem dos produtos sai de `store.catalog.items` para um conjunto ordenado `nl:catalog:<id>:o` (ZSET, posição como score), mais um conjunto por tipo (`:k:<tipo>`: chamadas, cursos, pacotes, ocultos). O registro da loja guarda só a contagem, a primeira página (`head`) e o id do catálogo | uma página: 1 `ZRANGE` de 24 ids e 24 `GET` dos produtos. O registro da loja deixa de crescer com o catálogo |
+| 2. Busca por índice de palavras | cada produto salvo grava as palavras do título e da descrição curta em `nl:catalog:<id>:w:<palavra>` (conjunto de ids), com teto de palavras por produto. A busca cruza os conjuntos das palavras pedidas e lê só a página de resultados | `SINTER` ou `SUNION` de até `searchWords` conjuntos, mais 24 `GET`; substitui a leitura de todos os produtos (#4144/#4172 tratam do preço até lá) |
+| 3. Mapa do site paginado | um índice de mapas por página de N produtos, lido por `ZRANGE` | um `ZRANGE` e N `GET` por página do mapa, nunca o catálogo inteiro |
+| 4. Índices reversos para salvar e estoque | `nl:catalog:<id>:r:<produto>` guarda quem oferece ou contém esse produto (funis, pacotes, ofertas no checkout, alvos de `bumpTargets`) e é mantido em cada salvamento | salvar um produto e definir estoque (`app/api/store/product/route.ts:88`, `lib/store.ts:2724`) leem só os produtos citados no índice reverso, não o catálogo |
+| 5. Telas do estúdio por tipo | `readKind` passa a ler o conjunto do tipo, paginado, com busca pelo índice de palavras | uma página por vez |
+| 6. Tarefas em lote com cursor | importação, exportação, fechamento, recontagem e cópia (`lib/imports.ts:1383`, `lib/store-export.ts:94`, `lib/plan-closing.ts:650`, `lib/data-recount.ts:155`, `lib/store-copy.ts:145`) percorrem o `ZSET` por páginas, guardando o cursor entre execuções, sob prazo (`withCutoff`) | cada execução tem teto de páginas, e o custo total é proporcional ao catálogo, mas dividido entre execuções e pago pelo que a tarefa já precifica |
+
+Riscos que o desenho ainda precisa resolver antes de virar código:
+
+- **Migração:** as lojas atuais têm o índice no registro e precisam ser copiadas para o `ZSET` sem perder ordem nem produto. Durante a cópia, valem as duas leituras, e a cópia é verificada antes de apagar o índice antigo.
+- **Consistência:** o salvamento do produto, do `ZSET`, dos conjuntos por tipo, das palavras e do índice reverso precisa ser atômico (um `EVAL`) ou reparável por uma recontagem com cursor.
+- **Apagamento:** cada família nova (`:o`, `:k:`, `:w:`, `:r:`) entra em `lib/data-families.ts` e no fechamento da loja. O índice de palavras guarda só texto do próprio criador, nunca dado de comprador.
+- **Custo de memória:** o índice de palavras ocupa espaço guardado (US$0,25 por GB por mês). Ele precisa de um teto de palavras por produto e de um preço por produto no registro de custos antes de existir.
+
+As duas propostas ao dono (unidade 3) dependem destes números confirmados. Até lá, custo desconhecido, que reprova.

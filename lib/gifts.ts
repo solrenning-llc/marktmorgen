@@ -258,9 +258,9 @@ export async function deliverGift(input: {
 }): Promise<GiftOutcome> {
   const { store, session, product, base } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGift(id);
-  if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
-  if (gift.given) return "already";
+  const seen = await readGift(id);
+  if (!seen || seen.s !== store.statsId || seen.p !== product.id) return "skip";
+  if (seen.given) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
@@ -274,6 +274,28 @@ export async function deliverGift(input: {
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  // Read again now that the mark is ours, as handOverPreorder does (Claude 7's race hunt): a run that read the gift
+  // before another run gave it, and took the mark once that run let it go, must not give it again from its old copy.
+  // A refund taken back in between would be undone: the purchase granted again, {...gift, given} written over the
+  // revoked mark, and the refund, already read, never read again. Read exactly (CX-123 rule 24): unknown throws.
+  let kept: Gift | null;
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+    if (reply === undefined || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError("a gift");
+    kept = typeof reply === "string" ? parseKeptGift(reply, id) : null;
+  } catch (error) {
+    await releaseMark(mark, value);
+    throw error;
+  }
+  if (!kept || kept.s !== store.statsId || kept.p !== product.id) {
+    await releaseMark(mark, value);
+    return "skip";
+  }
+  if (kept.given || kept.revoked) {
+    await releaseMark(mark, value);
+    return "already";
+  }
+  const gift = kept;
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -419,6 +441,10 @@ export async function revokeRefundedGifts(
         // No record: nothing of this gift is held as a purchase any more (null). A record that does not read is
         // unknown, never "no items" (rule 30, Claude 4 on #2781).
         let items: string[] = [];
+        // Only what this gift gave (as lib/group-buy.ts and lib/preorders.ts): grantImported writes with HSETNX, so a
+        // gift to an address that already held the product another way (a PayPal purchase, a place, a pre-order, an
+        // import, an earlier gift) wrote nothing, and its refund must leave that other purchase and its course alone.
+        let ours = false;
         if (typeof given === "string") {
           let v: unknown;
           try {
@@ -427,8 +453,17 @@ export async function revokeRefundedGifts(
             v = undefined;
           }
           if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+          const job = (v as { job?: unknown }).job;
+          // A job that is not text is unknown, never "came another way": the row waits to be tried again.
+          if (typeof job !== "string") return false;
+          ours = job === `gift:${gift.id}`;
           const listed = (v as { items?: unknown }).items;
           items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+        }
+        if (typeof given === "string" && !ours) {
+          // Nothing of this gift is held: it is marked taken back, and what came another way stays.
+          if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) return false;
+          return markRead(sid, id);
         }
         // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
         // purchase, so the next run takes both away again; taking a course away twice is harmless.

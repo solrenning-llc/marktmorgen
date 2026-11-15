@@ -135,7 +135,7 @@ const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
 /** The top-level fields of the object a source file passes to emitEvent for one event, sorted. */
 function sentFields(source: string, event: string): string[] {
-  const at = source.indexOf(`emitEvent(store, "${event}",`);
+  const at = source.search(new RegExp(`emitEvent\\([A-Za-z.]+, "${event.replace(".", "\\.")}",`));
   if (at < 0) throw new Error(`no emitEvent for ${event}`);
   // The object follows the seed, which may be a template with its own "${...}": it is the first ", {" after the call.
   const open = source.indexOf(", {", at) + 2;
@@ -240,7 +240,7 @@ async function main(): Promise<void> {
   is("each event's trigger is the one named for it", app.EVENTS.every((e) => app.triggers[e.key]?.operation.type === "hook" && e.key === e.event.replace(".", "_")), true);
 
   part("Each example says what its webhook really sends, field by field");
-  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"], ["waitlist.joined", "lib/waitlist.ts"], ["course.completed", "lib/course-finish.ts"]] as const) {
+  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"], ["waitlist.joined", "lib/waitlist.ts"], ["course.completed", "lib/course-finish.ts"], ["product.published", "app/api/store/product/route.ts"]] as const) {
     const spec = app.EVENTS.find((e) => e.event === event);
     const sample = spec ? (app.triggers[spec.key].operation.sample as { type?: string; data?: Record<string, unknown> }) : null;
     is(`${event}: the example is that event's message`, sample?.type, event);
@@ -260,6 +260,7 @@ async function main(): Promise<void> {
     ["sequence_step", "sequence.step", "f1:s1:ada@example.com", { sequence: { id: "f1", name: "Welcome" }, step: 1, email: "ada@example.com" }],
     ["waitlist_joined", "waitlist.joined", "wait|p1|ada@example.com|1", { email: "ada@example.com", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, asked_to_hear_from_you: false, requested_at: null }],
     ["course_completed", "course.completed", "course|c1|k1", { email: "ada@example.com", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, lessons: 3, completed_at: "2026-10-28T18:20:00.000Z" }],
+    ["product_published", "product.published", "published|p1|1", { product: { id: guide.product.id, title: "The Weeknight Cookbook", price_cents: 2900, currency: "usd", url: "https://marktmorgen.com/@harbor/x" }, how: "added", published_at: "2026-10-19T14:05:00.000Z" }],
   ] as const) {
     const op = app.triggers[key].operation as Op & { performList: (z: Z, b: Bundle) => Promise<{ type: string }[]> };
     const zap = await op.performSubscribe!(makeZ(writer.key), bundle({ targetUrl: `https://hooks.zapier.com/hooks/catch/1/${key}` }));

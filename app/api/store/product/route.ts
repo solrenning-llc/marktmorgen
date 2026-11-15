@@ -40,6 +40,8 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { emitEvent } from "@/lib/webhooks";
+import { productLink } from "@/lib/checkout-recovery";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
 import { exampleTitlesLeft } from "@/lib/course-templates";
@@ -245,6 +247,8 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // A draft this request publishes (action "visibility"), for the webhook below.
+  let wasDraft = false;
   try {
     let result: Outcome;
     // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
@@ -431,6 +435,7 @@ export async function POST(request: NextRequest) {
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
         const draft = await readListing(guarded.store, id);
+        wasDraft = draft?.hidden === true;
         if (draft) {
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
@@ -473,6 +478,17 @@ export async function POST(request: NextRequest) {
     // Said only where something can actually have been silenced: a price, a
     // shape, or a product going off the store (its own id changes nothing, but
     // everything that offered it does).
+    // A product that went on the store just now: a new one (on the store at once) or a draft published. The creator's
+    // webhooks hear of it (378 [TB4] complement WG (a)); a failure to queue it is said and never fails the save.
+    const went = result.product && !result.product.hidden && (action === "add" || (action === "visibility" && body.hidden === false && wasDraft)) ? result.product : null;
+    if (went) {
+      const at = Date.now();
+      await emitEvent(guarded.store, "product.published", `published|${went.id}|${Math.floor(at / 1000)}`, {
+        product: { id: went.id, title: went.title, price_cents: went.priceCents, currency: guarded.store.currency, url: productLink(guarded.store, went.id) },
+        how: action === "add" ? "added" : "draft_published",
+        published_at: new Date(at).toISOString(),
+      }).catch((error) => console.error("queueing the product.published webhook failed", error));
+    }
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
     return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });

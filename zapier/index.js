@@ -402,6 +402,18 @@ const EVENTS = [
       completed_at: "2026-10-28T18:20:00.000Z",
     },
   },
+  {
+    key: "product_published",
+    event: "product.published",
+    noun: "Product",
+    label: "Product Published",
+    description: "Triggers when a product goes on your store: a new one you add, or a draft you publish.",
+    data: {
+      product: { id: "p_8f2c1a", title: "The Weeknight Cookbook", price_cents: 2900, currency: "usd", url: "https://marktmorgen.com/@harbor/p_8f2c1a" },
+      how: "added",
+      published_at: "2026-10-19T14:05:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

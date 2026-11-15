@@ -31,6 +31,7 @@ not already.
   - Sequence Step Reached (`sequence.step`)
   - New Waitlist Spot (`waitlist.joined`)
   - Course Completed (`course.completed`)
+  - Product Published (`product.published`)
 
   Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
   its trigger, and each example has exactly the fields its webhook sends

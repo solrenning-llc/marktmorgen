@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
     const t = form.get("step");
     handle = typeof h === "string" ? normaliseHandle(h) : "";
     session = typeof s === "string" ? s.slice(0, 220) : "";
-    step = typeof t === "string" ? t.slice(0, 12) : "";
+    // The step as the page drew it: its id and the fingerprint of its terms (lib/upsell.ts, offerRef).
+    step = typeof t === "string" ? t.slice(0, 64) : "";
     // Only the button that says yes adds anything; a form that says neither
     // does nothing at all.
     const a = form.get("answer");

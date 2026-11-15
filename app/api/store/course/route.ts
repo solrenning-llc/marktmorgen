@@ -9,6 +9,7 @@ import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
 import { ownsPath, safeFileName, type ProductFile } from "@/lib/product-file";
@@ -37,7 +38,7 @@ import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
 import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
-import { readListing } from "@/lib/catalog";
+import { hasProduct, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { claimUpload, dropStream } from "@/lib/stream";
@@ -102,7 +103,9 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write.
+ * as it is kept, in one write; `{ action: "shelf", id, products }` sets the
+ * course's "More from" shelf (628 [HN4](b)) to up to six of the store's own
+ * products, in that order, and `products: []` takes it off.
  *
  * `id` is always the product's, and the course is found through the
  * creator's own store, so nothing here can reach anyone else's course.
@@ -367,6 +370,17 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: true, course: result.course });
       }
 
+      // The "More from" shelf (628 [HN4](b)): up to six of the store's own products, in the creator's order; anything the
+      // store does not have, and the course itself, are left out here, so the course keeps only ids the store holds.
+      if (action === "shelf") {
+        const asked = Array.isArray(body.products) ? body.products.filter((p: unknown) => typeof p === "string" && hasProduct(store, p)) : null;
+        if (!asked) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const result = editCourse(course, { op: "shelf", products: asked, courseProductId: product.id });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
       if (action === "withdraw") {
         const certificate = text(body.certificate, 20);
         if (!CERT_ID_PATTERN.test(certificate)) return Response.json({ ok: false, error: "unknown" }, { status: 400 });
@@ -410,7 +424,9 @@ export async function POST(request: NextRequest) {
         const lesson = findLesson(course, lessonId);
         if (!lesson) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
         // A new video deletes the one the lesson had: not from a session let in without its second step.
-        if (kind === "video" && lesson.lesson.video && (await lockedFor(request, "products", "replace"))) return refusedJson("locked");
+        const lock = kind === "video" && lesson.lesson.video ? await lockRead(lockedFor(request, "products", "replace")) : false;
+        if (lock instanceof Response) return lock;
+        if (lock) return refusedJson("locked");
         // The file has to sit in this account's folder for this very lesson,
         // and what it is is read from storage, not from the browser.
         const folder = await storeFolder(ref);

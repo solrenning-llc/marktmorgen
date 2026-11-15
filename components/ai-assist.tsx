@@ -4,6 +4,8 @@ import { createContext, useContext, useId, useState } from "react";
 import { readAiAnswer } from "@/lib/ai-response";
 import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
+import { AiDraftReview } from "@/components/ai-draft-review";
+import { draftStrings, draftTopics, freshChecks, reviewDone, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * Whether the writing help (lib/ai.ts) is there for this person on this page,
@@ -50,6 +52,7 @@ export function AiAssist<T>({
   emptyMessage,
   onBusyChange,
   validateResult,
+  onReviewChange,
 }: {
   /** The line that opens it, like "Write the description for me". */
   title: string;
@@ -73,6 +76,12 @@ export function AiAssist<T>({
   onBusyChange?: (busy: boolean) => void;
   /** Optional host-specific result validation before applying any content. */
   validateResult?: (value: unknown) => value is T;
+  /**
+   * Told whether the draft it filled in is checked (756 [STN3]): false as each
+   * new draft is filled, true once the creator checks all three boxes under it.
+   * A form that saves the draft waits on it.
+   */
+  onReviewChange?: (reviewed: boolean) => void;
 }) {
   const { on, left: startLeft } = useContext(AiOn);
   // Unknown from the start when the page could not read it (known: false); nothing is started on a guess.
@@ -81,6 +90,13 @@ export function AiAssist<T>({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filled, setFilled] = useState(false);
+  // A confirmed draft sits in the fields (756 [STN3]). Only a new confirmed draft sets it, and
+  // nothing clears it: a later attempt that fails leaves that draft, and its checks, where they are.
+  const [drafted, setDrafted] = useState(false);
+  // The three checks under the draft it filled in (756 [STN3]).
+  const [checks, setChecks] = useState<boolean[]>(freshChecks);
+  // What the draft is about that needs a reader who knows it (756 [STN3], unit 2), read from its own words.
+  const [topics, setTopics] = useState<DraftTopics>([]);
   const [left, setLeft] = useState(startLeft);
   const [allowanceKnown, setAllowanceKnown] = useState(startKnown);
   const [readOnce, setReadOnce] = useState(startKnown);
@@ -111,6 +127,12 @@ export function AiAssist<T>({
         setReadOnce(true);
         if (validateResult && !validateResult(data.value)) { setError(MESSAGES.unconfirmed); return; }
         onResult(data.value as T);
+        // Every new draft is checked afresh, whatever was checked for the one before.
+        setChecks(freshChecks());
+        // Each string as written, never the JSON text, where "\nInvesting" reads as "nInvesting"; in the draft's language.
+        setTopics(draftTopics(draftStrings(data.value), data.language));
+        onReviewChange?.(false);
+        setDrafted(true);
         setFilled(true);
         return;
       }
@@ -161,6 +183,17 @@ export function AiAssist<T>({
           <p className="text-sm font-semibold text-ink" role="status">
             {done}
           </p>
+        ) : null}
+        {drafted ? (
+          <AiDraftReview
+            checks={checks}
+            topics={topics}
+            onToggle={(index, ticked) => {
+              const next = checks.map((was, at) => (at === index ? ticked : was));
+              setChecks(next);
+              onReviewChange?.(reviewDone(next));
+            }}
+          />
         ) : null}
         <p className="text-xs text-ink-soft">
           It uses only your own words, here and in your store, never invents reviews, numbers, results or deadlines, and saves nothing until you

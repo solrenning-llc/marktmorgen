@@ -30,8 +30,10 @@ import {
   setProductLink,
   setStripeAccount,
   setSubscription,
+  storeForEmail,
 } from "@/lib/store";
 import { UPSELL_COOKIE, newUpsellKey, readUpsell } from "@/lib/upsell";
+import { shownRef } from "./upsell-ref-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -116,7 +118,7 @@ async function main(): Promise<void> {
     const form = new FormData();
     form.set("handle", HANDLE);
     form.set("session_id", session);
-    form.set("step", "glaze1");
+    form.set("step", await shownRef((await storeForEmail(OWNER))!, "glaze1"));
     form.set("answer", answer);
     form.set(CONSENT_FIELD, "yes");
     form.set(CONSENT_VERSION_FIELD, TEST_CONSENT.version);

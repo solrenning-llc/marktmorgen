@@ -32,9 +32,10 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayout, payAddress, readBook } from "@/lib/affiliates";
+import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
@@ -175,13 +176,29 @@ async function tokenFor(client: string, secret: string): Promise<{ token: string
   return { token: typeof data.access_token === "string" ? data.access_token : "", scope: typeof data.scope === "string" ? data.scope : "" };
 }
 
-async function bearer(store: Store): Promise<string | null> {
+/**
+ * A token for the store's PayPal app, with the fingerprint of the app it is for (senderPrint), read from the same
+ * link, so a batch can be tied to the account that sent it (issue #4448).
+ */
+async function bearer(store: Store): Promise<{ auth: string; sender: string } | null> {
   const link = await readLink(store);
   if (!link || !store.statsId) return null;
   const opened = unseal(link.secret, context(store.statsId));
   if (!opened.ok) return null;
   const { token } = await tokenFor(link.client, opened.value);
-  return token ? `Bearer ${token}` : null;
+  return token ? { auth: `Bearer ${token}`, sender: senderPrint(link.client) } : null;
+}
+
+/**
+ * The fingerprint of the PayPal app (its Client ID) a batch is sent from, kept with a batch on its way, so a batch
+ * whose answer is not known is only ever sent again from the same app (issue #4448): PayPal's own idempotency (the
+ * same sender_batch_id and PayPal-Request-Id) holds within one merchant, and nothing says it holds across two. Empty
+ * when there is no server secret: then the batch keeps none, and a retry is left for the creator's own check.
+ */
+const SENDER_PRINT_LABEL = "paypal-payout-sender/v1";
+function senderPrint(client: string): string {
+  const key = deriveKey(SENDER_PRINT_LABEL);
+  return key ? createHmac("sha256", key).update(client).digest("hex") : "";
 }
 
 export type ConnectResult = { ok: true } | { ok: false; reason: "format" | "refused" | "no-payouts" | "seal" | "error" };
@@ -270,8 +287,13 @@ export function batchBody(store: Store, lines: BatchLine[], senderBatchId: strin
 
 export type PayResult =
   | { ok: true; batch: string; people: number; cents: number }
-  /** "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again. */
-  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" };
+  /**
+   * "unknown": the batch was sent and PayPal's answer is not known, so it may have been paid; nobody in it is sent again.
+   * "pending": nothing was paid now (not sent, or refused by PayPal), but the batch's "?" entry could not be confirmed
+   * removed, so the settling may still send it (settleUnknown); its people stay on their way. "error" and PayPal's own
+   * refusals ("funds", "refused") are said only once nothing will be sent.
+   */
+  | { ok: false; reason: "not-connected" | "reconnect" | "nothing" | "refunds" | "funds" | "refused" | "busy" | "error" | "unknown" | "pending" };
 
 /**
  * Whether PayPal's answer to a batch says it was not made: a 4xx (other than
@@ -294,12 +316,39 @@ function refusedBeforeMade(error: unknown): boolean {
  * settling then finds the "?" one, gets the same batch back and writes it
  * again, and an item already written into the book is never written twice
  * (nl:pp:item). True when the batch is held under its id.
+ *
+ * The batch is held with the sender_batch_id it was sent under (`s`), and the
+ * "?" entry is taken away only on Redis's exact word (CX-123 rule 24, Claude 5
+ * on 09/11/2026). A removal that fails or answers in another shape is logged
+ * and leaves the "?" entry beside the batch: the settling then knows it by `s`
+ * and drops it without sending PayPal the money request again (heldUnknowns),
+ * and nobody in it is counted twice meanwhile.
  */
 async function promoteBatch(statsId: string, field: string, batch: string, entry: OpenBatch): Promise<boolean> {
-  const held: unknown = await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ at: entry.at, currency: entry.currency, lines: entry.lines })]]).catch(() => null);
+  const sender = field.slice(UNKNOWN_BATCH_PREFIX.length);
+  const held: unknown = await redisPipeline([["HSET", openKey(statsId), batch, JSON.stringify({ at: entry.at, currency: entry.currency, lines: entry.lines, s: sender })]]).catch(() => null);
   if (!Array.isArray(held) || held.length !== 1 || (held[0] !== 0 && held[0] !== 1)) return false;
-  await redisPipeline([["HDEL", openKey(statsId), field]]).catch(() => undefined);
+  if (!(await removedExactly(statsId, field))) {
+    console.error("a PayPal batch is held under its id, but its '?' entry could not be confirmed removed; the settling drops it", batch);
+  }
   return true;
+}
+
+/** Takes one open-batch entry away: true only when Redis answers the HDEL with exactly 0 or 1 (rule 24). */
+async function removedExactly(statsId: string, field: string): Promise<boolean> {
+  const gone = repliesFor(await redisPipeline([["HDEL", openKey(statsId), field]]).catch(() => null), 1);
+  return gone !== null && (gone[0] === 0 || gone[0] === 1);
+}
+
+/**
+ * The "?" entries whose own request PayPal named and which are held under that batch's id (`s`): left behind by a
+ * removal that was not confirmed (promoteBatch). They are that batch, never another payment: never sent again, never
+ * counted twice.
+ */
+function heldUnknowns(open: Map<string, OpenBatch>): Set<string> {
+  const senders = new Set<string>();
+  for (const [id, batch] of open) if (!id.startsWith(UNKNOWN_BATCH_PREFIX) && batch.s) senders.add(`${UNKNOWN_BATCH_PREFIX}${batch.s}`);
+  return new Set([...open.keys()].filter((id) => senders.has(id)));
 }
 
 /** At most one try a day at a batch whose answer was not known. */
@@ -352,8 +401,11 @@ export async function payoutUnknownMonth(month: string): Promise<Record<UnknownC
 export async function paypalChecks(store: Store): Promise<{ checking: number; manual: number }> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("Pending payout records are unavailable");
   const out = { checking: 0, manual: 0 };
-  for (const [id, batch] of await readOpen(store.statsId)) {
-    if (!id.startsWith(UNKNOWN_BATCH_PREFIX)) continue;
+  const open = await readOpen(store.statsId);
+  // A "?" entry left beside the batch PayPal named for it is that known batch, not one being checked.
+  const known = heldUnknowns(open);
+  for (const [id, batch] of open) {
+    if (!id.startsWith(UNKNOWN_BATCH_PREFIX) || known.has(id)) continue;
     if (batch.m === 1) out.manual += batch.lines.length;
     else out.checking += batch.lines.length;
   }
@@ -379,24 +431,35 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
       const lines = payableLines(book, await onTheirWay(store));
       if (!lines.length) return { ok: false, reason: "nothing" };
-      const auth = await bearer(store);
-      if (!auth) return { ok: false, reason: "reconnect" };
+      const token = await bearer(store);
+      if (!token) return { ok: false, reason: "reconnect" };
+      const { auth, sender } = token;
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
+      // `p`: the app the money is asked from, so a retry of an unknown answer never comes from another account (#4448).
       const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
         const r = receiverPrint(receiverOf(l));
         return { a: l.affiliate.id, c: l.cents, ...(r ? { r } : {}) };
-      }) };
+      }), ...(sender ? { p: sender } : {}) };
       // Written down as on its way BEFORE the creator's money is asked for (CX-123 rule 24): whatever PayPal answers,
       // or if it never answers, nobody in it can be put in another batch or payout file. Redis must say it holds it.
       const unknownField = `${UNKNOWN_BATCH_PREFIX}${senderBatchId}`;
-      const held: unknown = await redisPipeline([
-        ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
-        ["SADD", STORES, store.sid],
-      ]);
+      let held: unknown = null;
+      try {
+        held = await redisPipeline([
+          ["HSET", openKey(statsId), unknownField, JSON.stringify(open)],
+          ["SADD", STORES, store.sid],
+        ]);
+      } catch (error) {
+        // No answer is not "not written": Redis may have applied it before the answer was lost.
+        console.error("writing a PayPal batch down before sending it got no answer", error);
+      }
       if (!Array.isArray(held) || held.length !== 2 || held[0] !== 1 || (held[1] !== 0 && held[1] !== 1)) {
-        // Not known to be held: nothing is sent. The field is taken out again if it was written.
-        await redisPipeline([["HDEL", openKey(statsId), unknownField]]).catch(() => undefined);
-        return { ok: false, reason: "error" };
+        // Not known to be held: nothing is sent now. The field is taken out again if it was written, and "nothing was
+        // sent" is said only once Redis confirms that (rule 24): a "?" entry still there would be sent by the settling
+        // (settleUnknown), so the creator is told the batch may still go and not to pay its people another way.
+        if (await removedExactly(statsId, unknownField)) return { ok: false, reason: "error" };
+        console.error("a PayPal batch's '?' entry could be confirmed neither written nor removed; the settling may still send it");
+        return { ok: false, reason: "pending" };
       }
       let made: Record<string, unknown>;
       try {
@@ -407,8 +470,13 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
           await countUnknown("unknown");
           return { ok: false, reason: "unknown" };
         }
-        // PayPal refused it: nothing was made, so its people are owed again.
-        await redisPipeline([["HDEL", openKey(statsId), unknownField]]);
+        // PayPal refused it: nothing was made, so its people are owed again, but only once Redis confirms the "?" entry
+        // gone (rule 24). While it may still be there, the settling sends the same request again (settleUnknown), which
+        // PayPal may pay, so the creator is never told nothing will go (pre-review of 09/11/2026).
+        if (!(await removedExactly(statsId, unknownField))) {
+          console.error("PayPal refused a batch, but its '?' entry could not be confirmed removed; the settling may still send it");
+          return { ok: false, reason: "pending" };
+        }
         if (error instanceof PayPalError && error.code === "INSUFFICIENT_FUNDS") return { ok: false, reason: "funds" };
         if (error instanceof PayPalError && (error.status === 401 || error.status === 403)) return { ok: false, reason: "refused" };
         throw error;
@@ -435,6 +503,18 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
 export type Settled = { paid: number; released: number; waiting: number };
 
 /**
+ * Whether a run before the book write became the once-only record (Claude 2 on #3272) left its mark on a payout
+ * item (SET NX, its batch id as the value, kept 400 days): nil is none, text is one; anything else throws, so the line
+ * stays on its way. No mark is written any more; the book's own HSETNX is the record (addPayoutOnce).
+ */
+async function earlierItemMark(item: string): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["GET", itemKey(item)]]), 1);
+  if (reply && reply[0] === null) return false;
+  if (reply && typeof reply[0] === "string" && reply[0] !== "") return true;
+  throw new UnknownReplyError("a PayPal payout item's mark");
+}
+
+/**
  * Reads every open batch from PayPal and writes into the book what PayPal
  * says was paid — once per item, whoever asks first. Items PayPal could not
  * pay go back to owed; the rest stay on their way.
@@ -448,14 +528,32 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     await redisPipeline([["SREM", STORES, store.sid]]);
     return out;
   }
-  const auth = await bearer(store).catch(() => null);
-  if (!auth) return { ...out, waiting: [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  // A "?" entry left beside the batch PayPal named for it (promoteBatch's removal not confirmed) is dropped here, with
+  // nothing asked of PayPal: the batch itself is read below. Until Redis confirms the removal, its people stay on their
+  // way, the store stays in the daily job, and the batch is not settled either, so its id (`s`) still names the entry
+  // on the next run and it is never taken for a batch whose answer is not known. Its people are the batch's own, which
+  // stays in `open` and is counted waiting below (or in the no-token sum), so they are not counted here as well.
+  const undropped = new Set<string>();
+  for (const field of heldUnknowns(open)) {
+    open.delete(field);
+    if (!(await removedExactly(statsId, field))) {
+      console.error("a PayPal '?' entry already held under its batch id could not be confirmed removed; tried again next run", field);
+      undropped.add(field);
+    }
+  }
+  const token = await bearer(store).catch(() => null);
+  if (!token) return { ...out, waiting: out.waiting + [...open.values()].reduce((n, b) => n + b.lines.length, 0) };
+  const { auth, sender } = token;
   const day = new Date().toISOString().slice(0, 10);
   for (const [batch, sent] of open) {
     // A batch whose answer is not known has no PayPal id to read: the same request is sent again, at most once a
     // day, and its people stay on their way whatever comes back (decision C1-20261105-1830-C5-1, option A).
     if (batch.startsWith(UNKNOWN_BATCH_PREFIX)) {
-      await settleUnknown(store, batch, sent, auth).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
+      await settleUnknown(store, batch, sent, auth, sender).catch((error) => console.error("sending an unknown PayPal batch again failed", error));
+      out.waiting += sent.lines.length;
+      continue;
+    }
+    if (sent.s && undropped.has(`${UNKNOWN_BATCH_PREFIX}${sent.s}`)) {
       out.waiting += sent.lines.length;
       continue;
     }
@@ -480,14 +578,27 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       continue;
     }
     const still: Sent[] = [];
+    let references: Set<string> | undefined;
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
       if (status === PAID && got?.item) {
-        const [fresh] = await redisPipeline([["SET", itemKey(got.item), batch, "NX", "EX", 400 * 86_400]]);
-        if (fresh !== null) {
-          await addPayout(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference: `PayPal ${got.item}` });
-          out.paid += 1;
+        // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
+        // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.
+        // Anything not known (a reply of another shape, an outage, a full data room) keeps it on its way: never sent
+        // again, read again next time. Caught per line, so one line never stops the others (finding 2).
+        try {
+          const reference = `PayPal ${got.item}`;
+          // A mark left by a run before this change: in the book under a random id when its write landed.
+          if (await earlierItemMark(got.item)) {
+            references ??= await payoutReferences(store);
+            if (references.has(payoutReference(reference))) continue;
+          }
+          const wrote = await addPayoutOnce(store, { aff: line.a, cents: line.c, currency: sent.currency, date: day, reference, id: payoutIdForItem(got.item) });
+          if (wrote !== "held") out.paid += 1;
+        } catch (error) {
+          console.error("writing a PayPal payout into the book failed; it stays on its way", error);
+          still.push(line);
         }
       } else if (NOT_PAID.has(status)) {
         out.released += 1;
@@ -522,9 +633,9 @@ async function needsManualCheck(statsId: string, field: string, sent: OpenBatch)
  * batch sent: its id is kept when PayPal links it, and otherwise it is left
  * for the creator's own check. Anything else leaves it on its way, to be
  * tried again tomorrow; after UNKNOWN_MANUAL_AFTER_MS it is not tried again.
- * Never sent under a new key, never paid twice.
+ * Never sent under a new key or from another PayPal app, never paid twice.
  */
-async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth: string): Promise<"settled" | "waiting" | "manual"> {
+async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth: string, sender: string): Promise<"settled" | "waiting" | "manual"> {
   const statsId = store.statsId as string;
   const now = Date.now();
   if (seen.m === 1) return "manual";
@@ -532,9 +643,18 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   if (seen.t !== undefined && now - seen.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
   return withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async () => {
     // Read again under the payment's own lock: a press or another settling may have moved it.
-    const sent = (await readOpen(statsId)).get(field);
+    const fresh = await readOpen(statsId);
+    const sent = fresh.get(field);
     if (!sent || sent.m === 1) return sent ? "manual" : "waiting";
+    // Held under PayPal's id since the settling read it (its "?" removal not confirmed): never sent again; the next
+    // run drops the entry (heldUnknowns).
+    if (heldUnknowns(fresh).has(field)) return "waiting";
     if (sent.t !== undefined && now - sent.t < UNKNOWN_RETRY_EVERY_MS) return "waiting";
+    // Only from the same PayPal app that sent it (issue #4448): the first request may have paid from that account, and
+    // the same sender_batch_id sent from another account (the store connected a new app since) could pay everyone
+    // again. A batch that kept no sender (made before this check, or with no server secret) or whose app changed is
+    // money that may have left: never sent again, left for the creator's own check (rule 30).
+    if (!sent.p || !sender || sender !== sent.p) return needsManualCheck(statsId, field, sent);
     // The same request may make the batch now, if the first never reached PayPal, so it is sent only while the book
     // still owes every line in it (review of Codex G on #2681, second GRAVE). Refunds that cannot be read: not known,
     // wait (no try counted). A line no longer owed in full (refunded since, or the affiliate gone or no longer

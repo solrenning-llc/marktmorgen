@@ -1327,7 +1327,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
-    basis: "Page views load nothing from us; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
+    basis: "Each render of a card is one of the store's public requests, counted before it reads anything (isResting, as the store's own pages, #4634), and a resting store's card reads nothing more; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
   },
   {
     id: "certificate-page",

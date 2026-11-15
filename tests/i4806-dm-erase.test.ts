@@ -39,23 +39,48 @@ function seedPairs(): void {
 
 async function main(): Promise<void> {
   console.error = () => {};
-  part("#4806: an index member that is not this person's canonical pair keeps the erasure retryable");
-  for (const [label, member] of [
-    ["another pair's name", pairOf(OTHER, THIRD)],
-    ["a name without this person", "different.member"],
-    ["this person and another, not in order", `${OTHER > WHO ? OTHER : "0".repeat(32)}.${WHO}`],
-    ["three names", `${WHO}.${OTHER}.${THIRD}`],
-    ["this person alone", WHO],
-    ["this person with themselves", `${WHO}.${WHO}`],
-  ] as [string, string][]) {
+  // Review 5bNDa (LEVE 1, adopted): an erasure stuck for good fails the right to erasure. A member holding this person is
+  // theirs, canonical or not: deleted under the very name stored, the other names' lists cleared of it, and logged.
+  // One without them is somebody else's and stays. Only what cannot be read is unknown.
+  const logged: string[] = [];
+  console.error = (...args: unknown[]) => { logged.push(args.map(String).join(" ")); };
+  part("#4806: a member holding this person, canonical or not, is deleted under the name stored");
+  const reversed = `${OTHER}.${WHO}`;
+  for (const [label, member, others] of [
+    ["this person and another, not in order", reversed, [OTHER]],
+    ["three names", `${WHO}.${OTHER}.${THIRD}`, [OTHER, THIRD]],
+    ["this person alone", WHO, []],
+    ["this person with themselves", `${WHO}.${WHO}`, []],
+  ] as [string, string, string[]][]) {
+    redis.clear();
+    logged.length = 0;
+    redis.run(["ZADD", `${base}:i:${WHO}`, 1, member]);
+    redis.run(["RPUSH", `${base}:${member}`, msg]);
+    redis.run(["HSET", `${base}:r:${member}`, WHO, 1]);
+    for (const other of others) redis.run(["ZADD", `${base}:q:${other}`, 1, member]);
+    is(`${label}: done, one`, await outcome(() => forgetDmPerson(COMMUNITY, WHO)), "resolved 1");
+    is(`${label}: the conversation and its read marks are gone`, [redis.run(["LLEN", `${base}:${member}`]), redis.run(["HLEN", `${base}:r:${member}`])], [0, 0]);
+    is(`${label}: nobody's list names it`, [inbox(WHO), ...others.map((o) => redis.run(["ZRANGEBYSCORE", `${base}:q:${o}`, "-inf", "+inf"]))], [[], ...others.map(() => [])]);
+    is(`${label}: the name not canonical is logged`, logged.some((line) => line.includes("not canonical")), true);
+  }
+  part("#4806: a member without this person is somebody else's, and stays");
+  for (const [label, member] of [["another pair's name", pairOf(OTHER, THIRD)], ["a name without this person", "different.member"]] as [string, string][]) {
     redis.clear();
     redis.run(["ZADD", `${base}:i:${WHO}`, 1, member]);
     redis.run(["RPUSH", `${base}:${member}`, msg]);
-    const got = await outcome(() => forgetDmPerson(COMMUNITY, WHO));
-    is(`${label}: the erasure does not say done`, got, "UnknownReplyError");
-    is(`${label}: the person's index is kept`, inbox(WHO), [member]);
-    is(`${label}: and the conversation still stored`, (redis.run(["LRANGE", `${base}:${member}`, 0, -1]) as string[]).length, 1);
+    is(`${label}: done, none of theirs`, await outcome(() => forgetDmPerson(COMMUNITY, WHO)), "resolved 0");
+    is(`${label}: the other people's conversation is kept`, redis.run(["LLEN", `${base}:${member}`]), 1);
+    is(`${label}: this person's own list is deleted`, inbox(WHO), []);
   }
+  part("#4806: a list that cannot be read is unknown, and nothing is deleted");
+  redis.clear();
+  redis.run(["ZADD", `${base}:i:${WHO}`, 1, pairOf(WHO, OTHER)]);
+  redis.pipeline = (async (batch: Command[]) => (batch[0]?.[0] === "ZRANGEBYSCORE" ? [[7], []] : original(batch))) as typeof redis.pipeline;
+  const unread = await outcome(() => forgetDmPerson(COMMUNITY, WHO));
+  redis.pipeline = original;
+  is("a member that is not text: unknown", unread, "UnknownReplyError");
+  is("the person's list kept for the retry", inbox(WHO), [pairOf(WHO, OTHER)]);
+  console.error = () => {};
   part("#4806 controls: exact empty lists finish; canonical pairs, the creator's included, are deleted for both people");
   redis.clear();
   is("nothing listed: done, none", await outcome(() => forgetDmPerson(COMMUNITY, WHO)), "resolved 0");

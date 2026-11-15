@@ -196,7 +196,8 @@ async function main() {
   await redisPipeline([["DEL", "nl:stats:ppstats:ledger"]]);
   const stripeAsked: number[] = [];
   const stripeRead = await buyerLedger(stripeOnly, async (units) => { stripeAsked.push(units); return false; }).then(() => "read", (error: unknown) => (error instanceof LedgerNotCounted ? "not counted" : String(error)));
-  is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and their refunds are not read", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 0 }))]]);
+  // Their refunds kept are read with them, so they are counted too (#4398): a sale refunded in full never comes back.
+  is("with Stripe on and PayPal off, the PayPal sales kept are still counted, and so are their refunds", [stripeRead, stripeAsked], ["not counted", [BUYER_LEDGER_UNITS + ledgerUnits(ledgerReadBytes({ imported: 0, paypalSales: 300, paypalRefunds: 50 }))]]);
   redis.pipeline = pipe;
 
   part("One page, its fifty included kilobytes counted once (C3-112 (2))");

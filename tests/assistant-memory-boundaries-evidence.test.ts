@@ -11,6 +11,9 @@ import {dataKey,needData} from '@/lib/store-data';
 import {dataBytes} from '@/lib/store-data-rules';
 import {ROOM} from './data-room';
 import {store as redis} from './redis-stub';
+import { skipWaits } from './skip-waits';
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 const stats='G2MemoryBoundaries',key=`nl:amem:${stats}`,room={...ROOM,sid:'g2-memory-boundaries'};
 async function fixture(){redis.clear();assert.equal((await keepNote(stats,{kind:'preference',text:'Use a warm voice.'},room)).ok,true);return String(redis.run(['GET',key]));}
 function accounting(){const raw=String(redis.run(['GET',key])),required=dataBytes([raw],1),held=Number(redis.run(['HGET',dataKey(room)!,'amem']));return {required,held};}

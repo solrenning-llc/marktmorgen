@@ -67,7 +67,7 @@ export function MemberDiscount({ titles }: { titles: Record<string, string> }) {
         membership that already has a discount is left as it is. Nothing changes until you press &quot;Put the code on&quot;.
       </p>
       <form onSubmit={find} className="mt-3 flex flex-wrap items-end gap-3">
-        <label className="block min-w-0 flex-1" htmlFor={`${id}-email`}>
+        <label className="block min-w-0 flex-1 basis-56" htmlFor={`${id}-email`}>
           <span className="field-label">The member&apos;s email</span>
           <EmailInput id={`${id}-email`} required autoComplete="off" value={email} onChange={setEmail} className="field" />
         </label>

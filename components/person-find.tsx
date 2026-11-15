@@ -43,7 +43,7 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
         setBusy(false);
       }}
     >
-      <label className="min-w-0 flex-1 text-sm">
+      <label className="min-w-0 flex-1 basis-56 text-sm">
         <span className="field-label">A buyer&apos;s email address</span>
         <input
           type="email"

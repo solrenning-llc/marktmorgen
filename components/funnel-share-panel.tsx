@@ -315,7 +315,7 @@ export function FunnelSharePanel({
                   if (chosen && copyTo) void openPreview({ funnel: chosen, to: copyTo });
                 }}
               >
-                <label className="block min-w-0 flex-1" htmlFor="fs-copy-to">
+                <label className="block min-w-0 flex-1 basis-56" htmlFor="fs-copy-to">
                   <span className="field-label">Copy it into another of your stores</span>
                   <select id="fs-copy-to" className="field" value={copyTo} onChange={(e) => setCopyTo(e.target.value)}>
                     {otherStores.map((s) => (
@@ -398,7 +398,7 @@ export function FunnelSharePanel({
             void openPreview({ code: found });
           }}
         >
-          <label className="block min-w-0 flex-1" htmlFor="fs-code">
+          <label className="block min-w-0 flex-1 basis-56" htmlFor="fs-code">
             <span className="field-label">A share link or code</span>
             <input id="fs-code" type="text" className="field" value={code} onChange={(e) => setCode(e.target.value)} placeholder="mmf_…" autoComplete="off" spellCheck={false} />
           </label>

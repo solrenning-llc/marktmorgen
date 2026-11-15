@@ -45,6 +45,8 @@ const TRIAL_END = NOW + 5 * DAY;
 const subscription = (id: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
   id,
   status: "active",
+  // Stripe sends the field; main reads it as the evidence of no discount (lib/member-discount.ts, hasDiscount).
+  discounts: [],
   metadata: { store: "daysstore", product: "prod000001" },
   items: { data: [{ current_period_end: PERIOD_END, price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
   ...extra,

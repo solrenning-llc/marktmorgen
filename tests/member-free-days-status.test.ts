@@ -26,7 +26,7 @@ const next = now + 86_400;
 let mode = "healthy";
 let status = "active";
 let posts = 0;
-const sub = { id: "sub_sreview0001", object: "subscription", status: "active", metadata: { store: "sfreedays", product: "prod_sreview" }, items: { data: [{ current_period_end: next, price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] } };
+const sub = { id: "sub_sreview0001", object: "subscription", status: "active", discounts: [], metadata: { store: "sfreedays", product: "prod_sreview" }, items: { data: [{ current_period_end: next, price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] } };
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (init?.method === "POST") { posts++; throw new Error("No provider write allowed"); }
   const url = new URL(String(input));

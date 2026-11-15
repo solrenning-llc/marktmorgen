@@ -41,6 +41,8 @@ type Sub = Record<string, unknown> & { id: string; metadata: Record<string, stri
 const subscription = (id: string, extra: Record<string, unknown> = {}): Sub => ({
   id,
   status: "active",
+  // Stripe sends the field; main reads it as the evidence of no discount (lib/member-discount.ts, hasDiscount).
+  discounts: [],
   currency: "usd",
   customer: "cus_member0001",
   start_date: NOW - 200 * DAY,

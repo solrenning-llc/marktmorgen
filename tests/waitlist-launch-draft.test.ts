@@ -6,7 +6,9 @@
  * buy. So launch (lib/waitlist.ts) refuses it with its reason ("draft"),
  * before anything is written: no launch job, no send queue, the list kept,
  * no email; the studio says why (components/waitlist-panel.tsx). Published
- * again, it launches as before.
+ * again, it launches as before. A product that goes back to draft after its
+ * launch started stops being sent (runLaunches), nothing reserved and the
+ * list kept, and is sent on once it is published again.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductHidden, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
@@ -70,6 +72,25 @@ async function main(): Promise<void> {
   const launched = await launch(store, product, { note: "It is here.", address: "1 Main St, Portland, OR 97201" });
   is("launched, for the one confirmed", launched.ok && launched.total, 1);
   is("and the email goes", [await runLaunches(async () => (await storeForEmail(OWNER))!, readListing, Date.now() + 10_000), batches.flat().map((m) => m.to[0])], [1, ["dana@example.com"]]);
+
+  part("Back to draft in the middle of a launch: the sending stops, and resumes once it is published again");
+  const later = await addProduct(OWNER, "The Cake Book", "", "29", null);
+  if (!later.ok) throw new Error("no second product");
+  store = (await storeForEmail(OWNER))!;
+  const cake = (await readListing(store, later.product.id))!;
+  await setSoon(store, cake.id, true);
+  const before = single.length;
+  is("Eve joins", await joinWaitlist({ store, product: cake, email: "eve@example.com", consent: false, ip: "5.5.5.5", origin: "https://marktmorgen.com" }), "sent");
+  is("and confirms", (await confirmSpot(tokenIn(single[before].text), store)).ok, true);
+  is("launched while published", (await launch(store, cake, { note: "", address: "1 Main St, Portland, OR 97201" })).ok, true);
+  is("then back to draft before the job sends", (await setProductHidden(OWNER, cake.id, true)).ok, true);
+  const sentBefore = batches.flat().length;
+  const held = await runLaunches(async () => (await storeForEmail(OWNER))!, readListing, Date.now() + 10_000);
+  const heldView = (await waitlistViews((await storeForEmail(OWNER))!, [cake.id]))[cake.id];
+  is("nothing sent, the launch not finished, the list kept", [held, batches.flat().length - sentBefore, heldView?.launch?.sent, Boolean(heldView?.launch?.finished), heldView?.confirmed], [0, 0, 0, false, 1]);
+  is("published again", (await setProductHidden(OWNER, cake.id, false)).ok, true);
+  const resumed = await runLaunches(async () => (await storeForEmail(OWNER))!, readListing, Date.now() + 10_000);
+  is("the launch goes on, once", [resumed, batches.flat().slice(sentBefore).map((m) => m.to[0])], [1, ["eve@example.com"]]);
   done();
 }
 

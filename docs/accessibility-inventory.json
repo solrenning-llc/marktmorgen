@@ -1769,6 +1769,7 @@
     "app/api/photo/[id]/route.ts",
     "app/api/privacy/erase/route.ts",
     "app/api/report/route.ts",
+    "app/api/store-preview/route.ts",
     "app/api/store/ab/route.ts",
     "app/api/store/address/route.ts",
     "app/api/store/ads-event/route.ts",

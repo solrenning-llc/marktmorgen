@@ -30,7 +30,7 @@ const perCall = Math.ceil((seconds / 3600) * VERCEL_CPU_MICRO_USD_PER_HOUR + VER
 is("each job's call: every second of maxDuration at full CPU and 2 GB, plus the call", previewFunctionMicroUsd(), PREVIEW_JOBS * perCall);
 // Read here, not in the pure module: priced only once the route exists and declares that duration.
 const priced = existsSync(PREVIEW_ROUTE) && routePricedIn(readFileSync(PREVIEW_ROUTE, "utf8"));
-is("the route is not built yet, so the function time is not priced", priced, false);
+is("the route (unit 3a) declares the duration, so the function time is priced", priced, true);
 is("a route that declares another duration is not priced", routePricedIn("export const maxDuration = 300;"), false);
 is("nor one that declares none", routePricedIn("export async function POST() {}"), false);
 is("control: the declared duration prices it", routePricedIn(`export const maxDuration = ${seconds};`), true);

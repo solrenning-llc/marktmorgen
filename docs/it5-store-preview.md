@@ -95,7 +95,15 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
    - **The money, as the Store assistant's pool:** the same `ASSISTANT_POOL` script on a key of its own, `nl:storepv:pool:<month>`. The request's worst is reserved before the call and may never pass one priced writing job. It is settled at the billed tokens (`previewSettledMicroUsd`, the assistant's reading for the writing model), released only on a provider error status and kept whole when it may have billed. A cap that is unknown or spent asks nothing, and the first cap of a month is kept, so a later, larger one does not raise it.
    - **The pool's cap** (`previewPoolCapMicroUsd`): the month's previews times `PREVIEW_JOBS` times `WRITING_JOB_MICRO_USD`, from the places the owner chooses, (A) or (B), passed in. It is null while the route is not priced. Only the model is drawn from it; the function time and the database are bounded by the route's counts.
    - **The counts:** every job is counted per preview before anything is spent and stays counted; a third is answered "used". The address's and the site's day counts are the route's, in unit 3.
-3. **The home page form,** behind the switch, with the robot and per-address checks, the live progress and the draft read in order.
+3. **The door and the home page form,** behind the switch.
+   - **3a, the door** (built on 15 November 2026, in this branch, off; lib/store-preview-door.ts, app/api/store-preview/route.ts, tests/store-preview-door.test.ts):
+     - Off, it answers 404 as a path that does not exist, before reading the body or the database. The route declares `export const maxDuration = 60`, so the preview's worst is priced (routePricedIn holds the route's source), and passes no option.
+     - Refused before any count: another site, the hidden field, a body over 8 KiB or not JSON, a robot (lib/bot-check.ts), and a form with nothing to draft from.
+     - **The owner's choice decides whether there are any previews at all:** `PREVIEW_PLACES` is null, and the count of paying stores is not read yet. With either unknown, previews are "full" and nothing is asked.
+     - A new preview counts its address's day first (its network block, keyed, never the address as typed; `nl:storepv:addr:`), so a refused address takes nothing from the site. Then the site's day (`previewDayCeiling`) and month.
+     - The answers round needs an id this door opened: 16 random characters signed with the day (`deriveKey`), good that day and the next. Checking it sends nothing to the database; with no key, the door opens nothing.
+     - One preview with its answers round sends at most 38 database commands, scripts counted command by command, within `PREVIEW_DB_COMMANDS` (40). That leaves 2 for unit 4 (keeping the draft and reading it back), which must recount them and raise the priced figure if they do not fit, never leave one out.
+   - **3b, the form:** the home page form, with the live progress and the draft read in order, behind the switch.
 4. **Keeping it:** the 24-hour token, the copy into the studio on sign-up with no second call, and deletion by the visitor and on expiry.
 5. **The privacy words** and the public help line, in the same pull request that would turn it on; turning it on is the owner's.
 

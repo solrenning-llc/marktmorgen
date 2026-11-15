@@ -49,9 +49,9 @@ export type PreviewJob = {
 
 export type PreviewJobResult = { ok: true; draft: StoreSetup } | { ok: false; reason: "off" | "notes" | "used" | "spent" | "failed" };
 
-/** One writing job of a store preview, only while STORE_PREVIEW_ON is true. */
-export async function previewDraft(job: PreviewJob): Promise<PreviewJobResult> {
-  if (!STORE_PREVIEW_ON) return { ok: false, reason: "off" };
+/** One writing job of a store preview, only while STORE_PREVIEW_ON is true (`on` is for the door's tests). */
+export async function previewDraft(job: PreviewJob, on: boolean = STORE_PREVIEW_ON): Promise<PreviewJobResult> {
+  if (on !== true) return { ok: false, reason: "off" };
   return runPreviewJob(job);
 }
 

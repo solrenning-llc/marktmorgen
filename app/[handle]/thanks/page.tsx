@@ -1072,6 +1072,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     className="btn st-btn btn-lg mt-7"
                   >
                     {t.downloadIt}
+                    {/* Which product, to a screen reader (WCAG 2.4.9), after the visible words (2.5.3) (#4593). */}
+                    <span className="sr-only">{`: ${order.product.title}`}</span>
                   </a>
 
                   <p className="st-muted mt-5 text-sm">{t.fileLinkWorks(hours, store.name)}</p>
@@ -1096,8 +1098,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                   <p className="st-label">{t.alsoIn(order.option.label)}</p>
                   {order.link ? (
                     <>
-                      <a href={order.link} rel="noopener noreferrer nofollow" target="_blank" className="link mt-1 inline-block font-semibold">
+                      <a href={order.link} rel="noopener noreferrer nofollow" target="_blank" className="link mt-1 inline-flex min-h-11 items-center font-semibold">
                         {t.openIt}
+                        <span className="sr-only">{`: ${order.option.label}`}</span>
                       <NewTab language={store.language} /></a>
                       <p className="st-muted mt-1 text-sm">
                         {t.keptOnSave(linkHost(order.link), store.name)}
@@ -1108,9 +1111,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     <>
                       <a
                         href={`/api/store/download?handle=${encodeURIComponent(store.handle)}&session_id=${encodeURIComponent(sessionId ?? "")}`}
-                        className="link mt-1 inline-block font-semibold"
+                        className="link mt-1 inline-flex min-h-11 items-center font-semibold"
                       >
                         {t.downloadIt}
+                        <span className="sr-only">{`: ${order.option.label}`}</span>
                       </a>
                       <p className="st-muted mt-1 text-sm">
                         {t.optionLinkWorks(hours, Boolean(order.product.course))}
@@ -1154,6 +1158,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                         className="btn st-btn mt-3"
                       >
                         {t.openIt}
+                        <span className="sr-only">{`: ${added.product.title}`}</span>
                       <NewTab language={store.language} /></a>
                       <p className="st-muted mt-3 break-all text-sm">{added.link}</p>
                     </>
@@ -1165,6 +1170,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                       className="btn st-btn mt-3"
                     >
                       {t.downloadIt}
+                      <span className="sr-only">{`: ${added.product.title}`}</span>
                     </a>
                   ) : (
                     <p className="st-muted mt-2 text-sm">
@@ -1188,6 +1194,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     <>
                       <a href={added.product.link} rel="noopener noreferrer nofollow" target="_blank" className="btn st-btn mt-3">
                         {t.openIt}
+                        <span className="sr-only">{`: ${added.product.title}`}</span>
                       <NewTab language={store.language} /></a>
                       <p className="st-muted mt-3 break-all text-sm">{added.product.link}</p>
                     </>
@@ -1199,6 +1206,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                       className="btn st-btn mt-3"
                     >
                       {t.downloadIt}
+                      <span className="sr-only">{`: ${added.product.title}`}</span>
                     </a>
                   ) : null}
                   {keyBox(takenKeys[index] ?? null, added.product.title)}

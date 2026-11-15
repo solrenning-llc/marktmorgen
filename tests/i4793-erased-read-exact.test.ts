@@ -38,19 +38,25 @@ async function outcome(run: () => Promise<unknown>): Promise<string> {
   }
 }
 
-async function main(): Promise<void> {
-  const OWNER = "i4793@example.com";
+const OWNER = "i4793@example.com";
+const ERASED = "gone@example.com";
+const OTHER = "kept@example.com";
+
+// A fresh store whose list holds the deleted person's print and nothing else.
+async function seed() {
   await claimHandle(OWNER, "i4793", "I4793", "");
   await ensureStatsId(OWNER);
   await ensureListId(OWNER);
   await ensureStoreId(OWNER);
   const store = (await storeForEmail(OWNER))!;
   const listId = store.listId!;
-  const ERASED = "gone@example.com";
-  const OTHER = "kept@example.com";
   redis.run(suppressCommand(listId, ERASED, 1_794_608_400) as Cmd);
   is("the deleted person's print is there", redis.run(["HLEN", `nl:erased:${listId}`]), 1);
+  return { store, listId };
+}
 
+async function main(): Promise<void> {
+  let { store, listId } = await seed();
   const leads = () => redis.run(["HLEN", leadsKey(listId)]);
   const agreed = () => redis.run(["GET", agreedKey(listId)]);
   const row = (email: string) => redis.run(["HGET", leadsKey(listId), email]);
@@ -109,6 +115,10 @@ async function main(): Promise<void> {
   }
 
   part("Whole replies: everything works as before, the deleted person stays out");
+  // A clean store, so these controls inherit nothing from the cases above.
+  redis.clear();
+  ({ store, listId } = await seed());
+  is("control: the list starts empty", leads(), 0);
   const dry = await previewContactRows(listId, [{ email: ERASED, name: "", tags: [], consent: "agreed" }, { email: OTHER, name: "", tags: [], consent: "agreed" }]);
   is("the dry run says the other address would be added", dry.outcomes[1].outcome, "added");
   is("the dry run does not add the deleted address", dry.outcomes[0].outcome === "added", false);

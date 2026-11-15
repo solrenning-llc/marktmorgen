@@ -389,6 +389,19 @@ const EVENTS = [
       requested_at: "2026-10-19T14:05:00.000Z",
     },
   },
+  {
+    key: "course_completed",
+    event: "course.completed",
+    noun: "Course Completion",
+    label: "Course Completed",
+    description: "Triggers when a student finishes every lesson of one of your courses.",
+    data: {
+      email: "ada@example.com",
+      product: { id: "p_7c1d2e", title: "Sourdough at Home" },
+      lessons: 12,
+      completed_at: "2026-10-28T18:20:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

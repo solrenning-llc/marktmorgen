@@ -22,6 +22,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { doneLessons, emailKey } from "@/lib/learn";
 import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
+import { readListing } from "@/lib/catalog";
+import { emitEvent } from "@/lib/webhooks";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 
@@ -75,6 +77,15 @@ export async function noteIfFinished(store: Store, productId: string, courseId: 
     if (!lessons.every((id) => done.has(id))) return false;
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
+    // The creator's webhooks hear of it once, under the same once-only claim (378 [TB4] complement WG (a)); a failure
+    // to queue it is said and never stops the sequences below.
+    const listing = await readListing(store, productId).catch(() => null);
+    await emitEvent(store, "course.completed", `course|${courseId}|${emailKey(email)}`, {
+      email,
+      product: { id: productId, title: listing?.title ?? null },
+      lessons: lessons.length,
+      completed_at: new Date().toISOString(),
+    }).catch((error) => console.error("queueing the course.completed webhook failed", error));
     await enroll(store, email, { joined: false, finished: productId });
     return true;
   } catch (error) {

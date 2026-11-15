@@ -25,6 +25,7 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "dispute.opened", label: "Dispute opened", hint: "A buyer disputed a payment made at your checkout" },
   { key: "sequence.step", label: "Sequence step", hint: "Somebody reached a step of a sequence that calls your webhooks" },
   { key: "waitlist.joined", label: "Waitlist joined", hint: "Someone confirmed their spot on the waitlist of a product coming soon" },
+  { key: "course.completed", label: "Course completed", hint: "A student finished every lesson of one of your courses" },
 ];
 const ALL = EVENTS.map((e) => e.key);
 

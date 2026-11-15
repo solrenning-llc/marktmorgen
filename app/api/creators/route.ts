@@ -8,7 +8,7 @@ import {
   type CreatorAnswer,
 } from "@/lib/creator-research";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";

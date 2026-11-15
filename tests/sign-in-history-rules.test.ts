@@ -115,6 +115,8 @@ const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,
   "app/api/store/address/route.ts": /\byour sign-in address\b/,
+  // The operator's own Search Console connection is a site setting; the note's "settings" covers it.
+  "app/api/operator/search-console/route.ts": /\bsettings\b/,
 };
 /**
  * A route refuses a locked session when it compares the lock's date with 0: either directly,

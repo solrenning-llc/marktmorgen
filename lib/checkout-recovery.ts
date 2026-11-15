@@ -255,9 +255,21 @@ export async function stopReminders(token: string): Promise<boolean> {
   if (!STOP_TOKEN.test(token) || !isRedisConfigured()) return false;
   const grant = stopGrantOf(await redisPipeline([["GET", linkKey(token)]]));
   if (!grant) return false;
-  const set = repliesFor(await redisPipeline([["SET", offKey(grant.k, grant.e), new Date().toISOString()]]), 1);
-  if (!set || set[0] !== "OK") throw new UnknownReplyError("a reminder's stop mark");
+  await stopRemindersFor(grant.k, grant.e);
   return true;
+}
+
+/**
+ * The same stop, for an address whose email from that store (its stats id) bounced for good or was marked as spam:
+ * a moved member's first email or reminder (lib/imports.ts, tagged with lib/mail-health.ts moveTags), told by the
+ * sender (heardFromSender; review of #3476, MEDIUM 2). Such an email carries no list to be taken off, so its no is
+ * kept here, where the move's reminder reads it (remindersStoppedAmong), as a press of its stop link would. The mark's
+ * room was taken with the member's invitation (RECOVER_TRACE_BYTES, lib/move-members.ts). Throws unless Redis
+ * answered the write "OK" (CX-123 rule 24), so the sender's notice is not taken as heard.
+ */
+export async function stopRemindersFor(statsId: string, email: string): Promise<void> {
+  const set = repliesFor(await redisPipeline([["SET", offKey(statsId, email), new Date().toISOString()]]), 1);
+  if (!set || set[0] !== "OK") throw new UnknownReplyError("a reminder's stop mark");
 }
 
 /** Whether the address paid this store for any of these products after the checkout opened. */

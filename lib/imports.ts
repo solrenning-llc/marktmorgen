@@ -90,7 +90,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
-import { healthTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { healthTags, moveTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
@@ -1615,8 +1615,10 @@ async function mailStep(job: ImportJob, store: Store): Promise<"more" | "done" |
   }
   /** What was taken from the portion and did not go is given back to it. */
   const unsent = (n: number) => rampBack(job.sid, n);
-  const tags = healthTags(store, false);
   const members = job.kind === "members";
+  // A member's email carries its store's stats id as well (moveTags), so a bounce for good or a spam report keeps
+  // their no as the stop mark of that store's reminders, which their reminder reads (review of #3476, MEDIUM 2).
+  const tags = members ? moveTags(store) : healthTags(store, false);
   // The members' emails carry the creator's postal address (lib/move-members.ts, movePostal): with none, none is
   // sent, and they are counted as not emailed. A members import does not start without one (startProblem).
   if (members && !movePostal(store)) {
@@ -2077,7 +2079,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
             html: letterHtml(store, text),
             replyTo: store.email,
             headers: { "List-Unsubscribe": `<${stop.oneClick}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
-            tags: healthTags(store, false),
+            tags: moveTags(store),
           },
         ],
         `nimbus-move-remind:${store.statsId}:${field}`, { by: "monthly" },

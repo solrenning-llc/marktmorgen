@@ -347,9 +347,10 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
 
 /** How many messages the room holds right now. */
 export async function roomSize(id: string): Promise<number> {
-  // ZCARD's own count only (CX-123 rule 24): what a person's erasure is sized by is never 0 on an unknown answer.
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
   const n = countOf(repliesFor(await redisPipeline([["ZCARD", roomKey(id)]]), 1)?.[0]);
-  if (n === null) throw new UnknownReplyError("the room's size");
+  if (n === null) throw new UnknownReplyError("the count of the community room's messages");
   return n;
 }
 

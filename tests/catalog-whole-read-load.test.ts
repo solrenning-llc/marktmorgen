@@ -95,6 +95,12 @@ async function main(): Promise<void> {
 
     const all = await measure(() => readAllListings(store));
     is("reading the whole catalog reads the same listings", all.gets, outside);
+    if (count === 100_000) {
+      // Asking for ids must not cost more than the read itself (unit 5): readListings' `wanted` dedupes the ids it is given,
+      // and a dedupe that scans the list for each id grows with the square of the catalog. A ratio of two timings in the
+      // same run, not a time, so a slower machine does not change the verdict; 5x leaves room for the search's own matching.
+      is("searching asks for ids at no more than five times the cost of reading them all", search.ms <= 5 * Math.max(all.ms, 50), true);
+    }
     console.log(`  baseline ${count}: search ${search.gets} GET, ${search.bytes} bytes, ${search.ms} ms; whole read ${all.gets} GET, ${all.bytes} bytes, ${all.ms} ms`);
   }
   done();

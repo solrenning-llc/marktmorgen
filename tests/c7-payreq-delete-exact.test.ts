@@ -37,6 +37,30 @@ async function main(): Promise<void> {
   try { answer = String(await deleteRequest(store, made.request.id, now)); } catch { answer = "threw"; } finally { redis.pipeline = real; }
   is("an unconfirmed delete is not reported as deleted", answer === "deleted", false);
   is("the record is still stored", typeof redis.run(["GET", requestRecordKey(made.request.id)]), "string");
+
+  // Five replies, one of which is not a removal's 0 or 1: an error in its slot, or a count no single removal gives.
+  for (const [what, replies] of [
+    ["an error in the last slot", [1, 1, 1, 1, new Error("ERR wrong kind of value")]],
+    ["an error reply object in the first slot", [{ error: "ERR" }, 1, 1, 1, 1]],
+    ["a 2 for one member", [1, 1, 2, 1, 1]],
+    ["a -1", [1, -1, 1, 1, 1]],
+    ["a string \"1\"", [1, 1, 1, "1", 1]],
+    ["null", [1, 1, 1, 1, null]],
+  ] as const) {
+    part(`A delete whose five replies hold ${what}`);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.length === 5 && commands[0][0] === "DEL" && commands[0][1] === requestRecordKey(made.request.id)) return [...replies];
+      return real(commands);
+    }) as typeof redis.pipeline;
+    let said = "";
+    try { said = String(await deleteRequest(store, made.request.id, now)); } catch (error) { said = error instanceof Error ? error.name : "threw"; } finally { redis.pipeline = real; }
+    is(`${what}: unknown, never deleted`, said, "UnknownReplyError");
+    is(`${what}: the record is still stored`, typeof redis.run(["GET", requestRecordKey(made.request.id)]), "string");
+  }
+
+  part("Control: the five real removals answer, and the request is deleted");
+  is("deleted", String(await deleteRequest(store, made.request.id, now)), "deleted");
+  is("the record is gone", redis.run(["GET", requestRecordKey(made.request.id)]), null);
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

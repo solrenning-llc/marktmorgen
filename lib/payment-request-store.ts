@@ -399,19 +399,35 @@ export async function cancelRequest(store: Store, id: string, now = Date.now()):
   return done.answer === "not_open" ? "not_open" : done.request;
 }
 
-/** Deletes a request that is no longer open from the store's list. Its payment, if any, stays on the creator's Stripe. */
+/**
+ * Deletes a request that is no longer open from the store's list. Its payment, if any, stays on the creator's Stripe.
+ * Done under the request's write lock and read again under it (issue #4775): a change holding the lock is waited for,
+ * and the request is deleted only as it is once that change is done, never as it was read before. A lock still held
+ * after the wait throws LockBusyError, which the route answers as "could not be done right now"; nothing is deleted.
+ */
 export async function deleteRequest(store: Store, id: string, now = Date.now()): Promise<"deleted" | "open" | null> {
-  const request = await requestOf(store, id);
-  if (!request) return null;
-  if (statusOf(request, now) === "open") return "open";
-  await forget(request);
-  return "deleted";
+  if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
+  // Read once without the lock, so a press on a request that is gone or still open costs what it did: the lock (at
+  // most 28 commands more, in ORDER's basis in tests/plan-cost-registry.ts) is taken only for a delete that can happen.
+  const seen = await requestOf(store, id);
+  if (!seen) return null;
+  if (statusOf(seen, now) === "open") return "open";
+  return withLock(writeKey(id), 10, 5_000, async () => {
+    const request = await requestOf(store, id);
+    if (!request) return null;
+    if (statusOf(request, now) === "open") return "open";
+    await forget(request);
+    return "deleted";
+  });
 }
 
 /**
  * Deletes a request's record and takes it off its four lists, each removal confirmed by a reply of its own (issue
  * #4775): a DEL of one key, ZREM and SREM of one member answer 0 or 1. Anything else throws UnknownReplyError, so the
- * delete is never said to be done while the person's data may still be kept; the record stays to be deleted again.
+ * delete is never said to be done while the person's data may still be kept. The five run in one pipeline, not one
+ * step: a reply that does not read may come after some of them were done, so the record may already be gone while an
+ * entry of it is still listed. Pressing again deletes what is left only while the record is there; the rest is left
+ * to the lists' own reading, which skips an entry whose record is gone.
  */
 async function forget(request: PaymentRequest): Promise<void> {
   const removals: (string | number)[][] = [

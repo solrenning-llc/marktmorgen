@@ -372,12 +372,25 @@ export function switchBack(control: LeverSwitch): LeverSwitch {
  * confirm, rule 24: nothing more is sent until the page is reloaded),
  * whether Undo is offered, and the last outcome.
  */
-export type SwitchView = { flipped: boolean | "unknown"; undo: boolean; outcome: LeverOutcome | null };
-export const SWITCH_START: SwitchView = { flipped: false, undo: false, outcome: null };
+/**
+ * The card's own view. `saved` is the lever's state as the last confirmed reply gave it, absolute, never relative to
+ * the control: the studio page re-renders the control from the saved store on every refresh while React keeps this
+ * view, so a relative "flipped" would turn into the opposite of what is saved (Claude 7's MÉDIO 1 on #3563). null: no
+ * press confirmed yet, the control as the page drew it; "unknown": a reply did not confirm, reload to see it.
+ */
+export type SwitchView = {
+  saved: boolean | null | "unknown";
+  undo: boolean;
+  outcome: LeverOutcome | null;
+  /** What Undo sends: the exact reverse of the switch last saved, kept from the press, so a refresh that rebuilt the
+   * control from the saved store cannot change the earlier setting it puts back. */
+  back?: LeverSwitch | null;
+};
+export const SWITCH_START: SwitchView = { saved: null, undo: false, outcome: null, back: null };
 
-/** The switch as it stands in a view whose state is known. */
-export function switchNow(control: LeverSwitch, flipped: boolean): LeverSwitch {
-  return flipped ? switchBack(control) : control;
+/** The switch as it stands at `on`: the control itself when it says so, else its exact reverse. */
+function switchAt(control: LeverSwitch, on: boolean): LeverSwitch {
+  return control.on === on ? control : switchBack(control);
 }
 
 /**
@@ -392,8 +405,8 @@ export async function pressLever(
   how: "switch" | "undo",
   post: (route: LeverRoute, body: Record<string, unknown>) => Promise<unknown>,
 ): Promise<SwitchView> {
-  if (view.flipped === "unknown" || (how === "undo" && !view.undo)) return view;
-  const active = switchNow(control, view.flipped);
+  if (view.saved === "unknown" || (how === "undo" && !view.undo)) return view;
+  const active = how === "undo" && view.back ? view.back : shownSwitch(control, view);
   let reply: unknown;
   try {
     reply = await post(active.route, active.body);
@@ -401,12 +414,12 @@ export async function pressLever(
     reply = undefined;
   }
   const outcome = toggleOutcome(active, reply);
-  if (outcome.state === "saved") return { flipped: !view.flipped, undo: how === "switch", outcome };
+  if (outcome.state === "saved") return { saved: active.to, undo: how === "switch", outcome, back: how === "switch" ? switchBack(active) : null };
   if (outcome.state === "refused") return { ...view, outcome };
-  return { flipped: "unknown", undo: false, outcome };
+  return { saved: "unknown", undo: false, outcome, back: null };
 }
 
 /** The switch the card draws, from the server's control as the page was last rendered and the card's own view. */
 export function shownSwitch(control: LeverSwitch, view: SwitchView): LeverSwitch {
-  return switchNow(control, view.flipped === true);
+  return view.saved === null || view.saved === "unknown" ? control : switchAt(control, view.saved);
 }

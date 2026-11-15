@@ -98,14 +98,14 @@ test("next offer: switched on and off from the card through the real route, and 
 
   const off = await pressLever(control, SWITCH_START, "switch", post);
   assert.equal(off.outcome?.state, "saved");
-  assert.equal(off.flipped, true);
+  assert.equal(off.saved, false);
   assert.equal(off.undo, true);
   assert.match(off.outcome!.text, /Next offer is off/);
   assert.deepEqual((await read()).nextOffer, { on: false, email: false });
 
   const undone = await pressLever(control, off, "undo", post);
   assert.equal(undone.outcome?.state, "saved");
-  assert.equal(undone.flipped, false);
+  assert.equal(undone.saved, true);
   assert.equal(undone.undo, false);
   assert.deepEqual((await read()).nextOffer, { on: true, email: true });
   assert.deepEqual(sent.map((one) => one.route), ["/api/store/assistant-settings", "/api/store/assistant-settings"]);
@@ -117,9 +117,9 @@ test("next offer: switched on and off from the card through the real route, and 
 
   // The switch itself still works both ways.
   const off2 = await pressLever(control, undone, "switch", post);
-  assert.equal(off2.flipped, true);
+  assert.equal(off2.saved, false);
   const on2 = await pressLever(control, off2, "switch", post);
-  assert.equal(on2.flipped, false);
+  assert.equal(on2.saved, true);
   assert.deepEqual((await read()).nextOffer, { on: true, email: true });
 });
 
@@ -140,7 +140,7 @@ test("checkout recovery: off keeps the saved address; a refused switch says noth
   assert.equal(refused.outcome?.state, "refused");
   assert.match(refused.outcome!.text, /^Nothing was changed\./);
   assert.match(refused.outcome!.text, /not available/);
-  assert.equal(refused.flipped, true);
+  assert.equal(refused.saved, false);
   assert.equal(refused.undo, true);
   assert.equal((await read()).recovery.enabled, false);
 });
@@ -154,7 +154,7 @@ test("an unconfirmed reply leaves the state unknown, and nothing more is sent un
       sent.push(body);
       return reply;
     });
-    assert.equal(view.flipped, "unknown", JSON.stringify(reply));
+    assert.equal(view.saved, "unknown", JSON.stringify(reply));
     assert.equal(view.undo, false);
     assert.equal(view.outcome?.state, "unknown");
     assert.match(view.outcome!.text, /Reload/);
@@ -166,7 +166,7 @@ test("an unconfirmed reply leaves the state unknown, and nothing more is sent un
   const thrown = await pressLever(control, SWITCH_START, "switch", async () => {
     throw new Error("network");
   });
-  assert.equal(thrown.flipped, "unknown");
+  assert.equal(thrown.saved, "unknown");
   assert.equal(sent.length, 4);
 });
 
@@ -205,7 +205,7 @@ test("a write applied whose reply was lost is unknown, never 'Nothing was change
   assert.equal(view.outcome?.state, "unknown");
   assert.doesNotMatch(view.outcome!.text, /Nothing was changed/);
   assert.match(view.outcome!.text, /Reload/);
-  assert.equal(view.flipped, "unknown");
+  assert.equal(view.saved, "unknown");
   assert.equal(view.undo, false);
   // No further press is sent from that state.
   for (const how of ["switch", "undo"] as const) assert.deepEqual(await pressLever(control, view, how, route), view);
@@ -219,13 +219,13 @@ test("only a refusal the route gives before any write says nothing was changed; 
     const view = await pressLever(control, SWITCH_START, "switch", async () => ({ ok: false, error }));
     assert.equal(view.outcome?.state, "unknown", String(error));
     assert.doesNotMatch(view.outcome!.text, /Nothing was changed/);
-    assert.equal(view.flipped, "unknown");
+    assert.equal(view.saved, "unknown");
   }
   for (const error of ["address", "address_long", "stripe", "role", "forbidden", "signed_out", "unavailable", "studio_used", "locked", "two_step_required", "store_gone", "none", "invalid"]) {
     const view = await pressLever(control, SWITCH_START, "switch", async () => ({ ok: false, error }));
     assert.equal(view.outcome?.state, "refused", error);
     assert.match(view.outcome!.text, /^Nothing was changed\./);
-    assert.equal(view.flipped, false);
+    assert.equal(view.saved, null, "kept as the page drew it");
   }
 });
 

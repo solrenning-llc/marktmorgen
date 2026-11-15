@@ -9,7 +9,8 @@
  *   - nothing of the course is left: no data-room slot of its people's records (cd: students and lessons done, ct:
  *     quiz tries and passes, cc: certificates, ca: tasks, lc: comments), no student row and no certificate in its
  *     indexes, so even a slot given back too early never lets a kept record lose its way to the erasure.
- * An entry with no drop time (noted before it was kept) never leaves.
+ * An entry with no drop time (noted before it was kept) never leaves. An entry that leaves takes its course's own key
+ * (nl:coursegone:<statsId>:c:<courseId>, its lessons and modules, #4542) with it, so no record key is left orphaned.
  *
  * Synthetic: the in-memory Redis stand-in.
  */
@@ -52,6 +53,9 @@ async function main(): Promise<void> {
   is("the new drop is noted", await next(), "noted");
   is("the old, empty entry left the list", await listed("cgone"), false);
   is("the new one is on it", await listed("cnew"), true);
+  is("the old entry's own key, its lessons and modules, left with it", redis.run(["EXISTS", recordKey("cgone")]), 0);
+  is("the new one's own key is there", redis.run(["EXISTS", recordKey("cnew")]), 1);
+  is("every entry still on the list keeps its own key", redis.run(["EXISTS", recordKey("kept1")]) === 1 && redis.run(["EXISTS", recordKey(`kept${MAX_REMOVED_COURSES - 1}`)]) === 1, true);
 
   part("An old entry whose course still has people's records in the data room stays");
   for (const slot of ["cd", "ct", "cc", "ca", "lc"]) {
@@ -59,6 +63,7 @@ async function main(): Promise<void> {
     redis.run(["HSET", roomKey, `${slot}:cheld`, "64"]);
     is(`${slot}: the list stays full`, await next(), "full");
     is(`${slot}: the entry is kept`, await listed("cheld"), true);
+    is(`${slot}: and its own key`, redis.run(["EXISTS", recordKey("cheld")]), 1);
   }
 
   part("A recent entry stays, even with nothing left");

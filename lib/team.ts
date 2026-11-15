@@ -31,6 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -38,7 +39,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
@@ -445,12 +446,8 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const replies = repliesFor(await redisPipeline([
-      ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
-      ["INCR", counter],
-    ]), 2);
     // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
-    const sent = countOf(replies?.[1]);
+    const sent = windowCountOf(await redisPipeline(windowCount(counter, 24 * 60 * 60)));
     if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");

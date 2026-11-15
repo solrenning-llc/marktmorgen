@@ -58,6 +58,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
+import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -535,6 +536,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
   "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days: its head (under 400 bytes) and its themes' sorted set (:themes), at most three entries of under 1,000 bytes each (the kept one, the one being kept, and one a failed clean-up left, taken out by the next try)", "studio", 8, 4 * KB),
   "nl:rsum:@lib/reviews.ts": short("The same summary: its themes removed here by a review they counted that is deleted, hidden, refunded or rewritten; head and themes deleted with the product's reviews", "studio", 8, 4 * KB),
+  "nl:search:build:@lib/store-search-index.ts": short("One build of a store's search index at a time, a minute", "request", 1, 128, REQ("page")),
+  "nl:search:@lib/store-search-index.ts": { what: "A store's search index: each visible product's id, title and one-line summary, kept ten minutes", parts: [capped(SEARCH_INDEX_MAX_BYTES, "One record a store, kept SEARCH_INDEX_SECONDS; a larger one keeps only a short note that it is too large, for the same time.", src("lib/store-search-index.ts", "SEARCH_INDEX_MAX_BYTES", "SEARCH_INDEX_SECONDS"))] },
   "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time, two minutes", "studio", 1, 128),
   "nl:rsum:last:@lib/review-ai-summary.ts": short("When a product's last AI summary of its reviews was made, kept eight days and not deleted with the summary, so the week's limit holds", "studio", 8, 64),
   "nl:rsum:ver:@lib/review-ai-summary.ts": short("A random mark of a product's reviews, read and checked in the same step as keeping a summary", "studio", 8, 64),
@@ -634,7 +637,7 @@ export const FAMILIES: Record<string, Family> = {
   // ---------------------------------------------------------------- lib/ g–l
   "nl:gift:@lib/gifts.ts": { what: "Gifts: the gift, its payment, the refunds read", parts: [per("order", 400, 2_560, "A gift and its payment: two addresses, a message of MAX_GIFT_MESSAGE and a name of MAX_GIFT_FROM in any script, GIFT_KEPT_SECONDS.", KIND("gift")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days) and where an unfinished pass over them stands (lib/gifts.ts passKey, a JSON of under 300 bytes, a week).")] },
   "nl:gift:pi:@lib/gifts.ts": short("The gift a payment paid for", "order", 400, KEY, KIND("gift")),
-  "nl:grp:@lib/group-buy.ts": { what: "Purchases for several people: the purchase, who took a place, the emails, the refunds read", parts: [per("order", 400, KB, "A purchase and each place taken in it (each place is an order, and takes a member of at most an address).", KIND("group")), capped(2 * KEY + 64 * KB, "The store's marks and the refunds already handled."), per("store", 1, MARK, "Today's emails of a link.", MAIL("place"))] },
+  "nl:grp:@lib/group-buy.ts": { what: "Purchases for several people: the purchase, who took a place, the emails, the refunds read", parts: [per("order", 400, KB, "A purchase and each place taken in it (each place is an order, and takes a member of at most an address).", KIND("group")), capped(2 * KEY + 64 * KB, "The store's marks and the refunds already handled (thirty days from the last one marked)."), per("store", 1, MARK, "Today's emails of a link.", MAIL("place"))] },
   "nl:grp:pi:@lib/group-buy.ts": short("The purchase a payment paid for", "order", 400, KEY, KIND("group")),
   "nl:grp:take:@lib/group-buy.ts": short("A place's link", "store", 30, LINK_BYTES, MAIL("place")),
   "nl:ab:@lib/headline-test.ts": room("A headline test's counts: counted with its page while it runs, and on their own after (AB_RECORD_BYTES)", "lib/sales-page-store.ts"),
@@ -707,6 +710,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:save:@lib/membership-manage.ts": { what: "A save offer made to a member", parts: [item(MARK, "One per membership.", "membership")] },
   "nl:mnum:@lib/membership-numbers.ts": { what: "Membership numbers, cached", parts: [capped(512 * KB, "One cached view.")] },
   "nl:metaads:conn:@lib/meta-ads.ts": { what: "The Meta ads connection", parts: [capped(4 * KB, "One a store.")] },
+  "nl:metaads:gen@lib/meta-ads.ts": company("The Meta daily pass's generation", "One counter for every store, moved on by a connection or a chosen account."),
+  "nl:metaads:pass@lib/meta-ads.ts": company("The Meta daily pass's mark", "One key for every store, gone by the next UTC day."),
   "nl:metaads:read:@lib/meta-ads.ts": { what: "When Meta was last read", parts: [capped(KB, "One a store.")] },
   "nl:metaads:reading:@lib/meta-ads.ts": short("A reading under way", "integration", 1, 128),
   "nl:metaads:state:@lib/meta-ads.ts": short("A consent in progress", "integration", 1, 512),
@@ -833,7 +838,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:pod:@lib/podcast.ts": { what: "A podcast's episodes", parts: [capped((tier) => 0 * MAX_PRODUCTS + (tier ? 0 : 0), "Kept on the product's record (lib/store.ts, setPodcastEpisodes): counted with products.")], room: ["lib/store.ts"] },
   // Read-only alias of the existing retained family below; no storage or TTL write.
   "nl:pre:@lib/dispute-preorder-review.ts": { what: "One retained pre-order row read with its existing PTTL; storage and 400-day retention priced by nl:pre:@lib/preorders.ts, with no duplicate bytes", line: "database-storage" },
-  "nl:pre:@lib/preorders.ts": { what: "Pre-orders: who paid, the refunds read", parts: [per("order", 430, KB, "A pre-order and its payment, 400 days after its last change.", KIND("preorder")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled and where an unfinished pass over them stands (lib/preorders.ts passKey, a JSON of under 300 bytes, a week).")] },
+  "nl:pre:@lib/preorders.ts": { what: "Pre-orders: who paid, the refunds read", parts: [per("order", 430, KB, "A pre-order and its payment, 400 days after its last change.", KIND("preorder")), capped(3 * KEY + 64 * KB + 512, "The store's marks, the refunds already handled (thirty days from the last one marked) and where an unfinished pass over them stands (lib/preorders.ts passKey, a JSON of under 300 bytes, a week).")] },
   "nl:pre:give:@lib/preorders.ts": short("A pre-order being handed over", "day", 1, 128),
   "nl:pre:jobs@lib/preorders.ts": company("Products with pre-orders to hand over", "One set for every store."),
   "nl:pre:pi:@lib/preorders.ts": short("The pre-order a payment paid for", "order", 430, KEY, KIND("preorder")),
@@ -871,7 +876,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:rev:stop:@lib/review-requests.ts": { what: "A review ask's stop link: one for each address, the same in every email", parts: [kept(LINK_BYTES, "Review asks go to buyers: one a buyer, kept while they are asked.")] },
   "nl:rev:@lib/reviews.ts": { what: "Reviews and their lists", room: ["lib/reviews.ts", "lib/store.ts"], parts: [kept(MARK, "A payment's reviews, for refunds.")] },
   "nl:rev:all:@lib/reviews.ts": { what: "Every review, for the studio", room: ["lib/reviews.ts"] },
-  "nl:rev:lock:@lib/reviews.ts": short("A product's reviews being written", "buyer", 1, 128),
+  // Since 14 November 2026 a review's save also holds its payment's lock (payLockKey) beside its product's: two keys a buyer action.
+  "nl:rev:lock:@lib/reviews.ts": { what: "A product's reviews, and a payment's list of reviews, being written", parts: [per("buyer", 1, 128, "A product's reviews being written"), per("buyer", 1, 128, "A payment's list of reviews being written")] },
   "nl:rev:new:@lib/reviews.ts": { what: "Reviews not seen yet", room: ["lib/reviews.ts"] },
   "nl:rev:pay:@lib/reviews.ts": { what: "The reviews a payment paid for", parts: [kept(MARK, "One a payment.")] },
   "nl:rev:stores@lib/reviews.ts": company("Stores with any review", "One set for every store."),
@@ -955,8 +961,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:sold:lock:@lib/sold-count.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   "nl:stats:@lib/stats-notes.ts": { what: "Notes on the store's numbers", parts: [capped(MAX_NOTES * (MAX_STATS_NOTE * 3 + ENTRY_BYTES + 64), "MAX_NOTES notes.", src("lib/stats-notes.ts", "MAX_NOTES", "MAX_NOTE_LENGTH"))] },
   "nl:busy:@lib/stats-report.ts": company("A report being made", "The company's report to a creator, a day."),
+  "nl:monthly:seen:@lib/stats-report.ts": company("The stores the monthly job decided for a month", "One set a month for every store with visits, kept 40 days like the claims."),
   "nl:monthly:sent:@lib/stats-report.ts": company("A monthly report sent", "The company's email to a creator."),
   "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the weekly report off", "One set for every store."),
+  "nl:weekly:seen:@lib/stats-report.ts": company("The stores the weekly job decided for a week", "One set a week for every store with visits, kept 9 days like the claims."),
   "nl:weekly:sent:@lib/stats-report.ts": company("A weekly report sent", "The company's email to a creator."),
   "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:stats:@lib/stats.ts": {
@@ -1093,7 +1101,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wb:@lib/winback-send.ts": short("A come-back offer sent to a member by email", "own", 90, MARK, MAIL("come back")),
   "nl:wb:cursor@lib/winback-send.ts": company("Where the come-back job stopped", "One key, the company's job."),
   "nl:wb:link:@lib/winback-send.ts": short("A come-back link", "own", 60, LINK_BYTES, MAIL("come back")),
-  "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted", "day", 62, 128),
+  // One key a store with no expiry: the count of all time the studio shows as "Sent so far" (lib/winback-send.ts,
+  // winbacksSent), erased with the store. Still priced at the figure of a key a day kept 62 days, above its one key.
+  "nl:wb:n:@lib/winback-send.ts": short("Come-back offers counted, all time (one key a store, no expiry, erased with the store)", "day", 62, 128),
   "nl:wb:once:@lib/winback-send.ts": short("An address told of a product", "own", 60, KEY, MAIL("come back")),
   "nl:yearask:@lib/yearly-ask.ts": { what: "A member asked to go yearly", parts: [item(MARK, "One a membership, five years: counted as for good.", "membership")] },
   "nl:yearask:count:@lib/yearly-ask.ts": short("Asks counted a month", "day", 62, 128),

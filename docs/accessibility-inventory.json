@@ -459,6 +459,17 @@
       ]
     },
     {
+      "source": "app/[handle]/orders/sessions/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/orders/sessions",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/orders/withdraw/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/orders/withdraw",
@@ -1055,6 +1066,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/email/links/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/email/links",
+      "parameters": []
+    },
+    {
       "source": "app/studio/email/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/email",
@@ -1216,6 +1233,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/students/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/students",
+      "parameters": []
+    },
+    {
       "source": "app/studio/tax/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/tax",
@@ -1278,6 +1301,7 @@
     }
   ],
   "componentSources": [
+    "components/access-unchecked-note.tsx",
     "components/ad-spend-editor.tsx",
     "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
@@ -1333,6 +1357,7 @@
     "components/checkout-script-editor.tsx",
     "components/checkup-list.tsx",
     "components/clickfunnels-funnel.tsx",
+    "components/client-sessions.tsx",
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
     "components/community-approval-studio.tsx",
@@ -1341,6 +1366,7 @@
     "components/community-events-studio.tsx",
     "components/community-events.tsx",
     "components/community-held.tsx",
+    "components/community-locked.tsx",
     "components/community-member-preview.tsx",
     "components/community-parts.tsx",
     "components/community-push-toggle.tsx",
@@ -1571,6 +1597,7 @@
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/sent-links-editor.tsx",
     "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
     "components/session-picker.tsx",
@@ -1618,10 +1645,12 @@
     "components/store-tip-box.tsx",
     "components/store-tracking.tsx",
     "components/structured-data.tsx",
+    "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
+    "components/studio-search.tsx",
     "components/studio-start.tsx",
     "components/studio-store-pin.tsx",
     "components/studio-tools.tsx",
@@ -1798,6 +1827,7 @@
     "app/api/store/community/push/route.ts",
     "app/api/store/community/route.ts",
     "app/api/store/community/rsvp/route.ts",
+    "app/api/store/community/space-view/route.ts",
     "app/api/store/community/upload/route.ts",
     "app/api/store/companies/route.ts",
     "app/api/store/contact-box/route.ts",
@@ -1881,6 +1911,7 @@
     "app/api/store/links/route.ts",
     "app/api/store/live/route.ts",
     "app/api/store/look/route.ts",
+    "app/api/store/mail/links/route.ts",
     "app/api/store/mail/picture/route.ts",
     "app/api/store/mail/route.ts",
     "app/api/store/manage/cancel/route.ts",
@@ -1963,6 +1994,8 @@
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
     "app/api/store/stream/route.ts",
+    "app/api/store/students/route.ts",
+    "app/api/store/studio-search/route.ts",
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
@@ -2095,6 +2128,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 146
   }
 }

@@ -31,7 +31,7 @@ O registro da loja tem no máximo `MAX_STORE_BYTES = 1.000.000` bytes (`lib/stor
 Daí:
 
 - Sem opções, cerca de 18 bytes por produto. O registro inteiro comportaria algo em torno de 50 mil produtos, antes dos demais dados da loja e da primeira página.
-- Com o máximo de opções, cerca de 1,4 KB por produto. Por esse cálculo, o teto atual de 2.000 produtos já não caberia no registro se todos tivessem 50 opções. Não conferi se outra regra impede esse caso antes; fica como **ponto a conferir**.
+- Com o máximo de opções, cerca de 1,4 KB por produto. Por esse cálculo, o teto atual de 2.000 produtos já não caberia no registro se todos tivessem 50 opções. **Conferido:** uma gravação que faria o registro passar de 1 MB é recusada com `StoreFullError` (`lib/store.ts:1669`), salvo quando ela diminui o registro, para que remover, encurtar e reordenar continuem possíveis. Nada se perde, mas, numa loja com muitas opções por produto, o teto do registro chega antes do teto de 2.000 produtos.
 
 Conclusão: um catálogo sem teto fixo, ou um teto muito acima de 2.000, exige tirar o índice do registro da loja (unidade 2). Sem isso, cada visita a uma loja grande ficaria mais cara e mais lenta, e uma loja chegaria ao limite do registro antes do limite de produtos.
 

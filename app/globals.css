@@ -860,6 +860,17 @@ html {
     padding-block: 0.55rem;
   }
 }
+/* At any width, a label longer than the room it has breaks onto a second line instead of pushing the page past the
+   screen: text enlarged to 200% (WCAG 1.4.4, 1.4.10) made "Turn on two-step login" and the funnel guide buttons
+   overflow the studio (#4787; tests/button-text-resize.test.ts). The button keeps its own width in a row
+   (flex-shrink: 0) and the text only wraps when it must, so a button that fits is drawn exactly as before. A store
+   page body has its own rule, by its container's width, below. */
+.btn:where(:not(.sp-body *)) {
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+  flex-shrink: 0;
+}
 /* A button whose label may be longer than a small phone is wide: it may
    break onto a second line instead of pushing past the edge of its card. */
 .btn-wrap {

@@ -48,6 +48,36 @@ async function main(): Promise<void> {
   is("sent", await sendBatch(batch, "cmev:drill:0:2", meter), "sent");
   is("both emails went", mail.sesAttempts.length, 2);
   is("the figure counts the two that went", await used(), (start as number) + 2);
+
+  // Review of #4530 (Claude 2 cloud H, 15 November 2026): the exits after the Amazon block kept the figure too.
+  part("Amazon's bulk room is spent and the Resend handoff mark cannot be written: retry, figure kept");
+  await mail.setReady(true, { max24: 0, rate: 100 });
+  mail.clearCaptured();
+  const before = await used();
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:ses:rest:"))) throw new Error("Redis request timed out");
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  const handoffBatch = [letter("cara@example.com"), letter("dan@example.com")];
+  for (let run = 0; run < 5; run += 1) is(`handoff run ${run + 1}: retry`, await sendBatch(handoffBatch, "cmev:drill:1:2", meter), "retry");
+  redis.pipeline = pipeline;
+  is("handoff: nothing was handed to Amazon", mail.sesAttempts.length, 0);
+  is("handoff: nothing was handed to Resend", mail.resendAttempts.length, 0);
+  is("handoff: five runs leave the store's emails as they were", await used(), before);
+
+  part("Amazon's bulk room is spent and there is no Resend key: retry, figure kept");
+  delete process.env.RESEND_API_KEY;
+  const keyless = [letter("eve@example.com"), letter("finn@example.com")];
+  for (let run = 0; run < 3; run += 1) is(`no key run ${run + 1}: retry`, await sendBatch(keyless, "cmev:drill:2:2", meter), "retry");
+  process.env.RESEND_API_KEY = "re_test_store_meter_only";
+  is("no key: nothing was handed to either sender", mail.sesAttempts.length + mail.resendAttempts.length, 0);
+  is("no key: three runs leave the store's emails as they were", await used(), before);
+
+  part("Amazon only, with no room for the batch: retry, figure kept");
+  const amazonOnly = [letter("gil@example.com"), letter("hana@example.com")];
+  for (let run = 0; run < 3; run += 1) is(`Amazon only run ${run + 1}: retry`, await sendBatch(amazonOnly, "cmev:drill:3:2", meter, "amazon"), "retry");
+  is("Amazon only: nothing was handed to either sender", mail.sesAttempts.length + mail.resendAttempts.length, 0);
+  is("Amazon only: three runs leave the store's emails as they were", await used(), before);
   mail.restore();
   done();
 }

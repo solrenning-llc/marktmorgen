@@ -15,13 +15,14 @@ const REGION = "us-east-1";
 const posted: string[] = [];
 let loseReplyFor: string | null = null;
 let lossKind: "throw" | 500 = "throw";
+let maxSendRate = 10;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
   if (url.hostname === `email.${REGION}.amazonaws.com`) {
     if (url.pathname === "/v2/email/account") {
-      return json({ ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY", SendQuota: { Max24HourSend: 50_000, MaxSendRate: 10, SentLast24Hours: 0 } });
+      return json({ ProductionAccessEnabled: true, SendingEnabled: true, EnforcementStatus: "HEALTHY", SendQuota: { Max24HourSend: 50_000, MaxSendRate: maxSendRate, SentLast24Hours: 0 } });
     }
     if (url.pathname === "/v2/email/outbound-emails") {
       const body = JSON.parse(String(init?.body)) as { Destination: { ToAddresses: string[] } };
@@ -94,6 +95,24 @@ async function main(): Promise<void> {
       is(`marks down: ${to} is written to exactly once`, posted.filter((t) => t === to).length, 1);
     }
   }
+  // Review of #4530 (Claude 1 review worker A, 15 November 2026): two emails to one address in a plain batch (one
+  // review ask per order, lib/review-requests.ts) made the second possibly-taken mark answer "already there", so the
+  // batch stalled on every run and nobody from that wave on was written to.
+  for (const rate of [10, 1] as const) {
+    part(`One address twice in a plain batch, ${rate === 10 ? "in the same wave" : "in different waves"}: both go, once each`);
+    posted.length = 0;
+    loseReplyFor = null;
+    maxSendRate = rate;
+    await redis.pipeline([["DEL", "nl:ses:state"]]); // Amazon is asked again for the account's rate.
+    const key = `rev:probe-twice-${rate}:0:3`;
+    const batch = [letter("ana@example.com"), letter("ben@example.com"), { ...letter("ana@example.com"), subject: "Second order" }];
+    is(`rate ${rate}: the batch is sent`, await sendBatch(batch, key, { by: "company" }), "sent");
+    is(`rate ${rate}: ana@ gets both emails`, posted.filter((t) => t === "ana@example.com").length, 2);
+    is(`rate ${rate}: ben@ gets one`, posted.filter((t) => t === "ben@example.com").length, 1);
+    is(`rate ${rate}: the same batch tried again writes to nobody`, await sendBatch(batch, key, { by: "company" }), "sent");
+    is(`rate ${rate}: still three emails in all`, posted.length, 3);
+  }
+  maxSendRate = 10;
   done();
 }
 

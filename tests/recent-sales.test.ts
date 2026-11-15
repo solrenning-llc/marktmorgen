@@ -147,6 +147,23 @@ async function main(): Promise<void> {
   is("confirmed empty page keeps the existing cache behavior", asked, cachedCalls);
   refundReply = undefined;
 
+  part("Late recording does not put a retained older purchase ahead of a newer one (#4743)");
+  {
+    const feedKey = `nl:recent:feed:${base.statsId}`;
+    const listKey = `nl:recent:${base.statsId}`;
+    await redis.pipeline([["DEL", listKey, feedKey]]);
+    // None of the four refunded (an earlier part refunds pi_live2abcdef), so each is a card that may be shown.
+    const refundsBefore = refunds;
+    refunds = [];
+    // The reconciliation records four purchases newest first; LPUSH leaves the oldest on top.
+    for (const hours of [1, 2, 3, 4]) await rememberSale(on, checkout(hours, bread.product.id));
+    const newest = [NOW - 3600, NOW - 2 * 3600, NOW - 3 * 3600];
+    is("only the three newest purchases by recorded time are shown, newest first", (await recentSales(on)).map((s) => s.at), newest);
+    is("the cached cards keep the same order", (await recentSales(on)).map((s) => s.at), newest);
+    await redis.pipeline([["DEL", listKey, feedKey]]);
+    refunds = refundsBefore;
+  }
+
   part("Unknown or stale cached evidence is not public proof");
   await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW+3600,country:"DE"}])]]);
   is("a future cached purchase is hidden",await recentSales(on),[]);

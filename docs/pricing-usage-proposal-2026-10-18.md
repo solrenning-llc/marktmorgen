@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $77.90 | $724.90 | $69 / $690 |
-| Studio | $133.65 | $1,361.80 | $449 / $4,490 |
-| Scale | $229.88 | $2,481.60 | $999 / $9,990 |
+| Store | $77.90 | $725.15 | $69 / $690 |
+| Studio | $133.65 | $1,361.85 | $449 / $4,490 |
+| Scale | $229.88 | $2,481.65 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -55,7 +55,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | 0.0% | 60.27% | 60.09% | $89.81 | 3.00 |
 | $199 / $1,990 **(recommended)** | 15.7% | 60.27% | 60.03% | $119.95 | 2.25 |
-| $249 / $2,490 | 30.0% | 60.32% | 60.06% | $150.20 | 1.79 |
+| $249 / $2,490 | 30.0% | 60.32% | 60.05% | $150.20 | 1.79 |
 | $299 / $2,990 | 44.3% | 60.32% | 60.03% | $180.38 | 1.49 |
 | $449 / $4,490 | 87.1% | 60.34% | 60.01% | $270.94 | 0.99 |
 
@@ -68,7 +68,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $299 / $2,990 | 3.8% | 60.37% | 60.02% | $180.51 | 3.34 |
 | $349 / $3,490 **(recommended)** | 10.7% | 60.37% | 60.02% | $210.70 | 2.86 |
 | $399 / $3,990 | 17.0% | 60.39% | 60.03% | $240.99 | 2.50 |
-| $499 / $4,990 | 30.0% | 60.44% | 60.08% | $301.62 | 2.00 |
+| $499 / $4,990 | 30.0% | 60.44% | 60.07% | $301.62 | 2.00 |
 | $999 / $9,990 | 95.0% | 60.42% | 60.03% | $603.67 | 1.00 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).

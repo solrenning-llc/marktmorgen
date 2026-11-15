@@ -14,6 +14,7 @@
  *   - a search's token opens the page on the store it was made on only, and
  *     a sale opens its buyer only when it is this store's.
  */
+import { readFileSync } from "node:fs";
 import {
   MAX_PERSON_NOTES,
   addPersonNote,
@@ -23,6 +24,7 @@ import {
   findToken,
   forgetPersonNotes,
   personKey,
+  profileUnreadWords,
   readAddress,
   readPersonNotes,
   removePersonNote,
@@ -266,6 +268,30 @@ async function main(): Promise<void> {
   await saveCourse(outline, ROOM);
   const later = await buyerProfile(store, "buyer@example.com");
   is("marks on lessons taken out of the course are not counted", later.courses.map((c) => [c.done, c.lessons]), [[2, 4]]);
+
+  // Review of #4025 (Codex L, MEDIUM): the outline's GET ran inside the progress Promise.all with nothing to catch it,
+  // so one failed read (a Redis timeout) threw out of buyerProfile and the studio lost the whole buyer page.
+  part("A course whose progress cannot be read: the rest of the page stays, and says what is missing");
+  {
+    const original = redis.pipeline.bind(redis);
+    redis.pipeline = (async (batch: (string | number)[][]) => {
+      if (batch.length === 1 && batch[0][0] === "GET" && batch[0][1] === `nl:course:${COURSE}`) throw new Error("synthetic: the outline read timed out");
+      return original(batch);
+    }) as typeof redis.pipeline;
+    try {
+      const failed = await buyerProfile(store, "buyer@example.com");
+      is("the payments are all still there", failed.orders.map((o) => o.reference), later.orders.map((o) => o.reference));
+      is("the membership and the list record too", [failed.memberships.map((m) => m.title), failed.contact?.agreed], [["Bakers' Club"], true]);
+      is("no course figure that nobody read", failed.courses, []);
+      is("its progress is named as unread, never shown as none", failed.unread, ["courses"]);
+      is("in the page's words", profileUnreadWords(failed.unread).includes("how far they are in their courses"), true);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("read again, the course is back", (await buyerProfile(store, "buyer@example.com")).courses.map((c) => [c.done, c.lessons]), [[2, 4]]);
+    const page = readFileSync("app/studio/people/page.tsx", "utf8");
+    is("the studio page says it in the courses box, as a status", page.includes('profile.unread.includes("courses")'), true);
+  }
   is("on the list, agreed, with its labels", [profile.contact?.agreed, profile.contact?.tags], [true, ["vip"]]);
   is("Stripe was read in full", [profile.partial, profile.stripeError], [false, false]);
 

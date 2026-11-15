@@ -3522,7 +3522,8 @@ export async function notePartners(
     (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product) > 0),
   );
   if (!holders.length) return;
-  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched.
+  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched: the partner's inbox or
+  // their payout address (payAddress), as an own lead is (lib/affiliate-leads.ts isOwn; issue #4046, part 2).
   const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
@@ -3542,7 +3543,7 @@ export async function notePartners(
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
-      self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
+      self: Boolean(buyer) && (canonicalEmail(partner.email) === buyer || canonicalEmail(payAddress(partner)) === buyer),
       // The account a Stripe sale was paid into, as writeReferral writes it (readBook).
       ...(!sale.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
       ...(whole ? {} : { whole: sale.base }),

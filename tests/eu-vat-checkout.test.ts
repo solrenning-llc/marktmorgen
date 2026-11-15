@@ -39,6 +39,7 @@ test("an EU consumer: an electronically supplied service with a sourced rate is 
     kind: "collect",
     vat: { priceCents: 1000, vatCents: 190, totalCents: 1190, basisPoints: 1900, country: "DE" },
     place: { kind: "eu", country: "DE", evidence: de },
+    vies: null,
   });
 });
 

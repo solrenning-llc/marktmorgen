@@ -2299,6 +2299,9 @@ export class MemoryRedis {
       case "ZSCORE": {
         // A read makes no key, as on Redis (#4781: a writer reading its erasure note again must not leave one behind).
         if (!this.data.has(key)) return null;
+        // A key of another kind answers WRONGTYPE, as on Redis, never read as an empty sorted set (6QpVd on #4781).
+        const held = this.data.get(key);
+        if (!Array.isArray(held) || (held.length > 0 && typeof held[0] !== "object")) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
       }

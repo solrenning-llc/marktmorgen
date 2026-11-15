@@ -63,8 +63,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/events") {
     if (eventsFail) return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
     const after = url.searchParams.get("starting_after");
-    const from = after ? closings.findIndex((e) => e.id === after) + 1 : 0;
-    return answer({ object: "list", data: closings.slice(from, from + 100), has_more: from + 100 < closings.length });
+    // As Stripe lists them: only those created at or after created[gte], newest first, a hundred a page.
+    const gte = Number(url.searchParams.get("created[gte]") ?? 0);
+    const listed = closings.filter((e) => (e.created as number) >= gte);
+    const from = after ? listed.findIndex((e) => e.id === after) + 1 : 0;
+    return answer({ object: "list", data: listed.slice(from, from + 100), has_more: from + 100 < listed.length });
   }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -318,6 +321,50 @@ async function main(): Promise<void> {
   is("nor does a refund of part of the price", [(await importedFor(store, "ida@example.com")).length, Boolean((await readGroup(lateGroup.group.id))?.revoked)], [1, false]);
   lostDrops.length = 0;
   is("read again, nothing is taken back twice", [await revokeAll(), lostDrops], [0, []]);
+
+  // Claude 1's MÉDIO 1 and Claude 7's MÉDIO 1 and LEVE 1 on #4774: more closings than one run reads (LOST_DISPUTE_PAGES
+  // pages of 100), the lost one older than the newest 300 and more than 300 s older than the newest refund. The first
+  // run reads the newest 300, takes nothing back and must not move the anchor (it would pass over the lost one), but
+  // keeps its place in the closings; the next run goes on from there and takes the places back.
+  part("More closings than one run reads: the place in them moves, the anchor waits for the last one");
+  const nowS = Math.floor(Date.now() / 1000);
+  // The anchor where the last refund read left it: thirty seconds ago, so the window starts 330 s back.
+  await redis.pipeline([["SET", `nl:grp:${store.statsId}:refunds`, String(nowS - 30)]]);
+  const anchorBefore = (await redis.pipeline([["GET", `nl:grp:${store.statsId}:refunds`]]))[0];
+  refunds = [
+    { id: "re_GroupPart0002", object: "refund", created: nowS - 5, status: "succeeded", payment_intent: "pi_Group000005", charge: { object: "charge", refunded: false, amount: 4900, amount_refunded: 100 } },
+    ...refunds,
+  ];
+  const old = closing(10, "lost", "pi_Group000005", 4900);
+  old.created = nowS - 320;
+  const many = Array.from({ length: 300 }, (_, i) => {
+    const won = closing(1000 + i, "won", "pi_Group000004", 9800);
+    won.created = nowS - 20 - i;
+    return won;
+  });
+  closings = [...many, old];
+  lostDrops.length = 0;
+  is("the first run reads the newest 300 closings, all won: nothing taken back", [await revokeAll(), (await importedFor(store, "ida@example.com")).length], [0, 1]);
+  is("and the anchor stays where it was, so the closing it has not read stays in the window", (await redis.pipeline([["GET", `nl:grp:${store.statsId}:refunds`]]))[0], anchorBefore);
+  is("the next run goes on from its place in the closings and takes the lost purchase's place back", [await revokeAll(), (await importedFor(store, "ida@example.com")).length, lostDrops], [1, 0, [`ida@example.com|${product.id}`]]);
+  is("that purchase is closed for good", Boolean((await readGroup(lateGroup.group.id))?.revoked), true);
+
+  part("A lost dispute whose purchase cannot be read holds the anchor; one that names no payment does not");
+  const anchorNow = async () => Number((await redis.pipeline([["GET", `nl:grp:${store.statsId}:refunds`]]))[0]);
+  const unreadable = closing(15, "lost", "pi_Group000099", 2900);
+  await redis.pipeline([["SET", "nl:grp:pi:pi_Group000099", "grpunreadable0001"], ["SET", "nl:grp:grpunreadable0001", "{not a record"]]);
+  closings = [unreadable];
+  const anchorHeld = await anchorNow();
+  is("a lost dispute whose purchase does not read takes nothing and keeps the anchor", [await revokeAll(), await anchorNow()], [0, anchorHeld]);
+  await redis.pipeline([["DEL", "nl:grp:pi:pi_Group000099", "nl:grp:grpunreadable0001"]]);
+  const noPayment = closing(20, "lost", "pi_Group000009", 700);
+  ((noPayment.data as { object: Record<string, unknown> }).object).payment_intent = null;
+  closings = [noPayment, unreadable];
+  const heldAt = await anchorNow();
+  await revokeAll();
+  const marked = (await redis.pipeline([["SISMEMBER", `nl:grp:${store.statsId}:seen`, noPayment.id as string]]))[0];
+  const movedTo = await anchorNow();
+  is("marked read, and the anchor moves on, at least to the newest refund", [Number(marked), movedTo > heldAt, movedTo >= nowS - 5], [1, true, true]);
 
   done();
 }

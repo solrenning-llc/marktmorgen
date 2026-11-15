@@ -525,6 +525,8 @@ export async function agreementsOfPerson(store: Pick<Store, "sid">, email: strin
     const listed = repliesFor(await redisPipeline([["SMEMBERS", personSet(store.sid, email)]]), 1);
     const members = listed ? stringList(listed[0]) : null;
     if (!members) return null;
+    // A member that is not an agreement id names no record (the set is only written with record ids), so it is passed
+    // over here as the erasure passes over it (forgetAgreementsPerson): never a reason to answer null.
     const ids = members.filter((id) => ID_PATTERN.test(id)).slice(0, MAX_PER_PERSON * 2);
     if (!ids.length) return [];
     const read = repliesFor(await redisPipeline([["MGET", ...ids.map(recordKey)]]), 1);
@@ -612,11 +614,13 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
   const person = personSet(sid, email);
   const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
   const members = listed ? stringList(listed[0]) : null;
-  // Every member an agreement id (issue #4804): one that is not may still lead to a record, so the scope is unknown,
-  // the index is kept and the erasure says it is not finished, never filtered out and the index deleted with it.
-  if (!members || !members.every((id) => ID_PATTERN.test(id))) throw new UnknownReplyError("listing a person's agreements");
+  // Only a reply that is not a list of texts is unknown (rule 30). A member that is not an agreement id names no record
+  // (issue #4804, review of 51LL): the set is only ever written with a record's own id (SADD agreement.id, which
+  // ID_PATTERN holds), so it leads nowhere. It goes with the set below, and never stops the erasure for good.
+  if (!members) throw new UnknownReplyError("listing a person's agreements");
   // Sorted, so two erasures of the same person take the locks in the same order.
-  const ids = [...new Set(members)].sort();
+  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
+  const stray = [...new Set(members.filter((id) => !ID_PATTERN.test(id)))];
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
     // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record
@@ -640,8 +644,10 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
       return n !== null && n <= 1;
     })) throw new UnknownReplyError("deleting a person's agreements");
   }
-  const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
-  const gone = dropped ? countOf(dropped[0]) : null;
-  if (gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
+  // The members that are not ids out first, each answered within what was sent, then the set itself.
+  const dropped = repliesFor(await redisPipeline([...(stray.length ? [["SREM", person, ...stray]] : []), ["DEL", person]]), stray.length ? 2 : 1);
+  const removed = stray.length && dropped ? countOf(dropped[0]) : 0;
+  const gone = dropped ? countOf(dropped[dropped.length - 1]) : null;
+  if (removed === null || removed > stray.length || gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
   return ids.length;
 }

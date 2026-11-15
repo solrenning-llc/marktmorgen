@@ -18,6 +18,7 @@ import {
 } from "@/lib/licence-keys";
 import { readListing } from "@/lib/catalog";
 import { heldRefusal } from "@/lib/child-safety";
+import { seesBuyerAddresses, withoutAddresses } from "@/lib/buyer-addresses";
 
 /**
  * A product's license keys, for the creator who sells it.
@@ -33,7 +34,9 @@ import { heldRefusal } from "@/lib/child-safety";
  *   `{ action: "revoke", id, key, revoked }`
  *
  * The product is always found in the signed-in creator's own store, so
- * nothing here can reach another store's keys.
+ * nothing here can reach another store's keys. A buyer's address is orders
+ * data: a role without "orders" (an Editor) gets each key without it, a
+ * search that never matches it, and `buyers: false` (ALL-160).
  */
 export async function GET(request: NextRequest) {
   const access = await jsonAccess(request, "products");
@@ -46,9 +49,10 @@ export async function GET(request: NextRequest) {
     if (!store || !product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     const setup = activeKeys(product);
     if (!setup) return Response.json({ ok: true, on: false }, { headers: { "Cache-Control": "private, no-store" } });
-    const [counts, list] = await Promise.all([keyCounts(store, product), issuedKeys(store, product, query, 50)]);
+    const buyers = seesBuyerAddresses(access.role);
+    const [counts, list] = await Promise.all([keyCounts(store, product), issuedKeys(store, product, query, 50, { byEmail: buyers })]);
     return Response.json(
-      { ok: true, on: true, setup, sample: sampleKey(setup), counts, keys: list.keys, matching: list.total },
+      { ok: true, on: true, setup, sample: sampleKey(setup), counts, keys: withoutAddresses(list.keys, access.role), matching: list.total, buyers },
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch (error) {

@@ -1,7 +1,7 @@
 import { EmailField } from "@/components/email-field";
 import { servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { packageSaving } from "@/lib/call-package-rules";
-import { fromPrice, lengthList, listedLengths } from "@/lib/call-lengths";
+import { lengthList, listedLengths } from "@/lib/call-lengths";
 import { saleClock, saleOff, salePrice } from "@/lib/store-sale";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly, yearlySaving } from "@/lib/yearly-price";
@@ -25,6 +25,7 @@ import { comparable, optionsInPickOrder } from "@/lib/product-option";
 import { DEFAULT_PEOPLE, MAX_PEOPLE, MIN_PEOPLE } from "@/lib/group-rules";
 import { givableOptions } from "@/lib/gift-rules";
 import { productSegment } from "@/lib/product-slug";
+import { pricePill } from "@/lib/product-pill";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { pickWords } from "@/lib/buyer-words/pick";
@@ -58,20 +59,8 @@ export function productPath(store: Store, product: Listing): string {
   return `/@${store.handle}/p/${productSegment(product)}`;
 }
 
-/** The figure on the price pill: "$27", "from €9 a month", "¥500+", "Free", in the store's currency and language. */
-export function pricePill(store: Store, product: Listing): string {
-  const { w, money } = speech(store);
-  if (isFree(product)) return w.free;
-  if (activePwyw(product)) return `${money(product.priceCents)}+`;
-  const options = sellableOptions(product);
-  const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
-  // A call with several lengths (lib/call-lengths.ts): from the lowest of their prices.
-  const lengths = product.call ? listedLengths(product.call, product.priceCents) : [];
-  if (lengths.length) return w.fromPrice(money(fromPrice(lengths) as number));
-  const price = `${money(fromPriceCents(product))}${every}`;
-  return options.length > 1 ? w.fromPrice(price) : price;
-}
-
+/* The figure on the price pill lives in lib/product-pill.ts, so a server module can use it without this file's client components. */
+export { pricePill };
 
 /** "Subscribe — $5 the first month", for a membership with an introductory price (lib/intro-price.ts); null without one. */
 export function introButton(store: Store, product: Listing): string | null {
@@ -98,6 +87,16 @@ export function fairNow(store: Store, product: Listing): number {
  */
 export function offNow(store: Store, product: Listing): number {
   return Math.max(saleNow(store, product), fairNow(store, product));
+}
+
+/**
+ * The price pill as the checkout charges it now while a store-wide sale covers the product, with no old price beside
+ * it: for words that cannot cross a price out (a shared link's picture, the store guide's picks). Never a fair price
+ * for a country, which is the visitor's own; a sale is the same for everybody (lib/store-sale.ts).
+ */
+export function salePill(store: Store, product: Listing): string {
+  const off = saleNow(store, product);
+  return off ? speech(store).money(salePrice(product.priceCents, off)) : pricePill(store, product);
 }
 
 /**
@@ -570,6 +569,7 @@ export function BuyBox({
   consentAgain = false,
   embed = null,
   stepped = false,
+  chosenOption = null,
 }: {
   store: Store;
   product: Listing;
@@ -614,6 +614,11 @@ export function BuyBox({
    * C4-20261106-0520-TODOS-19), not repeated on every card.
    */
   stepped?: boolean;
+  /**
+   * The price option a link to this page named (630 [HN6](27), lib/option-link-rules.ts linkedOption): drawn chosen,
+   * and said so above the options, because the buyer clicked a link for it. Null chooses nothing, as always (487 [IT4]).
+   */
+  chosenOption?: string | null;
 }) {
   // The card's way to the buy step: the words the product page's own buttons use (pageAction), and its name for a
   // screen reader, so the link says on its own what it is for (WCAG 2.4.9).
@@ -628,6 +633,8 @@ export function BuyBox({
   if (soon && !isFree(product)) return preorder ? <PreorderForm store={store} product={product} day={preorder} writes={writes} consentAgain={consentAgain} /> : <WaitlistForm store={store} product={product} writes={writes} />;
   const { w, money } = speech(store);
   const options = sellableOptions(product);
+  // Only an option this box offers right now can be the one the link chose.
+  const linked = chosenOption && options.some((option) => option.id === chosenOption) ? options.find((option) => option.id === chosenOption)! : null;
   const every = product.recurring ? ` ${w.every(product.recurring.interval)}` : "";
   // What one costs in each option whose name says how many (lib/option-units.ts); not for a membership's price.
   const units = product.recurring ? new Map<string, UnitLine>() : unitLines(options);
@@ -786,7 +793,8 @@ export function BuyBox({
         */
         <div className="mb-4">
           <label htmlFor={`os-${product.id}`} className="st-label">{w.chooseOptionFor(product.title)}</label>
-          <select id={`os-${product.id}`} name="option" required defaultValue="" className="st-field mt-2">
+          {linked ? <p className="st-muted mt-1 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
+          <select id={`os-${product.id}`} name="option" required defaultValue={linked ? linked.id : ""} className="st-field mt-2">
             <option value="" disabled>
               {w.chooseOne}
             </option>
@@ -800,6 +808,7 @@ export function BuyBox({
       ) : options.length > 0 ? (
         <fieldset className="mb-4">
           <legend className="sr-only">{w.chooseOptionFor(product.title)}</legend>
+          {linked ? <p className="st-muted mb-2 text-sm" data-option-from-link="">{w.optionFromLink(linked.label)}</p> : null}
           {/*
             With what each includes written down, the cards stand side by side
             on a wide screen so the buyer can compare them; on a phone they
@@ -818,6 +827,7 @@ export function BuyBox({
                     name="option"
                     value={option.id}
                     required
+                    defaultChecked={linked?.id === option.id}
                     className="h-4 w-4"
                   />
                   <span className="font-bold">{option.label}</span>

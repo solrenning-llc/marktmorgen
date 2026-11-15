@@ -168,3 +168,20 @@ test("a full refund in two halves in another currency is recorded, the last taki
   const q4 = ukReturn([whole!], { start: "2026-10-01", end: "2026-12-31", filedOn: "2027-01-03" })!;
   assert.deepEqual([q4.box1Pence, q4.box6Pence], [0, 0], "nothing left declared");
 });
+
+test("in another currency, the pence left always match what is left converted, so box 1 never drains (Claude 7 on #4574 @5554f02147)", () => {
+  const period = { perPound: "1.3137", basis: "hmrc-period" as const, day: "2026-11-01", source: "https://www.trade-tariff.service.gov.uk/exchange_rates" };
+  let record = ukVatRecord({ sale: "cs_uk_usd_drift", store: "st_1", invoice: ukInvoice({ ...invoiceInput, currency: "USD", sterling: period })!, place: { kind: "uk", evidence: gb } })!;
+  const later = at("2026-11-20T12:00:00Z");
+  let exLeft = 1000;
+  let vatLeft = 200;
+  for (let i = 0; i < 300; i += 1) {
+    const next = ukVatAdjustment(record, { at: later, exVatCents: -5, vatCents: -1, reason: "refund" });
+    if (!next) break;
+    record = next;
+    exLeft -= 5;
+    vatLeft -= 1;
+  }
+  const q4 = ukReturn([record], { start: "2026-10-01", end: "2026-12-31", filedOn: "2027-01-03" })!;
+  assert.deepEqual([q4.box1Pence, q4.box6Pence], [toPence(vatLeft, "1.3137"), toPence(exLeft, "1.3137")]);
+});

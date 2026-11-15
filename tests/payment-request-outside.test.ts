@@ -119,6 +119,25 @@ async function main(): Promise<void> {
   await withSession(reqH, "cs_test_sessionofH1", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofH1" });
   const own = await openRequestCheckout(store, reqH, "https://marktmorgen.com", day);
   is("control: its own open checkout is the page again", own.ok ? own.url : own.reason, "https://checkout.stripe.com/c/pay/cs_test_sessionofH1");
+  part("A checkout Stripe no longer has (404): no checkout, marked");
+  const missing = await make();
+  await changeRequest(store, missing, (r) => ({ next: { ...r, session: "cs_test_goneone1234", sessionAt: Date.now() }, answer: true }));
+  const afterMissing = await markPaidOutside(store, missing, { method: "cash", note: "", paidAt: day });
+  is("404: marked paid outside, nothing closed", [afterMissing.ok, (await requestOf(store, missing))?.outside?.method, expired.includes("cs_test_goneone1234")], [true, "cash", false]);
+
+  part("A malformed 200 reply: an error, nothing marked, closed or written down");
+  for (const [label, session, state] of [
+    ["no status", "cs_test_nostatus123", { payment_status: "unpaid" }],
+    ["an unknown status", "cs_test_oddstate123", { status: "processing", payment_status: "unpaid" }],
+    ["another checkout's id, open", "cs_test_otheropen12", { id: "cs_test_someoneelse0000", status: "open", payment_status: "unpaid" }],
+    ["another checkout's id, paid", "cs_test_otherpaid12", { id: "cs_test_someoneelse0001", status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_other12345", created: Math.floor(day / 1000) }],
+  ] as const) {
+    const odd = await make();
+    await withSession(odd, session, state);
+    const answer = await markPaidOutside(store, odd, { method: "cash", note: "", paidAt: day });
+    const kept = await requestOf(store, odd);
+    is(`${label}: error, left open, unmarked, not closed`, [answer.ok ? "marked" : answer.reason, kept?.state, kept?.outside, kept?.payment, expired.includes(session)], ["error", "open", undefined, "", false]);
+  }
 
   part("Kept and said");
   is("a mark reads only whole", [readOutside({ method: "cheque" }), readOutside({ method: "cash", note: "  a\\nb  " })], [null, { method: "cash", note: "a\\nb" }]);

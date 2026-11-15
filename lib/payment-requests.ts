@@ -212,13 +212,15 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
 /** Why a payment page could not be opened, in the buyer's notice's words (lib/buyer-words/requests.ts, notices). */
 export type CheckoutRefusal = "closed" | "paused" | "error" | "busy" | "gone";
 
+/** The states Stripe documents for a Checkout Session (open, complete, expired): any other reply is not read. */
+const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expired"]);
+
 /**
- * Whether the checkout Stripe answered for a request's session is that request's own (#4447): `{}` (a session Stripe no
- * longer has, after a 404) is no checkout and passes; otherwise its id must be the request's session, and a paid one
- * must name this request and this store in its metadata. Anything else is someone else's answer.
+ * Whether the checkout Stripe answered for a request's session is that request's own (#4447): its id must be the
+ * request's session, and a paid one must name this request and this store in its metadata. Anything else is someone
+ * else's answer. (A session Stripe no longer has, a 404, is read as null by the caller and never reaches here.)
  */
 function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
-  if (Object.keys(known).length === 0) return true;
   if (known.id !== request.session) return false;
   if (!isSettled(known)) return true;
   const meta = (known.metadata ?? {}) as Record<string, string>;
@@ -237,31 +239,59 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
   const held = await holdForCheckout(request.id);
   if (!held) return { ok: false, reason: "busy" };
   try {
-    // The checkout opened before, while Stripe keeps it open: the same page again.
-    if (SESSION_ID.test(request.session) && now - request.sessionAt < REUSE_SECONDS * 1000) {
+    // The checkout opened before, read while Stripe may still hold it open (a day; CHECKOUT_LIFE_MS), never only for
+    // the 23 hours it is given again (Claude 7, 14 November 2026): a second press in the 24th hour opened a second
+    // checkout beside the first, and a buyer who paid both was charged twice for one request.
+    if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
         // A checkout Stripe no longer has is no checkout: a new one is opened.
-        if (error instanceof StripeError && error.status === 404) return {};
+        if (error instanceof StripeError && error.status === 404) return null;
         throw error;
-      })) as Record<string, unknown>;
-      // Only this request's own checkout is reused or written down (#4447, review of #4455): Stripe answering with
-      // another session, or a paid one naming another request or store, is a read error, so the buyer is never sent to
-      // another request's page and this request is never written down with another's payment.
-      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
-      if (known.status === "open" && typeof known.url === "string" && known.url) return { ok: true, url: known.url };
-      if (isSettled(known)) {
-        await markPaid(store, request.id, known, now);
-        return { ok: false, reason: "gone" };
+      })) as Record<string, unknown> | null;
+      // Read only from a reply about this very checkout in a state Stripe documents: any other 200 reply (no status, a
+      // status not known here, another checkout's id) says nothing about whether it is still payable, so nothing new
+      // opens beside it (Claude 7, 14 November 2026).
+      if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      // Only this request's own checkout is reused or written down (#4447, review of #4455): a paid one naming another
+      // request or store is a read error, so the buyer is never sent to another request's page and this request is
+      // never written down with another's payment.
+      if (known && !ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
+      if (known) {
+        // Within 23 hours, the same page again.
+        if (known.status === "open" && typeof known.url === "string" && known.url && now - request.sessionAt < REUSE_SECONDS * 1000) return { ok: true, url: known.url };
+        if (isSettled(known)) {
+          await markPaid(store, request.id, known, now);
+          return { ok: false, reason: "gone" };
+        }
+        // Being paid (a payment that settles later): no second checkout beside it.
+        if (known.status === "complete") return { ok: false, reason: "busy" };
+        // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
+        if (known.status === "open") {
+          const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+          if (closed.status !== "expired") return { ok: false, reason: "error" };
+        }
       }
     }
     const opened = await createRequestCheckout(store, request, origin, now);
-    // Kept only on a request still open: one paid or canceled while Stripe
-    // was opening this checkout keeps what it became, and the checkout just
-    // opened is closed again so nobody can pay it twice (MM-SA-02).
-    const kept = await changeRequest(store, request.id, (current) => (statusOf(current, now) === "open" ? { next: { ...current, session: opened.id, sessionAt: now }, answer: true } : { next: null, answer: false }), now);
-    if (!kept?.answer) {
-      await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(opened.id)}/expire`, new URLSearchParams()).catch((error: unknown) => console.error("closing a checkout opened for a request that was paid meanwhile failed", error));
-      return { ok: false, reason: "gone" };
+    // Kept only on a request still open and still naming the checkout this press read: one paid or canceled while
+    // Stripe was opening this checkout keeps what it became (MM-SA-02), and one where another press wrote its own
+    // checkout meanwhile keeps that one. The hold lasts 60 seconds, and the Stripe calls above can take longer, so a
+    // second press may have taken it (review of #4532, Claude 1 cloud R). Either way the checkout just opened is
+    // closed again, so nobody can pay the request twice.
+    const kept = await changeRequest(
+      store,
+      request.id,
+      (current) =>
+        statusOf(current, now) !== "open"
+          ? { next: null, answer: "gone" as const }
+          : current.session !== request.session || current.sessionAt !== request.sessionAt
+            ? { next: null, answer: "busy" as const }
+            : { next: { ...current, session: opened.id, sessionAt: now }, answer: "kept" as const },
+      now,
+    );
+    if (kept?.answer !== "kept") {
+      await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(opened.id)}/expire`, new URLSearchParams()).catch((error: unknown) => console.error("closing a checkout opened for a request that was paid or given another checkout meanwhile failed", error));
+      return { ok: false, reason: kept?.answer === "busy" ? "busy" : "gone" };
     }
     return { ok: true, url: opened.url };
   } catch (error) {
@@ -430,21 +460,27 @@ export async function markPaidOutside(
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       if (!store.stripeAccountId) return { ok: false, reason: "error" };
       const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
-        if (error instanceof StripeError && error.status === 404) return {};
+        // A checkout Stripe no longer has is no checkout: the mark goes ahead.
+        if (error instanceof StripeError && error.status === 404) return null;
         throw error;
-      })) as Record<string, unknown>;
-      // The checkout read must be this request's own (#4447): Stripe answering with another session, or a paid one
-      // that names another request or store, is a read error, so this request is never written down with another's
-      // payment, nor its checkout closed or marked on that answer. A session Stripe no longer has ({} on a 404) is not one.
-      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
-      if (isSettled(known)) {
-        await markPaid(store, request.id, known, now);
-        return { ok: false, reason: "paid_online" };
-      }
-      if (known.status === "complete") return { ok: false, reason: "processing" };
-      if (known.status === "open") {
-        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-        if (closed.status !== "expired") return { ok: false, reason: "error" };
+      })) as Record<string, unknown> | null;
+      // Read only from a reply about this very checkout in a state Stripe documents: any other 200 reply (no status, a
+      // status not known here, another checkout's id) says nothing about whether it is still payable or paid, so nothing
+      // is marked, closed or written down (Claude 7, 14 November 2026).
+      if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      // The checkout read must be this request's own (#4447): a paid one that names another request or store is a read
+      // error, so this request is never written down with another's payment, nor its checkout closed or marked on that answer.
+      if (known && !ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
+      if (known) {
+        if (isSettled(known)) {
+          await markPaid(store, request.id, known, now);
+          return { ok: false, reason: "paid_online" };
+        }
+        if (known.status === "complete") return { ok: false, reason: "processing" };
+        if (known.status === "open") {
+          const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+          if (closed.status !== "expired") return { ok: false, reason: "error" };
+        }
       }
     }
     const done = await changeRequest(
@@ -452,14 +488,19 @@ export async function markPaidOutside(
       request.id,
       (current) =>
         current.state !== "open"
-          ? { next: null, answer: false }
-          : {
-              next: { ...current, state: "paid", paidAt: Math.min(now, mark.paidAt), amountPaid: current.total, payment: "", failed: "", closedAt: now, outside: { method: mark.method, note: mark.note } },
-              answer: true,
-            },
+          ? { next: null, answer: "gone" as const }
+          : // A checkout another press opened while the hold had run out (review of #4532, Claude 1 cloud R) can still be
+            // paid: never marked paid over it, so the request is paid once.
+            current.session !== request.session || current.sessionAt !== request.sessionAt
+            ? { next: null, answer: "busy" as const }
+            : {
+                next: { ...current, state: "paid", paidAt: Math.min(now, mark.paidAt), amountPaid: current.total, payment: "", failed: "", closedAt: now, outside: { method: mark.method, note: mark.note } },
+                answer: "marked" as const,
+              },
       now,
     );
-    return done?.answer ? { ok: true, request: done.request } : { ok: false, reason: "gone" };
+    if (done?.answer === "marked") return { ok: true, request: done.request };
+    return { ok: false, reason: done?.answer === "busy" ? "busy" : "gone" };
   } catch (error) {
     console.error("marking a payment request paid outside Stripe failed", error);
     return { ok: false, reason: "error" };

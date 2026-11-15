@@ -30,11 +30,18 @@ function main(): void {
     is(`${check.name}: it runs on each proposed change and every day`, [/^on:\s*$/m.test(workflow), /^\s+pull_request:/m.test(workflow), /^\s+- cron: /m.test(workflow)], [true, true, true]);
     is(`${check.name}: no step may fail quietly`, /continue-on-error/.test(workflow), false);
     const gates = workflow.split("\n").filter((line) => /^\s+if:/.test(line)).map((line) => line.trim());
+    // Word for word: a job is skipped only for a change to documentation alone, or on a pull request
+    // whose real run waits for the merge queue (the scope's "deferred"), which every merge to main passes.
+    const scopeGate = "if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && needs.documentation-scope.outputs.deferred != 'true'";
     const allowed = (line: string) =>
       line === "if: ${{ always() }}" ||
       line === "if: env.AX2_PUBLIC_STANDARD == 'true'" ||
-      line.startsWith("if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'");
-    is(`${check.name}: it is skipped only for a change to documentation alone`, gates.filter((line) => !allowed(line)), []);
+      line === scopeGate + " }}" ||
+      line === scopeGate + " && (github.repository_id == '1334793724' || github.repository == 'viniciussucupira/marktmorgen') && github.event.repository.private == false && github.event.repository.visibility == 'public' }}";
+    is(`${check.name}: it is skipped only for a change to documentation alone or until the merge queue runs it`, gates.filter((line) => !allowed(line)), []);
+    is(`${check.name}: exactly one job is gated by the scope`, gates.filter((line) => line.startsWith(scopeGate)).length, 1);
+    is(`${check.name}: the deferral is declared on the scope and read by the final check`,
+      [workflow.match(/^ {10}CI_MERGE_GROUP_ONLY: "true"$/gm)?.length ?? 0, /^ {10}CI_EVENT: \$\{\{ github\.event_name \}\}$/m.test(workflow)], [2, true]);
     for (const needle of check.proof) is(`${check.name}: the workflow or its script has ${needle}`, (workflow + script).includes(needle), true);
   }
   is("the enhanced contrast rule is named wherever the page says the enhanced level is checked", ACCESSIBILITY_CHECKS.filter((c) => /enhanced/.test(c.what)).every((c) => c.proof.includes('"color-contrast-enhanced"') && c.proof.includes('"wcag2aaa"')), true);

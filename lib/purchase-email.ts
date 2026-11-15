@@ -66,13 +66,14 @@ import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preord
 import { speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
+import { firstChargeCents } from "@/lib/yearly-price";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds, isBundle } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
-import { pricePill } from "@/components/store-product";
+import { pricePill } from "@/lib/product-pill";
 import { productSegment } from "@/lib/product-slug";
 
 /** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */
@@ -375,11 +376,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   }
 
   if (product.recurring) {
+    // The first charge is what the checkout made it: the year's price when paid yearly (lib/yearly-price.ts).
+    const firstCents = firstChargeCents(product, option, every, store.tiers);
     if (firstChargeAt) {
-      const firstCents = option ? option.priceCents : product.priceCents;
-      lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
-    } else if (trialDays > 0) {
-      const firstCents = option ? option.priceCents : product.priceCents;
+      if (firstCents !== null) lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
+    } else if (trialDays > 0 && firstCents !== null) {
       const tax = store.tax.enabled && !store.tax.included;
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));

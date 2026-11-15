@@ -59,6 +59,7 @@ Read by Claude 1 cloud E on 15 November 2026 from Stripe's own pages, in their S
 1. A Checkout Session made with `adaptive_pricing[enabled]=true` on a test connected account with `fees_collector: "stripe"` converts, and its session and charge read back in the store's currency with `presentment_details`.
 2. The same with `currency_options` on a Price of that account.
 3. What Stripe does with a session that has an application fee and Adaptive Pricing on (the fee's currency).
+4. Not a proof but a gate: the read of the account's settlement currency (`settlesInStoreCurrency`, lib/buyer-currency.ts) gets its cache and its request units (`takeBuyerRead`) in unit 3b, before the key turns on; today it is never called, because the key is false.
 
 Each is a request to Stripe's test mode on a test account (as lib/verify-stripe.ts proves the site's other requests), never a live account, made by whoever may use the test keys; no agent creates an account for it.
 

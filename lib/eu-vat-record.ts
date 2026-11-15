@@ -189,8 +189,17 @@ export function euVatAdjustment(record: EuVatRecord, change: { at: number; taxab
   const date = dayOf(change?.at);
   if (!record || !date || !whole(change.taxableCents) || !whole(change.vatCents) || !text(change.reason, 100)) return null;
   if (change.taxableCents === 0 && change.vatCents === 0) return null;
+  // Never before the sale it adjusts (review of 15/11/2026: it would become a correction of a later quarter).
+  if (date < record.date) return null;
+  // Both move the same way, and the VAT keeps the rate's proportion of the amount: one cent either way is the
+  // rounding of two proportions (lib/eu-vat-refund.ts), anything more would declare too little or too much VAT.
+  if ((change.taxableCents > 0 && change.vatCents < 0) || (change.taxableCents < 0 && change.vatCents > 0)) return null;
+  const expected = Math.floor((Math.abs(change.taxableCents) * record.rateBasisPoints + 5000) / 10000);
+  if (!whole(expected) || Math.abs(Math.abs(change.vatCents) - expected) > 1) return null;
   const taxableLeft = record.taxableCents + record.adjustments.reduce((n, a) => n + a.taxableCents, 0) + change.taxableCents;
   const vatLeft = record.vatCents + record.adjustments.reduce((n, a) => n + a.vatCents, 0) + change.vatCents;
   if (taxableLeft < 0 || vatLeft < 0) return null;
+  // Nothing left to tax leaves no VAT behind.
+  if (taxableLeft === 0 && vatLeft !== 0) return null;
   return { ...record, adjustments: [...record.adjustments, { date, taxableCents: change.taxableCents, vatCents: change.vatCents, reason: change.reason }] };
 }

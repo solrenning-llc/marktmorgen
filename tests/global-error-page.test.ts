@@ -28,7 +28,7 @@ async function main(): Promise<void> {
   const { GLOBAL_ERROR_LOOK } = await import("@/lib/global-error-look");
   const error = Object.assign(new Error("secret detail: database password 1234"), { digest: "DIGEST-4691" });
   let retried = 0;
-  const html = renderToStaticMarkup(createElement(GlobalError, { error, retry: () => (retried += 1), reset: () => {} }));
+  const html = renderToStaticMarkup(createElement(GlobalError, { error, retry: () => (retried += 1) }));
 
   part("The document");
   is("<html lang=\"en-US\">, as app/layout.tsx", /<html[^>]*\blang="en-US"/.test(html), true);

@@ -126,7 +126,7 @@ async function main(): Promise<void> {
   // The whole of the recruit's sale given back: nothing for either of them.
   globalThis.fetch = (async (input: string | URL | Request) =>
     String(input).includes("/refunds")
-      ? new Response(JSON.stringify({ object: "list", data: [{ status: "succeeded", payment_intent: "pi_cs_one", amount: 10_000 }], has_more: false }), { status: 200 })
+      ? new Response(JSON.stringify({ object: "list", data: [{ id: "re_one", object: "refund", status: "succeeded", payment_intent: "pi_cs_one", amount: 10_000, currency: "usd" }], has_more: false }), { status: 200 })
       : new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
   store = { ...store, stripeAccountId: "acct_test_tier" };
   book = await readBook(store);

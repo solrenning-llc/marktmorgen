@@ -65,6 +65,7 @@ import { conversationsOf } from "@/lib/community-dm";
 import { chatMessagesOf } from "@/lib/community-chat";
 import { rsvpsOf } from "@/lib/community-events";
 import { votesOf } from "@/lib/community-polls";
+import { heldCopy, heldOf } from "@/lib/community-approval";
 import { keysOf } from "@/lib/licence-keys";
 import { paypalOrdersOf } from "@/lib/paypal-sales";
 import { preordersOf } from "@/lib/preorders";
@@ -105,7 +106,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/certificate.ts": { how: "copied", what: "Your certificates" },
   "lib/lesson-comments.ts": { how: "copied", what: "Your comments under lessons" },
   "lib/lesson-notes.ts": { how: "copied", what: "Your private notes on lessons" },
-  "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, and your posts, comments, likes, votes and reports" },
+  "lib/community-erasure.ts": { how: "copied", what: "Your community profile, points, notifications, private messages, what you said in its room, the events you said you are coming to, your posts, comments, likes, votes and reports, and what you sent that waits for approval" },
   "lib/waitlist.ts": { how: "copied", what: "Your places on the store's waitlists" },
   "lib/affiliate-bond.ts": { how: "copied", what: "Which affiliate brought you to the store" },
   "lib/affiliate-leads.ts": { how: "copied", what: "Sign-ups, free products and calls an affiliate was credited for" },
@@ -226,7 +227,10 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     // A record that does not read would leave out whether they agreed or left: the copy fails rather than omit it.
     const contact = parseContact(reply[0]);
     if (!contact) throw new UnknownReplyError("the person's contact record");
-    return [{ email: s.email, ...contact }];
+    // The token in their unsubscribe link is a key, left out: they have it in every email from the list.
+    const { t: _token, ...kept } = contact;
+    void _token;
+    return [{ email: s.email, ...kept }];
   },
   "lib/crm.ts": async (s) => {
     const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
@@ -260,7 +264,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/payment-request-store.ts": async (s) => {
     const list = await listRequests(s.store);
     if (list === null) throw new Error("the payment requests could not be read");
-    return list.filter((r) => same(r.email, s.email));
+    // The request's id is the secret in its pay link, a key, left out: they have it in the email that sent it. So are
+    // the store's own id, the last checkout opened for it and the internal reason an email failed (as for agreements);
+    // what was asked, paid and refunded stays.
+    return list.filter((r) => same(r.email, s.email)).map(({ id: _id, sid: _sid, session: _session, failed: _failed, ...kept }) => {
+      void [_id, _sid, _session, _failed];
+      return kept;
+    });
   },
   "lib/agreement-store.ts": async (s) => {
     const list = await listAgreements(s.store);
@@ -269,7 +279,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const a of list.filter((a) => same(a.email, s.email))) {
       const versions = [];
       for (const mark of a.versions) versions.push({ ...mark, ...((await readVersionExact(a, mark.n)) ?? {}) });
-      out.push({ ...a, versions });
+      // The agreement's id is the secret in its signing link, a key, left out: whoever held the file could sign as them.
+      // They have it in the email that sent it. So are the store's own id, the linked payment request's secret and the
+      // internal reason an email failed; what was agreed, each version and each signature stay.
+      const { id: _id, sid: _sid, payRequest: _payRequest, failed: _failed, ...kept } = a;
+      void [_id, _sid, _payRequest, _failed];
+      out.push({ ...kept, versions });
     }
     return out;
   },
@@ -333,7 +348,13 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   // Only their own field (leadOf): another person's lead that does not read never blocks this copy; theirs throws.
   "lib/affiliate-leads.ts": async (s) => {
     const lead = await leadOf(s.store, s.email);
-    return lead && lead.email && same(lead.email, s.email) ? [lead] : [];
+    if (!(lead && lead.email && same(lead.email, s.email))) return [];
+    // The creator's Stripe account a booking was paid into is the book's to read, never the person's copy.
+    const copy = { ...lead };
+    delete copy.acct;
+    // So is the refund the book kept on it (lib/affiliates.ts, AFFILIATE_REFUND_MARK).
+    delete copy.rf;
+    return [copy];
   },
   // Read whether or not the store still lets imported buyers in (importedFor asks that, and notes them as it reads).
   "lib/imported-purchases.ts": async (s) => importedFrom((await redisPipeline([["HGETALL", importedKey(s.statsId, s.email)]]))[0]),
@@ -342,7 +363,12 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     for (const productId of s.productIds) {
       const invite = await inviteForCopy(s.statsId, inviteField(s.email, productId));
       if (invite === "unknown") throw new UnknownReplyError("an invitation to keep a membership");
-      if (invite) out.push({ product: productId, ...invite });
+      if (!invite) continue;
+      // The token of the "Keep my membership" link is a key, left out: it opens the invitation and a checkout under
+      // their address (readMove). They have it in the email that sent it.
+      const { t: _token, ...kept } = invite;
+      void _token;
+      out.push({ product: productId, ...kept });
     }
     return out;
   },
@@ -386,7 +412,7 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
     if (!id) return [];
     const who = s.learner;
     const member = await readCommunityMember(id, who);
-    const [points, notices, devices, conversations, room, events, traces] = await Promise.all([
+    const [points, notices, devices, conversations, room, events, traces, held] = await Promise.all([
       pointsRecordOf(id, who),
       allNoticesOf(id, who),
       deviceCount(id, who),
@@ -394,6 +420,8 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       chatMessagesOf(id, who),
       rsvpsOf(id, who),
       memberTraces(id, who),
+      // What they sent that waits for approval, and the notes about what was not published (543 [CM2]).
+      heldOf(id, who),
     ]);
     const votes = await votesOf(id, who, traces.pollPosts);
     const { pollPosts: _polls, ...wrote } = traces;
@@ -414,8 +442,9 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
       likedComments: wrote.likedComments,
       reported: wrote.reported,
       votes,
+      waitingForApproval: held.map(heldCopy),
     };
-    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !votes.length && Object.values(wrote).every((list) => !list.length);
+    const empty = !member && points.total === 0 && !notices.length && !devices && !conversations.length && !room.length && !events.length && !votes.length && !held.length && Object.values(wrote).every((list) => !list.length);
     return empty ? [] : [record];
   },
   "lib/licence-keys.ts": async (s) => (await keysOf(s.store, s.productIds, s.email)).map((k) => ({ product: k.product, key: k.key, sale: k.reference, given: iso(k.at), revoked: iso(k.revokedAt), revokedBy: k.revokedBy })),

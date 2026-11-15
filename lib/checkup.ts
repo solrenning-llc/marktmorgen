@@ -109,7 +109,7 @@ export async function within<T, F>(read: () => Promise<T>, fallback: F, ms = CHE
   }
 }
 
-type CheckedStore = Pick<Store, "sid" | "listId" | "statsId" | "stripeAccountId" | "domain" | "subscriptionActive" | "tier" | "renewalUnpaidSince" | "planDisputes"> & AllowanceStore &
+type CheckedStore = Pick<Store, "sid" | "handle" | "previousHandles" | "listId" | "statsId" | "stripeAccountId" | "domain" | "subscriptionActive" | "tier" | "renewalUnpaidSince" | "planDisputes"> & AllowanceStore &
   Partial<Pick<Store, "email" | "extra" | "stripeChargesEnabled">>;
 
 /** The studio card each fix leads to, and the permission that draws it (app/studio/page.tsx). */

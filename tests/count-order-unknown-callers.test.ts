@@ -231,10 +231,20 @@ async function main(): Promise<void> {
     const before = [await counted(), await held(), emailsAccepted];
     const session = offerCheckout();
     amountUnreadable = true;
-    const kind = (await take(session).catch(() => ({ kind: "threw" }))).kind;
+    const logged: string[] = [];
+    const quiet = console.error;
+    console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+    const kind = await take(session).then((answer) => answer.kind, () => "threw").finally(() => {
+      console.error = quiet;
+    });
     amountUnreadable = false;
     is("taken: it was paid", kind, "done");
     is("no confirmation saying $0, not counted, and its place stays held", [emailsAccepted - before[2], (await counted()) - before[0], (await held()) - before[1]], [0, 0, 1]);
+    // Not confirmed is never silent (review of 6d0218087, LEVE): the case is logged with the checkout it followed and
+    // its own payment, so it can be found and answered, and never with the buyer's address.
+    const line = logged.find((entry) => entry.includes("a paid offer's amount or currency does not read")) ?? "";
+    is("logged with the checkout and the payment, never the address",
+      [line.includes(session), /pi_TestOffer\d{10}/.test(line), logged.some((entry) => entry.includes(BUYER))], [true, true, false]);
   }
 
   part("A paid offer whose count keeps failing keeps its place held");

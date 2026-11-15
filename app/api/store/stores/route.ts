@@ -106,7 +106,6 @@ export async function POST(request: NextRequest) {
       if (found?.lapsed.length) {
         await endLapsed(found.lapsed).catch((error: unknown) => console.error("ending a deleted store's lapsed subscription failed", error));
       }
-      await dropTeam(result.store);
       // Nothing of a deleted store is kept that could still reach anyone: the
       // sealed key to its email platform, its phones' push addresses, the
       // notes its team wrote about buyers (lib/buyer-profile.ts), its
@@ -116,14 +115,18 @@ export async function POST(request: NextRequest) {
       // durable line that the daily closing job tries again, with a ceiling of tries, and counted for the owner's
       // report (lib/store-forget-retry.ts; review of #2556), never only a log line.
       // The store assistant's notes too: an unconfirmed forgetting goes in the same line, never counted as done.
+      // Its team, invitations and log, and its kept readings (top buyers by address, members' words) too: each
+      // reply read exactly, an unconfirmed one in the same line (#4665, #4678), never only a log line.
       const forgetHooksAndKeys = async () => {
+        await dropTeam(result.store);
+        await forgetStoreReadings(result.store.statsId);
         await forgetStoreWebhooks(result.store.statsId);
         await revokeAllKeys(result.store.sid);
         await forgetMemory(result.store.statsId ?? null, result.store);
       };
       await Promise.all([
         forgetStoreFiles(result.store).catch((error: unknown) => console.error("forgetting a deleted store's files failed", error)),
-        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
+        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {

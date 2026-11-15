@@ -385,7 +385,11 @@ export async function keptNumbers(store: Store, now = Date.now()): Promise<Stats
  */
 export async function forgetStoreReadings(statsId: string | null | undefined): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", ...READING_KINDS.map((kind) => copyKey(kind, statsId))]]);
+  const keys = READING_KINDS.map((kind) => copyKey(kind, statsId));
+  // Read exactly (rule 24; Codex L, #4678): one DEL, 0 to its keys gone. Anything else is unknown and throws, so the
+  // store's delete puts it in the durable line (lib/store-forget-retry.ts), never taken as gone.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a store's kept readings");
 }
 
 /**

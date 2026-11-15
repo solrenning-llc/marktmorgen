@@ -39,7 +39,7 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
@@ -745,7 +745,7 @@ export async function spendInvite(token: string): Promise<JoinResult> {
  * unknown shape (rule 24) is still forgotten, so the store's deletion goes on; only the teammates' index entries,
  * which could not be read, are left, and memberStores drops each on the confirmed absence that follows.
  */
-export async function dropTeam(store: Store): Promise<void> {
+export async function dropTeam(store: Pick<Store, "sid">): Promise<void> {
   if (!store.sid) return;
   const members = await readTeam(store.sid).then(
     (team) => team.members,
@@ -754,11 +754,17 @@ export async function dropTeam(store: Store): Promise<void> {
       throw error;
     },
   );
-  await redisPipeline([
+  const commands = [
     ...members.map((m) => ["SREM", indexKey(m.email), store.sid]),
     ["DEL", teamKey(store.sid)],
     ["DEL", logKey(store.sid)],
-  ]);
+  ];
+  // Each reply read exactly (rule 24; Codex L, #4665): a SREM or a DEL of one key answers 0 or 1. Anything else is
+  // unknown and throws, so a deleted store's team, invitations and log go in the durable line, never taken as gone.
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies || replies.some((reply) => { const n = countOf(reply); return n === null || n > 1; })) {
+    throw new UnknownReplyError("forgetting a deleted store's team");
+  }
 }
 
 /**

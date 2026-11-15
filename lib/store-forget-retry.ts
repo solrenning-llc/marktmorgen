@@ -1,5 +1,5 @@
 /**
- * A deleted store's webhooks, API keys and assistant notes whose forgetting failed (added
+ * A deleted store's webhooks, API keys, assistant notes, team and kept readings whose forgetting failed (added
  * 5 November 2026, review of #2556, LEVE 3 of Reviewer 1): never left to a
  * log line. The store's delete (app/api/store/stores) puts it in line, and
  * the daily closing job (app/api/cron/closing) tries it again, at most
@@ -26,7 +26,9 @@
  * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
  * 4 × MAX_ENDPOINTS) and revokeAllKeys (4 + MAX_KEYS: the list read, each key's
  * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
- * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
+ * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026) and dropTeam (the team read, a SREM for each
+ * of its MAX_TEAM members, the team and its log deleted: 1 + MAX_TEAM + 2) and forgetStoreReadings (one DEL; both
+ * added 15 November 2026, #4665 and #4678), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
@@ -37,13 +39,15 @@ import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
 import { MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
+import { MAX_TEAM, dropTeam } from "@/lib/team";
+import { forgetStoreReadings } from "@/lib/store-readings";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
 export const FORGET_TRIES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 4;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + (1 + MAX_TEAM + 2) + 1 + 4;
 /** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
 export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
@@ -96,6 +100,10 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  */
 export type ForgetWork = (statsId: string | null, sid: string) => Promise<void>;
 const forgetBoth: ForgetWork = async (statsId, sid) => {
+  // The team, its invitations and log, and the kept readings (#4665, #4678): each reply read exactly, so a try that
+  // did not confirm them throws and the store stays in line.
+  await dropTeam({ sid });
+  await forgetStoreReadings(statsId);
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.

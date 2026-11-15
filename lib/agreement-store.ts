@@ -141,14 +141,19 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
     const membership = await redisPipeline([["SMEMBERS", person]]);
     if (!Array.isArray(membership) || membership.length !== 1 || !Array.isArray(membership[0])) return unavailable();
     const members: unknown[] = membership[0];
-    if (new Set(members).size !== members.length || !Array.from(members).every((id) => typeof id === "string" && ID_PATTERN.test(id))) return unavailable();
-    const ids = members as string[];
+    if (new Set(members).size !== members.length || !Array.from(members).every((id) => typeof id === "string")) return unavailable();
+    // A member that is not an agreement id names no record (the set is only written with record ids, SADD agreement.id
+    // below), so it is taken out with the records gone, as the erasure and agreementsOfPerson pass over it (issue #4804
+    // review): never a reason to refuse a new agreement, nor counted against MAX_PER_PERSON.
+    const ids = (members as string[]).filter((id) => ID_PATTERN.test(id));
+    const stray = (members as string[]).filter((id) => !ID_PATTERN.test(id));
+    let gone: string[] = [];
     if (ids.length) {
       const alive = await redisPipeline(ids.map((id) => ["EXISTS", recordKey(id)]));
       if (!Array.isArray(alive) || alive.length !== ids.length || !Array.from(alive).every((value) => value === 0 || value === 1)) return unavailable();
-      const gone = ids.filter((_, i) => alive[i] === 0);
-      if (gone.length) await redisPipeline([["SREM", person, ...gone]]);
+      gone = ids.filter((_, i) => alive[i] === 0);
     }
+    if (gone.length || stray.length) await redisPipeline([["SREM", person, ...gone, ...stray]]);
     const keep = Math.ceil(KEEP_MS / 1000);
     const counts = await redisPipeline([
       ["ZREMRANGEBYSCORE", storeKey(store.sid), "-inf", String(now - KEEP_MS)],
@@ -616,11 +621,10 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
   const members = listed ? stringList(listed[0]) : null;
   // Only a reply that is not a list of texts is unknown (rule 30). A member that is not an agreement id names no record
   // (issue #4804, review of 51LL): the set is only ever written with a record's own id (SADD agreement.id, which
-  // ID_PATTERN holds), so it leads nowhere. It goes with the set below, and never stops the erasure for good.
+  // ID_PATTERN holds), so it leads nowhere. It goes with the set (DEL) below, and never stops the erasure for good.
   if (!members) throw new UnknownReplyError("listing a person's agreements");
   // Sorted, so two erasures of the same person take the locks in the same order.
   const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
-  const stray = [...new Set(members.filter((id) => !ID_PATTERN.test(id)))];
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
     // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record
@@ -644,10 +648,9 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
       return n !== null && n <= 1;
     })) throw new UnknownReplyError("deleting a person's agreements");
   }
-  // The members that are not ids out first, each answered within what was sent, then the set itself.
-  const dropped = repliesFor(await redisPipeline([...(stray.length ? [["SREM", person, ...stray]] : []), ["DEL", person]]), stray.length ? 2 : 1);
-  const removed = stray.length && dropped ? countOf(dropped[0]) : 0;
-  const gone = dropped ? countOf(dropped[dropped.length - 1]) : null;
-  if (removed === null || removed > stray.length || gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
+  // The set itself, the members that are not ids with it.
+  const dropped = repliesFor(await redisPipeline([["DEL", person]]), 1);
+  const gone = dropped ? countOf(dropped[0]) : null;
+  if (gone === null || gone > 1) throw new UnknownReplyError("deleting a person's agreement list");
   return ids.length;
 }

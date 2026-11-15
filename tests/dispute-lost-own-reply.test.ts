@@ -110,6 +110,30 @@ async function main() {
     got = await read({ object: "list", data: [dispute()], has_more: true });
     is("has_more true with this charge's own lost row: lost, the rest cannot undo it", [got.lost, got.door, got.given], [true, true, true]);
 
+    part("A prevented dispute is judged by its own money (disputeMoneyGone, after #3321)");
+    // Stripe closes a dispute stopped before it opened (an issuer's early resolution) as "prevented": when the money was
+    // withdrawn and not put back it is the bank taking the payment back, as a lost one; when nothing was withdrawn, or
+    // all of it was reinstated, the buyer kept nothing back. Its money unreadable is unknown, never either.
+    const moves = (...amounts: unknown[]) => amounts.map((amount, i) => ({ object: "balance_transaction", id: `txn_prevented0${i}`, amount }));
+    got = await read(whole(dispute({ status: "prevented", balance_transactions: moves(-2000) })));
+    is("prevented with the money withdrawn: lost, the doors close, given back", [got.lost, got.door, got.given], [true, true, true]);
+    got = await read(whole(dispute({ status: "prevented", balance_transactions: [] })));
+    is("prevented with nothing withdrawn: not lost", [got.lost, got.door, got.given], [false, false, false]);
+    got = await read(whole(dispute({ status: "prevented", balance_transactions: moves(-2000, 2000) })));
+    is("prevented, withdrawn and put back: not lost", [got.lost, got.door, got.given], [false, false, false]);
+    await notJudged("prevented with no balance_transactions", whole(dispute({ status: "prevented" })));
+    await notJudged("prevented with an amount that is not a whole number", whole(dispute({ status: "prevented", balance_transactions: moves("-2000") })));
+    await notJudged("prevented with three money moves", whole(dispute({ status: "prevented", balance_transactions: moves(-1, -1, -1) })));
+
+    part("A proved loss decides beside a prevented row whose money cannot be read (Codex V on #3569)");
+    const unread = dispute({ id: "du_disputeown02", status: "prevented" });
+    got = await read(whole(dispute(), unread));
+    is("its own lost row, then an unreadable prevented one: lost", [got.lost, got.door, got.given], [true, true, true]);
+    got = await read(whole(unread, dispute()));
+    is("an unreadable prevented row, then its own lost one: lost", [got.lost, got.door, got.given], [true, true, true]);
+    await notJudged("its own lost row beside another charge's unreadable prevented row", whole(dispute(), dispute({ id: "du_disputeown02", status: "prevented", charge: OTHER_CHARGE })));
+    await notJudged("an unreadable prevented row beside a won one", whole(dispute({ status: "won" }), unread));
+
     part("A row that is not an object");
     await notJudged("a row that is text", whole(dispute({ status: "won" }), "du_disputeown02"));
     await notJudged("a row that is null", whole(null));

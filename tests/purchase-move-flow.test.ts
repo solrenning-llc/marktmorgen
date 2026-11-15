@@ -222,6 +222,22 @@ async function main(): Promise<void> {
     is("both kept, and the move written into the index (unit 4a)", [typeof request?.fromConfirmedAt, typeof request?.toConfirmedAt, typeof request?.appliedAt], ["number", "number", "number"]);
   }
 
+  part("A store with no room left says so, not that the move is merely unfinished (Claude 1 on #3625)");
+  {
+    const token = await signIn("full.buyer@example.com");
+    const m = mails.length;
+    is("asked", await askToMovePurchases({ store: moss, token, to: "full.new@example.com", origin: ORIGIN }), "sent");
+    const [a, b] = mails.slice(m).map((mail) => linkIn(mail.text) ?? "");
+    is("the first confirmation waits", await confirmMoveLink({ store: moss, token: a ?? "" }), "waiting");
+    // The store's data room answers full when the move takes its room.
+    odd = { command: "EVAL", prefix: "-- marktmorgen:store-data", reply: [0, 1], times: 1, skip: 0 };
+    const answer = await confirmMoveLink({ store: moss, token: b ?? "" });
+    odd = null;
+    is("the answer is full", answer, "full");
+    const said = moveWords.confirmed[answer];
+    is("its words name the store's room, never \"in a few minutes\"", [/room/i.test(said.title + said.body), /few minutes/i.test(said.body)], [true, false]);
+  }
+
   part("A link that does not work here");
   {
     is("unknown", await confirmMoveLink({ store: moss, token: "d".repeat(48) }), "link");

@@ -7,7 +7,9 @@
  * Synthetic store; the creator's Stripe account is a stand-in for `fetch`; nothing real is reached.
  */
 import { NextRequest } from "next/server";
-import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductCourse, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
+import { parseShipping } from "@/lib/shipping";
 import { readProduct } from "@/lib/catalog";
 import { setSoon } from "@/lib/waitlist";
 import { setExpectedDay } from "@/lib/preorders";
@@ -35,6 +37,8 @@ const MORE_MOST: Record<"bump" | "gift" | "bundle", [number, number]> = { bump: 
 const UNIT4_MOST: Record<"option" | "pick" | "plan", [number, number]> = { option: [7, 10], pick: [7, 10], plan: [8, 11] };
 /** Unit 5, measured the same day: a monthly subscription and a pre-order, each [round trips, commands]. */
 const UNIT5_MOST: Record<"subscription" | "preorder", [number, number]> = { subscription: [7, 10], preorder: [7, 10] };
+/** Unit 6, measured the same day: a course and a physical product, each [round trips, commands]. */
+const UNIT6_MOST: Record<"course" | "physical", [number, number]> = { course: [7, 10], physical: [7, 10] };
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
@@ -191,6 +195,35 @@ async function main(): Promise<void> {
   await setSoon(shop, early.product.id, true);
   await setExpectedDay(shop, early.product.id, new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
   await unit5("preorder", (f) => { f.set("product", early.product.id); f.set("preorder", "yes"); });
+  part("Unit 6: a course and a physical product");
+  const unit6 = async (label: "course" | "physical", fill: (f: FormData) => void) => {
+    roundTrips = 0;
+    commands = 0;
+    stripeCalls.length = 0;
+    const f = new FormData();
+    f.set("handle", "speedshop");
+    fill(f);
+    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com" } }));
+    const [tripsMost, commandsMost] = UNIT6_MOST[label];
+    is(`${label}: on to Stripe's page`, response.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+    // A physical product's session asks for the delivery address; a course's never does.
+    is(`${label}: its own kind of session`, lastSession.has("metadata[ship]"), label === "physical");
+    is(`${label}: at most ${tripsMost} round trips and ${commandsMost} commands, one request to Stripe`, [roundTrips <= tripsMost, commands <= commandsMost, stripeCalls.length <= STRIPE_REQUESTS_MOST], [true, true, true]);
+  };
+  const lessons = await addProduct(owner, "Baking Course", "", "49", null);
+  if (!lessons.ok) throw new Error("no course product");
+  let outline = emptyCourse();
+  const added1 = editCourse(outline, { op: "lesson-add", moduleId: outline.modules[0].id, title: "Opening" });
+  if (!added1.ok) throw new Error("no lesson");
+  outline = added1.course;
+  if (!(await setProductCourse(owner, lessons.product.id, { id: outline.id, lessons: 1 })).ok) throw new Error("no course");
+  await saveCourse(outline, (await storeForEmail(owner))!);
+  await unit6("course", (f) => { f.set("product", lessons.product.id); });
+  const book = await addProduct(owner, "Printed Book", "", "30", null);
+  if (!book.ok) throw new Error("no physical product");
+  const shipped = await setProductShipping(owner, book.product.id, parseShipping({ cents: 600, region: "na", note: "" })!);
+  if (!shipped.ok) throw new Error(`no shipping: ${shipped.reason}`);
+  await unit6("physical", (f) => { f.set("product", book.product.id); });
   done();
 }
 

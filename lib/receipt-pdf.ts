@@ -24,6 +24,9 @@
 import { PDFDocument, type PDFPage, rgb } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { PageTagger, type TagRole } from "@/lib/tagged-pdf";
+
+/** The roles a receipt draws: headings and paragraphs only (the tagger also knows table and list cells). */
+type ReceiptRole = Extract<TagRole, "H1" | "H2" | "P">;
 import { canDraw, loadFonts } from "@/lib/certificate-pdf";
 import { wrap } from "@/lib/form-response-pdf";
 import { formatMoney } from "@/lib/money";
@@ -244,9 +247,6 @@ export function receiptTitle(receipt: NumberedReceipt): string {
 }
 
 /** The texts the file draws, in reading order: what `canDraw` is asked about before anything is made. */
-/** The roles a receipt's texts take: headings and paragraphs only (no table or list roles of lib/tagged-pdf.ts). */
-export type ReceiptRole = Extract<TagRole, "H1" | "H2" | "P">;
-
 export function receiptTexts(receipt: NumberedReceipt): { role: ReceiptRole; text: string }[] {
   const money = (value: number) => formatMoney(value, receipt.currency, "en-US");
   const out: { role: ReceiptRole; text: string }[] = [{ role: "H1", text: `Receipt from ${receipt.sellerName}` }];

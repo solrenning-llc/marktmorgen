@@ -1,26 +1,26 @@
 # Checkout speed (277 [H3-2])
 
-What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Unit 1, 15 November 2026.
+What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 and 2, 15 November 2026.
 
 ## The path
 
-1. The buyer presses Buy on the product page, the checkout link or the embedded checkout. Each is a plain form posted to `POST /api/store/checkout` (`app/api/store/checkout/route.ts`).
+1. The buyer presses Buy on the product page, the checkout link or the embedded checkout. Each is a plain form posted to `POST /api/store/checkout` (`app/api/store/checkout/route.ts`). The cart's Buy posts to `POST /api/store/cart` (`app/api/store/cart/route.ts`).
 2. **Our part.** The route checks the request, reads the store and the product, makes the Stripe Checkout Session on the creator's own account, and answers with a redirect (303) to Stripe's page.
 3. **Stripe's part.** The buyer's browser loads Stripe's hosted payment page from Stripe's servers.
 
 ## The budget, in CI
 
-`tests/checkout-speed-budget.test.ts` counts our part. It does not time it, because a timer depends on the machine and would make CI fail at random. For one plain product, measured on main on 15 November 2026, the route makes these calls before it answers:
+`tests/checkout-speed-budget.test.ts` counts our part. It does not time it, because a timer depends on the machine and would make CI fail at random. Measured on main on 15 November 2026, the routes make these calls before they answer:
 
-| What | At most |
-| --- | --- |
-| Database round trips | 7 |
-| Database commands | 10 |
-| Requests to Stripe | 1 (`POST /checkout/sessions`) |
+| What | One plain product (`POST /api/store/checkout`) | A cart of two plain products (`POST /api/store/cart`) |
+| --- | --- | --- |
+| Database round trips | 7 | 8 |
+| Database commands | 10 | 12 |
+| Requests to Stripe | 1 (`POST /checkout/sessions`) | 1 (`POST /checkout/sessions`) |
 
 The work the route leaves for after its answer (`after()`: counting the visit, the A/B tests) runs while the buyer is already on the way to Stripe, so it is not in the budget. A change that adds a wait before the redirect fails this test, and whoever raises a figure says why in the same change. A lower figure is welcome, and the budget is then lowered to it.
 
-This unit covers the plain product only. Options, bundles, gifts, extras and the cart go through more checks and are left for a later unit, measured the same way.
+Units 1 and 2 cover a plain product and a cart of plain products. Options, bundles, gifts and the boxes ticked at checkout (extras) go through more checks and are left for a later unit, measured the same way.
 
 ## What is not ours
 

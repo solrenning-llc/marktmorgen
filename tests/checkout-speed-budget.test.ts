@@ -9,6 +9,7 @@
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
+import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -22,6 +23,9 @@ import { done, is, part } from "./check";
 const ROUND_TRIPS_MOST = 7;
 const COMMANDS_MOST = 10;
 const STRIPE_REQUESTS_MOST = 1;
+/** Unit 2: the cart's Buy with two plain products (POST /api/store/cart), measured the same day. */
+const CART_ROUND_TRIPS_MOST = 8;
+const CART_COMMANDS_MOST = 12;
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
@@ -80,6 +84,22 @@ async function main(): Promise<void> {
   const again = await click();
   is("sent on to Stripe again", again.location, "https://checkout.stripe.com/c/pay/test");
   is("within the same budget", [again.roundTrips <= ROUND_TRIPS_MOST, again.commands <= COMMANDS_MOST, again.stripe.length <= STRIPE_REQUESTS_MOST], [true, true, true]);
+  part("Unit 2: a cart of two plain products, the cart's own Buy");
+  const second = await addProduct(owner, "Starter Guide", "", "12", null);
+  if (!second.ok) throw new Error("no second product");
+  await setProductLink(owner, second.product.id, "https://example.com/starter");
+  roundTrips = 0;
+  commands = 0;
+  stripeCalls.length = 0;
+  const cart = new FormData();
+  cart.set("handle", "speedshop");
+  cart.append("id", made.product.id);
+  cart.append("id", second.product.id);
+  const cartAnswer = await cartRoute(new NextRequest("https://marktmorgen.com/api/store/cart", { method: "POST", body: withConsent(cart), headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com" } }));
+  is("the cart's buyer is sent on to Stripe's page", cartAnswer.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+  is(`at most ${CART_ROUND_TRIPS_MOST} database round trips before the cart's redirect`, roundTrips <= CART_ROUND_TRIPS_MOST, true);
+  is(`at most ${CART_COMMANDS_MOST} database commands before the cart's redirect`, commands <= CART_COMMANDS_MOST, true);
+  is("one request to Stripe: the session itself", [stripeCalls.length <= STRIPE_REQUESTS_MOST, stripeCalls[0]], [true, "POST /checkout/sessions"]);
   done();
 }
 

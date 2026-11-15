@@ -1932,6 +1932,7 @@
     "app/api/store/nudge/route.ts",
     "app/api/store/numbers-links/route.ts",
     "app/api/store/numbers/ask/route.ts",
+    "app/api/store/offers/route.ts",
     "app/api/store/option/route.ts",
     "app/api/store/order/route.ts",
     "app/api/store/orders/bundle/route.ts",

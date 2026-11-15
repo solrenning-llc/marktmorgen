@@ -14,6 +14,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { installSesMailFixture } from "./ses-mail-fixture";
+import { SWEEP_LIBRARY_NOTES } from "./plan-cost-registry";
 
 type Session = Record<string, unknown> & { id: string; created: number; status: string };
 let sessions: Session[] = [];
@@ -82,6 +83,26 @@ async function main(): Promise<void> {
   sessions = [{ id: "cs_test_o1000000000003", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now() / 1000) + 5, amount_total: 4900, currency: "usd", customer_details: { email }, metadata: { store: HANDLE, product } }];
   await sweepCheckouts(Date.now() + 20_000);
   is("the store is in their library again, for the new purchase", (await storesBoughtFrom(email)).length, 1);
+
+  part("the deletion check adds what the cost registry says, a pass with buyers");
+  sessions = [
+    { id: "cs_test_o1000000000004", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now() / 1000) + 5, amount_total: 4900, currency: "usd", customer_details: { email: "first@example.com" }, metadata: { store: HANDLE, product } },
+    { id: "cs_test_o1000000000005", object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment", created: Math.floor(Date.now() / 1000) + 5, amount_total: 4900, currency: "usd", customer_details: { email: "second@example.com" }, metadata: { store: HANDLE, product } },
+  ];
+  const counting = redis.pipeline.bind(redis);
+  let marks = 0;
+  let takeBacks = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    marks += batch.filter((c) => c[0] === "HMGET" && String(c[1]).startsWith("nl:erased:")).length;
+    if (batch.length && batch.every((c) => c[0] === "SREM" && String(c[1]).startsWith("nl:lib:"))) takeBacks += 1;
+    return counting(batch);
+  }) as typeof redis.pipeline;
+  try {
+    await sweepCheckouts(Date.now() + 20_000);
+  } finally {
+    redis.pipeline = counting;
+  }
+  is("two reads of the marks for both buyers at once, no take-back", [marks, takeBacks], [SWEEP_LIBRARY_NOTES.markReadsPerStoreRun, 0]);
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -5,7 +5,7 @@
  * lease; otherwise a third operation could enter and overwrite or delete the
  * draft during the other tab's version check.
  */
-import { DraftReadUnavailable, removeDraft, saveDraft } from "@/lib/mail-drafts";
+import { DraftReadUnavailable, DraftRemovalUnconfirmed, removeDraft, saveDraft } from "@/lib/mail-drafts";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -62,13 +62,17 @@ async function main() {
 
   part("A slow save whose lease ran out never deletes the other tab's lease");
   const late = await withLeaseTakenOver(() => saveDraft(store, "owner@example.com", { ...input, id, body: "Late", expectedSavedAt: current.savedAt }));
-  if (late.ok) current = late.draft;
+  // Since #3343's follow-up the write itself checks the lease: the late save is refused, never saved (Claude 2 on #3343).
+  is("the late save is refused, never saved", late, { ok: false, reason: "draft_busy" });
+  is("and the stored draft is not the late one", JSON.parse(String((await raw([["HGET", key, id]]))[0])).body, "Third");
   is("the other tab's lease stays", (await raw([["GET", lock]]))[0], "another-tab");
   is("so a third save is still kept out", await saveDraft(store, "third@example.com", { ...input, id, body: "Third tab", expectedSavedAt: current.savedAt }), { ok: false, reason: "draft_busy" });
   await raw([["DEL", lock]]);
 
   part("A slow delete whose lease ran out never deletes the other tab's lease");
-  await withLeaseTakenOver(() => removeDraft(store, id, current.savedAt).catch(() => false));
+  const lateDelete = await withLeaseTakenOver(() => removeDraft(store, id, current.savedAt).then(() => "deleted", (error: unknown) => error instanceof DraftRemovalUnconfirmed ? "unconfirmed" : "other"));
+  is("the late delete deletes nothing and is not confirmed", lateDelete, "unconfirmed");
+  is("and the draft is still there", (await raw([["HEXISTS", key, id]]))[0], 1);
   is("the other tab's lease stays after a delete", (await raw([["GET", lock]]))[0], "another-tab");
   await raw([["DEL", lock]]);
 

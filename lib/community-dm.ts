@@ -591,15 +591,18 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
   const mine = stringList(lists?.[0]);
   const asked = stringList(lists?.[1]);
   if (!mine || !asked) throw new UnknownReplyError(what);
-  const pairs = [...new Set([...mine, ...asked])];
-  // Every member must be the canonical name of a pair holding exactly this person and one other (#4806): one that is
-  // not cannot be attributed, and dropping it would delete the person's lists, the only path to the conversation
-  // stored under it, while the step says done. Unknown, then: nothing is deleted and the erasure is tried again.
-  const others = pairs.map((pair) => otherIn(pair, who));
-  if (others.some((other, i) => !other || other === who || pairs[i] !== pairOf(who, other))) throw new UnknownReplyError(what);
+  // A member holding this person is theirs, canonical or not (#4806; review 5bNDa, LEVE 1): it is deleted under the
+  // very name stored, the only key its conversation is under, and the other names in it have it taken off their lists.
+  // Never left behind and never a reason to stop for good, which would keep the erasure from ever finishing. One
+  // without them is somebody else's and stays. Only a list that cannot be read is unknown (above).
+  const pairs = [...new Set([...mine, ...asked])].filter((pair) => pair.split(".").includes(who));
+  const others = pairs.map((pair) => [...new Set(pair.split(".").filter((name) => name !== who && name !== ""))]);
+  const odd = pairs.filter((pair, i) => others[i].length !== 1 || pair !== pairOf(who, others[i][0]));
+  if (odd.length) console.error("forgetting a member's private conversations: names not canonical deleted as stored", odd.length);
   const commands: (string | number)[][] = [];
   pairs.forEach((pair, i) => {
-    commands.push(["DEL", chatKey(id, pair), readKey(id, pair)], ["ZREM", inboxKey(id, others[i]), pair], ["ZREM", askedKey(id, others[i]), pair]);
+    commands.push(["DEL", chatKey(id, pair), readKey(id, pair)]);
+    for (const other of others[i]) commands.push(["ZREM", inboxKey(id, other), pair], ["ZREM", askedKey(id, other), pair]);
   });
   // The conversations first, each deletion answered with its count, at most what the command could delete (#4795): a
   // DEL its keys, a ZREM its members. Their own lists only after that, so a retry can still find every conversation.

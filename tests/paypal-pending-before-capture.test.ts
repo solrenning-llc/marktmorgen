@@ -31,6 +31,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as paypalReturn } from "@/app/api/store/paypal/return/route";
 import { COMMAND, ORDER_COMPUTE, PAYPAL_CAPTURE_WATCH } from "./plan-cost-registry";
+import * as paypalSales from "@/lib/paypal-sales";
 
 const PARTNER_CLIENT = "AZpartnerClientId0123456789";
 const SELLER = "7KNGBPH2U58GQ";
@@ -52,9 +53,10 @@ function completed(order: string, value: string, email: string): Record<string, 
 /**
  * How PayPal answers the next capture: it takes the payment, it declines it, or the answer never comes back (nothing
  * taken); "lost-late": the answer never comes back and a minute passes meanwhile; "pending-late": PayPal holds the
- * payment as pending (an eCheck) and its answer comes back two days later.
+ * payment as pending (an eCheck) and its answer comes back two days later; "pending": PayPal holds it as pending and
+ * answers at once.
  */
-let captureWith: "take" | "decline" | "lost" | "lost-late" | "pending-late" = "take";
+let captureWith: "take" | "decline" | "lost" | "lost-late" | "pending-late" | "pending" = "take";
 let buyerFor = "a@example.com";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -83,8 +85,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       throw new Error("Synthetic: the capture's answer never came back, a minute later");
     }
     const body = completed(capture, "49.00", buyerFor);
-    if (captureWith === "pending-late") {
-      ahead += 2 * 86_400_000;
+    if (captureWith === "pending-late" || captureWith === "pending") {
+      if (captureWith === "pending-late") ahead += 2 * 86_400_000;
       const held = body.purchase_units as { payments: { captures: { status: string }[] } }[];
       held[0].payments.captures[0].status = "PENDING";
       body.status = "COMPLETED";
@@ -233,7 +235,8 @@ async function main(): Promise<void> {
     paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
   });
   is("one step put it in pending and renewed its record, the commands tests/plan-cost-registry.ts prices", [watchSent.length, watchSent[0]?.length], [1, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
-  is("inside the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked * COMMAND < ORDER_COMPUTE / 10, true);
+  is("the tries an order may ask, the bound lib/paypal-sales.ts holds, as tests/plan-cost-registry.ts prices them", (paypalSales as Record<string, unknown>).CAPTURE_TRIES_PER_ORDER, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost);
+  is("all of them together inside a tenth of the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked * COMMAND < ORDER_COMPUTE / 10, true);
   is("a sweep after it hands nothing over again", await sweep(), 0);
   is("and nothing moved", await state(healthy, "healthy@example.com"), { paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1 });
 
@@ -468,6 +471,33 @@ async function main(): Promise<void> {
       paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
     });
   }
+
+  part("Claude 7's cost MEDIUM on #3411: the return replayed for an order PayPal holds as pending asks PayPal a bounded number of times");
+  // The return route is held per connection and store, not per order; a buyer reloading it, or a script replaying it
+  // from many addresses, used to send the watch and a capture each time, for as long as the record lives (thirty days).
+  captureWith = "pending";
+  const replayed = await open("replayed@example.com");
+  const tries = PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost;
+  const replays = 10;
+  let watches = 0;
+  let watchCommands = 0;
+  const pastBound: { status: number; location: string; records: number }[] = [];
+  for (let i = 0; i < replays; i += 1) {
+    const shown = await returnFor(store, replayed, "none");
+    watches += watchSent.length;
+    watchCommands += watchSent.reduce((sum, sent) => sum + sent.length, 0);
+    if (i >= tries) pastBound.push({ ...shown, records: recordSent.filter((command) => command[0] === "SET").length });
+  }
+  is("PayPal is asked to take the payment fewer times than the return was opened", (captures.get(replayed) ?? 0) < replays, true);
+  is("exactly the bound's number of times, however often the return is opened", captures.get(replayed), tries);
+  is("the watch's commands, every return together, stay inside what the registry prices for the order", watchCommands <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
+  is("each return sent the watch once, those past the bound asking PayPal nothing", watches, replays);
+  is("a return past the bound still lands on the thanks page and writes the record nothing more", pastBound.every((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=") && shown.records === 0), true);
+  is("the order still stands in pending, never written down as paid", [await pending(replayed), Boolean(await readPaid(replayed))], [true, false]);
+  orders.set(replayed, completed(replayed, "49.00", "replayed@example.com"));
+  is("PayPal completes it: the next sweep writes it down and hands it over, once, never captured again", [await sweep(), await state(replayed, "replayed@example.com")], [1, {
+    paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: tries,
+  }]);
 
   done();
 }

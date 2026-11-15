@@ -969,7 +969,9 @@ export async function reviewList(folder: string, courseId: string, nowSeconds: n
       rows.push({ lessonId, id, submission: "unread" });
       continue;
     }
-    if (submission === null) gone.push(member);
+    // Gone, or its keeping time over (review of #3571, Claude 7): never shown, though the sweep's grace keeps the record
+    // a few days more, so a buyer's address and note are not shown past the time the creator chose; taken off the list.
+    if (submission === null || submission.keepUntil <= nowSeconds) gone.push(member);
     else rows.push({ lessonId, id, submission });
   }
   if (gone.length) await redisPipeline([["ZREM", key, ...gone]]).catch(() => undefined);

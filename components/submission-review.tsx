@@ -227,13 +227,19 @@ export function SubmissionReview({ productId }: { productId: string }) {
         <button type="button" className="btn btn-secondary btn-sm mt-3" aria-disabled={busy} aria-busy={busy} onClick={() => load()}>
           {busy ? "Opening…" : "Show files to review"}
         </button>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && next === null ? (
         <p className="mt-3 text-sm text-ink" role="status">
           No buyer has sent a file yet.
         </p>
       ) : (
         <>
-          <ul className="mt-4 grid gap-3" aria-label="Files to review">
+          {/* A page whose files were all gone still has older ones after it (review of #3571, Claude 7's LOW). */}
+          {items.length === 0 ? (
+            <p className="mt-3 text-sm text-ink" role="status">
+              No files to review here. Older files may still be waiting.
+            </p>
+          ) : null}
+          <ul className="mt-4 grid gap-3" aria-label="Files to review" hidden={items.length === 0}>
             {items.map((item) =>
               item.unread ? (
                 <li key={item.id} className="rounded-[var(--r-sm)] border border-line bg-white p-4 text-sm text-ink">

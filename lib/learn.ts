@@ -1020,6 +1020,16 @@ const DRIP_CURSOR_SECONDS = 30 * 86_400;
 const DRIP_PAGE = 200;
 /** How long a run walks the courses when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
 const DRIP_RUN_MS = 40_000;
+/**
+ * The ceiling on a run's marks before they are spent (the MR rule; found under Claude 7's MÉDIO on #3344): a mark is a
+ * SET NX for each student and module due, and a send that does not go lets it go, so without a ceiling a course
+ * whose sends are refused (the store's email figure spent) would spend a mark on every one of its students, every run.
+ * A run stops trying marks in a course after this many sends that did not go, and in a store after
+ * DRIP_REFUSALS_PER_STORE, until the next run: the rest wait inside the same three-day window, never sent twice.
+ */
+export const DRIP_REFUSALS_PER_COURSE = 3;
+/** The same ceiling for all of one store's courses in a run, so many courses cannot multiply it. */
+export const DRIP_REFUSALS_PER_STORE = 20;
 type Cmd = (string | number)[];
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;

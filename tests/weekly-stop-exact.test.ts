@@ -23,10 +23,14 @@ function answer(command: string, whole: unknown) {
   redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === command ? whole : real(commands))) as typeof redis.pipeline;
 }
 
+// Each press from its own connection: the stop's per-connection limit (WEEKLY_STOP_PER_HOUR, tests/one-click-notices.test.ts)
+// is not what this file checks, and its presses outnumber it.
+let presses = 0;
 async function press(url: string, form?: Record<string, string>): Promise<{ status: number; page: string }> {
   const body = new URLSearchParams(form ?? {});
+  presses += 1;
   try {
-    const response = await weeklyRoute(new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body }));
+    const response = await weeklyRoute(new NextRequest(url, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": `198.51.100.${presses % 250}` }, body }));
     return { status: response.status, page: await response.text() };
   } catch (error) {
     return { status: 0, page: `thrown: ${(error as Error).message}` };

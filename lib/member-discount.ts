@@ -169,6 +169,17 @@ export async function memberSubs(store: Store, email: string): Promise<MemberSub
   }
 }
 
+/** Whether a subscription, as Stripe answered it with its discounts expanded, carries a discount of `promotion`. */
+function showsPromotion(sub: Raw, promotion: string): boolean {
+  if (!Object.hasOwn(sub, "discounts") || !Array.isArray(sub.discounts)) return false;
+  return sub.discounts.some((discount) => {
+    if (!discount || typeof discount !== "object" || Array.isArray(discount)) return false;
+    const code = (discount as Raw).promotion_code;
+    const id = typeof code === "string" ? code : code && typeof code === "object" && !Array.isArray(code) ? (code as Raw).id : null;
+    return id === promotion;
+  });
+}
+
 export type ApplyResult = { ok: true } | { ok: false; reason: "not_member" | "discounted" | "code" | "stripe" | "refused" };
 
 /**
@@ -188,8 +199,11 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
   if (codes.state !== "ok") return { ok: false, reason: "stripe" };
   if (!codes.codes.some((c) => c.id === promotion && c.active)) return { ok: false, reason: "code" };
   try {
-    const changed = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion }), API_VERSION, `member-discount:${subscription}:${promotion}`);
+    const changed = await onAccount("POST", account, `/subscriptions/${encodeURIComponent(subscription)}`, new URLSearchParams({ "discounts[0][promotion_code]": promotion, "expand[0]": "discounts" }), API_VERSION, `member-discount:${subscription}:${promotion}`);
     if (!changed || !Object.hasOwn(changed, "id") || changed.id !== subscription) return { ok: false, reason: "stripe" };
+    // Confirmed only when the answer lists the discount of this very code on it (#4721): a membership answered with
+    // no discount, another code's, or one that cannot be read is not shown to the studio as a discount put on.
+    if (!showsPromotion(changed, promotion)) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

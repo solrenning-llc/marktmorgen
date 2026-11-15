@@ -45,7 +45,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (init?.method === "POST" && path.startsWith("/subscriptions/")) {
     const headers = new Headers(init.headers);
     posted.push({ path, body: String(init.body), key: headers.get("Idempotency-Key") });
-    return refuse ? answer({ error: { message: "This promotion code cannot be applied." } }, 400) : answer({ id: path.split("/")[2] });
+    return refuse ? answer({ error: { message: "This promotion code cannot be applied." } }, 400) : answer({ id: path.split("/")[2], discounts: [{ id: "di_member0001", object: "discount", promotion_code: new URLSearchParams(String(init.body)).get("discounts[0][promotion_code]") }] });
   }
   return answer({ object: "list", data: [] });
 }) as typeof fetch;
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   is("a code that is not active: refused", await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_stopped001"), { ok: false, reason: "code" });
   is("nothing was sent to Stripe for any of them", posted.length, 0);
   is("the code goes on", await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), { ok: true });
-  is("with Stripe's promotion code field, on that membership, once", [posted[0]?.path, decodeURIComponent(posted[0]?.body ?? ""), posted[0]?.key], ["/subscriptions/sub_live000001", "discounts[0][promotion_code]=promo_active0001", "member-discount:sub_live000001:promo_active0001"]);
+  is("with Stripe's promotion code field, on that membership, once", [posted[0]?.path, decodeURIComponent(posted[0]?.body ?? ""), posted[0]?.key], ["/subscriptions/sub_live000001", "discounts[0][promotion_code]=promo_active0001&expand[0]=discounts", "member-discount:sub_live000001:promo_active0001"]);
   refuse = true;
   is("Stripe refusing it by the code's rules is said as such", await applyMemberDiscount(store, "member@example.com", "sub_live000001", "promo_active0001"), { ok: false, reason: "refused" });
 

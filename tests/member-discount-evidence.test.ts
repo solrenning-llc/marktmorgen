@@ -7,7 +7,7 @@ const customer = "cus_member0001", id = "sub_live000001", promo = "promo_active0
 const price = { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } };
 const subscription = (p: unknown = price) => ({ id, status: "active", discounts: [], metadata: { store: "memberstore", product: "prod000001" }, items: { data: [{ price: p }] } });
 const page = (data: unknown[]) => ({ object: "list", data, has_more: false });
-let customers: unknown, subscriptions: unknown, posts = 0, postReply: unknown = { id };
+let customers: unknown, subscriptions: unknown, posts = 0, postReply: unknown = null;
 const savedFetch = globalThis.fetch, savedKey = process.env.STRIPE_SECRET_KEY;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   await claimHandle("member-discount@example.com", "memberstore", "Member Store", "");
   await setStripeAccount("member-discount@example.com", "acct_1Memberxxxxxxxx", true);
   const store = (await storeForEmail("member-discount@example.com"))!;
-  const reset = () => { customers = page([{ id: customer }]); subscriptions = page([subscription()]); posts = 0; postReply = { id }; };
+  const reset = () => { customers = page([{ id: customer }]); subscriptions = page([subscription()]); posts = 0; postReply = { id, discounts: [{ id: "di_member0001", object: "discount", promotion_code: promo }] }; };
   async function refuses(name: string): Promise<void> {
     is(`${name}: the list is unknown`, await memberSubs(store, "member@example.com"), null);
     is(`${name}: no discount operation`, [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: false, reason: "stripe" }, 0]);

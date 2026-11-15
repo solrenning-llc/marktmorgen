@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { lockRead } from "@/lib/two-step-unknown";
+import { brandImitation, imitationWhy } from "@/lib/brand-imitation-rules";
 import type { NextRequest } from "next/server";
 import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -23,6 +24,10 @@ import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage,
 const MAX_BODY_BYTES = 200_000;
 
 const refuse = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+
+/** A page's title posing as Marktmorgen itself (lib/brand-imitation-rules.ts): the passage, why for a page, and the fix. */
+const imitationRefusal = (posing: { excerpt: string; fix: string }) =>
+  Response.json({ ok: false, error: "brand_imitation", passage: { field: "title", excerpt: posing.excerpt, why: imitationWhy("the page cannot be shown with it"), fix: posing.fix } }, { status: 409 });
 
 /**
  * Whether a page is on the store's list, read again after a lost answer: "listed" with the store as read, "absent"
@@ -244,15 +249,20 @@ export async function POST(request: NextRequest) {
       const title = siteTitle(body.title);
       const slug = text(body.slug, 60);
       if (!title) return refuse("title");
+      // A title posing as Marktmorgen itself is the menu link and the name of a page visitors see (568 [GD2] (c)):
+      // refused while the page is shown or scheduled, kept while it is held back, as its blocks are.
+      const posing = brandImitation({ title, summary: "", about: "" });
       const saved = await changeSitePages(ref, (latest) => {
         const held = latest.find((page) => page.id === id);
         if (!held) return { refuse: "gone" };
+        if (posing && held.from !== -1) return { refuse: "brand_imitation" };
         const problem = slugProblem(slug, latest, held.id);
         // A page keeps an address it already has, even one reserved since; only a new one is refused.
         if (problem && !(problem === "reserved" && slug === held.slug)) return { refuse: problem };
         return latest.map((page) => (page.id === held.id ? { ...page, title, slug, nav: body.nav !== false, target: text(body.target, 40) } : page));
       });
       if (!saved.ok && saved.reason === "gone") return refuse("unknown", 404);
+      if (!saved.ok && saved.reason === "brand_imitation" && posing) return imitationRefusal(posing);
       return saved.ok ? Response.json({ ok: true, pages: saved.store.sitePages }) : refuse(saved.reason);
     }
 
@@ -288,6 +298,9 @@ export async function POST(request: NextRequest) {
       if (problem) return refuse(problem);
       if (page.blocks.some((block) => !SITE_KINDS.includes(block.kind))) return refuse("kind");
       if (oversized(page)) return refuse("too_big");
+      // Its title is shown with it (568 [GD2] (c)): a page held back with a title posing as Marktmorgen is not put out.
+      const titlePosing = outFrom(page) !== -1 ? brandImitation({ title: found.title, summary: "", about: "" }) : null;
+      if (titlePosing) return imitationRefusal(titlePosing);
       // A part left ⟦like this⟧ for the creator to write (lib/funnel-ai-rules.ts), or a campaign's own part in
       // [brackets] (lib/funnel-starters.ts), is a direction, never words shown to visitors: kept while hidden,
       // refused once shown or scheduled, saying the block and the part (754 [STN1], unit 1).

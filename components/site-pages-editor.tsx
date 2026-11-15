@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, MAX_SLUG, SITE_STARTERS, type SitePage, slugFrom } from "@/lib/site-page-rules";
 import { pageFileName } from "@/lib/site-page-file";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 
 export const MESSAGES: Record<string, string> = {
   too_many: `A store has up to ${MAX_SITE_PAGES} pages of its own. Remove one first.`,
@@ -29,7 +30,7 @@ export const MESSAGES: Record<string, string> = {
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; pages?: SitePage[]; id?: string; pictures?: number; file?: unknown; left?: { pictures: number; refs: number; reviewPicks: number } };
+type Answer = { ok?: boolean; error?: string; pages?: SitePage[]; id?: string; pictures?: number; file?: unknown; passage?: unknown; left?: { pictures: number; refs: number; reviewPicks: number } };
 
 async function call(payload: Record<string, unknown>): Promise<Answer> {
   try {
@@ -238,6 +239,8 @@ export function SitePageSettings({
     setError(null);
     const a = await call(payload);
     setBusy(false);
+    // A title posing as Marktmorgen (568 [GD2] (c)): the passage, why and the fix come from the server.
+    if (!a.ok && a.error === "brand_imitation") return setError(imitationMessage(a.passage, "the page's title", "Your changes were not saved"));
     if (!a.ok) return setError(MESSAGES[a.error ?? ""] ?? MESSAGES.server_error);
     toast(done);
     after?.();

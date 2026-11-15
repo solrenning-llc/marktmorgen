@@ -1,6 +1,7 @@
 "use client";
 
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import { templateLeftMessage } from "@/lib/template-text-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
 import { pasteExceedsLimit } from "@/lib/paste-limit";
@@ -1149,7 +1150,7 @@ export function PageEditor({
           return;
         }
       }
-      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : data.error === "brand_imitation" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
+      setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : data.error === "brand_imitation" && site && (data as { passage?: { field?: unknown } }).passage?.field === "title" ? imitationMessage((data as { passage?: unknown }).passage, "the page's title", "Your changes were not saved") : data.error === "brand_imitation" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
       setError(MESSAGES.server_error);
     } finally {

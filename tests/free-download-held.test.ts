@@ -62,6 +62,28 @@ async function main() {
   is("the address does not join the list", suspended.listed, false);
   await noteTakedown(OWNER, null, false);
 
+  part("Rule 24: a store or a product that does not read in its shape hands nothing over and adds nobody");
+  const original = redis.pipeline.bind(redis);
+  /** Replaces the reply to the next pipeline whose first command is a GET of a key `which` picks, after it ran. */
+  const odd = (which: (key: string) => boolean, reply: unknown) => {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const out = await original(commands);
+      if (commands[0]?.[0] === "GET" && which(String(commands[0][1]))) return [reply, ...(out as unknown[]).slice(1)];
+      return out;
+    }) as typeof redis.pipeline;
+  };
+  for (const [label, which, reply] of [
+    ["the store's address read as a number", (k: string) => k.startsWith("nl:store:handle:"), 7],
+    ["the store's record read as a list", (k: string) => k.startsWith("nl:store:owner:"), ["x"]],
+    ["the store's record cut short", (k: string) => k.startsWith("nl:store:owner:"), "{\"handle\":"],
+  ] as [string, (k: string) => boolean, unknown][]) {
+    odd(which, reply);
+    const got = await press(`odd${serial}@example.com`);
+    redis.pipeline = original;
+    is(`${label}: refused, with no link`, got.status >= 400 && got.location === null, true);
+    is(`${label}: the address does not join the list`, got.listed, false);
+  }
+
   part("Control again: published and open, it works as before");
   const again = await press("dee@example.com");
   is("the link is handed over", [again.status, again.location], [303, "https://example.com/starter-guide"]);

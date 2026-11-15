@@ -43,6 +43,30 @@ async function main(): Promise<void> {
     is("the run is not on the held list", redis.run(["ZSCORE", heldKey, `${flow.id}|${person}`]), null);
   }
 
+  part("an erasure between reading the run and claiming its step (Claude 7 on #4489): nothing is claimed or attempted");
+  redis.clear();
+  await redis.pipeline([["SET", `nl:mail:flows:${listId}`, JSON.stringify([flow])]]);
+  await openRuns(flow.id, [email]);
+  await forgetWorkflowPerson(store, email);
+  const late = await claimAttempts(flow.id, [email], 0, flow.steps[0].id, "email");
+  is("the erased person is not claimed", late.claimed, []);
+  is("the erased person is not held as open", late.open, []);
+  is("the erased person is reported gone", late.gone, [email]);
+  is("the claim does not recreate the run", redis.run(["EXISTS", runKey]), 0);
+  is("the claim does not recreate the history", redis.run(["EXISTS", logKey]), 0);
+  for (const state of states) {
+    await settleAttempts(listId, flow.id, 0, flow.steps[0].id, "email", [{ email, state, note: "Sent.", to: -1 }]);
+    is(`a ${state} settle after it writes no run`, redis.run(["EXISTS", runKey]), 0);
+    is(`a ${state} settle after it writes no history`, redis.run(["EXISTS", logKey]), 0);
+    is(`a ${state} settle after it leaves the index alone`, redis.run(["ZSCORE", indexKey, person]), null);
+    is(`a ${state} settle after it leaves the held list alone`, redis.run(["ZSCORE", heldKey, `${flow.id}|${person}`]), null);
+  }
+
+  part("(control) a claimed attempt's history entry keeps an expiry");
+  await start();
+  is("the history has the attempt", (redis.run(["LRANGE", logKey, 0, -1]) as string[]).some((e) => e.includes('"state":"attempted"')), true);
+  is("the history keeps an expiry", Number(redis.run(["TTL", logKey])) > 0, true);
+
   part("a step settled over a run that no longer holds the claimed attempt writes nothing");
   await start();
   await redis.pipeline([["HDEL", runKey, "open"]]);

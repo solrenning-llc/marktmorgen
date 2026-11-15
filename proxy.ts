@@ -187,12 +187,14 @@ function withZoomArrival(request: NextRequest, response: NextResponse): NextResp
 const MAX_API_BODY_BYTES = 4 * 1024 * 1024;
 
 /**
- * The one address another site may post to: the one-click unsubscribe that
- * mail apps send (RFC 8058). Its token is the whole key, it only ever takes
- * somebody off a list, and a web mail app is entitled to press it from its
- * own page.
+ * The addresses another site may post to: the one-click unsubscribes that
+ * mail apps send (RFC 8058), the list's and the waitlist launch's. Each token
+ * is the whole key, each only ever takes somebody off, and a web mail app is
+ * entitled to press it from its own page. The waitlist route still refuses a
+ * post from another site without its token in the address (its page's own
+ * button; tests/proxy-one-click-waitlist.test.ts).
  */
-const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe"]);
+const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe", "/api/store/waitlist/leave"]);
 
 /**
  * Every request under /api/ that changes something passes here first.

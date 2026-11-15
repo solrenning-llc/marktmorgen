@@ -8,7 +8,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -23,7 +23,7 @@ import {
 } from "@/lib/assignment-rules";
 import { deleteFile, headFile } from "@/lib/file-store";
 import { plain, serveFile } from "@/lib/serve-file";
-import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
 import { noteIfFinished } from "@/lib/course-finish";
 import { takeBuyerAction, takeBuyerRead } from "@/lib/buyer-actions";
 import { speech } from "@/lib/buyer-words";
@@ -59,7 +59,10 @@ export async function POST(request: NextRequest) {
     const on = await studentOnTask(body.handle, body.product, body.lesson, await cookies());
     if (!on.ok) return no(on.reason === "unknown" ? "unknown" : "closed", on.reason === "unknown" ? 404 : 403);
     const { store, product, course, lesson, task, who, email } = on;
-    if (!(await withinLimit("task-hand-in", who, HAND_INS_PER_HOUR, 3_600))) return no("slow", 429);
+    // Past the hour's hand-ins, "slow"; a count that cannot be read is "unavailable", never "slow down" (rule 24).
+    const tries = await essentialLimitState("task-hand-in", who, HAND_INS_PER_HOUR, 3_600);
+    if (tries === "exceeded") return no("slow", 429);
+    if (tries === "unknown") return no("unavailable", 503);
     // A hand-in is one of the store's buyer actions (lib/buyer-actions.ts).
     if (!(await takeBuyerAction(store))) return no("resting", 503);
 
@@ -84,6 +87,8 @@ export async function POST(request: NextRequest) {
           if (!ownsTaskPath(asked.path, folder) || !(await takeTaskUpload(asked.path))) return no("invalid");
           const path = asked.path;
           const found = await headFile(path).catch(() => null);
+          // Not there yet (the browser's PUT may still land): the name stays held, and the sweep deletes a late file
+          // a day on (lib/assignment.ts, takeTaskUpload). The same hold covers every way out below that keeps no work.
           if (!found) return no("missing");
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
@@ -132,6 +137,8 @@ export async function POST(request: NextRequest) {
       });
       // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
       if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email);
+      // The new file is the work's now: its hold for the sweep is let go (lib/assignment.ts, takeTaskUpload).
+      if (taken && file) await releaseTaskHold(file.path);
       // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the
       // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
       // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).

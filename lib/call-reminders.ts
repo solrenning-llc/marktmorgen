@@ -24,6 +24,8 @@ import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import type { Listing, Store } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { listingFinder } from "@/lib/catalog";
 import { readableTime, seatsAt, zoneName, isTimeZone } from "@/lib/call-setup";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomKind, roomOf } from "@/lib/call-rooms";
@@ -63,6 +65,29 @@ type Message = Parameters<typeof sendEmailOutcome>[0];
 
 function when(mark: "24" | "1"): string {
   return mark === "24" ? "Tomorrow" : "In 1 hour";
+}
+
+/** Confirm the whole bounded WITHSCORES reply before processing any member. */
+function dueQueue(reply: unknown, now: number): string[] {
+  const unreadable = () => new Error("The call reminder queue could not be read.");
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
+  const entry = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!entry || !Object.hasOwn(entry, "value")) throw unreadable();
+  const raw: unknown = entry.value;
+  if (!Array.isArray(raw) || raw.length % 2 !== 0 || raw.length > BATCH * 2) throw unreadable();
+  const flat: string[] = [];
+  for (let i = 0; i < raw.length; i += 2) {
+    const member = Object.getOwnPropertyDescriptor(raw, String(i));
+    const score = Object.getOwnPropertyDescriptor(raw, String(i + 1));
+    if (!member || !Object.hasOwn(member, "value") || typeof member.value !== "string" ||
+      !score || !Object.hasOwn(score, "value")) throw unreadable();
+    const value: unknown = score.value;
+    if (typeof value !== "number" && (typeof value !== "string" || !/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value))) throw unreadable();
+    const at = Number(value);
+    if (!Number.isFinite(at) || at < 0 || at > now) throw unreadable();
+    flat.push(member.value, String(at));
+  }
+  return flat;
 }
 
 /**
@@ -163,6 +188,18 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
 }
 
 /**
+ * The store reader the mail cron gives sendCallReminders: null only when the
+ * store is confirmed gone (the address is free or was let go), since that
+ * takes its due reminders off the queue; a reply out of shape, or a record
+ * that cannot be read, throws instead, so they are kept for the next run.
+ */
+export async function storeForReminders(handle: string): Promise<Store | null> {
+  const found = await storeForHandleExactly(handle);
+  if (found === "unknown") throw new UnknownReplyError("the store for call reminders");
+  return found === "none" ? null : found;
+}
+
+/**
  * Sends every reminder that is due, and confirms every paid booking whose
  * buyer never came back. Safe to run more than once; one run at a time is the
  * caller's lock.
@@ -175,8 +212,7 @@ export async function sendCallReminders(
   const counts = { reminded: 0, confirmed: 0, dropped: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   const now = Date.now();
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = dueQueue(await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]), now);
 
   // One read of Stripe per store, however many of its bookings are due.
   const groups = new Map<string, { member: string; score: number }[]>();
@@ -200,7 +236,19 @@ export async function sendCallReminders(
   for (const [key, members] of groups) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = key.split("|");
-    const store = await findStore(handle).catch(() => null);
+    let store: Awaited<ReturnType<typeof findStore>>;
+    try {
+      store = await findStore(handle);
+    } catch (error) {
+      // Unknown, not gone: tried again next run, and given up on only once it
+      // is hours late, as when Stripe does not answer below, so one store that
+      // cannot be read never holds the head of the queue for good.
+      console.error("reading the store for call reminders failed", error);
+      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      counts.dropped += stale.length;
+      continue;
+    }
     const done: string[] = [];
     if (!store || store.callsId !== callsId) {
       await redisPipeline([["ZREM", REMINDER_QUEUE, ...members.map((m) => m.member)]]);
@@ -222,14 +270,26 @@ export async function sendCallReminders(
     const bySession = new Map(paid.map((call) => [call.session, call]));
     const find = listingFinder(store);
 
-    for (const { member } of members) {
+    for (const { member, score } of members) {
       const item = parseMember(member);
       done.push(member);
       if (!item) continue;
       // A booking made long ahead in a busy account may be older than the
       // sessions paidCalls reads: it is looked up on its own before it is
       // taken for unpaid or refunded.
-      const call = bySession.get(item.session) ?? (await paidCall(store, item.session).catch(() => null)) ?? undefined;
+      let call: PaidCall | null | undefined;
+      try {
+        call = bySession.get(item.session) ?? await paidCall(store, item.session);
+      } catch (error) {
+        // Unknown, not unpaid: kept for the next run while it can still be of
+        // use, and given up on once it is hours late, as when the whole list
+        // does not answer, so a session Stripe answers 404 for on every run (one
+        // of the account the store used before) cannot hold the queue.
+        console.error("reading one paid call for reminders failed", error);
+        if (now - score > GIVE_UP_MS) counts.dropped += 1;
+        else done.pop();
+        continue;
+      }
       const product = call ? await find(call.product) : null;
       if (!call || !product || !isCallProduct(product)) {
         // Never paid, refunded out of the list, or the product is gone.

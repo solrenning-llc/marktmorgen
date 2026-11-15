@@ -16,10 +16,10 @@
  * taken, and a control left on purpose is never taken back.
  */
 import { readFileSync } from "node:fs";
-import { focusKeeper, type KeptElement } from "@/lib/focus-keeper";
+import { destructiveName, focusKeeper, type KeptElement } from "@/lib/focus-keeper";
 import { done, is, part } from "./check";
 
-type El = KeptElement & { name: string; focused: number; main?: boolean; first?: El | null };
+type El = KeptElement & { name: string; focused: number; main?: boolean; first?: El | null; controls?: El[] };
 const body = { name: "body" };
 let active: unknown = body;
 const el = (name: string, parent: El | null = null, extra: Partial<El> = {}): El => {
@@ -42,7 +42,9 @@ const place = {
     for (let at: KeptElement | null | undefined = e; at; at = at.parentElement) if ((at as El).main) return at !== e;
     return false;
   },
-  firstControlIn: (e: KeptElement) => (e as El).first ?? null,
+  firstControlIn: (e: KeptElement, skip?: (control: KeptElement) => boolean) =>
+    (e as El).controls ? ((e as El).controls!.find((c) => c.isConnected && !skip?.(c)) ?? null) : ((e as El).first ?? null),
+  destructive: (e: KeptElement) => destructiveName((e as El).name, false),
   contains: (outer: KeptElement, inner: KeptElement) => {
     for (let at: KeptElement | null | undefined = inner; at; at = at.parentElement) if (at === outer) return true;
     return false;
@@ -288,5 +290,108 @@ part("It never takes the focus from anything else");
   k.disabledChanged(save);
   is("and gets it back then", save.focused, 1);
 }
+
+part("Deleting an item of a list (Claude 7's MÉDIO on #3790): the focus goes beside it, never to another Delete");
+// Three items, each [Delete, Edit]; the list has an "Add item" button after them.
+const list = () => {
+  const main = el("main", null, { main: true });
+  const listEl = el("list", main);
+  const items = [1, 2, 3].map((n) => {
+    const item = el(`item ${n}`, listEl);
+    item.controls = [el(`Delete item ${n}`, item), el(`Edit item ${n}`, item)];
+    return item;
+  });
+  items.forEach((item, i) => {
+    item.previousElementSibling = items[i - 1] ?? null;
+    item.nextElementSibling = items[i + 1] ?? null;
+  });
+  const add = el("Add item", listEl);
+  items[2].nextElementSibling = add;
+  add.previousElementSibling = items[2];
+  listEl.controls = [...items.flatMap((item) => item.controls!), add];
+  const remove = (item: El) => {
+    item.isConnected = false;
+    item.parentElement = null;
+    for (const c of item.controls!) c.isConnected = false;
+  };
+  return { listEl, items, add, remove };
+};
+{
+  const k = fresh();
+  const { items, remove } = list();
+  const del = items[0].controls![0];
+  active = del;
+  k.focusIn(del);
+  remove(items[0]);
+  active = body;
+  k.treeChanged();
+  is("the first item deleted: the next item's first control that deletes nothing", active === items[1].controls![1], true);
+  is("never another item's Delete", items.some((item) => item.controls![0].focused > 0), false);
+}
+{
+  const k = fresh();
+  const { items, add, remove } = list();
+  items[2].nextElementSibling = null; // the Add button is outside the items
+  add.previousElementSibling = null;
+  const del = items[2].controls![0];
+  active = del;
+  k.focusIn(del);
+  remove(items[2]);
+  active = body;
+  k.treeChanged();
+  is("the last item deleted: the item before it, not the first item of the list", active === items[1].controls![1], true);
+}
+{
+  const k = fresh();
+  const { listEl, items, add, remove } = list();
+  items.forEach((item) => { item.nextElementSibling = null; item.previousElementSibling = null; });
+  const del = items[0].controls![0];
+  active = del;
+  k.focusIn(del);
+  remove(items[0]);
+  remove(items[1]);
+  remove(items[2]);
+  listEl.controls = [add];
+  active = body;
+  k.treeChanged();
+  is("the list emptied: the list's own control that deletes nothing", active === add, true);
+}
+{
+  const k = fresh();
+  const { listEl, items, remove } = list();
+  for (const item of items) item.controls = [item.controls![0]]; // only Delete in each
+  items.forEach((item) => { item.nextElementSibling = null; item.previousElementSibling = null; });
+  listEl.controls = items.map((item) => item.controls![0]);
+  const del = items[0].controls![0];
+  active = del;
+  k.focusIn(del);
+  remove(items[0]);
+  active = body;
+  k.treeChanged();
+  is("only Deletes left near it: the focus is not moved to one, so a repeated Enter deletes nothing", items.slice(1).some((item) => item.controls![0].focused > 0), false);
+}
+{
+  const k = fresh();
+  const main = el("main", null, { main: true });
+  const card = el("card", main);
+  const opener = el("Add your profiles", card);
+  active = opener;
+  k.focusIn(opener);
+  opener.isConnected = false;
+  opener.parentElement = null;
+  const editor = el("editor", card);
+  editor.first = el("Remove profile", editor);
+  card.first = el("Remove all", card);
+  active = body;
+  k.treeChanged([editor]);
+  is("an editor that starts with a Remove: not focused there either", [editor.first.focused, (card.first as El).focused], [0, 0]);
+}
+
+part("What deletes, in the studio's words");
+is("Delete, Remove, Erase and Discard at the start", ["Delete", "Remove the task: buy clay", "erase history", "Discard this plan"].map((name) => destructiveName(name, false)), [true, true, true, true]);
+is("a control marked as dangerous, whatever its name", destructiveName("Yes", true), true);
+is("Edit, Clear filters, Add, a word inside a name", ["Edit item 2", "Clear filters", "Add item", "Undo remove"].map((name) => destructiveName(name, false)), [false, false, false, false]);
+const studioDom = readFileSync("lib/focus-keeper-dom.ts", "utf8");
+is("the studio skips what deletes when it picks a control", /destructive:/.test(studioDom) && /btn-danger/.test(studioDom) && /data-destructive/.test(studioDom), true);
 
 done();

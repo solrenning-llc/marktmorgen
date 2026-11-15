@@ -136,3 +136,9 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
     },
   };
 }
+
+const DESTRUCTIVE = /^(delete|remove|erase|discard)\b/i;
+/** Whether a control's name (or a mark on it) says it deletes something: the keeper never hands it the focus. */
+export function destructiveName(name: string, marked: boolean): boolean {
+  return marked || DESTRUCTIVE.test(name.trim());
+}

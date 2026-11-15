@@ -80,11 +80,11 @@ Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocor
 
 (b) **Como juntar.** Clone completo (`test -f .git/shallow && git fetch --unshallow origin`); `git merge origin/main`, nunca rebase nem force push; ler os dois lados e os commits do main no arquivo, e manter os dois comportamentos. Arquivos gerados (docs/pricing-*, docs/margin-alignment-*, tabelas de margem e afins) e docs/reservations/* ficam com a versão do main e, quando o PR precisa deles, são regenerados pelo próprio script, nunca editados à mão. Depois: tsc sem erro novo, testes dos arquivos tocados (RED→GREEN se algo quebrou), `git merge-tree` limpo, um push (MV (c), ritmo de 1 push a cada 5 a 20 minutos e Actions medido antes) e o pedido "re-review needed #N @sha10 (merge of main)". Se os dois lados forem dois desenhos incompatíveis, não escolher no escuro: registrar o trecho exato no canal e no PR, e seguir com os outros.
 
-(c) **Varredura.** Cada agente confere seus PRs abertos pelo menos a cada 2 horas só com git, sem gastar API nem Actions: para cada PR, `git merge-tree --write-tree <base atual> <head do PR>`, com a base `origin/main` ou o ramo de baixo da pilha. O relatório diário `prs-parados` (PV (c)) lista os PRs em conflito de todos; o coordenador cobra no canal o dono de cada um.
+(c) **Varredura.** Cada agente confere seus PRs abertos pelo menos a cada 30 minutos (pela tarefa agendada da ALL-211; sem ela, a cada 2 horas) só com git, sem gastar API nem Actions: para cada PR, `git merge-tree --write-tree <base atual> <head do PR>`, com a base `origin/main` ou o ramo de baixo da pilha. O relatório diário `prs-parados` (PV (c)) lista os PRs em conflito de todos; o coordenador cobra no canal o dono de cada um.
 
 **Prevenir**
 
-(d) **Arquivos compartilhados.** PR de produto não toca docs/reservations/*, docs/codex-queue.md nem arquivo gerado, salvo quando um teste exige regenerar; nesse caso, regenera pelo script na própria junção. Em listas e registros que muitos editam (tests/plan-cost-registry.ts, lib/data-families.ts, tests/store-data-registry.ts, inventários de testes, aliases de tests/test-config.mjs, docs/e5-money-readers.md e afins), a linha nova entra na posição em ordem alfabética, nunca no fim do arquivo.
+(d) **Arquivos compartilhados.** PR de produto não toca docs/reservations/*, docs/codex-queue.md nem arquivo gerado, salvo quando um teste exige regenerar; nesse caso, regenera pelo script na própria junção. Em listas e registros que muitos editam (tests/plan-cost-registry.ts, lib/data-families.ts, tests/store-data-registry.ts, inventários de testes, aliases de tests/test-config.mjs, docs/e5-money-readers.md e afins), a linha nova entra na posição em ordem alfabética, nunca no fim do arquivo. O mesmo vale para uma constante nova num registro: ela entra em ordem alfabética do nome entre as vizinhas da mesma seção, nunca logo depois da última constante da seção nem da última linha de uma lista (em 15/11/2026, dois PRs puseram uma constante cada logo depois de `LOCKED_UNTIL_STAR_EXTRA` em tests/plan-cost-registry.ts, e o #3491 entrou em conflito).
 
 (e) **Antes de abrir PR e antes de cada push.** Conferir os PRs abertos que tocam os mesmos arquivos (`gh api repos/solrenning-llc/marktmorgen/pulls/N/files`) e rodar `git merge-tree` contra a base e contra cada um deles. Se colidir, combinar no canal quem vai primeiro; o segundo espera a incorporação do primeiro ou trabalha em cima dele. Em registros de custo (tests/plan-cost-registry.ts, lib/receiving-costs.ts, tabelas de margem), um PR por bloco de cada vez.
 
@@ -95,6 +95,10 @@ Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocor
 (h) **Limite.** No máximo 15 PRs abertos por agente fora da fila (MV (b)). Acima disso, o trabalho novo fica em ramo sem PR até o número baixar; primeiro se resolvem os conflitos e se levam os prontos à fila.
 
 (i) **PRONTO.** "Pronto para fila" só com `git merge-tree` limpo contra o `origin/main` buscado há menos de 1 hora, escrito no próprio aviso junto do head.
+
+(j) **Base de pilha velha.** A varredura (c) também aponta todo PR cuja base não é `main` e cujo PR de base foi fechado ou está mais de 200 commits atrás do main. O autor junta o main na base e a base no PR, ou muda a base para `main` quando ela já entrou ou foi fechada, na mesma rodada. Em 15/11/2026, #3291, #3678, #3495 e #3073 reprovaram `reservation-check` por bases de 1.700 a 5.000 commits atrás do main.
+
+(k) **PR pronto não envelhece.** Quanto mais tempo um PR fica aberto, mais o main anda e mais conflito ele acumula. Com duas revisões READY de famílias diferentes e as 9 verificações verdes no head, o autor pede `fila #N @sha` na mesma rodada (CV (f)), e o coordenador enfileira os prontos antes de qualquer trabalho novo.
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 

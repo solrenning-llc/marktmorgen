@@ -374,7 +374,7 @@ async function tellGift(input: Parameters<typeof deliverGift>[0], gift: Gift, se
         g.orderRef(sessionId),
         ...consentEmailLines(store, session.metadata),
         "",
-        g.weEmailed(gift.to, Boolean(gift.message)),
+        g.weEmailed(gift.to, Boolean(gift.from), Boolean(gift.message)),
         "",
         g.chargedBy(store.name),
       ].join("\n"),

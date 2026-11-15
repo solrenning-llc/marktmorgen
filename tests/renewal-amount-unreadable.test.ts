@@ -29,7 +29,7 @@ async function main() {
   const owner = "renewal-amount-owner@example.com";
   await claimHandle(owner, "renewamt", "Renewal Amount", "");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_TestRenewAmount1", true);
+  await setStripeAccount(owner, "acct_TestRenewAmt1", true);
   const store = (await storeForEmail(owner))!;
   part("A renewal amount must be whole minor units to certify the renewal reading");
   invoiceAmount = 4800;

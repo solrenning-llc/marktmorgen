@@ -39,7 +39,7 @@ async function main() {
   const owner = "paid-amount-owner@example.com";
   await claimHandle(owner, "paidamt", "Paid Amount", "");
   await ensureStatsId(owner);
-  await setStripeAccount(owner, "acct_TestPaidAmount01", true);
+  await setStripeAccount(owner, "acct_TestPaidAmt01", true);
   const store = (await storeForEmail(owner))!;
   const since = NOW / 1000 - 86400;
   part("A paid amount must be whole minor units to be a sale");

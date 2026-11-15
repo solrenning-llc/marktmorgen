@@ -641,7 +641,7 @@ export const PAGES: TopicPage[] = [
     title: "Side by side",
     highlight: "with Beacons",
     intro:
-      "Every number here was read on Beacons' own pricing page and help center in September 2026, and the page says where each one came from. When they change one, this page changes.",
+      "Every number here was read in Beacons' own help center in November 2026, and the page says where each one came from. When they change one, this page changes.",
     badge: PROOF,
     accent: "from-sky-brand to-violet-brand",
     blocks: [
@@ -662,7 +662,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "The part that decides",
-        note: "Sources: Beacons' pricing page and their help center articles 'Beacons Products Transaction Fees' and 'When will I receive my payout from Product/Store Sales?', read on September 18, 2026. Plan prices, the fee quoted below and the rows on order bumps, memberships and courses re-checked on their pricing page and help center on September 28, 2026.",
+        note: "Sources: Beacons' help center articles 'Beacons Pricing Plans', 'Beacons Pro Page', 'Beacons Products Transaction Fees', 'When will I receive my payout from Product/Store Sales?', 'Order Bumps: Boost Your Sales with Beacons' and 'How to Create Courses on Beacons', read on November 15, 2026. Their pricing page (beacons.ai/pricing) showed a Cloudflare block that day and was not read.",
         head: ["", "Beacons", "Marktmorgen"],
         rows: [
           ["Cut of each sale", "9% on the free and $10 plans. 0% from the $30 plan up", feeWords().short],
@@ -673,8 +673,8 @@ export const PAGES: TopicPage[] = [
           ["Card fee", "Stripe's 2.9% + $0.30, on top of their 9%", "Stripe processing fees, plus the published plan share"],
           ["What you are buying", "A whole suite: link in bio, websites, media kit, email, an affiliate network, AI tools", "One store, built to sell: files, courses, memberships, calls, a community for your buyers, and a media kit for brands"],
           ["A free plan", "Yes, and you can sell on it", "None"],
-          ["Order bumps and upsells", "Order bumps on every plan, the free one included", "Yes \u2014 up to three boxes the buyer checks at checkout, and one click after paying on the same card"],
-          ["Memberships and courses", "Memberships from the $30 plan. Courses on every plan, but only one, with no video hosting, below the $30 plan", `Yes, both, on the ${PLAN_AT.creator} plan`],
+          ["Order bumps and upsells", "Order bumps from the $30 plan, on digital products only", "Yes \u2014 up to three boxes the buyer checks at checkout, and one click after paying on the same card"],
+          ["Memberships and courses", "Memberships, and multi-module courses with video hosting, from the $30 plan. On every plan a course can be sold as files, with its videos hosted elsewhere", `Yes, both, on the ${PLAN_AT.creator} plan`],
         ],
       },
       {
@@ -695,7 +695,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "note",
         title: "Where Beacons is ahead of us, and it is not close",
-        body: `For $30 they give you 0% and, with it, websites, a media kit that updates itself, email marketing, an affiliate network of 12,000 brands and a pile of AI tools. We give you a store page with courses, memberships, calls, a community, an affiliate program of your own, the checkout tools and a media kit whose numbers you type yourself, and on our ${PLAN_AT.pro} Studio plan email to your list, but none of the other extras. Compare the subscription and sales fee together; the cheaper option depends on your sales.`,
+        body: `For $30 they give you 0% and, with it, websites, a media kit that updates itself, email marketing, branded affiliate links and a pile of AI tools. We give you a store page with courses, memberships, calls, a community, an affiliate program of your own, the checkout tools and a media kit whose numbers you type yourself, and on our ${PLAN_AT.pro} Studio plan email to your list, but none of the other extras. Compare the subscription and sales fee together; the cheaper option depends on your sales.`,
       },
       {
         kind: "note",

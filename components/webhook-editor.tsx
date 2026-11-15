@@ -27,6 +27,7 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "waitlist.joined", label: "Waitlist joined", hint: "Someone confirmed their spot on the waitlist of a product coming soon" },
   { key: "course.completed", label: "Course completed", hint: "A student finished every lesson of one of your courses" },
   { key: "product.published", label: "Product published", hint: "A new product, or a draft you published, went on your store" },
+  { key: "membership.trial_ending", label: "Trial ending", hint: "A membership's free trial ends in three days, on your Stripe account" },
 ];
 const ALL = EVENTS.map((e) => e.key);
 

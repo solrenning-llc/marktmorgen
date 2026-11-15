@@ -104,6 +104,7 @@ export const WEBHOOK_EVENTS = [
   "waitlist.joined",
   "course.completed",
   "product.published",
+  "membership.trial_ending",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -1637,10 +1638,11 @@ const STRIPE_TYPES = [
   "customer.subscription.deleted",
   "charge.refunded",
   "charge.dispute.created",
+  "customer.subscription.trial_will_end",
 ];
 
 /** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
-const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened"];
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Pick<Config, "endpoints">): boolean {
@@ -1887,6 +1889,44 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     return true;
   }
 
+  if (event.type === "customer.subscription.trial_will_end") {
+    // Three days before a membership's free trial ends, as Stripe tells it (378 [TB4] complement WG (a)). Not the
+    // store's own plan, and only a membership of this store.
+    if (!handles.has(meta.store ?? "") || meta.kind === "plan") return true;
+    const id = str(object.id);
+    const trialEnd = num(object.trial_end);
+    if (!id || !trialEnd || !heard.has("membership.trial_ending")) return true;
+    // The member's address, read as a cancellation's is: with none of the run's lookups left, or a call that failed,
+    // it waits for the next run rather than going out without it; a customer Stripe no longer has has none.
+    const customer = str(object.customer);
+    let email: string | null = null;
+    if (customer && store.stripeAccountId) {
+      if (lookups.left <= 0) {
+        saySpent(store, "left");
+        return "spent";
+      }
+      lookups.left -= 1;
+      try {
+        email = str((await onAccount("GET", store.stripeAccountId, `/customers/${encodeURIComponent(customer)}`)).email);
+      } catch (error) {
+        if (!isMissing(error)) {
+          const waits = waitsOn(error);
+          console.error(waits === "ours" ? "OUR CODE FAILED reading a member's address for a trial ending (not a Stripe error); it is read again next run" : "reading a member's address for a trial ending failed at Stripe; it is read again next run", store.handle, error);
+          return waits;
+        }
+        email = null;
+      }
+    }
+    await emitEvent(store, "membership.trial_ending", trialEndingSeed(id, trialEnd), {
+      subscription: id,
+      product: await product(meta.product),
+      option: meta.option ?? null,
+      trial_ends_at: iso(trialEnd),
+      buyer: { email, customer },
+    }, created);
+    return true;
+  }
+
   if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
     if (!handles.has(meta.store ?? "") || meta.kind === "plan") return true;
     const id = str(object.id);
@@ -2067,6 +2107,11 @@ export function changedFields<T extends Record<string, string | number | boolean
   return out;
 }
 
+/** One trial ending's seed: the membership and the end Stripe gave, so a trial moved to another end is told again. */
+function trialEndingSeed(subscription: string, trialEnd: number): string {
+  return `${subscription}|trial|${trialEnd}`;
+}
+
 /** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */
 function planOf(items: unknown): { price: string | null; amount_cents: number; interval: string | null; interval_count: number; quantity: number } | null {
   const first = ((items as { data?: unknown } | null | undefined)?.data as Record<string, unknown>[] | undefined)?.[0];
@@ -2128,6 +2173,10 @@ function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean):
   }
   if (event.type === "charge.refunded") return { parts: [{ type: "refund.issued", seed: `${id}|${num(object.amount_refunded)}` }], about: `the refund of charge ${shown}`, known };
   if (event.type === "charge.dispute.created") return { parts: [{ type: "dispute.opened", seed: id }], about: `dispute ${shown}`, known: confirmed };
+  if (event.type === "customer.subscription.trial_will_end") {
+    const trialEnd = num(object.trial_end);
+    return { parts: meta.kind !== "plan" && id && trialEnd ? [{ type: "membership.trial_ending", seed: trialEndingSeed(id, trialEnd) }] : [], about: `subscription ${shown}`, known };
+  }
   return { parts: [], about: `Stripe event ${str(event.id) ?? shown}`, known: false };
 }
 

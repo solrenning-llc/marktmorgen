@@ -32,6 +32,7 @@ not already.
   - New Waitlist Spot (`waitlist.joined`)
   - Course Completed (`course.completed`)
   - Product Published (`product.published`)
+  - Trial Ending (`membership.trial_ending`)
 
   Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
   its trigger, and each example has exactly the fields its webhook sends

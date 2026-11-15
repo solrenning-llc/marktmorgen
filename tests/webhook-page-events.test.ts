@@ -15,7 +15,7 @@ const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "e
 const page = FEATURE_PAGES.find((p) => p.slug === "webhooks");
 const block = page?.blocks.find((b) => b.kind === "features" && / events, and how they arrive$/.test(b.title ?? "")) as { title: string; items: { title: string; body: string }[] } | undefined;
 const titles = (block?.items ?? []).map((i) => i.title);
-const named = titles.flatMap((t) => t.match(/\b[a-z]+\.[a-z]+\b/g) ?? []);
+const named = titles.flatMap((t) => t.match(/\b[a-z]+\.[a-z_]+\b/g) ?? []);
 
 part("The count in the title");
 is("as many events as the code sends, in words", block?.title, `${WORDS[WEBHOOK_EVENTS.length][0].toUpperCase()}${WORDS[WEBHOOK_EVENTS.length].slice(1)} events, and how they arrive`);

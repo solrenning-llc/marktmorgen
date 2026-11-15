@@ -414,6 +414,20 @@ const EVENTS = [
       published_at: "2026-10-19T14:05:00.000Z",
     },
   },
+  {
+    key: "membership_trial_ending",
+    event: "membership.trial_ending",
+    noun: "Membership",
+    label: "Trial Ending",
+    description: "Triggers three days before a membership's free trial ends, as your Stripe account tells it.",
+    data: {
+      subscription: "sub_a1b2c3",
+      product: { id: "p_3d9e7b", title: "The Supper Club" },
+      option: null,
+      trial_ends_at: "2026-11-01T14:05:00.000Z",
+      buyer: { email: "ada@example.com", customer: "cus_a1b2c3" },
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

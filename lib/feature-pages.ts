@@ -1551,7 +1551,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "features",
-        title: "Fourteen events, and how they arrive",
+        title: "Fifteen events, and how they arrive",
         items: [
           { icon: "receipt", title: "sale.completed and refund.issued", body: "A paid checkout of any product, each one-click offer taken after it, and a refund, even one made in your Stripe dashboard." },
           { icon: "repeat", title: "membership.started and membership.canceled", body: "A membership bought, and a membership set to end or ended." },
@@ -1564,6 +1564,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "clock", title: "waitlist.joined", body: "Someone confirmed their spot on the waitlist of a product you marked coming soon: their email, the product, and whether they also asked to hear from you." },
           { icon: "check", title: "course.completed", body: "A student finished every lesson of one of your courses, by marking it done, passing its quiz or having their work approved: their email, the course and how many lessons it has, once for each student." },
           { icon: "store", title: "product.published", body: "A product went on your store: a new one you added, or a draft you published. Its name, price and link." },
+          { icon: "clock", title: "membership.trial_ending", body: "A membership's free trial ends in three days, as your Stripe account tells it: the membership, the product, when the trial ends and the member's email." },
           { icon: "lock", title: "Signed", body: "Every message carries a Marktmorgen-Signature header: an HMAC-SHA256 of its time and body under that address's secret." },
           { icon: "refresh", title: "Tried again", body: "When an address does not answer, the message is tried six more times over about forty hours, then marked failed." },
           { icon: "list", title: "A log you can read", body: "Your studio keeps the last 50 deliveries, each for up to seven days, with what the address answered." },

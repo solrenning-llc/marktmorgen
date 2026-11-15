@@ -37,7 +37,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
+import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
@@ -150,7 +150,9 @@ async function settleContacts(room: ContactRoom, pairs: { before: Contact | null
   if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
-export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
+// The list's key lives in lib/contact-rules.ts (no imports), so a sender that only needs to read a row, such as the
+// community announcements (lib/community-mail.ts), does not pull in sign-in and email.
+export { leadsKey };
 export const agreedKey = (listId: string) => `nl:store:leads:${listId}:agreed`;
 export const unsubKey = (listId: string) => `nl:store:leads:${listId}:unsub`;
 export const tokenKey = (token: string) => `nl:mail:unsub:${token}`;

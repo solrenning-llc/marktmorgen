@@ -7,7 +7,9 @@
  *     address, a person's or member's key, a student, a buyer, "who";
  *   - a write whose field, member or value names one the same way;
  *   - a file that writes to the database and works with addresses or the
- *     keys made from them (normaliseEmail, emailKey, personKey and the rest).
+ *     keys made from them (normaliseEmail, emailKey, personKey and the rest);
+ *   - a file that writes a stored file (writeFileWhole) from a call handed a
+ *     person's address, as a stamped copy is (lib/pdf-stamp.ts, stampLine).
  *
  * It errs toward finding too much: a file it finds that keeps nothing about
  * a store's people says so in the registry, in a sentence.
@@ -65,7 +67,10 @@ function readTemplate(src: string, i: number): { end: number; text: string; part
   return { end: j, text, parts };
 }
 
-export type Finding = { file: string; keys: string[]; writes: number; handles: boolean };
+export type Finding = { file: string; keys: string[]; writes: number; handles: boolean; files: boolean };
+
+/** A call handed a person's address, such as `stampLine(sale.email, …)`: a stored file made from it carries it. */
+const ADDRESS_ARGUMENT = /\w+\(\s*[\w.]*\b(email|address|recipient)\b[^)]*\)/;
 
 /** Every file of app/ and lib/ that shows a sign, with the key prefixes it makes from a person. */
 export function personFiles(root: string): Finding[] {
@@ -86,7 +91,8 @@ export function personFiles(root: string): Finding[] {
       if (PERSON.test(m[2].split(",").slice(1).join(","))) writes += 1;
     }
     const handles = WRITES.test(src) && HANDLES.test(src);
-    if (keys.size || writes || handles) out.push({ file, keys: [...keys].sort(), writes, handles });
+    const files = /\bwriteFileWhole\(/.test(src) && ADDRESS_ARGUMENT.test(src);
+    if (keys.size || writes || handles || files) out.push({ file, keys: [...keys].sort(), writes, handles, files });
   }
   return out.sort((a, b) => a.file.localeCompare(b.file));
 }

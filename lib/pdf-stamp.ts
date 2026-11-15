@@ -350,7 +350,14 @@ export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | 
   }
 }
 
-/** Redis commands a new copy adds for a person's deletion: the mark read before (1) and after (1) it is made, and its note (3). */
+/**
+ * Redis commands a new copy adds for a person's deletion, measured in tests/c7-stamped-copy-erasure.test.ts: the
+ * deletion mark read before (1) and after (1) the copy is made, and its note (3). Sent only when a copy is made (once
+ * per sale and file), never when one is served from its record. The stamping path as a whole (the reads, the
+ * original read from the file store, the copy written to it, keepFor, the record and the retry of DROP_QUEUE) has
+ * no line in tests/plan-cost-registry.ts: an open gap from before this change, not measured, never zero; this adds
+ * only these five, and the whole path is to be measured and priced in its own unit (claude7/stamp-path-cost).
+ */
 export const STAMP_ERASURE_COMMANDS = 5;
 
 /**

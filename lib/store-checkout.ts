@@ -1007,6 +1007,9 @@ export type Order =
   /** Refunded in full: what it bought is closed, on every page (lib/refunds.ts). */
   | { state: "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
 
+/** How far ahead of this server's clock Stripe's creation time of an order may be: the two clocks' drift, five minutes. */
+export const CREATED_SLACK_SECONDS = 300;
+
 /**
  * Decides whether this buyer may have the file.
  *
@@ -1117,8 +1120,18 @@ export async function readOrder(
 
   // A download link lasts three days; a booked call is shown, with its
   // calendar file, until it is over, because the reminder emails link here.
-  const created = typeof session.created === "number" ? session.created : 0;
-  const age = Date.now() / 1000 - created;
+  // When it was created decides that window only when it reads (issue #4801): a safe whole second from 1970, and
+  // never more than CREATED_SLACK_SECONDS ahead of this server's clock (the two clocks' drift). Anything else
+  // (Infinity, text, a fraction, missing, an hour ahead) is an error, never a window that does not close. Within the
+  // slack it counts from now, so the window is never longer than three days.
+  const nowSeconds = Date.now() / 1000;
+  const stamped = session.created;
+  if (typeof stamped !== "number" || !Number.isSafeInteger(stamped) || stamped < 0 || stamped > nowSeconds + CREATED_SLACK_SECONDS) {
+    console.error("a paid checkout's creation time does not read", { session: sessionId });
+    return { state: "error" };
+  }
+  const created = Math.min(stamped, Math.floor(nowSeconds));
+  const age = nowSeconds - Math.min(stamped, nowSeconds);
   if (age > DOWNLOAD_WINDOW_SECONDS && !(call && call.end > Date.now())) return { state: "expired" };
 
   const details = session.customer_details as { email?: unknown } | null;

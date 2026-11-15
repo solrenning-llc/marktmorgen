@@ -69,8 +69,11 @@ export type EuInvoiceInput = {
   taxableCents: number;
   /** For "collect": the VAT added on top (lib/eu-vat-amount.ts). */
   vat?: VatOnTop | null;
-  /** For "collect" in a currency other than the euro: the ECB rate (currency per euro) at the sale, and its day. */
-  ecb?: { perEuro: string; day: string } | null;
+  /**
+   * For "collect" in a currency other than the euro: the ECB's publications of that currency (units per euro, by
+   * day). The code takes the latest one published before the sale's day; the caller never picks the rate.
+   */
+  ecb?: readonly { perEuro: string; day: string }[] | null;
 };
 
 export type EuInvoice = {
@@ -130,6 +133,27 @@ export function toEuroCents(cents: number, perEuro: string): number | null {
   return result <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(result) : null;
 }
 
+/**
+ * The ECB rate art. 91(2) asks for: the latest published before the sale's day. The sale's own day is never used,
+ * because the ECB publishes around 16:00 CET and the code cannot know a sale came after it. Never older than
+ * ECB_RATE_MOST_DAYS_OLD days (working days only, so a long weekend with a holiday still has one inside it). Null
+ * when none is there, a publication does not read, or a day is given twice with different rates.
+ */
+function latestBefore(publications: EuInvoiceInput["ecb"], suppliedOn: string): { perEuro: string; day: string } | null {
+  if (!Array.isArray(publications)) return null;
+  const byDay = new Map<string, string>();
+  for (const p of publications) {
+    if (!p || !realDay(p.day) || typeof p.perEuro !== "string" || !RATE.test(p.perEuro)) return null;
+    if (byDay.has(p.day) && byDay.get(p.day) !== p.perEuro) return null;
+    byDay.set(p.day, p.perEuro);
+  }
+  const before = [...byDay.keys()].filter((day) => day < suppliedOn).sort();
+  const day = before[before.length - 1];
+  if (!day) return null;
+  if ((Date.parse(`${suppliedOn}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86_400_000 > ECB_RATE_MOST_DAYS_OLD) return null;
+  return { perEuro: byDay.get(day)!, day };
+}
+
 /** The invoice of one EU sale, or null when any detail art. 226 asks is missing or the parts disagree. */
 export function euInvoice(input: EuInvoiceInput): EuInvoice | null {
   if (!input || typeof input !== "object") return null;
@@ -176,6 +200,9 @@ export function euInvoice(input: EuInvoiceInput): EuInvoice | null {
   const vat = input.vat;
   if (!vat || vat.country !== customer.country || vat.priceCents !== input.taxableCents || !whole(vat.vatCents) || vat.vatCents < 0) return null;
   if (!whole(vat.basisPoints) || vat.basisPoints <= 0 || vat.totalCents !== vat.priceCents + vat.vatCents) return null;
+  // The VAT is the rate's on the taxable amount, half up once (lib/eu-vat-amount.ts): any other figure is refused.
+  const product = vat.priceCents * vat.basisPoints;
+  if (!whole(product) || vat.vatCents !== Math.floor((product + 5000) / 10000)) return null;
   const oss = input.seller?.oss;
   const identification = oss && typeof oss.memberState === "string" ? IDENTIFICATION[oss.memberState] : undefined;
   if (!identification || typeof oss.vatNumber !== "string") return null;
@@ -185,11 +212,8 @@ export function euInvoice(input: EuInvoiceInput): EuInvoice | null {
   if (input.currency === identification.currency) {
     vatNational = { currency: identification.currency, cents: vat.vatCents, perEuro: null, day: null, source: null };
   } else {
-    const ecb = input.ecb;
-    // The latest published rate at the sale: never a later day, and never older than a week (the ECB publishes on
-    // working days, so a long weekend with a holiday still has one inside it).
-    if (!ecb || !realDay(ecb.day) || ecb.day > suppliedOn) return null;
-    if ((Date.parse(`${suppliedOn}T00:00:00Z`) - Date.parse(`${ecb.day}T00:00:00Z`)) / 86_400_000 > ECB_RATE_MOST_DAYS_OLD) return null;
+    const ecb = latestBefore(input.ecb, suppliedOn);
+    if (!ecb) return null;
     const cents = toEuroCents(vat.vatCents, ecb.perEuro);
     if (cents === null) return null;
     vatNational = { currency: identification.currency, cents, perEuro: ecb.perEuro, day: ecb.day, source: ECB_REFERENCE_RATES };

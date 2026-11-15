@@ -15,8 +15,9 @@
  *            how it is treated), a product whose kind is unknown ("supply"), or no sourced rate ("rate");
  *            and, until EU_VAT_COLLECT_REVIEWED is set, every sale that would be collected or reverse-charged
  *            ("review"); and every sale once the official rate table is past its review date ("rates-expired").
- *   reverse-charge  a business whose VAT number VIES answered "valid" (lib/eu-vat-vies.ts), for the country the
- *            evidence places it in, asked within VIES_FRESH_SECONDS of the sale on the same day, under a complete EU
+ *   reverse-charge  a business whose VAT number VIES answered "valid" with the associated name and address
+ *            (Regulation 282/2011 art. 18(1)(a); lib/eu-vat-vies.ts viesValidFor), for the country the evidence
+ *            places it in, asked within VIES_FRESH_SECONDS of the sale on the same day, under a complete EU
  *            record and the review: no VAT is added; the business accounts for it (Directive 2006/112/EC art. 196).
  *
  * A business whose number VIES did not answer "valid" (invalid, MS_UNAVAILABLE or any other unavailability, a
@@ -76,6 +77,8 @@ export function euCheckout(input: {
   if (input.supply !== "ess") return { kind: "refuse", reason: "supply" };
   const treatment = recordedTreatment("EU", input.records);
   if (treatment === null) return { kind: "refuse", reason: "record" };
+  // A clock that is not a moment dates nothing: no rate, no VIES answer and no record can be checked against it.
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return { kind: "refuse", reason: "rate" };
   const reviewed = (input.reviewed ?? euVatCollectOn({ now })) === true;
   const business = input.business ?? null;
   const vies = business ? keptAnswer(business.vies) : null;

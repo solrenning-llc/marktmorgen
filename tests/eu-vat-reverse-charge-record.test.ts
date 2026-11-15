@@ -6,7 +6,7 @@
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { euReverseChargeRecord, euVatRecord } from "@/lib/eu-vat-record";
+import { euReverseChargeRecord, euVatAdjustment, euVatRecord } from "@/lib/eu-vat-record";
 import type { ViesAnswer } from "@/lib/eu-vat-vies";
 
 const at = Math.floor(Date.parse("2026-11-14T12:00:00Z") / 1000);
@@ -45,4 +45,18 @@ test("a collected sale keeps on its record what VIES said about a number it did 
   };
   assert.deepEqual(euVatRecord({ ...base, vies: unavailable })?.vies, unavailable);
   assert.equal("vies" in (euVatRecord(base) ?? {}), false, "no answer, no field");
+});
+
+test("an adjustment never comes before its sale, carries the rate's VAT on its amount and leaves no VAT on nothing", () => {
+  const record = euVatRecord({
+    sale: "cs_test_3", store: "st_1", supply: "ess", service: "Download", at, currency: "eur",
+    vat: { priceCents: 1000, vatCents: 190, totalCents: 1190, basisPoints: 1900, country: "DE" }, place, payments: [{ at, cents: 1190 }], customerName: null,
+  })!;
+  const later = at + 86_400;
+  assert.notEqual(euVatAdjustment(record, { at: later, taxableCents: -500, vatCents: -95, reason: "refund" }), null);
+  assert.notEqual(euVatAdjustment(record, { at: later, taxableCents: -333, vatCents: -64, reason: "refund" }), null, "63.27 rounds to 63; one cent either way is the proportion's rounding");
+  assert.equal(euVatAdjustment(record, { at: at - 86_400, taxableCents: -500, vatCents: -95, reason: "refund" }), null, "before the sale");
+  assert.equal(euVatAdjustment(record, { at: later, taxableCents: -1, vatCents: -190, reason: "refund" }), null, "VAT out of proportion");
+  assert.equal(euVatAdjustment(record, { at: later, taxableCents: -1000, vatCents: -100, reason: "refund" }), null, "a full refund leaves no VAT behind");
+  assert.equal(euVatAdjustment(record, { at: later, taxableCents: -500, vatCents: 95, reason: "refund" }), null, "signs disagree");
 });

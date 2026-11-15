@@ -4,7 +4,7 @@ import { type ExactStore, storeForHandleExactly } from "@/lib/store-exact";
 import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { readLetterGrant, spendLetterOpen } from "@/lib/letter-access";
 import { letterWords } from "@/lib/buyer-words/letters";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { restingAway, takeBuyerReadExact } from "@/lib/buyer-actions";
 import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /** The browser's first language, as a store language code ("es" from "es-MX,es;q=0.9"); the default when it names none of them. */
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     });
   if (!grant || !store || storeKey(store) !== grant.k) return gone(browserLanguage(request));
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  const taken = await takeBuyerReadExact(store).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return restingAway(origin, store);

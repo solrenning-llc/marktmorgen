@@ -17,7 +17,7 @@
 import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 
 /**
  * An unknown count throws UnknownReplyError, the short window's (withinLimit) or the store's public requests' (takePublicRequest),
@@ -25,7 +25,7 @@ import { takePublicRequest } from "@/lib/traffic";
  */
 export async function withinStore(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" = "public"): Promise<boolean> {
   if (!(await withinLimit(scope, who, limit, windowSeconds))) return false;
-  return takePublicRequest(store, side);
+  return takePublicRequestExact(store, side);
 }
 
 /**

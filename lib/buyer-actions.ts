@@ -28,7 +28,7 @@
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequest, takePublicRequestExact } from "@/lib/traffic";
 
 /** Public requests a community picture counts as: its bytes pass through us (tests/plan-cost-registry.ts holds the price). */
 export const PICTURE_REQUEST_UNITS = 4;
@@ -43,6 +43,11 @@ export async function takeBuyerAction(store: Store, by: "buyer" | "owner" = "buy
 /** One read on the buyers' side, `units` of the store's public requests. */
 export async function takeBuyerRead(store: Store, units = 1): Promise<boolean> {
   return takePublicRequest(store, "buyer", Date.now(), units);
+}
+
+/** takeBuyerRead telling an unknown count apart: throws UnknownReplyError, for a caller that says it could not check (#3068). */
+export async function takeBuyerReadExact(store: Store, units = 1): Promise<boolean> {
+  return takePublicRequestExact(store, "buyer", Date.now(), units);
 }
 
 /** Where a form goes when the store cannot take it this month. */

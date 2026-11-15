@@ -11,7 +11,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { readCourseListing } from "@/lib/catalog";
 import { monogram } from "@/lib/store-app";
 import { readCourse } from "@/lib/course";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { plain } from "@/lib/serve-file";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sample = id === "sample";
   const now = Date.now();
   const resting = () => plain(503, speech(store).w.restingTitle);
-  const taken = await takePublicRequest(store, "public", now, 1).catch(unknownLimit);
+  const taken = await takePublicRequestExact(store, "public", now, 1).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return resting();
@@ -98,7 +98,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (!sample && (request.headers.get("if-none-match") ?? "").split(",").some((one) => one.trim().replace(/^W\//, "") === tag)) {
     return new Response(null, { status: 304, headers: { ...cache, "X-Robots-Tag": "noindex" } });
   }
-  const rest = CERTIFICATE_PDF_UNITS > 1 ? await takePublicRequest(store, "public", now, CERTIFICATE_PDF_UNITS - 1).catch(unknownLimit) : true;
+  const rest = CERTIFICATE_PDF_UNITS > 1 ? await takePublicRequestExact(store, "public", now, CERTIFICATE_PDF_UNITS - 1).catch(unknownLimit) : true;
   if (rest === "unknown") return limitUnknownResponse();
   if (!rest) return resting();
   if (!(await canDraw(certificate.name, certificate.title, certificate.creator, store.name))) {

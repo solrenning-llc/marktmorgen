@@ -18,7 +18,7 @@ import { NextRequest } from "next/server";
 import { withinStore } from "@/lib/metered-limits";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { addProduct, claimHandle, storeForHandle } from "@/lib/store";
-import { holdPublicRequests, takePublicRequest } from "@/lib/traffic";
+import { holdPublicRequests, takePublicRequest, takePublicRequestExact } from "@/lib/traffic";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { shelfShown } from "@/lib/course-shelf";
 import { requestOrdersLink } from "@/lib/buyer-orders";
@@ -89,9 +89,9 @@ async function main(): Promise<void> {
   const shop = await storeForHandle("requestshop");
   if (!shop) throw new Error("the synthetic store was not made");
 
-  part("takePublicRequest: an unreadable count is unknown, never a spent window and never room");
+  part("takePublicRequestExact: an unreadable count is unknown, never a spent window and never room");
   answering("", null);
-  is("the real counter takes a request", await outcome(() => takePublicRequest(shop)), "answered true");
+  is("the real counter takes a request", await outcome(() => takePublicRequestExact(shop)), "answered true");
   for (const [said, value] of [
     ["a count as text", ["7"]],
     ["a true", [true]],
@@ -101,23 +101,23 @@ async function main(): Promise<void> {
     ["no list at all", "OK"],
   ] as const) {
     answering("requests", value);
-    is(`${said} is unknown`, await outcome(() => takePublicRequest(shop)), "unknown");
+    is(`${said} is unknown`, await outcome(() => takePublicRequestExact(shop)), "unknown");
   }
   answering("requests", SPENT);
-  is("a confirmed spent window is still a no", await outcome(() => takePublicRequest(shop)), "answered false");
+  is("a confirmed spent window is still a no", await outcome(() => takePublicRequestExact(shop)), "answered false");
   answering("requests", "throw");
-  is("Redis that cannot be asked still refuses, as before", await outcome(() => takePublicRequest(shop)), "answered false");
+  is("Redis that cannot be asked still refuses, as before", await outcome(() => takePublicRequestExact(shop)), "answered false");
 
   part("The connection's share of the day: an unreadable share is unknown, never \"over its share\"");
   askedBy(new Request(`${ORIGIN}/@requestshop`, { headers: { "x-forwarded-for": "203.0.113.40" } }));
   answering("share", [true, 1]);
-  is("an unreadable share is unknown", await outcome(() => takePublicRequest(shop, "public", Date.now(), 10)), "unknown");
+  is("an unreadable share is unknown", await outcome(() => takePublicRequestExact(shop, "public", Date.now(), 10)), "unknown");
   askedBy(new Request(`${ORIGIN}/@requestshop`, { headers: { "x-forwarded-for": "203.0.113.41" } }));
   answering("share", [9_999_999, 1]);
-  is("a share confirmed past the day's is still a no", await outcome(() => takePublicRequest(shop, "public", Date.now(), 10)), "answered false");
+  is("a share confirmed past the day's is still a no", await outcome(() => takePublicRequestExact(shop, "public", Date.now(), 10)), "answered false");
   askedBy(new Request(`${ORIGIN}/@requestshop`, { headers: { "x-forwarded-for": "203.0.113.42" } }));
   answering("", null);
-  is("a share within the day's takes the request", await outcome(() => takePublicRequest(shop, "public", Date.now(), 10)), "answered true");
+  is("a share within the day's takes the request", await outcome(() => takePublicRequestExact(shop, "public", Date.now(), 10)), "answered true");
   askedBy(null);
 
   part("withinStore: the store's unknown count is passed on, never said as a spent window");

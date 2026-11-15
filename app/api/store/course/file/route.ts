@@ -7,7 +7,7 @@ import { heldBack, passedForGate } from "@/lib/quiz";
 import { plain, serveFile } from "@/lib/serve-file";
 import { readCourseListing } from "@/lib/catalog";
 import { coursesWords } from "@/lib/buyer-words/courses";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { speech } from "@/lib/buyer-words";
 import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     }
   }
   // One of the store's public requests: on the buyers' side, or the public's for a lesson anyone may preview (lib/buyer-actions.ts).
-  const taken = await takePublicRequest(store, found.lesson.preview ? "public" : "buyer").catch(unknownLimit);
+  const taken = await takePublicRequestExact(store, found.lesson.preview ? "public" : "buyer").catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return plain(503, speech(store).w.restingTitle);

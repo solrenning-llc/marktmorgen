@@ -5,7 +5,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { requestCommunityLink } from "@/lib/community-access";
 import { clientIp } from "@/lib/visit";
 import { limited, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { restingAway, takeBuyerReadExact } from "@/lib/buyer-actions";
 
 /** "Send me a link": a member coming into the community on this device. */
 export async function POST(request: NextRequest) {
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   if (!store?.community) return new Response("Not found.", { status: 404 });
 
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts); the email it sends is an access email.
-  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  const taken = await takeBuyerReadExact(store).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return restingAway(origin, store);

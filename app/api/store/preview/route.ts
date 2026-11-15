@@ -1,4 +1,4 @@
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import type { NextRequest } from "next/server";
 import { readListing } from "@/lib/catalog";
 import { normaliseHandle, setProductPreview, storeForHandle } from "@/lib/store";
@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
   const store = await storeForHandle(normaliseHandle(params.get("handle") ?? ""));
   if (!store) return plain(404, "There is no such store.");
   // One of the store's public requests for its window (lib/traffic.ts).
-  const taken = await takePublicRequest(store).catch(unknownLimit);
+  const taken = await takePublicRequestExact(store).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return plain(429, "This store can't show previews right now. Try again later.");

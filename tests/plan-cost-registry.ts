@@ -1386,7 +1386,7 @@ export const COST_LINES: CostLine[] = [
       // A sign-up credited to an affiliate takes one of these before its lead is written (18 October 2026).
       { file: "lib/affiliate-leads.ts", names: ["takePublicRequest(store)", "count?: boolean"] },
       // The offers after a cart read what the buyer already has from the creator's Stripe account, counted before (556 [CT1], 1 November 2026).
-      { file: "lib/cart-offers.ts", names: ["takeBuyerRead(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
+      { file: "lib/cart-offers.ts", names: ["takeBuyerReadExact(store, CART_OFFER_REQUEST_UNITS)", "CART_OFFER_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS"] },
       // A code only for people who bought here before reads what the typed email bought from the creator's Stripe account, counted before (554 [DS1], unit 2, 11 November 2026).
       { file: "lib/returning-code.ts", names: ["takeBuyerRead(store, RETURNING_CODE_REQUEST_UNITS)", "RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS", "RETURNING_TRIES = 6", "RETURNING_LINKS_PER_ADDRESS = 3", "RETURNING_LINK_SECONDS = 1800", "kind: \"transactional\""] },
       // A course's "More from" shelf reads what a student owns the same way, counted before (628 [HN4](b), 10 November 2026).
@@ -1428,7 +1428,7 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/orders/page.tsx", names: ["await askBundle(store, token,", "await askOlder(store, token, asked)", "if (token && (bundleAsked || olderAsked))"] },
       // A certificate's PDF takes one before its record is read and the rest of CERTIFICATE_PDF_UNITS before it is drawn, on the public side; a sample
       // is kept by the CDN five minutes (C3, 4 November 2026; CERTIFICATE_PDF_READ in tests/plan-cost-registry.test.ts).
-      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequest(store, \"public\", now, 1)", "takePublicRequest(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
+      { file: "app/[handle]/certificate/[id]/pdf/route.ts", names: ["takePublicRequestExact(store, \"public\", now, 1)", "takePublicRequestExact(store, \"public\", now, CERTIFICATE_PDF_UNITS - 1)", "public, max-age=0, s-maxage=300"] },
       { file: "lib/certificate-pdf.ts", names: ["CERTIFICATE_PDF_UNITS = 2", "CERTIFICATE_PDF_MAX_BYTES = 256_000"] },
       // The picture its shared link unfolds into is paid for the same way, CERTIFICATE_CARD_UNITS as many as the PDF and lighter than it
       // (153 KB, 0.59 s of CPU cold, measured; audit R41, item 3), so CERTIFICATE_PDF_READ prices it too (tests/certificate-card-standing.test.ts).

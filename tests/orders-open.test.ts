@@ -435,7 +435,7 @@ test("a link request the store has no room for asks Stripe nothing, and the per-
   assert.deepEqual([asked, (await requestsIn(folder, window)) - before], [0, 0]);
   // The route answers a refusal as it answers a store with no room at all.
   const route = readFileSync("app/api/store/orders/route.ts", "utf8");
-  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes('const taken = await takePublicRequest(store, "buyer").catch(unknownLimit);\n  if (!taken) return tooMany();'));
+  assert.ok(route.includes('if (result === "busy") return tooMany();') && route.includes('const taken = await takePublicRequestExact(store, "buyer").catch(unknownLimit);\n  if (!taken) return tooMany();'));
 });
 
 /** A store selling links, with one paid checkout of BUYER per product, and its link to the list. */

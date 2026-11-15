@@ -7,7 +7,7 @@ import { LETTER_ID, membersOnly } from "@/lib/letter-rules";
 import { requestLetterLink } from "@/lib/letter-access";
 import { clientIp } from "@/lib/visit";
 import { limited, limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { restingAway, takeBuyerReadExact } from "@/lib/buyer-actions";
 
 /** "Send me the link": a reader proving their address to read an email kept for members (lib/letter-access.ts). */
 export async function POST(request: NextRequest) {
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   if (!store || store.suspended) return new Response("Not found.", { status: 404 });
 
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts); the email it sends is an access email.
-  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  const taken = await takeBuyerReadExact(store).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return restingAway(origin, store);

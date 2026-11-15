@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { requestOrdersLink } from "@/lib/buyer-orders";
 import { fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  const taken = await takePublicRequest(store, "buyer").catch(unknownLimit);
+  const taken = await takePublicRequestExact(store, "buyer").catch(unknownLimit);
   if (!taken) return tooMany();
 
   const page = `/@${store.handle}/orders`;

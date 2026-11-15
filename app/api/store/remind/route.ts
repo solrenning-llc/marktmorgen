@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
+import { takePublicRequestExact } from "@/lib/traffic";
 import { clientAddress, fromAnotherSite, limited, unknownLimit } from "@/lib/request-guard";
 import { readListing, readListings } from "@/lib/catalog";
 import { readCartIds } from "@/lib/cart-rules";
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
   // One of the store's public requests for its window (lib/traffic.ts).
-  const taken = await takePublicRequest(store).catch(unknownLimit);
+  const taken = await takePublicRequestExact(store).catch(unknownLimit);
   if (!taken) return new Response("Please try again later.", { status: 429 });
   const away = (status: string) =>
     new Response(null, {

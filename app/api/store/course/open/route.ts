@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { storeForHandle } from "@/lib/store";
 import { mintPass, openCourseLink, passCookie, storeKey } from "@/lib/learn";
 import { readListing } from "@/lib/catalog";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { restingAway, takeBuyerReadExact } from "@/lib/buyer-actions";
 import { limitUnknownResponse, unknownLimit } from "@/lib/request-guard";
 
 /**
@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     );
   }
   // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  const taken = await takeBuyerRead(store).catch(unknownLimit);
+  const taken = await takeBuyerReadExact(store).catch(unknownLimit);
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return restingAway(origin, store);

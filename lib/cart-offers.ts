@@ -42,7 +42,7 @@ import { activeFunnel, funnelPosition, funnelProductIds, type Funnel } from "@/l
 import { offerableAfterPaying } from "@/lib/bundles";
 import { readListings } from "@/lib/catalog";
 import { bumpsFromMeta, deliverableItems } from "@/lib/bundle-rules";
-import { takeBuyerRead } from "@/lib/buyer-actions";
+import { takeBuyerReadExact } from "@/lib/buyer-actions";
 import { unknownLimit } from "@/lib/request-guard";
 import { ownedHere } from "@/lib/next-offer";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -110,6 +110,6 @@ export function cartOfferFrom(meta: Record<string, string | undefined> | null | 
 export async function ownedBeforeCart(store: Store, email: string | null): Promise<Set<string> | null> {
   if (!email) return null;
   // Not known (rule 24) is "cannot be read in full": nothing is offered, and the page after paying still opens.
-  if ((await takeBuyerRead(store, CART_OFFER_REQUEST_UNITS).catch(unknownLimit)) !== true) return null;
+  if ((await takeBuyerReadExact(store, CART_OFFER_REQUEST_UNITS).catch(unknownLimit)) !== true) return null;
   return ownedHere(store, email);
 }

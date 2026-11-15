@@ -307,8 +307,23 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
  * "resting". A caller that answers it in its own words reads it with
  * `.catch(unknownLimit)` (lib/request-guard.ts).
  */
-export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
+export async function takePublicRequestExact(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
   return takePublic(store, who, now, units, from.shared === true, false);
+}
+
+/** An unknown count read as a no, for the callers that answer only yes or no (Claude 7 on #3068). */
+const unknownIsNo = (error: unknown): false => {
+  if (error instanceof UnknownReplyError) return false;
+  throw error;
+};
+
+/**
+ * takePublicRequestExact as a plain yes or no: a count that came back in a shape that cannot be read is a no, as it
+ * always was, so the many callers that read a boolean (an optional shelf, a sitemap, an image) are never broken by it
+ * (Claude 7's MEDIUM on #3068). A caller that tells the person "could not check just now" uses the exact one.
+ */
+export async function takePublicRequest(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1, from: { shared?: boolean } = {}): Promise<boolean> {
+  return takePublicRequestExact(store, who, now, units, from).catch(unknownIsNo);
 }
 
 /**
@@ -318,7 +333,8 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
  * back after it (givePublicRequests), and what it read beyond them counted (forcePublicRequests).
  */
 export async function holdPublicRequests(store: Store, units: number, now: number): Promise<boolean> {
-  return takePublic(store, "public", now, units, false, true);
+  // A yes or no for its caller (an unknown count is a no, as before; Claude 7 on #3068).
+  return takePublic(store, "public", now, units, false, true).catch(unknownIsNo);
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {

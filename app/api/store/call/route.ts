@@ -53,6 +53,10 @@ export async function POST(request: NextRequest) {
     // turning the call off also waits for a booking in flight to let the lock go (Codex P on #4023): never a call
     // removed while a buyer's checkout for it opens.
     const store: Store | null = await storeForEmail(guarded.ref);
+    // guardStoreWrite has already read this store, so null here is a read that could not be had (rule 24; Claude 6 on
+    // #4023), never "a store with no calendar": nothing is written, a change or a removal, rather than one made
+    // without the lock a booking takes.
+    if (!store) return Response.json({ ok: false, error: "error" }, { status: 503 });
     if (setup) {
       if (store) {
         // Other lengths than the call's own, each with its price (lib/call-lengths.ts): the call's own first, at the product's price.

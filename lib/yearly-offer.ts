@@ -76,7 +76,7 @@ export function yearlyOfferEmail(input: { tier: Tier; trialing: boolean }): { su
       "",
       `Switch in your studio, where your plan is: ${SITE_URL}/studio#billing`,
       "",
-      "Every charge is covered by our 30-day refund, the yearly one too. This is the only time we will write to you about it.",
+      "Our 30-day money-back guarantee covers your first payment, once per person; a yearly plan also gets back the months not started, less the card fee. This is the only time we will write to you about it.",
       "",
       `Questions: reply to this email, or write to ${SUPPORT_EMAIL}.`,
       "",

@@ -2769,7 +2769,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
     title: "A store for cooks",
     highlight: "that sells the week, then the season",
     intro:
-      "Meal plans in sizes, a free recipe that brings people to your list, and a monthly plan for the ones who want every week. The meal plans are in the demo store, and you can buy them right now.",
+      "Meal plans in sizes, a free recipe that brings people to your list, and a monthly plan for the ones who want every week. The meal plans are in the demo store, and you can try buying them now with Stripe's test card.",
     badge: WORKING,
     accent: "from-mint-brand to-amber-brand",
     related: ["price-options", "memberships", "checkout", "email"],

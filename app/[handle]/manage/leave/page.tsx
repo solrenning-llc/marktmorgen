@@ -51,7 +51,8 @@ export default async function LeavePage({ params, searchParams }: Params) {
   const answer = why ? answerFor(why) : null;
   const cheaper = answer?.cheaper && one ? choicesFor(store, one, await liveTiers(store).catch(() => [])).filter((c) => c.way === "down") : [];
   const pause = Boolean(answer?.pause && one && one.canPause && !one.pause && store.pause > 0);
-  const contact = answer?.contact
+  // No way to write to a store switched off after a report (lib/takedown.ts); the way out stays.
+  const contact = answer?.contact && !store.suspended
     ? store.contact.on
       ? `/@${store.handle}/contact`
       : `mailto:${store.email}?subject=${encodeURIComponent(one?.title ?? store.name)}`
@@ -85,8 +86,9 @@ export default async function LeavePage({ params, searchParams }: Params) {
         <div className="st-card mt-6 p-6 sm:p-9" data-leave-page>
           {!memberships ? (
             <>
+              {/* The page's one heading, also when nothing can be canceled from it (WCAG 1.3.1, 2.4.6, 2.4.10). */}
               <div className="st-note mb-6">
-                <p className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</p>
+                <h1 className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</h1>
                 <p className="mt-1 text-sm">{m.manageNotices.expired.body}</p>
               </div>
               <Link href={manage} className="btn st-btn btn-block">
@@ -95,7 +97,8 @@ export default async function LeavePage({ params, searchParams }: Params) {
             </>
           ) : !one || one.endsAt !== null ? (
             <>
-              <p className="st-muted text-lg leading-relaxed">{m.leaveGone}</p>
+              <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{m.yourMembership}</h1>
+              <p className="st-muted mt-4 text-lg leading-relaxed">{m.leaveGone}</p>
               <Link href={manage} className="btn st-btn btn-block mt-6">
                 {m.yourMembership}
               </Link>
@@ -197,7 +200,10 @@ export default async function LeavePage({ params, searchParams }: Params) {
                 <button type="submit" className="btn btn-secondary btn-block mt-2" data-leave-cancel>
                   {m.leaveCancel}
                 </button>
-                <p className="st-muted mt-3 text-sm">{`${m.leaveConfirm} ${m.cancelNote}`}</p>
+                <p className="st-muted mt-3 text-sm">
+                  {/* Sold as a number of payments: this press cancels it, with no Stripe page after (lib/membership-manage.ts). */}
+                  {one.fixedEnd ? m.fixedCancelNote(one.periodEnd ? endDate(one.periodEnd) : "") : `${m.leaveConfirm} ${m.cancelNote}`}
+                </p>
               </form>
             </>
           )}

@@ -14,7 +14,7 @@ import { advanceAll } from "@/lib/broadcasts";
 import { advanceAnnouncements } from "@/lib/community-mail";
 import { advanceUpdates } from "@/lib/product-updates";
 import { sendDueSteps } from "@/lib/flows";
-import { sendCallReminders } from "@/lib/call-reminders";
+import { sendCallReminders, storeForReminders } from "@/lib/call-reminders";
 import { runEventQueue } from "@/lib/community-event-mail";
 import { SITE_URL } from "@/lib/site-url";
 import { sweepCheckouts } from "@/lib/checkout-sweep";
@@ -212,7 +212,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // events and the webhooks always have their turn.
     let calls = null;
     try {
-      calls = await sendCallReminders(storeForHandle, Math.min(started + 40_000, Math.max(deadline, Date.now() + 10_000)), SITE_URL);
+      calls = await sendCallReminders(storeForReminders, Math.min(started + 40_000, Math.max(deadline, Date.now() + 10_000)), SITE_URL);
     } catch (error) {
       console.error("sending call reminders failed", error);
     }

@@ -16,7 +16,7 @@ export const LLC_COMPLIANCE_COST_IDS = [
  "us-form-5472", "us-pro-forma-1120", "br-irpf", "br-cbe", "vat-oss-and-local-compliance",
  "itin-and-acceptance-agent", "us-resident-representative", "us-business-address",
 ] as const;
-export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
+export const LLC_FIXED_COST_IDS = ["delaware", "california-tax", "california-fee", "registered-agent", "llc-formation", "owner-inss", "domains", "tools", "deployment-artifact-retention", "backup", "public-site-delivery", "us-mailbox", "eu-gdpr-representative", "eu-dsa-representative", "uk-gdpr-representative", ...LLC_COMPLIANCE_COST_IDS] as const;
 export type FixedCostId = typeof LLC_FIXED_COST_IDS[number];
 export type FixedCostCeiling = { id: FixedCostId; fullMonthlyUsdCents: number | null; fullAnnualUsdCents: number | null; evidence: string; reserveReviewed: boolean };
 /** Public observations checked22 October2026; discounts/free periods never reduce worst-case cost. */
@@ -29,6 +29,12 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * a Class A for each object's deletion and two listings a run, Upstash at every command and byte the caps allow (200
   * SCAN pages a run at the most), no free quota. Not a reviewed ceiling: BACKUP_COST_UNKNOWNS are open and the owner has not approved a monthly cost. */
  backup: { currency: "USD", model: "lib/backup-cost.ts", review: "lib/backup-run.ts BACKUP_COST_REVIEW", checked: "2026-11-04", source: "docs/backup-cost-2026-11-04.md", approvedCeiling: false },
+ /** 244 [SP1] and every other static public page (home, pricing, blog, legal, free tools): serving them is a company
+  * cost (no store pays for these visits), priced at Vercel's on-demand Fast Data Transfer and CDN request rates, never
+  * a free allowance. One first visit to a free tool page measured at most 621,508 bytes and 31 requests (lib/free-tools.ts
+  * TOOL_PAGE_COST), about US$0.000155. No ceiling bounds the number of visits: the only one possible is a Vercel account
+  * spend limit, the owner's setting, so the monthly ceiling stays unknown and this line keeps the company review failing. */
+ publicSiteDelivery: { currency: "USD", perGbMinor: 15, perMillionRequestsMinor: 200, perToolVisitBytesMost: 621508, perToolVisitRequestsMost: 31, checked: "2026-11-15", source: "https://vercel.com/docs/pricing/networking", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },
  californiaFee: { currency: "USD", maximumAnnualMinor: 1179000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

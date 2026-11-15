@@ -432,6 +432,8 @@ async function main(): Promise<void> {
     "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
+    "call": ["act:products:remove"],
+    "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
     "community": ["lockedFor"],
@@ -445,6 +447,7 @@ async function main(): Promise<void> {
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "course/task/upload": ["not:a student's own door for a file to hand in: it takes back only the listing it made itself when the door is not opened"],
     "creator-card": ["act:page:remove"],
     "companies": ["act:orders:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
@@ -492,7 +495,7 @@ async function main(): Promise<void> {
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(|\bwriteTeam\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);

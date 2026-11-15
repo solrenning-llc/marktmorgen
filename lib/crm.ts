@@ -160,14 +160,21 @@ const json = (raw: unknown): unknown => {
   }
 };
 
+/** A JSON string's escapes read back (\uXXXX, \", \\, \/, \b, \f, \n, \r, \t), so text spelled with them reads as written. */
+function unescapeJson(text: string): string {
+  const simple: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
+  return text.replace(/\\(u[0-9a-fA-F]{4}|["\\/bfnrt])/g, (_, code: string) => (code.length === 5 ? String.fromCharCode(parseInt(code.slice(1), 16)) : simple[code]));
+}
+
 /**
- * Whether a stored deal value names `address`, for a person's erasure and their copy (issue #4810 and its review):
- * "yes", "no", or "unknown". A value that reads as a deal record answers by its email, exactly. One that does not read
- * is theirs when its text holds the address as a whole address (not inside a longer one), not theirs when it does
- * not, and unknown only when it holds a JSON escape (a backslash) that could spell the address another way. So one
- * damaged deal of somebody else's never stops every erasure in the store, and one of theirs is never left out.
+ * Whether a stored deal value names `address`, for a person's erasure and their copy (issue #4810 and its reviews):
+ * "yes" or "no". A value that reads as a deal record answers by its email, exactly. One that does not read is theirs
+ * when its text, as stored or with its JSON escapes read back (an address spelled with \u0040 is still theirs), holds
+ * the address as a whole address (not inside a longer one), and not theirs otherwise: a newline or a quote escaped in
+ * a note decides nothing. So one damaged deal of somebody else's never stops every erasure in the store, and one of
+ * theirs is never left out.
  */
-export function dealNames(raw: string, address: string): "yes" | "no" | "unknown" {
+export function dealNames(raw: string, address: string): "yes" | "no" {
   const wanted = address.trim().toLowerCase();
   if (!wanted) return "no";
   const deal = json(raw);
@@ -176,36 +183,44 @@ export function dealNames(raw: string, address: string): "yes" | "no" | "unknown
     if (mail === undefined || mail === null) return "no";
     if (typeof mail === "string") return mail.trim().toLowerCase() === wanted ? "yes" : "no";
   }
-  const text = raw.toLowerCase();
   const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  if (new RegExp(`(?<![a-z0-9._%+-])${escaped}(?![a-z0-9_-]|\\.[a-z0-9])`).test(text)) return "yes";
-  return text.includes("\\") ? "unknown" : "no";
+  const whole = new RegExp(`(?<![a-z0-9._%+-])${escaped}(?![a-z0-9_-]|\\.[a-z0-9])`);
+  return whole.test(raw.toLowerCase()) || whole.test(unescapeJson(raw).toLowerCase()) ? "yes" : "no";
 }
 
+/** The person's deals for their copy: each that reads, and the text of each of theirs that does not, as stored. */
+export type PersonDeals = { deals: Deal[]; unread: string[] };
+
 /**
- * The person's deals for the copy of their data (art. 15): read exactly, never filtered in silence. A deal that is
- * theirs, or may be (dealNames "yes" or "unknown"), and does not read as a deal, throws UnknownReplyError, so the copy
- * fails rather than come out complete without it. A deal of theirs in a stage the store has since removed is answered
- * with its stage left empty: the copy shows it with no stage.
+ * The person's deals for the copy of their data (art. 15): read exactly, never filtered in silence. A deal of theirs
+ * (dealNames "yes") that does not read as a deal is in the copy as its stored text, which is theirs too, so the copy
+ * is never held up for good by it nor complete without it. A deal of theirs in a stage the store has since removed is
+ * answered with its stage left empty: the copy shows it with no stage.
  */
-export async function dealsOfPerson(statsId: string | null, email: string, stages: readonly Stage[]): Promise<Deal[]> {
-  if (!statsId || !isRedisConfigured()) return [];
+export async function dealsOfPerson(statsId: string | null, email: string, stages: readonly Stage[]): Promise<PersonDeals> {
+  if (!statsId || !isRedisConfigured()) return { deals: [], unread: [] };
   const values = stringList(repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0]);
   if (!values) throw new UnknownReplyError("a store's deals");
-  const out: Deal[] = [];
+  const deals: Deal[] = [];
+  const unread: string[] = [];
   for (const raw of values) {
-    const names = dealNames(raw, email);
-    if (names === "no") continue;
+    if (dealNames(raw, email) === "no") continue;
     const record = json(raw);
-    if (names === "unknown" || !record || typeof record !== "object" || Array.isArray(record)) throw new UnknownReplyError("a deal of the person's");
+    if (!record || typeof record !== "object" || Array.isArray(record)) {
+      unread.push(raw);
+      continue;
+    }
     const stage = (record as { stage?: unknown }).stage;
     // A stage the store removed is still this deal's: read with it, so the deal is not dropped for it.
     const known = typeof stage === "string" && !stages.some((s) => s.id === stage) ? [...stages, { id: stage, name: "", kind: "open" as const }] : stages;
     const deal = parseDeal(record, known);
-    if (!deal) throw new UnknownReplyError("a deal of the person's");
-    out.push(known === stages ? deal : { ...deal, stage: "" });
+    if (!deal) {
+      unread.push(raw);
+      continue;
+    }
+    deals.push(known === stages ? deal : { ...deal, stage: "" });
   }
-  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return { deals: deals.sort((a, b) => b.updatedAt - a.updatedAt), unread };
 }
 
 /**
@@ -702,16 +717,11 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
   for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
-  // Each deal judged on its own (issue #4810 and its review, dealNames): a readable one by its address, an unreadable
-  // one by whether its text holds the address. Only a deal that cannot be decided (an escape that could spell it), or
-  // a deal id twice, stops the deletion: it throws before writing anything and says it is not finished. A damaged
-  // deal of somebody else's never stops it, and one of the person's is deleted with theirs.
+  // Each deal judged on its own (issue #4810 and its reviews, dealNames): a readable one by its address, an unreadable
+  // one by whether its text, escapes read back, holds the address. A damaged deal of somebody else's never stops the
+  // deletion, and one of the person's is deleted with theirs. Only a deal id twice throws, before writing anything.
   if (new Set(pairs.map(([id]) => id)).size !== pairs.length) throw new UnknownReplyError("a store's deals");
-  const theirs = pairs.flatMap(([id, value]) => {
-    const names = dealNames(value, address);
-    if (names === "unknown") throw new UnknownReplyError("a store's deal");
-    return names === "yes" ? [id] : [];
-  });
+  const theirs = pairs.flatMap(([id, value]) => (dealNames(value, address) === "yes" ? [id] : []));
   // Each value taken out in one script that answers what it deleted, each deal
   // deleted on its own: what goes back to the store's data room is exactly
   // what was removed, even with a change of the same value at the same time.

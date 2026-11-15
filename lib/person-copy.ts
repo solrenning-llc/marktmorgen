@@ -235,14 +235,16 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/crm.ts": async (s) => {
     const [fields, stages, tasks] = await Promise.all([readFields(s.statsId), readStages(s.statsId), readPersonTasks(s.statsId, s.person)]);
     const values = await readValues(s.statsId, s.person, fields);
-    // Read exactly (issue #4810 review): an unreadable deal that is theirs, or may be, fails the copy; one in a removed
+    // Read exactly (issue #4810 reviews): a deal of theirs that does not read is in the copy as stored; one in a removed
     // stage is in it, with no stage name.
-    const deals = await dealsOfPerson(s.statsId, s.email, stages);
+    const { deals, unread } = await dealsOfPerson(s.statsId, s.email, stages);
     const stageName = new Map(stages.map((st) => [st.id, st.name]));
     return [
       ...fields.filter((f) => values[f.id]).map((f) => ({ field: f.name, value: values[f.id] })),
       // Who of the team the deal is given to is that teammate's, not yours.
       ...deals.map((d) => ({ deal: d.title, stage: stageName.get(d.stage) ?? "", value: d.cents, note: d.note, nextAction: d.nextAction ?? "", dueDate: d.dueDate ?? "", created: iso(d.createdAt), updated: iso(d.updatedAt) })),
+      // A deal of theirs that does not read, as it is stored: their data, never left out.
+      ...unread.map((raw) => ({ deal: "(a deal that could not be read, as stored)", stored: raw })),
       // The team's tasks about you (639 [GL7](6)), at most MAX_PERSON_TASKS; the teammate responsible is theirs, left out.
       ...tasks.map((t) => ({ task: t.text, dueDate: t.due, done: t.done, created: iso(t.createdAt), doneAt: iso(t.doneAt) })),
     ];

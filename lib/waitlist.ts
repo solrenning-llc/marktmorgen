@@ -199,7 +199,7 @@ export const WAIT_CONFIRM_CALLS = 3;
 export const WAIT_CONFIRM_UNITS = 1;
 
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
@@ -207,7 +207,8 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   if (!entry) return { ok: false };
   // Paid before it spends: a press that writes takes WAIT_CONFIRM_UNITS of the store's public requests, or is refused.
   const joins = Boolean(entry.c && store.listId);
-  if ((!entry.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false };
+  // Refused for want of a request: the link still works, so the page says to press it again later, never "expired".
+  if ((!entry.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false, reason: "busy" };
   // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
   // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
   // the list again and lifts the erasure print.

@@ -29,8 +29,8 @@ function walk(dir: string, out: string[] = []): string[] {
 /** Every key the code names under "nl:", by the part before its first variable, and the file it is in. */
 function familiesInCode(): Set<string> {
   const found = new Set<string>();
-  // lib/data-families.ts is the list of these families' names for the code that measures them, not keys of its own.
-  for (const file of ["app", "lib"].flatMap((dir) => walk(dir)).filter((file) => file !== "lib/data-families.ts")) {
+  // lib/data-families.ts and its topic files (lib/data-families/) are the list of these families' names for the code that measures them, not keys of their own.
+  for (const file of ["app", "lib"].flatMap((dir) => walk(dir)).filter((file) => file !== "lib/data-families.ts" && !file.startsWith("lib/data-families/"))) {
     for (const m of read(file).matchAll(/[`"'](nl:[^`"'$]*)(\$\{|[`"'])/g)) found.add(`${m[1]}@${file}`);
   }
   return found;

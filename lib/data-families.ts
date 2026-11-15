@@ -483,3 +483,19 @@ export function closingOf(key: string): Closing | null {
   const family = closingFamilyOf(key);
   return family ? CLOSING[family] : null;
 }
+
+/*
+ * Families kept one file per topic (C2-213, variant B1): lib/data-families/<topic>.ts, listed by the generated
+ * lib/data-families/index.ts (node scripts/data-families-index.mjs; lib/data-families/README.md). Each topic's
+ * entries are joined here, once, to the four lists above, so countedInRoom, closingFamilyOf and closingOf read them
+ * as their own. No line above is moved or edited by this: a pull request that adds a family above still merges.
+ * tests/data-families-index.test.ts fails for a family that is in a topic file and above both.
+ */
+import { ALL_TOPICS } from "@/lib/data-families/index";
+
+for (const topic of ALL_TOPICS) {
+  (COUNTED_FAMILIES as string[]).push(...(topic.counted ?? []));
+  (ELSEWHERE_FAMILIES as string[]).push(...(topic.elsewhere ?? []));
+  Object.assign(CLOSING as Record<string, Closing>, topic.closing ?? {});
+  (FOLLOWED_FAMILIES as unknown as string[]).push(...(topic.followed ?? []));
+}

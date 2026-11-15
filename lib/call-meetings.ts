@@ -473,7 +473,15 @@ function readRefundPass(raw: unknown): RefundPass | null {
 async function refundsOf(store: Store, callsId: string, deadline: number): Promise<number> {
   const account = store.stripeAccountId as string;
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const [anchorRaw, passRaw] = await redisPipeline([["GET", anchorKey(callsId)], ["GET", passKey(callsId)]]);
+  // The walk's place, read exactly (rule 24, from main): only GET's exact null is "no place yet"; another shape stops this
+  // store's walk with the place as it was, never a one-day window written over the real, older place. The pass is read
+  // with it (readRefundPass takes any other shape for no pass, which starts again from that place).
+  const placeRead = repliesFor(await redisPipeline([["GET", anchorKey(callsId)], ["GET", passKey(callsId)]]), 2);
+  const anchorRaw = placeRead?.[0];
+  if (!placeRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+    throw new UnknownReplyError("the call refunds' place");
+  }
+  const passRaw = placeRead[1];
   // The first look goes back a day: meetings are only made from now on, and
   // a refund made before one existed has nothing to remove.
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;

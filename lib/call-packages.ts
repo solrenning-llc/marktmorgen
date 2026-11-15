@@ -224,6 +224,15 @@ export async function packageSessionUsed(checkout: string, session: string): Pro
 
 export type PackageState = { left: number; total: number; expired: boolean; until: number };
 
+/**
+ * The most Redis commands one packageState sends besides one EXISTS a hold: spent()'s SMEMBERS of the package's
+ * record of paid sessions (1) and writeUsed's SADD, EXPIRE, EXISTS and DEL (4) when it writes a seen session down.
+ */
+export const PACKAGE_READ_EXTRA_COMMANDS = 5;
+
+/** What the buyer's orders page takes from its meter before it reads one package (lib/buyer-orders.ts; Claude 7 on #3487). */
+export const packageReadCommands = (bought: Bought): number => bought.holds.length + PACKAGE_READ_EXTRA_COMMANDS;
+
 export async function packageState(bought: Bought, at = now()): Promise<PackageState> {
   const used = await spent(bought, at);
   const expired = bought.until > 0 && at > bought.until;

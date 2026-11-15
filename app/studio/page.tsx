@@ -74,7 +74,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -860,7 +860,16 @@ export default async function StudioPage({
     aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
-    list: store && may("export") ? early(listSize(store)) : null,
+    // A size that could not be read is "unread" here, inside the early read, so the joint wait for the kept readings
+    // below (`answered`) still resolves and the visits and sales are shown (Claude 4, LEVE on #2862).
+    list: store && may("export")
+      ? early(
+          listSize(store).catch((error: unknown) => {
+            console.error("could not read a list's size", error);
+            return "unread" as const;
+          }),
+        )
+      : null,
     callProducts: store ? early(readKind(store, "call")) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
@@ -2066,7 +2075,9 @@ export default async function StudioPage({
                 {hasPixels(store.pixels) ? (async () => {
                   const before = serverWrite.done;
                   const setupRead = (async () => {
-                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // Not read: said so, never shown as an empty setup nor written on the store as none.
+                    const setup = await serverSetup(store.statsId).catch(() => null);
+                    if (!setup) return null;
                     // A token saved before the store kept its own list of platforms is written there now, once, after
                     // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
@@ -2075,9 +2086,17 @@ export default async function StudioPage({
                   })();
                   // The writes after this one wait for the cart link's too, even when this part writes nothing.
                   serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  const setup = await setupRead;
+                  if (!setup) {
+                    return (
+                      <p className="text-ink-soft">
+                        Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                      </p>
+                    );
+                  }
                   return (
                   <ServerEventsEditor
-                    setup={await setupRead}
+                    setup={setup}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -2241,7 +2260,17 @@ export default async function StudioPage({
                 people who may take the list away as a file may hand one out. */}
             {apiKeys ? <ApiKeyEditor keys={apiKeys} /> : null}
 
-            {list && (givesAway || list.total > 0) ? (
+            {list === "unread" ? (
+              <div className="card mt-8 p-6 sm:p-8">
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Your list
+                </p>
+                <p className="mt-2 text-ink-soft">
+                  We could not count your list just now. Reload this page in a
+                  moment to see it and download it.
+                </p>
+              </div>
+            ) : list && (givesAway || list.total > 0) ? (
               <div className="card mt-8 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your list
@@ -2560,7 +2589,7 @@ export default async function StudioPage({
             ) : null}
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
@@ -2933,6 +2962,14 @@ export default async function StudioPage({
                 <p className="mt-2 text-ink-soft">
                   {feeWords(COMMISSION_LIVE && store.shared).studioPay} Visits and lesson video have finite monthly thresholds, shown above. Public pages and new video playback pause at their respective thresholds.
                 </p>
+                {/* 601 [KB22] U5: only a store with a plan subscription has invoices to read (lib/plan-invoices.ts). */}
+                {store.subscriptionId && store.stripeCustomerId ? (
+                  <p className="mt-3">
+                    <Link href={studioPath(store, "", "invoices")} prefetch={false} className="inline-flex min-h-11 items-center font-semibold text-violet-deep underline underline-offset-4">
+                      Your plan&apos;s invoices
+                    </Link>
+                  </p>
+                ) : null}
 
                 {!PLAN_BREAKS_ENABLED && (pauseSet || onBreakNow) ? (
                   <form action={`/api/billing/cancel${pin}`} method="post" className="mt-4">
@@ -3161,6 +3198,14 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
+                        <p className="mt-3 text-sm text-ink-soft">
+                          Before you leave, review what is included in the data file and what is not.{" "}
+                          <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
+                            See what the data file holds, and download it
+                          </a>
+                        </p>
+                      ) : null}
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button
@@ -3413,6 +3458,17 @@ export default async function StudioPage({
                           {!sale.isCall && !sale.isTip && sale.email && sale.reference.startsWith("cs_") ? (
                             <p className="mt-2">
                               <ResendPurchase reference={sale.reference} email={sale.email} />
+                            </p>
+                          ) : null}
+                          {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
+                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                            <p className="mt-2">
+                              <a
+                                href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}
+                                className="inline-flex min-h-11 items-center text-xs font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                              >
+                                Download the receipt (PDF)<span className="sr-only">{`: ${sale.title}, paid ${new Date(sale.paidAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}`}</span>
+                              </a>
                             </p>
                           ) : null}
                         </li>

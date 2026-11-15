@@ -636,6 +636,16 @@ export async function passedForGate(courseId: string, who: string): Promise<Set<
 }
 
 /**
+ * The same passes for a page that reports progress (Claude 1 cloud R on #4558): null when the reply is in an unknown
+ * shape, so the page says it could not be checked, never "nothing passed"; a gate it also decides reads null as
+ * nothing passed, as passedForGate does.
+ */
+export async function passedOrUnknown(courseId: string, who: string): Promise<Set<string> | null> {
+  if (!isRedisConfigured()) return new Set();
+  return passedExactly(courseId, who);
+}
+
+/**
  * Several students at once, for the studio's list. A student whose passes answered in an unknown shape (or every
  * student, when the pipeline's reply is not one per student) reads null, never "nothing passed" (CX-123 rule 24).
  */

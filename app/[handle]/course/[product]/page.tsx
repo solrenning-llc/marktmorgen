@@ -20,7 +20,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
-import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
+import { heldBack, passedOrUnknown, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
@@ -99,14 +99,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
   if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
-  // Null: the lessons done could not be read just now; said so, never shown as 0 done (rule 24).
+  // Null: the lessons done, or the quizzes passed, could not be read just now; said so, never shown as 0 done or as
+  // nothing passed (rule 24; Claude 1 cloud R on #4558).
   const [done, passed, certificate] = studying
     ? await Promise.all([
         doneLessonsOrUnknown(course.id, access.learner.email),
-        passedForGate(course.id, who),
+        passedOrUnknown(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
-    : [new Set<string>() as Set<string> | null, new Set<string>(), null];
+    : [new Set<string>() as Set<string> | null, new Set<string>() as Set<string> | null, null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     after(() => touchStudent(course.id, email, access.start, store));
@@ -117,9 +118,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
     // The first time a student opens it, what opening it starts (lib/course-finish.ts).
     after(() => noteIfOpened(store, product.id, course.id, email));
   }
-  // Lessons a quiz that has to be passed still holds shut, for this student.
-  const held = studying ? heldBack(course, passed) : new Map<string, string>();
-  const finished = studying && done !== null && hasFinished(course, done, passed);
+  // Lessons a quiz that has to be passed still holds shut, for this student: passes that do not read hold them, as a gate.
+  const held = studying ? heldBack(course, passed ?? new Set()) : new Map<string, string>();
+  const finished = studying && done !== null && passed !== null && hasFinished(course, done, passed);
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
   // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own
@@ -303,7 +304,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                         <button type="submit" className="btn st-btn">{w.getCertificate}</button>
                       </div>
                     </form>
-                  ) : done === null ? (
+                  ) : done === null || passed === null ? (
                     <p className="st-muted mt-1 text-sm">{w.certProgressUnknown}</p>
                   ) : (
                     <p className="st-muted mt-1 text-sm">{w.certHow(mustPass)}</p>

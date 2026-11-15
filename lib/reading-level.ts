@@ -96,7 +96,8 @@ export function plainText(input: string): string {
 export function sentencesOf(text: string): string[] {
   let guarded = text;
   for (const abbreviation of ABBREVIATIONS) {
-    const escaped = abbreviation.replace(/\./g, "\\.");
+    // Every character a pattern reads as an operator is escaped, the backslash too (CodeQL js/incomplete-sanitization).
+    const escaped = abbreviation.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
     guarded = guarded.replace(new RegExp(`\\b${escaped}\\.(?=\\s)`, "gi"), (match) => match.replace(/\./g, "\u0000"));
   }
   return guarded
@@ -120,10 +121,23 @@ export function wordsOf(text: string): string[] {
  *     "simple"), a final "-es" or "-ed" that adds no syllable (but keep "-ed"
  *     after "t" or "d", as in "wanted", and "-es" after s, x, z, c, g, ch
  *     or sh, as in "boxes" and "pages"), and count groups of a, e, i, o, u, y;
+ *   - a vowel pair that is two syllables (a hiatus) counts as two (HIATUS):
+ *     "i" before "a", "o" or "u" ("media", "studio", "audio", "period",
+ *     "various") except after c, t, s, x, g, n or l, where it is mostly one
+ *     ("special", "nation", "region", "million"); "eo" after d, h or r
+ *     ("video", "theory", "stereo"), not in "-eous"; "creat" ("create",
+ *     "creator"); a final "ea" ("idea", "area"); "ien" before c or t
+ *     except after c, t or s ("client", "experience", but "patient");
+ *     "e" before a final "ing" ("being", "seeing"); and "u" before "a"
+ *     except after q, g or s ("actual", "manual", but "quality");
  *   - every word has at least one syllable.
- * Known misses of this kind of heuristic: "-ia" and "-io" read as one
- * ("piano" 2 for 3), "-ue" endings, some "-ely" words. The test holds the
- * misses on its list to one syllable a word.
+ * The hiatus rule adds only where a pair is two syllables in the words it
+ * names (Claude 7 on #4612: the vowel groups alone undercount in one
+ * direction, so every page read easier than it is). Known misses that
+ * remain: "-ness" and a silent "e" before "-be", "usual" and "visual"
+ * (after s), "quiet", some "-ely" words. The test holds the misses on its
+ * list to one syllable a word, and the hiatus words to their dictionary
+ * count.
  */
 export function syllablesOf(word: string): number {
   if (word.includes("-")) return word.split("-").filter(Boolean).reduce((sum, part) => sum + syllablesOf(part), 0);
@@ -145,7 +159,22 @@ export function syllablesOf(word: string): number {
     extra = 1;
   } else if (/[^aeiouy]ed$/.test(w)) stem = w.slice(0, -2); // "used", "signed"
   else if (/[^aeiouy]e$/.test(w)) stem = w.slice(0, -1); // "make", "store": silent "e"
-  return Math.max(1, vowelGroups(stem) + extra);
+  return Math.max(1, vowelGroups(stem) + hiatusSplits(stem) + extra);
+}
+
+/** The vowel pairs read as two syllables, each a split of one vowel group (see syllablesOf). */
+const HIATUS = [
+  /(?<![ctsxgnl])i(?=[aou])/g,
+  /(?<=[dhr])e(?=o(?!us))/g,
+  /creat/g,
+  /ea$/g,
+  /(?<![cts])ien(?=[ct])/g,
+  /e(?=ings?$)/g,
+  /(?<![qgs])u(?=a)/g,
+];
+
+function hiatusSplits(stem: string): number {
+  return HIATUS.reduce((sum, pattern) => sum + (stem.match(pattern) ?? []).length, 0);
 }
 
 function vowelGroups(word: string): number {

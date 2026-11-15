@@ -67,11 +67,21 @@ function unitChecks(): void {
     ["organizational", 6], ["understanding", 4], ["don't", 1], ["store's", 1], ["money-back", 3],
     ["AI", 2], ["PDF", 3], ["URL", 3], ["URLs", 3],
   ];
+  // Two-syllable vowel pairs (hiatus), this product's own words, at their dictionary counts (Claude 7 on #4612): the
+  // vowel groups alone read each pair as one, so every page read easier than it is.
+  exact.push(
+    ["creator", 3], ["creators", 3], ["create", 2], ["created", 3], ["creating", 3], ["studio", 3], ["video", 3],
+    ["videos", 3], ["audio", 3], ["media", 3], ["period", 3], ["idea", 3], ["area", 3], ["being", 2], ["client", 2],
+    ["previous", 3], ["various", 3], ["experience", 4], ["actual", 3], ["piano", 3],
+    // And the pairs that stay one syllable, kept one.
+    ["special", 2], ["nation", 2], ["region", 2], ["million", 2], ["people", 2], ["patient", 2], ["quality", 3],
+    ["language", 2], ["friend", 1], ["social", 2], ["each", 1], ["great", 1], ["team", 1],
+  );
   for (const [word, want] of exact) is(`syllablesOf(${JSON.stringify(word)})`, syllablesOf(word), want);
 
   part("Syllables: known misses of the heuristic, held to one syllable a word");
-  // Dictionary counts; the heuristic reads "ea", "ia", "io" as one group and misses "-ness" and a silent "e" before "-be".
-  const misses: [string, number][] = [["creator", 3], ["piano", 3], ["created", 3], ["business", 2], ["maybe", 2], ["recipe", 3]];
+  // Dictionary counts; the heuristic misses "-ness", a silent "e" before "-be", a hiatus after s ("usual") and "quiet".
+  const misses: [string, number][] = [["business", 2], ["maybe", 2], ["recipe", 3], ["usual", 3], ["quiet", 2], ["courteous", 3]];
   for (const [word, want] of misses) near(`syllablesOf(${JSON.stringify(word)}), dictionary ${want}`, syllablesOf(word), want, 1);
 
   part("The two formulas on round counts (worked by hand)");

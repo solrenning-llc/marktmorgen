@@ -50,6 +50,10 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
+    // Every control that changes the list is disabled until the save answers (Codex X4 on #3723: an edit made in
+    // between was put under the server's copy). The focus goes to Save, which stays focusable, so it is never left
+    // on a control about to be disabled (pressing Enter in a name field).
+    document.getElementById("paths-save")?.focus();
     setBusy(true);
     setSaid(null);
     try {
@@ -75,6 +79,7 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
 
   return (
     <form onSubmit={save} className="space-y-6" noValidate>
+      <fieldset disabled={busy} className="contents">
       {!enough ? (
         <p className="notice">{`A path puts ${MIN_PATH_COURSES} or more of your courses in order. Make at least two courses first; then come back here.`}</p>
       ) : null}
@@ -192,13 +197,14 @@ export function LearningPathsEditor({ initial, courses }: { initial: StoredPath[
           </button>
         </p>
       ) : null}
+      </fieldset>
       <div className="flex flex-wrap items-center gap-3">
         {enough && paths.length < MAX_PATHS ? (
-          <button type="button" className={button} onClick={() => { setSaid(null); setPaths((list) => [...list, { name: "", courses: [], order: "sequence" }]); }}>
+          <button type="button" className={button} disabled={busy} onClick={() => { setSaid(null); setPaths((list) => [...list, { name: "", courses: [], order: "sequence" }]); }}>
             Add a path
           </button>
         ) : null}
-        <button type="submit" className="btn btn-primary inline-flex min-h-11 items-center justify-center" aria-disabled={busy || undefined}>
+        <button type="submit" id="paths-save" className="btn btn-primary inline-flex min-h-11 items-center justify-center" aria-disabled={busy || undefined}>
           {busy ? "Saving…" : "Save paths"}
         </button>
       </div>

@@ -846,6 +846,18 @@
       ]
     },
     {
+      "source": "app/platform/free-tools/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/platform/free-tools",
+      "parameters": []
+    },
+    {
+      "source": "app/platform/free-tools/what-is-left-of-a-sale/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/platform/free-tools/what-is-left-of-a-sale",
+      "parameters": []
+    },
+    {
       "source": "app/platform/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/platform",
@@ -1433,6 +1445,8 @@
     "components/form-keep.tsx",
     "components/form-response-deal.tsx",
     "components/forms-editor.tsx",
+    "components/free-tool-take-home.tsx",
+    "components/free-tools-hub.tsx",
     "components/funnel-ai-draft.tsx",
     "components/funnel-editor.tsx",
     "components/funnel-form-setup.tsx",
@@ -2129,6 +2143,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 146
+    "pageTemplates": 148
   }
 }

@@ -3,6 +3,7 @@ import { BLOG_POSTS } from "@/lib/blog";
 import { PAGES } from "@/lib/site-pages";
 import { SITE_URL } from "@/lib/site-url";
 import { HOUSE_HANDLE } from "@/lib/house-store";
+import { FREE_TOOLS, FREE_TOOLS_PATH } from "@/lib/free-tools";
 
 /**
  * Every page on this site that is worth finding, listed for search engines.
@@ -33,6 +34,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: "/pricing", priority: 0.8 },
     { path: "/blog", priority: 0.8 },
     { path: "/platform", priority: 0.8 },
+    { path: "/platform/free-tools", priority: 0.5 },
+    ...FREE_TOOLS.map((tool) => ({ path: `${FREE_TOOLS_PATH}/${tool.slug}`, priority: 0.4 })),
     { path: "/grow-sales", priority: 0.8 },
     { path: "/mission", priority: 0.6 },
     { path: "/help", priority: 0.6 },

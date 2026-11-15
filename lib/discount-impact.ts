@@ -11,7 +11,14 @@
  * checkout: the amount its discount took off, and the store's own note of
  * which discount it was. Nothing more is asked of Stripe. Rules the browser
  * can read too.
+ *
+ * Money in two currencies does not add up, so the table holds the store's
+ * own currency only, and sales paid in another one are totalled per
+ * currency beside it (discountElsewhere, 22 [E5] unit 2), each in its own
+ * money and never converted: a buyer who pays in euros on purpose, once
+ * buyers may (docs/buyer-currency-and-language.md), is said, not dropped.
  */
+import { formatMoney } from "@/lib/money";
 
 /** Which discount a sale had, as the checkout wrote it (lib/store-checkout.ts). */
 export type DiscountKind = "full" | "code" | "sale" | "fair" | "intro" | "comeback" | "welcome";
@@ -120,6 +127,58 @@ export function discountImpact(sales: DiscountSale[], refunded: Set<string>, cur
     .filter((row): row is NonNullable<typeof row> => Boolean(row))
     .map(({ emails, againEmails, ...row }) => ({ ...row, buyers: emails.size, again: againEmails.size }));
   return rows.some((row) => row.kind !== "full") ? rows : null;
+}
+
+/** The checkouts of one other currency over the same days, counted apart from the table. */
+export type DiscountElsewhere = {
+  currency: string;
+  sales: number;
+  /** Paid, after the discount, in that currency. */
+  cents: number;
+  /** Of these sales, how many had a discount. */
+  discounted: number;
+  /** What the discounts took off, in that currency. */
+  off: number;
+};
+
+/** A currency code as Stripe writes one: three lowercase letters. Anything else is not counted anywhere. */
+const CODE = /^[a-z]{3}$/;
+
+/**
+ * The checkouts the table leaves out because they were paid in another
+ * currency, totalled per currency in code order: the same days, the same
+ * checkouts (no one-click extras, no tips), each amount in its own currency
+ * and never converted. Pure.
+ */
+export function discountElsewhere(sales: DiscountSale[], currency: string, now: number, days = 90): DiscountElsewhere[] {
+  const since = now - days * 86_400_000;
+  const by = new Map<string, DiscountElsewhere>();
+  for (const sale of sales) {
+    if (sale.upsell || sale.currency === currency || !CODE.test(sale.currency)) continue;
+    if (sale.created < since || sale.created > now) continue;
+    const meta = (sale.row.metadata ?? {}) as Record<string, string>;
+    if (meta.kind === "tip") continue;
+    const row = by.get(sale.currency) ?? { currency: sale.currency, sales: 0, cents: 0, discounted: 0, off: 0 };
+    row.sales += 1;
+    row.cents += sale.cents;
+    if (discountKindOf(sale.row) !== "full") {
+      row.discounted += 1;
+      row.off += discountOff(sale.row);
+    }
+    by.set(sale.currency, row);
+  }
+  return [...by.values()].sort((a, b) => (a.currency < b.currency ? -1 : a.currency > b.currency ? 1 : 0));
+}
+
+/** The sentence under the table for sales in another currency, each in its own money; null when there are none. Pure. */
+export function elsewhereWords(rows: DiscountElsewhere[]): string | null {
+  if (rows.length === 0) return null;
+  const parts = rows.map((row) => {
+    const money = (cents: number) => formatMoney(cents, row.currency);
+    const sold = `${money(row.cents)} from ${row.sales.toLocaleString("en-US")} ${row.sales === 1 ? "sale" : "sales"}`;
+    return row.discounted > 0 ? `${sold}, ${row.discounted.toLocaleString("en-US")} with a discount taking ${money(row.off)} off` : sold;
+  });
+  return `Sales paid in another currency are not added to the table, because amounts in two currencies do not add up: ${parts.join("; ")}.`;
 }
 
 /** How a membership began, from what its checkout wrote on it. Pure. */

@@ -8,7 +8,7 @@ import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
 import { StartQuiz } from "@/components/start-quiz";
 import { quizFacts } from "@/lib/start-quiz-facts";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { PostCover } from "@/components/post-cover";
 import { ShareRow } from "@/components/share-row";
 import { ArticleData } from "@/components/structured-data";

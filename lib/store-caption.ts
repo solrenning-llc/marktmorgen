@@ -22,6 +22,10 @@ export async function addStoreCaption(store: Store, pathname: string, lang: stri
   const path = readStreamPath(pathname);
   if (!path || path.folder !== await storeFolder(storeRef(store))) return { ok: false, reason: "unknown" };
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
+  // A language AI captions were paid for and are still being written in: a file of the creator's own in it would be
+  // counted as the service's delivery (no refund for what it never wrote), and the service may later replace it. Every
+  // language autoWriting lists (a request not owed, not kept, not yet delivered in it) is refused by withOwnCaptions with
+  // "auto_writing", atomically with the upload and for a removal too, so no separate read before it is needed.
   return byHand(pathname, lang, () => addCaption(pathname, lang, file));
 }
 

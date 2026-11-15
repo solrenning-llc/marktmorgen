@@ -73,6 +73,7 @@ const MESSAGES: Record<string, string> = {
   caption_many: `A video holds captions in up to ${MAX_CAPTION_TRACKS} languages. Remove one first.`,
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
+  caption_writing: "AI captions in this language are still being written for this video. Add your own file once they are done, or after the request ends.",
   caption_unknown: "That video is not there anymore. Reload the page.",
   caption_auto_writing: `AI captions in this language are still on their way for this video. Until they arrive, or the charge for them is given back (no sooner than ${GIVE_UP_HOURS} hours after the order), captions in this language can't be uploaded or removed.`,
   caption_changing: "Captions in this language are still being changed for this video. Try again in a few minutes.",

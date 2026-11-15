@@ -13,6 +13,7 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import { HELP_CENTER_SEARCH, MOST_SCREEN_ANSWERS, SCREEN_HELP, helpAnchor, screenAnswers, screenOf } from "@/lib/screen-help";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
+import { HELP_AREAS } from "@/lib/help-areas";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { ScreenHelpPanel } from "@/components/screen-help";
 import { StudioHeader } from "@/components/studio-header";
@@ -50,6 +51,9 @@ is("only the screens without the top bar have no entry", screens.filter((screen)
 is(`at most ${MOST_SCREEN_ANSWERS} answers a screen, never one twice`, Object.entries(SCREEN_HELP).filter(([, list]) => list.length > MOST_SCREEN_ANSWERS || new Set(list).size !== list.length).map(([screen]) => screen), []);
 is("the most is three", MOST_SCREEN_ANSWERS, 3);
 is("every answer named is a question of the help center today", Object.values(SCREEN_HELP).flat().filter((q) => !questions.includes(q)), []);
+// A screen whose studio area already has its own answer in the help center (lib/help-areas.ts) shows it, so the
+// list empty only while no answer exists (Discord's answer came in 564 [HC1], unit 4, and its screen still said none).
+is("a screen whose area has its own answer never shows an empty list", HELP_AREAS.filter((area) => drawn.includes(area.folder) && (SCREEN_HELP[area.folder] ?? []).length === 0).map((area) => area.folder), []);
 is("most screens have at least one answer", Object.values(SCREEN_HELP).filter((list) => list.length > 0).length >= drawn.length - 2, true);
 is("the anchor of every help question is the one the help center draws", questions.filter((q) => helpAnchor(q) !== answerId(q)), []);
 

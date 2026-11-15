@@ -32,8 +32,8 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = real;
   }
-  // The GET and SMEMBERS, then one GET for each of the other MAX_STORES_PER_ACCOUNT - 1; the line prices one more.
-  is("no more Redis commands than the line prices", [commands, commands <= ACCOUNT_STORES_GUARD.commandsPerRead], [2 + MAX_STORES_PER_ACCOUNT - 1, true]);
+  // The GET and SMEMBERS, then the other MAX_STORES_PER_ACCOUNT - 1 stores in one MGET: three, whatever their number.
+  is("no more Redis commands than the line prices", [commands, commands <= ACCOUNT_STORES_GUARD.commandsPerRead], [3, true]);
 
   part("The line, the same for every plan, and above zero");
   const line = COST_LINES.find((row) => row.id === "account-stores-guard");

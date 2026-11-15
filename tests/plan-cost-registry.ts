@@ -1061,14 +1061,14 @@ export const ASSISTANT_START_EXTRA_SECONDS = Math.max(0,
     PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds);
 /**
  * The account's stores read exactly before a plan is written on a store or ended for it (lib/store.ts keptElsewhere,
- * money HIGH of 15 November 2026): its GET and SMEMBERS, then one GET for each other store, at most
- * MAX_STORES_PER_ACCOUNT. An essential billing event reads it twice (the subscription search of the checkout or the
+ * money HIGH of 15 November 2026): its GET and SMEMBERS, then the other stores in one MGET (one command at Upstash
+ * whatever their number, at most MAX_STORES_PER_ACCOUNT keys), so three commands a read. An essential billing event reads it twice (the subscription search of the checkout or the
  * deletion, and the way back); a closing pass twice (its search, and once for every plan it asks to end, passed to
  * each: lib/plan-closing.ts refuseLatePlans). Upstash's $2 a million commands. The daily sync's reads, one for each
  * plan it would write down on a store, are the company's job, outside a plan: not priced here and not zero (null).
  */
 export const ACCOUNT_STORES_GUARD = {
-  commandsPerRead: 2 + MAX_STORES_PER_ACCOUNT,
+  commandsPerRead: 3,
   essentialReadsPerEvent: 2,
   closingReadsPerEvent: 2,
   usdPerCommand: 2 / 1_000_000,
@@ -1165,7 +1165,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/plan-closing.ts", names: ["keptElsewhere(store)", "elsewhere, onStopped"] },
       { file: "lib/billing-sync.ts", names: ["keptElsewhere(store)"] },
     ],
-    basis: "At most 2 + MAX_STORES_PER_ACCOUNT Redis commands a read (ACCOUNT_STORES_GUARD.commandsPerRead, counted in tests/account-stores-guard-cost.test.ts), twice for every essential billing event (the subscription search, the way back) and twice for each closing pass (its search, and once for all the plans it asks to end), at Upstash's $2 a million. The daily sync's reads are the company's job, not a plan's: unknown (null), never zero. No sale, price, quota or gate is activated.",
+    basis: "Three Redis commands a read, the other stores (at most MAX_STORES_PER_ACCOUNT) in one MGET (ACCOUNT_STORES_GUARD.commandsPerRead, counted in tests/account-stores-guard-cost.test.ts), twice for every essential billing event (the subscription search, the way back) and twice for each closing pass (its search, and once for all the plans it asks to end), at Upstash's $2 a million. The daily sync's reads are the company's job, not a plan's: unknown (null), never zero. No sale, price, quota or gate is activated.",
   },
   {
     id: "assistant-start-reads",

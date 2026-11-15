@@ -48,7 +48,7 @@ import { cache } from "react";
 import { pointDomain } from "@/lib/domains";
 import { rememberListing } from "@/lib/directory-index";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, deleteIfHeldOnly, holdLock, releaseLock, releaseLockStrict, setIfHeld, takeLock } from "@/lib/redis-lock";
 import {CONTRACT_ADMISSION_COVERAGE,canonicalFinancialSnapshot} from "@/lib/contract-funding-rules";
 import { type ProductFile } from "@/lib/product-file";
@@ -1390,8 +1390,12 @@ export async function accountStoresExact(email: string): Promise<Store[]> {
   const main = head[0] === null ? null : parseStore(head[0]);
   if (head[0] !== null && !main) throw new UnknownReplyError("an account's first store");
   const ids = members.filter((id) => STORE_ID_PATTERN.test(id));
-  const records = ids.length ? repliesFor(await redisPipeline(await Promise.all(ids.map(async (id) => ["GET", await ownerKey(extraRef(id))]))), ids.length) : [];
-  if (!records) throw new UnknownReplyError("an account's stores");
+  // The other stores in one MGET (one command whatever their number, as Upstash counts it), read exactly: a list with
+  // one reply for each id asked, or unknown.
+  const keys = await Promise.all(ids.map(async (id) => await ownerKey(extraRef(id))));
+  const got = ids.length ? repliesFor(await redisPipeline([["MGET", ...keys]]), 1) : [[]];
+  const records = got ? listSlots(got[0]) : null;
+  if (!records || records.length !== ids.length) throw new UnknownReplyError("an account's stores");
   const others: Store[] = [];
   for (const raw of records) {
     if (raw === null) continue;

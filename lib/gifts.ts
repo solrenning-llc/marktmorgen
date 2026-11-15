@@ -342,8 +342,14 @@ export async function deliverGift(input: {
 
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (buyer) {
-    const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents;
-    const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+    // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+    // three-letter currency. Anything else leaves the line out, never the catalog's current price or the store's own
+    // currency.
+    const amount = session.amount_total;
+    const currency = session.currency;
+    const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+      ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+      : null;
     await sendEmail({ meter: { by: "order" },
       from: input.from,
       to: buyer,
@@ -353,7 +359,7 @@ export async function deliverGift(input: {
         "",
         g.aGift(title),
         g.giftFor(gift.to),
-        g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+        ...(paid ? [g.paidLine(paid)] : []),
         g.orderRef(sessionId),
         ...consentEmailLines(store, session.metadata),
         "",
@@ -441,6 +447,10 @@ export async function revokeRefundedGifts(
         // No record: nothing of this gift is held as a purchase any more (null). A record that does not read is
         // unknown, never "no items" (rule 30, Claude 4 on #2781).
         let items: string[] = [];
+        // Only what this gift gave (as lib/group-buy.ts and lib/preorders.ts): grantImported writes with HSETNX, so a
+        // gift to an address that already held the product another way (a PayPal purchase, a place, a pre-order, an
+        // import, an earlier gift) wrote nothing, and its refund must leave that other purchase and its course alone.
+        let ours = false;
         if (typeof given === "string") {
           let v: unknown;
           try {
@@ -449,8 +459,17 @@ export async function revokeRefundedGifts(
             v = undefined;
           }
           if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+          const job = (v as { job?: unknown }).job;
+          // A job that is not text is unknown, never "came another way": the row waits to be tried again.
+          if (typeof job !== "string") return false;
+          ours = job === `gift:${gift.id}`;
           const listed = (v as { items?: unknown }).items;
           items = Array.isArray(listed) ? listed.filter((item): item is string => typeof item === "string") : [];
+        }
+        if (typeof given === "string" && !ours) {
+          // Nothing of this gift is held: it is marked taken back, and what came another way stays.
+          if (!(await saveGift({ ...gift, revoked: now() }, GIFT_KEPT_SECONDS))) return false;
+          return markRead(sid, id);
         }
         // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the
         // purchase, so the next run takes both away again; taking a course away twice is harmless.

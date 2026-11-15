@@ -398,8 +398,9 @@ export default function PrivacyPage() {
           that names the booking and its time, and we keep a mark that each
           reminder was sent for 14 days. If the buyer moves the booking
           to another time from the link in their email, we keep the new time
-          and how many times it was moved, tied to that checkout, for 200
-          days. The line in the creator&apos;s diary that keeps the time taken
+          and how many times it was moved, tied to that checkout, until 200
+          days after the call it was moved to, and never longer than two
+          years. The line in the creator&apos;s diary that keeps the time taken
           is let go {PAST_CALL_DAYS} days after the call ends; the booking
           itself stays on the creator&apos;s Stripe account. The same kind of cookie, for
           the same 32 minutes, is set when someone starts to buy a product sold
@@ -786,7 +787,16 @@ export default function PrivacyPage() {
           when the creator is trying two, each sent to a part of the list
           chosen at random. The tag is the same for everyone who got that
           email or that subject line: it lets the store count visits and sales
-          by email, and says nothing about who you are. Which of a
+          by email, and says nothing about who you are. In a one-off email
+          sent since November 6, 2026, each link first opens an address of
+          ours, the same for everyone who got the email, so the creator can
+          change where a wrong link leads after sending. Opening it counts as
+          one request of the store, as a page of the store does. Nothing about
+          who opened it, or when, is kept for that email or shown to the
+          creator. As on every page of the store, to limit abuse, a one-way
+          hash of the network address it is opened from is counted with that
+          day&apos;s requests from the same address, never with the email.
+          Which of a
           creator&apos;s automatic emails reach you is decided by what their
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you

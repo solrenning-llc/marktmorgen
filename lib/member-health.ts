@@ -20,6 +20,7 @@ import { type PauseSub, pausedNow } from "@/lib/membership-pause-rules";
 import { lastSeenMany } from "@/lib/learn";
 import { lastSeenIn, readConfig } from "@/lib/community";
 import { normaliseEmail } from "@/lib/auth";
+import { keepUnlessErased, suppressedAmong } from "@/lib/suppression";
 import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-health-rules";
 import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
@@ -242,19 +243,36 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
     }
   }
   const { rows, complete } = await runningMembers(store);
-  const { members, unscored } = await scoredMembers(store, rows, now);
+  const { members: scored, unscored } = await scoredMembers(store, rows, now);
+  // A buyer deleted from the store (lib/suppression.ts) whose subscription the provider still lists is counted below
+  // but never named (#4749): who was deleted is read exactly, and an answer that does not read throws, so nobody who
+  // may be deleted is named (CX-123 rule 24).
+  const erased = await suppressedAmong(store.listId, scored.map((m) => m.email));
   const counts: Record<Band, number> = { well: 0, slipping: 0, risk: 0 };
   let atRisk = 0;
   let atRiskElsewhere = 0;
-  for (const m of members) {
+  for (const m of scored) {
     counts[m.band] += 1;
     if (m.band !== "risk") continue;
     if (m.own && m.own.currency !== store.currency) atRiskElsewhere += 1;
     else atRisk += m.monthly;
   }
+  const members = scored.filter((m) => !erased.has(m.email));
   const health: Health = { at: Math.floor(now / 1000), currency: store.currency, members, counts, atRisk, atRiskElsewhere, unscored, complete };
-  if (isRedisConfigured()) await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
-  return health;
+  if (!isRedisConfigured()) return health;
+  const named = members.map((m) => m.email);
+  if (!store.listId || !named.length) {
+    await redisPipeline([["SET", cacheKey(store), JSON.stringify(health), "EX", CACHE_SECONDS]]).catch(() => {});
+    return health;
+  }
+  // Kept only when nobody it names was deleted since the check above, in one step with the write (keepUnlessErased):
+  // an erasure that finished while this reading was on its way leaves no copy naming that person. When the step
+  // cannot run, nothing is kept.
+  const gone = await keepUnlessErased(cacheKey(store), store.listId, JSON.stringify(health), CACHE_SECONDS, named).catch(async () => {
+    await redisPipeline([["DEL", cacheKey(store)]]).catch(() => {});
+    return null;
+  });
+  return gone?.size ? { ...health, members: members.filter((m) => !gone.has(m.email)) } : health;
 }
 
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */

@@ -599,7 +599,9 @@ type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; 
  * Whether an Orders v2 answer is this order's own (#4444, Codex X8): its `id` is the order asked about, and every
  * capture in it whose `up` link names an order names this one. Amount, currency and payee alone do not tell two orders
  * of the same price apart, so an answer holding another order's completed record would otherwise confirm this one with
- * that order's capture and buyer. An answer that is not this order's says nothing about it: its outcome is unknown.
+ * that order's capture and buyer. An `up` link that is there but does not name exactly this order's Orders v2 path
+ * (no href, not text, another URL) is not proof either. An answer that is not this order's says nothing about it: its
+ * outcome is unknown.
  */
 function ownAnswer(done: Record<string, unknown>, order: string): boolean {
   if (done.id !== order) return false;
@@ -609,9 +611,17 @@ function ownAnswer(done: Record<string, unknown>, order: string): boolean {
     for (const capture of captures) {
       const links = Array.isArray(capture?.links) ? (capture.links as { rel?: unknown; href?: unknown }[]) : [];
       for (const link of links) {
-        if (link?.rel !== "up" || typeof link.href !== "string") continue;
-        const named = /\/v2\/checkout\/orders\/([^/?#]+)/.exec(link.href)?.[1];
-        if (named !== undefined && named !== order) return false;
+        if (link?.rel !== "up") continue;
+        // A capture with no links at all is allowed by the API's shape; an `up` link present is declared evidence, so
+        // it must be text whose path is exactly this order's (Codex g's MÉDIO on #4453). Anything else is unknown.
+        if (typeof link.href !== "string") return false;
+        let path: string;
+        try {
+          path = new URL(link.href).pathname;
+        } catch {
+          return false;
+        }
+        if (path !== `/v2/checkout/orders/${order}`) return false;
       }
     }
   }

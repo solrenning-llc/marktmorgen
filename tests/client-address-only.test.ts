@@ -20,6 +20,7 @@ const OWNER = "lib/request-guard.ts";
 /** Still reading by hand, each reserved by the open pull requests named (15/11/2026). */
 const LEFT: Record<string, string> = {
   "app/[handle]/page.tsx": "#2850, #3067, #3636, #4535 and others",
+  // Whichever of claude7/auth-link-limit and claude7/client-address-unify merges last removes this line.
   "app/api/auth/request/route.ts": "#3712; moved on claude7/auth-link-limit",
   "app/api/creators/route.ts": "#3495, #3584, #3717",
   "app/api/store/free/route.ts": "#3440, #3636, #4636 and others",

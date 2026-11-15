@@ -285,8 +285,13 @@ export async function POST(request: NextRequest) {
       // Reading the inviting program's people for the cap is paid from the answering creator's own studio requests
       // (`charge`, guarded.store), taken at its worst first and given back down to what was read. Not taken: 429,
       // nothing read or written, the offer kept.
-      const made = await acceptPartnership(from, guarded.email, invite.share, charge);
+      const made = await acceptPartnership(from, guarded.email, invite.share, charge, invite.at);
       if (!made.ok && made.reason === "resting") return fail("studio_used", 429);
+      // Declined or removed by that store after this offer was made (#4045): the offer no longer stands, taken out.
+      if (!made.ok && made.reason === "withdrawn") {
+        await answerInvite(guarded.email, invite.id);
+        return fail("gone");
+      }
       if (!made.ok && (made.reason === "committed" || made.reason === "crowded")) return fail(`offer_${made.reason}`, 409);
       if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
       await answerInvite(guarded.email, invite.id);

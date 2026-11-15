@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { lockRead } from "@/lib/two-step-unknown";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -46,7 +47,9 @@ export async function POST(request: NextRequest) {
     // own, so the file is read where the id points (readDelivery), not on a product only.
     // Read once, only for a new file (the lock and the episodes need it); a detach reads it after its write instead.
     const delivery = detach ? null : await readDelivery(store, id);
-    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(delivery)) return refusedJson("locked");
+    const lock = detach ? false : await lockRead(lockedFor(request, "products", "replace"));
+    if (lock instanceof Response) return lock;
+    if (lock && deliveredFile(delivery)) return refusedJson("locked");
 
     // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
     // first (754 [STN1]; Claude 6 on #3432). A read that fails throws, so nothing is taken off (rule 24).

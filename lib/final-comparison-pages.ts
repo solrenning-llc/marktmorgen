@@ -22,18 +22,40 @@ function quotedPrices(plans: readonly CompetitorPlanPrice[], interval: "month" |
     return p.name+": "+interval+" purchase quote unverified";
   }).join("; ");
 }
+/**
+ * The date a page may claim its sources were read: the oldest read among every dated source of that competitor and
+ * of the page (#4571, batch 6). The six pages used one shared date; a competitor whose pages sit behind a check we do
+ * not pass (Substack, Patreon, Thinkific) keeps its own true date instead of holding the others back or being
+ * dated as re-read when it was not.
+ */
+function oldestRead(competitor: unknown, extra: readonly OfficialPriceSource[]): string {
+  const dates: string[] = extra.map(s=>s.readOn);
+  const walk=(v: unknown): void => {
+    if(Array.isArray(v)){v.forEach(walk);return;}
+    if(v && typeof v==="object"){
+      const o=v as Record<string, unknown>;
+      if(typeof o.readOn==="string")dates.push(o.readOn);
+      Object.values(o).forEach(walk);
+    }
+  };
+  walk(competitor);
+  const oldest=[...dates].sort()[0];
+  if(!oldest||!/^\d{4}-\d{2}-\d{2}$/.test(oldest))throw new Error("A final comparison page has no dated source");
+  return new Date(oldest+"T00:00:00Z").toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric",timeZone:"UTC"});
+}
 function page(d: Detail): TopicPage {
   const competitor=COMPETITOR_PRICES[d.key];
+  const read=oldestRead(competitor,d.sources);
   return {
     slug:d.key,section:"proof",eyebrow:"A sourced comparison",
     title:"Marktmorgen vs",highlight:competitor.name,
     intro:d.intro,
     seo:{title:"Marktmorgen vs "+competitor.name,description:"A "+competitor.name+" alternative where products and a creator's store share one studio. Compare sourced prices, practical limits and tradeoffs. Marktmorgen paid plans remain closed."},
-    badge:{label:"Sources read October 20, 2026",tone:"proof"},accent:"#6d4aff",
+    badge:{label:"Sources read "+read,tone:"proof"},accent:"#6d4aff",
     blocks:[
       {kind:"lead",text:d.lead},
       {kind:"table",title:"Subscriptions, fees and practical scope",head:["Compare",competitor.name,"Marktmorgen"],
-       note:"USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs.",
+       note:"USD. Sources read "+read+". Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs.",
        rows:[
         ["Monthly subscription",quotedPrices(competitor.plans,"month"),TIERS.map(t=>PLAN_TITLES[t]+": "+publishedPriceWords(t,"month")).join("; ")],
         ["Annual billing",quotedPrices(competitor.plans,"year"),TIERS.map(t=>PLAN_TITLES[t]+": "+publishedPriceWords(t,"year")).join("; ")],
@@ -43,7 +65,7 @@ function page(d: Detail): TopicPage {
        ]},
       {kind:"features",title:"Inspect the existing tools",items:d.tools},
       {kind:"limits",title:"Where they are ahead",items:d.ahead},
-      {kind:"features",title:"Official sources and scope",intro:"Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised.",
+      {kind:"features",title:"Official sources and scope",intro:"Read "+read+". No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised.",
        items:[...d.sources.map(s=>({icon:"info" as const,title:s.label,body:"Read the provider's current terms and the scope of the quoted features and charges.",href:s.url})),
        {icon:"scale",title:"All published comparisons",body:"Read other comparisons and their own dated sources.",href:"/proof/comparisons"}]},
     ],

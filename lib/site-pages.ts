@@ -111,11 +111,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Teachable",
     intro: "A Teachable alternative where courses sit beside other products in a creator's store. Compare catalog limits, student experience and payment costs before moving a school.",
     seo: { title: "Marktmorgen vs Teachable", description: "A Teachable alternative where courses and other products share a creator's store. Compare sourced prices, catalog limits and payment fees. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "A school and a multi-product store can serve different needs. Marktmorgen already supports courses, quizzes and certificates; that does not make its student experience identical to Teachable's. Inspect the actual course tools, product limits and separate payment fees." },
-      { kind: "table", title: "Courses, subscriptions and fees", head: ["Compare", "Teachable", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Product counts are catalog limits, not a promise of unlimited storage or bandwidth. Taxes and payment processing are separate.", rows: [
+      { kind: "table", title: "Courses, subscriptions and fees", head: ["Compare", "Teachable", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Product counts are catalog limits, not a promise of unlimited storage or bandwidth. Taxes and payment processing are separate.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.teachable.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual billing", COMPETITOR_PRICES.teachable.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform and processing fees", COMPETITOR_PRICES.teachable.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
@@ -132,7 +132,7 @@ export const PAGES: TopicPage[] = [
         "Teachable's Custom offer includes migration assistance and school-specific onboarding. Marktmorgen does not promise that service through its self-service importer.",
         "Teachable sells paid courses today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No worldwide tax exemption, universal course fit or net-margin result is inferred from the fee table.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No worldwide tax exemption, universal course fit or net-margin result is inferred from the fee table.", items: [
         { icon: "list", title: COMPETITOR_PRICES.teachable.plans[0].source.label, body: "Monthly prices, annual-billing display, product caps, trial, student apps and Custom services.", href: COMPETITOR_PRICES.teachable.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.teachable.plans[0].feeSource.label, body: "Plan fee versus processing and optional bundles.", href: COMPETITOR_PRICES.teachable.plans[0].feeSource.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
@@ -147,13 +147,13 @@ export const PAGES: TopicPage[] = [
     highlight: "HighLevel",
     intro: "A HighLevel alternative where CRM records sit beside a creator's store and products. Compare the audience, channels and agency model before treating these as equivalent subscriptions.",
     seo: { title: "Marktmorgen vs HighLevel", description: "A HighLevel alternative where CRM and products share a creator's store. Compare subscription prices, usage costs, channels and agency scope. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Marktmorgen already has custom contact fields, deals, pipelines and branching workflows. That does not make it a phone system or an agency-resale platform. Choose by the work and channels you need, including the usage bill." },
-      { kind: "table", title: "CRM, subscriptions and channel costs", head: ["Compare", "HighLevel", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Subscription prices do not include every optional service, provider charge or tax. A store is not the same billing unit as an agency sub-account.", rows: [
+      { kind: "table", title: "CRM, subscriptions and channel costs", head: ["Compare", "HighLevel", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Subscription prices do not include every optional service, provider charge or tax. A store is not the same billing unit as an agency sub-account.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.highlevel.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
-        ["Annual subscription", COMPETITOR_PRICES.highlevel.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
+        ["Annual subscription", COMPETITOR_PRICES.highlevel.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["CRM and accounts", "CRM and pipelines. Starter has 3 sub-accounts; Unlimited and Agency Pro have unlimited sub-accounts.", "Contact fields, deals and pipelines within each store. " + pipelineLimitWords()],
         ["Communication channels", "Email, SMS, calling and social-media tools; usage and add-on costs apply.", "Opt-in email with published send limits; no SMS, WhatsApp or phone-call sending. Booked video calls are a different product."],
         ["Usage charges", COMPETITOR_PRICES.highlevel.feeScope, "List emails use published plan allowances. Stripe charges separately for payments; bounded paid add-ons keep their own limits."],
@@ -170,7 +170,7 @@ export const PAGES: TopicPage[] = [
         "HighLevel offers agency-wide account management. Marktmorgen's pipelines and their limits belong to individual stores.",
         "HighLevel sells paid subscriptions today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No result, revenue, cost-saving or net-margin claim is made from either subscription price.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No result, revenue, cost-saving or net-margin claim is made from either subscription price.", items: [
         { icon: "list", title: COMPETITOR_PRICES.highlevel.plans[0].source.label, body: "Monthly and annual prices, sub-accounts, channels and SaaS Mode.", href: COMPETITOR_PRICES.highlevel.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.highlevel.usage.source.label, body: "Usage billing, wallets, optional services and rebilling.", href: COMPETITOR_PRICES.highlevel.usage.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
@@ -228,17 +228,17 @@ export const PAGES: TopicPage[] = [
     eyebrow: "A sourced comparison",
     title: "Marktmorgen vs",
     highlight: "Whop",
-    intro: "A Whop alternative where a creator's store uses their own Stripe account. Compare discovery, payment services and payout fees rather than treating every platform fee as the same charge.",
+    intro: "A Whop alternative where a creator's store uses their own Stripe account. Compare payment services and payout fees rather than treating every platform fee as the same charge.",
     seo: { title: "Marktmorgen vs Whop", description: "A Whop alternative where a creator's store uses their own Stripe account. Compare dated payment, payout and optional-service fees. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Choose the distribution and payment setup you need. A direct Stripe store does not bring a marketplace audience with it, and a payment-service quote is not a promise that every extra service or tax is included." },
-      { kind: "table", title: "Payments, payouts and discovery", head: ["Compare", "Whop", "Marktmorgen"], note: "USD. Sources read October 20, 2026. Whop's Standard quote has conditional additions; a payment fee is not an independently verified platform-share breakdown. Unknown charges are not zero.", rows: [
+      { kind: "table", title: "Payments, payouts and discovery", head: ["Compare", "Whop", "Marktmorgen"], note: "USD. Sources read November 15, 2026. Whop's Standard quote has conditional additions; a payment fee is not an independently verified platform-share breakdown. Unknown charges are not zero.", rows: [
         ["Subscription", "Standard pay-as-you-go has no setup or monthly fee. Custom pricing requires a quote.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month") + " or " + publishedPriceWords(t, "year")).join("; ")],
         ["Each payment", COMPETITOR_PRICES.whop.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
         ["Getting paid", COMPETITOR_PRICES.whop.payoutScope, "Payouts follow your connected Stripe account's schedule and fees. Creator and platform tax obligations still apply."],
-        ["Discovery", "A public Discover directory with business search.", "Your store has its own address and sharing links. No comparable discovery directory or guaranteed buyers are offered here."],
+        ["Discovery", "A Whop-run discovery directory could not be confirmed on November 15, 2026: the cited address now shows one business's page named Discover, and Whop's home page links no directory.", "Your store has its own address and sharing links. No discovery directory or guaranteed buyers are offered here."],
         ["Getting started", "Standard payment services are available now, subject to the provider's onboarding and eligibility.", PLANS_ON_SALE ? "Check the current plan terms before starting." : "Store setup is available. Paid plans and paid selling are not open yet."],
       ] },
       { kind: "features", title: "Inspect the store and payment setup", items: [
@@ -246,14 +246,13 @@ export const PAGES: TopicPage[] = [
         { icon: "store", title: "Community beside products", body: "Inspect the existing community, courses and product limits before assuming they replace your current setup.", href: "/platform/community" },
       ] },
       { kind: "limits", title: "Where they are ahead", items: [
-        "Whop has a public discovery directory. Marktmorgen does not promise a comparable audience source or marketplace placement.",
         "Whop Standard has no monthly subscription fee. Marktmorgen uses subscriptions with published limits.",
         "Whop offers several payout methods. Marktmorgen relies on the creator's connected Stripe payout options.",
         "Whop accepts paid business today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. This page does not certify a merchant-of-record arrangement, worldwide tax coverage or net margin for either platform.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. This page does not certify a merchant-of-record arrangement, worldwide tax coverage or net margin for either platform.", items: [
         { icon: "calculator", title: COMPETITOR_PRICES.whop.plans[0].source.label, body: "Card, international, optional-service and payout charges.", href: COMPETITOR_PRICES.whop.plans[0].source.url },
-        { icon: "list", title: COMPETITOR_PRICES.whop.discovery.source.label, body: "The actual public directory; inclusion does not promise traffic or sales.", href: COMPETITOR_PRICES.whop.discovery.source.url },
+        { icon: "list", title: COMPETITOR_PRICES.whop.discovery.source.label, body: "The address cited for its directory; on November 15, 2026 it showed one business's page.", href: COMPETITOR_PRICES.whop.discovery.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],
@@ -304,11 +303,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Circle",
     intro: "A Circle alternative where a community sits beside a creator's store and products. Compare live events, messaging and billing before choosing.",
     seo: { title: "Marktmorgen vs Circle", description: "A Circle alternative where community and products share a creator's store. Compare native live events, messaging and sourced billing terms. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Both products have community conversations and private messages. Marktmorgen's existing chat is not missing: its room checks for new messages while active. Compare the kind of conversation and event you need, rather than assuming these work identically." },
-      { kind: "table", title: "Community, price and payment terms", head: ["Compare", "Circle", "Marktmorgen"], note: "USD. Sources read October 20, 2026. An annual-billing monthly equivalent is not a monthly purchase option or a verified annual invoice. Taxes and processor charges are separate.", rows: [
+      { kind: "table", title: "Community, price and payment terms", head: ["Compare", "Circle", "Marktmorgen"], note: "USD. Sources read November 15, 2026. An annual-billing monthly equivalent is not a monthly purchase option or a verified annual invoice. Taxes and processor charges are separate.", rows: [
         ["Annual-billing display", COMPETITOR_PRICES.circle.plans.map(p => p.name + ": $" + p.annualEquivalentMonthlyCents / 100 + "/month equivalent").join("; ") + ". " + COMPETITOR_PRICES.circle.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Monthly subscription", "Current monthly purchase prices not verified here; check Circle's quote.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Platform share and processing", COMPETITOR_PRICES.circle.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Stripe processing is separate; direct payments do not remove tax obligations."],
@@ -326,7 +325,7 @@ export const PAGES: TopicPage[] = [
         "Circle Plus offers branded iOS and Android listings. Marktmorgen has no app-store listing.",
         "Circle sells paid community plans today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. A missing billing quote remains unknown, not zero.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. A missing billing quote remains unknown, not zero.", items: [
         { icon: "list", title: COMPETITOR_PRICES.circle.plans[0].source.label, body: "Annual-billing display, trial, Email Hub and branded-app scope.", href: COMPETITOR_PRICES.circle.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.circle.plans[0].feeSource.label, body: "Platform shares and the separate processor and Billing charges.", href: COMPETITOR_PRICES.circle.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.circle.live.source.label, body: "Native broadcasting, interactive rooms and recordings.", href: COMPETITOR_PRICES.circle.live.source.url },
@@ -343,11 +342,11 @@ export const PAGES: TopicPage[] = [
     highlight: "ClickFunnels",
     intro: "A ClickFunnels alternative where a creator's store, products and funnels share a block-based studio. Compare the editor, payment terms and migration limits before moving.",
     seo: { title: "Marktmorgen vs ClickFunnels", description: "A ClickFunnels alternative where store pages and funnels share a block-based studio. Compare prices, page tests and migration limits. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Both platforms can use your existing Stripe account, and neither adds a platform share to those payments. That alone is not a reason to move. Compare the design controls, email allowance and what your current funnel needs." },
-      { kind: "table", title: "Prices, pages and payment terms", head: ["Compare", "ClickFunnels", "Marktmorgen"], note: "USD. Official sources read October 20, 2026 are linked below. Annual charges are paid yearly; Dominate has no monthly purchase option. Processor and optional-service charges are separate.", rows: [
+      { kind: "table", title: "Prices, pages and payment terms", head: ["Compare", "ClickFunnels", "Marktmorgen"], note: "USD. Official sources read November 15, 2026 are linked below. Annual charges are paid yearly; Dominate has no monthly purchase option. Processor and optional-service charges are separate.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.clickfunnels.plans.map(p => p.name + ": " + (p.monthlyCents === null ? "annual only" : "$" + p.monthlyCents / 100)).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual subscription", COMPETITOR_PRICES.clickfunnels.plans.map(p => p.name + ": $" + (p.annualCents / 100).toLocaleString("en-US") + "/year").join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform share and processing", COMPETITOR_PRICES.clickfunnels.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Stripe charges its own processing fees."],
@@ -365,12 +364,12 @@ export const PAGES: TopicPage[] = [
         "ClickFunnels publishes larger email-send allowances, starting on Launch. Marktmorgen's Studio and Scale list-email limits are shown in the table.",
         "ClickFunnels sells paid plans now. Marktmorgen's paid plans remain closed, so a prepared store is not an open paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. The page-test guide allows one variant per funnel step; it does not support a claim of unlimited simultaneous page variants.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. The page-test guide allows one variant per funnel step; it does not support a claim of unlimited simultaneous page variants.", items: [
         { icon: "list", title: COMPETITOR_PRICES.clickfunnels.plans[0].source.label, body: "Monthly and exact annual charges, including annual-only Dominate, and email allowances.", href: COMPETITOR_PRICES.clickfunnels.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.clickfunnels.plans[0].feeSource.label, body: "Existing Stripe accounts, processor fees and optional billing or invoice charges.", href: COMPETITOR_PRICES.clickfunnels.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.clickfunnels.trial.source.label, body: "Its standard trial and account setup.", href: COMPETITOR_PRICES.clickfunnels.trial.source.url },
         { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.split.source.label, body: "Original and one variant page per funnel step.", href: COMPETITOR_PRICES.clickfunnels.split.source.url },
-        { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.editor.source.label, body: "The published editor and platform capabilities.", href: COMPETITOR_PRICES.clickfunnels.editor.source.url },
+        { icon: "layout", title: COMPETITOR_PRICES.clickfunnels.editor.source.label, body: "The drag-and-drop page editor and its templates.", href: COMPETITOR_PRICES.clickfunnels.editor.source.url },
         { icon: "scale", title: "All published comparisons", body: "Read the other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],
@@ -383,11 +382,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Skool",
     intro: "A Skool alternative where a community can sit beside products, courses and paid calls in the creator's store. Compare payment fees, live events and discovery before choosing.",
     seo: { title: "Marktmorgen vs Skool", description: "A Skool alternative where community and products share the creator's store. Compare Hobby and Pro fees, native live calls and discovery. Marktmorgen paid selling remains closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Marktmorgen starts at " + publishedPriceWords("creator", "month") + "; Skool Hobby is $" + COMPETITOR_PRICES.skool.plans[0].monthlyCents / 100 + " a month. Skool provides its own live-call and discovery tools. Inspect Marktmorgen if you need several product types and direct Stripe charges, rather than assuming either platform is the best fit for every community." },
-      { kind: "table", title: "Subscriptions, payment fees and scope", head: ["Compare", "Skool", "Marktmorgen"], note: "USD. Sources read October 20, 2026 are linked below. Skool's listed payment fee is not a separate quote for a Marktmorgen payment: Stripe processing still applies on your own account. Taxes and optional services may add to either side.", rows: [
+      { kind: "table", title: "Subscriptions, payment fees and scope", head: ["Compare", "Skool", "Marktmorgen"], note: "USD. Sources read November 15, 2026 are linked below. Skool's listed payment fee is not a separate quote for a Marktmorgen payment: Stripe processing still applies on your own account. Taxes and optional services may add to either side.", rows: [
         ["Monthly subscription", COMPETITOR_PRICES.skool.plans.map(p => p.name + ": $" + p.monthlyCents / 100).join("; "), TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month")).join("; ")],
         ["Annual billing", COMPETITOR_PRICES.skool.annualScope, TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "year")).join("; ")],
         ["Each paid transaction", COMPETITOR_PRICES.skool.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% to Marktmorgen").join("; ") + ". Your Stripe processing fees are separate."],
@@ -405,7 +404,7 @@ export const PAGES: TopicPage[] = [
         "Skool has a community-discovery directory with eligibility rules. Marktmorgen does not promise a comparable discovery network or a supply of buyers.",
         "Skool offers paid community subscriptions today. Marktmorgen's paid plans are closed; setting up a store does not enable a paid checkout.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No audience size, webinar capacity or guaranteed results are claimed here.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No audience size, webinar capacity or guaranteed results are claimed here.", items: [
         { icon: "list", title: COMPETITOR_PRICES.skool.plans[0].source.label, body: "Hobby and Pro monthly prices; annual billing headline.", href: COMPETITOR_PRICES.skool.plans[0].source.url },
         { icon: "calculator", title: COMPETITOR_PRICES.skool.plans[0].feeSource.label, body: "Transaction bands, the bank-payout account and optional acquisition charges.", href: COMPETITOR_PRICES.skool.plans[0].feeSource.url },
         { icon: "info", title: COMPETITOR_PRICES.skool.trial.source.label, body: "Trial, renewal and cancellation rules.", href: COMPETITOR_PRICES.skool.trial.source.url },
@@ -433,7 +432,7 @@ export const PAGES: TopicPage[] = [
         { icon: "scale", title: "Marktmorgen vs ClickFunnels", body: "Editor, payment fees and the existing migration guide.", href: "/proof/clickfunnels" },
         { icon: "scale", title: "Marktmorgen vs Circle", body: "Native live events, messaging and billing terms.", href: "/proof/circle" },
         { icon: "scale", title: "Marktmorgen vs Kit", body: "Email allowances, commerce fees and newsletter tools.", href: "/proof/kit" },
-        { icon: "scale", title: "Marktmorgen vs Whop", body: "Payment fees, payouts and public discovery.", href: "/proof/whop" },
+        { icon: "scale", title: "Marktmorgen vs Whop", body: "Payment fees and payouts.", href: "/proof/whop" },
         { icon: "scale", title: "Marktmorgen vs Hotmart", body: "Current USD fee bands, payment model and distribution tools.", href: "/proof/hotmart" },
         { icon: "scale", title: "Marktmorgen vs HighLevel", body: "CRM, channel costs and agency scope.", href: "/proof/highlevel" },
         { icon: "scale", title: "Marktmorgen vs Teachable", body: "Course catalogs, student experience and processing fees.", href: "/proof/teachable" },

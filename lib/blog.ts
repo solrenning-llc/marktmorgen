@@ -72,7 +72,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "p",
-      "text": "On October 20, Kajabi listed Basic at $179 monthly, Growth at $249 and Pro at $499. Annual billing displayed monthly equivalents of $143, $199 and $399. Those equivalents describe an annual commitment, not monthly purchase prices."
+      "text": "On November 15, Kajabi listed Basic at $179 monthly, Growth at $249 and Pro at $499. Annual billing displayed monthly equivalents of $143, $199 and $399. Those equivalents describe an annual commitment, not monthly purchase prices."
     },
     {
       "type": "h2",
@@ -105,7 +105,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Sources read October 20, 2026. These are dated published USD figures, not a personalized checkout quote, earnings forecast or assertion that one product replaces everything in another."
+      "text": "Sources read November 15, 2026. These are dated published USD figures, not a personalized checkout quote, earnings forecast or assertion that one product replaces everything in another."
     },
     {
       "type": "links",
@@ -143,7 +143,7 @@ COMMUNITY_PLATFORM_GUIDE,
   "body": [
     {
       "type": "p",
-      "text": "Skool's pricing page listed Hobby at $9 a month and Pro at $99 when read on October 20, 2026. It advertises two months free for yearly billing; this article does not turn that headline into a verified annual invoice."
+      "text": "Skool's pricing page listed Hobby at $9 a month and Pro at $99 when read on November 15, 2026. It advertises two months free for yearly billing; this article does not turn that headline into a verified annual invoice."
     },
     {
       "type": "h2",
@@ -175,7 +175,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Official sources read October 20, 2026. No exact annual invoice or unresolved transaction band is treated as zero. Marktmorgen paid sales remain closed; its community and pricing pages describe actual scope and limits, not a Skool Discovery substitute."
+      "text": "Official sources read November 15, 2026. No exact annual invoice or unresolved transaction band is treated as zero. Marktmorgen paid sales remain closed; its community and pricing pages describe actual scope and limits, not a Skool Discovery substitute."
     },
     {
       "type": "links",
@@ -225,7 +225,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "p",
-      "text": "Teachable's October 20 pricing listed Starter, Builder and Growth at $39, $89 and $189 monthly, with annual monthly equivalents of $29, $69 and $139. Product counts were 5, 10 and 50. Custom needs a quote; the annual display is not an independently verified invoice."
+      "text": "Teachable's November 15 pricing listed Starter, Builder and Growth at $39, $89 and $189 monthly, with annual monthly equivalents of $29, $69 and $139. Product counts were 5, 10 and 50. Custom needs a quote; the annual display is not an independently verified invoice."
     },
     {
       "type": "h2",
@@ -262,7 +262,7 @@ COMMUNITY_PLATFORM_GUIDE,
     },
     {
       "type": "note",
-      "text": "Sources read October 20, 2026. This checklist makes no earnings, savings or blanket feature-equivalence claim. Existing buyer languages, creator content and permissions must survive any migration."
+      "text": "Sources read November 15, 2026. This checklist makes no earnings, savings or blanket feature-equivalence claim. Existing buyer languages, creator content and permissions must survive any migration."
     },
     {
       "type": "links",

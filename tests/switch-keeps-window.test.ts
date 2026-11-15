@@ -546,6 +546,16 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
+    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
+    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
+    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
+    // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
+    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
+    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // #4246 (claude7/decided-flow-ses-wait) counts the waits for room at Amazon SES in WORST_COMMANDS_PER_RUN
     // (SES_WAITS_PER_RUN × (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY), lib/flow-limits.ts): a dearer
     // workflows line, so each plan keeps less, every figure still above zero (MR). Figures as the model computes them.
@@ -555,13 +565,16 @@ async function main(): Promise<void> {
     // unchanged; every figure above zero (MR).
     // And each counted wait priced at the dearer of an ordinary try and an SES try past its parks
     // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
-    is("11: Store, Studio and Scale keep 45.11, 311.76 and 700.20 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "311.76", "700.20"]);
+    // With main's erasure probe (#4542) and #4015 merged in: Store 45.10, Studio 311.76, Scale 700.19, every figure above
+    // zero (MR); cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 311.76 and 700.19 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "311.76", "700.19"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
     // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
     // The same on the yearly month: Studio 256.74 → 256.64, Scale 577.10 → 576.93; Store unchanged.
-    is("11: and 37.05, 256.64 and 576.93 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "256.64", "576.93"]);
+    // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
+    is("11: and 37.04, 256.63 and 576.92 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "256.63", "576.92"]);
   } finally {
     Date.now = realNow;
   }

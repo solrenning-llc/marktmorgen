@@ -28,10 +28,10 @@ const AAA_RULES = ['"wcag2aaa"', '"color-contrast-enhanced"'];
 export const ACCESSIBILITY_CHECKS: readonly AccessibilityCheck[] = [
   {
     name: "Public pages",
-    what: "The home page, the price list and the sign-in page, at five screen widths from 320 to 1920 pixels, in Chromium, Firefox and WebKit, with automated checks that include the enhanced (AAA) contrast rule, plus wider text spacing, reduced motion, high contrast (forced colors) and a narrow screen.",
+    what: "The home page, the price list, the fee page and the sign-in page, at five screen widths from 320 to 1920 pixels, in Chromium, Firefox and WebKit, with automated checks that include the enhanced (AAA) contrast rule, plus wider text spacing, reduced motion, high contrast (forced colors) and a narrow screen.",
     workflow: ".github/workflows/accessibility-public-matrix.yml",
     script: "tests/e2e/accessibility-public-matrix.mjs",
-    proof: [ENGINES, ...AAA_RULES, '["/","/pricing","/signin"]', "[320,390,768,1280,1920]", '"text-spacing","reduced-motion","forced-colors","reflow-320"'],
+    proof: [ENGINES, ...AAA_RULES, '["/","/pricing","/pricing/fees","/signin"]', "[320,390,768,1280,1920]", '"text-spacing","reduced-motion","forced-colors","reflow-320"'],
   },
   {
     name: "Signing up",
@@ -99,4 +99,4 @@ export function statementDigest(): string {
  * tests/accessibility-statement.test.ts fails when the records change and this
  * is not reviewed again (DA1 (b)).
  */
-export const STATEMENT_REVIEW = { date: "November 15, 2026", digest: "87e49737c77d3de8" } as const;
+export const STATEMENT_REVIEW = { date: "November 15, 2026", digest: "8b76200faa5a605f" } as const;

@@ -322,10 +322,11 @@ const GONE = new Set(["bounced", "complained", "refused"]);
  * The members whose address the store's list did not take off for a hard bounce, a spam complaint or a refusal (`gone`
  * with `unsub`, lib/contacts.ts stopWriting): such an address never gets an announcement either, so a member who
  * marked one as spam is not written to again and a dead address stops being tried (tests/community-mail-list-gone.test.ts).
+ * An event's reminders and notices read it too (lib/community-event-mail.ts, #4639).
  * A plain unsubscribe from the list is not read here: the community's own stop link decides its emails. A member not
  * on the list is kept. A row in no known shape is unknown (rule 24): it throws, and the batch waits.
  */
-async function keptOnList(listId: string, members: Member[]): Promise<Member[]> {
+export async function keptOnList(listId: string, members: Member[]): Promise<Member[]> {
   if (!members.length) return members;
   const rows = repliesFor(await redisPipeline([["HMGET", leadsKey(listId), ...members.map((m) => m.e)]]), 1)?.[0];
   if (!Array.isArray(rows) || rows.length !== members.length) throw new UnknownReplyError("the store's list rows of an announcement batch");

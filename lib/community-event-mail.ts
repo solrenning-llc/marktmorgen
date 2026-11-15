@@ -65,7 +65,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { type CommunityConfig, type Member, readConfigExact, readMembersExact } from "@/lib/community";
 import { holdsTicket } from "@/lib/community-access";
-import { type SortedBatch, UNKEPT_LINK_NOTE, skippedNote, sortBatch } from "@/lib/community-mail";
+import { type SortedBatch, UNKEPT_LINK_NOTE, keptOnList, skippedNote, sortBatch } from "@/lib/community-mail";
 import { alertCreator } from "@/lib/phone-alerts";
 import { JOIN_EARLY_MINUTES } from "@/lib/community-text";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -702,6 +702,21 @@ export async function advanceEventJob(
         .map((k) => found.get(k))
         .filter((m): m is Member => Boolean(m && !m.removed && (going.has(m.k) || kind === "cancelled")))
         .filter((m) => !reminder || m.mail);
+      // Never an address the store's list took off for a hard bounce, a spam complaint or a refusal, reminders and
+      // notices alike, as an announcement (keptOnList; #4639). A list row that does not read holds the batch, as a
+      // members read that does not come back (above): never read as kept.
+      const listed = await (store.listId ? keptOnList(store.listId, coming) : Promise.resolve(coming)).catch((error: unknown) => {
+        console.error("an event's email could not read the store's list rows of a batch", error);
+        return null;
+      });
+      if (!listed) {
+        if (!stillUseful(reminder ? job.kind : "1", event.start, Date.now())) {
+          if (reminder) return await finish("sent", "No longer due.");
+          return await finish("failed", "We couldn't read who was coming before the event's time. Nobody else was emailed.");
+        }
+        job = { ...job, note: MEMBERS_NOTE };
+        break;
+      }
       // A reminder asks each of them of the creator's Stripe account, batch by batch, so a member who lapsed since it
       // started is left out, and gives each the stop link their record keeps. Both strictly (rules 24 and 30): a ticket
       // or an event's door that could not be asked about, or a stop link not kept, is not a no; it leaves the batch
@@ -709,11 +724,11 @@ export async function advanceEventJob(
       // runs at most; a member whose answer can never be had is passed over, counted, never sent to (sortBatch,
       // lib/community-mail.ts; review of #3140, M2).
       const checked: SortedBatch | null = !reminder
-        ? { wait: false as const, recipients: coming, tokens: [] as string[], skipped: 0 }
+        ? { wait: false as const, recipients: listed, tokens: [] as string[], skipped: 0 }
         : await sortBatch(
             store,
             community,
-            coming,
+            listed,
             async (m: Member) =>
               (await holdsTicket(store, config, m.e, { strict: true })) &&
               (await mayAttend(store, config, event, { owner: false, email: m.e }, { strict: true })),

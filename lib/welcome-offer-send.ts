@@ -378,13 +378,19 @@ export async function forgetWelcomePerson(statsId: string | null, email: string)
   const hour = typeof mark === "string" ? (/^due:(\d{1,12}):\d+\.\d{9}$/.exec(mark)?.[1] ?? null) : null;
   const older = typeof mark === "string" && (mark === "1" || /^\d+\.\d{9}$/.test(mark));
   if (mark !== null && !hour && !older) throw new UnknownReplyError("the read of a person's welcome reminder mark");
+  // The reminder that holds the address leaves the queue first, and the mark that locates it goes only once that
+  // removal is confirmed (#4681): a queue read or removal that fails throws with the mark still there, so the next
+  // try finds the reminder again, rather than finding no mark and calling the erasure done.
+  const h = hash(email);
+  const waiting = hour ? await dueAt(statsId, h, hour) : older ? await dueScan(statsId, h) : [];
+  let taken = 0;
+  if (waiting.length) {
+    const removed = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
+    if (removed === null || removed > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");
+    taken = removed;
+  }
   const gone = countOf(repliesFor(await redisPipeline([["DEL", startKey(statsId, email), remindedKey(statsId, email)]]), 1)?.[0]);
   // Never 0 removed on a reply of another shape (CX-123 rule 24): thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
   if (gone === null || gone > 2) throw new UnknownReplyError("the deletion of a person's welcome offer start and reminder mark");
-  const h = hash(email);
-  const waiting = hour ? await dueAt(statsId, h, hour) : older ? await dueScan(statsId, h) : [];
-  if (!waiting.length) return gone;
-  const taken = countOf(repliesFor(await redisPipeline([["ZREM", DUE_KEY, ...waiting]]), 1)?.[0]);
-  if (taken === null || taken > waiting.length) throw new UnknownReplyError("the removal of a person's welcome reminder from the queue");
   return gone + taken;
 }

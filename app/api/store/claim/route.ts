@@ -11,6 +11,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { recordInvite } from "@/lib/creator-invites";
 import { INVITE_COOKIE, INVITE_CODE_PATTERN } from "@/lib/creator-invite-rules";
+import { adultFrom } from "@/lib/adult-confirmation";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -21,6 +22,10 @@ const MAX_BODY_BYTES = 2_000;
  * the person signed in, whatever store their studio has open.
  *
  * The new store becomes the one the studio opens next.
+ *
+ * No store is made without the owner's yes to "at least 18" (lib/adult-confirmation.ts, 568 [GD2] (i)): the box
+ * sent as exactly true with the current version of its words. Without it the answer is "adult" and nothing is
+ * read or written; with it the yes is kept on the new store, with its version and time.
  */
 export async function POST(request: NextRequest) {
   // Refused before anything else is read: another site, by Origin or by
@@ -55,13 +60,18 @@ export async function POST(request: NextRequest) {
   const bio =
     typeof body.bio === "string" ? body.bio.slice(0, MAX_BIO_LENGTH) : "";
 
+  const adult = adultFrom(body);
+  if (!adult) {
+    return Response.json({ ok: false, error: "adult" }, { status: 400 });
+  }
+
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
 
   try {
     const result =
-      body.another === true ? await createStore(email, handle, name, bio) : await claimHandle(email, handle, name, bio);
+      body.another === true ? await createStore(email, handle, name, bio, adult) : await claimHandle(email, handle, name, bio, adult);
     if (!result.ok) {
       return Response.json(
         { ok: false, error: result.reason, limit: "limit" in result ? result.limit : undefined },

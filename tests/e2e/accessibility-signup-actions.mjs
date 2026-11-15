@@ -164,12 +164,13 @@ try{
    await page.getByLabel("Your address",{exact:true}).fill(handle);
    await page.getByLabel("Store name",{exact:true}).fill(storeName);
    await page.getByLabel("One line about it",{exact:false}).fill("Disposable local accessibility fixture.");
+   await page.getByRole("checkbox",{name:/^I am at least 18 years old/}).focus();await page.keyboard.press("Space");
    const claim=page.waitForResponse(r=>new URL(r.url()).pathname==="/api/store/claim"&&r.request().method()==="POST");
    await page.getByRole("button",{name:"Create my store",exact:true}).focus();await page.keyboard.press("Enter");
    const claimed=await claim;
    if(!capturedClaim)throw Error("Actual local claim response was not captured");
    const claimBody=capturedClaim.requestBody,created=capturedClaim.body;
-   if(!claimed.ok()||!capturedClaim.ok||created.ok!==true||created.handle!==handle||typeof created.store!=="string"||!/^[0-9a-f]{32}$/.test(created.store)||claimBody.handle!==handle||claimBody.name!==storeName||claimBody.another!==false)throw Error("Initial local store claim refused or mismatched");
+   if(!claimed.ok()||!capturedClaim.ok||created.ok!==true||created.handle!==handle||typeof created.store!=="string"||!/^[0-9a-f]{32}$/.test(created.store)||claimBody.handle!==handle||claimBody.name!==storeName||claimBody.another!==false||claimBody.adult!==true||claimBody.adultVersion!==1)throw Error("Initial local store claim refused or mismatched");
    await page.getByRole("heading",{name:"Your store",exact:true}).waitFor();
    if(await page.getByLabel("Your address",{exact:true}).count())throw Error("Initial setup did not refresh into created store");
    phase="created-studio";

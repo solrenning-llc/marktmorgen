@@ -31,7 +31,7 @@ export async function checkClaimAcknowledgment({browser,LOCAL,session,sid,is}){
    await page.goto(LOCAL+"/studio/new",{waitUntil:"networkidle",timeout:60000});
    const form=page.locator("form:has(#store-handle)"),field=form.getByLabel("Your address",{exact:true}),name=form.getByLabel("Store name",{exact:true}),bio=form.locator("#store-bio");
    for(const scenario of scenarios){
-    await field.fill(" @Synthetic.Store ");await name.fill("Synthetic store");await bio.fill("A synthetic description.");
+    await field.fill(" @Synthetic.Store ");await name.fill("Synthetic store");await bio.fill("A synthetic description.");await form.getByRole("checkbox",{name:/^I am at least 18 years old/}).check();
     let release;const held=new Promise(resolve=>{release=resolve;});
     pending={scenario,release:held};
     const seen=page.waitForRequest(request=>request.method()==="POST"&&new URL(request.url()).pathname==="/api/store/claim",{timeout:15000});seen.catch(()=>{});

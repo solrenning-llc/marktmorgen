@@ -19,16 +19,17 @@ Fields the person may leave empty are not counted.
 | --- | --- | --- |
 | 1 | Ask for a sign-in link | `email` |
 | 2 | Open the link and confirm | none |
-| 3 | Claim the store | `handle`, `name` |
+| 3 | Claim the store | `handle`, `name`, `adult` |
 | 4 | Add the first product | `title`, `price` |
 | 5 | Start Stripe's onboarding | `country` |
 | 6 | Choose a plan (closed today) | none |
 
-In total: **6 actions** and **6 required fields** on this site.
+In total: **6 actions** and **7 required fields** on this site.
 
 What the walk found:
 - **No account form and no password.** The emailed link (or its 6-digit code) creates the account and signs in. The link works once.
 - **The store's name is required by the form, not by the server.** The studio's form marks both the address and the name required. The claim route accepts the address alone. Both fields are counted, because a person cannot send the form without the name.
+- **The age box is required by both.** Since 15 November 2026 (568 [GD2] (i), `lib/adult-confirmation.ts`) the form shows an unchecked box, "I am at least 18 years old, or the age of majority where I live if that is higher.", as section 1 of the Terms requires. The route makes no store without it, and the store keeps the yes with the version of the words and the time. It adds one required field to step 3 (6 to 7 in total) and no step.
 - **A product added by hand is published at once.** There is no separate publish step. A separate publish step exists only for the hidden drafts the AI store setup makes (`firstOfferPublishedAt`, docs/ht5-store-activation.md).
 - **Stripe's own pages come after step 5.** They hold identity checks and payout details, and their number of steps belongs to Stripe. This site cannot shorten them and does not count them.
 - **The checkout cannot be turned on today.** `PLANS_ON_SALE` is false (lib/opening.ts), so step 6 answers `billing=not-open` before it reads any field. The store cannot sell (`canSell` is false: it needs a paid plan, and the tax, Article 9a and commercial gates stay closed). Its fields are not counted, because they cannot be measured while it is closed.

@@ -75,7 +75,11 @@ export default function PrivacyPage() {
           you put on the page, and the files you upload for delivery to your
           buyers. Your photo is shrunk on your own device before it is sent, is
           shown publicly on your store page and in previews of links to it, and
-          is deleted from our storage when you remove or replace it.
+          is deleted from our storage when you remove or replace it. When you
+          make a store, you check a box to confirm you are at least 18, or the
+          age of majority where you live; we keep that you checked it, which
+          version of that sentence you saw and when, with the store, for as
+          long as the store exists.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When

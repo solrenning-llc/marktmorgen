@@ -6,7 +6,8 @@
  *
  *   1. asks for a sign-in link with an email address;
  *   2. opens it (the one-tap confirm form);
- *   3. claims a store with an address and a name;
+ *   3. claims a store with an address, a name and the "at least 18" box
+ *      (568 [GD2] (i), lib/adult-confirmation.ts);
  *   4. adds a first product with a title and a price;
  *   5. starts Stripe's onboarding with a country;
  *   6. asks for a plan, which turns the checkout on.
@@ -25,6 +26,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HandleForm } from "@/components/handle-form";
+import { ADULT_VERSION } from "@/lib/adult-confirmation";
 import { NextRequest } from "next/server";
 import { POST as askLink } from "@/app/api/auth/request/route";
 import { POST as openLink } from "@/app/api/auth/callback/route";
@@ -106,9 +108,10 @@ async function main(): Promise<void> {
   // The studio's form is what a person uses: the browser will not send it without the fields it marks required.
   const form = renderToStaticMarkup(createElement(HandleForm));
   const formRequired = [...form.matchAll(/<input[^>]*>/g)].map((tag) => tag[0]).filter((tag) => / required=""/.test(tag)).map((tag) => /name="([^"]+)"/.exec(tag)?.[1] ?? "");
-  is("the studio's form requires the address and the name", formRequired, ["handle", "name"]);
-  const claimed = await claim(asJson(claimUrl, { handle: "walkergoods" }, true));
-  is("the route alone accepts the address without a name (recorded as a difference)", claimed.status, 200);
+  is("the studio's form requires the address, the name and the age box", formRequired, ["handle", "name", "adult"]);
+  is("without the age box: refused", (await claim(asJson(claimUrl, { handle: "walkergoods" }, true))).status, 400);
+  const claimed = await claim(asJson(claimUrl, { handle: "walkergoods", adult: true, adultVersion: ADULT_VERSION }, true));
+  is("the route alone accepts the address and the age box without a name (recorded as a difference)", claimed.status, 200);
   is("the account has its store", (await storeForEmail(EMAIL))?.handle, "walkergoods");
   walk.push({ step: 3, action: "Claim the store", required: formRequired });
 

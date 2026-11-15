@@ -191,6 +191,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type AdultConfirmation, readAdult } from "@/lib/adult-confirmation";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -370,6 +371,11 @@ export type Store = {
   firstOfferPublishedAt?: string;
   /** True only for stores registered after activation tracking was installed. */
   activationTracked?: boolean;
+  /**
+   * The owner's yes to "at least 18" when this store was made (lib/adult-confirmation.ts, 568 [GD2] (i)): the
+   * version of the words checked and the time. Absent for stores made before the box existed.
+   */
+  adultConfirmed?: AdultConfirmation;
   /** Addresses this store used before. They lead here until it lets them go. */
   previousHandles: string[];
   /**
@@ -987,6 +993,7 @@ function parseStore(raw: unknown): Store | null {
       extra: value.extra === true && sid !== "",
       createdAt: value.createdAt ?? "",
       activationTracked: value.activationTracked === true,
+      ...(readAdult(value.adultConfirmed) ? { adultConfirmed: readAdult(value.adultConfirmed)! } : {}),
       ...(typeof value.firstOfferPublishedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value.firstOfferPublishedAt) && Number.isFinite(Date.parse(value.firstOfferPublishedAt)) ? { firstOfferPublishedAt: value.firstOfferPublishedAt.slice(0, 30) } : {}),
       previousHandles: Array.isArray(value.previousHandles)
         ? value.previousHandles.filter((h) => typeof h === "string")
@@ -1407,6 +1414,7 @@ async function freshStore(fields: {
   email: string;
   sid: string;
   extra: boolean;
+  adult?: AdultConfirmation;
 }): Promise<Store> {
   const createdAt = new Date().toISOString();
   // Where its product records go (lib/catalog.ts), derived from the key the
@@ -1421,6 +1429,7 @@ async function freshStore(fields: {
     extra: fields.extra,
     createdAt,
     activationTracked: true,
+    ...(fields.adult ? { adultConfirmed: { version: fields.adult.version, at: fields.adult.at } } : {}),
     previousHandles: [],
     releasedHandles: [],
     renamedAt: "",
@@ -1849,6 +1858,7 @@ export async function claimHandle(
   rawHandle: string,
   rawName: string,
   rawBio: string,
+  adult?: AdultConfirmation,
 ): Promise<ClaimResult> {
   const handle = normaliseHandle(rawHandle);
   const problem = newAddressProblem(handle);
@@ -1862,7 +1872,7 @@ export async function claimHandle(
   ]);
   if (taken === null) return { ok: false, reason: "taken" };
 
-  const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid: newListId(), extra: false });
+  const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid: newListId(), extra: false, adult });
 
   try {
     await redisPipeline([
@@ -1896,6 +1906,7 @@ export async function createStore(
   rawHandle: string,
   rawName: string,
   rawBio: string,
+  adult?: AdultConfirmation,
 ): Promise<CreateResult> {
   const handle = normaliseHandle(rawHandle);
   const problem = newAddressProblem(handle);
@@ -1927,7 +1938,7 @@ export async function createStore(
     return { ok: false, reason: "taken" };
   }
 
-  const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid, extra: true });
+  const store = await freshStore({ handle, name: rawName, bio: rawBio, email, sid, extra: true, adult });
   try {
     await redisPipeline([
       ["SET", await ownerKey(ref), recordJson(store)],

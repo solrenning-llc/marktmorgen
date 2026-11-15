@@ -129,6 +129,15 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/webhook-outbox.ts OUTBOX_ADMIT: an event kept in the outbox only while its line has room, record and place together.
+        if (key.startsWith("-- marktmorgen:hookout-admit:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, record, line, id, value, seconds, due, ceiling] = args;
+          if (this.run(["ZSCORE", line, id]) !== null) return 0;
+          if (Number(this.run(["ZCARD", line])) >= Number(ceiling)) return -1;
+          this.run(["SET", record, value, "NX", "EX", seconds]);
+          this.run(["ZADD", line, due, id]);
+          return 1;
+        }
         // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
         if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, pool, bound, ...keys] = args;

@@ -27,7 +27,7 @@ is("the threshold", LOW_FROM_PERCENT, 80);
 
 part("In the studio");
 const studio = readFileSync("components/email-studio.tsx", "utf8");
-is("drawn under the month's count, only for a known month, knowing a trial", studio.includes("{props.monthKnown && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? ("), true);
+is("drawn under the month's count, only for a known month whose count was read, knowing a trial", studio.includes("{props.monthKnown && props.used !== null && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? ("), true);
 const page = readFileSync("app/studio/email/page.tsx", "utf8");
 is("a day only for a paid plan that renews, from its billing window", page.includes("renews={!trial && store.period?.renews === true && store.period.funded !== true ? (() => { const window = allowanceWindow(store); return window?.billing ? opensAgainWords(window) : null; })() : null}"), true);
 

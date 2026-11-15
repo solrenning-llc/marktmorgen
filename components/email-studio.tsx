@@ -559,8 +559,8 @@ export function EmailStudio(props: {
           {!props.trial && emailEquivalence(props.allowance) ? (
             <p className="mt-2 text-sm text-ink-soft" data-email-equivalence>{emailEquivalence(props.allowance)}</p>
           ) : null}
-          {/* From 80% used: how many are left and when the count starts again (357 [ES3], lib/mail-left.ts). */}
-          {props.monthKnown && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? (
+          {/* From 80% used: how many are left and when the count starts again (357 [ES3], lib/mail-left.ts); nothing while the month's count could not be read. */}
+          {props.monthKnown && props.used !== null && mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial) ? (
             <p className="mt-3 rounded-[var(--r-md)] bg-sand p-3 text-sm font-medium text-ink" data-mail-left="">{mailLeftWords(props.used, props.allowance, props.renews ?? null, props.trial)}</p>
           ) : null}
           {props.moveUp ? (

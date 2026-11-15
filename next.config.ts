@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
     "/\\[handle\\]/certificate/\\[id\\]/pdf": ["./lib/fonts/**/*"],
     "/**/certificate/**": ["./lib/fonts/**/*"],
     // The buyer's line stamped on a PDF is drawn with Noto Sans, embedded (lib/pdf-stamp.ts; PDF/UA 7.21.4.1).
-    "/api/store/download": ["./lib/fonts/NotoSans-Regular.ttf"],
+    "/api/store/download": ["./lib/fonts/**/*"],
   },
   experimental: {
     /**

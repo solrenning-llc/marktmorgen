@@ -82,9 +82,9 @@ const store = (await storeForEmail(owner))!;
 const lapsed = Date.now() - 60_000;
 for (let i = 0; i < 5; i += 1) await redis.pipeline([["HSET", `nl:stock:${store.statsId}:${main_.product.id}`, `cs_test_${"h".repeat(20)}${i}`, JSON.stringify({ until: lapsed })]]);
 
-const render = async (mm?: string) => {
-  answering(new NextRequest(`https://marktmorgen.com/embed/embmetered/${main_.product.id}${mm ? `?mm=${mm}` : ""}`));
-  return html((await EmbedCard({ params: Promise.resolve({ handle: "embmetered", product: main_.product.id }), searchParams: Promise.resolve(mm ? { mm } : {}) } as never)) as React.ReactElement);
+const render = async (mm?: string, id: string = main_.product.id) => {
+  answering(new NextRequest(`https://marktmorgen.com/embed/embmetered/${id}${mm ? `?mm=${mm}` : ""}`));
+  return html((await EmbedCard({ params: Promise.resolve({ handle: "embmetered", product: id }), searchParams: Promise.resolve(mm ? { mm } : {}) } as never)) as React.ReactElement);
 };
 const folder = await storeFolder(owner);
 const counter = `nl:traffic:r:${folder}:${allowanceWindow(store)!.id}`;
@@ -104,6 +104,13 @@ await render();
 const plain = log;
 log = null;
 is(`a plain render: at most ${ceiling} commands (${plain.length})`, plain.length <= ceiling, true);
+
+part("An open by the script of a product that is not there still takes the store's request");
+log = [];
+await render("page", "nosuchprod");
+const missing = log;
+log = null;
+is("one INCRBY of the store's requests (Claude 7 on #4645)", missing.filter((c) => c[0] === "INCRBY").length, 1);
 
 part("A resting store's card reads none of it");
 await redis.pipeline([["SET", counter, String(publicVisitLimit(requestLimitFor(store, Date.now() / 1000)))]]);

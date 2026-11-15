@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type {Store} from "@/lib/store";
 import {leverStateText,salesLeverSettings,type LeverReading} from "@/lib/sales-levers";
+import {leverEarnedWords} from "@/lib/lever-earnings";
 import {leverToggle} from "@/lib/sales-lever-toggle-rules";
 import {assistantWindow,type AssistantPlan} from "@/lib/store-assistant-rules";
 import type {Role} from "@/lib/team-roles";
-import {formatMoney} from "@/lib/money";
 import {studioPath} from "@/lib/studio-route";
 import {SalesLeverSwitch} from "@/components/sales-lever-switch";
 /** Whether the Store assistant add-on is paid for now, from the record as loaded: a month that ran out without being read again is unknown, never active. */
@@ -23,8 +23,8 @@ export function SalesLevers({store,reading,canConfigure,role,addOn}:{store:Store
  <h3 className="text-lg font-semibold">{lever.title}</h3>
  {control.kind==="toggle"&&own?<SalesLeverSwitch control={control} states={{on:leverStateText(lever.key,true),off:leverStateText(lever.key,false)}}/>:<p className="mt-2 text-sm font-semibold text-violet-deep">{lever.state}</p>}
  {own&&(control.kind==="settings"||control.kind==="unknown")&&control.mayOpen?<p className="mt-2 text-sm text-ink-soft">{control.reason}</p>:null}
- <p className="mt-3 text-sm text-ink-soft">{metric?.cents!==null&&metric?.cents!==undefined?formatMoney(metric.cents,reading!.currency)+" in "+metric.records+" tagged paid records.":"Not separately measured from the available payment records."}</p>
- <p className="mt-2 text-sm text-ink-soft">{metric?.scope??"No complete payment reading is available."}</p><p className="mt-3 text-sm text-ink-soft">{lever.cost}</p>
+ <p className="mt-3 text-sm font-semibold">{leverEarnedWords(metric,lever.key,reading?.complete===true).line}</p>
+ <p className="mt-2 text-sm text-ink-soft">{leverEarnedWords(metric,lever.key,reading?.complete===true).how}</p><p className="mt-3 text-sm text-ink-soft">{lever.cost}</p>
  {canConfigure?<Link href={lever.path.startsWith("#")?lever.path:studioPath(store,"",lever.path)} prefetch={false} className="link mt-3 inline-flex min-h-11 items-center">Review {lever.title.toLowerCase()} settings</Link>:null}
  </li>;})}</ul>
  <p className="mt-5 text-sm text-ink-soft">Cost-free optional offer mechanisms remain available when configured; empty offers cannot be enabled without your product choices. Existing opt-outs and permissions are preserved. A switch on a card saves the same setting as its settings page, through the same checks; nothing else on this screen changes a setting, sends a message or opens a sale.</p>

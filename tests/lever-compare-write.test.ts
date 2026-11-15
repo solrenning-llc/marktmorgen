@@ -136,7 +136,7 @@ test("another tab's change is never lost to the card's switch, and the card asks
     assert.equal(view.outcome?.state, "refused", control.key);
     assert.match(view.outcome!.text, /^Nothing was changed\. It was changed in another tab or by someone else/);
     assert.match(view.outcome!.text, /Reload/);
-    assert.equal(view.flipped, "unknown", control.key);
+    assert.equal(view.saved, "unknown", control.key);
     assert.equal(view.undo, false);
   }
   const now = await read();

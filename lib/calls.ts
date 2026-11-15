@@ -117,6 +117,7 @@ import {
   teamDays,
   teamMoveDays,
 } from "@/lib/team-booking";
+import { safeSenderName } from "@/lib/sender-name";
 
 /** How far back Stripe is read for paid bookings. Longer than any horizon. */
 const LOOKBACK_DAYS = 120;
@@ -1776,7 +1777,7 @@ export function icsLink(origin: string, store: Store, session: string): string {
 // ---- Confirming a booking ------------------------------------------------
 
 function displayName(name: string): string {
-  return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
+  return safeSenderName(name, "A store");
 }
 
 export function senderAddress(): string {

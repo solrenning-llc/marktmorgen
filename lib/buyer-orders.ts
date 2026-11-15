@@ -77,6 +77,7 @@ import {
   ordersMovesCommands,
 } from "@/lib/buyer-orders-rules";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
+import { safeSenderName } from "@/lib/sender-name";
 
 /** How long the emailed link opens the list. */
 export const ORDERS_LINK_SECONDS = 24 * 60 * 60;
@@ -1053,7 +1054,7 @@ async function within(key: string, limit: number): Promise<boolean | null> {
 
 /** A name that can sit inside the quotes of an email's From line. */
 export function displayName(name: string): string {
-  return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
+  return safeSenderName(name, "A store");
 }
 
 /** The address part of the sender (NIMBUS_FROM). */

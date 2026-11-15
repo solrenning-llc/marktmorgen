@@ -85,6 +85,7 @@ import {
   activeKeys,
   type KeySetup,
 } from "@/lib/key-setup";
+import { safeSenderName } from "@/lib/sender-name";
 
 // The setting itself lives in lib/key-setup.ts; it is still found here.
 export {
@@ -1140,7 +1141,7 @@ export async function keysOf(store: Store, productIds: string[], email: string):
 // ---------------------------------------------------------------- email
 
 function displayName(name: string): string {
-  return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
+  return safeSenderName(name, "A store");
 }
 
 function senderAddress(): string {

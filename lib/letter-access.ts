@@ -40,6 +40,7 @@ import { TOKEN_PATTERN, learnerFrom, storeKey } from "@/lib/learn";
 import { LETTER_ID, type Letter, membersOnly } from "@/lib/letter-rules";
 import { letterWords } from "@/lib/buyer-words/letters";
 import type { Store } from "@/lib/store";
+import { safeSenderName } from "@/lib/sender-name";
 
 export const LETTER_LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
@@ -136,7 +137,7 @@ async function within(key: string, limit: number): Promise<boolean> {
 }
 
 function displayName(name: string): string {
-  return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
+  return safeSenderName(name, "A store");
 }
 
 function senderAddress(): string {

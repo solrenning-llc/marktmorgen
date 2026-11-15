@@ -123,6 +123,7 @@ import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
+import { safeSenderName } from "@/lib/sender-name";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -977,7 +978,7 @@ async function within(key: string, limit: number): Promise<boolean | null> {
 
 /** A name that can sit inside the quotes of an email's From line. */
 function displayName(name: string): string {
-  return name.replace(/["\\<>\r\n]/g, "").trim().slice(0, 60) || "A store";
+  return safeSenderName(name, "A store");
 }
 
 /** The address part of NIMBUS_FROM, whatever form it was written in. */

@@ -7,7 +7,6 @@
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import type { Broadcast } from "@/lib/broadcasts";
 import { publishLetter } from "@/lib/letters";
-import type { Letter } from "@/lib/letter-rules";
 import { requestLetterLink } from "@/lib/letter-access";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

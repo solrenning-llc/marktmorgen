@@ -548,11 +548,17 @@ async function main(): Promise<void> {
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
     // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
     // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
+    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
+    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
+    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
     // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
-    is("11: Store, Studio and Scale keep 44.36, 311.94 and 697.58 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.36", "311.94", "697.58"]);
+    is("11: Store, Studio and Scale keep 44.35, 311.93 and 697.57 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.35", "311.93", "697.57"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 36.30, 256.81 and 574.30 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.30", "256.81", "574.30"]);
+    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
+    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
+    is("11: and 36.29, 256.80 and 574.30 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.29", "256.80", "574.30"]);
   } finally {
     Date.now = realNow;
   }

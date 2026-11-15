@@ -50,7 +50,7 @@ import { givingWords } from "@/lib/buyer-words/giving";
 import { updatesWords } from "@/lib/buyer-words/updates";
 import { type Listing, type Store, saleHandles, storeForHandle } from "@/lib/store";
 import { MAX_UPDATE_NOTE, MAX_UPDATE_RECIPIENTS, UPDATE_GAP_SECONDS, canTellBuyers } from "@/lib/product-updates-rules";
-import { noteForErasure } from "@/lib/erasure-index";
+import { noteForErasure, stillNoted } from "@/lib/erasure-index";
 import { orderWrite } from "@/lib/order-data";
 import { suppressedCommand } from "@/lib/suppression";
 import { BUYER_LEDGER_UNITS, ledgerReadBytes, ledgerUnits } from "@/lib/segments";
@@ -364,6 +364,14 @@ async function stopLink(store: Store, email: string): Promise<string> {
     throw new UnknownReplyError("the erasure note of an update's stop link");
   }
   await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
+  // The note read again after the write (#4781): an erasure that completed between the note and the write deleted the
+  // note and found no record yet, so this record would hold the address with nothing leading to it. Gone: the record
+  // is taken back and this throws, so the batch sends nothing and waits; the next run leaves the erased address out
+  // (its deletion print). An erasure after this read finds the note and deletes the record itself.
+  if (notes.length && store.statsId && !(await stillNoted(store.statsId, email, stopKey(token)))) {
+    await orderWrite(store, [["DEL", stopKey(token)]]);
+    throw new Error("an update's stop link was taken back: its address was deleted from the store meanwhile");
+  }
   return token;
 }
 

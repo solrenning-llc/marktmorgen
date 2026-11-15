@@ -46,6 +46,20 @@ export function noteForErasure(statsId: string | null | undefined, email: string
   return [["ZADD", index, now, key], ["ZREMRANGEBYSCORE", index, "-inf", now - INDEX_SECONDS * 1000], ["EXPIRE", index, INDEX_SECONDS]];
 }
 
+/**
+ * Whether a key noted for this address (noteForErasure) is still in its notes, read exactly: true while it is, false
+ * once an erasure deleted them. For a writer that noted a key first and wrote it in another step (#4781): read after
+ * the write, false means an erasure ran in between and found nothing yet, so the writer takes its record back. Any
+ * reply but a score or none throws UnknownReplyError.
+ */
+export async function stillNoted(statsId: string, email: string, key: string): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["ZSCORE", notesKey(statsId, email), key]]), 1);
+  const score = reply?.[0];
+  if (score === null) return false;
+  if (typeof score === "string" && score.trim() !== "" && Number.isFinite(Number(score))) return true;
+  throw new UnknownReplyError("whether a record is still noted for an erasure");
+}
+
 /** How many times an erasure reads the notes again when they changed between its read and its delete. */
 export const FORGET_TRIES = 3;
 /**

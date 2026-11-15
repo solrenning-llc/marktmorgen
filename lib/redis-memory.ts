@@ -2297,6 +2297,8 @@ export class MemoryRedis {
       case "ZCARD":
         return this.zset(key).length;
       case "ZSCORE": {
+        // A read makes no key, as on Redis (#4781: a writer reading its erasure note again must not leave one behind).
+        if (!this.data.has(key)) return null;
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
       }

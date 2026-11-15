@@ -17,7 +17,7 @@ Lines are cut in this order, each down to at most 10% of today's figure (never b
 | Net today | 55.69% | 55.18% | 59.65% | 59.21% | 60.11% | 59.67% |
 | AI drafts / answers a month | none today | none today | 40 / 250 → **14 / 93** | 40 / 250 → **4 / 25** | 80 / 400 | 80 / 400 → **32 / 160** |
 | Video hours watched a month | 4 | 4 | 32 | 32 → **3** | 64 | 64 |
-| Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **16 GiB** | 80 GiB | 80 GiB |
+| Storage | 5 GiB | 5 GiB | 40 GiB | 40 GiB → **15.5 GiB** | 80 GiB | 80 GiB |
 | Orders a month | 200 | 200 | 450 | 450 | 1,500 | 1,500 |
 | Store emails a month | 75 | 75 | 300 | 300 | 800 | 800 |
 | Access emails a month | 150 | 150 | 400 | 400 | 1,000 | 1,000 |

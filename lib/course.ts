@@ -15,9 +15,10 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readShelf } from "@/lib/course-shelf-rules";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { indexBytes } from "@/lib/community-search";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
+import { DELETE_IF_SAME } from "@/lib/redis-lock";
 import { dataBytes } from "@/lib/store-data-rules";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
 import { type QuizSetup, parseSetup as parseQuizSetup } from "@/lib/quiz";
@@ -723,6 +724,80 @@ export async function saveBody(courseId: string, lessonId: string, text: string,
   if (next) await redisPipeline([["SET", bodyKey(courseId, lessonId), next]]);
   else await redisPipeline([["DEL", bodyKey(courseId, lessonId)]]);
   if (grown < 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: -grown }]);
+}
+
+/**
+ * The lesson texts of a course made by an import (260 [KJ5], lib/course-import-apply.ts),
+ * written at once: each text already as the editor keeps it (cleanBody), for
+ * a lesson id given once. The room for all of them is taken in one step
+ * before anything is written (DataRoomError when it does not fit, and then
+ * nothing is); each is written only where no text is kept yet; anything
+ * that comes back otherwise takes away what this call is known to have
+ * written (only while the key still holds exactly that text), gives back the
+ * room of what is known gone and throws. A text whose writer cannot be told
+ * stays, with its room counted: never another writer's text deleted.
+ */
+export async function saveNewBodies(courseId: string, bodies: { lessonId: string; text: string }[], room: DataStore): Promise<void> {
+  if (!COURSE_ID_PATTERN.test(courseId)) throw new Error("not a course id");
+  const ids = new Set<string>();
+  for (const { lessonId, text } of bodies) {
+    if (!ITEM_ID_PATTERN.test(lessonId) || ids.has(lessonId)) throw new Error("not a new lesson's text");
+    if (typeof text !== "string" || !text || cleanBody(text) !== text) throw new Error("not a lesson text as the editor keeps it");
+    ids.add(lessonId);
+  }
+  if (!bodies.length) return;
+  if (!isRedisConfigured()) throw new Error("lesson texts cannot be written here");
+  const bytes = bodies.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  await needData(room, [{ slot: BODIES_SLOT(courseId), bytes }]);
+  let replies: unknown[] | null = null;
+  try {
+    replies = repliesFor(await redisPipeline(bodies.map(({ lessonId, text }) => ["SET", bodyKey(courseId, lessonId), text, "NX"])), bodies.length);
+  } catch {
+    replies = null;
+  }
+  if (replies && replies.every((reply) => reply === "OK")) return;
+  // Taking back: only what this call wrote goes, and only the room of what is known to be gone (or never
+  // written) comes back; anything whose fate cannot be read keeps its room counted, more and never less.
+  const gone: { lessonId: string; text: string }[] = [];
+  const mine: { lessonId: string; text: string }[] = [];
+  const unsure: { lessonId: string; text: string }[] = [];
+  bodies.forEach((body, i) => {
+    const reply = replies?.[i];
+    if (replies && reply === null) gone.push(body); // NX refused: another text is kept there, and this one was never written.
+    else if (reply === "OK") mine.push(body);
+    else unsure.push(body);
+  });
+  if (unsure.length) {
+    let held: unknown[] | null = null;
+    try {
+      const read = repliesFor(await redisPipeline([["MGET", ...unsure.map((body) => bodyKey(courseId, body.lessonId))]]), 1);
+      held = read && Array.isArray(read[0]) && read[0].length === unsure.length ? read[0] : null;
+    } catch {
+      held = null;
+    }
+    unsure.forEach((body, i) => {
+      const value = held?.[i];
+      // Nothing there, or another text: not this call's. The same text says nothing about who wrote it (NX refuses a
+      // writer's identical text the same way), so it is never deleted and keeps its room counted (Codex L on #3821).
+      if (held && (value === null || (typeof value === "string" && value !== body.text))) gone.push(body);
+    });
+  }
+  if (mine.length) {
+    let deleted: unknown[] | null = null;
+    try {
+      // Deleted in one step only while the key still holds this call's text: one put there since by another writer stays.
+      deleted = repliesFor(await redisPipeline(mine.map((body) => ["EVAL", DELETE_IF_SAME, 1, bodyKey(courseId, body.lessonId), body.text])), mine.length);
+    } catch {
+      deleted = null;
+    }
+    mine.forEach((body, i) => {
+      const count = deleted ? countOf(deleted[i]) : null;
+      if (count === 0 || count === 1) gone.push(body);
+    });
+  }
+  const back = gone.reduce((sum, { text }) => sum + bodyBytes(text), 0);
+  if (back > 0) await giveData(room, [{ slot: BODIES_SLOT(courseId), bytes: back }]);
+  throw new UnknownReplyError("an imported course's lesson texts");
 }
 
 /** Takes a course's records away, and gives back their room. Its files are the caller's to delete. */

@@ -291,6 +291,19 @@ async function someLeftOrUnlimited(store: Store, product: Listing): Promise<bool
   return left !== undefined && left !== 0;
 }
 
+/** A list row read as a contact only when it is a JSON object whose `unsub`, when present, is true or false; else null. */
+function contactExact(raw: string): ReturnType<typeof parseContact> {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if ("unsub" in value && typeof (value as { unsub?: unknown }).unsub !== "boolean") return null;
+  return parseContact(raw);
+}
+
 /**
  * Sends the reminder for one checkout that closed unpaid, when everything
  * above allows it. Called by the five-minute job with each closed checkout
@@ -506,6 +519,9 @@ async function deliver(
   if (erased) return "skip";
   // Someone who left the creator's list has said no to their email, and a
   // reminder is their email.
+  // A contact text that does not read as a contact is unknown (rule 24), never "has not left the list"
+  // (tests/recovery-marks-exact.test.ts), as the review requests and product updates read it.
+  if (store.listId && typeof contact === "string" && contactExact(contact) === null) throw new UnknownReplyError("the list contact for the checkout reminder");
   if (store.listId && parseContact(contact)?.unsub) return "skip";
 
   if (await paidSince(store, email, ids, how.since)) {

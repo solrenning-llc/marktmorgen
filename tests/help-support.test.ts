@@ -54,7 +54,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const real = redis.pipeline.bind(redis);
 let countLost = false;
 redis.pipeline = (async (batch: Command[]) => {
-  if (countLost && batch.some((c) => c[0] === "SET" && String(c[1]).startsWith("nl:rl:help-support:"))) throw new Error("synthetic Redis timeout");
+  if (countLost && batch.some((c) => c[0] === "INCR" && String(c[1]).startsWith("nl:rl:help-support:"))) throw new Error("synthetic Redis timeout");
   return real(batch);
 }) as typeof redis.pipeline;
 

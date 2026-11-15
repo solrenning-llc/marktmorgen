@@ -59,7 +59,7 @@ Read by Claude 1 cloud E on 15 November 2026 from Stripe's own pages, in their S
 1. A Checkout Session made with `adaptive_pricing[enabled]=true` on a test connected account with `fees_collector: "stripe"` converts, and its session and charge read back in the store's currency with `presentment_details`.
 2. The same with `currency_options` on a Price of that account.
 3. What Stripe does with a session that has an application fee and Adaptive Pricing on (the fee's currency).
-4. Not a proof but a gate: the read of the account's settlement currency (`settlesInStoreCurrency`, lib/buyer-currency.ts) gets its cache and its request units (`takeBuyerRead`) in unit 3b, before the key turns on; today it is never called, because the key is false.
+4. Not a proof but a gate: the read of the account's settlement currency (`accountSettlementCurrency` and `settlesIn`, lib/buyer-currency.ts) gets its cache and its request units (`takeBuyerRead`) in unit 3b, before the key turns on; today it is never called, because the key is false.
 5. What a dispute on a converted payment opens at, and in which currency the disputed amount and its fee are taken from the creator's account (added 15 November 2026 from the coordinator's list: no page read says it).
 6. What Stripe's page shows a buyer in France, the UK, Canada and Japan (`test+location_FR@example.com` and the others) before paying: the currency, the total with tax, the rate or markup, and the choice to pay in the store's currency; then a full and a partial refund, and a subscription with one renewal.
 

@@ -22,7 +22,8 @@ import {
   buyerCurrencyPlan,
   hasApplicationFee,
   hasTaxRates,
-  settlesInStoreCurrency,
+  accountSettlementCurrency,
+  settlesIn,
 } from "@/lib/buyer-currency";
 import { inTheCurrencyShown } from "@/lib/instant-pay";
 import { applyShare } from "@/lib/platform-share";
@@ -88,23 +89,23 @@ async function main(): Promise<void> {
   const share = checkout.indexOf("applyShare(body, store,");
   const wired = checkout.indexOf("applyBuyerCurrency(body,");
   is("the product checkout: after inTheCurrencyShown and after the share, only behind the key", [share > 0, wired > share, checkout.indexOf("inTheCurrencyShown(body);") < wired, /if \(BUYER_CURRENCY_LIVE\) \{\s*applyBuyerCurrency\(body,/.test(checkout)], [true, true, true, true]);
-  is("it reads the fee and the tax rates from the session it judges", [checkout.includes("fee: hasApplicationFee(body)"), checkout.includes("taxRates: hasTaxRates(body)"), checkout.includes("settles: await settlesInStoreCurrency(store)")], [true, true, true]);
+  is("it reads the fee and the tax rates from the session it judges", [checkout.includes("fee: hasApplicationFee(body)"), checkout.includes("taxRates: hasTaxRates(body)"), checkout.includes("settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId))")], [true, true, true]);
   const others = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "store-checkout.ts" && f !== "buyer-currency.ts").filter((f) => /applyBuyerCurrency|adaptive_pricing\[enabled\]", "true"|adaptive_pricing\]\[enabled\]=true/.test(read(`lib/${f}`)));
   is("no other checkout turns Stripe's conversion on", others, []);
   is("the buyer-facing answer still says no while the key is off", read("lib/currency-faq.ts").includes("No. Our checkout asks Stripe not to convert"), true);
 
   part("The account's settlement currency");
-  const store = { stripeAccountId: "acct_1TestBuyerCcy01", currency: "usd" as const };
   account = { id: "acct_1TestBuyerCcy01", default_currency: "usd" };
-  const same = await settlesInStoreCurrency(store);
+  const same = await accountSettlementCurrency("acct_1TestBuyerCcy01");
   account = { id: "acct_1TestBuyerCcy01", default_currency: "EUR" };
-  const other = await settlesInStoreCurrency(store);
+  const other = await accountSettlementCurrency("acct_1TestBuyerCcy01");
   account = { id: "acct_1TestBuyerCcy01" };
-  const silent = await settlesInStoreCurrency(store);
+  const silent = await accountSettlementCurrency("acct_1TestBuyerCcy01");
   account = "fail";
-  const failed = await settlesInStoreCurrency(store);
-  const none = await settlesInStoreCurrency({ stripeAccountId: "", currency: "usd" });
-  is("the same, another, said nothing, failed, no account", [same, other, silent, failed, none], [true, false, null, null, null]);
+  const failed = await accountSettlementCurrency("acct_1TestBuyerCcy01");
+  const none = await accountSettlementCurrency("");
+  is("read: the same, another (lowercased), said nothing, failed, no account", [same, other, silent, failed, none], ["usd", "eur", null, null, null]);
+  is("compared with the store's currency: settles, does not, unknown", [settlesIn("usd", same), settlesIn("usd", other), settlesIn("usd", silent)], [true, false, null]);
   is("asked of the creator's account, a read only", [...new Set(asked)], ["GET /v1/account acct_1TestBuyerCcy01"]);
 
   done();

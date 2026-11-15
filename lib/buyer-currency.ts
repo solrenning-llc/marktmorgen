@@ -48,7 +48,6 @@
  * Stripe's page. Nothing here converts an amount, and no report reads it.
  */
 import { onAccount } from "@/lib/stripe-account";
-import type { Store } from "@/lib/store";
 
 /** Off until the test-mode proofs in docs/buyer-currency-and-language.md. */
 export const BUYER_CURRENCY_LIVE: boolean = false;
@@ -121,20 +120,28 @@ export function applyBuyerCurrency(body: URLSearchParams, plan: BuyerCurrencyPla
 }
 
 /**
- * Whether the store's currency is the creator's account's settlement
- * currency, read from the account's `default_currency` (the currency its
- * balance settles in). False when it is another, null when the account
- * cannot be read or says nothing. Asked only while BUYER_CURRENCY_LIVE is
- * true; before that key turns on, this read gets its cache and its request
- * units (docs/buyer-currency-and-language.md, unit 3b).
+ * Whether a currency is the account's settlement currency: null when the
+ * settlement currency is unknown, so the plan keeps the store's currency.
+ * Pure.
  */
-export async function settlesInStoreCurrency(store: Pick<Store, "stripeAccountId" | "currency">): Promise<boolean | null> {
-  if (!store.stripeAccountId) return null;
+export function settlesIn(own: string, settlement: string | null): boolean | null {
+  return settlement === null ? null : settlement === own;
+}
+
+/**
+ * The creator's account's settlement currency, read from its
+ * `default_currency` (the currency its balance settles in), lowercase; null
+ * when there is no account, it cannot be read or it says nothing. Asked only
+ * while BUYER_CURRENCY_LIVE is true; before that key turns on, this read gets
+ * its cache and its request units (docs/buyer-currency-and-language.md,
+ * unit 3b). The checkout compares it with the store's currency (settlesIn).
+ */
+export async function accountSettlementCurrency(accountId: string | null | undefined): Promise<string | null> {
+  if (!accountId) return null;
   try {
-    const account = (await onAccount("GET", store.stripeAccountId, "/account")) as { default_currency?: unknown };
-    const settles = typeof account.default_currency === "string" ? account.default_currency.toLowerCase() : "";
-    if (!/^[a-z]{3}$/.test(settles)) return null;
-    return settles === store.currency;
+    const account = (await onAccount("GET", accountId, "/account")) as { default_currency?: unknown };
+    const code = typeof account.default_currency === "string" ? account.default_currency.toLowerCase() : "";
+    return /^[a-z]{3}$/.test(code) ? code : null;
   } catch (error) {
     console.error("reading the account's settlement currency failed", error);
     return null;

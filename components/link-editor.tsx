@@ -67,6 +67,8 @@ function linkTags(link: StoreLink, hydrated: boolean): string[] {
     const plays = playable(link.url);
     if (plays) tags.push(`Plays on your page (${plays.name})`);
   }
+  // Kept back by the creator (423 [LT1]): said first, in words, whatever its times.
+  if (link.archived) tags.push(link.from || link.until ? "Archived, hidden from your page; its times are kept" : "Archived, hidden from your page");
   // Times are said in the creator's own time zone, which only the browser knows.
   if (!hydrated) {
     if (link.from || link.until) tags.push("Scheduled");
@@ -77,6 +79,16 @@ function linkTags(link: StoreLink, hydrated: boolean): string[] {
   if (when === "ended" && link.until) tags.push(`Ended ${WHEN.format(new Date(link.until))}, hidden`);
   if (when === "live" && link.until) tags.push(`Shows until ${WHEN.format(new Date(link.until))}`);
   return tags;
+}
+
+/** What is said once a link is archived or shown again (423 [LT1]): where it now stands, never more. */
+export function archiveDoneWords(link: Pick<StoreLink, "from" | "until" | "header">, archived: boolean, now = Date.now()): string {
+  const what = link.header ? "Heading" : "Link";
+  if (archived) return `${what} archived. It is hidden from your page and kept here; press Show again to bring it back.`;
+  const when = linkWhen({ ...link, id: "", title: "", url: "", addedAt: "" }, now);
+  if (when === "ended") return `${what} no longer archived, but its end time has passed, so it stays hidden. Edit its times to show it.`;
+  if (when === "soon") return `${what} no longer archived. It shows on your page from its start time.`;
+  return `${what} shown on your page again.`;
 }
 
 /** The draft as the route reads it (lib/store-link.ts, linkExtras). */
@@ -430,6 +442,21 @@ export function LinkEditor({ links, folder }: { links: StoreLink[]; folder: stri
                     className="text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
                   >
                     Move down
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    aria-label={`${link.archived ? "Show again" : "Archive"}: ${link.title}`}
+                    onClick={() =>
+                      run(
+                        { action: link.archived ? "unarchive" : "archive", id: link.id },
+                        () => {},
+                        archiveDoneWords(link, !link.archived),
+                      )
+                    }
+                    className="text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40"
+                  >
+                    {link.archived ? "Show again" : "Archive"}
                   </button>
                   {removingId === link.id ? null : (
                     <button

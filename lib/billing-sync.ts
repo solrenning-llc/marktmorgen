@@ -172,7 +172,10 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
     if (!changeOf(store, stateOf(subscription))) return true;
     const now = await readSubscription(id, store);
     if (now.state === "unknown") return false;
-    if (await recordState(store, now)) counts.updated += 1;
+    // Written only over the snapshot this was decided on (Codex U's MÉDIO on #4002): a plan the money-back refund or
+    // the cancel button ended after Stripe answered, or a switch, refuses the write, and the next run reads Stripe again.
+    const plan = changeOf(store, now);
+    if (plan && (await setSubscription(storeRef(store), plan, store)) !== null) counts.updated += 1;
     return true;
   }
 

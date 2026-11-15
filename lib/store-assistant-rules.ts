@@ -51,6 +51,7 @@ import { AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH
 import { assessCustomerWorstCase, MINIMUM_NET_PROFIT_CENTS, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { captureCustomerTaxInput, customerTaxCeiling, type CustomerTaxInput } from "@/lib/customer-tax-review";
 import { MAX_STORED_PAGE_BYTES } from "@/lib/sales-page";
+import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/assistant-question-length";
 import { CONFUSABLE_LATIN_SOURCES, LOOKALIKES_BEFORE_GATE_RANGE } from "@/lib/confusables-latin";
 import { PAGE_GOES_ON } from "@/lib/answers-rules";
 import { DISPUTE_COUNTER_FEE_CENTS, DISPUTE_FEE_CENTS, DISPUTE_RESERVE_BPS, MOST_CORRECT_READING, PROVIDER_FEES, REFUND_RESERVE_BPS, REMITTANCE_BPS, STRIPE_TOTAL_BPS, chargedOf, providerFeeCents, receivingOf } from "@/lib/receiving-costs";
@@ -64,6 +65,33 @@ export const ASSISTANT_PRICE_CENTS = 6_900;
 export const ASSISTANT_NAME = "Store assistant";
 /** What every reply is shown under, in the store's language too (lib/buyer-words/assistant.ts). */
 export const ASSISTANT_LABEL = "AI assistant";
+
+/**
+ * Pages of each of the customer's lists (subscriptions, open checkout pages) the add-on's start reads before it opens
+ * a page (lib/assistant-billing.ts, startAssistant): a longer list is not known to hold no add-on, and nothing opens.
+ */
+export const ASSISTANT_START_LIST_PAGES = 2;
+/**
+ * The most Stripe calls one start of the add-on makes (lib/assistant-billing.ts, startAssistant): the subscriptions,
+ * the open pages, the open pages read again after Stripe answers 409 for a key in progress, then the price read, the
+ * product read and write, the price write and the checkout POST. Adopting a live add-on makes fewer (its pages, the
+ * invoices read and one ending). Priced at every essential billing event in tests/plan-cost-registry.ts
+ * (assistant-start-reads).
+ */
+export const ASSISTANT_START_STRIPE_CALLS = 3 * ASSISTANT_START_LIST_PAGES + 5;
+/** How long a start waits, when Stripe answers that another tab's request under the same key is in progress, before it reads the open pages again; inside the start's cutoff. */
+export const ASSISTANT_IN_PROGRESS_WAIT_MS = 1_000;
+/**
+ * The hard end of one start of the add-on (lib/assistant-billing.ts, startAssistant, run inside withCutoff from
+ * lib/fetch-timeout.ts): no request is sent after it, one still waiting is given up at it, and the in-progress wait is
+ * not begun when it would end past it. So a start holds the function for at most this long, whatever Stripe does,
+ * well under ASSISTANT_START_STRIPE_CALLS calls each waited on for STRIPE_TIMEOUT_MS; the cost line
+ * (assistant-start-reads, tests/plan-cost-registry.ts) is priced at the smaller of the two. Set to the two Stripe GETs
+ * of STRIPE_TIMEOUT_MS that platform-subscription-search already prices for every essential billing event, so a start
+ * fits inside what that event is already paid for and the line adds nothing. A start that meets it fails as a network
+ * failure does: nothing is written down, and the creator is told something went wrong.
+ */
+export const ASSISTANT_START_CUTOFF_MS = 40_000;
 
 /** The model: the cheapest current one, fixed here so no deployment setting can make a message dearer than priced. */
 export const ASSISTANT_MODEL = "claude-haiku-5-5" as const;
@@ -90,8 +118,8 @@ export const ASSISTANT_OUTPUT_TOKENS = 320;
 export const ASSISTANT_PRODUCTS = 40;
 export const ASSISTANT_PAGES = 6;
 
-export const MIN_ASSISTANT_QUESTION = 2;
-export const MAX_ASSISTANT_QUESTION = 400;
+/* The question's length lives in lib/assistant-question-length.ts, so the buyer's chat reads it without this file. */
+export { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION };
 /** The longest reply shown. */
 export const MAX_ASSISTANT_REPLY = 900;
 /** The creator's own notes for the assistant: who to write to, what is true of every product. */

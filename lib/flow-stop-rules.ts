@@ -11,7 +11,7 @@
  *
  * Pure and browser-safe.
  */
-import { MAX_RETRIES_BY_YOU, MAX_WAIT_DAYS_PER_STEP, MAX_WAITS_PER_RUN } from "@/lib/flow-limits";
+import { MAX_RETRIES_BY_YOU, MAX_WAIT_DAYS_PER_STEP, MAX_WAITS_PER_RUN, SES_PARKS_PER_RUN } from "@/lib/flow-limits";
 import type { FlowGoal, StepCondition } from "@/lib/flow-rules";
 import { END, type RoutedStep } from "@/lib/flow-paths";
 
@@ -46,7 +46,7 @@ export function stopRules(
     { kind: "taken_out", text: "Another of your workflows reaches a step that takes them out of this one." },
     {
       kind: "waits",
-      text: `A step that cannot go yet waits and is tried again by itself: when the month's emails turn, the next day, or after a growing delay. A run waits ${MAX_WAITS_PER_RUN} times at the most, and one step ${MAX_WAIT_DAYS_PER_STEP} days; past that it stops, with nothing done at that step. Waiting for room at the service that sends our email does not count toward either: that email waits as long as it takes and goes out once there is room.`,
+      text: `A step that cannot go yet waits and is tried again by itself: when the month's emails turn, the next day, or after a growing delay. A run waits ${MAX_WAITS_PER_RUN} times at the most, and one step ${MAX_WAIT_DAYS_PER_STEP} days; past that it stops, with nothing done at that step. Waiting for room at the service that sends our email does not count toward either, up to ${SES_PARKS_PER_RUN} times a run and only while that service is set up and ready: the email waits and goes out once there is room. Past that, such a wait counts like any other wait, and the run stops after the usual limit with a note that says why.`,
     },
     {
       kind: "held",

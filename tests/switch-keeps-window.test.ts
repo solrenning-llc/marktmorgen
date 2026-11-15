@@ -553,12 +553,15 @@ async function main(): Promise<void> {
     // (SES_WAKE_JOBS_PER_DAY × SES_WAKE_JOB_COMMANDS) priced whole on every plan that can run workflows, and
     // SES_WAIT_COMMANDS_PER_TRY 60 → 64: Studio 312.40 → 311.87 and Scale 700.96 → 700.37; Store, with no runs a day,
     // unchanged; every figure above zero (MR).
-    is("11: Store, Studio and Scale keep 45.11, 311.87 and 700.37 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "311.87", "700.37"]);
+    // And each counted wait priced at the dearer of an ordinary try and an SES try past its parks
+    // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
+    is("11: Store, Studio and Scale keep 45.11, 311.76 and 700.20 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "311.76", "700.20"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
     // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
-    is("11: and 37.05, 256.74 and 577.10 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "256.74", "577.10"]);
+    // The same on the yearly month: Studio 256.74 → 256.64, Scale 577.10 → 576.93; Store unchanged.
+    is("11: and 37.05, 256.64 and 576.93 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "256.64", "576.93"]);
   } finally {
     Date.now = realNow;
   }

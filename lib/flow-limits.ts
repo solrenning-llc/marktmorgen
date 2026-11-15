@@ -168,10 +168,18 @@ export const SES_WAKE_JOB_COMMANDS = 1 + 2 + 25;
  * at SES_WAKE_JOB_COMMANDS at the most: priced, whole, on every plan's workflows line (tests/plan-cost-registry.ts).
  */
 export const SES_WAKE_JOBS_PER_DAY = 288;
+/**
+ * One counted wait whose try was for room at Amazon SES, past SES_PARKS_PER_RUN or with SES not ready (lib/flows.ts,
+ * waitOrStop): the try reads Amazon's state and its 24 hours as any SES try does, and the wait is counted as any other.
+ * Measured at 65 in tests/flow-ses-over-cap.test.ts (15 November 2026, review of #4246 by Claude 4 cloud AA); 68 with
+ * room. WORST_COMMANDS_PER_RUN prices each of the MAX_WAITS_PER_RUN counted waits at the dearer of this and
+ * WAIT_COMMANDS_PER_TRY, since any of them may be such a try.
+ */
+export const SES_COUNTED_WAIT_COMMANDS_PER_TRY = 68;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +
-  MAX_WAITS_PER_RUN * WAIT_COMMANDS_PER_TRY +
+  MAX_WAITS_PER_RUN * Math.max(WAIT_COMMANDS_PER_TRY, SES_COUNTED_WAIT_COMMANDS_PER_TRY) +
   SES_WAITS_PER_RUN * (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY);
 
 type PlanView = { tier: Tier; subscriptionActive: boolean; trialEnds: number };

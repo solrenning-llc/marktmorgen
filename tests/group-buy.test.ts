@@ -43,6 +43,9 @@ type Sent = { to: string[]; subject: string; text: string };
 const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 let refunds: Record<string, unknown>[] = [];
+/** Closing events of disputes, newest first, as Stripe lists them (queue 388 [TB14]). */
+let closings: Record<string, unknown>[] = [];
+let eventsFail = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
@@ -57,8 +60,25 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return answer({ id: `cs_test_${"t".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" });
   }
   if (path === "/refunds") return answer({ object: "list", data: refunds, has_more: false });
+  if (path === "/events") {
+    if (eventsFail) return new Response(JSON.stringify({ error: { message: "rate limited" } }), { status: 429 });
+    const after = url.searchParams.get("starting_after");
+    const from = after ? closings.findIndex((e) => e.id === after) + 1 : 0;
+    return answer({ object: "list", data: closings.slice(from, from + 100), has_more: from + 100 < closings.length });
+  }
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
+
+/** A dispute Stripe closed, as its charge.dispute.closed event. */
+function closing(n: number, status: "lost" | "won", payment: string, amount: number): Record<string, unknown> {
+  return {
+    id: `evt_grpclosed${String(n).padStart(8, "0")}`,
+    object: "event",
+    type: "charge.dispute.closed",
+    created: Math.floor(Date.now() / 1000) - 60 + n,
+    data: { object: { object: "dispute", id: `dp_grp${String(n).padStart(12, "0")}`, status, amount, charge: `ch_grpdisp${String(n).padStart(8, "0")}`, payment_intent: payment } },
+  };
+}
 
 const base = (over: Partial<Listing>): Listing =>
   ({ id: "x", priceCents: 2900, recurring: null, call: null, pwyw: null, keys: null, options: [], file: null, link: "https://example.com", course: null, bundle: null, stock: null, ...over }) as Listing;
@@ -276,6 +296,28 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:orders:n:${folder}:${allowanceWindow(store)!.id}`, 0]]);
   await askPlace({ store, id: lateGroup.group.id, email: "ida@example.com", product, base: BASE, from: FROM, ordersLink: async () => null });
   is("with room in the month, the same person takes it", [(await take(tokenFor("ida@example.com"))).outcome, await placesTaken(lateGroup.group.id)], ["taken", 1]);
+
+  // Queue 388 [TB14], completeness add-on C1-20261105-1919-C4-1: a dispute lost takes a purchase for several back as a
+  // full refund does, whatever its amount (the owner's rule of 4 November 2026 in lib/refunds.ts); a won one, and a
+  // refund of part of the price, take nothing; a read of the closing events that fails takes nothing, and the next
+  // run does; read again, nothing is taken twice.
+  part("A dispute lost takes every place back, as a full refund does");
+  store = (await storeForEmail("owner@example.com"))!;
+  const lostDrops: string[] = [];
+  const revokeAll = () => revokeRefundedGroups(store, Date.now() + 10_000, async (email, productId) => void lostDrops.push(`${email}|${productId}`));
+  refunds = [{ id: "re_GroupPart0001", object: "refund", created: Math.floor(Date.now() / 1000) - 30, status: "succeeded", payment_intent: "pi_Group000005", charge: { object: "charge", refunded: false, amount: 4900, amount_refunded: 2000 } }];
+  closings = [closing(1, "lost", "pi_Group000003", 500)];
+  eventsFail = true;
+  is("the closings cannot be read: nothing taken back", [await revokeAll(), (await importedFor(store, "gil@example.com")).length], [0, 1]);
+  eventsFail = false;
+  closings = [closing(2, "won", "pi_Group000004", 9800), closing(1, "lost", "pi_Group000003", 500)];
+  is("the next run takes back the place of the purchase whose dispute was lost, for part of its price", await revokeAll(), 1);
+  is("from that address, and its access", [(await importedFor(store, "gil@example.com")).length, lostDrops], [0, [`gil@example.com|${planner.id}`]]);
+  is("that purchase is closed for good", Boolean((await readGroup(picked.group.id))?.revoked), true);
+  is("a dispute won takes nothing back", [(await importedFor(store, "hal@example.com")).length, Boolean((await readGroup(heldGroup.group.id))?.revoked)], [1, false]);
+  is("nor does a refund of part of the price", [(await importedFor(store, "ida@example.com")).length, Boolean((await readGroup(lateGroup.group.id))?.revoked)], [1, false]);
+  lostDrops.length = 0;
+  is("read again, nothing is taken back twice", [await revokeAll(), lostDrops], [0, []]);
 
   done();
 }

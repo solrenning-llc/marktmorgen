@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { lockRead } from "@/lib/two-step-unknown";
 import type { NextRequest } from "next/server";
 import { type Store, StoreFullError, appendSitePages, changeSitePages, ensureStatsId, imageFolder, storeForEmailSeen } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -312,7 +313,9 @@ export async function POST(request: NextRequest) {
       const before = picturePaths(held);
       const shown = picturePaths(page);
       // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
-      if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");
+      const lock = before.some((path) => !shown.includes(path)) ? await lockRead(lockedFor(request, "page", "replace")) : false;
+      if (lock instanceof Response) return lock;
+      if (lock) return refusedJson("locked");
       const fresh = shown.filter((path) => !before.includes(path));
       if (fresh.length) {
         const folder = await imageFolder(ref);

@@ -768,6 +768,10 @@ export async function startSetup(email: string, session: string, backupRaw: stri
   if (!backup || backup.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(backup)) return "backup";
   if (backup === normaliseEmail(email)) return "same";
   if (!(await withinLimit("two-step-backup", normaliseEmail(email), 5, 60 * 60))) return "limited";
+  // Per inbox as well as per account (MM-SA-49, the shape of MM-SA-35): any number of accounts naming the same address
+  // still send it at most five codes an hour, so this is never a way to fill a stranger's inbox from our domain.
+  // Hashed, so the counter's name never holds the address.
+  if (!(await withinLimit("two-step-backup-to", sha(`nimbus-2fa-backup-to:${backup}`), 5, 60 * 60))) return "limited";
   const secret = newSecret();
   const confirm = confirmCode();
   const sent = isSenderConfigured()

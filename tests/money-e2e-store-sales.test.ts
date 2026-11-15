@@ -67,10 +67,10 @@ process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const OWNER = "sales-usd@example.com";
 const HANDLE = "saleshop";
-const ACCOUNT = "acct_1TestSaleShop001";
+const ACCOUNT = "acct_1TestSales01";
 const OWNER_JPY = "sales-jpy@example.com";
 const HANDLE_JPY = "saleshopjp";
-const ACCOUNT_JPY = "acct_1TestSaleShopJp1";
+const ACCOUNT_JPY = "acct_1TestSalesJp1";
 const ORIGIN = "https://marktmorgen.com";
 const SALE_COUPON = "sale_bf_15";
 const DAY = 86_400;

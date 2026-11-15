@@ -184,7 +184,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       ) : null}
       <p className="st-muted mt-6 text-sm">
         {`${g.alreadyTook} `}
-        <Link href={`/@${store.handle}/orders`} className="st-footer-link font-semibold">
+        <Link href={`/@${store.handle}/orders`} className="st-footer-link st-in-sentence font-semibold">
           {g.openAgain}
         </Link>
       </p>

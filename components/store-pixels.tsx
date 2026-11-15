@@ -550,7 +550,7 @@ export function StorePixels({
         <p className="font-bold">{words.adsTitle(storeName)}</p>
         <p className="st-muted mt-1 text-sm leading-relaxed">
           {words.adsBody(names, storeName)}{" "}
-          <Link href="/privacy#ads" className="st-footer-link font-semibold">
+          <Link href="/privacy#ads" className="st-footer-link st-in-sentence font-semibold">
             {words.more}
           </Link>
         </p>

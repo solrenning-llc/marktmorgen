@@ -2556,17 +2556,20 @@ select.st-field:not([multiple]),
 .st-footer-link:hover {
   color: var(--st-accent-text);
 }
-/* On the store front such a link mostly stands alone (the foot of the page, a search's way back, "Watch on ..."):
-   a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
-   inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
-[data-store-layout] .st-footer-link:not(summary, figcaption > *) {
+/* On every store page such a link mostly stands alone (the foot of the page, a search's way back, "Watch on ...",
+   "Back to <store>" on the tip page, "Visit <store>'s store" on the letters page): a 44 px target (WCAG 2.5.5 AAA).
+   Until 15 November 2026 this held on the store front only ([data-store-layout]), so on its other pages such a link
+   was 20 px tall (#4613). Not a summary, which would lose its disclosure triangle (below), nor a link inside a
+   quote's caption or marked .st-in-sentence, which breaks with its sentence (2.5.5 exempts a link in a sentence).
+   Held by tests/store-link-targets.test.ts. */
+.st-footer-link:not(summary, figcaption > *, .st-in-sentence) {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
 }
 /* A summary drawn as such a link (the presale's "Or join the waitlist") opens from a 44 px row by its padding, so it
    stays a list item with its triangle. The first padding is for a browser without the lh unit. */
-[data-store-layout] summary.st-footer-link {
+summary.st-footer-link {
   min-height: 2.75rem;
   padding-block: 0.625rem;
   padding-block: calc((2.75rem - 1lh) / 2);

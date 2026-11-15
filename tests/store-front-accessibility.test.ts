@@ -119,11 +119,12 @@ async function main(): Promise<void> {
   const page = readFileSync("app/[handle]/page.tsx", "utf8");
   const css = readFileSync("app/globals.css", "utf8");
   is("the store front's layout is marked, so its rules reach only it", /data-store-layout=""/.test(page), true);
-  const footer = rule(css, /\[data-store-layout\] \.st-footer-link:not\(summary, figcaption > \*\)/);
+  // Since #4613 the rule holds on every store page, not only this one (tests/store-link-targets.test.ts).
+  const footer = rule(css, /\n\.st-footer-link:not\(summary, figcaption > \*, \.st-in-sentence\)/);
   is("its standalone links (blog, \"Get it again\", affiliates, report, delete, the search's \"Show every product\") are 2.75rem tall", [/display:\s*inline-flex/.test(footer), /min-height:\s*2\.75rem/.test(footer)], [true, true]);
   // Claude 5's review of #2987 (LOW 2): a summary drawn as such a link (the presale's "Or join the waitlist") keeps
   // its disclosure triangle, and a link inside a quote's caption breaks with its sentence.
-  const waitlist = rule(css, /\[data-store-layout\] summary\.st-footer-link/);
+  const waitlist = rule(css, /\nsummary\.st-footer-link/);
   is("a summary drawn as such a link stays a list item, 44 px tall by its padding", [/display:/.test(waitlist), /min-height:\s*2\.75rem/.test(waitlist), /calc\(\(2\.75rem - 1lh\) \/ 2\)/.test(waitlist)], [false, true, true]);
   const news = rule(css, /\.st-announce a/);
   // LOW 3: the arrow after the news stays at the end of its sentence, with its space, not a flex item of its own.

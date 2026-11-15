@@ -118,7 +118,7 @@ export function AffiliateClick({
       <p className="font-bold">{words.affiliateTitle(storeName)}</p>
       <p className="st-muted mt-1 text-sm leading-relaxed">
         {words.affiliateBody(days)}{" "}
-        <Link href="/privacy#affiliates" className="st-footer-link font-semibold">
+        <Link href="/privacy#affiliates" className="st-footer-link st-in-sentence font-semibold">
           {words.more}
         </Link>
       </p>

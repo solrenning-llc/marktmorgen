@@ -552,6 +552,8 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Merge of main into #3597 (15 November 2026, Claude 6 conflict sweep): main's model with this PR's draft preview costs
+    // together; figures as the model computes them, each still above zero (MR). Cost is not lowered.
     // Merge of main into #3440 (15 November 2026): a draft's private preview page and its records cost a little more,
     // one cent less kept on Studio and Scale monthly, still above zero (MR); figures as the model computes them with
     // main's costs and #3440's together. The yearly figures are unchanged.

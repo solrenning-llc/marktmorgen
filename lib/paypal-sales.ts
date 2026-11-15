@@ -47,7 +47,7 @@ import { fairOff } from "@/lib/fair-price";
 import { admitOrders } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HSET_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { plainAmount, formatMoney } from "@/lib/money";
@@ -1153,17 +1153,6 @@ export async function watchPayPal(
       await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
       continue;
     }
-    // Each write confirmed before the order leaves the watch (Codex G on #2791): a reply in another shape keeps the
-    // order watched, looked at again in an hour, and the same write is made again then (both are harmless twice).
-    const leaveWatch = async (write: (string | number)[]): Promise<boolean> => {
-      const wrote = repliesFor(await redisPipeline([write]), 1);
-      if (!wrote || (wrote[0] !== 0 && wrote[0] !== 1)) {
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
-        return false;
-      }
-      await redisPipeline([["ZREM", watchKey(statsId), order]]);
-      return true;
-    };
     if (kept) {
       // Its course back too (an HSETNX), in case an earlier pass took it away before this payment was seen.
       if (on.restoreStart) {
@@ -1175,7 +1164,14 @@ export async function watchPayPal(
           continue;
         }
       }
-      await leaveWatch(["HSET", importedKey(statsId, paid.email), paid.product, JSON.stringify({ at: kept.at, job: `paypal:${kept.order}`, items: items.length ? items : null })]);
+      // Only over the grant read above (#4756): a grant deleted since (the person's erasure) stays deleted, one changed
+      // since is left as it is, and either way the order stays watched for a new read; an unknown answer too.
+      const replaced = repliesFor(await redisPipeline([["EVAL", HSET_IF_EQUAL, 1, importedKey(statsId, paid.email), paid.product, given as string, JSON.stringify({ at: kept.at, job: `paypal:${kept.order}`, items: items.length ? items : null })]]), 1);
+      if (!replaced || replaced[0] !== 1) {
+        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
+        continue;
+      }
+      await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
     // The course first, then the purchase and the watch (Codex G on #2781; rule 30): a course removal that fails keeps

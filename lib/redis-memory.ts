@@ -346,6 +346,13 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/redis-reply.ts HSET_IF_EQUAL: one hash field set only while it holds the value it was read as.
+        if (key.startsWith("-- marktmorgen:hset-if-equal:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, hash, field, read, value] = args;
+          if (this.run(["HGET", hash, field]) !== read) return 0;
+          this.run(["HSET", hash, field, value]);
+          return 1;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

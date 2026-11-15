@@ -139,6 +139,15 @@ export const HDEL_IF_EQUAL = `-- marktmorgen:hdel-if-equal:v1
 if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end
 return 0`;
 
+/**
+ * Sets one hash field only while it holds the value it was read as (KEYS[1] the hash, ARGV[1] the field, ARGV[2] the
+ * value read, ARGV[3] the new value): 1 when set, 0 when the field is absent or holds another value. So a write that
+ * replaces what it read never brings back a field deleted since (a person's erasure, #4756) nor overwrites a later one.
+ */
+export const HSET_IF_EQUAL = `-- marktmorgen:hset-if-equal:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then redis.call("HSET", KEYS[1], ARGV[1], ARGV[3]) return 1 end
+return 0`;
+
 /** Thrown where a reply was not in its exact shape, so what depended on it is said as not done. */
 export class UnknownReplyError extends Error {
   constructor(what: string) {

@@ -80,6 +80,8 @@ async function main(): Promise<void> {
   part("The plan, as one answer");
   const [status, planned] = await json(await ask({ action: "outline", product: draft.product.id, notes: "Weeknight dinners for busy parents." }));
   is("the plan and what is left", [status, planned.ok, planned.value, typeof planned.left], [200, true, PLAN, "number"]);
+  // The parts are written in the store's language (lib/ai-file.ts, writingRules), so the page reads the file in it (756 [STN3], unit 2).
+  is("with the store's language, which the file is written in", planned.language, store.language);
   is("one model call", calls, 1);
 
   part("The parts, as lines");

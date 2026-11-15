@@ -58,7 +58,9 @@ export async function POST(request: NextRequest) {
   if (action === "outline") {
     const done = await writeFileOutline(store, { productTitle: product.title, notes });
     if (!done.ok) return fail(done.reason, done.reason === "failed" ? 502 : 400);
-    return Response.json({ ok: true, value: done.value, left: done.left });
+    // The store's language, which the parts are written in (lib/ai-file.ts, writingRules), so the page
+    // reads the file in it and draws the general warning for a language its word lists do not read (756 [STN3], unit 2).
+    return Response.json({ ok: true, value: done.value, left: done.left, language: store.language });
   }
 
   if (action === "sections") {

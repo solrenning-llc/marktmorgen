@@ -12,7 +12,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { AiFileReview, finalStates } from "@/components/ai-file-assist";
-import { AI_DRAFT_BADGE, ESTIMATE_BADGE } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, ESTIMATE_BADGE, sensitiveLabel, sensitiveWarning } from "@/lib/ai-draft-review";
 import { done, is, part } from "./check";
 
 const draft = {
@@ -22,19 +22,35 @@ const draft = {
     { title: "Week one", body: "Go to bed at the same time. Good sleep helps your health." },
   ],
 };
-const draw = (checks: boolean[], missing: string[] = []) =>
+const draw = (checks: boolean[], missing: string[] = [], file: typeof draft = draft, language: "en" | "de" | null = "en") =>
   renderToStaticMarkup(
-    createElement(AiFileReview, { draft, given: "A guide to sleep for new parents.", checks, missing, saving: false, onToggle: () => {}, onEdit: () => {}, onSave: () => {} }),
+    createElement(AiFileReview, { draft: file, language: language ?? undefined, given: "A guide to sleep for new parents.", checks, missing, saving: false, onToggle: () => {}, onEdit: () => {}, onSave: () => {} }),
   );
+// A synthetic file written in German, about health and money: the word lists read English only.
+const german = {
+  title: "Gesund leben",
+  sections: [{ title: "Start", body: "Sie sollten Medikamente gegen Bluthochdruck nicht absetzen und Ihre Steuern sparen." }],
+};
 const saveButton = (html: string) => /<button[^>]*>Make the PDF[^<]*<\/button>/.exec(html)?.[0] ?? "";
 
 function main(): void {
+  const source = readFileSync("components/ai-file-assist.tsx", "utf8");
   part("The text, under the AI draft checks");
   const fresh = draw([false, false, false], ["Week two"]);
   is("the badge, drawn by the page", fresh.includes(AI_DRAFT_BADGE), true);
   is("the three checks, none checked yet", (fresh.match(/type="checkbox"/g) ?? []).length === 3 && !/checked=""/.test(fresh), true);
   is("each part in a box with its own visible label", (fresh.match(/<label[^>]*for="[^"]+"[^>]*>Part \d: /g) ?? []).length, 2);
   is("the warning about health", fresh.includes("This draft is about health."), true);
+
+  part("A file is read in the store's language (756 [STN3], unit 2)");
+  const unreadWarning = sensitiveWarning("unread")!;
+  const inGerman = draw([false, false, false], [], german, "de");
+  is("a German file gets the general warning about health, money or the law", [inGerman.includes(sensitiveLabel("unread")), inGerman.includes(unreadWarning)], [true, true]);
+  is("and no specific subject is claimed for it", inGerman.includes("This draft is about"), false);
+  const unsaid = draw([false, false, false], [], german, null);
+  is("a file whose language was not said gets the general warning too", unsaid.includes(unreadWarning), true);
+  is("an English file still gets its specific subjects, not the general warning", [fresh.includes("This draft is about health."), fresh.includes(unreadWarning)], [true, false]);
+  is("the review reads the file with draftTopics in its language, never the English-only reading", [/draftTopics\(texts, language\)/.test(source), /sensitiveTopics\(/.test(source)], [true, false]);
   is("a number the creator did not give is marked as an estimate", fresh.includes(ESTIMATE_BADGE) && fresh.includes(">8<"), true);
   is("a part that did not come back is said", fresh.includes("These parts did not come back and are not in the file: Week two."), true);
 
@@ -54,7 +70,6 @@ function main(): void {
   );
 
   part("Source checks");
-  const source = readFileSync("components/ai-file-assist.tsx", "utf8");
   is("nothing animates", /\banimate-/.test(source), false);
   is("every button is at least 44 by 44 pixels", (source.match(/<button[\s\S]*?className="([^"]*)"/g) ?? []).every((b) => /min-h-11/.test(b)), true);
   is("it posts only to its own route and the writing help's stop", (source.match(/fetch\("([^"]+)"/g) ?? []).sort(), ['fetch("/api/store/ai"', 'fetch("/api/store/ai-file"'].sort());

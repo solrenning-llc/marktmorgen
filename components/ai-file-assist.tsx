@@ -8,7 +8,8 @@ import { Icon } from "@/components/icons";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
 import { readAiAnswer } from "@/lib/ai-response";
 import { type AiStepId, type AiStepLine, readStepLine } from "@/lib/ai-steps";
-import { aiDraftHold, draftStrings, freshChecks, reviewDone, sensitiveTopics, unsourcedNumbers } from "@/lib/ai-draft-review";
+import { aiDraftHold, draftStrings, draftTopics, freshChecks, reviewDone, unsourcedNumbers } from "@/lib/ai-draft-review";
+import type { LanguageCode } from "@/lib/store-language";
 import {
   MAX_FILE_SECTIONS,
   MAX_FILE_TITLE,
@@ -71,6 +72,7 @@ export function finalStates(ids: readonly AiStepId[], states: Partial<Record<AiS
 /** The checked text and its save: drawn by AiFileAssist, kept apart so it can be checked as drawn. */
 export function AiFileReview({
   draft,
+  language,
   given,
   checks,
   missing,
@@ -80,6 +82,11 @@ export function AiFileReview({
   onSave,
 }: {
   draft: FileDraft;
+  /**
+   * The store language the file is written in (lib/ai-file.ts, writingRules), from the route's answer;
+   * a language the word lists do not read, or none said, draws the general warning (756 [STN3], unit 2).
+   */
+  language: LanguageCode | undefined;
   /** What the creator typed, so a number they gave is not marked as an estimate. */
   given: string;
   checks: readonly boolean[];
@@ -110,7 +117,7 @@ export function AiFileReview({
           />
         </div>
       ))}
-      <AiDraftReview checks={checks} onToggle={onToggle} topics={sensitiveTopics(texts.join("\n"))} estimates={unsourcedNumbers(draftStrings(draft.sections.map((s) => s.body)), given)} />
+      <AiDraftReview checks={checks} onToggle={onToggle} topics={draftTopics(texts, language)} estimates={unsourcedNumbers(draftStrings(draft.sections.map((s) => s.body)), given)} />
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" className="btn btn-primary btn-sm inline-flex min-h-11 min-w-11 items-center justify-center" onClick={onSave} disabled={saving || !reviewDone([...checks])} aria-busy={saving}>
           {saving ? "Making the PDF…" : "Make the PDF and keep it as this product's file"}
@@ -129,6 +136,7 @@ export function AiFileAssist({ productId, onSaved }: { productId: string; onSave
   const [stage, setStage] = useState<Stage>("notes");
   const [notes, setNotes] = useState("");
   const [outline, setOutline] = useState<FileOutline | null>(null);
+  const [language, setLanguage] = useState<LanguageCode | undefined>(undefined);
   const [draft, setDraft] = useState<FileDraft | null>(null);
   const [missing, setMissing] = useState<string[]>([]);
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
@@ -183,6 +191,8 @@ export function AiFileAssist({ productId, onSaved }: { productId: string; onSave
         setLeft(data.left);
         setKnown(true);
         setOutline(read);
+        // The store's language, which the parts are written in, so the text is read in it.
+        setLanguage(data.language);
         setStage("outline");
       } else {
         if (!data.ok && !Object.hasOwn(MESSAGES, data.error)) setKnown(false);
@@ -430,6 +440,7 @@ export function AiFileAssist({ productId, onSaved }: { productId: string; onSave
             <h3 id={`${base}-h`} ref={heading} tabIndex={-1} className="text-sm font-semibold text-ink">Step 4: Read, change and check the text</h3>
             <AiFileReview
               draft={draft}
+              language={language}
               given={`${notes}\n${outline ? JSON.stringify(outline) : ""}`}
               checks={checks}
               missing={missing}

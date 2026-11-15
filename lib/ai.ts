@@ -670,6 +670,14 @@ function setupAnswers(raw: unknown): { q: string; a: string }[] {
     .slice(0, MAX_SETUP_QUESTIONS);
 }
 
+/**
+ * A store draft's own words, trimmed and capped as the draft reads them (488 [IT5] unit 2: split out of
+ * writeStoreSetup, unchanged): what the creator does, what they sell, and their answers to the draft's questions.
+ */
+export function storeSetupWords(input: { about?: unknown; selling?: unknown; answers?: unknown }): { about: string; selling: string; answers: { q: string; a: string }[] } {
+  return { about: block(input.about, MAX_AI_NOTES), selling: block(input.selling, MAX_AI_NOTES), answers: setupAnswers(input.answers) };
+}
+
 /** What a store draft is written for: the store's name, its currency and the English name of its language. */
 export type StoreSetupShape = { name: string; currency: string; language: string };
 
@@ -741,9 +749,7 @@ export function parseStoreSetup(answer: string, words: string, currency: string,
 }
 
 export async function writeStoreSetup(store: Store, input: { about: string; selling: string; link?: string; answers?: unknown }, now = Date.now(), sourceHooks: SourceHooks = {}): Promise<AiResult<StoreSetup>> {
-  const answers = setupAnswers(input.answers);
-  const about = block(input.about, MAX_AI_NOTES);
-  const selling = block(input.selling, MAX_AI_NOTES);
+  const { about, selling, answers } = storeSetupWords(input);
   // A link counts only while reading is switched on (lib/source-page.ts); otherwise it is not read and not needed.
   const link = sourceReadingOn() ? line(input.link, 2_048) : "";
   if (!about && !link) return { ok: false, reason: "notes" };

@@ -16,8 +16,8 @@
  *     lib/free-pool-rules.ts) and chooses neither.
  */
 import {
-  UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION, VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB,
-  VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR, WRITING_JOB_MICRO_USD,
+  AI_CALL_INFRA_MICRO_USD, ANTHROPIC_RATES, PROVIDER_CHARGES_BPS, UPSTASH_MICRO_USD_PER_MILLION_COMMANDS, VERCEL_CALL_MICRO_USD_PER_MILLION,
+  VERCEL_CPU_MICRO_USD_PER_HOUR, VERCEL_FUNCTION_GB, VERCEL_MEMORY_MICRO_USD_PER_GB_HOUR, WRITING_JOB_MICRO_USD,
 } from "@/lib/spend-cost-table";
 import { freePoolSize } from "@/lib/free-pool-rules";
 
@@ -34,6 +34,9 @@ export const PREVIEWS_PER_ADDRESS_PER_DAY = 2;
  * the preview's route really sends by that route's own tests (unit 2).
  */
 export const PREVIEW_DB_COMMANDS = 40;
+
+/** Tokens one job may write back: the studio's own draft's (writeStoreSetup in lib/ai.ts asks for the same). */
+export const PREVIEW_OUTPUT_TOKENS = 2_500;
 
 /** The route the preview runs in (unit 2), and the duration it must declare (export const maxDuration). */
 export const PREVIEW_ROUTE = "app/api/store-preview/route.ts";
@@ -106,4 +109,43 @@ export function previewMonthCeiling(places: PreviewPlaces, paying: number): numb
 export function previewDayCeiling(month: number): number {
   if (!Number.isSafeInteger(month) || month <= 0) return 0;
   return Math.min(month, Math.ceil((month * 2) / 30));
+}
+
+/**
+ * The preview's month pool, in micro-dollars (unit 2): the month's previews (previewMonthCeiling) at every job's
+ * priced worst, WRITING_JOB_MICRO_USD, which each job's own hold may not pass. Only the model's part is drawn from the
+ * pool; the function time and the database commands are bounded by the counts the route checks. Null while the route
+ * is not priced: an unknown worst never opens a pool, and the owner's choice of places is still an argument.
+ */
+export function previewPoolCapMicroUsd(places: PreviewPlaces, paying: number, routeIsPriced: boolean): number | null {
+  if (previewWorstMicroUsd(routeIsPriced) === null) return null;
+  const total = previewMonthCeiling(places, paying) * PREVIEW_JOBS * WRITING_JOB_MICRO_USD;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+const ceilDiv = (a: bigint, b: bigint) => (a + b - BigInt(1)) / b;
+
+/**
+ * What one job's call cost, read from the provider's usage at the cost table's rates with its charges and the
+ * call's infrastructure, never more than the job's hold: the same reading as the Store assistant's
+ * (assistantSettledMicroUsd in lib/store-assistant-rules.ts), for the writing model. A bill that does not read
+ * (a count that is not a whole number, more output than asked, a model the table does not price) settles the whole
+ * hold, never less (CX-123 rule 24).
+ */
+export function previewSettledMicroUsd(model: string, usage: unknown, hold: number, maxTokens: number): number {
+  if (!Number.isSafeInteger(hold) || hold <= 0) return 0;
+  if (!Object.hasOwn(ANTHROPIC_RATES, model) || !usage || typeof usage !== "object") return hold;
+  const u = usage as Record<string, unknown>;
+  const count = (n: unknown) => (typeof n === "number" && Number.isSafeInteger(n) && n >= 0 ? n : null);
+  const input = count(u.input_tokens), output = count(u.output_tokens);
+  const cacheWrite = count(u.cache_creation_input_tokens ?? 0), cacheRead = count(u.cache_read_input_tokens ?? 0);
+  if (input === null || output === null || cacheWrite === null || cacheRead === null || output > maxTokens) return hold;
+  const allInput = input + cacheWrite + cacheRead;
+  const tier = ANTHROPIC_RATES[model as keyof typeof ANTHROPIC_RATES].tiers.find((row) => allInput <= row.upToInputTokens);
+  if (!tier) return hold;
+  const million = BigInt(1_000_000);
+  // Cache writes cost more than input; counted at 2x, as the assistant counts them. None are asked for.
+  const provider = ceilDiv(BigInt(input + cacheRead + 2 * cacheWrite) * BigInt(tier.inputMicroUsdPerMTok), million) + ceilDiv(BigInt(output) * BigInt(tier.outputMicroUsdPerMTok), million);
+  const charged = ceilDiv(provider * BigInt(10_000 + PROVIDER_CHARGES_BPS), BigInt(10_000)) + BigInt(AI_CALL_INFRA_MICRO_USD);
+  return charged > BigInt(hold) ? hold : Number(charged);
 }

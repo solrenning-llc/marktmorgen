@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
-import { parseStoreSetup, storeSetupRequest, writeStoreSetup } from "@/lib/ai";
+import { parseStoreSetup, storeSetupRequest, storeSetupWords, writeStoreSetup } from "@/lib/ai";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -67,6 +67,7 @@ async function main(): Promise<void> {
   const requestA = storeSetupRequest(shape, { about: INPUT_A.about, selling: INPUT_A.selling, answers: [{ q: "Who is it for?", a: "Parents" }], page: null }); // the caller cleans the answers first (setupAnswers)
   is("the same system prompt", requestA.system, sentA.system);
   is("the same user prompt", requestA.prompt, sentA.messages[0].content);
+  is("the words cleaned as the draft cleans them: trimmed, and only answers with both halves", storeSetupWords({ ...INPUT_A, about: `  ${INPUT_A.about}\u0007 ` }), { about: INPUT_A.about, selling: INPUT_A.selling, answers: [{ q: "Who is it for?", a: "Parents" }] });
   const requestB = storeSetupRequest(shape, { about: INPUT_B.about, selling: "", answers: [], page: null });
   is("the same prompts for a draft with no sales line and no answers", [requestB.system, requestB.prompt], [sentB.system, sentB.messages[0].content]);
   if (!a.ok) throw new Error("no draft");

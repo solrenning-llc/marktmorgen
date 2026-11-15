@@ -1007,6 +1007,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:account:stores:@lib/store.ts": company("An account's other stores", "An account's."),
   "nl:account:stores:@lib/account-exists.ts": { what: "An account's other stores, read exactly to tell an existing account when an invitation is taken", parts: [capped(0, "Read only: counted with lib/store.ts.")] },
   "nl:catalog:move:cursor@lib/store.ts": company("Where the catalog move stopped", "One key, the company's job."),
+  "nl:storepv:jobs:@lib/store-preview.ts": company("A store preview's writing jobs, a day (488 [IT5])", "Not a store's: one small count a preview before any account, at most PREVIEW_JOBS, gone in a day; previews are bounded by the month's preview ceiling, whose line the owner's choice of funding sets."),
+  "nl:storepv:pool:@lib/store-preview.ts": company("The store previews' month pool (488 [IT5])", "Not a store's: one small hash a month (held, spent, count, cap) written by ASSISTANT_POOL, kept 40 days."),
   "nl:store:before-catalog:@lib/store.ts": { what: "A store record kept aside while it moved, thirty days", parts: [capped(MAX_STORE_BYTES + KB, "Once, at most the record.", src("lib/store.ts", "MAX_STORE_BYTES"))] },
   "nl:store:handle:@lib/store.ts": { what: "The store's addresses", parts: [capped(21 * KEY, "Its address and up to twenty before it.")] },
   "nl:store:id:@lib/discount-schedule.ts": { what: "Where the store is kept, read exactly so a scheduled code is dropped only for a store confirmed gone", parts: [capped(0, "Read only: counted with lib/store.ts.")] },

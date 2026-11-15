@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { setChatAddress } from "@/lib/chat-summary";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { ensureStatsId, setChatSales } from "@/lib/store";
 
 /**
@@ -24,8 +24,18 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "server_error" }, { status: 500 });
     }
   }
+  // Only explicit text can request a save or removal; malformed input is not a stop.
+  if (typeof body.url !== "string") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   // Each save posts a first message, so saving is kept to a few an hour.
-  if (!(await withinLimit("chat-summary", store.handle, 10, 3600))) return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  // Stopping only deletes the address; the studio guard above already admits that work.
+  const removing = typeof body.url === "string" && body.url.trim().length === 0;
+  if (!removing) {
+    const admission = await essentialLimitState("chat-summary", store.handle, 10, 3600);
+    if (admission !== "within") {
+      const exceeded = admission === "exceeded";
+      return Response.json({ ok: false, error: exceeded ? "rate_limited" : "unavailable" }, { status: exceeded ? 429 : 503 });
+    }
+  }
   try {
     const withStats = store.statsId ? store : await ensureStatsId(store.email);
     if (!withStats?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });

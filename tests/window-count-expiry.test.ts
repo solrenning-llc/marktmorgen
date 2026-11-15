@@ -60,7 +60,9 @@ async function main(): Promise<void> {
   walk("lib");
   walk("app");
   // Either order of the SET's options: `"EX", n, "NX"` and `"NX", "EX", n` race the same way (Claude 7 on #3369).
-  const pair = /\["SET", ([^,\]]+), "0", (?:"EX", [^\]]+, "NX"|"NX", "EX", [^\]]+)\],\s*\["INCR(?:BY)?", \1/;
+  // A pair followed at once by the key's own EXPIRE … NX gives the key its expiry back whatever happened, so it is safe
+  // (lib/calendar-sync.ts, the day's key in lib/store-readings.ts).
+  const pair = /\["SET", ([^,\]]+), "0", (?:"EX", [^\]]+, "NX"|"NX", "EX", [^\]]+)\],\s*\["INCR(?:BY)?", \1[^\]]*\](?!,\s*\["EXPIRE", \1, [^\]]+, "NX"\])/;
   const left = files.filter((f) => f !== join("lib", "redis-memory.ts") && pair.test(readFileSync(f, "utf8"))).sort();
   // Reserved by other agents (docs/reservations/): their owners move them to lib/window-count.ts in their own units.
   // lib/letter-access.ts keeps the pattern on purpose (no EXPIRE option, tests/letter-members.test.ts) and reads the

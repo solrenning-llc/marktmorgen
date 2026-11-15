@@ -612,9 +612,11 @@ export async function forgetAgreementsPerson(sid: string, email: string): Promis
   const person = personSet(sid, email);
   const listed = repliesFor(await redisPipeline([["SMEMBERS", person]]), 1);
   const members = listed ? stringList(listed[0]) : null;
-  if (!members) throw new UnknownReplyError("listing a person's agreements");
+  // Every member an agreement id (issue #4804): one that is not may still lead to a record, so the scope is unknown,
+  // the index is kept and the erasure says it is not finished, never filtered out and the index deleted with it.
+  if (!members || !members.every((id) => ID_PATTERN.test(id))) throw new UnknownReplyError("listing a person's agreements");
   // Sorted, so two erasures of the same person take the locks in the same order.
-  const ids = [...new Set(members.filter((id) => ID_PATTERN.test(id)))].sort();
+  const ids = [...new Set(members)].sort();
   for (let at = 0; at < ids.length; at += FORGET_BATCH) {
     const batch = ids.slice(at, at + FORGET_BATCH);
     // One agreement at a time: its lock (the one a signature, a new version or a change holds while it reads the record

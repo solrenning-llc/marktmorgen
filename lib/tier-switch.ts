@@ -39,6 +39,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { forgetPaid } from "@/lib/learn";
 import { forgetTicket } from "@/lib/community-access";
 import type { Listing, Store } from "@/lib/store";
+import { safeSenderName } from "@/lib/sender-name";
 
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
 const PRICE_PATTERN = /^price_[A-Za-z0-9]{6,64}$/;
@@ -455,7 +456,7 @@ async function tell(store: Store, account: string, found: Found, updated: Record
           : total < 0
             ? m.paidCredit(formatMoney(-total, currency, locale))
             : m.paidNothing;
-  const from = `"${m.fromName(store.name.replace(/["\\<>\r\n]/g, "").slice(0, 60))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
+  const from = `"${m.fromName(safeSenderName(store.name, `@${store.handle}`))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from,
     to: email,

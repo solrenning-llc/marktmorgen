@@ -41,6 +41,7 @@ import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { forgetPaid } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
+import { safeSenderName } from "@/lib/sender-name";
 
 /** What the switch page and the form ask for, in place of another plan's id. */
 export const YEARLY_TARGET = "yearly";
@@ -295,7 +296,7 @@ async function tell(store: Store, account: string, found: Found, updated: Record
   const m = membershipWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const paid = found.trialing ? m.yearlyPaidTrial : !charged ? "" : total > 0 ? m.yearlyPaidCharged(formatMoney(total, currency, locale)) : m.paidNothing;
-  const from = `"${m.fromName(store.name.replace(/["\\<>\r\n]/g, "").slice(0, 60))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
+  const from = `"${m.fromName(safeSenderName(store.name, `@${store.handle}`))}" <${(NIMBUS_FROM.match(/<([^>]+)>/)?.[1] ?? NIMBUS_FROM).trim()}>`;
   await sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from,
     to: email,

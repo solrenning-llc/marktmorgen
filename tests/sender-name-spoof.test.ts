@@ -17,6 +17,7 @@ const shown = (line: string) => line.match(/^"([^"]*)"/)?.[1] ?? "";
 part("A plain name is kept as it is");
 is("the creator's own sender name", shown(fromLine(base)), "Ana at Harbor Kitchen");
 is("an apostrophe, an ampersand and accents stay", safeSenderName("Zoë & Co's Bakery", "x"), "Zoë & Co's Bakery");
+for (const fine of ["St. Louis Bakery", "Dr. Ana Coaching", "Ana Co. Ltd", "Studio 5.0"]) is(`"${fine}" is a name, not a domain`, safeSenderName(fine, "x"), fine);
 
 part("A disguise is never the sender's name");
 for (const bad of ["support@paypal.com", "PayPal.com", "paypal.com security", "Marktmorgen", "Marktmorgen Support", "Support", "Billing Support Team", "www.apple.com"]) {

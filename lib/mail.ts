@@ -33,6 +33,7 @@ import { rememberLinkKeys } from "@/lib/mail-clicks";
 import { type Pause, healthId, healthTags, noteSent, pauseForSending, rampBack, rampRoom } from "@/lib/mail-health";
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
+import { safeSenderName } from "@/lib/sender-name";
 
 export const MAX_SUBJECT = 150;
 export const MAX_MAIL_BODY = 20_000;
@@ -530,7 +531,10 @@ ${address ? `<p style="margin:0 0 8px">${escape(fromName)} · ${escape(address)}
  */
 export function fromLine(store: Store): string {
   const address = creatorAddress(store.handle, NIMBUS_FROM) ?? marketingAddress();
-  return `"${displayName(store.mail?.fromName || store.name)}" <${address}>`;
+  // Never a disguise (lib/sender-name.ts): a sender name that is an address, a domain or Marktmorgen's own falls back to
+  // the store's name when that is safe, else to the store's address.
+  const storeName = safeSenderName(store.name, `@${store.handle}`);
+  return `"${displayName(safeSenderName(store.mail?.fromName || store.name, storeName))}" <${address}>`;
 }
 
 /**

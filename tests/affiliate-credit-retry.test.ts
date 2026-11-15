@@ -11,6 +11,7 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
+import { bondPlace } from "@/lib/affiliate-bond";
 import { handOverPayPal, sweepPayPal } from "@/lib/paypal-delivery";
 import { handOverKey, type Paid } from "@/lib/paypal-sales";
 import { ownErasureCommand, ownErasureField, suppressedKey } from "@/lib/suppression";
@@ -119,6 +120,49 @@ async function main(): Promise<void> {
   await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000).catch(() => undefined);
   heal();
   is("an unreadable deletion mark: nothing credited, the credit still owed", [await hget(`nl:aff:${stats}:sales`, `paypal:${unreadOrder}`), await owed(unreadOrder)], [null, true]);
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000);
+
+  // The person's own deletion completes during the retry, after its first read of the mark and before the bond is
+  // written (Claude 6, MEDIUM on #3858): the mark is read once more after the bond, as the hand-over does, and the bond
+  // that names them is taken back. The credit itself stays, for the sale paid.
+  const racedOrder = "5O190127TN3647105";
+  const racedSale = sale(racedOrder, "raced@example.com");
+  await pipeline([["SET", `nl:ppsell:paid:${racedOrder}`, JSON.stringify(racedSale)]]);
+  affiliateReadBroken(stats);
+  await handOverPayPal({ ...lasting, listId }, racedSale).catch(() => undefined);
+  heal();
+  const bondsBefore = await bonds();
+  is("owed, and no bond for the raced buyer yet", [await owed(racedOrder), await hget(`nl:aff:${stats}:bond`, bondPlace(stats, racedSale.email).field)], [true, null]);
+  const racedMark = ownErasureField(listId, racedSale.email);
+  let fired = false;
+  redis.pipeline = (async (b: Batch) => {
+    const replies = await pipeline(b);
+    if (!fired && b.length === 1 && b[0][0] === "HGET" && b[0][1] === suppressedKey(listId) && b[0][2] === racedMark) {
+      fired = true;
+      await pipeline([ownErasureCommand(listId, racedSale.email, NOW + 1)]);
+    }
+    return replies;
+  }) as typeof redis.pipeline;
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000);
+  heal();
+  is("the deletion completed during the credit's retry", fired, true);
+  is("the affiliate is still credited for the sale paid", typeof (await hget(`nl:aff:${stats}:sales`, `paypal:${racedOrder}`)), "string");
+  is("no bond names the person whose deletion completed during the credit", [await hget(`nl:aff:${stats}:bond`, bondPlace(stats, racedSale.email).field), await bonds()], [null, bondsBefore]);
+  is("and the credit leaves the list", await owed(racedOrder), false);
+
+  // A retry that finds the person already deleted takes back a bond an earlier try wrote for this order's affiliate
+  // (that try stopped after the bond, before its second read), so nothing that names them is left.
+  const staleOrder = "5O190127TN3647106";
+  const staleSale = sale(staleOrder, "stale@example.com");
+  await pipeline([["SET", `nl:ppsell:paid:${staleOrder}`, JSON.stringify(staleSale)]]);
+  affiliateReadBroken(stats);
+  await handOverPayPal({ ...lasting, listId }, staleSale).catch(() => undefined);
+  heal();
+  const stalePlace = bondPlace(stats, staleSale.email);
+  await pipeline([["HSET", stalePlace.key, stalePlace.field, AFF], ownErasureCommand(listId, staleSale.email, NOW + 1)]);
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000);
+  is("a bond an earlier try wrote for a person since deleted is taken back by the retry", await hget(stalePlace.key, stalePlace.field), null);
+  is("and that credit leaves the list too", await owed(staleOrder), false);
 
   part("Offer after paying: a paid offer whose affiliate read is unknown");
   payment = { id: PI, object: "payment_intent", status: "succeeded", amount: 2500, currency: "usd", receipt_email: "buyer@example.com", created: NOW, metadata: { parent: SESSION, step: "", product: "gone-product", title: "Extra", via: AFF, via_rate: "20" } };

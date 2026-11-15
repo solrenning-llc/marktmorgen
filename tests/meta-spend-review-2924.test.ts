@@ -3,10 +3,8 @@
  * 1. A typed spend line is written only after the kept lines read exactly, so a 503 always means nothing was saved:
  *    a hash holding an entry in another shape refuses the add (no line written again and again behind a 503), and a
  *    read after the write that fails answers the lines known from the read before it, never 503 with the line saved.
- * 2. Ad spend for a report is taken only when every part of it read (spendsForReport): typed lines unread, or Meta's
- *    unread, leave the ad figures out, never one part shown as all of it or everything as $0. The weekly email goes
- *    further since #3297 (coordinator's decision, 15/11/2026): it reads every line (readSpendLines) and treats a Meta
- *    part unread as unknown, so nothing is sent on it and the week is let go to be tried again.
+ * 2. The weekly email takes ad spend only when every part of it read (spendsForReport): typed lines unread, or Meta's
+ *    unread, leave the ad figures out, never one part shown as all of it or everything as $0.
  * 3. Disconnecting Meta reads the connection and the deletion exactly: an unknown reply is never "not connected"
  *    with the connection, its token and its lines still kept.
  */
@@ -102,7 +100,7 @@ test("2. the weekly email's spend: whole, or none at all", async () => {
   const typedUnread = await settle(() => spendsForReport!(statsId));
   assert.deepEqual(typedUnread.value?.map((s) => s.cents), [], "typed unread: no ad figures");
   const route = readFileSync(join(process.cwd(), "app/api/cron/weekly/route.ts"), "utf8");
-  assert.equal(route.includes("readSpendLines(") && /if \(spent\.metaUnread\) throw /.test(route), true, "the weekly cron takes every line or none: a Meta part unread is unknown, never one part as all of it");
+  assert.equal(route.includes("spendsForReport("), true, "the weekly cron reads its spend through it");
   assert.equal(/readSpends\(store\.statsId\)\.catch\(\(\) => \[\]\)/.test(route), false, "never an unread spend as $0");
 });
 

@@ -11,8 +11,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { EMAIL_KEY_HOLDS_MS, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
-import { readSpendLines } from "@/lib/ad-spend";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { spendsForReport } from "@/lib/ad-spend";
 import { recordSample } from "@/lib/benchmarks";
 import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
 import { readTeamMembers } from "@/lib/team";
@@ -210,17 +209,17 @@ export async function GET(request: NextRequest) {
 
 /**
  * What the week's summary is written from, read exactly: the numbers (null when they could not be read), the ad
- * spend, and the team members the owner chose who are on the team in a role that sees the numbers. Throws when
- * the spend or the team could not be read, so neither is ever taken as none (rule 24).
+ * spend (null when a part could not be read: said as not read, never as none), and the team members the owner chose
+ * who are on the team in a role that sees the numbers. Throws when the team could not be read, so it is never taken
+ * as none (rule 24).
  */
-async function summaryInputs(store: Store, emailOff: boolean): Promise<{ data: StatsData; spends: AdSpend[]; copies: string[] } | null> {
+async function summaryInputs(store: Store, emailOff: boolean): Promise<{ data: StatsData; spends: AdSpend[] | null; copies: string[] } | null> {
   const data = await readNumbers(store);
   if (!data) return null;
-  // Every line or unknown (rule 24): typed lines that cannot be read throw, and so does a Meta part that could not be
-  // read, so the summary never takes one part as all of the spend (Claude 5 on #2924) nor the spend as none.
-  const spent = await readSpendLines(store.statsId);
-  if (spent.metaUnread) throw new UnknownReplyError("the Meta ad spend lines for the weekly summary");
-  const spends = spent.spends;
+  // Every line, or null when a part could not be read (main's spendsForReport, review of #4027): the email then leaves
+  // the ad figures out and says the spend was not read, never $0, and the rest of the summary still goes. Chosen over
+  // this branch's earlier throw (which let the whole week go) by the coordinator on 15 Nov 2026 (option A).
+  const spends = await spendsForReport(store.statsId, null);
   if (emailOff) return { data, spends, copies: [] };
   const chosen = await weeklyTeam(store.handle);
   if (!chosen.length || !store.sid) return { data, spends, copies: [] };

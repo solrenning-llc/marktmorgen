@@ -130,12 +130,15 @@ export async function spendsForStudio(statsId: string | null): Promise<{ spends:
  * figures that use ad spend are left out of it, never shown with one part as
  * all of it or everything as $0 (Claude 5 on #2924).
  */
-export async function spendsForReport(statsId: string | null): Promise<AdSpend[]> {
+export async function spendsForReport(statsId: string | null): Promise<AdSpend[]>;
+/** With `unreadAs: null`, an unread part answers null, so the email can say the spend was not read (review of #4027). */
+export async function spendsForReport(statsId: string | null, unreadAs: null): Promise<AdSpend[] | null>;
+export async function spendsForReport(statsId: string | null, unreadAs: AdSpend[] | null = []): Promise<AdSpend[] | null> {
   const read = await readSpendLines(statsId).catch((error: unknown) => {
     console.error("reading ad spend for the weekly email failed", error);
     return null;
   });
-  return read && !read.metaUnread ? read.spends : [];
+  return read && !read.metaUnread ? read.spends : unreadAs;
 }
 
 /**

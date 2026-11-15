@@ -18,7 +18,8 @@ async function main(): Promise<void> {
     }
     calls.push(url.pathname);
     if (url.pathname === "/v1/checkout/sessions") return new Response(JSON.stringify(reply), { status });
-    if (url.pathname === "/v1/payment_intents") return new Response(JSON.stringify({data:[]}));
+    // Altered 2026-11-09 (rule 23): a Stripe list carries has_more, and listSales now reads the upsells page in its exact shape (readStripePage).
+    if (url.pathname === "/v1/payment_intents") return new Response(JSON.stringify({data:[],has_more:false}));
     throw new Error("Unexpected synthetic endpoint");
   }) as typeof fetch;
   try {

@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
@@ -33,6 +34,7 @@ import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
 import { CaptionsRefundsOwed } from "@/components/captions-refunds-owed";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
 import { parseLanguage } from "@/lib/store-language";
@@ -156,7 +158,7 @@ export default async function StudioCoursePage({
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Course</p>
+        <StudioTrail store={store} path={[{ label: "Products", href: `${studioPath(store)}#products` }]} here="Course" />
         <h1 className="t-h2 mt-3 break-words">{product.title}</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Modules hold lessons. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and any lesson can be a
@@ -181,7 +183,18 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        <CaptionsRefundsOwed rows={owedRows} />
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds for AI captions could not be checked
+            </h2>
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
+          </section>
+        ) : (
+          <CaptionsRefundsOwed rows={owedRows} />
+        )}
         <CourseAccessCheck
           check={lessonCaptionCheck(course, streams, captions, writing)}
           productId={product.id}
@@ -330,6 +343,11 @@ export default async function StudioCoursePage({
           <p className="mt-2 text-ink-soft">
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
+          </p>
+          <p className="mt-2 text-sm">
+            <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+              Filter students and change many at once
+            </Link>
           </p>
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">

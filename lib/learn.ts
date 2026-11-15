@@ -1001,6 +1001,30 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
   });
 }
 
+/**
+ * Who and what an emailed link was for, read without spending one of its
+ * opens: the GET of the link (app/api/store/course/open/route.ts), which a
+ * mail filter may make, only finds the store to send the browser to the page
+ * that asks for a tap (MM-SA-41). An answer not in its exact shape is thrown
+ * (CX-123 rule 24); a link that is gone, or already used up, is null.
+ */
+export async function peekCourseLink(token: string): Promise<LinkGrant | null> {
+  if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", linkKey(token)], ["GET", opensKey(token)]]), 2);
+  const raw = replies?.[0];
+  const opened = replies?.[1];
+  if (!replies || (typeof raw !== "string" && raw !== null) || (typeof opened !== "string" && opened !== null)) throw new UnknownReplyError("a course link");
+  const opens = opened === null ? 0 : Number(opened);
+  if (!Number.isSafeInteger(opens) || opens < 0) throw new UnknownReplyError("a course link's opens");
+  if (typeof raw !== "string" || opens >= MAX_LINK_OPENS) return null;
+  try {
+    const grant = JSON.parse(raw) as LinkGrant;
+    return typeof grant.e === "string" && typeof grant.h === "string" && typeof grant.p === "string" ? grant : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Spends one open of an emailed link, and says who and what it was for. */
 export async function openCourseLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;

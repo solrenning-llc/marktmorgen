@@ -32,7 +32,7 @@ import { parseChatSetting, room } from "@/lib/community-chat";
 import { parseDmSetting } from "@/lib/community-dm";
 import { communityWords } from "@/lib/buyer-words/community";
 import { emailKey, mintPass, passCookieName } from "@/lib/learn";
-import { GET as openRoute } from "@/app/api/store/community/open/route";
+import { POST as openRoute } from "@/app/api/store/community/open/route";
 import { POST as chatRoute } from "@/app/api/store/community/chat/route";
 import { POST as messagesRoute } from "@/app/api/store/community/messages/route";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
@@ -471,7 +471,8 @@ async function main(): Promise<void> {
     const sent = mails.length;
     if ((await requestCommunityLink({ store: club, email: MEMBER, ip: ip(), origin: ORIGIN })) !== "sent" || mails.length - sent !== 1) throw new Error("no community link");
     const token = mails.at(-1)!.match(/token=([0-9a-f]{64})/)?.[1] ?? "";
-    const openIt = () => openRoute(new NextRequest(`https://marktmorgen.com/api/store/community/open?token=${token}`, { headers: { Host: "marktmorgen.com" } }));
+    // The tap on the page the link lands on spends the open (MM-SA-41): a GET of the link spends nothing.
+    const openIt = () => openRoute(new NextRequest("https://marktmorgen.com/api/store/community/open", { method: "POST", headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams([["token", token]]) }));
     const isOpen = (commands: Command[]) =>
       commands.length === 3 && commands[0]?.[0] === "GET" && key(commands[0]).startsWith("nl:cm:link:") && commands[2]?.[0] === "INCR";
     const passes = (from: number) => wroteSince(from, (c) => c[0] === "SET" && key(c).startsWith("nl:learn:"));

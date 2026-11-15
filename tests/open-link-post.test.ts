@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     is("no open counted and no pass written", [opens(), passes() - startPasses], [0, 0]);
 
     part(`${kind.name}: the page holds the token in a form that posts back here`);
-    const html = renderToStaticMarkup(await kind.Page({ params: Promise.resolve({ handle: store.handle }), searchParams: Promise.resolve({ token: kind.token }) }));
+    const html = renderToStaticMarkup(await kind.Page({ params: Promise.resolve({ handle: `@${store.handle}` }), searchParams: Promise.resolve({ token: kind.token }) }));
     is("a form that posts to the route, with the token and one button", [
       html.includes(`action="/api/store/${kind.name}/open"`),
       html.includes('method="post"'),
@@ -101,12 +101,17 @@ async function main(): Promise<void> {
     const tapped = await post({ Origin: ORIGIN });
     is("on to what the link opens, with the store's pass", [tapped.status, tapped.headers.get("location"), Boolean(tapped.headers.get("set-cookie"))], [303, kind.lands, true]);
     is("one open spent, one pass written", [opens(), passes() - startPasses], [1, 1]);
+
+    part(`${kind.name}: a link used up is said as gone at the GET, as before`);
+    await redis.pipeline([["SET", `${kind.grantKey(kind.token)}:opens`, "10", "EX", 3_600]]);
+    const used = await kind.get(new NextRequest(`${url}?token=${kind.token}`, { headers: { Host: "marktmorgen.com" } }));
+    is("410, no cookie", [used.status, used.headers.get("set-cookie")], [410, null]);
   }
 
   part("The page speaks the store's language");
   await setLanguage(OWNER, "es");
-  const spanish = renderToStaticMarkup(await CommunityOpenPage({ params: Promise.resolve({ handle: store.handle }), searchParams: Promise.resolve({ token: "a".repeat(64) }) }));
-  is("lang is the store's", spanish.includes('lang="es"'), true);
+  const spanish = renderToStaticMarkup(await CommunityOpenPage({ params: Promise.resolve({ handle: `@${store.handle}` }), searchParams: Promise.resolve({ token: "a".repeat(64) }) }));
+  is("lang is the store's", spanish.includes('lang="es-ES"'), true);
 
   done();
 }

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { setWinBack, storeForEmail } from "@/lib/store";
 import { MAX_WINBACK_ADDRESS, NO_WINBACK, WINBACK_DAYS, WINBACK_MONTHS, WINBACK_PERCENTS } from "@/lib/winback";
 import { makeSaveCoupon } from "@/lib/save-offer-coupon";
+import { couponStillFits } from "@/lib/offer-coupon-reuse";
 import { StripeError } from "@/lib/stripe-account";
 import { guardStoreWrite } from "@/lib/store-request";
 
@@ -40,7 +41,8 @@ export async function POST(request: NextRequest) {
     if (!address || address.length > MAX_WINBACK_ADDRESS) return fail("address");
     if (!store.stripeAccountId) return fail("stripe");
 
-    const same = store.winback.percent === percent && store.winback.months === months && store.winback.coupon;
+    // The same offer keeps its coupon only while the account connected now holds it with those terms (#4703).
+    const same = store.winback.percent === percent && store.winback.months === months && store.winback.coupon && (await couponStillFits(store, store.winback.coupon, percent, months));
     const coupon = same ? store.winback.coupon : await makeSaveCoupon(store, percent, months, "win-back");
     const result = await setWinBack(guarded.ref, { percent, months, days, coupon, address });
     if (!result.ok) return fail(result.reason);

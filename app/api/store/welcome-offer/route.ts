@@ -4,6 +4,7 @@ import { MAX_WELCOME_ADDRESS, NO_WELCOME_OFFER, WELCOME_HOURS, WELCOME_PERCENTS 
 import { canOfferWelcome } from "@/lib/welcome-offer-send";
 import { readListing } from "@/lib/catalog";
 import { makeSaveCoupon } from "@/lib/save-offer-coupon";
+import { couponStillFits } from "@/lib/offer-coupon-reuse";
 import { StripeError } from "@/lib/stripe-account";
 import { guardStoreWrite } from "@/lib/store-request";
 
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest) {
     if (!store.stripeAccountId) return fail("stripe");
     const product = productId ? await readListing(store, productId) : null;
     if (!canOfferWelcome(store, product ?? null)) return fail("product");
-    const same = store.welcomeOffer.percent === percent && store.welcomeOffer.coupon;
+    // The same percent keeps its coupon only while the account connected now holds it with those terms (#4703).
+    const same = store.welcomeOffer.percent === percent && store.welcomeOffer.coupon && (await couponStillFits(store, store.welcomeOffer.coupon, percent, 1));
     const coupon = same ? store.welcomeOffer.coupon : await makeSaveCoupon(store, percent, 1, "welcome");
     const result = await setWelcomeOffer(guarded.ref, { product: productId, percent, hours, coupon, remind, address });
     if (!result.ok) return fail(result.reason);

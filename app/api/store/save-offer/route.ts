@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { setSaveOffer, storeForEmail } from "@/lib/store";
 import { NO_SAVE, SAVE_MONTHS, SAVE_PERCENTS } from "@/lib/save-offer";
 import { makeSaveCoupon } from "@/lib/save-offer-coupon";
+import { couponStillFits } from "@/lib/offer-coupon-reuse";
 import { StripeError } from "@/lib/stripe-account";
 import { guardStoreWrite } from "@/lib/store-request";
 
@@ -38,7 +39,8 @@ export async function POST(request: NextRequest) {
     if (!(SAVE_MONTHS as readonly number[]).includes(months)) return Response.json({ ok: false, error: "months" }, { status: 400 });
     if (!store.stripeAccountId) return Response.json({ ok: false, error: "stripe" }, { status: 400 });
 
-    const same = store.save.percent === percent && store.save.months === months && store.save.coupon;
+    // The same offer keeps its coupon only while the account connected now holds it with those terms (#4703).
+    const same = store.save.percent === percent && store.save.months === months && store.save.coupon && (await couponStillFits(store, store.save.coupon, percent, months));
     const coupon = same ? store.save.coupon : await makeSaveCoupon(store, percent, months);
     const result = await setSaveOffer(guarded.ref, { percent, months, coupon });
     if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });

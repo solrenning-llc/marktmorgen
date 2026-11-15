@@ -550,12 +550,20 @@ async function main(): Promise<void> {
     // (lib/batch-count.ts, BATCH_COUNT_EXTRA_COMMANDS), so Studio and Scale, which send monthly emails, keep a few cents
     // less: 313.81 where 313.83 was and 703.23 where 703.27 was, and 258.68 and 579.96 a month of a yearly plan.
     // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
-    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered. With both, at the merge of
-    // 15 November 2026, the model computes 703.23 (the extra cent rounds inside the batch marks' cost).
-    is("11: Store, Studio and Scale keep 45.12, 313.81 and 703.23 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.81", "703.23"]);
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
+    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
+    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
+    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Merge of main into #4073 (15 November 2026): main's erasure probe and this PR's batch kept-count mark on every
+    // monthly email (lib/batch-count.ts, BATCH_COUNT_EXTRA_COMMANDS) together: Studio and Scale keep a few cents less;
+    // every figure still far above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.11, 313.80 and 703.22 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.80", "703.22"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 37.06, 258.68 and 579.96 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.68", "579.96"]);
+    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
+    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
+    is("11: and 37.05, 258.68 and 579.95 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.68", "579.95"]);
   } finally {
     Date.now = realNow;
   }

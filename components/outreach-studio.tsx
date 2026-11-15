@@ -49,6 +49,7 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   unknown: "That pitch is no longer here. Reload the page.",
   server_error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
+  unavailable: "This could not be checked just now. Reload the page to see where it stands, then try again.",
 };
 
 const STATUS_WORDS: Record<PitchStatus, string> = {
@@ -288,7 +289,7 @@ export function OutreachStudio({ sender: saved, pitches: first, left, on, off = 
   }
 
   return (
-    <div className="mt-8 grid gap-6">
+    <div className="mt-8 grid gap-6 [overflow-wrap:anywhere] [&>*]:min-w-0">
       <section className="card p-6 sm:p-8" aria-labelledby="who-title">
         <h2 id="who-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">
           Who is writing

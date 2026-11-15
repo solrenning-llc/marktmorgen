@@ -74,7 +74,7 @@ import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
 import { heardOff } from "@/lib/heard";
 import { weeklyTeam } from "@/lib/stats-report";
-import { NO_SETUP, SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
+import { SERVER_PLATFORMS, serverSetup } from "@/lib/ad-events";
 import { claimPathsRead, laterWords, pathsStale, readPaths } from "@/lib/next-bought";
 import { BuyerPaths } from "@/components/buyer-paths";
 import { canBeBumped, isOneOff } from "@/lib/product-extras";
@@ -862,7 +862,16 @@ export default async function StudioPage({
     aiLeft: store && aiAvailableFor(store) ? early(aiLeft(store).catch(() => 0)) : null,
     live: store?.subscriptionId && isBillingConfigured() ? early(readSubscription(store.subscriptionId)) : null,
     pause: store && isBillingConfigured() ? early(pauseView(store)) : null,
-    list: store && may("export") ? early(listSize(store)) : null,
+    // A size that could not be read is "unread" here, inside the early read, so the joint wait for the kept readings
+    // below (`answered`) still resolves and the visits and sales are shown (Claude 4, LEVE on #2862).
+    list: store && may("export")
+      ? early(
+          listSize(store).catch((error: unknown) => {
+            console.error("could not read a list's size", error);
+            return "unread" as const;
+          }),
+        )
+      : null,
     callProducts: store ? early(readKind(store, "call")) : null,
     meet: store && meetOn && (may("products") || may("orders")) ? early(meetView(store.statsId, store, arrivedZoom).catch(() => null)) : null,
     shelf: store ? early(studioShelf(store, params)) : null,
@@ -1257,8 +1266,10 @@ export default async function StudioPage({
         { key: "address", title: "Your address", hint: `marktmorgen.com/@${store.handle} is yours.`, done: true, href: "#details" },
         { key: "details", title: "Say what your store is", hint: "One line under your name tells a visitor why they are here.", done: Boolean(store.bio), href: "#details" },
         { key: "look", title: "Add your photo and color", hint: "A face and a color make the page yours.", done: Boolean(store.photoId), href: "#look" },
-        { key: "product", title: "Prepare your first offer", hint: "Keep an AI draft or add one yourself; add the delivery and review its terms.", done: productCount(store) > 0, href: productCount(store) === 0 && ai.on ? "#setup-ai" : "#products" },
-        { key: "publish", title: "Publish your first offer yourself", hint: "Review the product, delivery, price and buyer terms, then choose Publish. Publishing does not open paid selling while sales gates are closed.", done: visibleCount(store) > 0, href: "#products" },
+        // Each hint names only what this studio offers: an AI draft only where the AI box is shown (setup-ai below),
+        // and Publish for what waits on it. A product added by hand is on the page at once (components/product-editor.tsx).
+        { key: "product", title: "Prepare your first offer", hint: productCount(store) === 0 && ai.on ? "Keep an AI draft or add one yourself; add the delivery and review its terms." : "Add what you sell and its price, then the file or link the buyer gets.", done: productCount(store) > 0, href: productCount(store) === 0 && ai.on ? "#setup-ai" : "#products" },
+        { key: "publish", title: "Publish your first offer yourself", hint: "Review the product, delivery, price and buyer terms. A product you add yourself is on your page at once. A draft, from AI or one you unpublished, goes on it when you choose Publish it. Publishing does not open paid selling while sales gates are closed.", done: visibleCount(store) > 0, href: "#products" },
         ...(connectReady
           ? [{ key: "stripe", title: "Connect your Stripe account", hint: "Where your buyers' money goes: yours, not ours.", done: store.stripeChargesEnabled, href: "#stripe" }]
           : []),
@@ -2068,7 +2079,9 @@ export default async function StudioPage({
                 {hasPixels(store.pixels) ? (async () => {
                   const before = serverWrite.done;
                   const setupRead = (async () => {
-                    const setup = await serverSetup(store.statsId).catch(() => NO_SETUP);
+                    // Not read: said so, never shown as an empty setup nor written on the store as none.
+                    const setup = await serverSetup(store.statsId).catch(() => null);
+                    if (!setup) return null;
                     // A token saved before the store kept its own list of platforms is written there now, once, after
                     // the cart link's write.
                     const on = SERVER_PLATFORMS.filter((p) => setup.on[p]);
@@ -2077,9 +2090,17 @@ export default async function StudioPage({
                   })();
                   // The writes after this one wait for the cart link's too, even when this part writes nothing.
                   serverWrite.done = Promise.all([before.catch(() => null), setupRead]);
+                  const setup = await setupRead;
+                  if (!setup) {
+                    return (
+                      <p className="text-ink-soft">
+                        Server-sent conversions could not be read just now. Nothing was changed; reload the page in a moment.
+                      </p>
+                    );
+                  }
                   return (
                   <ServerEventsEditor
-                    setup={await setupRead}
+                    setup={setup}
                     pixels={{
                       meta: Boolean(store.pixels.meta),
                       tiktok: Boolean(store.pixels.tiktok),
@@ -2243,7 +2264,17 @@ export default async function StudioPage({
                 people who may take the list away as a file may hand one out. */}
             {apiKeys ? <ApiKeyEditor keys={apiKeys} /> : null}
 
-            {list && (givesAway || list.total > 0) ? (
+            {list === "unread" ? (
+              <div className="card mt-8 p-6 sm:p-8">
+                <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
+                  Your list
+                </p>
+                <p className="mt-2 text-ink-soft">
+                  We could not count your list just now. Reload this page in a
+                  moment to see it and download it.
+                </p>
+              </div>
+            ) : list && (givesAway || list.total > 0) ? (
               <div className="card mt-8 p-6 sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">
                   Your list
@@ -2562,7 +2593,7 @@ export default async function StudioPage({
             ) : null}
 
             {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
-              <div className="card mt-8 p-6 sm:p-8">
+              <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
                   Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
@@ -2788,7 +2819,7 @@ export default async function StudioPage({
                 <p className="mt-4 rounded-[12px] bg-paper px-4 py-3 text-sm text-ink-soft ring-1 ring-line">
                   {usageWindow
                     ? usageWindow.billing
-                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, with your plan\u2019s next month.`
+                      ? `Your billing month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted in it and starts again on ${windowDay(usageWindow.end)}, when your next billing month begins.`
                       : standing === "trial"
                         ? `Your free trial: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here is counted for the whole trial.`
                         : `This calendar month: ${windowDay(usageWindow.start)} to ${windowDay(usageWindow.end)} (UTC). Every figure here starts again on the 1st.`
@@ -3171,6 +3202,14 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
+                        <p className="mt-3 text-sm text-ink-soft">
+                          Before you leave, review what is included in the data file and what is not.{" "}
+                          <a href="#store-data-export" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-2">
+                            See what the data file holds, and download it
+                          </a>
+                        </p>
+                      ) : null}
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button
@@ -3423,6 +3462,17 @@ export default async function StudioPage({
                           {!sale.isCall && !sale.isTip && sale.email && sale.reference.startsWith("cs_") ? (
                             <p className="mt-2">
                               <ResendPurchase reference={sale.reference} email={sale.email} />
+                            </p>
+                          ) : null}
+                          {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
+                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                            <p className="mt-2">
+                              <a
+                                href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}
+                                className="inline-flex min-h-11 items-center text-xs font-bold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
+                              >
+                                Download the receipt (PDF)<span className="sr-only">{`: ${sale.title}, paid ${new Date(sale.paidAt * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}`}</span>
+                              </a>
                             </p>
                           ) : null}
                         </li>

@@ -25,7 +25,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
 type Saved = { id: string; name: string; query: string };
-type Reply = { ok?: boolean; error?: string; message?: string; filters?: Saved[]; most?: number; filter?: Saved };
+type Reply = { ok?: boolean; error?: string; message?: string; filters?: Saved[]; most?: number; filter?: Saved; removed?: boolean };
 
 async function threw(run: () => Promise<unknown>): Promise<string> {
   try {
@@ -65,6 +65,8 @@ async function main(): Promise<void> {
     ["an address not as saved", JSON.stringify({ ...good, query: "kind=products&product=Course" })],
     ["a filter that keeps nothing out", JSON.stringify({ ...good, query: "" })],
     ["a buyer's address", JSON.stringify({ ...good, query: "email=jane%40example.com" })],
+    ["an address in product words", JSON.stringify({ ...good, query: "product=jane%40example.com" })],
+    ["an address in the name", JSON.stringify({ ...good, name: "Orders for jane@example.com" })],
     ["a field more", JSON.stringify({ ...good, extra: 1 })],
   ] as const) {
     is(`never a filter: ${what}`, parseSavedFilter(raw), null);
@@ -90,8 +92,23 @@ async function main(): Promise<void> {
   is("a filter that keeps nothing out refused", await saveSalesFilter(statsId, "All", EMPTY_FILTER), { ok: false, reason: "empty" });
   is("a buyer's address never kept", await saveSalesFilter(statsId, "Jane", filterFromQuery("email=jane@example.com")), { ok: false, reason: "email" });
   is("no name refused", await saveSalesFilter(statsId, "  ", filterFromQuery("kind=tips")), { ok: false, reason: "name" });
+  is("an address in product words is refused before it can outlive erasure", await saveSalesFilter(statsId, "Jane's orders", filterFromQuery("product=jane%40example.com")), { ok: false, reason: "email" });
+  is("an address in the saved name is refused too", await saveSalesFilter(statsId, "jane@example.com", filterFromQuery("kind=tips")), { ok: false, reason: "email" });
   is("nothing written by a refusal", (await readSavedFilters(statsId)).length, 2);
+
+  part("Product words cut at a space are saved as they read back (Claude 3 cloud J's MEDIUM on #3495)");
+  // 99 letters, a space, a letter: cut to 100 characters, the words end in a space the read trims away. Saved as
+  // they were, the kept address read back as another filter, the list became unreadable and every save failed.
+  const cut = await saveSalesFilter(statsId, "Long words", filterFromQuery(`product=${"a".repeat(99)}+b`));
+  is("the filter is saved", cut.ok, true);
+  is("as it reads back: the words without the space the cut left", cut.ok ? cut.filter.query : null, `product=${"a".repeat(99)}`);
+  is("the list still reads, with it", await threw(() => readSavedFilters(statsId)), "no error");
+  is("and the next save still works", await saveSalesFilter(statsId, "Tips", filterFromQuery("kind=tips")).then((r) => r.ok, () => "failed"), true);
+  for (const id of [cut.ok ? cut.filter.id : ""].filter(Boolean)) await removeSalesFilter(statsId, id);
+  const tips = (await readSavedFilters(statsId).catch(() => [] as Saved[])).find((f) => f.name === "Tips");
+  if (tips) await removeSalesFilter(statsId, tips.id);
   const id = courses.ok ? courses.filter.id : "";
+  is("a rename cannot introduce an address", await renameSalesFilter(statsId, id, "jane@example.com"), { ok: false, reason: "email" });
   const renamed = await renameSalesFilter(statsId, id, "My courses");
   is("renamed, its filter kept", renamed.ok && renamed.filter, { id, name: "My courses", query: "product=Course&kind=products" });
   is("renamed to a name another one has: refused", await renameSalesFilter(statsId, id, "APRIL"), { ok: false, reason: "taken" });
@@ -156,6 +173,9 @@ async function main(): Promise<void> {
   is("saved from the page's address", [saved.status, saved.body.filters?.map((f) => [f.name, f.query])], [200, [["Tips", "kind=tips"]]]);
   const refused = await post({ action: "save", name: "Jane", query: "email=jane%40example.com" });
   is("an address refused, saying what to do", [refused.status, refused.body.error, refused.body.message], [400, "email", SAVED_FILTER_REFUSALS.email]);
+  const productAddress = await post({ action: "save", name: "Jane's orders", query: "product=jane%40example.com" });
+  is("the route refuses an encoded address in product words", [productAddress.status, productAddress.body.error], [400, "email"]);
+  is("the refused address was not stored", (await readSavedFilters(statsId)).map((f) => f.query), ["kind=tips"]);
   const tipsId = saved.body.filters?.[0]?.id ?? "";
   is("renamed", (await post({ action: "rename", id: tipsId, name: "Tips only" })).body.filters?.map((f) => f.name), ["Tips only"]);
   const gone = await post({ action: "rename", id: "ffffffffffff", name: "Other" });
@@ -177,12 +197,21 @@ async function main(): Promise<void> {
   is("and nothing an editor sent was kept", (await readSavedFilters(statsId)).map((f) => f.name), ["Calls"]);
 
   part("Could not be read: said so, never none, never written over");
-  await redis.pipeline([["DEL", key], ["HSET", key, "0123456789ab", "{"]]);
+  await redis.pipeline([["DEL", key], ["HSET", key, "0123456789ab", "{"], ["HSET", key, "fedcba987654", "{"]]);
   const unread = await list();
   is("503 with plain words, no list", [unread.status, unread.body.error, unread.body.filters, unread.body.message], [503, "unavailable", undefined, SAVED_FILTER_REFUSALS.unavailable]);
   const blind = await post({ action: "save", name: "Products", query: "kind=products" });
   is("a save then refused, 503", [blind.status, blind.body.error], [503, "unavailable"]);
-  is("a deletion then refused too, the kept value left as it was", [(await post({ action: "remove", id: "0123456789ab" })).status, (await redis.pipeline([["HGETALL", key]]))[0]], [503, ["0123456789ab", "{"]]);
+  const removedUnreadable = await post({ action: "remove", id: "0123456789ab" });
+  is(
+    "a damaged entry is deleted exactly even while another damaged entry keeps the list unreadable",
+    [removedUnreadable.status, removedUnreadable.body.removed, removedUnreadable.body.filters, (await redis.pipeline([["HGETALL", key]]))[0]],
+    [200, true, undefined, ["fedcba987654", "{"]],
+  );
+  const removedLast = await post({ action: "remove", id: "fedcba987654" });
+  is("deleting the last damaged entry returns the readable empty list", [removedLast.status, removedLast.body.removed, removedLast.body.filters], [200, true, []]);
+  const absentAgain = await post({ action: "remove", id: "0123456789ab" });
+  is("a second removal is still an exact successful request", [absentAgain.status, absentAgain.body.removed, absentAgain.body.filters], [200, false, []]);
 
   done();
 }

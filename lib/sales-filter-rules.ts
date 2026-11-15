@@ -161,7 +161,7 @@ export type SavedFilterRefusal = "name" | "empty" | "email" | "taken" | "full" |
 export const SAVED_FILTER_REFUSALS: Record<SavedFilterRefusal | "unavailable", string> = {
   name: "Give this filter a name.",
   empty: "Choose at least one filter before you save it.",
-  email: "A saved filter does not keep an email address. Clear the email box, then save.",
+  email: "A saved filter cannot keep an email address. Remove addresses from its name and product words, and clear the email box, then save.",
   taken: "You already have a filter with this name. Choose another name.",
   full: `A store keeps up to ${MAX_SAVED_FILTERS} saved filters. Delete one to save a new one.`,
   gone: "This filter was deleted. Open the list again.",
@@ -171,6 +171,9 @@ export const SAVED_FILTER_REFUSALS: Record<SavedFilterRefusal | "unavailable", s
 
 /** Bytes of a text as UTF-8, in the browser as on the server. */
 export const utf8Bytes = (text: string): number => new TextEncoder().encode(text).length;
+
+/** Address-shaped text cannot be kept outside the buyer's erasure path, even in a name or product field. */
+export const savedFilterHasAddress = (text: string): boolean => /[^\s@]+@[^\s@]+/u.test(text);
 
 /** A name as it is kept: control characters and runs of spaces made one space, trimmed, cut at the most; "" for none. */
 export function savedFilterName(raw: unknown): string {
@@ -208,7 +211,7 @@ export function parseSavedFilter(raw: unknown): SavedFilter | null {
   if (typeof name !== "string" || !name || savedFilterName(name) !== name) return null;
   if (typeof query !== "string") return null;
   const filter = filterFromQuery(query);
-  if (!isFiltered(filter) || filter.email || filterQuery(filter) !== query) return null;
+  if (!isFiltered(filter) || filter.email || savedFilterHasAddress(name) || savedFilterHasAddress(filter.product) || filterQuery(filter) !== query) return null;
   return { id, name, query };
 }
 

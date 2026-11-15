@@ -197,8 +197,9 @@ export const fr: BuyerWords = {
   whoAnswers: (store) =>
     `${store} est le vendeur et répond de ce que vous achetez, des remboursements et de tout droit de rétractation dont vous disposez. Marktmorgen héberge les pages de la boutique et n'est pas partie à la vente.`,
   noPaymentsTitle: "Cette boutique ne peut pas encore accepter de paiements.",
-  noPaymentsBody: (store) => `Les prix ci-dessus sont réels, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,
-  noPaymentsBodyOne: (store) => `Le prix ci-dessus est réel, mais rien ici ne peut débiter une carte. Pour acheter, écrivez directement à ${store}.`,
+  noPaymentsBody: "Les prix ci-dessus sont réels, mais rien ici ne peut débiter une carte.",
+  noPaymentsBodyOne: "Le prix ci-dessus est réel, mais rien ici ne peut débiter une carte.",
+  noPaymentsWrite: (store) => `Écrire à ${store}`,
 
   notices: {
     soldout: { title: "Il vient d'être épuisé", body: "Le dernier est parti juste avant que vous cliquiez sur acheter. Rien n'a été débité." },

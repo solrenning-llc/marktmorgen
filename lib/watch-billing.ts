@@ -19,7 +19,7 @@
  *   nl:watch:told:<folder>:<month>      the creator was written to about that month
  *   nl:watch:monthly:<subscription>     a yearly plan was set to bill added lines monthly
  */
-import { type Meter, type Settled as Used, firstWordOf, giveFirstWordBack, takeFirstWordOf, settleAllUsage, settleUsage, storeOf } from "@/lib/usage-billing";
+import { type Meter, type Settled as Used, firstWordOf, giveFirstWordBack, takeFirstWordOf, settleAllUsage, settleUsage, settleUsageWalk, storeOf } from "@/lib/usage-billing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
 import { VIDEO_HOURS_INCLUDED, VIDEO_SECONDS_INCLUDED, hoursWords, monthWords } from "@/lib/watch-rules";
 
@@ -55,6 +55,15 @@ export async function settle(folder: string, month: string, final: boolean, now 
 /** The daily run: this month for every store whose video was watched, and the month before while it is still being closed. */
 export async function settleAll(now = Date.now()): Promise<Settled[]> {
   return (await settleAllUsage(VIDEO, now)).map(inSeconds);
+}
+
+/**
+ * settleAll walked from just after the last place a run reached and stopped once `until` has passed (#4583,
+ * lib/usage-billing.ts settleUsageWalk): what the daily job runs, inside its time limit.
+ */
+export async function settleAllWithin(until: number, after: string | null, now = Date.now()) {
+  const walk = await settleUsageWalk(VIDEO, { now, until, after });
+  return { ...walk, results: walk.results.map(inSeconds) };
 }
 
 /** Whether the creator still has to be written to about this month: true the first time it is asked, and never again. */

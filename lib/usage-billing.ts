@@ -354,26 +354,52 @@ export async function settleUsage(meter: Meter, folder: string, month: string, f
  * it, and the month before while it is still being closed.
  */
 export async function settleAllUsage(meter: Meter, now = Date.now()): Promise<Settled[]> {
-  if (!isRedisConfigured()) return [];
+  return (await settleUsageWalk(meter, { now })).results;
+}
+
+/** How far one walk of the daily settling went: the stores reached of all to settle, and the last one reached. */
+export type UsageWalk = { results: Settled[]; reached: number; of: number; last: string | null };
+
+/**
+ * The daily run for one meter, walked in order from just after `after` (the last place a run reached, as
+ * "<month>/<folder>"), wrapping round to the start, and stopped once `until` has passed (#4583): a run that meets the
+ * function's time limit settles the stores it reached, and the next run goes on from there, so the same last stores
+ * are never left out day after day. Without `until` and `after` it is the whole list, from the start.
+ */
+export async function settleUsageWalk(
+  meter: Meter,
+  { now = Date.now(), until = Number.POSITIVE_INFINITY, after = null }: { now?: number; until?: number; after?: string | null } = {},
+): Promise<UsageWalk> {
+  if (!isRedisConfigured()) return { results: [], reached: 0, of: 0, last: null };
   const today = new Date(now);
   const month = monthKey(today);
-  const results: Settled[] = [];
   const runs: [string, boolean][] = [[month, false]];
   if (today.getUTCDate() <= SETTLE_DAYS) runs.unshift([monthBefore(month), true]);
+  const items: { place: string; folder: string; which: string; final: boolean }[] = [];
   for (const [which, final] of runs) {
-    for (const folder of await meter.folders(which)) {
-      try {
-        // A store inside what every plan covers has nothing to settle, and is not asked about further.
-        // A figure that cannot be read (it throws: audit SG2, CX-123 rule 24) leaves only this store
-        // for the next run, logged below; the others go on.
-        if ((await meter.measured(folder, which)) <= meter.covered) continue;
-        results.push(await settleUsage(meter, folder, which, final, now));
-      } catch (error) {
-        console.error(`settling a store's ${meter.name} failed`, error);
-      }
+    for (const folder of await meter.folders(which)) items.push({ place: `${which}/${folder}`, folder, which, final });
+  }
+  items.sort((a, b) => (a.place < b.place ? -1 : a.place > b.place ? 1 : 0));
+  const from = after === null ? 0 : Math.max(0, items.findIndex((item) => item.place > after));
+  const results: Settled[] = [];
+  let reached = 0;
+  let last: string | null = null;
+  for (let k = 0; k < items.length; k += 1) {
+    if (Date.now() >= until) break;
+    const { place, folder, which, final } = items[(from + k) % items.length];
+    reached += 1;
+    last = place;
+    try {
+      // A store inside what every plan covers has nothing to settle, and is not asked about further.
+      // A figure that cannot be read (it throws: audit SG2, CX-123 rule 24) leaves only this store
+      // for the next run, logged below; the others go on.
+      if ((await meter.measured(folder, which)) <= meter.covered) continue;
+      results.push(await settleUsage(meter, folder, which, final, now));
+    } catch (error) {
+      console.error(`settling a store's ${meter.name} failed`, error);
     }
   }
-  return results;
+  return { results, reached, of: items.length, last };
 }
 
 /**

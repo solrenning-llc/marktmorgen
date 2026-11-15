@@ -17,7 +17,7 @@ import { largerPlanFor } from "@/lib/larger-plan";
 import { SITE_URL } from "@/lib/site-url";
 import { SETUP_VIDEO_SECONDS, costsPaused, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { watchedFolders, watchedIn } from "@/lib/watch";
-import { giveVideoWordBack, settleAll, storeOf, takeVideoWord } from "@/lib/watch-billing";
+import { giveVideoWordBack, settleAllWithin, storeOf, takeVideoWord } from "@/lib/watch-billing";
 import { allowanceWindow, calendarWindow, resetWords } from "@/lib/allowance-window";
 
 import { centsWords } from "@/lib/watch-rules";
@@ -76,14 +76,93 @@ const TOLD = "nl:usage-watch:told";
 const LOCK = "nl:usage-watch:lock";
 const LOCK_SECONDS = 120;
 
-type VideoRun = { stores: number; billed: number; cents: number; paused: number; failed: number; told: number };
+/**
+ * The run's own end, inside the function's time limit (#4583): each part walks its stores until its share of the run
+ * has gone, and a share left unused passes to the parts after it. Until 15 November 2026 the parts walked every store
+ * with no end, so with enough stores the run met maxDuration and was stopped; the next day began again from the top in
+ * the same order, and the same last stores were never settled or written to. The rest after the last share is kept
+ * for the delivery part, the told list and letting go of the lock.
+ */
+const RUN_MS = 50_000;
+const ENDS = { settle: 8_000, video: 15_000, visits: 28_000, orders: 41_000 } as const;
+type Part = keyof typeof ENDS;
+
+/** Where each part's walk goes on from: the last place a run reached, kept across days (a walk wraps round). */
+const AT = (part: Part) => `nl:usage-watch:at:${part}`;
+const AT_SECONDS = 40 * 86_400;
+
+/** How far a part's walk went this run; "unknown" when where it goes on from could not be read, and nothing was walked. */
+type Walked = { reached: number; of: number; done: boolean } | "unknown";
+
+/**
+ * Where a part's walk goes on from, read exactly (CX-123 rule 24): nil is the start; a place this job wrote (text) is
+ * the place; anything else is unknown, and the part walks nothing on it and its place is left as it was.
+ */
+async function placeOf(part: Part): Promise<string | null | undefined> {
+  const replies = repliesFor(await redisPipeline([["GET", AT(part)]]), 1);
+  if (!replies) return undefined;
+  const raw = replies[0];
+  if (raw === null) return null;
+  return typeof raw === "string" && raw.length > 0 && raw.length <= 200 ? raw : undefined;
+}
+
+/** Keeps the last place a part's walk reached. A write that cannot be confirmed only means the next run repeats it. */
+async function keepPlace(part: Part, last: string | null): Promise<void> {
+  if (last === null) return;
+  const wrote = repliesFor(await redisPipeline([["SET", AT(part), last, "EX", AT_SECONDS]]), 1);
+  if (!wrote || wrote[0] !== "OK") console.error(`usage-watch: where the ${part} walk reached could not be kept; the next run repeats part of it`);
+}
+
+/**
+ * Walks `places` (sorted) from just after the part's kept place, wrapping round to the start, until `until` has
+ * passed, and keeps the last place reached. Each place is visited at most once a run; `visit` keeps its own errors.
+ */
+async function walk(part: Part, places: string[], until: number, visit: (place: string) => Promise<void>): Promise<Walked> {
+  let after: string | null | undefined;
+  try {
+    after = await placeOf(part);
+  } catch (error) {
+    console.error(`usage-watch: where the ${part} walk goes on from could not be read`, error);
+    after = undefined;
+  }
+  if (after === undefined) {
+    console.error(`usage-watch: where the ${part} walk goes on from is unknown; nothing walked this run, its place left as it was`);
+    return "unknown";
+  }
+  const from = after === null ? 0 : Math.max(0, places.findIndex((place) => place > after));
+  let reached = 0;
+  let last: string | null = null;
+  for (let k = 0; k < places.length; k += 1) {
+    if (Date.now() >= until) break;
+    const place = places[(from + k) % places.length];
+    reached += 1;
+    last = place;
+    await visit(place);
+  }
+  await keepPlace(part, last).catch((error) => console.error(`usage-watch: where the ${part} walk reached could not be kept`, error));
+  return { reached, of: places.length, done: reached === places.length };
+}
+
+type VideoRun = {
+  stores: number; billed: number; cents: number; paused: number; failed: number; told: number;
+  settled: Walked; walked: Walked;
+};
 
 /** Bills video past the plan's hours, and writes to each creator the first time a month passes them. */
-async function videoRun(): Promise<VideoRun> {
-  const out: VideoRun = { stores: 0, billed: 0, cents: 0, paused: 0, failed: 0, told: 0 };
-  let settled: Awaited<ReturnType<typeof settleAll>> = [];
+async function videoRun(started: number): Promise<VideoRun> {
+  const out: VideoRun = { stores: 0, billed: 0, cents: 0, paused: 0, failed: 0, told: 0, settled: "unknown", walked: "unknown" };
+  let settled: Awaited<ReturnType<typeof settleAllWithin>>["results"] = [];
   try {
-    settled = await settleAll();
+    // settleAll, walked from where the last run reached and stopped at its share (lib/watch-billing.ts).
+    const after = await placeOf("settle");
+    if (after === undefined) {
+      console.error("usage-watch: where the settle walk goes on from is unknown; nothing settled this run");
+    } else {
+      const walked = await settleAllWithin(started + ENDS.settle, after);
+      settled = walked.results;
+      out.settled = { reached: walked.reached, of: walked.of, done: walked.reached === walked.of };
+      await keepPlace("settle", walked.last);
+    }
   } catch (error) {
     console.error("settling video hours failed", error);
     return out;
@@ -111,24 +190,24 @@ async function videoRun(): Promise<VideoRun> {
   } catch (error) {
     console.error("could not read the stores whose video was watched", error);
   }
-  for (const folder of watchedStores) {
+  out.walked = await walk("video", watchedStores, started + ENDS.video, async (folder) => {
     try {
       const store = await storeOf(folder);
       const month = store ? allowanceWindow(store)?.id : null;
-      if (!store || !month) continue;
+      if (!store || !month) return;
       const seconds = await watchedIn(folder, month);
-      if (seconds < SETUP_VIDEO_SECONDS) continue;
+      if (seconds < SETUP_VIDEO_SECONDS) return;
       const limit = videoLimitFor(store);
       const paused = limit !== null && seconds >= limit;
-      if (!paused) continue;
+      if (!paused) return;
       if (paused) out.paused += 1;
       // A renewal Stripe could not collect pauses video for its own reason, and the
       // creator is told that one (232 [CA1] unit 4): not a plan's hours used up.
-      if (costsPaused(store)) continue;
-      if (!isSenderConfigured()) continue;
+      if (costsPaused(store)) return;
+      if (!isSenderConfigured()) return;
       // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
       const word = await takeVideoWord(folder, month);
-      if (word === null) continue;
+      if (word === null) return;
       const notice = videoUsageNotice({ seconds, limit, standing: standingOf(store),
         studioUrl: `${SITE_URL}/studio`, supportEmail: SUPPORT_EMAIL });
       const outcome = await sendEmailOutcome({ meter: { by: "company" },
@@ -145,7 +224,7 @@ async function videoRun(): Promise<VideoRun> {
     } catch (error) {
       console.error("writing to a creator about video hours failed", error);
     }
-  }
+  });
   console.log(
     out.stores === 0 && out.paused === 0
       ? "video-watch: every store inside its hours"
@@ -154,7 +233,7 @@ async function videoRun(): Promise<VideoRun> {
   return out;
 }
 
-type VisitsRun = { stores: number; resting: number; failed: number; told: number };
+type VisitsRun = { stores: number; resting: number; failed: number; told: number; walked: Walked };
 
 /**
  * Writes to each creator the first time a month's visits rest their public
@@ -162,30 +241,30 @@ type VisitsRun = { stores: number; resting: number; failed: number; told: number
  * are not sold (lib/traffic-rules.ts); the pages rest instead, for every
  * standing, and what buyers already have goes on until the whole figure.
  */
-async function visitsRun(): Promise<VisitsRun> {
-  const out: VisitsRun = { stores: 0, resting: 0, failed: 0, told: 0 };
+async function visitsRun(started: number): Promise<VisitsRun> {
+  const out: VisitsRun = { stores: 0, resting: 0, failed: 0, told: 0, walked: "unknown" };
   let visited: string[] = [];
   try {
     visited = await foldersOfTwoMonths(visitedFolders);
   } catch (error) {
     console.error("could not read the stores that were visited", error);
   }
-  for (const folder of visited) {
+  out.walked = await walk("visits", visited, started + ENDS.visits, async (folder) => {
     try {
       const store = await storeOf(folder);
       const month = store ? allowanceWindow(store)?.id : null;
-      if (!store || !month) continue;
+      if (!store || !month) return;
       const visits = await visitsIn(folder, month);
-      if (visits < publicVisitLimit(SETUP_VISITS)) continue;
+      if (visits < publicVisitLimit(SETUP_VISITS)) return;
       const limit = visitLimitFor(store);
       const shown = publicVisitLimit(limit);
-      if (visits < shown) continue;
+      if (visits < shown) return;
       out.stores += 1;
       out.resting += 1;
-      if (!isSenderConfigured()) continue;
+      if (!isSenderConfigured()) return;
       // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
       const word = await takeVisitsWord(folder, month);
-      if (word === null) continue;
+      if (word === null) return;
       const standing = standingOf(store);
       const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
@@ -226,7 +305,7 @@ async function visitsRun(): Promise<VisitsRun> {
       out.failed += 1;
       console.error("writing to a creator about visits failed", error);
     }
-  }
+  });
   console.log(
     out.resting === 0
       ? "visits-watch: every store inside its visits"
@@ -258,9 +337,10 @@ export async function GET(request: NextRequest) {
 }
 
 async function watchUsage(): Promise<Response> {
-  const video = await videoRun();
-  const visits = await visitsRun();
-  const orders = await ordersRun();
+  const started = Date.now();
+  const video = await videoRun(started);
+  const visits = await visitsRun(started);
+  const orders = await ordersRun(started);
 
   // The delivery part on its own: a list or total Redis answered in an unknown shape (CX-123 rule 24) is never
   // "nobody is over". It is said as unknown, nobody is written to on it and its told list is left as it was; the
@@ -321,6 +401,8 @@ async function watchUsage(): Promise<Response> {
   const unknown: string[] = [];
   // Stores whose owner could not be read today: not written to, support not told, not recorded; tried next run.
   let unreadOwners = 0;
+  // Stores over the allowance left for the next run because the run's own end came first.
+  let notReached = 0;
   // Only a notice that went out is recorded as given: a refused send, a store left because no sender is configured,
   // or an ownerless store support could not be told about stays off the told list and is tried again next run.
   const given: string[] = [];
@@ -340,6 +422,11 @@ async function watchUsage(): Promise<Response> {
       continue;
     }
     if (!isSenderConfigured()) break;
+    // The run's own end (#4583): the owners not reached are not recorded as told, and are written to next run.
+    if (Date.now() >= started + RUN_MS) {
+      notReached = fresh.length - i;
+      break;
+    }
     const sent = await sendEmail({ meter: { by: "company" },
       from: NIMBUS_FROM,
       to: email,
@@ -415,7 +502,7 @@ async function watchUsage(): Promise<Response> {
   }
 
   return Response.json(
-    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, video, visits, orders },
+    { ok: true, over: over.length, told, unknown: unknown.length, unreadOwners, notReached, video, visits, orders },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -438,15 +525,15 @@ async function readTold(): Promise<Set<string>> {
   return new Set(names);
 }
 
-type OrdersRun = { stores: number; failed: number; told: number };
+type OrdersRun = { stores: number; failed: number; told: number; walked: Walked };
 
 /**
  * Writes to each creator the first time a month's orders reach their plan's
  * figure, where new orders stop (lib/order-admission.ts). Nothing is billed:
  * since 17 October 2026 orders past a plan's figure are not sold.
  */
-async function ordersRun(): Promise<OrdersRun> {
-  const out: OrdersRun = { stores: 0, failed: 0, told: 0 };
+async function ordersRun(started: number): Promise<OrdersRun> {
+  const out: OrdersRun = { stores: 0, failed: 0, told: 0, walked: "unknown" };
   let ordered: string[] = [];
   try {
     ordered = await foldersOfTwoMonths(orderedFolders);
@@ -454,20 +541,20 @@ async function ordersRun(): Promise<OrdersRun> {
     console.error("could not read the stores with orders", error);
     return out;
   }
-  for (const folder of ordered) {
+  out.walked = await walk("orders", ordered, started + ENDS.orders, async (folder) => {
     try {
       const store = await storeOf(folder);
       const month = store ? allowanceWindow(store)?.id : null;
-      if (!store || !month) continue;
+      if (!store || !month) return;
       const orders = await ordersIn(folder, month);
-      if (orders < Math.min(...Object.values(ORDERS_INCLUDED))) continue;
+      if (orders < Math.min(...Object.values(ORDERS_INCLUDED))) return;
       const limit = paidOrdersLimitFor(store);
-      if (limit === null || orders < limit) continue;
+      if (limit === null || orders < limit) return;
       out.stores += 1;
-      if (!isSenderConfigured()) continue;
+      if (!isSenderConfigured()) return;
       // The month's mark, kept with this run's value: given back only on a certain refusal (lib/usage-billing.ts).
       const word = await takeOrdersWord(folder, month);
-      if (word === null) continue;
+      if (word === null) return;
       const outcome = await sendEmailOutcome({ meter: { by: "company" },
         from: NIMBUS_FROM,
         to: store.email,
@@ -501,7 +588,7 @@ async function ordersRun(): Promise<OrdersRun> {
       out.failed += 1;
       console.error("writing to a creator about orders failed", error);
     }
-  }
+  });
   console.log(
     out.stores === 0
       ? "orders-watch: every store inside its orders"

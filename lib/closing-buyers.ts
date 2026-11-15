@@ -237,8 +237,14 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     for (const sub of held.missing) if (await markUntold(folder, `#${sub}`, 0)) out.untold += 1;
     const kept: string[] = [...members.keys()];
     kept.push(...(await importedBuyers(store.statsId)).keys());
-    kept.push(...(await readPayPalSales(store.statsId, 0, 100_000)).sales.map((sale) => sale.email));
+    const paypal = await readPayPalSales(store.statsId, 0, 100_000);
+    kept.push(...paypal.sales.map((sale) => sale.email));
     if (!(await tell(kept))) return out;
+    // A PayPal reading that left a sale out (its record missing or another store's, or more sales than read) is not
+    // the whole list (5bNDa on #4001): those read are told now and written down, and the round stays where it was, so
+    // the closing job reads them all again on its next run, as for an answer it could not read. The store does not
+    // close before its buyers are told (lib/plan-closing.ts), so no PayPal buyer is passed over in silence.
+    if (paypal.partial) return out;
     out.after = "start";
   }
   const account = store.stripeAccountId;

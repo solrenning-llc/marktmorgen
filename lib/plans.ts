@@ -40,6 +40,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { type Interval, isInterval } from "@/lib/product-recurring";
+import { addPeriods } from "@/lib/plan-periods";
 import { withCutoff } from "@/lib/fetch-timeout";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
@@ -130,22 +131,8 @@ export function isAccountRefusal(error: unknown): boolean {
   return error.status === 401 && /access to account/i.test(error.stripeMessage);
 }
 
-/**
- * The moment `n` periods after `anchor`, the way Stripe counts them: a month
- * later is the same day of the month, or the last day when the month is
- * shorter, at the same time of day.
- */
-export function addPeriods(anchorSeconds: number, interval: Interval, n: number): number {
-  if (interval === "day") return anchorSeconds + n * 86400;
-  if (interval === "week") return anchorSeconds + n * 7 * 86400;
-  const months = interval === "year" ? n * 12 : n;
-  const start = new Date(anchorSeconds * 1000);
-  const day = start.getUTCDate();
-  const target = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months, 1, start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds()));
-  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(day, lastDay));
-  return Math.floor(target.getTime() / 1000);
-}
+// How Stripe counts a plan's periods lives in lib/plan-periods.ts, with no import back here (review of #3367).
+export { addPeriods } from "@/lib/plan-periods";
 
 export type PlanState = "done" | "open" | "gone" | "early" | "unread" | "owed" | "untold";
 

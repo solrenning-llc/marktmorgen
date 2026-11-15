@@ -1,0 +1,66 @@
+/**
+ * Issue #4808 (erasure, MEDIUM; Codex G, transcribed by Claude 2): when the file store failed during a person's
+ * erasure, the fallback queued their files for the daily job one path at a time, and a first queue write that failed
+ * ended the loop: that path and every one after it had neither a deletion nor a queue entry, and a repeat erasure
+ * could no longer find them (their records were already gone). Now every path is queued independently, a failed one is
+ * tried again at once, and only a path still not queued leaves the erasure incomplete. Synthetic data only.
+ */
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+import { makeWorld, seedPerson } from "./erasure-world";
+import { erasePerson } from "@/lib/person-erasure";
+import { normaliseEmail } from "@/lib/auth";
+
+type Commands = (string | number)[][];
+// The file store never answers; Resend and Stripe answer empty.
+globalThis.fetch = (async (input: string | URL | Request) => {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  if (/blob|vercel/.test(url.hostname)) throw new Error("synthetic file store outage");
+  if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }), { status: 200 });
+  return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
+}) as typeof fetch;
+
+async function main(): Promise<void> {
+  console.error = () => {};
+  process.env.STRIPE_SECRET_KEY = "sk_test_i4808_stand_in";
+  process.env.RESEND_API_KEY = "re_test_i4808_stand_in";
+  process.env.BLOB_READ_WRITE_TOKEN = "vercel_blob_rw_synthetic_i4808_token";
+  const real = redis.pipeline.bind(redis);
+  const doors = (c: Commands) => c.some((x) => x[0] === "ZADD" && x[1] === "nl:tasks:doors");
+  const queued = async () => ((await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[]).filter((p) => String(p).startsWith("tasks/"));
+
+  part("The file store fails, and the first write of the cleanup queue fails too (the issue's reproduction)");
+  redis.clear();
+  const world = await makeWorld();
+  const ana = normaliseEmail("ana@example.com");
+  await seedPerson(world, ana, null);
+  let failed = 0;
+  redis.pipeline = (async (c: Commands) => {
+    if (doors(c) && failed === 0) { failed += 1; throw new Error("synthetic redis failure on ZADD nl:tasks:doors"); }
+    return real(c);
+  }) as typeof redis.pipeline;
+  await erasePerson(world.store, ana, { kind: "person" }).catch(() => undefined);
+  redis.pipeline = real;
+  is("one queue write failed", failed, 1);
+  is("the file is queued for the daily job all the same", (await queued()).length > 0, true);
+  const retry = await erasePerson(world.store, ana, { kind: "person" });
+  is("and a repeat erasure finishes", retry.ok, true);
+  is("with the file still queued for deletion", (await queued()).length > 0, true);
+
+  part("A queue that never takes it: the erasure is never reported done");
+  redis.clear();
+  const world2 = await makeWorld();
+  const bo = normaliseEmail("bo@example.com");
+  await seedPerson(world2, bo, null);
+  let tries = 0;
+  redis.pipeline = (async (c: Commands) => {
+    if (doors(c)) { tries += 1; throw new Error("synthetic redis failure on ZADD nl:tasks:doors"); }
+    return real(c);
+  }) as typeof redis.pipeline;
+  const outcome = await erasePerson(world2.store, bo, { kind: "person" }).then((r) => (r.ok ? "ok" : "incomplete"), () => "threw");
+  redis.pipeline = real;
+  is("not done", outcome === "ok", false);
+  is("each path was tried twice before giving up", tries >= 2, true);
+  done();
+}
+void main().catch((error) => { console.error(error); process.exit(1); });

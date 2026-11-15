@@ -270,6 +270,11 @@ export function CalendarEditor({
             {`Your previous address was asked too often (more than ${CALENDAR_REFUSED_PER_HOUR} times too often in an hour), so it stopped on ${new Date(view.stoppedAt).toUTCString().slice(5, 22)} UTC. This is a new one: subscribe to it again, and set your calendar app to check every 15 minutes or less often.`}
           </p>
         ) : null}
+        {view.leftAt && !view.stoppedAt ? (
+          <p className="notice notice-warn mt-3 text-sm text-ink" role="note">
+            {`Your previous address stopped working on ${new Date(view.leftAt).toUTCString().slice(5, 22)} UTC, because someone who could see it left your team. This is a new one: in your calendar app, remove the old subscription and subscribe to this address again.`}
+          </p>
+        ) : null}
         {view.subscribeUrl ? (
           <>
             <div className="mt-3 flex flex-col gap-3 sm:flex-row">

@@ -9,3 +9,4 @@ export async function checkHostCalendar(){state.checks++;return true;}
 export async function addHostIcs(){state.adds++;return {ok:true};}
 export async function setHostCalendars(){return null;}
 export async function setHostSource(){return null;}
+export async function hostWriteTarget(){return null;}

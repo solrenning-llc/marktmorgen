@@ -44,7 +44,7 @@ import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
 import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
-import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
+import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, can, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
 export const MAX_TEAM = 5;
@@ -601,7 +601,12 @@ export async function removeMember(store: Store, email: string, options: { repea
   const address = normaliseEmail(email);
   // Somebody not on the team is swept only for a removal being repeated (the route reads that from the log):
   // a mistyped address pauses nothing and emails nobody.
-  if (!options.repeat && !(await readTeam(store.sid)).members.some((m) => m.email === address)) return false;
+  const before = await readTeam(store.sid);
+  if (!options.repeat && !before.members.some((m) => m.email === address)) return false;
+  // Whether they could see the store's private calendar address (security audit 506 [SG1], MM-SA-22). A removal
+  // being repeated may find them already gone, their role unknown: the address is replaced then, the safe side.
+  const role = before.members.find((m) => m.email === address)?.role;
+  const sawCalendar = role === undefined || can(role, "settings");
   // Loaded here, as lib/api-key-pause.ts reads the team through this file.
   const { leftTeam, tellOwnerOfExit, undoExit } = await import("@/lib/api-key-pause");
   const first = await leftTeam(store, address);
@@ -626,7 +631,19 @@ export async function removeMember(store: Store, email: string, options: { repea
     console.error("pausing a former teammate's API keys after taking them off failed; the removal is to be repeated", error);
     throw new KeysNotSwept();
   }
-  await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded] }).catch((error: unknown) =>
+  // The calendar feed lists each booked buyer's name or email and the call's room behind one address per store, which
+  // the studio shows to every member with "settings": theirs is replaced as they leave (MM-SA-22), as their keys stop.
+  // Not replaced is not finished: the removal is repeated, never said as done.
+  let calendar: string | null = null;
+  if (removed || options.repeat) {
+    try {
+      if (sawCalendar) calendar = await (await import("@/lib/calendar-sync")).replaceFeedTokenForExit(store);
+    } catch (error) {
+      console.error("replacing the calendar address after a teammate left failed; the removal is to be repeated", error);
+      throw new KeysNotSwept();
+    }
+  }
+  await tellOwnerOfExit(store, address, { left: [...first.left, ...second.left], unmatched: [...first.unmatched, ...second.unmatched], unrecorded: [...first.unrecorded, ...second.unrecorded], calendar }).catch((error: unknown) =>
     console.error("telling the owner which API keys a teammate leaving paused failed", error),
   );
   // The store leaves their index, and what they could do with each pipeline (639 [GL7](7)) goes with them; a repeat

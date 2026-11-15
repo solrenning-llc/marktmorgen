@@ -22,7 +22,7 @@ import type { Store } from "@/lib/store";
 import { done, is, part } from "./check";
 
 const flat = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&quot;|&ldquo;|&rdquo;|“|”/g, '"').replace(/\s+/g, " ");
-const view = { feeds: [], subscribeUrl: "https://marktmorgen.com/api/store/calendar/abc.ics", stoppedAt: null };
+const view = { feeds: [], subscribeUrl: "https://marktmorgen.com/api/store/calendar/abc.ics", stoppedAt: null, leftAt: null };
 
 part("The calendar card: the promise only where it is kept");
 const named = flat(renderToStaticMarkup(createElement(CalendarEditor, { view, weekly: false })));

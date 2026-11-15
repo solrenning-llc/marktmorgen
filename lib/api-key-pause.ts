@@ -221,7 +221,14 @@ export async function afterMake(store: Store, id: string, maker: KeyMaker, email
 }
 
 /** What one sweep of a teammate leaving paused: theirs, for good; others' whose maker matches nobody on the team; and keys nobody is recorded as having made. */
-export type Exit = { left: string[]; unmatched: string[]; unrecorded: string[]; attempt?: ExitAttempt };
+export type Exit = {
+  left: string[];
+  unmatched: string[];
+  unrecorded: string[];
+  attempt?: ExitAttempt;
+  /** The store's new calendar subscription address, when the one the teammate could see was replaced (MM-SA-22). */
+  calendar?: string | null;
+};
 
 /**
  * What a sweep tried to write (owner C3-121), confirmed or not: an answer
@@ -334,12 +341,30 @@ const turnOnHow = (store: Store, origin: string) =>
  * Tells the store's owner, in one short email, which API keys a teammate
  * leaving paused and why, and how to turn back on the ones that can be: a
  * key nobody is recorded as having made may be the owner's own (made before
- * 4 November 2026), and its integration stops until they do. Nothing is sent
- * when nothing was paused. Returns whether it went.
+ * 4 November 2026), and its integration stops until they do. When their
+ * leaving replaced the store's calendar address, the same email gives the new
+ * one. Nothing is sent when nothing was paused or replaced. Returns whether it went.
  */
 export async function tellOwnerOfExit(store: Store, who: string, exit: Exit, origin = SITE_URL): Promise<boolean> {
-  if (!exit.left.length && !exit.unmatched.length && !exit.unrecorded.length) return true;
+  const keys = exit.left.length > 0 || exit.unmatched.length > 0 || exit.unrecorded.length > 0;
+  if (!keys && !exit.calendar) return true;
   const back = [...exit.unrecorded, ...exit.unmatched].length;
+  // The calendar's address was replaced as they left (MM-SA-22): said with the new one, in the same email.
+  const calendar = exit.calendar
+    ? [
+        `${who} could see your store's private calendar address, which lists your booked calls and who booked them, so it was replaced. The old address stops working now. In your calendar app, remove the old subscription and subscribe again with the new address:`,
+        exit.calendar,
+      ]
+    : [];
+  if (!keys) {
+    return sendEmail({
+      meter: { by: "store", store, kind: "email" },
+      from: NIMBUS_FROM,
+      to: store.email,
+      subject: headerText(`Your calendar address for ${store.name} changed`, 200),
+      text: [`${who} is no longer on the team of ${store.name}.`, "", ...calendar].join("\n"),
+    }).catch(() => false);
+  }
   return sendEmail({
     meter: { by: "store", store, kind: "email" },
     from: NIMBUS_FROM,
@@ -357,6 +382,7 @@ export async function tellOwnerOfExit(store: Store, who: string, exit: Exit, ori
       ...(exit.left.length
         ? ["", "Paused for good, because they were made by someone no longer on the team. You can revoke them there and make new ones:", ...exit.left.map((name) => `- ${name}`)]
         : []),
+      ...(calendar.length ? ["", ...calendar] : []),
     ].join("\n"),
   }).catch(() => false);
 }

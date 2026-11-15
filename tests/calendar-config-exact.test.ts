@@ -108,7 +108,7 @@ async function main(): Promise<void> {
   is("removing one keeps the other", removed.feeds.map((f) => f.id), [FEEDS[1].id]);
 
   redis.clear();
-  is("no settings yet: none, not an error", await calendarView(STORE), { feeds: [], subscribeUrl: null, stoppedAt: null });
+  is("no settings yet: none, not an error", await calendarView(STORE), { feeds: [], subscribeUrl: null, stoppedAt: null, leftAt: null });
   await ensureFeedToken(STORE);
   const made = JSON.parse(String(await keptNow())) as { feeds: unknown; token: string };
   is("no settings yet: opening the studio makes them, with no calendars", [made.feeds, /^[0-9a-f]{48}$/.test(made.token)], [[], true]);

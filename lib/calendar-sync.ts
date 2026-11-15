@@ -109,7 +109,7 @@ const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 
 type Feed = { id: string; url: string; addedAt: string };
 /** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
-type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string };
+type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string; leftAt?: string };
 export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
@@ -153,6 +153,7 @@ function parseConfig(raw: unknown): Config | null {
       tokenAt: typeof value.tokenAt === "string" ? value.tokenAt : "",
       callsId: typeof value.callsId === "string" && /^[0-9a-f]{8,40}$/.test(value.callsId) ? value.callsId : null,
       ...(typeof value.stoppedAt === "string" && value.stoppedAt ? { stoppedAt: value.stoppedAt } : {}),
+      ...(typeof value.leftAt === "string" && value.leftAt ? { leftAt: value.leftAt } : {}),
     };
   } catch {
     return null;
@@ -332,12 +333,17 @@ export type CalendarView = {
   subscribeUrl: string | null;
   /** When the address before this one was stopped for being asked too often (CALENDAR_REFUSED_PER_HOUR), or null. */
   stoppedAt: string | null;
+  /**
+   * When the address before this one was replaced because a teammate who could see it left the team
+   * (replaceFeedTokenForExit; security audit 506 [SG1], MM-SA-22), or null.
+   */
+  leftAt: string | null;
 };
 
 /** What the studio shows: the calendars, without their addresses, and how each last went. */
 export async function calendarView(store: Store): Promise<CalendarView> {
   const config = await readConfig(store);
-  if (!config) return { feeds: [], subscribeUrl: null, stoppedAt: null };
+  if (!config) return { feeds: [], subscribeUrl: null, stoppedAt: null, leftAt: null };
   const replies = config.feeds.length
     ? await redisPipeline(config.feeds.flatMap((f) => [["GET", goodKey(f.id)], ["GET", errKey(f.id)]]))
     : [];
@@ -361,7 +367,7 @@ export async function calendarView(store: Store): Promise<CalendarView> {
       unsupported: good?.unsupported ?? 0,
     };
   });
-  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null, stoppedAt: config.stoppedAt ?? null };
+  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null, stoppedAt: config.stoppedAt ?? null, leftAt: config.leftAt ?? null };
 }
 
 export function subscribeUrl(token: string): string {
@@ -433,10 +439,43 @@ export async function newFeedToken(store: Store, keepStopped = false): Promise<C
     const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
     if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
   }
-  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
-  const { stoppedAt, ...rest } = config;
+  // A new address the creator asked for clears the notes that the one before was stopped or replaced; one made in its
+  // place keeps the stopped note.
+  const { stoppedAt, leftAt: _left, ...rest } = config;
+  void _left;
   await writeConfig(store, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
   return calendarView(store);
+}
+
+/**
+ * Replaces the store's subscription address because a teammate who could see it left the team (security audit 506
+ * [SG1], MM-SA-22): the feed lists each booked buyer's name or email and the call's room, and the studio shows its
+ * address to every member with "settings" (lib/team.ts removeMember). The old address answers nothing from the moment
+ * the settings name the new one (storeIdForToken checks the token against them); the studio says why it changed
+ * (leftAt). Answers the new address; a store with no address yet gets none: null. Every write is read back exactly (rule 24): a reply in any
+ * other shape throws UnknownReplyError, so the removal is said as not finished and is repeated, never taken as done.
+ */
+export async function replaceFeedTokenForExit(store: Store, now = Date.now()): Promise<string | null> {
+  if (!store.statsId || !isRedisConfigured()) return null;
+  const config = await readConfig(store);
+  if (!config?.token) return null;
+  const token = randomBytes(24).toString("hex");
+  const at = new Date(now).toISOString();
+  const { stoppedAt: _stopped, leftAt: _left, ...rest } = config;
+  void _stopped;
+  void _left;
+  const next: Config = { ...rest, token, tokenAt: at, leftAt: at };
+  const written = repliesFor(
+    await redisPipeline([
+      ["SET", tokenKey(token), store.statsId],
+      ["SET", cfgKey(store.statsId), JSON.stringify({ ...next, handle: store.handle, callsId: store.callsId ?? null })],
+    ]),
+    2,
+  );
+  if (!written || written[0] !== "OK" || written[1] !== "OK") throw new UnknownReplyError("a calendar address replaced after a teammate left");
+  // The settings no longer name the old token, so it already answers nothing; its own key goes too, as best it can.
+  await redisPipeline([["DEL", tokenKey(config.token)]]).catch((error: unknown) => console.error("deleting a replaced calendar address's key failed", error));
+  return subscribeUrl(token);
 }
 
 /** Makes the subscription address the first time the studio needs one. */

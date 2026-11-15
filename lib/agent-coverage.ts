@@ -201,6 +201,7 @@ export const AGENT_COVERAGE: Readonly<Record<string, AgentAction>> = {
   "POST store/no-count": row("numbers", never(BROWSER)),
   "POST store/notes": row("numbers", draft),
   "POST store/nudge": row("email", draft),
+  "POST store/ending": row("email", draft),
   "POST store/numbers-links": row("numbers", draft),
   "POST store/numbers/ask": row("numbers", read),
   "POST store/option": row("products", draft),

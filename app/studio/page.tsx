@@ -122,6 +122,7 @@ import { PauseEditor } from "@/components/pause-editor";
 import { DunningEditor } from "@/components/dunning-editor";
 import { LeaveEditor } from "@/components/leave-editor";
 import { NudgeEditor } from "@/components/nudge-editor";
+import { EndingEditor } from "@/components/ending-editor";
 import { nudgesThisMonth } from "@/lib/member-nudge";
 import { YearlyAskEditor } from "@/components/yearly-ask-editor";
 import { readVoice } from "@/lib/customer-voice";
@@ -2240,6 +2241,8 @@ export default async function StudioPage({
                         sent={await nudgesThisMonth(store).catch(() => 0)}
                       />
                     ))()}
+                    {/* 361 [AP1] (e): the reminder the day before a member's access ends, off until turned on. */}
+                    <EndingEditor ending={store.ending} suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""} />
                     {(async () => {
                       const recurring = readKind(store, "recurring").catch(() => []);
                       return (

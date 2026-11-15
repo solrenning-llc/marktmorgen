@@ -35,3 +35,6 @@ export async function redisPipeline(commands: (string | number)[][]): Promise<un
   }
   return results;
 }
+/** lib/access-ending.ts, now called from the same daily run: no membership here has an end, and Stripe is never read again. */
+export const endsAtOf = () => null;
+export const onAccount = async () => { throw new Error("synthetic: no Stripe read in this world"); };

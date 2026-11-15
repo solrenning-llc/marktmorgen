@@ -28,6 +28,7 @@ import { membershipWords } from "@/lib/buyer-words/membership";
 import type { LanguageCode } from "@/lib/store-language";
 import { nudgeFits } from "@/lib/member-health-rules";
 import { type MemberRow, runningMembers, scoreMembers } from "@/lib/member-health";
+import { endingStore } from "@/lib/access-ending";
 
 const CURSOR_KEY = "nl:nudge:cursor";
 const KEEP_SECONDS = 400 * 86_400;
@@ -51,9 +52,10 @@ export function nudgeEmail(input: { storeName: string; title: string; courseUrl:
 }
 
 /** One store's members who stopped coming, each written to once per period. */
-export async function nudgeStore(store: Store, deadline: number, now = Date.now()): Promise<number> {
+export async function nudgeStore(store: Store, deadline: number, now = Date.now(), read?: Awaited<ReturnType<typeof runningMembers>>["rows"]): Promise<number> {
   if (!store.nudge.on || !store.stripeAccountId || !store.statsId || !store.listId) return 0;
-  const { rows } = await runningMembers(store);
+  // The daily run hands over the memberships it read once for this and the access reminder (lib/access-ending.ts).
+  const rows = read ?? (await runningMembers(store)).rows;
   const members = (await scoreMembers(store, rows, now)).filter((m) => nudgeFits(m.score, m.factors) && m.periodEnd > 0);
   if (!members.length) return 0;
   // Only those who agreed to hear from the creator and have not left the list.
@@ -147,12 +149,16 @@ export async function sendMemberNudges(deadline: number): Promise<{ stores: numb
         continue;
       }
       if (Date.now() >= deadline) break;
-      if (store.nudge.on && sellsMemberships(store)) {
+      // One read of the store's running memberships serves the come-back email and the reminder the day before
+      // access ends (361 [AP1] (e)): Stripe's list is never read twice for one store in one run.
+      if ((store.nudge.on || store.ending?.on) && sellsMemberships(store)) {
         counts.stores += 1;
         try {
-          counts.sent += await nudgeStore(store, deadline);
+          const { rows } = await runningMembers(store);
+          if (store.nudge.on) counts.sent += await nudgeStore(store, deadline, Date.now(), rows);
+          if (store.ending?.on) counts.sent += await endingStore(store, rows, deadline);
         } catch (error) {
-          console.error("reading a store's members for come-back emails failed", store.handle, error);
+          console.error("reading a store's members for come-back emails or access reminders failed", store.handle, error);
         }
       }
       done += 1;

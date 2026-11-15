@@ -72,6 +72,7 @@ import { parsePauseMonths } from "@/lib/membership-pause-rules";
 import { type Dunning, DEFAULT_DUNNING, parseDunning } from "@/lib/dunning-rules";
 import { type LeaveSetting, NO_LEAVE, parseLeave } from "@/lib/leave-rules";
 import { NO_NUDGE, type Nudge, parseNudge } from "@/lib/member-health-rules";
+import { type EndingSetting, NO_ENDING, parseEnding } from "@/lib/access-ending-rules";
 import { NO_YEARLY_ASK, type YearlyAsk, parseYearlyAsk } from "@/lib/yearly-switch-rules";
 import { type WinBack, NO_WINBACK, parseWinBack } from "@/lib/winback";
 import { type ReturningCode, MAX_RETURNING_CODES, parseReturningCodes } from "@/lib/returning-code-rules";
@@ -579,6 +580,8 @@ export type Store = {
    * Off for every store until its creator turns it on, with a postal address.
    */
   nudge: Nudge;
+  /** The reminder a member gets the day before their access ends (361 [AP1] (e), lib/access-ending.ts): off until turned on, with a postal address. */
+  ending: EndingSetting;
   /**
    * The one email that offers monthly members the same membership's yearly
    * price (lib/yearly-ask.ts). Off until its creator turns it on, with a postal address.
@@ -1072,6 +1075,7 @@ function parseStore(raw: unknown): Store | null {
       dunning: parseDunning(value.dunning),
       leaving: parseLeave(value.leaving),
       nudge: parseNudge(value.nudge),
+      ending: parseEnding(value.ending),
       yearlyAsk: parseYearlyAsk(value.yearlyAsk),
       weeklyAi: value.weeklyAi === true,
       adsServer: parseAdsServer(value.adsServer),
@@ -1457,6 +1461,7 @@ async function freshStore(fields: {
     dunning: { ...DEFAULT_DUNNING },
     leaving: { ...NO_LEAVE, reasons: [...NO_LEAVE.reasons] },
     nudge: { ...NO_NUDGE },
+    ending: { ...NO_ENDING },
     yearlyAsk: { ...NO_YEARLY_ASK },
     weeklyAi: false,
     adsServer: [],
@@ -2931,6 +2936,15 @@ export async function setNudge(email: string, raw: unknown): Promise<{ ok: true;
   const asked = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   if (asked.on === true && !nudge.on) return { ok: false, reason: "address" };
   const next = await patchStore(email, () => ({ nudge }));
+  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/** Saves the reminder a member gets the day before their access ends (361 [AP1] (e), lib/access-ending-rules.ts). */
+export async function setEnding(email: string, raw: unknown): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "address" }> {
+  const ending = parseEnding(raw);
+  const asked = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (asked.on === true && !ending.on) return { ok: false, reason: "address" };
+  const next = await patchStore(email, () => ({ ending }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 

@@ -121,7 +121,7 @@ async function main(): Promise<void> {
   is("one walk: complete, no cursor", [page.complete, page.reason, page.cursor], [true, "done", null]);
   is("R is plan storage + the students' room + the community pictures, never less", [room("creator"), room("pro"), room("scale")], [5 * 1024 ** 3 + 250 * 1024 ** 2 + 200 * PICTURE_BYTES, 40 * 1024 ** 3 + 1024 ** 3 + 1000 * PICTURE_BYTES, 80 * 1024 ** 3 + 2 * 1024 ** 3 + 3000 * PICTURE_BYTES]);
   is("nothing listed or signed from a file store", [blobWorld.listCalls.length, blobWorld.tokenCalls.length], [0, 0]);
-  is("the database: the day's count, a SCAN, a GET for each store", [commands[0][0], commands[1][0], scans(), commands.filter((c) => c[0] === "GET").length], ["SET", "INCRBY", 1, 4]);
+  is("the database: the day's count, a SCAN, a GET for each store", [commands[0][0], commands[1][0], scans(), commands.filter((c) => c[0] === "GET").length], ["INCR", "EXPIRE", 1, 4]);
   is("the day's count is the stores page's own", commands[0][1], `nl:backup:files:day:${new Date().toISOString().slice(0, 10)}:stores`);
 
   reset();
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   await record(today, [rec(4, now), rec(5, now)]);
   answer = await call(`?page=deletions&cursor=${after}`);
   is("two more written since: exactly those two", parseDeletionPage(answer.json).records.map((r) => r.key), [rec(4, now).key, rec(5, now).key]);
-  is("one LRANGE a day read, no other command but the day's count", commands.filter((c) => !["SET", "INCRBY", "LRANGE"].includes(String(c[0]))).length, 0);
+  is("one LRANGE a day read, no other command but the day's count", commands.filter((c) => !["INCR", "EXPIRE", "LRANGE"].includes(String(c[0]))).length, 0);
 
   part("from the start: every day still kept, the oldest first");
   reset();

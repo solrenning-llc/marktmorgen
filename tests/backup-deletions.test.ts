@@ -152,10 +152,10 @@ async function main(): Promise<void> {
   is("the database is down: deleted, no error to the caller", [thrown, deletionWorld.deleted.flat()], [false, [blobFile(F, "a.pdf")]]);
   is("the miss is logged with its count, never the key", [logged.some((l) => l.includes("deletion record") && l.includes("1")), logged.some((l) => l.includes(F) || l.includes("a.pdf"))], [true, false]);
   for (const [what, bad] of [
-    ["the count answered as text", (list: unknown[][]) => (list[0][0] === "SET" ? [null, "1"] : undefined)],
+    ["the count answered as text", (list: unknown[][]) => (list[0][0] === "INCRBY" ? ["1", 1] : undefined)],
     ["the push answered 0", (list: unknown[][]) => (list[0][0] === "RPUSH" ? [0, 1] : undefined)],
     ["the expiry not set", (list: unknown[][]) => (list[0][0] === "RPUSH" ? [1, 0] : undefined)],
-    ["one reply missing", (list: unknown[][]) => (list[0][0] === "SET" ? ["OK"] : undefined)],
+    ["one reply missing", (list: unknown[][]) => (list[0][0] === "INCRBY" ? [1] : undefined)],
   ] as const) {
     reset();
     inject = bad;

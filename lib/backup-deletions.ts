@@ -40,7 +40,7 @@
  * Cost, worst month per store (MR; the route stays off, so nothing is spent
  * today): at most BACKUP_DELETION_RECORDS_PER_MONTH records, each one RPUSH
  * entry of at most RECORD_BYTES_MOST bytes kept at most 15 days, with 4
- * commands a deleteFile call for each store it names (SET NX EX and INCRBY
+ * commands a deleteFile call for each store it names (INCRBY and EXPIRE NX
  * to count, RPUSH and EXPIRE to keep) and 2 once the ceiling is reached; the
  * route reads each record once (one LRANGE a day). The calls past the
  * ceiling are bounded only by the deletions a store can make, which is the
@@ -53,6 +53,7 @@
  * exactly a record, or an LRANGE that is not a list, throws: the route
  * answers 503, never a page with a record left out.
  */
+import { windowCountBy, windowCountOf } from "@/lib/window-count";
 import { BACKUP_DELETION_REASONS, BACKUP_FILES_HELD_OBJECTS, BACKUP_FILES_PAGE_BYTES, BACKUP_FILES_PAGE_ENTRIES, type BackupDeletionPage, type BackupDeletionReason, type BackupFilesSource, parseDeletionPage } from "@/lib/backup-files-contract";
 import { BACKUP_DELETION_RECORDS_REVIEW, BACKUP_FILES_ROUTE_REVIEW } from "@/lib/backup-files-review";
 import { admitFilesReview, backupFilesRouteSecret } from "@/lib/backup-files-source";
@@ -192,8 +193,9 @@ async function keepRecords(folder: string, items: string[], now: number): Promis
   try {
     const count = countKey(folder, now);
     // Counted before it is kept: past the store's month ceiling nothing is written (MR, a ceiling before the spend).
-    const counted = repliesFor(await redisPipeline([["SET", count, "0", "NX", "EX", BACKUP_DELETION_COUNT_SECONDS], ["INCRBY", count, items.length]]), 2);
-    const total = counted && (counted[0] === null || counted[0] === "OK") ? countOf(counted[1]) : null;
+    // The window count (lib/window-count.ts): INCRBY, then the expiry only when the key has none, so a key that expired
+    // between two commands never comes back without one; read only in its exact shape (rule 24).
+    const total = windowCountOf(await redisPipeline(windowCountBy(count, BACKUP_DELETION_COUNT_SECONDS, items.length)));
     if (total === null || total < items.length) return "missed";
     if (total > BACKUP_DELETION_RECORDS_PER_MONTH) return "missed";
     const list = dayList(Math.floor(now / DAY_MS));

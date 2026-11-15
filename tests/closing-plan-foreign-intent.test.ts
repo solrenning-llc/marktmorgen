@@ -4,8 +4,10 @@
  * sizes the refund from that charge. An answer for another payment (another
  * PaymentIntent's id, or a charge that names another payment) decides
  * nothing: no refund is asked for, the task stays in line, and the creator is
- * not told money came back. A charge expanded with no payment_intent is read
- * as before. Synthetic Stripe and email stand-ins only.
+ * not told money came back. The charge must name its own payment, as a string
+ * or as an expanded object with that id: one with no payment_intent, null, an
+ * object without an id or another id proves nothing and is refused the same
+ * way (Codex P on this branch). Synthetic Stripe and email stand-ins only.
  */
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -34,6 +36,8 @@ const world = {
   paymentReads: [] as string[],
   /** A payment whose read answers for another payment (#4423): the reply given instead. */
   foreign: new Map<string, unknown>(),
+  /** Payments whose charge names them as an expanded object rather than by id (a form Stripe also answers with). */
+  expandedIntent: new Set<string>(),
 };
 const sent: { to: string; subject: string; text: string }[] = [];
 
@@ -92,7 +96,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const amount = world.charges.get(intent[1]);
     if (!amount) return json({ error: { message: "No such payment_intent" } }, 404);
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && row.status === "succeeded").reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
+    const own = world.expandedIntent.has(intent[1]) ? { id: intent[1], object: "payment_intent" } : intent[1];
+    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: own, currency: "usd", amount, amount_refunded: refunded, disputed: false } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {
@@ -150,7 +155,13 @@ async function main() {
   const quiet = console.error;
   console.error = () => {};
   const posts = () => world.refunds.map((row) => row.payment_intent);
-  const charge = (pi: string, amount: number, extra: Record<string, unknown> = {}) => ({ id: `ch_${pi.slice(3)}`, currency: "usd", amount, amount_refunded: 0, disputed: false, ...extra });
+  const charge = (pi: string, amount: number, extra: Record<string, unknown> = {}) => ({ id: `ch_${pi.slice(3)}`, payment_intent: pi, currency: "usd", amount, amount_refunded: 0, disputed: false, ...extra });
+  /** A charge as above with its payment_intent field left out altogether. */
+  const unnamed = (pi: string, amount: number) => {
+    const { payment_intent: _left, ...rest } = charge(pi, amount);
+    void _left;
+    return rest;
+  };
 
   part("Control: the plan payment's own answer is refunded in full");
   {
@@ -161,12 +172,28 @@ async function main() {
     is("$40 back on its own payment", refundsOf("pi_ownpi01"), [4_000]);
   }
 
+  part("Control: a charge naming its own payment as an expanded object is refunded in full");
+  {
+    const one = await inLine("ownpi02", [invoiceRow("in_ownpi02", "paid", 4_000, { payment_intent: "pi_ownpi02" })]);
+    world.payments.set("in_ownpi02", [paidPart("in_ownpi02", "pi_ownpi02", 4_000, S(day) + 120)]);
+    world.charges.set("pi_ownpi02", 4_000);
+    world.expandedIntent.add("pi_ownpi02");
+    is("settled", await settleOne(one.id), true);
+    is("$40 back on its own payment", refundsOf("pi_ownpi02"), [4_000]);
+  }
+
   part("The read of payment A answers for payment B");
   for (const [name, answer] of [
     ["another id, B unrefunded", () => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000) })],
     ["another id, B already refunded", () => ({ id: "pi_foreignb", latest_charge: charge("pi_foreignb", 12_000, { amount_refunded: 12_000 }) })],
     ["its own id, a charge naming B", (a: string) => ({ id: a, latest_charge: charge("pi_foreignb", 12_000, { payment_intent: "pi_foreignb" }) })],
     ["no id at all", (a: string) => ({ latest_charge: charge(a, 4_000) })],
+    // Codex P on this branch: its own id, but B's charge with nothing tying it to A, would size A's refund at $120.
+    ["its own id, B's charge with no payment_intent", (a: string) => ({ id: a, latest_charge: unnamed("pi_foreignb", 12_000) })],
+    ["its own id, C's unrefunded charge with no payment_intent", (a: string) => ({ id: a, latest_charge: unnamed("pi_foreignc", 12_000) })],
+    ["its own id, B's charge with payment_intent null", (a: string) => ({ id: a, latest_charge: charge("pi_foreignb", 12_000, { payment_intent: null }) })],
+    ["its own id, B's charge with a payment_intent object without an id", (a: string) => ({ id: a, latest_charge: charge("pi_foreignb", 12_000, { payment_intent: { object: "payment_intent" } }) })],
+    ["its own id, B's charge with payment_intent as a number", (a: string) => ({ id: a, latest_charge: charge("pi_foreignb", 12_000, { payment_intent: 42 }) })],
   ] as [string, (a: string) => unknown][]) {
     const tag = `foreignpay0${world.subs.size}`;
     const a = `pi_${tag}`;

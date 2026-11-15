@@ -553,8 +553,9 @@ export function TopicPageView({ page }: { page: TopicPage }) {
                 {page.intro}
               </p>
               <p className="mt-7 flex flex-wrap items-center gap-2">
-                <span className={BADGE_CLASS[page.badge.tone]}>{page.badge.label}</span>
-                {page.plan ? <span className="tag">{PLAN_LINE[page.plan]}</span> : null}
+                {/* A badge takes a second line rather than being cut: a .tag never wraps and is 26 px tall (WCAG 1.4.12). */}
+                <span className={BADGE_CLASS[page.badge.tone] + " h-auto min-h-[26px] whitespace-normal py-1"}>{page.badge.label}</span>
+                {page.plan ? <span className="tag h-auto min-h-[26px] whitespace-normal py-1">{PLAN_LINE[page.plan]}</span> : null}
               </p>
               {page.section !== "proof" ? (
                 <div className="mt-8 flex flex-wrap items-center gap-3">

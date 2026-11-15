@@ -875,7 +875,15 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * not certified, never zero.
  */
 export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
-export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
+/**
+ * The copy a reading of the buyers leaves, stored for its whole life (lib/segments.ts, LEDGER_SECONDS: an hour since
+ * the owner's C3-80 (b); Codex R1 on #3226): BUYER_LEDGER_BYTES at Upstash's GB-month rate for that hour. Only a
+ * reading writes it and one copy lives at most that long after it, so a store read back to back pays each hour of its
+ * copy with the reading that made it. tests/ledger-copy-retention-cost.test.ts holds the hour to LEDGER_SECONDS.
+ */
+export const BUYER_LEDGER_COPY_SECONDS = 3_600;
+export const BUYER_LEDGER_COPY_KEPT = BUYER_LEDGER_BYTES * DB_BYTE_MONTH * (BUYER_LEDGER_COPY_SECONDS / (30 * 86_400));
+export const BUYER_LEDGER = request("heavy", 8 + TAKE_COMMANDS, 2 * BUYER_LEDGER_BYTES) + ALL_TIME_PAGES * EXPORT_PAGE_SECONDS * MEMORY_SECOND + BUYER_LEDGER_COPY_KEPT;
 /**
  * A narrowed email's reading of the store's buyers made by the scheduled job
  * (lib/broadcasts.ts, readNarrowing; the "scheduled-reads" line): one

@@ -564,7 +564,10 @@ async function main(): Promise<void> {
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // The same #4026 costs take one cent from Studio's and Scale's yearly month.
-    is("11: and 37.05, 258.70 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.97"]);
+    // Second merge of main into #4026 (15 November 2026, Claude 6 conflict sweep): main's model now also holds #4022's
+    // erasable "nl:vault:fresh:" family (lib/data-families.ts); together with #4026's companies'
+    // costs, Studio's yearly month keeps one cent less: 258.69 where 258.70 was, far above zero (MR). Cost is not lowered.
+    is("11: and 37.05, 258.69 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.97"]);
   } finally {
     Date.now = realNow;
   }

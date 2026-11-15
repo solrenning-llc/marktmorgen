@@ -924,6 +924,17 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
+        // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).
+        if (key.startsWith("-- marktmorgen:calendar-config-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, settings, present, expected, value] = args;
+          this.scriptCalls += 1;
+          const now = this.run(["GET", settings]);
+          if (present === "1" ? now !== expected : now !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", settings, value]);
+          return 1;
+        }
         // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
         // each address link only while it points at them; the people and links deleted and the people left.
         if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {

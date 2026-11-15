@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { recoveredFrom, recoveryReport } from "@/lib/payment-recovery-report";
 import { countKey, monthOf, sentKey } from "@/lib/dunning-keys";
 import type { Store } from "@/lib/store";
@@ -6,12 +7,13 @@ import { done, is, part } from "./check";
 
 const now = Date.UTC(2026, 10, 5, 1);
 const store = { handle: "recovery-evidence", previousHandles: [], releasedHandles: [], stripeAccountId: "acct_test_recovery_evidence", statsId: "f".repeat(32), currency: "usd" } as unknown as Store;
-const cache = `nl:dun:report:${store.statsId}:v2`;
+const cache = `nl:dun:report:${store.statsId}:v3`;
 const invoice = (id = "in_confirmed", extra: Record<string, unknown> = {}) => ({ id, currency: "usd", amount_paid: 1234, attempt_count: 2, paid_out_of_band: false, billing_reason: "subscription_cycle", status_transitions: { paid_at: now / 1000 - 60 }, parent: { subscription_details: { metadata: { store: store.handle } } }, ...extra });
 const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
 const original = redis.pipeline;
 let replies: unknown[] = [];
 let reads = 0;
+let creationFilter: string | null = null;
 let writes = 0;
 let fault: { command: string; reply: unknown[] } | null = null;
 redis.pipeline = async commands => {
@@ -22,9 +24,19 @@ redis.pipeline = async commands => {
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if ((init?.method ?? "GET") !== "GET" || url.pathname !== "/v1/invoices") throw new Error("Unexpected provider operation");
+  creationFilter = url.searchParams.get("created[gte]");
   const body = replies[Math.min(reads, replies.length - 1)];
   reads += 1;
-  return new Response(JSON.stringify(body), { status: 200 });
+  // As Stripe does: a created[gte] filter leaves out every invoice created before it (#4732).
+  const cutoff = creationFilter === null ? null : Number(creationFilter);
+  const listing = body as { data?: unknown[]; has_more?: boolean } | null;
+  const result = cutoff !== null && Array.isArray(listing?.data)
+    ? { ...listing, data: listing.data.filter((row) => {
+        const created = (row as { created?: unknown } | null)?.created;
+        return typeof created !== "number" || created >= cutoff;
+      }) }
+    : body;
+  return new Response(JSON.stringify(result), { status: 200 });
 }) as typeof fetch;
 const reset = (pages: unknown[] = [page([invoice()])]) => { redis.clear(); replies = pages; reads = 0; writes = 0; fault = null; };
 async function refuses(name: string, fresh = true) {
@@ -93,6 +105,17 @@ async function main() {
   is("largest exact monthly counter total remains known", edge?.month, { failed: Number.MAX_SAFE_INTEGER - 2, cards: 2 });
   reset([page([invoice("in_first")], true), page([invoice("in_first")])]);
   await refuses("repeated next-page identity"); is("duplicate page stops before another request", reads, 2);
+  part("A renewal paid in the window can have been invoiced before it (#4732)");
+  const old = invoice("in_LongOverdue01", { created: now / 1000 - 61 * 86_400 });
+  reset([page([old])]);
+  const overdue = await recoveryReport(store, true, now);
+  is("the Stripe read does not exclude an invoice by creation time", creationFilter, null);
+  is("an older invoice paid in the 30-day window is counted", [overdue?.recovered, overdue?.cents, overdue?.complete], [1, 1234, true]);
+  is(
+    "the panel says a capped reading may omit payments of the last 30 days, not only the oldest",
+    readFileSync("app/studio/memberships/page.tsx", "utf8").includes("These figures may omit some payments received in the last 30 days."),
+    true,
+  );
   reset(Array.from({ length: 10 }, (_, n) => page([invoice("in_page" + n)], true)));
   const capped = await recoveryReport(store, true, now);
   is("existing ten-page cap is still explicitly partial", [reads, capped?.recovered, capped?.complete], [10, 10, false]);

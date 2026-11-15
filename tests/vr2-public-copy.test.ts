@@ -10,6 +10,12 @@
  *    nothing; a dispute won earns again), as the help center already says (lib/help-content.ts).
  * 3. components/home-parts.tsx: "in 15 currencies" read as a buyer paying in their own currency, while a store charges
  *    in the one currency it chose (and BUYER_CURRENCY_LIVE is false).
+ * 4. lib/feature-pages.ts, /for/cooks: "you can buy them right now" in the demo store, where a purchase is a test one,
+ *    made with Stripe's test card.
+ * 5. lib/yearly-offer.ts (MEDIUM): the yearly offer email said "Every charge is covered by our 30-day refund, the
+ *    yearly one too", while the guarantee covers the first payment, once per person, within 30 days
+ *    (lib/plan-refund-words.ts); a yearly plan also gets back the months not started, less the card fee.
+ *    (lib/plan-pause.ts has the same sentence; it is reserved by Codex A3 and left to it.)
  */
 import { readFileSync } from "node:fs";
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
@@ -32,4 +38,13 @@ part("The home page says a store charges in one currency it chooses");
 is("never the bare 'in 15 currencies' for what a buyer pays in", home.includes("Stripe account, in 15 currencies"), false);
 is("the store's prices in one of 15 currencies", home.includes("Your store's prices in one of 15 currencies, and Apple Pay"), true);
 is("buyers pay in the store's currency, one of 15", home.includes("Buyers pay into your own Stripe account, in your store's currency (one of 15), and the money is yours."), true);
+
+part("The cooks' page says a demo purchase is a test one");
+is("never 'you can buy them right now' in the demo store", features.includes("you can buy them right now"), false);
+is("try buying them with Stripe's test card", features.includes("The meal plans are in the demo store, and you can try buying them now with Stripe's test card."), true);
+
+part("The yearly offer says what the money-back guarantee covers");
+const yearly = flat("lib/yearly-offer.ts");
+is("never that every charge, the yearly one too, is covered", yearly.includes("Every charge is covered by our 30-day refund"), false);
+is("the first payment, once per person; a yearly plan gets back the months not started, less the card fee", yearly.includes("Our 30-day money-back guarantee covers your first payment, once per person; a yearly plan also gets back the months not started, less the card fee."), true);
 done();

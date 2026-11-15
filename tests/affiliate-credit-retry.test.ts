@@ -13,6 +13,7 @@ import { addProduct, claimHandle, ensureStatsId, setStripeAccount, setSubscripti
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { handOverPayPal, sweepPayPal } from "@/lib/paypal-delivery";
 import { handOverKey, type Paid } from "@/lib/paypal-sales";
+import { ownErasureCommand, ownErasureField, suppressedKey } from "@/lib/suppression";
 import { settlePendingOffers, settleUpsells } from "@/lib/upsell";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -76,6 +77,48 @@ async function main(): Promise<void> {
   await sweepPayPal(store, Date.now() + 10_000);
   is("once the read heals, the sweep credits the affiliate's referral", typeof (await hget(`nl:aff:${stats}:sales`, `paypal:${order}`)), "string");
   is("and takes it out of the list", (await pipeline([["ZSCORE", handOverKey(stats), `credit:${order}`]]))[0], null);
+
+  part("PayPal: a credit made again for a person who deleted themselves since names nobody (Claude 1 cloud, MEDIUM on #3858)");
+  // A store that keeps its affiliates' buyers (lifetime): crediting a sale again would tie the buyer to the affiliate.
+  const lasting: Store = { ...((await storeForEmail(OWNER))!), affiliates: { ...NO_AFFILIATES, enabled: true, percent: 20, lifetime: true } };
+  const bonds = async () => (await pipeline([["HLEN", `nl:aff:${stats}:bond`]]))[0];
+  const owed = (o: string) => pipeline([["ZSCORE", handOverKey(stats), `credit:${o}`]]).then((r) => r[0] !== null);
+  const sale = (o: string, email: string): Paid => ({ store: stats, order: o, capture: `CAP${o}`, email, product, cents: 4900, currency: "usd", at: NOW, handle: store.handle, via: { aff: AFF, rate: 20 } });
+  const erasedOrder = "5O190127TN3647102";
+  const erasedSale = sale(erasedOrder, "gone@example.com");
+  await pipeline([["SET", `nl:ppsell:paid:${erasedOrder}`, JSON.stringify(erasedSale)]]);
+  affiliateReadBroken(stats);
+  await handOverPayPal(lasting, erasedSale).catch(() => undefined);
+  heal();
+  const listId = (await storeForEmail(OWNER))!.listId!;
+  is("handed over while the affiliate read was unknown: the credit is owed and no bond is written yet", [await owed(erasedOrder), await bonds()], [true, 0]);
+  await pipeline([ownErasureCommand(listId, erasedSale.email, NOW + 1)]);
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000);
+  is("the sweep still credits the affiliate's referral for the sale paid", typeof (await hget(`nl:aff:${stats}:sales`, `paypal:${erasedOrder}`)), "string");
+  is("but writes no bond naming the person who deleted themselves", await bonds(), 0);
+  is("and the credit leaves the list", await owed(erasedOrder), false);
+
+  // Control: the same retry for a buyer still there ties them to the affiliate, as a first credit does.
+  const keptOrder = "5O190127TN3647103";
+  const keptSale = sale(keptOrder, "stays@example.com");
+  await pipeline([["SET", `nl:ppsell:paid:${keptOrder}`, JSON.stringify(keptSale)]]);
+  affiliateReadBroken(stats);
+  await handOverPayPal({ ...lasting, listId }, keptSale).catch(() => undefined);
+  heal();
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000);
+  is("control: a buyer still there is tied to the affiliate by the credit made again", [typeof (await hget(`nl:aff:${stats}:sales`, `paypal:${keptOrder}`)), await bonds()], ["string", 1]);
+
+  // A deletion mark that does not read (rule 24): nothing credited on a guess, the credit stays owed for the next sweep.
+  const unreadOrder = "5O190127TN3647104";
+  const unreadSale = sale(unreadOrder, "unread@example.com");
+  await pipeline([["SET", `nl:ppsell:paid:${unreadOrder}`, JSON.stringify(unreadSale)]]);
+  affiliateReadBroken(stats);
+  await handOverPayPal({ ...lasting, listId }, unreadSale).catch(() => undefined);
+  const mark = ownErasureField(listId, unreadSale.email);
+  redis.pipeline = (async (b: Batch) => (b.length === 1 && b[0][0] === "HGET" && b[0][1] === suppressedKey(listId) && b[0][2] === mark ? ["soon"] : pipeline(b))) as typeof redis.pipeline;
+  await sweepPayPal({ ...lasting, listId }, Date.now() + 10_000).catch(() => undefined);
+  heal();
+  is("an unreadable deletion mark: nothing credited, the credit still owed", [await hget(`nl:aff:${stats}:sales`, `paypal:${unreadOrder}`), await owed(unreadOrder)], [null, true]);
 
   part("Offer after paying: a paid offer whose affiliate read is unknown");
   payment = { id: PI, object: "payment_intent", status: "succeeded", amount: 2500, currency: "usd", receipt_email: "buyer@example.com", created: NOW, metadata: { parent: SESSION, step: "", product: "gone-product", title: "Extra", via: AFF, via_rate: "20" } };

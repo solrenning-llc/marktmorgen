@@ -366,8 +366,13 @@ async function creditAgain(store: Store, order: string): Promise<boolean> {
   if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
   // Erased, or past its time: nothing left to credit from.
   if (paid === null) return true;
+  // The person deleted from the store at their own request since paying: credited for the sale paid, with nothing that
+  // names them (no bond), as the hand-over does (Claude 1 cloud, MEDIUM on #3858). An unknown mark throws: the credit
+  // stays owed for the next sweep, never made on a guess (rule 24).
+  const listId = await deletionListId(store);
+  const erased = await erasedSincePaid(listId, paid, true);
   const product = await readListing(store, paid.product);
-  await creditPayPalSale(store, paid, product?.title ?? "");
+  await creditPayPalSale(store, paid, product?.title ?? "", !erased);
   return true;
 }
 

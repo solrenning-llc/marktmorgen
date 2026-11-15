@@ -34,6 +34,8 @@ const ms = (days: number) => (T0 + days * DAY) * 1000;
 const PLANNER = "a1b2c3d4e5f6";
 
 let invoicesDown = false;
+/** A 2xx invoice page in a shape not known (Claude 2 cloud C's MEDIUM on #3906): never "complete, no instalments". */
+let invoicesMalformed: unknown = null;
 /** Invoices of other synthetic stores, answered with the first store's (each store reads only its own handle's). */
 const moreInvoices: unknown[] = [];
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -41,6 +43,7 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   if (url.pathname === "/v1/invoices") {
     if (invoicesDown) return answer({ error: { message: "down" } }, 500);
+    if (invoicesMalformed !== null) return answer(invoicesMalformed);
     // One instalment of a plan sold through the affiliate's link: $100 paid, 30% of it theirs.
     return answer({
       object: "list",
@@ -88,6 +91,19 @@ async function main(): Promise<void> {
   is("nothing done", await idleSweep(store, ms(420)), { warned: 0, removed: 0 });
   is("still approved", await status(), "approved");
   invoicesDown = false;
+
+  part("An invoice page in a shape not known: not known, so nobody is removed (Claude 2 cloud C's MEDIUM on #3906)");
+  for (const [what, page] of [
+    ["an empty object", {}],
+    ["no object field", { data: [], has_more: false }],
+    ["data that is not a list", { object: "list", data: "none", has_more: false }],
+    ["has_more that is not a boolean", { object: "list", data: [], has_more: "no" }],
+  ] as const) {
+    invoicesMalformed = page;
+    is(`${what}: nothing done`, await idleSweep(store, ms(420)), { warned: 0, removed: 0 });
+    is(`${what}: still approved`, await status(), "approved");
+  }
+  invoicesMalformed = null;
 
   part("Paid in full: the rule applies again");
   await redis.pipeline([

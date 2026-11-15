@@ -1057,6 +1057,8 @@ export class MemoryRedis {
           if (this.run(["GET", lock]) !== token) return [-2, ...length];
           if ((held ?? "") !== expected) return [-1, ...length];
           this.data.set(target, record);
+          // The script's SET has no KEEPTTL: as in real Redis, the key keeps no expiry (as the v2 mirror above).
+          this.until.delete(target);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-deal-save:v2\n") && args[0] === "1" && args.length === 6) {

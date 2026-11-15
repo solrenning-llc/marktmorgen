@@ -321,7 +321,9 @@ async function main(): Promise<void> {
 
   part("The in-memory script clears the key's expiry, as real Redis's SET does");
   await real([["SET", "nl:test:cas-ttl", "a", "EX", 100]]);
-  is("the script writes over the text read", (await real([["EVAL", SAVE_CRM_PIPELINES, 1, "nl:test:cas-ttl", "a", "b"]]))[0], 1);
+  // Since #2048 the script is v3: it writes only while the CRM lock (its second key) is still the change's own (ARGV[3]).
+  await real([["SET", "nl:test:cas-lock", "own"]]);
+  is("the script writes over the text read", (await real([["EVAL", SAVE_CRM_PIPELINES, 2, "nl:test:cas-ttl", "nl:test:cas-lock", "a", "b", "own"]]))[0], 1);
   is("and the key keeps no expiry", await ttlOf("nl:test:cas-ttl"), -1);
 
   part("Resend: the delivery and its time left are read exactly, before anything is marked");

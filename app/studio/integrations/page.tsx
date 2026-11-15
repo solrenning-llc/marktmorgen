@@ -5,6 +5,7 @@ import { ensureStatsId } from "@/lib/store";
 import { idsOfKind, readTitles } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { syncView } from "@/lib/email-sync";
 import { EmailSyncEditor } from "@/components/email-sync-editor";
@@ -57,7 +58,7 @@ export default async function StudioIntegrationsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Email platforms</p>
+        <StudioTrail store={store} here="Email platforms" />
         <h1 className="t-h2 mt-3">Your list, in your own email tool</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Connect Mailchimp, Kit, beehiiv or MailerLite, and the people who agree to hear from you are added there as they

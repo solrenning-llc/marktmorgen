@@ -44,6 +44,22 @@ async function main(): Promise<void> {
   is("a list answered in another shape is unknown, never no sales", await readPayPalSales(statsId, 0, 10).then((r) => r.partial, () => "threw"), "threw");
   redis.pipeline = original;
 
+  // Claude 1 cloud and Claude 2 I on #4001 (MEDIUM): a record expires by design PAID_KEPT_SECONDS (400 days) after its
+  // sale, while its member stays in the sales list until the next sale trims it. Such a member is past keeping, not
+  // unknown: it is left out and the reading stays whole. A missing record inside the keeping window stays partial.
+  part("PayPal sales: a sale past its keeping period is left out, not unknown");
+  redis.clear();
+  const now = Math.floor(Date.now() / 1000);
+  const old = now - 450 * 86_400;
+  const recent = now - 100 * 86_400;
+  await redisPipeline([["ZADD", salesKey, String(old), order(10)], ["ZADD", salesKey, String(recent), order(11)], ["SET", paidKey(order(11)), record(statsId, 11, recent)]]);
+  is("a member 450 days old with no record: one sale, read whole", await readPayPalSales(statsId, 0, 100).then((r) => [r.sales.length, r.partial], () => "threw"), [1, false]);
+  is("the same from a later since: one sale, read whole", await readPayPalSales(statsId, recent - 1, 100).then((r) => [r.sales.length, r.partial], () => "threw"), [1, false]);
+  await redisPipeline([["ZADD", salesKey, String(now - 5), order(12)]]);
+  is("(control) a missing record 5 seconds old still leaves the reading partial", await readPayPalSales(statsId, 0, 100).then((r) => [r.sales.length, r.partial], () => "threw"), [1, true]);
+  await redisPipeline([["ZREM", salesKey, order(12)], ["ZADD", salesKey, String(now - 399 * 86_400), order(13)]]);
+  is("(control) a missing record 399 days old, inside keeping, still leaves it partial", await readPayPalSales(statsId, 0, 100).then((r) => [r.sales.length, r.partial], () => "threw"), [1, true]);
+
   done();
 }
 

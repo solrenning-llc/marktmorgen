@@ -719,12 +719,16 @@ async function deliver(
  * deleted address says the same (lib/suppression.ts).
  */
 export async function forgetRecoveryPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
-  if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
+  // Not on an empty catalogue: the carts note below names cart marks no product id of today can (every product
+  // removed after the reminder), so it is read whatever the store lists now (Codex G; review of #3929).
+  if (!statsId || !isRedisConfigured()) return 0;
   // The carts they were reminded of this week, read exactly: a list that does not read is unknown, never "no carts".
   const noted = repliesFor(await redisPipeline([["SMEMBERS", cartsKey(statsId, email)]]), 1);
   const carts = noted ? stringList(noted[0]) : null;
   if (!carts) throw new UnknownReplyError("the carts an address was reminded of");
   const marks = [...productIds, ...carts].map((p) => onceKey(statsId, email, p));
+  // No product and no noted cart: nothing to delete, and a DEL with no key is an error, not "nothing here".
+  if (!marks.length) return 0;
   // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
   // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
   const gone = repliesFor(await redisPipeline([["DEL", ...marks, ...(carts.length ? [cartsKey(statsId, email)] : [])]]), 1);

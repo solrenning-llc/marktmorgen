@@ -374,6 +374,7 @@ async function main(): Promise<void> {
     ["crm", { action: "unpipeline", id: "x", moveTo: "x" }],
     ["notes", { action: "remove", id: "x" }],
     ["spend", { action: "remove", id: "x" }],
+    ["spend", { action: "remove-unreadable" }],
     ["outreach", { action: "drop", id: "x" }],
     ["mail", { action: "segment-remove", id: "x" }],
     ["mail", { action: "draft-remove", id: "x" }],
@@ -432,6 +433,8 @@ async function main(): Promise<void> {
     "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
+    "call": ["act:products:remove"],
+    "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
     "community": ["lockedFor"],
@@ -445,6 +448,7 @@ async function main(): Promise<void> {
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "course/task/upload": ["not:a student's own door for a file to hand in: it takes back only the listing it made itself when the door is not opened"],
     "creator-card": ["act:page:remove"],
     "companies": ["act:orders:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
@@ -491,7 +495,7 @@ async function main(): Promise<void> {
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(|\bwriteTeam\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);
@@ -613,8 +617,8 @@ async function main(): Promise<void> {
     "reviews": { ask: "need:settings", hide: "open:reversible", photo: "act:reviews", reply: "open:adds", seen: "open:edits" },
     "saved-blocks": { apply: "open:adds", remove: "act:page", save: "open:adds", update: "open:edits" },
     "short-links": { add: "open:adds", remove: "act:page", target: "open:edits" },
-    "site-page": { add: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
-    "spend": { add: "open:adds", remove: "act:stats" },
+    "site-page": { add: "open:adds", copy: "open:adds", export: "open:reads", import: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
+    "spend": { add: "open:adds", remove: "act:stats", "remove-unreadable": "act:stats:remove" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },

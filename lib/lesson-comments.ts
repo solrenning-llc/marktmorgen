@@ -289,6 +289,36 @@ export async function readComment(courseId: string, id: string): Promise<LessonC
   return comment;
 }
 
+/**
+ * Claims a student's first name, once, even when two of their first posts
+ * race: HSETNX writes it only while none is kept. The name is charged before
+ * the claim; a claim that lost (0) gives that charge back and every post uses
+ * the name that won, so a student never shows two names and the name is never
+ * charged twice. A claim whose reply is not exact is settled by reading the
+ * name again: only a confirmed absence gives the charge back; a name kept by
+ * then may be this claim's own, so the charge stays (never less than kept,
+ * rule 24). Either way the post is not written: null, "unknown".
+ */
+async function claimName(courseId: string, by: string, given: string, room: DataStore): Promise<string | null> {
+  const charged = [{ slot: COMMENTS_SLOT(courseId), bytes: dataBytes([by, given], 1) }];
+  await needData(room, charged);
+  let reply: unknown;
+  try {
+    reply = oneReply(await redisPipeline([["HSETNX", namesKey(courseId), by, given]]));
+  } catch {
+    reply = undefined;
+  }
+  if (reply === 1) return given;
+  if (reply === 0) {
+    await giveData(room, charged);
+    // The name that won; one taken away since (an erasure) leaves this post unknown.
+    const winner = await commenterName(courseId, by);
+    return winner || null;
+  }
+  if ((await commenterName(courseId, by)) === "") await giveData(room, charged);
+  return null;
+}
+
 export type AddResult =
   | { ok: true; comment: LessonComment; parent: LessonComment | null }
   | { ok: false; reason: "empty" | "name" | "parent" | "replies" | "full" | "unknown" };
@@ -321,8 +351,9 @@ export async function addComment(input: {
     name = kept || given;
     if (!name) return { ok: false, reason: "name" };
     if (!kept) {
-      await needData(input.room, [{ slot: COMMENTS_SLOT(input.courseId), bytes: dataBytes([input.by, given], 1) }]);
-      await redisPipeline([["HSET", namesKey(input.courseId), input.by, given]]);
+      const claimed = await claimName(input.courseId, input.by, given, input.room);
+      if (claimed === null) return { ok: false, reason: "unknown" };
+      name = claimed;
     }
   }
 

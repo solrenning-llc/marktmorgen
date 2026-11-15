@@ -76,7 +76,7 @@ for (const [label, reply] of malformed) {
 }
 
 const charges = (log: Commands[]) => log.filter((p) => p.some((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:store-data:"))).length;
-const nameWrites = (log: Commands[]) => log.filter((p) => p.some((c) => c[0] === "HSET" && String(c[1]).endsWith(":names"))).length;
+const nameWrites = (log: Commands[]) => log.filter((p) => p.some((c) => (c[0] === "HSET" || c[0] === "HSETNX") && String(c[1]).endsWith(":names"))).length;
 
 test("a name given the first time is charged and written once", async () => {
   redis.clear();
@@ -163,6 +163,38 @@ test("two first posts at once with the same name: the name is charged once, as t
   const [a, b] = await racingFirstPosts(["Dana", "Dana"]);
   assert.ok(a.ok && b.ok);
   assert.equal((await dataUsed(ROOM))?.used, sequential);
+});
+
+for (const [label, reply] of malformed) {
+  test(`a name claim whose reply is not exact writes no post: ${label}; confirmed absence gives the charge back`, async () => {
+    redis.clear();
+    const before = (await dataUsed(ROOM))?.used;
+    const result = await answering((c) => c[0] === "HSETNX" && String(c[1]).endsWith(":names"), reply, () =>
+      addComment({ room: ROOM, courseId: COURSE, lessonId: LESSON, by: STUDENT, name: "Dana", text: "Hello", now: 100 }));
+    assert.deepEqual(result, { ok: false, reason: "unknown" });
+    assert.equal(await commenterName(COURSE, STUDENT), "");
+    assert.equal((await dataUsed(ROOM))?.used, before, "nothing was kept, so nothing stays charged");
+  });
+}
+
+test("a name claim whose reply was lost after it was written keeps the charge and writes no post", async () => {
+  redis.clear();
+  const before = (await dataUsed(ROOM))?.used ?? 0;
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands: Commands) => {
+    const reply = await original(commands);
+    if (commands.length === 1 && commands[0][0] === "HSETNX") throw new Error("synthetic lost reply");
+    return reply;
+  };
+  let result: unknown;
+  try {
+    result = await addComment({ room: ROOM, courseId: COURSE, lessonId: LESSON, by: STUDENT, name: "Dana", text: "Hello", now: 100 });
+  } finally {
+    redis.pipeline = original;
+  }
+  assert.deepEqual(result, { ok: false, reason: "unknown" });
+  assert.equal(await commenterName(COURSE, STUDENT), "Dana");
+  assert.ok(((await dataUsed(ROOM))?.used ?? 0) > before, "the name is kept, so its charge stays");
 });
 
 async function oneComment() {

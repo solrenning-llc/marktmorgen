@@ -5,12 +5,13 @@ import {store as redis} from "./redis-stub";
 import {done,is,part} from "./check";
 let visited=0,sequence=0;
 const cases:[string,()=>unknown][]=[
- ["lost",()=>[]],["short",()=>["OK"]],["string count",()=>["OK","1"]],["boolean count",()=>["OK",true]],
- ["unknown SET",()=>[true,1]],["infinite",()=>["OK",Infinity]],["fractional",()=>["OK",1.5]],["zero",()=>["OK",0]],
- ["extra member",()=>["OK",1,1]],["inherited",()=>{const a=new Array(2);a[0]="OK";Object.setPrototypeOf(a,{1:1});return a;}],
- ["accessor",()=>{const a=["OK",1];Object.defineProperty(a,"1",{get(){visited++;return 1;}});return a;}],
- ["extra property",()=>Object.assign(["OK",1],{extra:true})],
- ["symbol",()=>Object.assign(["OK",1],{[Symbol("unknown")]:true})],
+ // The admission is INCRBY then EXPIRE NX (lib/window-count.ts, windowCountBy): [count, 0 or 1].
+ ["lost",()=>[]],["short",()=>[1]],["string count",()=>["1",1]],["boolean count",()=>[true,1]],
+ ["unknown EXPIRE",()=>[1,true]],["EXPIRE out of range",()=>[1,2]],["infinite",()=>[Infinity,1]],["fractional",()=>[1.5,1]],["zero",()=>[0,1]],
+ ["extra member",()=>[1,1,1]],["inherited",()=>{const a=new Array(2);a[1]=1;Object.setPrototypeOf(a,{0:1});return a;}],
+ ["accessor",()=>{const a=[1,1];Object.defineProperty(a,"0",{get(){visited++;return 1;}});return a;}],
+ ["extra property",()=>Object.assign([1,1],{extra:true})],
+ ["symbol",()=>Object.assign([1,1],{[Symbol("unknown")]:true})],
 ];
 async function main(){
  part("Actual paid resource allowance requires confirmed finite consumption");

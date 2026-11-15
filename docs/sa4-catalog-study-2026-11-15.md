@@ -123,3 +123,24 @@ Riscos que o desenho ainda precisa resolver antes de virar código:
 - **Custo de memória:** o índice de palavras ocupa espaço guardado (US$0,25 por GB por mês). Ele precisa de um teto de palavras por produto e de um preço por produto no registro de custos antes de existir.
 
 As duas propostas ao dono (unidade 3) dependem destes números confirmados. Até lá, custo desconhecido, que reprova.
+
+---
+
+# Unidade 4, linha de base: medição do código atual (15/11/2026)
+
+`tests/catalog-whole-read-load.test.ts` monta lojas sintéticas de 2.000, 10.000 e 100.000 produtos visíveis no banco em memória, a partir de uma listing real gravada por `addProduct`, e mede a busca da loja (`searchStore`) e a leitura do catálogo inteiro (`readAllListings`). O teste fixa o crescimento exato de hoje, uma leitura por produto fora da primeira página, para o desenho da unidade 2 ter uma base medida a superar. Nada muda no código do produto.
+
+| Produtos | Busca da loja | Leitura do catálogo inteiro |
+| --- | --- | --- |
+| 2.000 | 1.976 GET, 1.048.204 bytes, 42 ms | 1.976 GET, 1.048.204 bytes, 13 ms |
+| 10.000 | 9.976 GET, 5.296.204 bytes, 256 ms | 9.976 GET, 5.296.204 bytes, 49 ms |
+| 100.000 | 99.976 GET, 53.176.204 bytes, 17.555 ms | 99.976 GET, 53.176.204 bytes, 598 ms |
+
+Os bytes são os da listing sintética, de cerca de 530 bytes. O pior caso usa o teto de revisão de 16.384 bytes por listing, e o teste confirma que nenhuma leitura passa dele. Os tempos são do banco em memória numa máquina só; servem para comparar o crescimento, não como tempo de produção.
+
+**Achado da medição:**
+- **Onde:** `wanted` (`lib/catalog.ts:691-699`) tira os ids repetidos com `!out.includes(id)`, ou seja, procura cada id na lista inteira.
+- **O que causa:** com ids informados, como faz a busca, o trabalho cresce com o quadrado do catálogo. Vai de 10 mil para 100 mil produtos e o tempo da busca sobe 68 vezes, enquanto a leitura sem ids sobe 12 vezes.
+- **Peso hoje:** com o teto de 2.000, é cerca de 30 ms de CPU por busca, dentro do que o pior caso já conta.
+- **Peso acima do teto:** passa a ser o maior custo de CPU da busca.
+- **Conserto:** um `Set` em vez de `includes`, sem mudar limite nenhum. Entra na unidade 5 (construção do que não muda limite), com um teste que fixa que a busca com 100 mil produtos fica perto do tempo da leitura sem ids.

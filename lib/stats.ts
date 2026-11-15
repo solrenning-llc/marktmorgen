@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
+import { type DiscountElsewhere, type DiscountRow, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -947,7 +947,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1402,6 +1402,13 @@ export type RenewalPayment = {
   currency: string;
   /** The payment, when the invoice names it: on the invoice itself in older API versions, or among its payments when they come with it; empty otherwise, so a refund of it cannot be matched. */
   paymentIntent: string;
+  /**
+   * Every paid payment the invoice names, each once: one paid in parts has several (#4410). `paymentsComplete`
+   * says whether they are known to be all of them: the one on the invoice itself (older API versions), or its
+   * list of payments when that list says there is no more and every paid one names its payment intent.
+   */
+  paymentIntents: string[];
+  paymentsComplete: boolean;
   /** The channel the subscription was sold through, by the same rule as renewalEntries: "" for direct, UNRECORDED when it says nothing. */
   channel: string;
   /** The invoice, to find its payment among the account's invoice payments when the invoice does not name it. */
@@ -1471,12 +1478,18 @@ export async function readRenewalPayments(store: Store, since: number, pages: nu
       const email = typeof invoice.customer_email === "string" ? invoice.customer_email.trim() : "";
       if (cents <= 0 || !email) continue;
       const meta = invoiceMeta(invoice);
-      const listedPayment = ((invoice.payments as { data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | null | undefined)?.data ?? []).find((p) => p.status === "paid")?.payment?.payment_intent;
-      const paymentIntent = typeof invoice.payment_intent === "string" ? invoice.payment_intent : typeof listedPayment === "string" ? listedPayment : "";
+      const listed = invoice.payments as { data?: unknown; has_more?: unknown } | null | undefined;
+      const paidListed = (Array.isArray(listed?.data) ? (listed.data as { status?: unknown; payment?: { payment_intent?: unknown } | null }[]) : []).filter((p) => p?.status === "paid").map((p) => p.payment?.payment_intent);
+      const listedIntents = [...new Set(paidListed.filter((intent): intent is string => typeof intent === "string" && intent !== ""))];
+      const ownIntent = typeof invoice.payment_intent === "string" && invoice.payment_intent ? invoice.payment_intent : "";
+      const paymentIntent = ownIntent || (listedIntents[0] ?? "");
+      // All of an invoice paid in parts, not only its first part (#4410); its list counts as whole only when it says so.
+      const paymentIntents = ownIntent ? [ownIntent] : listedIntents;
+      const paymentsComplete = Boolean(ownIntent) || (listedIntents.length > 0 && listed?.has_more === false && listedIntents.length === paidListed.length);
       const channel = "channel" in meta ? (meta.channel === "direct" ? "" : meta.channel) : meta.utm_source || UNRECORDED;
       const currency = currencyOf(invoice);
       if (!currency) partial = true;
-      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency, paymentIntent, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
+      out.push({ email, created: (typeof invoice.created === "number" ? invoice.created : 0) * 1000, cents, currency, paymentIntent, paymentIntents, paymentsComplete, channel, invoice: typeof invoice.id === "string" ? invoice.id : "" });
     }
     if (!list.has_more) break;
     // Out of time: what was read is kept, and the reading says it is partial.
@@ -1849,6 +1862,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   out.discounts = {
     rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
+    // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
+    elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2202,7 +2217,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**

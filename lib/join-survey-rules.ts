@@ -114,6 +114,15 @@ export type JoinAnswer = { v: number; choice: string; label: string; comment: st
 const LINK = /\b(?:https?:\/\/|www\.)\S+/gi;
 const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/g;
 /**
+ * The stricter reading the reviews' cleaner uses (lib/review-ai-summary-rules.ts, cleanReviewText; Claude 7 on #3652):
+ * an address written out to dodge a filter ("jane at gmail dot com"), and a web address with no http or www
+ * ("janesmith.dev/shop", "wa.me/<number>"), whole with its path; ".js" stays, a library's name, never an address.
+ */
+const SPELLED_EMAIL = /\b[\p{L}\p{N}._-]+\s+(?:at|\(at\)|\[at\])\s+[\p{L}\p{N}-]+\s+(?:dot|\(dot\)|\[dot\])\s+[a-z]{2,}\b/giu;
+const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/gi;
+/** Invisible format characters (zero-width and the like), which could split an address so no pattern sees it. */
+const FORMAT = /\p{Cf}/gu;
+/**
  * A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets.
  * Wide on purpose (Claude 1 on #3652, LEVE): a long date or figure ("2026-11-11", "1 000 000") goes too, losing a few
  * words a member typed rather than ever keeping a way to reach them.
@@ -146,6 +155,6 @@ export function cleanJoinAnswer(
   if (raw.v !== setting.version) return { ok: false, problem: "version" };
   const choice = joinChoices(setting).find((c) => c.id === raw.choice);
   if (!choice) return { ok: false, problem: "choice" };
-  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(LINK, " ").replace(EMAIL, " ").replace(PHONE, " ").replace(HANDLE, "$1"), MAX_JOIN_COMMENT) : "";
+  const comment = typeof raw.comment === "string" ? words(commentHead(raw.comment).replace(FORMAT, "").replace(LINK, " ").replace(EMAIL, " ").replace(SPELLED_EMAIL, " ").replace(BARE_LINK, " ").replace(PHONE, " ").replace(HANDLE, "$1"), MAX_JOIN_COMMENT) : "";
   return { ok: true, answer: { v: setting.version, choice: choice.id, label: choice.label, comment } };
 }

@@ -124,13 +124,14 @@ export type LeftOut = {
   steps: number;
   /** Split test steps (526 [FN2]): a file carries pages in order only, so these stay with the sender. */
   splits: number;
+  branches: number;
   /** Product cards or button targets naming a product the store no longer has. */
   products: number;
   /** Form blocks naming a form the store no longer has. */
   forms: number;
 };
 
-const emptyLeft = (): LeftOut => ({ pictures: 0, videos: 0, bios: 0, guarantees: 0, countdowns: 0, quotes: 0, reviewPicks: 0, steps: 0, splits: 0, products: 0, forms: 0 });
+const emptyLeft = (): LeftOut => ({ pictures: 0, videos: 0, bios: 0, guarantees: 0, countdowns: 0, quotes: 0, reviewPicks: 0, steps: 0, splits: 0, branches: 0, products: 0, forms: 0 });
 
 /**
  * A store's funnel as a file. `mode` "share" leaves out what is about the
@@ -177,6 +178,10 @@ export function buildBundle(source: BundleSource, mode: "share" | "own"): { bund
   for (const step of source.steps.slice(0, MAX_FUNNEL_PAGES)) {
     if (step.kind === "split") {
       left.splits += 1;
+      continue;
+    }
+    if (step.kind === "branch") {
+      left.branches += 1;
       continue;
     }
     if (step.kind === "product") {
@@ -271,6 +276,7 @@ export function leftOutWords(left: LeftOut): string[] {
   if (left.reviewPicks) out.push("The reviews you picked to show first stay yours; buyers' reviews are never shared.");
   if (left.quotes) out.push(n(left.quotes, "1 thing said about you elsewhere is left out.", "# things said about you elsewhere are left out."));
   if (left.steps) out.push(n(left.steps, "1 step whose page or product is gone is left out.", "# steps whose page or product is gone are left out."));
+  if (left.branches) out.push(n(left.branches, "1 conditional path is left out, with its pages: add it again after the funnel is brought in.", "# conditional paths are left out, with their pages: add them again after the funnel is brought in."));
   if (left.splits) out.push(n(left.splits, "1 split test is left out, with its pages: add it again after the funnel is brought in.", "# split tests are left out, with their pages: add them again after the funnel is brought in."));
   if (left.products) out.push(n(left.products, "1 product card or button names a product you no longer have, and is left empty.", "# product cards or buttons name products you no longer have, and are left empty."));
   if (left.forms) out.push(n(left.forms, "1 form block names a form you no longer have, and is left empty.", "# form blocks name forms you no longer have, and are left empty."));

@@ -28,6 +28,7 @@ import { StorePagesNav } from "@/components/store-pages-nav";
 import { FunnelBeacon } from "@/components/store-beacon";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
+import { queryReader, visitFacts } from "@/lib/funnel-branch-rules";
 import { funnelWords } from "@/lib/buyer-words/funnel";
 
 type Params = {
@@ -83,7 +84,8 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
   if (!found) notFound();
   const { store, page, blocks } = found;
   // The same rule the store page follows for the creator's own domain.
-  const reachedOn = (await headers()).get("x-nimbus-domain");
+  const asked = await headers();
+  const reachedOn = asked.get("x-nimbus-domain");
   if (reachedOn && (store.domain?.name !== reachedOn || !canUseDomain(store))) redirect(`${SITE_URL}/@${store.handle}/${page.slug}`);
 
   const { w } = speech(store);
@@ -103,7 +105,8 @@ export default async function StoreOwnPage({ params, searchParams }: Params) {
   // Where its buttons lead: the product the creator chose for it, while it is published, or the store.
   const target = page.target ? await readListing(store, page.target).catch(() => null) : null;
   // Opened as a step of a funnel of pages (lib/page-funnel.ts): its buttons lead to the next step instead.
-  const here = await funnelHere(store, funnelMark(query.f), "page", page.id).catch(() => null);
+  // A conditional path next reads this visit's own tags and device, never kept (lib/funnel-branch-rules.ts).
+  const here = await funnelHere(store, funnelMark(query.f), "page", page.id, undefined, visitFacts(queryReader(query), asked.get("user-agent"))).catch(() => null);
   const leadsTo = here?.next
     ? { href: here.next, label: funnelWords(store.language).next }
     : target && !target.hidden

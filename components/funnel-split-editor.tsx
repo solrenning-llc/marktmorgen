@@ -50,7 +50,7 @@ export function FunnelSplitEditor({
   const titleOf = (key: string) => choices.find((c) => keyOf(c) === key)?.title ?? "No longer available";
   const shares = draft.equal ? equalShares(draft.options.length).map(String) : draft.shares;
   const stepTitle = (step: PageFunnelStep) =>
-    step.kind === "split" ? "a split test" : choices.find((c) => keyOf(c) === keyOf(step))?.title ?? "No longer available";
+    step.kind === "split" ? "a split test" : step.kind === "branch" ? "a conditional path" : choices.find((c) => keyOf(c) === keyOf(step))?.title ?? "No longer available";
   const canAdd = addDestination(draft, steps, choices) !== draft;
   const place = draft.editing ?? draft.at;
 

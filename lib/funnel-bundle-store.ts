@@ -29,8 +29,8 @@ export async function collectBundle(store: Store, funnelId: string, mode: "share
   const formIds = new Set<string>();
   const productIds = new Set<string>();
   for (const step of funnel.steps) {
-    // A split test is left out of the file (lib/funnel-bundle.ts says so to the sender), and so are its pages.
-    if (step.kind === "split") continue;
+    // A split test or a conditional path is left out of the file (lib/funnel-bundle.ts says so to the sender), and so are its pages.
+    if (step.kind === "split" || step.kind === "branch") continue;
     if (step.kind === "product") {
       productIds.add(step.id);
       continue;

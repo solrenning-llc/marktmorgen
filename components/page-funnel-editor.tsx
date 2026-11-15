@@ -17,6 +17,9 @@ import { funnelReachRatioMetric, funnelStepMetrics } from "@/lib/funnel-metrics"
 import type { SplitView } from "@/lib/funnel-split-results";
 import { SplitResults } from "@/components/funnel-split-results";
 import { FunnelSplitEditor } from "@/components/funnel-split-editor";
+import { branchIfWords } from "@/lib/funnel-branch-rules";
+import { FunnelBranchEditor } from "@/components/funnel-branch-editor";
+import { type BranchDraft, checkBranchDraft, editBranchDraft, newBranchDraft } from "@/lib/funnel-branch-draft";
 import { type SplitDraft, checkSplitDraft, editSplitDraft, newSplitDraft, stepsForSave } from "@/lib/funnel-split-draft";
 import { DIAGNOSIS_NOTE, funnelFindings } from "@/lib/funnel-diagnosis";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -49,8 +52,9 @@ const MESSAGES: Record<string, string> = {
   name: "Give the funnel a name. Only you see it.",
   slug: "The address can have only lowercase letters, numbers and dashes.",
   taken: "Another funnel of this store already has that address.",
-  steps: `A funnel needs at least one step, each page or product once, ${MAX_FUNNEL_PAGES} pages at most (each page of a split test counts).`,
+  steps: `A funnel needs at least one step, each page or product once, ${MAX_FUNNEL_PAGES} pages at most (each page of a split test or conditional path counts).`,
   split: "A split test needs two to four different pages or products, with shares in whole percents that add up to 100.",
+  branch: "A conditional path needs one to four rules, a page for everyone else, and a product step just before it for a rule about buying.",
   full: `A store can have ${MAX_PAGE_FUNNELS} funnels. Remove one to add another.`,
   page: "One of the pages was deleted. Choose another.",
   gone: "One of the products was deleted. Choose another.",
@@ -98,6 +102,11 @@ export function PageFunnelEditor({
   /** A split test being built or edited inside the draft (526 [FN2]): applied to the draft only, saved with the funnel. */
   const [splitDraft, setSplitDraft] = useState<SplitDraft | null>(null);
   const splitReturn = useRef<string | null>(null);
+  /** A conditional path being built or edited inside the draft (526 [FN2]): applied to the draft only, saved with the funnel. */
+  const [branchDraft, setBranchDraft] = useState<BranchDraft | null>(null);
+  const branchReturn = useRef<string | null>(null);
+  /** A split test or conditional path form is open: the steps around it wait. */
+  const sideOpen = splitDraft !== null || branchDraft !== null;
   const locked = busy || uncertain;
   useLeaveGuard(draft !== null || busy || uncertain);
 
@@ -149,6 +158,20 @@ export function PageFunnelEditor({
     splitReturn.current = null;
     focusFirst([back, "pf-split-add", "pf-name"]);
   }, [splitOpen]);
+  // The conditional path form, the same way.
+  const branchOpen = branchDraft !== null;
+  const wasBranchOpen = useRef(false);
+  useEffect(() => {
+    if (branchOpen === wasBranchOpen.current) return;
+    wasBranchOpen.current = branchOpen;
+    if (branchOpen) {
+      document.querySelector<HTMLElement>("[data-branch-editor-title]")?.focus();
+      return;
+    }
+    const back = branchReturn.current;
+    branchReturn.current = null;
+    focusFirst([back, "pf-branch-add", "pf-name"]);
+  }, [branchOpen]);
   const wasRemoving = useRef<string | null>(null);
   useEffect(() => {
     const was = wasRemoving.current;
@@ -218,6 +241,23 @@ export function PageFunnelEditor({
     setSplitDraft(null);
   }
 
+  function openBranch(next: BranchDraft | null, from: string) {
+    if (flight.current || recovery.current || !next) return;
+    branchReturn.current = from;
+    setError(null);
+    setBranchDraft(next);
+  }
+
+  function applyBranch() {
+    if (flight.current || recovery.current || !draft || !branchDraft) return;
+    const checked = checkBranchDraft(branchDraft, draft.steps, choices);
+    if (!checked.ok) return;
+    const at = branchDraft.editing ?? Math.min(branchDraft.at, draft.steps.length);
+    branchReturn.current = `pf-branch-edit-${at}`;
+    setDraft({ ...draft, steps: checked.steps });
+    setBranchDraft(null);
+  }
+
   async function send(body: FunnelMutation, done: string) {
     if (flight.current || recovery.current) return;
     flight.current = true;
@@ -257,7 +297,7 @@ export function PageFunnelEditor({
 
   function save() {
     if (flight.current || recovery.current) return;
-    if (!draft || splitDraft) return;
+    if (!draft || sideOpen) return;
     const places = draft.steps.flatMap(stepPlaces).map(key);
     const repeated = new Set(places).size !== places.length;
     if (repeated) {
@@ -550,13 +590,34 @@ export function PageFunnelEditor({
                       id={`pf-split-edit-${index}`}
                       type="button"
                       className="btn btn-ghost mt-1"
-                      disabled={splitDraft !== null}
+                      disabled={sideOpen}
                       aria-label={`Edit split test, step ${index + 1}`}
                       onClick={() => openSplit(editSplitDraft(draft.steps, index), `pf-split-edit-${index}`)}
                     >
                       Edit split test
                     </button>
                   </p>
+                ) : step.kind === "branch" ? (
+                  <div id={`pf-step-${index}`} className="min-w-0 flex-1 text-sm text-ink">
+                    <p className="font-semibold">{`Conditional path, step ${index + 1}:`}</p>
+                    <ol className="list-decimal pl-5">
+                      {step.rules.map((rule, at) => (
+                        <li key={at}>{`If ${branchIfWords(rule)}: ${titleOf(rule.to)}`}</li>
+                      ))}
+                    </ol>
+                    <p>{`Everyone else: ${titleOf(step.otherwise)}`}</p>
+                    <p className="text-xs text-ink-soft">Each visitor goes to the page of the first rule that fits them. Nothing about them is kept.</p>
+                    <button
+                      id={`pf-branch-edit-${index}`}
+                      type="button"
+                      className="btn btn-ghost mt-1"
+                      disabled={sideOpen}
+                      aria-label={`Edit conditional path, step ${index + 1}`}
+                      onClick={() => openBranch(editBranchDraft(draft.steps, index), `pf-branch-edit-${index}`)}
+                    >
+                      Edit conditional path
+                    </button>
+                  </div>
                 ) : (
                 <>
                 <label className="sr-only" htmlFor={`pf-step-${index}`}>{`Step ${index + 1}`}</label>
@@ -582,7 +643,7 @@ export function PageFunnelEditor({
                 <button
                   type="button"
                   onClick={() => move(index, -1)}
-                  disabled={index === 0 || splitDraft !== null}
+                  disabled={index === 0 || sideOpen}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-paper disabled:opacity-40"
                   aria-label={`Move step ${index + 1} up`}
                 >
@@ -591,7 +652,7 @@ export function PageFunnelEditor({
                 <button
                   type="button"
                   onClick={() => move(index, 1)}
-                  disabled={index === draft.steps.length - 1 || splitDraft !== null}
+                  disabled={index === draft.steps.length - 1 || sideOpen}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-paper disabled:opacity-40"
                   aria-label={`Move step ${index + 1} down`}
                 >
@@ -600,7 +661,7 @@ export function PageFunnelEditor({
                 <button
                   type="button"
                   onClick={() => patch({ steps: draft.steps.filter((_, i) => i !== index) })}
-                  disabled={splitDraft !== null}
+                  disabled={sideOpen}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                   aria-label={`Remove step ${index + 1}`}
                 >
@@ -619,7 +680,7 @@ export function PageFunnelEditor({
               {`Add a step (${placeCount(draft.steps)} of ${MAX_FUNNEL_PAGES} pages)`}
             </button>
           ) : null}
-          {splitDraft === null && newSplitDraft(draft.steps, choices, draft.steps.length) ? (
+          {!sideOpen && newSplitDraft(draft.steps, choices, draft.steps.length) ? (
             <button
               id="pf-split-add"
               type="button"
@@ -629,6 +690,29 @@ export function PageFunnelEditor({
               <Icon name="plus" size={18} />
               Add a split test (2 to 4 pages, each counts as a page)
             </button>
+          ) : null}
+          {!sideOpen && newBranchDraft(draft.steps, choices, draft.steps.length) ? (
+            <button
+              id="pf-branch-add"
+              type="button"
+              onClick={() => openBranch(newBranchDraft(draft.steps, choices, draft.steps.length), "pf-branch-add")}
+              className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-sm font-bold text-ink-soft transition-colors hover:border-violet-brand hover:text-violet-deep"
+            >
+              <Icon name="plus" size={18} />
+              Add a conditional path (by link, device or answer; each page counts)
+            </button>
+          ) : null}
+          {branchDraft ? (
+            <FunnelBranchEditor
+              draft={branchDraft}
+              steps={draft.steps}
+              choices={choices}
+              onChange={(next) => {
+                if (!flight.current && !recovery.current) setBranchDraft(next);
+              }}
+              onApply={applyBranch}
+              onCancel={() => setBranchDraft(null)}
+            />
           ) : null}
           {splitDraft ? (
             <FunnelSplitEditor
@@ -660,16 +744,16 @@ export function PageFunnelEditor({
           {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <button type="button" onClick={save} aria-busy={busy} disabled={locked || splitDraft !== null || !draft.name.trim() || draft.steps.length === 0} aria-describedby={splitDraft ? "pf-split-pending" : undefined} className="btn btn-primary">
+            <button type="button" onClick={save} aria-busy={busy} disabled={locked || splitDraft !== null || branchDraft !== null || !draft.name.trim() || draft.steps.length === 0} aria-describedby={sideOpen ? "pf-split-pending" : undefined} className="btn btn-primary">
               {busy ? "Saving…" : draft.id ? "Save the funnel" : "Make the funnel"}
             </button>
-            <button type="button" className="btn btn-ghost" onClick={() => { setDraft(null); setSplitDraft(null); setError(null); }} disabled={locked}>
+            <button type="button" className="btn btn-ghost" onClick={() => { setDraft(null); setSplitDraft(null); setBranchDraft(null); setError(null); }} disabled={locked}>
               Cancel
             </button>
           </div>
-          {splitDraft ? (
+          {sideOpen ? (
             <p id="pf-split-pending" className="mt-2 text-sm text-ink-soft">
-              Use or cancel the split test above before you save the funnel.
+              {splitDraft ? "Use or cancel the split test above before you save the funnel." : "Use or cancel the conditional path above before you save the funnel."}
             </p>
           ) : null}
         </fieldset>

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { originFrom } from "@/lib/request-origin";
 import { nextHref, readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
+import { visitFacts } from "@/lib/funnel-branch-rules";
 
 /**
  * A funnel of pages' own address, /@chef/go/launch (and chef.com/go/launch on
@@ -19,6 +20,9 @@ import { nextHref, readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-s
  * A first step that is a split test (526 [FN2]) sends each visitor to one of
  * its pages that can be shown, drawn afresh for this visit by its shares,
  * with no cookie and nothing about the person; none can, it is passed over.
+ * A first step that is a conditional path follows this request's own
+ * utm_source / utm_campaign tags and the browser's name (phone or computer),
+ * read here and never kept.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ handle: string; funnel: string }> }) {
   const { handle: raw, funnel: slug } = await params;
@@ -43,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // A product the store still lists whose listing cannot be read is unknown, never "a deleted product".
   const states = await stepStates(store, funnel, { strictProducts: true }).catch(() => null);
   if (states === null) return later();
-  const target = nextHref(funnel, states, -1);
+  const target = nextHref(funnel, states, -1, undefined, visitFacts(request.nextUrl.searchParams, request.headers.get("user-agent")));
   if (!target) return away(`/@${store.handle}`);
 
   // What the link carried, kept; a mark of another funnel, dropped.

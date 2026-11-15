@@ -9,7 +9,7 @@ export type FunnelMutationResult =
   | { state: "rejected"; error: string }
   | { state: "uncertain" };
 
-const REFUSALS = new Set(["name", "slug", "taken", "steps", "split", "full", "page", "gone", "call", "unknown", "role", "locked", "store_gone", "forbidden", "slow_down"]);
+const REFUSALS = new Set(["name", "slug", "taken", "steps", "split", "branch", "full", "page", "gone", "call", "unknown", "role", "locked", "store_gone", "forbidden", "slow_down"]);
 
 /** A failed transport or incomplete acknowledgement must never invite a blind repeat. */
 export function readFunnelMutationResult(status: number, raw: unknown, request: FunnelMutation): FunnelMutationResult {
@@ -34,7 +34,8 @@ export function readFunnelMutationResult(status: number, raw: unknown, request: 
   const steps = expected.funnel.steps.map((step, i) => {
     const asked = sent[i] as { id?: unknown } | undefined;
     const answer = kept.steps[i];
-    return step.kind === "split" && answer?.kind === "split" && asked?.id === undefined ? { ...step, id: answer.id } : step;
+    const minted = (step.kind === "split" || step.kind === "branch") && answer?.kind === step.kind && asked?.id === undefined;
+    return minted ? { ...step, id: answer.id } : step;
   });
   if (kept.name !== expected.funnel.name || kept.slug !== expected.funnel.slug || kept.on !== expected.funnel.on || !sameSteps(kept.steps, steps)) return uncertain;
   return { state: "confirmed" };

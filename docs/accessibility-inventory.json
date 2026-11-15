@@ -1439,6 +1439,7 @@
     "components/form-response-deal.tsx",
     "components/forms-editor.tsx",
     "components/funnel-ai-draft.tsx",
+    "components/funnel-branch-editor.tsx",
     "components/funnel-editor.tsx",
     "components/funnel-form-setup.tsx",
     "components/funnel-issue-explain.tsx",

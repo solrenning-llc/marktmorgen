@@ -36,7 +36,6 @@ import {
   type PageFunnelStep,
   STEP_WHY,
   funnelPlaces,
-  nextOpen,
   placeVersion,
   parsePageFunnels,
   productStepProblem,
@@ -46,6 +45,7 @@ import {
   withMark,
 } from "@/lib/page-funnel";
 import { splitVersion } from "@/lib/funnel-split-rules";
+import { type VisitFacts, branchPick, readsTag } from "@/lib/funnel-branch-rules";
 
 const funnelsKey = (statsId: string) => `nl:pfunnels:${statsId}`;
 const seenKey = (statsId: string, funnel: PageFunnel, index: number) => `nl:pfunnel:seen:${statsId}:${funnel.id}:${funnel.since}:${index}`;
@@ -220,6 +220,8 @@ export type StepState = {
 
 /** Said to the creator when none of a split's destinations can be shown. */
 export const SPLIT_CLOSED_WHY = "None of this split test's pages can be shown right now. Visitors go on to the next step.";
+/** Said to the creator when none of a conditional path's pages can be shown. */
+export const BRANCH_CLOSED_WHY = "None of this conditional path's pages can be shown right now. Visitors go on to the next step.";
 
 /**
  * Every step of a funnel as the store stands, read with one look at the
@@ -257,10 +259,11 @@ export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">
     };
   };
   return funnel.steps.map((step) => {
-    if (step.kind !== "split") return placeState(step);
-    const each = step.options.map((option) => placeState({ kind: option.kind, id: option.id }));
+    if (step.kind !== "split" && step.kind !== "branch") return placeState(step);
+    const each = stepPlaces(step).map(placeState);
     const open = each.some((state) => state.open && state.path !== null);
-    return { step, title: `Split test: ${each.map((state) => state.title).join(" / ")}`, path: null, free: false, open, why: open ? "" : SPLIT_CLOSED_WHY, options: each };
+    const title = step.kind === "split" ? `Split test: ${each.map((state) => state.title).join(" / ")}` : `Conditional path: ${each.map((state) => state.title).join(" / ")}`;
+    return { step, title, path: null, free: false, open, why: open ? "" : step.kind === "split" ? SPLIT_CLOSED_WHY : BRANCH_CLOSED_WHY, options: each };
   });
 }
 
@@ -273,29 +276,59 @@ export function visitDraw(): number {
 
 /**
  * Where a step sends a visitor, without the funnel's mark: its own address,
- * or for a split the address of one destination that can be shown, drawn by
- * its shares (splitPick). Null when it cannot be shown.
+ * for a split the address of one destination that can be shown, drawn by its
+ * shares (splitPick), and for a conditional path the page its first matching
+ * rule names, else its default (branchPick, from what `facts` knows of this
+ * visit). Null when it cannot be shown.
  */
-export function stepTarget(state: StepState, draw: number = visitDraw()): string | null {
-  if (state.step.kind !== "split") return state.open ? state.path : null;
+export function stepTarget(state: StepState, draw: number = visitDraw(), facts: VisitFacts = {}): string | null {
+  const step = state.step;
+  if (step.kind !== "split" && step.kind !== "branch") return state.open ? state.path : null;
   const each = state.options ?? [];
   const at = (place: FunnelPlace) => each.find((s) => s.step.kind === place.kind && s.step.id === place.id) ?? null;
-  const picked = splitPick(state.step, (place) => {
+  const open = (place: FunnelPlace) => {
     const found = at(place);
     return Boolean(found?.open && found.path);
-  }, draw);
+  };
+  const picked = step.kind === "split" ? splitPick(step, open, draw) : branchPick(step, facts, open);
   return picked ? at(picked)?.path ?? null : null;
 }
 
-/** Whether a page of the funnel can be shown, from the states of its steps (a split's destinations included). */
-const placeOpenIn = (states: readonly StepState[]) => (place: FunnelPlace) =>
-  states.some((state) => [state, ...(state.options ?? [])].some((s) => s.step.kind === place.kind && s.step.id === place.id && s.open && s.path !== null));
+/**
+ * The address of the first step from `states` that sends this visit
+ * somewhere, or null: a step that cannot be shown, or a branch none of whose
+ * pages for this visit can, is passed over. `bought` is told only to the
+ * first step, and only when `offerFirst` (it is about the step just before).
+ */
+function firstTarget(states: readonly StepState[], draw: number, facts: VisitFacts, offerFirst: boolean): string | null {
+  const { bought, ...rest } = facts;
+  for (let i = 0; i < states.length; i += 1) {
+    const path = stepTarget(states[i], draw, i === 0 && offerFirst && bought !== undefined ? { ...rest, bought } : rest);
+    if (path) return path;
+  }
+  return null;
+}
 
 /** Where a visitor goes after step `from` of this funnel: the next step that can be shown, with the funnel's mark, or null at the end. */
-export function nextHref(funnel: PageFunnel, states: StepState[], from: number, draw: number = visitDraw()): string | null {
-  const at = nextOpen(funnel, from, placeOpenIn(states));
-  const path = at >= 0 && states[at] ? stepTarget(states[at], draw) : null;
+export function nextHref(funnel: PageFunnel, states: StepState[], from: number, draw: number = visitDraw(), facts: VisitFacts = {}): string | null {
+  const path = firstTarget(states.slice(Math.max(-1, from) + 1), draw, facts, false);
   return path ? withMark(path, funnel.id) : null;
+}
+
+/** Whether a funnel has a conditional path that reads a tag: then its next links carry the visit's tags along. */
+const branchesOnTags = (funnel: Pick<PageFunnel, "steps">) => funnel.steps.some((step) => step.kind === "branch" && step.rules.some(readsTag));
+
+/** A next link, with the visit's own tags carried along when a later step reads them. */
+function withTags(path: string, funnel: PageFunnel, facts: VisitFacts): string {
+  const marked = withMark(path, funnel.id);
+  if (!branchesOnTags(funnel)) return marked;
+  const tags = new URLSearchParams();
+  if (facts.source) tags.set("utm_source", facts.source);
+  if (facts.campaign) tags.set("utm_campaign", facts.campaign);
+  const query = tags.toString();
+  if (!query) return marked;
+  const [base, hash] = marked.split("#");
+  return `${base}&${query}${hash === undefined ? "" : `#${hash}`}`;
 }
 
 /**
@@ -303,7 +336,10 @@ export function nextHref(funnel: PageFunnel, states: StepState[], from: number, 
  * in its address: only a funnel that is on, and only when this page or product
  * is one of its steps or one of a split's destinations (then it is at the
  * split's place). Anything else is a page opened on its own. A split next is
- * drawn afresh for this visit (`draw`, injected only by tests).
+ * drawn afresh for this visit (`draw`, injected only by tests). A conditional
+ * path next follows `facts`, what the caller's own request says of this
+ * visit (its tags, its device, and on a product step whether it was bought);
+ * `bought` counts only for a branch right after this step.
  */
 export async function funnelHere(
   store: Store,
@@ -311,6 +347,7 @@ export async function funnelHere(
   kind: FunnelPlace["kind"],
   id: string,
   draw: () => number = visitDraw,
+  facts: VisitFacts = {},
 ): Promise<{ funnel: PageFunnel; index: number; place: FunnelPlace; next: string | null } | null> {
   if (!mark) return null;
   const funnel = await readPageFunnel(store.statsId, mark).catch(() => null);
@@ -320,9 +357,8 @@ export async function funnelHere(
   // Only what comes after this step is looked at.
   const rest = funnel.steps.slice(index + 1);
   const states = await stepStates(store, { steps: rest });
-  const at = nextOpen({ steps: rest }, -1, placeOpenIn(states));
-  const path = at >= 0 ? stepTarget(states[at], draw()) : null;
-  return { funnel, index, place: { kind, id }, next: path ? withMark(path, funnel.id) : null };
+  const path = firstTarget(states, draw(), facts, true);
+  return { funnel, index, place: { kind, id }, next: path ? withTags(path, funnel, facts) : null };
 }
 
 /** A person, for one funnel only: a fingerprint of their connection and browser, never kept as it is. */

@@ -23,6 +23,8 @@ import { givingWords } from "@/lib/buyer-words/giving";
 import { pageShown } from "@/lib/sales-page";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
+import { headers } from "next/headers";
+import { queryReader, visitFacts } from "@/lib/funnel-branch-rules";
 import { funnelWords } from "@/lib/buyer-words/funnel";
 import { leadIdOf } from "@/lib/ad-consent";
 
@@ -118,7 +120,7 @@ export default async function FreePage({ params, searchParams }: Params) {
   const stillFree = claimed !== null && claimed.priceCents === 0;
   // Signed up from a step of a funnel of pages (lib/page-funnel.ts): the way on
   // to its next step, in place of the one paid product the page names.
-  const here = !token && status === "sent" && asked ? await funnelHere(store, funnelMark(query.f), "product", asked.id).catch(() => null) : null;
+  const here = !token && status === "sent" && asked ? await funnelHere(store, funnelMark(query.f), "product", asked.id, undefined, visitFacts(queryReader(query), (await headers()).get("user-agent"))).catch(() => null) : null;
   // After signing up, the paid product the free one's page names, if any.
   const next = here?.next ? null : await nextProduct(store, token ? (stillFree ? claimed : null) : status === "sent" ? asked : null);
   const said = speech(store);

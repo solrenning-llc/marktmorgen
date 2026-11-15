@@ -294,10 +294,21 @@ export function copiedForm(form: FormDef, id: string, products: IdMap, now: numb
 /**
  * A funnel for the other store, off, walking its pages' and products' copies;
  * a step whose page or product is not copied is left out, and so is a split
- * test with any page not copied (its shares were set for all of them).
+ * test with any page not copied (its shares were set for all of them), and
+ * a conditional path with any page not copied.
  */
 export function copiedFunnel(funnel: PageFunnel, id: string, slug: string, pages: IdMap, products: IdMap, nowSeconds: number, left: BlocksLeft): PageFunnel {
   const steps = funnel.steps.flatMap((step): PageFunnelStep[] => {
+    if (step.kind === "branch") {
+      const to = (place: { kind: "page" | "product"; id: string }) => ({ kind: place.kind, id: place.kind === "page" ? pages(place.id) : products(place.id) });
+      const rules = step.rules.map((rule) => ({ ...rule, to: to(rule.to) }));
+      const otherwise = to(step.otherwise);
+      if (!otherwise.id || rules.some((rule) => !rule.to.id)) {
+        left.refs += 1;
+        return [];
+      }
+      return [{ kind: "branch", id: step.id, rules, otherwise }];
+    }
     if (step.kind === "split") {
       const options = step.options.map((option) => ({ ...option, id: (option.kind === "page" ? pages(option.id) : products(option.id)) }));
       if (options.some((option) => !option.id)) {

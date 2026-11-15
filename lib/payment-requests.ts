@@ -356,7 +356,8 @@ function refundRow(item: unknown): { id: string; intent: string | null; status: 
   const id = row && typeof row.id === "string" && row.id ? row.id : "";
   const intent = row?.payment_intent;
   // Stripe never refunds 0: a refund of nothing is a row in another shape.
-  if (!row || !id || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) return null;
+  // A row that is not a refund (its own object, rule 30) is not read as one.
+  if (!row || row.object !== "refund" || !id || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) return null;
   return { id, intent: intent as string | null, status: row.status, amount: row.amount as number, currency: row.currency };
 }
 

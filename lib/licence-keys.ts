@@ -60,6 +60,8 @@ import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObjec
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+// A sale's key line and its record, written together or not at all (settle).
+import { orderWriteIfNew } from "@/lib/order-data";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
@@ -229,6 +231,19 @@ async function swapSale(store: Store, product: Pick<Listing, "id">, reference: s
 /** Keys go to Redis in batches this size, well under any request limit. */
 const BATCH = 1_000;
 
+/**
+ * Pushes new keys onto a product's pool while it is under its bound, in one step (Claude 7's race hunt): the room is
+ * read and taken with the push, so two uploads at once never both take the same room and pass MAX_POOL_KEYS. KEYS[1]
+ * the pool; ARGV[1] the bound; ARGV[2..] the keys, in order. Answers how many it pushed: always the first ones.
+ */
+export const POOL_PUSH = `-- marktmorgen:license-pool-push:v1
+local n = #ARGV - 1
+local room = tonumber(ARGV[1]) - redis.call('LLEN', KEYS[1])
+if room < n then n = room end
+if n <= 0 then return 0 end
+for i = 2, n + 1 do redis.call('RPUSH', KEYS[1], ARGV[i]) end
+return n`;
+
 
 
 type Info = { r: string; e: string; at: number; v?: number; w?: "refund" };
@@ -372,11 +387,21 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
 /**
  * Ties a key to a sale, unless the sale got one a moment ago from somewhere
  * else — then that one stands, and this key goes back where it came from.
+ *
+ * The sale's key line and the key's record are written in one script, so a
+ * process that stops part way never leaves a sale with a key no check can
+ * find: both are there, or neither is and the sale is given a key the next
+ * time it is looked at (11 November 2026).
  */
 async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey | null> {
+  const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
   // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
-  const [won] = await orderWrite(store, [["HSETNX", saleKey(store, product), reference, key]]);
-  if (Number(won) !== 1) {
+  const won = await orderWriteIfNew(store, [
+    ["HSETNX", saleKey(store, product), reference, key],
+    ["HSET", infoKey(store, product), key, JSON.stringify(info)],
+    ["HDEL", waitingKey(store, product), reference],
+  ]);
+  if (!won) {
     await redisPipeline(fromPool ? [["LPUSH", poolKey(store, product), key]] : [["SREM", allKey(store, product), key]]);
     // Lost to a key given a moment ago from somewhere else, or to the refund job's mark: then no key at all.
     const again = await readSale(store, product, reference);
@@ -384,11 +409,6 @@ async function settle(store: Store, product: Listing, reference: string, email: 
     if (again?.state === "pending") return null;
     return again ?? { state: "waiting" };
   }
-  const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
-  await orderWrite(store, [
-    ["HSET", infoKey(store, product), key, JSON.stringify(info)],
-    ["HDEL", waitingKey(store, product), reference],
-  ]);
   return { state: "issued", key, revoked: false };
 }
 
@@ -451,10 +471,6 @@ export type UploadResult = {
  */
 export async function addKeys(store: Store, product: Listing, keys: string[], origin: string = SITE_URL): Promise<UploadResult> {
   if (!store.statsId || !isRedisConfigured()) throw new Error("keys cannot be stored");
-  // An unknown count is not an empty pool: the upload is refused rather than let past MAX_POOL_KEYS (CX-123 rule 24).
-  const length = countOf(repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1)?.[0]);
-  if (length === null) throw new UnknownReplyError("LLEN of a license key pool");
-  let room = Math.max(0, MAX_POOL_KEYS - length);
   let added = 0;
   let known = 0;
   let overflow = 0;
@@ -469,28 +485,28 @@ export async function addKeys(store: Store, product: Listing, keys: string[], or
     const batch = keys.slice(i, i + BATCH);
     // One key at a time into the set, so the answer says which ones are new.
     const fresh = await redisPipeline(batch.map((key) => ["SADD", allKey(store, product), key]));
-    const take: string[] = [];
-    const giveBack: string[] = [];
+    const offered: string[] = [];
     batch.forEach((key, j) => {
       if (Number(fresh[j]) !== 1) {
         known += 1;
         notKept.push(key);
         return;
       }
-      if (room > 0) {
-        take.push(key);
-        room -= 1;
-      } else {
-        overflow += 1;
-        giveBack.push(key);
-        notKept.push(key);
-      }
+      offered.push(key);
     });
-    const writes: (string | number)[][] = [];
-    if (take.length) writes.push(["RPUSH", poolKey(store, product), ...take]);
-    if (giveBack.length) writes.push(["SREM", allKey(store, product), ...giveBack]);
-    if (writes.length) await redisPipeline(writes);
-    added += take.length;
+    if (!offered.length) continue;
+    // The room is taken with the push (POOL_PUSH): what did not fit is left out. Read exactly (CX-123 rule 24): an
+    // answer that is not a count of the keys offered throws, never "all of them fitted" or "none did".
+    const [pushedReply] = await redisPipeline([["EVAL", POOL_PUSH, 1, poolKey(store, product), MAX_POOL_KEYS, ...offered]]);
+    const pushed = typeof pushedReply === "number" && Number.isSafeInteger(pushedReply) && pushedReply >= 0 && pushedReply <= offered.length ? pushedReply : null;
+    if (pushed === null) throw new UnknownReplyError("the key pool's room");
+    const giveBack = offered.slice(pushed);
+    if (giveBack.length) {
+      overflow += giveBack.length;
+      notKept.push(...giveBack);
+      await redisPipeline([["SREM", allKey(store, product), ...giveBack]]);
+    }
+    added += pushed;
   }
   if (notKept.length) await giveData(store, [{ slot, bytes: weigh(notKept) }]);
   // A top-up means the next low pool is worth another warning.

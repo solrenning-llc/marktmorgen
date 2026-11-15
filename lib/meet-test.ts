@@ -146,6 +146,8 @@ export async function removeTest(statsId: string, provider: MeetProvider): Promi
   else await googleDelete(access.token, had.id);
   // Read as written (CX-123 rule 24): a DEL whose reply is not a count is not known to be done, and is said so;
   // asking again deletes the same meeting (a 404 there is done) and forgets it.
-  if (countOf(repliesFor(await redisPipeline([["DEL", testKey(statsId, provider)]]), 1)?.[0]) === null) throw unread("forgetting the test meeting with a reply that is not a count");
+  // One key deletes at most one: a larger count is not known to be done either.
+  const forgotten = countOf(repliesFor(await redisPipeline([["DEL", testKey(statsId, provider)]]), 1)?.[0]);
+  if (forgotten === null || forgotten > 1) throw unread("forgetting the test meeting with a reply that is not a count of one key");
   return true;
 }

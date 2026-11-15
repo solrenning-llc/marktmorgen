@@ -203,7 +203,8 @@ export async function forgetDevice(id: string, who: string, endpoint: string, ro
   const [held] = room ? await redisPipeline([["HGET", pushKey(id, who), endpoint]]) : [null];
   // Said done only when the deletion is answered in its exact shape (rule 24): "turn this off" is never confirmed unwritten.
   const removed = countOf(repliesFor(await redisPipeline([["HDEL", pushKey(id, who), endpoint]]), 1)?.[0]);
-  if (removed === null) throw new UnknownReplyError("forgetting a member's push device");
+  // An HDEL of one field removes at most one: a larger count does not match what ran, so it is not known to be done.
+  if (removed === null || removed > 1) throw new UnknownReplyError("forgetting a member's push device");
   if (room && removed === 1 && typeof held === "string") await giveData(room, [{ slot: DEVICES_SLOT, bytes: dataBytes([endpoint, held], 1) }]);
 }
 

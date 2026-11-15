@@ -35,7 +35,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -507,8 +507,14 @@ export async function dropReminder(sid: string, id: string): Promise<void> {
 /** The stores with open requests, for the five-minute job. */
 export async function storesWithRequests(): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", STORES]]);
-  return new Set(Array.isArray(raw) ? raw.map(String) : []);
+  // Read exactly (issue #4729): one reply, a list of distinct, non-empty texts. Anything else throws, and the sweep
+  // stops before its first page with its place kept, never skipping these stores as if there were none.
+  const reply = repliesFor(await redisPipeline([["SMEMBERS", STORES]]), 1);
+  const members = reply ? stringList(reply[0]) : null;
+  if (!members || members.some((sid) => sid.length === 0) || new Set(members).size !== members.length) {
+    throw new UnknownReplyError("the stores with payment requests");
+  }
+  return new Set(members);
 }
 
 /** Leaves a store off that list once it has no open request. */

@@ -738,7 +738,9 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
   // The stores with open payment requests, read once a run.
-  const requesting = await storesWithRequests().catch(() => new Set<string>());
+  // Read exactly (issue #4729): an unreadable index throws here, before the first page, so the cursor stays where it
+  // was for the next run and the cron reports this step as not done.
+  const requesting = await storesWithRequests();
   // Redis's SCAN may hand back the same key on more than one page (and a store
   // moving between addresses is seen under both), so each store is swept at
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and

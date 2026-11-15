@@ -1,8 +1,8 @@
 import { withinStore } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
-import { originFrom } from "@/lib/request-origin";
+import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer } from "@/lib/affiliates";
+import { AFFILIATE_SESSION_SECONDS, affiliateCookieName, joinAsBuyer, requestAffiliateLink } from "@/lib/affiliates";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 
 const MAX_BODY_BYTES = 1_000;
@@ -42,6 +42,15 @@ export async function POST(request: NextRequest) {
     console.error("a buyer joining the affiliate program failed", error);
     return { ok: false as const, reason: "error" as const };
   });
+  // Already an affiliate here: the order is no sign-in to their page (MM-SA-34). Their own
+  // link goes to the address that paid, with the apply form's limits, and the page says "check your inbox".
+  if (!result.ok && result.reason === "known") {
+    const sent = await requestAffiliateLink({ store, email: result.email, note: "", ip: clientAddress(request), origin: linkOrigin(request, store) }).catch((error) => {
+      console.error("emailing a known affiliate their link failed", error);
+      return "error" as const;
+    });
+    return back(sent);
+  }
   if (!result.ok) return back(result.reason);
   const secure = origin.startsWith("https://") ? "; Secure" : "";
   return new Response(null, {

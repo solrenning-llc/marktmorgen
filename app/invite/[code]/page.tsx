@@ -102,11 +102,13 @@ export default async function InvitePage({ params }: { params: Promise<{ code: s
             </div>
           ) : (
             <div className="mt-8">
-              {/* A plain link, never prefetched: following it is what keeps the invite. */}
-              <a href={`/invite/${code}/accept`} className="btn btn-primary">
-                Accept the invite
-                <Icon name="arrow-right" size={16} />
-              </a>
+              {/* A form, never a link: only this button's POST keeps the invite (MM-SA-55), so no other site can set it. */}
+              <form method="post" action={`/invite/${code}/accept`}>
+                <button type="submit" className="btn btn-primary">
+                  Accept the invite
+                  <Icon name="arrow-right" size={16} />
+                </button>
+              </form>
               <p className="mt-3 max-w-xl text-[0.875rem] text-ink-mute">
                 {`Accepting keeps this invite on this browser for ${INVITE_COOKIE_DAYS} days, so it counts when you make your store. It counts once, for a first Marktmorgen store, and only if the account has not paid us before.`}
               </p>

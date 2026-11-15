@@ -13,11 +13,13 @@
  *   - a credit reaches Stripe once, even when the note that it did is lost;
  *   - a creator not paying us yet keeps what they earned until they start.
  */
+import { NextRequest } from "next/server";
 import { claimHandle, createStore, setSubscription, storeForEmail } from "@/lib/store";
 import { inviteCode, inviteView, inviterFor, recordInvite, creditKey, OWED_KEY, byKey, parseBy } from "@/lib/creator-invites";
 import { INVITE_STRIPE_VERSION, paidOn, settleInvites } from "@/lib/creator-invite-credit";
 import { INVITE_BONUS_CENTS, INVITE_CODE_PATTERN, INVITE_COOKIE, INVITE_HOLD_DAYS, INVITE_PROGRAM_OPEN, LEGACY_INVITE_RECORDING_UNTIL, mayRecordAcceptedInvite, inviteShare, currentInviteTerms, readInviteTerms } from "@/lib/creator-invite-rules";
-import { GET as accept } from "@/app/invite/[code]/accept/route";
+// The button is a form: the POST is what keeps an invite (MM-SA-55); a GET keeps nothing.
+import { POST as accept } from "@/app/invite/[code]/accept/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -166,7 +168,7 @@ async function main(): Promise<void> {
   redis.run(["SET", byKey(eve.sid), JSON.stringify({ ...eveRecord, terms: { version: 1, sharePercent: 25, bonusCents: 500 } })]);
 
   part("Accepting an invite keeps it; a bad one keeps nothing");
-  const req = { nextUrl: { protocol: "https:" } } as never;
+  const req = new NextRequest("https://marktmorgen.com/invite/x/accept", { method: "POST", headers: { host: "marktmorgen.com" } });
   const yes = await accept(req, { params: Promise.resolve({ code }) });
   is("new acceptances are paused", INVITE_PROGRAM_OPEN, false);
   is("it explains the pause at sign-up", yes.headers.get("location"), "/signin?status=invite-paused");

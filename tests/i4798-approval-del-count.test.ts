@@ -58,6 +58,35 @@ async function eraseNothing(forge: Forge | null): Promise<string> {
   }
 }
 
+/**
+ * One held post with a picture named by its record only, not by the member's picture list (review of the same family):
+ * the final deletion gains an HSET that writes the picture into the list (sent 1 field), answered by `forge`.
+ */
+async function eraseUnlisted(forge: Forge | null): Promise<string> {
+  redis.clear();
+  const img = { path: `community/${"f".repeat(24)}/held-unlisted.png`, w: 100, h: 100, alt: "A drawing" };
+  const held = await holdPost(id, { space: "aaaaaaaaaaaa", author: ada, title: "", text: "Hello", img, kind: "post" as const, poll: null }, ROOM, t0);
+  if (!held.ok) throw new Error("not held");
+  await original([["DEL", `nl:cm:${id}:ap:f`]]);
+  let seen = 0;
+  redis.pipeline = (async (batch) => {
+    const out = await original(batch);
+    if (batch.length === 5 && batch[0][0] === "ZREM" && batch[4][0] === "HSET") {
+      seen += 1;
+      if (forge) return forge(out as unknown[]);
+    }
+    return out;
+  }) as typeof redis.pipeline;
+  try {
+    await forgetHeldPerson(id, ada);
+    return seen ? "finished" : "the unlisted picture's HSET was never sent";
+  } catch (error) {
+    return error instanceof UnknownReplyError ? "not finished (unknown reply)" : `not finished (${String(error)})`;
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
 const at = (i: number, value: unknown): Forge => (out) => out.map((v, j) => (j === i ? value : v));
 const NOT = "not finished (unknown reply)";
 
@@ -75,6 +104,12 @@ async function main(): Promise<void> {
   is("DEL answered \"1\"", await erase(at(1, "1")), NOT);
   is("DEL answered null", await erase(at(1, null)), NOT);
   is("a reply missing", await erase((out) => out.slice(0, 3)), NOT);
+
+  part("forgetHeldPerson with a picture named by its record only: the HSET that lists it (sent 1)");
+  is("control: the real replies finish", await eraseUnlisted(null), "finished");
+  is("the picture's HSET answered 2", await eraseUnlisted(at(4, 2)), NOT);
+  is("the picture's HSET answered -1", await eraseUnlisted(at(4, -1)), NOT);
+  is("the picture's HSET answered \"1\"", await eraseUnlisted(at(4, "1")), NOT);
 
   part("forgetHeldPerson with nothing held: the list's DEL and the counts' HDEL");
   is("control: the real replies finish", await eraseNothing(null), "finished");

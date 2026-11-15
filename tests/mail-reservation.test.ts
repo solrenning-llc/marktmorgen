@@ -196,6 +196,38 @@ test('a list reservation taken before 00:00 UTC and given back after it returns 
   assert.equal(await dayCount(NEW_DAY),1);
  });
 });
+// Review of #3928 (Codex U, citing Codex G, MÉDIO): the caller takes mailDay() before reserve() waits on the plan,
+// the paid window and the provider. A reservation whose wait crosses 00:00 UTC must count on the day it is actually
+// taken (its pipeline), never on the day the caller started on: otherwise the new day never counts that batch and
+// admits one more than MARKETING_DAILY_CAP.
+test('a list reservation whose day was named before 00:00 UTC but taken after it counts on the new day',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const day=mailDay();
+  set(AFTER_MIDNIGHT);
+  const before=await dayCount(OLD_DAY);
+  assert.equal(await reserve(store,1,false,day),'ok');
+  assert.equal(await dayCount(OLD_DAY),before,'the old day is unchanged');
+  assert.equal(await dayCount(NEW_DAY),1,'the new day counts the batch');
+  assert.equal(await reserve(store,1,false,mailDay()),'day','so the new day stops at its cap');
+  await release(store,1,day);
+  assert.equal(await dayCount(NEW_DAY),0,'and the give-back returns to the day it was taken from');
+ });
+});
+test('a day-only reservation whose day was named before 00:00 UTC but taken after it counts on the new day',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const day=mailDay();
+  set(AFTER_MIDNIGHT);
+  const before=await dayCount(OLD_DAY);
+  assert.equal(await reserveDay(1,day),true);
+  assert.equal(await dayCount(OLD_DAY),before,'the old day is unchanged');
+  assert.equal(await dayCount(NEW_DAY),1,'the new day counts it');
+  assert.equal(await reserveDay(1,mailDay()),false,'so the new day stops at its cap');
+  await releaseDay(1,day);
+  assert.equal(await dayCount(NEW_DAY),0,'and the give-back returns to the day it was taken from');
+ });
+});
 test('a day-only reservation taken before 00:00 UTC and given back after it returns to its own day',async()=>{
  process.env.MARKETING_DAILY_CAP='1';
  await atClock(BEFORE_MIDNIGHT,async set=>{

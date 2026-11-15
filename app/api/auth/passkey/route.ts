@@ -7,6 +7,7 @@ import { RemovalBusyError, RemovalUnsentError, addPasskey, cancelRemoval, listPa
 import { LockBusyError } from "@/lib/redis-lock";
 import { liveSecondStep, mayAddNow, mayAddSecondStep, mayKeepPasskey } from "@/lib/second-step-gate";
 import { lockedUntil, twoStepOn } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 const MAX_BODY_BYTES = 16_000;
 /** Changes one account may make to its passkeys in an hour: each one emails the account. */
@@ -73,7 +74,9 @@ export async function POST(request: NextRequest) {
   // owner's own changes (31 requests of any kind would otherwise keep the owner out for the hour). The one
   // exception: it may ask for a removal that waits, on a count of its own (below), so somebody who lost the
   // app and the passkey waits once, not twice.
-  const locked = (await lockedUntil(session)) > 0;
+  const until = await lockRead(lockedUntil(session));
+  if (until instanceof Response) return until;
+  const locked = until > 0;
   if (locked && body.action !== "remove") {
     return Response.json({ ok: false, error: "locked" }, { status: 403 });
   }

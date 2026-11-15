@@ -1007,6 +1007,9 @@ export type Order =
   /** Refunded in full: what it bought is closed, on every page (lib/refunds.ts). */
   | { state: "processing" | "expired" | "invalid" | "unavailable" | "error" | "refunded" };
 
+/** How far ahead of this server's clock a checkout's creation time may be and still read: clocks drift, links do not (#4801). */
+const CREATED_SKEW_SECONDS = 300;
+
 /**
  * Decides whether this buyer may have the file.
  *
@@ -1117,8 +1120,13 @@ export async function readOrder(
 
   // A download link lasts three days; a booked call is shown, with its
   // calendar file, until it is over, because the reminder emails link here.
+  // Stripe's creation time decides the window only as a safe whole second that is not in the future (#4801): Infinity,
+  // a fraction or a date ahead (past a few minutes of clock skew) is an answer that does not read, never a window that
+  // does not end. A missing or non-number time stays as before: read as the epoch, so the link has expired.
   const created = typeof session.created === "number" ? session.created : 0;
+  if (!Number.isSafeInteger(created) || created < 0) return { state: "error" };
   const age = Date.now() / 1000 - created;
+  if (age < -CREATED_SKEW_SECONDS) return { state: "error" };
   if (age > DOWNLOAD_WINDOW_SECONDS && !(call && call.end > Date.now())) return { state: "expired" };
 
   const details = session.customer_details as { email?: unknown } | null;

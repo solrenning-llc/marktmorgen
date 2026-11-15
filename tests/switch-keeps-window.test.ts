@@ -551,11 +551,12 @@ async function main(): Promise<void> {
     // With the line product-update-commands (#4781, 15 November 2026: a product update's Redis commands for each
     // monthly email), Studio keeps 313.49 where 313.83 was and Scale 702.77 where 703.26 was, still above zero (MR);
     // Store has no monthly emails and is unchanged. Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.12, 313.49 and 702.77 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.49", "702.77"]);
+    // A recipient erased during a send priced too (UPDATE_EMAIL_COMMANDS 30, #4781): Studio 313.48, Scale 702.76.
+    is("11: Store, Studio and Scale keep 45.12, 313.48 and 702.76 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.48", "702.76"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same line (#4781): Studio's yearly month keeps 258.36 where 258.71 was, Scale's 579.50 where 579.99 was.
-    is("11: and 37.06, 258.36 and 579.50 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.36", "579.50"]);
+    is("11: and 37.06, 258.35 and 579.48 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.35", "579.48"]);
   } finally {
     Date.now = realNow;
   }

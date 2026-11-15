@@ -12,11 +12,12 @@ export const MAX_UPDATE_RECIPIENTS = 5_000;
  * Redis commands one update email costs at the most while it is sent (lib/product-updates.ts, advanceUpdate), every
  * script's own commands counted: a run whose one batch holds one recipient, which pays the batch's own reads and
  * writes alone (its lock, its page of the list, the three checks, the month's reservation, the stop link with its
- * erasure note and the note read again since #4781, the send and the job saved). Measured, with each further
- * recipient of a batch at 10, by tests/i4781-update-commands.test.ts; priced on every monthly email of a plan (line
- * product-update-commands in tests/plan-cost-registry.ts).
+ * erasure note and the note read again since #4781, the send and the job saved): 29. A recipient erased while their
+ * stop link was written has it taken back (one DEL) and is skipped, their reserved email kept spent: 30. Measured,
+ * with each further recipient of a batch at 10, by tests/i4781-update-commands.test.ts; priced on every monthly email
+ * of a plan (line product-update-commands in tests/plan-cost-registry.ts).
  */
-export const UPDATE_EMAIL_COMMANDS = 29;
+export const UPDATE_EMAIL_COMMANDS = 30;
 /** The longest the creator's own words may be. */
 export const MAX_UPDATE_NOTE = 1_500;
 

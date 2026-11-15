@@ -348,7 +348,7 @@ function noted(replies: unknown[] | null): boolean {
   return !!replies && replies.length === 3 && (replies[0] === 0 || replies[0] === 1) && countOf(replies[1]) !== null && replies[2] === 1;
 }
 
-async function stopLink(store: Store, email: string): Promise<string> {
+async function stopLink(store: Store, email: string): Promise<string | null> {
   const token = stopToken(store.statsId ?? "", email);
   const grant = { s: store.statsId, e: normaliseEmail(email), h: store.handle, n: store.mail?.fromName || store.name };
   // The link itself is counted in the store's room at what it really adds,
@@ -366,11 +366,12 @@ async function stopLink(store: Store, email: string): Promise<string> {
   await orderWrite(store, [["SET", stopKey(token), JSON.stringify(grant), "EX", STOP_LINK_SECONDS]]);
   // The note read again after the write (#4781): an erasure that completed between the note and the write deleted the
   // note and found no record yet, so this record would hold the address with nothing leading to it. Gone: the record
-  // is taken back and this throws, so the batch sends nothing and waits; the next run leaves the erased address out
-  // (its deletion print). An erasure after this read finds the note and deletes the record itself.
+  // is taken back and null says so; the batch skips this person and sends to the rest, keeping the email reserved for
+  // them spent (so the month's emails bound this path too). An erasure after this read finds the note and deletes the
+  // record itself.
   if (notes.length && store.statsId && !(await stillNoted(store.statsId, email, stopKey(token)))) {
     await orderWrite(store, [["DEL", stopKey(token)]]);
-    throw new Error("an update's stop link was taken back: its address was deleted from the store meanwhile");
+    return null;
   }
   return token;
 }
@@ -446,6 +447,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         job = { ...job, status: "waiting", note: "The recipients could not be checked just now. Nothing more was sent. We will try again." };
         break;
       }
+      let sentNow = 0;
       if (recipients.length) {
         const reserved = await reserve(store, recipients.length);
         if (reserved !== "ok") {
@@ -461,7 +463,7 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           };
           break;
         }
-        let stops: string[];
+        let stops: (string | null)[];
         try {
           stops = [];
           for (const email of recipients) stops.push(await stopLink(store, email));
@@ -475,6 +477,8 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
         const messages: BatchMessage[] = [];
         for (const [at, email] of recipients.entries()) {
           const stop = stops[at];
+          // Erased while this batch wrote their stop link: nothing goes to them (its email stays spent, above).
+          if (stop === null) continue;
           const page = `${SITE_URL}/unsubscribe?u=${stop}`;
           const r = render(store, text.subject, text.body, null, {
             page,
@@ -488,9 +492,10 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           });
           messages.push({ from: fromLine(store), to: email, subject: r.subject, text: r.text, html: r.html, replyTo: store.email, headers: r.headers });
         }
-        const outcome = await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" });
+        const outcome = messages.length ? await sendBatch(messages, `upd:${id}:${job.done}:${emails.length}`, { by: "monthly" }) : "sent";
         if (outcome !== "sent") {
-          await giveBack(store, recipients.length);
+          // Only what was to go out comes back; a skipped person's email stays spent.
+          await giveBack(store, messages.length);
           const failures = job.failures + 1;
           job =
             failures >= 5 || outcome === "refused"
@@ -498,8 +503,9 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
               : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
           break;
         }
+        sentNow = messages.length;
       }
-      job = { ...job, done: job.done + emails.length, sent: job.sent + recipients.length, failures: 0 };
+      job = { ...job, done: job.done + emails.length, sent: job.sent + sentNow, failures: 0 };
       await save(job);
     }
     if (job.status === "sending" && job.done >= job.total) {

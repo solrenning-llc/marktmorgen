@@ -73,7 +73,7 @@ export async function POST(request: NextRequest) {
   if (honeypot.trim()) return answer("sent");
 
   try {
-    if (!(await withinStore("apply-ip", `${store.sid}:${clientAddress(request)}`, APPLY_PER_CONNECTION_HOUR, 3_600, store))) return answer("limited");
+    if (!(await withinStore("apply-ip", `${clientAddress(request)}|${store.sid}`, APPLY_PER_CONNECTION_HOUR, 3_600, store))) return answer("limited");
     if (!(await isApplyFirst(store, product.id))) return answer("closed");
     if (!consent) return answer("consent");
     const kept = await submitApplication(store, { offer: product.id, email, consentVersion: version }, now);

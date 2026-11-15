@@ -67,6 +67,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
 
 /** Studio areas the help center has no answer for yet, by folder, each with what that answer is to explain. */
 export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
+  applications: "Approving or declining an application to buy (the Applications to buy screen, 604 [WP3]): no product can ask for an application yet, so no answer can say how to start one.",
   students: "Filtering a course's students and changing many at once (the Students screen): the course answer says who opened it and how to take a student off, not this screen.",
 };
 

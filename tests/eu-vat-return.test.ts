@@ -157,3 +157,13 @@ test("an adjustment dated before its sale makes the return unknown, never a corr
   const early = { ...a, adjustments: [{ date: "2027-02-01", taxableCents: -100, vatCents: -19, reason: "refund" }] };
   assert.equal(ossReturn([early], { year: 2027, quarter: 1, rates: none, filedOn: "2027-04-02" }), null);
 });
+
+test("a record in a currency not written in hundredths makes no return, never one at a hundredth of its VAT (Claude 7 on #4572)", () => {
+  // euVatRecord now refuses such a currency; a record built some other way is refused here too.
+  const usd = sale("cs_test_ReturnUsd000001", "2027-02-10", "DE", 10_000, 1900, "usd");
+  const yen = { ...usd, sale: "cs_test_ReturnYen000001", currency: "JPY" };
+  const withRates = rates([["USD", "2027-03-31", "1.1000"], ["JPY", "2027-03-31", "160.00"]]);
+  assert.notEqual(ossReturn([usd], { year: 2027, quarter: 1, rates: withRates, filedOn: "2027-04-02" }), null);
+  assert.equal(ossReturn([yen], { year: 2027, quarter: 1, rates: withRates, filedOn: "2027-04-02" }), null);
+  assert.equal(ossReturn([{ ...usd, currency: "KWD" }], { year: 2027, quarter: 1, rates: withRates, filedOn: "2027-04-02" }), null);
+});

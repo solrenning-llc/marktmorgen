@@ -30,6 +30,7 @@
 import type { EuVatRecord } from "@/lib/eu-vat-record";
 import { type EcbRates, periodEndRate } from "@/lib/ecb-rates";
 import { toEuroCents } from "@/lib/eu-vat-invoice";
+import { decimalsOf } from "@/lib/money";
 
 /** Years after the original return's deadline during which it is corrected through the OSS (OSS guide, Part 2). */
 export const OSS_CORRECTION_YEARS = 3;
@@ -133,7 +134,10 @@ export function ossReturn(records: readonly EuVatRecord[], input: { year: number
     if (!sold || !whole(record.taxableCents) || !whole(record.vatCents) || !whole(record.rateBasisPoints)) return null;
     if (typeof record.memberState !== "string" || !/^[A-Z]{2}$/.test(record.memberState) || typeof record.currency !== "string") return null;
     const currency = record.currency.toUpperCase();
-    if (!/^[A-Z]{3}$/.test(currency)) return null;
+    // Only a currency written in hundredths: toEuroCents converts minor units as cents, so a yen or a dinar record would
+    // be declared at a hundredth or ten times its VAT (Claude 7 on #4572). euVatRecord makes none; one built otherwise
+    // makes no return, never a wrong one.
+    if (!/^[A-Z]{3}$/.test(currency) || decimalsOf(currency) !== 2) return null;
     const soldHere = label(sold) === period;
     let taxable = soldHere ? record.taxableCents : 0;
     let vat = soldHere ? record.vatCents : 0;

@@ -32,6 +32,8 @@ import { ReturningCodeRefused, createCheckout } from "@/lib/store-checkout";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { parseReturningCodes, readLinkToken, readRefusal, readTypedCode, returningCodeFor, returningCodeOffered, type ReturningCode } from "@/lib/returning-code-rules";
 import { RETURNING_CLAIM_SECONDS, RETURNING_TRIES, otherDiscountWins, paidHere, sendReturningLink } from "@/lib/returning-code";
+import { forgetNoted } from "@/lib/erasure-index";
+import { suppressCommand } from "@/lib/suppression";
 import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -102,10 +104,21 @@ const ENDED: ReturningCode = { code: "OLDTHANKS", coupon: "cpn_ReturnOld0001", o
 
 /** Every link written: the route's after-answer work writes one only for an address that paid here. */
 let linkWrites = 0;
+/** Run just before Redis applies a link write: the erasure finishing first (#4769). */
+let beforeLinkWrite: (() => Promise<void>) | undefined;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  for (const command of commands) if (command[0] === "SET" && String(command[1]).startsWith("nl:rcode:link:")) linkWrites += 1;
-  return realPipeline(commands);
+  const linkWrite = commands.find((command) =>
+    (command[0] === "SET" && String(command[1]).startsWith("nl:rcode:link:") && !String(command[1]).endsWith(":claim")) ||
+    (command[0] === "EVAL" && command[2] === 2 && String(command[3]).startsWith("nl:rcode:link:")),
+  );
+  if (linkWrite) await beforeLinkWrite?.();
+  const replies = await realPipeline(commands);
+  if (linkWrite) {
+    const reply = replies[commands.indexOf(linkWrite)];
+    if (reply === "OK" || (Array.isArray(reply) && reply.length === 0)) linkWrites += 1;
+  }
+  return replies;
 }) as typeof redis.pipeline;
 
 /** The email the link would go in, captured instead of sent (the provider is not reachable from tests). */
@@ -325,6 +338,24 @@ async function main(): Promise<void> {
   part("A buy form with no code works as before");
   r = await post({}, "198.51.100.40");
   is("on to Stripe, with the box and no coupon, nothing read", [r.location, r.session?.get("allow_promotion_codes"), r.session?.get("discounts[0][coupon]"), r.reads], ["https://checkout.stripe.com/c/pay/test", "true", null, 0]);
+
+  part("An erased address is not written back by a deferred returning link (#4769)");
+  const beforeRace = { mail: captured.length, links: linkWrites };
+  let reached = false;
+  beforeLinkWrite = async () => {
+    reached = true;
+    await realPipeline([suppressCommand(store.listId!, PAST)]);
+    await forgetNoted(store.statsId, PAST);
+  };
+  try {
+    await linkFor(PAST, productId);
+  } finally {
+    beforeLinkWrite = undefined;
+  }
+  is("the pending write was reached", reached, true);
+  is("an old purchase cannot re-create the link or email after erasure", { mail: captured.length, links: linkWrites }, beforeRace);
+  await linkFor(PAST, productId);
+  is("a later lookup of the same old purchase creates no link and sends no email", { mail: captured.length, links: linkWrites }, beforeRace);
 
   done();
 }

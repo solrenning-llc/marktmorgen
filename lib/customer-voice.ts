@@ -51,6 +51,7 @@
  */
 import { answerModel, askModel, counted, jsonIn } from "@/lib/ai";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor } from "@/lib/redis-reply";
 import { membershipNumbers } from "@/lib/membership-numbers";
 import { sellsMemberships } from "@/lib/membership-manage";
 import { STORE_PAGE, missedQuestions } from "@/lib/answers";
@@ -329,6 +330,30 @@ export async function forgetVoicePerson(statsId: string | null, now = Date.now()
     ["DEL", ...keptMonths(now).map((month) => voiceKey(statsId, month))],
   ]);
   return Number(gone) || 0;
+}
+
+/**
+ * A review its buyer deleted (app/api/store/review/route.ts; Claude 7's reviews hunt, 14 November 2026): every summary
+ * kept for the store that quotes its words goes, with the lock of a reading under way, so that reading is not kept
+ * (VOICE_KEEP). A summary that does not read (another reply than text or nothing) goes too, never kept on a guess. One
+ * GET of each kept month, then at most one DEL. Returns how many summaries went.
+ */
+export async function forgetReviewWords(statsId: string | null, text: string, now = Date.now()): Promise<number> {
+  const words = text.trim();
+  if (!statsId || !words || !isRedisConfigured()) return 0;
+  const quoted = new Set([words, cleanVoice(words)]);
+  const keys = keptMonths(now).map((month) => voiceKey(statsId, month));
+  const replies = repliesFor(await redisPipeline(keys.map((key) => ["GET", key])), keys.length);
+  const gone = keys.filter((key, i) => {
+    const raw = replies ? replies[i] : undefined;
+    if (raw === null) return false;
+    const summary = parseSummary(raw);
+    if (!summary) return true;
+    return [...summary.themes, ...(summary.reviewThemes ?? [])].some((theme) => theme.examples.some((example) => example.source === "review" && quoted.has(example.text)));
+  });
+  if (!gone.length) return 0;
+  await redisPipeline([["DEL", lockKey(statsId)], ["DEL", ...gone]]);
+  return gone.length;
 }
 
 /** This month's summary, or last month's while this month has none yet. */

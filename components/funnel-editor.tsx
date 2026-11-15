@@ -13,6 +13,7 @@ import {
   MAX_STEP_TEXT_LENGTH,
 } from "@/lib/funnel";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import { randomLetters } from "@/lib/random-letters";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { commonPath, commonPathWords } from "@/lib/funnel-starter";
@@ -30,6 +31,13 @@ const MESSAGES: Record<string, string> = {
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };
+
+/** Where in the offers a refusal was found: "the headline of offer 2", from what the server said. */
+export function offerPart(passage: { field?: unknown; offer?: unknown } | undefined): string {
+  const part = passage?.field === "headline" ? "the headline" : "the text";
+  const n = typeof passage?.offer === "number" && Number.isInteger(passage.offer) && passage.offer > 0 ? passage.offer : 0;
+  return n ? `${part} of offer ${n}` : `${part} of an offer`;
+}
 
 type Offerable = { id: string; title: string; priceCents: number; bundle?: boolean; draft?: boolean };
 type Picture = { id: string; title: string; src: string };
@@ -169,13 +177,15 @@ export function FunnelEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: owner.id, funnel }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; passage?: { field?: unknown; offer?: unknown } };
       if (data.ok) {
         toast(confirmation);
         setConfirmRemove(false);
         router.refresh();
         return;
       }
+      // An offer posing as Marktmorgen (568 [GD2] (c)): which offer and which part, the passage, why and the fix.
+      if (data.error === "brand_imitation") return setError(imitationMessage(data.passage, offerPart(data.passage), "Your changes were not saved"));
       setError(data.error === "price" ? priceMessage(currency) : MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
     } catch {
       setError(MESSAGES.server_error);

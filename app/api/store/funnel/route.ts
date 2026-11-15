@@ -3,6 +3,7 @@ import { StoreFullError, setProductFunnel } from "@/lib/store";
 import { currencyRule, readMoney } from "@/lib/money";
 import { MAX_FUNNEL_STEPS, parseFunnel } from "@/lib/funnel";
 import { guardStoreWrite, text } from "@/lib/store-request";
+import { brandImitation, imitationWhy } from "@/lib/brand-imitation-rules";
 
 /**
  * Sets or clears what is offered after paying for one product.
@@ -41,6 +42,15 @@ export async function POST(request: NextRequest) {
         yes: typeof step.yes === "string" && step.yes ? step.yes : null,
         no: typeof step.no === "string" && step.no ? step.no : null,
       });
+    }
+    // An offer is shown to a buyer who has just paid, the moment a fake "verify your card" works best: its headline
+    // and text may not pose as Marktmorgen itself (568 [GD2] (c), lib/brand-imitation-rules.ts). Nothing is saved.
+    for (const [index, step] of steps.entries()) {
+      const posing = brandImitation({ title: step.headline, summary: step.text, about: "" });
+      if (posing) {
+        const passage = { field: posing.field === "title" ? "headline" : "text", offer: index + 1, excerpt: posing.excerpt, why: imitationWhy("the offer cannot be shown with it"), fix: posing.fix };
+        return Response.json({ ok: false, error: "brand_imitation", passage }, { status: 409 });
+      }
     }
     funnel = parseFunnel({ steps });
     // A price too low for Stripe reads as a price problem, not a shape one.

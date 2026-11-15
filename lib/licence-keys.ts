@@ -60,6 +60,8 @@ import { StripeListUnreadable, type StripeRow, hasOwnField, ownField, plainObjec
 import { orderWrite } from "@/lib/order-data";
 import { giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+// A sale's key line and its record, written together or not at all (settle).
+import { orderWriteIfNew } from "@/lib/order-data";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import type { Listing, Store } from "@/lib/store";
@@ -372,11 +374,21 @@ export async function keyForSale(store: Store, product: Listing, reference: stri
 /**
  * Ties a key to a sale, unless the sale got one a moment ago from somewhere
  * else — then that one stands, and this key goes back where it came from.
+ *
+ * The sale's key line and the key's record are written in one script, so a
+ * process that stops part way never leaves a sale with a key no check can
+ * find: both are there, or neither is and the sale is given a key the next
+ * time it is looked at (11 November 2026).
  */
 async function settle(store: Store, product: Listing, reference: string, email: string, key: string, fromPool: boolean): Promise<SaleKey | null> {
+  const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
   // A key given to a sale is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
-  const [won] = await orderWrite(store, [["HSETNX", saleKey(store, product), reference, key]]);
-  if (Number(won) !== 1) {
+  const won = await orderWriteIfNew(store, [
+    ["HSETNX", saleKey(store, product), reference, key],
+    ["HSET", infoKey(store, product), key, JSON.stringify(info)],
+    ["HDEL", waitingKey(store, product), reference],
+  ]);
+  if (!won) {
     await redisPipeline(fromPool ? [["LPUSH", poolKey(store, product), key]] : [["SREM", allKey(store, product), key]]);
     // Lost to a key given a moment ago from somewhere else, or to the refund job's mark: then no key at all.
     const again = await readSale(store, product, reference);
@@ -384,11 +396,6 @@ async function settle(store: Store, product: Listing, reference: string, email: 
     if (again?.state === "pending") return null;
     return again ?? { state: "waiting" };
   }
-  const info: Info = { r: reference, e: email, at: Math.floor(Date.now() / 1000) };
-  await orderWrite(store, [
-    ["HSET", infoKey(store, product), key, JSON.stringify(info)],
-    ["HDEL", waitingKey(store, product), reference],
-  ]);
   return { state: "issued", key, revoked: false };
 }
 

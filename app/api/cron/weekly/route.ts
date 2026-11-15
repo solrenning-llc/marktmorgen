@@ -8,7 +8,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { claimWeek, readNumbers, releaseWeek, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { noteSeen, readNumbers, readSeen, releaseWeek, weekClaim, weekOf, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { spendsForReport } from "@/lib/ad-spend";
@@ -56,20 +56,33 @@ export async function GET(request: NextRequest) {
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
+  // The folders decided this week, kept so no later run reads their stores again (lib/stats-report.ts readSeen).
+  const week = weekOf(started);
+  const decided: string[] = [];
   try {
     const now = new Date();
     const lastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 15));
     const folders = [...new Set([...(await visitedFolders(monthKey(now))), ...(await visitedFolders(monthKey(lastMonth)))])];
+    const seen = await readSeen("weekly", week).catch(() => new Set<string>());
     for (const folder of folders) {
+      if (seen.has(folder)) continue;
       if (out.looked >= MAX_PER_RUN || Date.now() - started > TIME_BUDGET_MS) break;
-      const store = await storeOf(folder).catch(() => null);
-      if (!store) continue;
+      // A store that could not be read is not decided: the next run reads it again.
+      const store = await storeOf(folder).catch(() => undefined);
+      if (store === undefined) continue;
+      if (!store) {
+        decided.push(folder);
+        continue;
+      }
       const standing = standingOf(store);
       if (standing !== "paid" && standing !== "trial") {
         out.unpaid += 1;
+        decided.push(folder);
         continue;
       }
-      const emailOff = await weeklyOff(store.handle);
+      // Stopped, not stopped, or unknown (null): unknown sends no email, as before, but is never kept as decided.
+      const offState = await weeklyOffState(store.handle);
+      const emailOff = offState !== false;
       // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
       const chat = await chatAddress(store.statsId).catch(() => undefined);
       if (chat === undefined) {
@@ -77,12 +90,24 @@ export async function GET(request: NextRequest) {
         continue;
       }
       if (emailOff && !chat) {
+        if (offState === null) {
+          out.failed += 1;
+          continue;
+        }
         out.stopped += 1;
+        decided.push(folder);
         continue;
       }
       // The week is read once, so the claim and its release name the same week even across Monday's midnight.
       const at = Date.now();
-      if (!(await claimWeek(store.handle, at))) continue;
+      const claim = await weekClaim(store.handle, at);
+      if (claim !== "ours") {
+        // Claimed already: decided. A claim whose answer is unknown is not (review of #4169): the next run claims
+        // again and reads "taken" if this write did land, so the store is never skipped for the rest of the week.
+        if (claim === "taken") decided.push(folder);
+        else out.failed += 1;
+        continue;
+      }
       out.looked += 1;
       const data = await readNumbers(store).catch(() => null);
       if (!data) {
@@ -92,6 +117,7 @@ export async function GET(request: NextRequest) {
         out.failed += 1;
         continue;
       }
+      decided.push(folder);
       // Its rates, for the ranges stores its size are set beside (lib/benchmarks.ts): read here anyway.
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
@@ -144,6 +170,7 @@ export async function GET(request: NextRequest) {
     console.error("weekly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
+    await noteSeen("weekly", week, decided).catch((error) => console.error("weekly: keeping the stores decided failed", error));
     await releaseMark("nl:weekly:lock", lock);
   }
 }

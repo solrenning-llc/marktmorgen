@@ -1330,6 +1330,28 @@ export async function storeForId(sid: string): Promise<Store | null> {
 }
 
 /**
+ * storeForId on Redis's exact answer only (rule 24; Claude 6 on #2969): null only where the id leads to no store
+ * (nil), or the record it leads to is not there or is another store's; a reply missing or in another shape, and a
+ * record that is there but cannot be read, throw UnknownReplyError, never "no such store". The same two GETs.
+ */
+export async function storeForIdExact(sid: string): Promise<Store | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return null;
+  const [ref] = repliesFor(await redisPipeline([["GET", storeIdKey(sid)]]), 1) ?? unknownIdReply();
+  if (ref === null) return null;
+  if (typeof ref !== "string" || !ref) unknownIdReply();
+  const [raw] = repliesFor(await redisPipeline([["GET", await ownerKey(ref)]]), 1) ?? unknownIdReply();
+  if (raw === null) return null;
+  const store = (typeof raw === "string" ? parseStore(raw) : null) ?? unknownIdReply();
+  // As storeForEmail and storeForId: a record that belongs to another owner key, or carries another id, is not this store.
+  if (typeof store.email !== "string" || storeRef(store).toLowerCase() !== ref.toLowerCase()) return null;
+  return store.sid === sid ? store : null;
+}
+
+function unknownIdReply(): never {
+  throw new UnknownReplyError("the store behind an id");
+}
+
+/**
  * Every store an account owns, its first store first and the others in the
  * order they were made. A store whose record says it belongs to someone
  * else — which only a half-finished move could leave — is not listed.
@@ -2059,27 +2081,42 @@ export async function renameHandle(
 
 export type StripeAccountResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "shape" };
+  | { ok: false; reason: "none" | "shape" | "moved" };
 
 /**
  * Writes down which Stripe account a creator connected.
  *
  * Only the identifier is kept. Marktmorgen never holds a key to that account and
  * never holds the money that lands in it.
+ *
+ * `expected`, when given, is the account the caller read before asking Stripe
+ * (null: none yet). The write is made only while the store still points at it,
+ * under the store's lock; otherwise nothing is written and the answer is
+ * "moved". An account forgotten, or another one connected, while Stripe was
+ * being asked is never written over (the studio's Stripe routes).
  */
 export async function setStripeAccount(
   email: string,
   accountId: string,
   chargesEnabled = false,
+  options: { expected?: string | null } = {},
 ): Promise<StripeAccountResult> {
   if (!STRIPE_ACCOUNT_PATTERN.test(accountId)) {
     return { ok: false, reason: "shape" };
   }
-  const next = await patchStore(email, () => ({
-    stripeAccountId: accountId,
-    stripeChargesEnabled: chargesEnabled,
-    stripeCheckedAt: new Date().toISOString(),
-  }));
+  let moved = false;
+  const next = await patchStore(email, (store) => {
+    if (options.expected !== undefined && store.stripeAccountId !== options.expected) {
+      moved = true;
+      return null;
+    }
+    return {
+      stripeAccountId: accountId,
+      stripeChargesEnabled: chargesEnabled,
+      stripeCheckedAt: new Date().toISOString(),
+    };
+  });
+  if (moved) return { ok: false, reason: "moved" };
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 

@@ -23,7 +23,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { standingOf } from "@/lib/plan-standing";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
-import { claimMark } from "@/lib/claim-mark";
+import { type Claimed, claimMark } from "@/lib/claim-mark";
 import { deriveKey } from "@/lib/secret-box";
 import { formatMoney } from "@/lib/money";
 import { insightsFrom } from "@/lib/insights";
@@ -298,13 +298,22 @@ export function weeklyTokenOk(handle: string, token: string): boolean {
  * email goes on it this time, and it is said in the log. Sweep A6 (Claude 5).
  */
 export async function weeklyOff(handle: string): Promise<boolean> {
+  return (await weeklyOffState(handle)) !== false;
+}
+
+/**
+ * Whether the numbers emails are stopped: true, false, or null when the answer is unknown. The weekly and monthly
+ * jobs use it so an unknown answer is never kept as decided for the period (review of #4169); weeklyOff reads null as
+ * stopped, as before.
+ */
+export async function weeklyOffState(handle: string): Promise<boolean | null> {
   if (!isRedisConfigured()) return false;
   const replies = repliesFor(await redisPipeline([["SISMEMBER", OFF, handle]]), 1);
   const member = replies ? countOf(replies[0]) : null;
   if (member === 0) return false;
   if (member === 1) return true;
   console.error("weekly-off: whether the numbers emails are stopped is unknown; no numbers email this time");
-  return true;
+  return null;
 }
 
 export async function setWeeklyOff(handle: string, off: boolean): Promise<void> {
@@ -372,15 +381,50 @@ export function weeklyMemberTokenOk(handle: string, email: string, token: string
  * (lib/claim-mark.ts, CX-123 rule 24): an answer not known to be this run's is never a claim, and nothing is sent on it.
  */
 export async function claimWeek(handle: string, now = Date.now()): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  return ownClaim(sentKey(weekOf(now), handle), 9 * 86400);
+  return (await weekClaim(handle, now)) === "ours";
+}
+
+/** The week's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
+export async function weekClaim(handle: string, now = Date.now()): Promise<Claimed> {
+  if (!isRedisConfigured()) return "unknown";
+  return claimState(sentKey(weekOf(now), handle), 9 * 86400);
+}
+
+/**
+ * The visited folders the weekly or monthly job has decided for a period (C1 cost audit, 12 November 2026): emailed,
+ * quiet, stopped, not on a running plan, no store, or claimed already. The job runs every hour for two days; before,
+ * each run started again at the first folder and read every store already claimed (its record, its stop, its channel
+ * and a claim answering "taken") before reaching one not yet decided, so run k read about 25k stores and every run
+ * after the last one re-read them all until its time ran out. A folder left undecided (its store, its channel or its
+ * numbers could not be read) is not kept, and the next run reads it again. Read whole or not at all: an answer in
+ * another shape decides nothing, and the run reads every folder as before (the claims keep anyone from two emails).
+ */
+const seenKey = (kind: "weekly" | "monthly", period: string) => (kind === "weekly" ? `nl:weekly:seen:${period}` : `nl:monthly:seen:${period}`);
+
+export async function readSeen(kind: "weekly" | "monthly", period: string): Promise<Set<string>> {
+  if (!isRedisConfigured()) return new Set();
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", seenKey(kind, period)]]), 1);
+  const members = replies?.[0];
+  if (!Array.isArray(members) || members.some((member) => typeof member !== "string")) return new Set();
+  return new Set(members as string[]);
+}
+
+/** Keeps the folders decided in this run, for as long as the period's claims last. */
+export async function noteSeen(kind: "weekly" | "monthly", period: string, folders: string[]): Promise<void> {
+  if (!folders.length || !isRedisConfigured()) return;
+  const key = seenKey(kind, period);
+  await redisPipeline([["SADD", key, ...folders], ["EXPIRE", key, (kind === "weekly" ? 9 : 40) * 86400]]);
 }
 
 /** A once-only claim (SET NX): true only when it is this run's; taken or unknown is false, and unknown is said. */
 async function ownClaim(key: string, seconds: number): Promise<boolean> {
+  return (await claimState(key, seconds)) === "ours";
+}
+
+async function claimState(key: string, seconds: number): Promise<Claimed> {
   const got = await claimMark(key, seconds);
   if (got === "unknown") console.error(`stats-report: the claim ${key.split(":").slice(0, 2).join(":")} answered in an unknown shape; nothing is sent on it this time`);
-  return got === "ours";
+  return got;
 }
 
 const CHANNEL_WORDS: Record<string, string> = {
@@ -499,8 +543,13 @@ export function lastMonthOf(now = Date.now()): string {
 
 /** Claims a month's email for a store; false when it was already claimed, or when the answer is not known to be ours. */
 export async function claimMonth(handle: string, month: string): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
-  return ownClaim(monthSentKey(month, handle), 40 * 86400);
+  return (await monthClaim(handle, month)) === "ours";
+}
+
+/** The month's claim as it answered: "ours", "taken", or "unknown" (never kept as decided; review of #4169). */
+export async function monthClaim(handle: string, month: string): Promise<Claimed> {
+  if (!isRedisConfigured()) return "unknown";
+  return claimState(monthSentKey(month, handle), 40 * 86400);
 }
 
 /** Lets a month's claim go, when the numbers could not be read, so a later run tries again. */

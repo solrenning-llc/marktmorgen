@@ -60,8 +60,32 @@ Read by Claude 1 cloud E on 15 November 2026 from Stripe's own pages, in their S
 2. The same with `currency_options` on a Price of that account.
 3. What Stripe does with a session that has an application fee and Adaptive Pricing on (the fee's currency).
 4. Not a proof but a gate: the read of the account's settlement currency (`settlesInStoreCurrency`, lib/buyer-currency.ts) gets its cache and its request units (`takeBuyerRead`) in unit 3b, before the key turns on; today it is never called, because the key is false.
+5. What a dispute on a converted payment opens at, and in which currency the disputed amount and its fee are taken from the creator's account (added 15 November 2026 from the coordinator's list: no page read says it).
 
 Each is a request to Stripe's test mode on a test account (as lib/verify-stripe.ts proves the site's other requests), never a live account, made by whoever may use the test keys; no agent creates an account for it.
+
+### The coordinator's sources (14 November 2026, 22h30 Fortaleza), checked on 15 November 2026
+
+Claude 1 (the coordinator) sent three pages read on 14 November 2026: docs.stripe.com/payments/currencies/localize-prices/adaptive-pricing, docs.stripe.com/connect/currencies/adaptive-pricing and docs.stripe.com/payments/checkout/localize-prices/manual-currency-prices. Claude 1 cloud E read them again on 15 November 2026 (Stripe-hosted variant). What they add to the answers above, in Stripe's words:
+
+- "Calculate prices in real time using an exchange rate guaranteed for 24 hours."
+- The buyer may refuse the conversion: "Your customer doesn't pay this fee if they choose to pay in your integration currency, but their bank's exchange rate and fees might apply."
+- What the buyer paid in their currency arrives with the events: "If a customer pays in their local currency, the checkout.session.completed" event, and for a renewal "the payment_intent.succeeded event", each with "a `presentment_details` hash that includes the `presentment_amount` and `presentment_currency`".
+- Local ways to pay need the local currency: "70% of all e-commerce transactions in the Netherlands use iDEAL, but it only works with EUR"; PayPal and "Klarna (EU+UK only)" are on the same list. So with the conversion off, a buyer abroad does not meet them; this is part of the reason for (a).
+- "Stripe recommends using Adaptive Pricing instead of manual currency prices to reduce currency exchange rate fluctuation risk" (Manual currency prices).
+- Testing: "pass in an email like `test+location_FR@example.com`" to present the checkout as to a buyer in France.
+
+Against the coordinator's list of what the pages do not say:
+
+- **Adaptive Pricing with an application fee (the commission):** not stated on any page read (point 2 above). It stays a test-mode proof, and until then a session with a fee stays in the store's currency (`buyerCurrencyPlan`, reason `fee`).
+- **Adaptive Pricing with Stripe Tax:** stated, on a fourth page, Adaptive Pricing and Stripe Tax (docs.stripe.com/tax/calculating/adaptive-pricing, read on 15 November 2026): "When you use Adaptive Pricing, all tax calculation, tax reporting, and invoicing remain in your integration currency … before any currency conversion. Your customer can pay in their local currency, but this doesn't change your reporting." The test-mode proof 1 still includes `automatic_tax[enabled]=true` on a creator's account, because our sessions set it on the creator's account (lib/tax.ts), which the page does not show.
+- **Disputes:** not stated on any page read. Added as proof 5 above.
+
+Care the design takes from it (each unit keeps it):
+
+- The buyer sees, before paying, the currency, the final amount with the tax on it, and the choice to pay in the store's currency, all on Stripe's page; our page says that Stripe may show the buyer's own currency there (unit 3b). Nothing we draw shows an amount we converted.
+- Reports and the VAT records take the right figure, never one we convert: with (a), the store's currency (Stripe's "reporting" and Stripe Tax stay in it), and `presentment_details` only to say what the buyer paid in theirs; with (b), the sale's own currency, counted apart (unit 2).
+
 
 ## What exists
 

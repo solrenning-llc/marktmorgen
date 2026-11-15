@@ -252,7 +252,6 @@ test("editor tools control: a spent allowance is still 0 left, with every AI job
 const PENDING = new Set([
   "app/studio/pages/page.tsx",
   "app/studio/site/page.tsx",
-  "app/api/store/numbers/ask/route.ts",
 ]);
 const ZERO_ON_UNKNOWN = /aiLeft\([^)]*\)\.catch\(\(\) => 0\)/;
 const sources = (dir: string): string[] =>

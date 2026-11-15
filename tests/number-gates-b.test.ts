@@ -94,6 +94,22 @@ const UNKNOWN_PAIRS: [string, unknown][] = [
   ["a counter that never answers", "throw"],
 ];
 
+/** A window count's replies (lib/window-count.ts: INCR, then EXPIRE NX) that are not a count: each must refuse. */
+const WINDOW_UNKNOWN: [string, unknown][] = [
+  ["an EXPIRE answered false", [1, false]],
+  ["an EXPIRE answered in another shape", [1, "1"]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a count that is not whole", [1.5, 1]],
+  ["a count below zero", [-1, 1]],
+  ["a reply cut short", [1]],
+  ["an empty reply", []],
+  ["a reply that is not a list", { x: 1 }],
+  ["a counter that never answers", "throw"],
+];
+
 /** The same, for a counter that also reads its TTL in the same round. */
 const UNKNOWN_TRIPLES: [string, unknown][] = [
   ["a SET answered false", [false, 1, 3_600]],
@@ -149,8 +165,8 @@ async function main(): Promise<void> {
   };
 
   part("The store's numbers as a file: the ten-minute window");
-  const windowCounter = (commands: Command[]) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:rl:export:") && !String(commands[0][1]).includes(":ended:");
-  for (const [label, reply] of UNKNOWN_PAIRS) {
+  const windowCounter = (commands: Command[]) => commands[0]?.[0] === "INCR" && String(commands[0][1]).startsWith("nl:rl:export:") && !String(commands[0][1]).includes(":ended:");
+  for (const [label, reply] of WINDOW_UNKNOWN) {
     arm(windowCounter, reply);
     const before = counterCalls;
     const answer = await exportCall("visits");
@@ -159,16 +175,16 @@ async function main(): Promise<void> {
   arm(windowCounter, null);
   const visits = await exportCall("visits");
   is("a confirmed count within the window makes the file", [visits.status, visits.file], [200, true]);
-  arm(windowCounter, [null, 11]);
+  arm(windowCounter, [11, 0]);
   const busy = await exportCall("visits");
   is("a confirmed count past the window is refused as before", [busy.status, busy.file, busy.body.startsWith("That is a lot of files")], [429, false, true]);
-  arm(windowCounter, ["OK", 1.5]);
+  arm(windowCounter, [1.5, 1]);
   const storeFile = await exportCall("store");
   is("the whole store's file on an unknown window count: not made, said as not made", [storeFile.status, storeFile.file, storeFile.body], [503, false, "Your store's file could not be made just now. Try again in a minute."]);
 
   part("The whole store's file after a plan ended");
-  const endedCounter = (commands: Command[]) => commands[0]?.[0] === "SET" && String(commands[0][1]).includes(":ended:");
-  for (const [label, reply] of UNKNOWN_PAIRS) {
+  const endedCounter = (commands: Command[]) => commands[0]?.[0] === "INCR" && String(commands[0][1]).includes(":ended:");
+  for (const [label, reply] of WINDOW_UNKNOWN) {
     arm(endedCounter, reply);
     const before = counterCalls;
     const { ended, endedCookie } = await endedStore();
@@ -179,7 +195,7 @@ async function main(): Promise<void> {
   arm(endedCounter, null);
   const endedFile = await exportCall("store", kept.ended, kept.endedCookie);
   is("a confirmed count within what an ended plan keeps makes the file", [endedFile.status, endedFile.file, endedFile.type.startsWith("application/json")], [200, true, true]);
-  arm(endedCounter, [null, ENDED_STORE_EXPORTS + 1]);
+  arm(endedCounter, [ENDED_STORE_EXPORTS + 1, 0]);
   const endedPast = await exportCall("store", kept.ended, kept.endedCookie);
   is("a confirmed count past it is refused as before", [endedPast.status, endedPast.file, endedPast.body.startsWith("You have downloaded your store's main data")], [429, false, true]);
 
@@ -189,8 +205,8 @@ async function main(): Promise<void> {
     if (response === "threw") return { status: 500, body: { error: "threw" } as { error?: string; status?: string } };
     return { status: response.status, body: (await response.json()) as { error?: string; status?: string } };
   };
-  const licenceCounter = (commands: Command[]) => commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:rl:licence:");
-  for (const [label, reply] of UNKNOWN_PAIRS) {
+  const licenceCounter = (commands: Command[]) => commands[0]?.[0] === "INCR" && String(commands[0][1]).startsWith("nl:rl:licence:");
+  for (const [label, reply] of WINDOW_UNKNOWN) {
     arm(licenceCounter, reply);
     const before = counterCalls;
     const answer = await licenceCall();
@@ -199,7 +215,7 @@ async function main(): Promise<void> {
   arm(licenceCounter, null);
   const checked = await licenceCall();
   is("a confirmed count within the window reaches the store's check", [checked.status !== 429 && checked.status !== 502, afterCounter.length > 0], [true, true]);
-  arm(licenceCounter, [null, 121]);
+  arm(licenceCounter, [121, 0]);
   const tooMany = await licenceCall();
   is("a confirmed count past the window is refused as before", [tooMany.status, tooMany.body.error, afterCounter.length], [429, "Too many checks. Wait a minute.", 0]);
 

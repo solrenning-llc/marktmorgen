@@ -301,9 +301,8 @@ export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceK
 }
 
 /**
- * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
- * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
- * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ * The same count with an unread one taken as 0. Kept only for tests that measure what a call took; the studio's
+ * main page reads allowanceUsedExact (tests/studio-unread-counts.test.ts). Never use it for a decision or a screen.
  */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
   return (await allowanceUsedExact(store, kind, now)) ?? 0;

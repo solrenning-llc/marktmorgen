@@ -12,6 +12,13 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 
 export const RESPONSES_KEY = "nl:creators:responses";
 
+/**
+ * The most answers kept at once (MM-SA-50): each holds at most about 4 KB of text (lib/creator-research.ts, LIMITS),
+ * so the list never passes about 20 MB, whoever sends them. Past it a new answer is refused and said as full, never
+ * kept by dropping an older one with its consent; the daily job (pruneResearch) makes room as answers reach 24 months.
+ */
+export const RESEARCH_MAX_ANSWERS = 5_000;
+
 /** How long an answer is kept: 24 months. */
 const KEEP_MS = 730 * 24 * 60 * 60 * 1000;
 

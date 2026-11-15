@@ -140,6 +140,10 @@ async function main(): Promise<void> {
     ["the token cannot be issued", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.tokenFails = true; }],
     ["a token without its signing key", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.token = { delegationToken: "d", validUntil: Date.now() + 600_000 }; }],
     ["a token that has run out", () => { blobWorld.pages = [listing(blobs(0, 2))]; blobWorld.token = { delegationToken: "d", clientSigningToken: "c", validUntil: Date.now() - 1 }; }],
+    // Claude 7's LEVE on #3313: a key whose signed address does not lead back to it is never handed out as signed.
+    ["a key with a # (its signed address ends at the #)", () => { blobWorld.pages = [listing([...blobs(0, 1), { pathname: `${PREFIX}a#b.pdf`, size: 1, etag: "e1" }])]; }],
+    ["a key with a ? (its signed address reads it as a query)", () => { blobWorld.pages = [listing([{ pathname: `${PREFIX}a?b.pdf`, size: 1, etag: "e2" }])]; }],
+    ["a key with an encoded part (its address decodes to another key)", () => { blobWorld.pages = [listing([{ pathname: `${PREFIX}a%2Fb.pdf`, size: 1, etag: "e3" }])]; }],
   ];
   for (const [what, arrange] of broken) {
     reset();

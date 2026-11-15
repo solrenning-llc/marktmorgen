@@ -515,7 +515,7 @@ export async function touchStudent(
   email: string,
   startSeconds: number,
   room: DataStore,
-  drip?: { course: Course; productId: string },
+  drip?: { course: Course; productId: string } | { card: DripCard },
 ): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = studentsKey(courseId);
@@ -533,7 +533,8 @@ export async function touchStudent(
   }
   const nowSeconds = Math.floor(Date.now() / 1000);
   row.l = nowSeconds;
-  const card = drip && drip.course.id === courseId ? dripCardOf(drip.course, drip.productId) : null;
+  // The course page hands the outline; the course start hands the kept card (dripCardFor), never the outline.
+  const card = !drip ? null : "card" in drip ? drip.card : drip.course.id === courseId ? dripCardOf(drip.course, drip.productId) : null;
   const index = card && room.statsId && room.handle && !indexed ? { statsId: room.statsId, handle: room.handle, card } : null;
   const pairs = index ? duePairs(courseId, field, row.s, index.card, nowSeconds) : [];
   // Marked once its pairs are written, and kept marked by a visit that writes none (the course start, with no outline).
@@ -1118,7 +1119,7 @@ const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
 
 /** A course's drip card as kept: product `p`, cohort start `s`, modules `m` ([id, title, days, lessons]), schedule `g`. */
-type DripCard = { p: string; s: number | null; m: [string, string, number, number][]; g: string };
+export type DripCard = { p: string; s: number | null; m: [string, string, number, number][]; g: string };
 
 /** The card of a course, or null when nothing in it opens over time. */
 function dripCardOf(course: Course, productId: string): DripCard | null {
@@ -1143,6 +1144,17 @@ function readCard(reply: unknown): DripCard | null | "unknown" {
   } catch {
     return "unknown";
   }
+}
+
+/**
+ * A course's kept drip card, read on its own (one GET of a few KB, never the outline), for the course start
+ * (app/api/store/course/start): a student who starts there and never loads the course page still gets their pairs.
+ * Null when the course has none; "unknown" for a reply it cannot read (rule 24), which writes no pair.
+ */
+export async function dripCardFor(courseId: string): Promise<DripCard | null | "unknown"> {
+  if (!isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", cardKey(courseId)]]).catch(() => null), 1);
+  return replies ? readCard(replies[0]) : "unknown";
 }
 
 /** A module of a card as the outline's, for opensAt and the email. */

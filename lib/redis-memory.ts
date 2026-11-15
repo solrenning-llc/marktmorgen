@@ -515,6 +515,13 @@ export class MemoryRedis {
           this.run(["SET", lock, to, "EX", seconds]);
           return 1;
         }
+        // lib/auto-captions.ts: a captions record replaced, with its expiry, only while it is still the value read.
+        if (key.startsWith("-- marktmorgen:captions-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, from, to, seconds] = args;
+          if (this.run(["GET", record]) !== from) return 0;
+          this.run(["SET", record, to, "EX", seconds]);
+          return 1;
+        }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
         if (key.startsWith("-- marktmorgen:sns-receipt-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, receipt, from, to, seconds] = args;

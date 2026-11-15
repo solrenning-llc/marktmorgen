@@ -98,7 +98,7 @@ test("the cost and test registries never block: each agent adds its own rows (in
 });
 
 test("the key-family registries and the tests' Redis emulator never block: each agent adds its own entries (inbox CX-46)", () => {
-  const shared = ["lib/data-families.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"];
+  const shared = ["lib/data-families.ts", "lib/data-families/index.ts", "tests/store-data-registry.ts", "lib/redis-memory.ts"];
   const reserved = [{ path: "docs/reservations/claude2.md", text: own("Claude 2", `| Claude 2 | x | claude2/x | ${shared.map((f) => "`" + f + "`").join(", ")} | 04/11/2026 |\n`) }];
   assert.equal(conflicts({ text: lanesOnly, branch: "claude3/y", changed: shared, agentFiles: reserved }).found.length, 0);
   // A file next to them that is not shared still blocks.

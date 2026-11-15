@@ -535,7 +535,7 @@ async function main(): Promise<void> {
       "app/api/store/letters/route.ts",
       "app/studio/email/page.tsx",
       "lib/closed-store-data.ts",
-      "lib/data-families.ts",
+      "lib/data-families/letters.ts",
       "lib/letters.ts",
     ],
   );

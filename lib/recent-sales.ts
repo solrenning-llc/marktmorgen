@@ -166,8 +166,11 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
       // Not cached: the next visit asks again rather than showing nothing for five minutes.
       if (!refunded) return [];
       const listings = new Map((await readListings(store, [...new Set(kept.map((k) => k.p))])).map((p) => [p.id, p]));
+      // Newest first by the checkout's own time, whatever order they were recorded in (#4743): the reconciliation records
+      // a page newest first, and LPUSH leaves the oldest on top.
       shown = kept
         .filter((k) => !refunded.has(k.pi))
+        .sort((a, b) => b.at - a.at)
         .flatMap((k) => {
           const product = listings.get(k.p);
           return product && !product.hidden ? [{ product: product.id, title: product.title, at: k.at, country: k.c }] : [];

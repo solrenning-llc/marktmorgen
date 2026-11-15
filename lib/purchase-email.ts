@@ -66,13 +66,14 @@ import { type HandOverDeps, confirmPreorder, resendPreorder } from "@/lib/preord
 import { speechFor } from "@/lib/buyer-words";
 import { ordersWords } from "@/lib/buyer-words/orders";
 import { firstCharge } from "@/lib/move-rules";
+import { firstChargeCents } from "@/lib/yearly-price";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { purchaseRefunded } from "@/lib/refunds";
 import { scheduleReviewAsk } from "@/lib/review-ask";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta, deliveredIds, isBundle } from "@/lib/bundle-rules";
 import { type NextOffer, nextOfferForEmail } from "@/lib/next-offer";
 import { nextOfferWords } from "@/lib/buyer-words/next-offer";
-import { pricePill } from "@/components/store-product";
+import { pricePill } from "@/lib/product-pill";
 import { productSegment } from "@/lib/product-slug";
 
 /** The fixed sentence as a receipt carries it, with the address of the Terms that explain its limit (queue item 307 EC1). */
@@ -258,12 +259,37 @@ function firstChargeDiscount(session: SessionRecord): "none" | "once" | "every" 
   }
   const coupons = Array.isArray(session.discounts) ? session.discounts : [];
   const named = Boolean(meta.code || meta.sale || meta.welcome || meta.winback);
-  if ((details === undefined || details === null) && coupons.length === 0 && !named) return "none";
+  if ((details === undefined || details === null) && coupons.length === 0 && !named) {
+    // Stripe gave no total_details and nothing names a discount: what came off is read from the price before discounts.
+    // Above what was charged, something came off whose length does not read; a price before discounts that does not
+    // read is not taken for "nothing came off" (CX-123 rule 24).
+    const subtotal = session.amount_subtotal;
+    if (!Number.isSafeInteger(subtotal) || Number(subtotal) < 0 || !Number.isSafeInteger(session.amount_total)) return "unread";
+    return Number(subtotal) > Number(session.amount_total) ? "unsure" : "none";
+  }
   const durations = coupons.map(couponDuration);
   if (durations.length > 0 && durations.every((d) => d === "once")) return "once";
   if (durations.length > 0 && durations.every((d) => d === "forever")) return "every";
   if (durations.every((d) => d === null) && (meta.sale || meta.welcome) && !meta.code && !meta.winback) return "once";
   return "unsure";
+}
+
+/**
+ * For the thanks page (rule 27): a membership charged at checkout whose discount came off its first charge, said in
+ * the same words as the confirmation's "Paid:" line; "unread" when what was charged or what came off does not read, so
+ * the page names no price; null when the price is said as before (nothing off, every charge off, a free trial, a moved
+ * membership, a payment plan or an introductory price, which the page says itself).
+ */
+export function firstChargeSaid(store: Pick<Store, "language" | "tax">, session: SessionRecord, product: Listing): string | "unread" | null {
+  if (!product.recurring) return null;
+  const meta = session.metadata ?? {};
+  if (introOf(meta) || wholeNumber(meta.trial_days) > 0 || firstCharge(meta) || (meta.kind === "plan" && Number(meta.plan_payments) >= 2)) return null;
+  if (!chargeReads(session)) return "unread";
+  const discount = firstChargeDiscount(session);
+  if (discount === "unread") return "unread";
+  if (discount !== "once" && discount !== "unsure") return null;
+  const every = meta.every === "year" ? "year" : product.recurring.interval;
+  return paidLine(store, product, session.amount_total as number, session.currency as string, null, 0, wholeNumber(meta.ends_after), null, every, discount, regularOf(session, meta));
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
@@ -375,11 +401,11 @@ function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: nu
   }
 
   if (product.recurring) {
+    // The first charge is what the checkout made it: the year's price when paid yearly (lib/yearly-price.ts).
+    const firstCents = firstChargeCents(product, option, every, store.tiers);
     if (firstChargeAt) {
-      const firstCents = option ? option.priceCents : product.priceCents;
-      lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
-    } else if (trialDays > 0) {
-      const firstCents = option ? option.priceCents : product.priceCents;
+      if (firstCents !== null) lines.push("", words.movedCharge(said.money(firstCents), store.tax.enabled && !store.tax.included, said.date(firstChargeAt * 1000)));
+    } else if (trialDays > 0 && firstCents !== null) {
       const tax = store.tax.enabled && !store.tax.included;
       const firstOn = said.date((created + trialDays * 86400) * 1000);
       lines.push("", words.trialCharge(said.money(firstCents), tax, trialDays, firstOn));

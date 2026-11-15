@@ -34,7 +34,7 @@ import { rememberBuyers } from "@/lib/buyer-library";
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor, UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, needData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -333,6 +333,8 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  */
 export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
+  // Read exactly (CX-123 rule 24): a reply cut short or in another shape is unknown, never "0 deleted", so the
+  // erasure records this part as not finished instead of reporting the purchases gone.
   const replies = repliesFor(await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]), 2);
   if (!replies) throw new UnknownReplyError("the imported-person erasure");
   return replies.reduce<number>((sum, reply) => {

@@ -9,6 +9,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { makeWorld, seedPerson } from "./erasure-world";
 import { erasePerson } from "@/lib/person-erasure";
+import { reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
+import { reviewPhotoPath } from "@/lib/review-photo";
 import { normaliseEmail } from "@/lib/auth";
 
 type Commands = (string | number)[][];
@@ -84,6 +86,25 @@ async function main(): Promise<void> {
   is("the repeat, everything back, finishes", repeat.ok, true);
   is("and the file is queued for deletion: its record was kept until its path was", (await queued()).length > 0, true);
   is("nothing left of the paths' set once done", redis.keys().filter((k) => k.startsWith("nl:erase:files:") && JSON.stringify(redis.run(["SMEMBERS", k])) !== "[]").length, 0);
+  part("Review 3rjdf (MEDIUM): a review's photo is kept before the review goes, with the set, the queue and the store failing");
+  redis.clear();
+  const world5 = await makeWorld();
+  const eve = normaliseEmail("eve@example.com");
+  await seedPerson(world5, eve, null);
+  const stats5 = world5.store.statsId as string;
+  const saved = await saveReview(stats5, { productId: world5.courseProduct, email: eve, reference: "cs_test_I4808Photo0001", pi: "pi_I4808Photo0001", rating: 5, text: "Synthetic words", name: "Eve" }, world5.store);
+  is("a review saved", saved.state, "created");
+  const photo = await reviewPhotoPath("keeper@example.com", "image/jpeg");
+  is("with a photo", typeof (await setReviewPhoto(stats5, world5.courseProduct, reviewId(stats5, world5.courseProduct, eve), { path: photo, width: 1200, height: 900 })), "object");
+  redis.pipeline = (async (c: Commands) => {
+    if (doors(c) || c.some((x) => x[0] === "SADD" && String(x[1]).startsWith("nl:erase:files:"))) throw new Error("synthetic redis failure");
+    return real(c);
+  }) as typeof redis.pipeline;
+  const photoFirst = await erasePerson(world5.store, eve, { kind: "person" }).then((r) => (r.ok ? "ok" : "incomplete"), () => "threw");
+  redis.pipeline = real;
+  is("photo: said as incomplete", photoFirst, "incomplete");
+  is("photo: the repeat finishes", (await erasePerson(world5.store, eve, { kind: "person" })).ok, true);
+  is("photo: and the photo is queued for deletion", ((await real([["ZRANGEBYSCORE", "nl:tasks:doors", "-inf", "+inf"]]))[0] as string[]).includes(photo), true);
   done();
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

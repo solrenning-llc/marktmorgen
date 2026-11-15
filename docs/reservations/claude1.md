@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 562 [QZ1], units 1 and 2 ("Where should I start?" at /start-here, on the blog's index and at the end of each article: three questions answered in the browser) | claude/modest-faraday-f25rzq-start-here-blog | `app/start-here/page.tsx`, `components/start-quiz.tsx`, `lib/start-quiz.ts`, `lib/start-quiz-facts.ts`, `tests/start-quiz.test.ts`, `tests/e2e/start-quiz.mjs` (also one line of `app/sitemap.ts`, one section of `app/blog/page.tsx` and of `app/blog/[slug]/page.tsx` and the review line of `lib/accessibility-statement.ts`, not reserved: other open PRs touch them) | 12/11/2026 12h53 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

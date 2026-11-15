@@ -11,9 +11,10 @@
  */
 import { NextRequest } from "next/server";
 import { GET as back } from "@/app/api/billing/return/route";
-import { createBillingCheckout, ownedBy } from "@/lib/billing";
+import { HELD_SLACK_DAYS, createBillingCheckout, ownedBy } from "@/lib/billing";
+import { applyListedAssistant } from "@/lib/assistant-billing";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
-import { claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, type Store } from "@/lib/store";
+import { RELEASE_QUARANTINE_DAYS, claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -46,8 +47,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return json({ error: { message: `no stand-in for ${method} ${url.pathname}` } }, 404);
 }) as typeof fetch;
 
-function subscription(id: string, customer: string, meta: Record<string, string>): Reply {
-  const start = now - 5 * 86_400;
+function subscription(id: string, customer: string, meta: Record<string, string>, made = now - 5 * 86_400): Reply {
+  const start = made;
   const end = now + 25 * 86_400;
   return {
     id, object: "subscription", status: "active", customer, created: start,
@@ -75,7 +76,8 @@ async function twoStores(n: number, meta: (a: Store) => Record<string, string>) 
   const sub = `sub_SessOwnA${n}0000`;
   const session = `cs_test_SessOwnA${n}000000000`;
   const a0 = (await storeForEmail(owner))!;
-  subscriptions.set(sub, subscription(sub, customer, meta(a0)));
+  // Bought before A let the address go, so at least the quarantine before B could take it.
+  subscriptions.set(sub, subscription(sub, customer, meta(a0), now - 40 * 86_400));
   checkout(session, customer, sub, meta(a0));
   await setSubscription(owner, { customerId: customer, subscriptionId: sub, active: true, tier: "creator", cycle: "month", period: paidPeriod() });
   const renamed = await renameHandle(owner, `${x}new`);
@@ -106,7 +108,36 @@ async function main() {
     is("B is told nothing was finished", billingOf(answer), "unfinished");
     is("B is not written A's subscription: one payment, one store", [b.subscriptionId, b.subscriptionActive, b.stripeCustomerId], [null, false, null]);
     is("A still keeps it", (await storeForId(s.a.sid))?.subscriptionId, s.sub);
+    // The same hole reached the Store assistant (coordinator, 15 November 2026): with A's customer written on B, the
+    // daily sync's applyListedAssistant gave B the add-on A bought under the address. B never takes A's customer now.
+    const addOn = { ...subscription("sub_SessOwnAddOn10000", s.customer, { addon: "assistant", assistant_for: s.x }), status: "active" };
+    is("A's assistant add-on, met in the list under the address B holds, is not B's", await applyListedAssistant(addOn), false);
+    is("B has no add-on", (await storeForId(s.b.sid))?.assistantPlan ?? null, null);
   }
+
+  part("The same earlier session when A's subscription does not read: B is written nothing, not even A's customer");
+  {
+    const s = await twoStores(4, () => ({ store: `sessownx4` }));
+    const kept = subscriptions.get(s.sub)!;
+    subscriptions.delete(s.sub);
+    const answer = await s.comeTo(s.b);
+    subscriptions.set(s.sub, kept);
+    const b = (await storeForId(s.b.sid))!;
+    is("told it is not confirmed", billingOf(answer), "unconfirmed");
+    is("nothing written on B", [b.subscriptionId, b.subscriptionActive, b.stripeCustomerId], [null, false, null]);
+  }
+
+  part("The daily sync's ownedBy, an earlier subscription with no store id: B's by the owner's email only if made while B held the address");
+  {
+    const s = await twoStores(5, () => ({ store: `sessownx5` }));
+    const record = { ...subscriptions.get(s.sub)!, customer: { id: s.customer, email: s.owner } };
+    is("A's, made before B took the address: not B's", ownedBy(s.b, record), false);
+    is("one made since B holds it: B's by the email, as before", ownedBy(s.b, { ...record, created: Math.floor(Date.now() / 1000) }), true);
+    is("still A's, by its own customer", ownedBy(s.a, record), true);
+  }
+
+  part("The slack for clock skew stays inside the quarantine, so it can never reach another store's subscription");
+  is("HELD_SLACK_DAYS < RELEASE_QUARANTINE_DAYS", HELD_SLACK_DAYS < RELEASE_QUARANTINE_DAYS, true);
 
   part("A session that carries its store's id is taken only on that store");
   {
@@ -123,7 +154,7 @@ async function main() {
     await ensureStatsId(owner);
     const store = (await storeForEmail(owner))!;
     const sub = "sub_SessOwnFirst0000";
-    subscriptions.set(sub, subscription(sub, "cus_SessOwnFirst000", { store: "sessownfirst" }));
+    subscriptions.set(sub, subscription(sub, "cus_SessOwnFirst000", { store: "sessownfirst" }, Math.floor(Date.now() / 1000) + 1));
     checkout("cs_test_SessOwnFirst0000000000", "cus_SessOwnFirst000", sub, { store: "sessownfirst" });
     const cookie = `${SESSION_COOKIE}=${await openSession(owner)}`;
     const answer = await back(new NextRequest(`https://marktmorgen.test/api/billing/return?session_id=cs_test_SessOwnFirst0000000000&store=${store.sid}`, { headers: { cookie } }));

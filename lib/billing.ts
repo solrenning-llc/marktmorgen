@@ -415,6 +415,9 @@ export async function createBillingCheckout(
     "subscription_data[metadata][store]": store.handle,
     "subscription_data[metadata][tier]": tier,
     "metadata[store]": store.handle,
+    // The store itself, not only the address it had (STORE_SID_META): an address let go can be another store's later.
+    "subscription_data[metadata][store_sid]": store.sid,
+    "metadata[store_sid]": store.sid,
     // The store rides along, so an owner of several comes back to the one
     // they were paying for, and the way back writes it down on that one.
     success_url: `${origin}/api/billing/return?session_id={CHECKOUT_SESSION_ID}${store.sid ? `&store=${store.sid}` : ""}`,
@@ -497,6 +500,11 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /**
+   * Matched by the store's current address alone and its subscription could not be read (missing or Stripe did not
+   * answer): not known to be this store's (holdsSince), so the way back writes nothing and says it is not confirmed.
+   */
+  unverified?: true;
 };
 
 /**
@@ -508,11 +516,47 @@ export type StartedSubscription = {
  * counts first, as it always did: one it let go of and took back stays on the
  * released list, and a first plan's checkout makes a new customer.
  */
-function sessionOwnedBy(store: Store, named: unknown, customerId: string): boolean {
-  if (typeof named !== "string" || !named) return false;
-  if (named === store.handle) return true;
-  if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId;
-  return (store.previousHandles ?? []).includes(named);
+function sessionOwnedBy(store: Store, named: unknown, customerId: string, sid?: unknown): "sid" | "handle" | "other" | null {
+  // A checkout that carries its store's id is that store's, and no other's, whatever address it names.
+  if (sid !== undefined) return typeof sid === "string" && sid !== "" && sid === store.sid ? "sid" : null;
+  if (typeof named !== "string" || !named) return null;
+  // Its current address only from when the store holds it (holdsSince, checked against the subscription once read):
+  // another store may have let it go and been paid under it before (money HIGH, 15 November 2026).
+  if (named === store.handle) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId ? "other" : "handle";
+  if ((store.releasedHandles ?? []).includes(named)) return Boolean(store.stripeCustomerId) && customerId === store.stripeCustomerId ? "other" : null;
+  return (store.previousHandles ?? []).includes(named) ? "other" : null;
+}
+
+/**
+ * The metadata field a plan checkout and its subscription carry with the store's own id (since 15 November 2026):
+ * an address is a name another store can hold later, an id is the store.
+ */
+export const STORE_SID_META = "store_sid";
+
+/**
+ * Since when, in seconds, this store holds its current address: made with it, or renamed to it. A subscription
+ * matched by that address alone and made before then was another store's under the same address (a let-go one taken
+ * after its quarantine), never this one's. A date that does not read is unknown: never "always held".
+ */
+export function holdsSince(store: Pick<Store, "createdAt" | "renamedAt">): number {
+  const made = Date.parse(store.createdAt);
+  if (!Number.isFinite(made)) return Number.POSITIVE_INFINITY;
+  const renamed = store.renamedAt ? Date.parse(store.renamedAt) : Number.NEGATIVE_INFINITY;
+  if (Number.isNaN(renamed)) return Number.POSITIVE_INFINITY;
+  return Math.floor(Math.max(made, renamed) / 1000);
+}
+
+/**
+ * Days a subscription may predate holdsSince and still count (clock skew between Stripe and us). Safe while shorter
+ * than RELEASE_QUARANTINE_DAYS: another store's subscription under an address was made before it let the address go,
+ * and nobody can take it before the quarantine ends, so it predates holdsSince by at least the quarantine.
+ */
+export const HELD_SLACK_DAYS = 7;
+
+/** Whether a subscription matched only by the store's current address was made while the store held it. */
+function madeWhileHeld(store: Store, subscription: Record<string, unknown> | null): boolean {
+  const created = subscription?.created;
+  return typeof created === "number" && Number.isSafeInteger(created) && created >= holdsSince(store) - HELD_SLACK_DAYS * 86_400;
 }
 
 /**
@@ -543,7 +587,8 @@ export async function readStartedSubscription(
   if (session.mode !== "subscription") return null;
   const metadata = session.metadata as Record<string, string> | null;
   const customerId = typeof session.customer === "string" ? session.customer : "";
-  if (!metadata || !sessionOwnedBy(store, metadata.store, customerId)) return null;
+  const via = metadata ? sessionOwnedBy(store, metadata.store, customerId, ownField(metadata, STORE_SID_META)) : null;
+  if (!metadata || !via) return null;
 
   const subscriptionId =
     typeof session.subscription === "string" ? session.subscription : "";
@@ -558,6 +603,7 @@ export async function readStartedSubscription(
     if(!subscription||subscription.id!==subscriptionId||subscription.customer!==customerId)return null;
     const meta=subscription.metadata as Record<string,unknown>|null;
     if(meta?.store!==metadata.store||meta?.funding_grant!==metadata.funding_grant||meta?.funding_review!==metadata.funding_review)return null;
+    if(via==="handle"&&!madeWhileHeld(store,subscription))return null;
     state=stateOf(subscription);
     if(state.state!=="active"||state.changePending)return null;
     const items=subscription.items as {data?:{quantity?:unknown;price?:Record<string,unknown>}[]}|undefined;
@@ -582,8 +628,12 @@ export async function readStartedSubscription(
     try{subscription=await subscriptionRecord(subscriptionId);}
     catch(error){
       console.error("reading the subscription failed",error);
-      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
+      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,...(via==="handle"?{unverified:true as const}:{})};
     }
+    // Matched by the current address alone: a subscription that does not read is not known to be this store's, and
+    // one made before the store held the address was another store's under it (money HIGH, 15 November 2026).
+    if(via==="handle"&&!subscription)return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,unverified:true};
+    if(via==="handle"&&!madeWhileHeld(store,subscription))return null;
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
     state=subscription?stateOf(subscription):{state:"inactive",reason:"missing"};
@@ -1547,6 +1597,9 @@ export function customerOf(subscription: Record<string, unknown>): { id: string;
  */
 export function ownedBy(store: Store, subscription: Record<string, unknown>): boolean {
   const meta = subscription.metadata as Record<string, string> | null | undefined;
+  // Carrying a store's own id (STORE_SID_META), it is that store's and no other's (money HIGH, 15 November 2026).
+  const sid = meta ? ownField(meta, STORE_SID_META) : undefined;
+  if (sid !== undefined) return typeof sid === "string" && sid !== "" && sid === store.sid;
   const named = meta?.store ?? "";
   const customer = customerOf(subscription);
   const sameCustomer = Boolean(store.stripeCustomerId) && customer.id === store.stripeCustomerId;
@@ -1564,6 +1617,9 @@ export function ownedBy(store: Store, subscription: Record<string, unknown>): bo
   const handles = new Set([store.handle, ...store.previousHandles]);
   if (!handles.has(named)) return false;
   if (sameCustomer) return true;
+  // By the email alone under its current address, only a subscription made while the store held it: the same owner's
+  // other store may have been paid under that address before letting it go.
+  if (named === store.handle && !store.previousHandles.includes(named) && !madeWhileHeld(store, subscription)) return false;
   return customer.email !== "" && normaliseEmail(customer.email) === normaliseEmail(store.email);
 }
 

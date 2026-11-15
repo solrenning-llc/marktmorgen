@@ -33,6 +33,9 @@ export async function GET(request: NextRequest) {
     }
     const started = await readStartedSubscription(store, sessionId);
     if (!started) return away(origin, studio("billing=unfinished"));
+    // Not known to be this store's yet (lib/billing.ts, unverified): nothing is written, not even its customer, which
+    // may be another store's; the daily job settles it.
+    if (started.unverified) return away(origin, studio("billing=unconfirmed"));
 
     // A session keeps naming the subscription it made after that one has
     // ended and another has taken its place (an old tab, the back button).

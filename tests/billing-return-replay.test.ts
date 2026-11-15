@@ -63,12 +63,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 }) as typeof fetch;
 
 /** A legacy (unfunded) Marktmorgen plan subscription, as Stripe sends one in full. */
-function subscription(id: string, customer: string, handle: string, status: "active" | "canceled"): Reply {
+/** `made`: when Stripe made it (by default its period's start); never before the store that bought it (lib/billing.ts holdsSince). */
+function subscription(id: string, customer: string, handle: string, status: "active" | "canceled", made?: number): Reply {
   const live = status === "active";
   const start = live ? now - 5 * 86_400 : now - 90 * 86_400;
   const end = live ? now + 25 * 86_400 : now - 60 * 86_400;
   return {
-    id, object: "subscription", status, customer, created: start,
+    id, object: "subscription", status, customer, created: made ?? start,
     ...(live ? {} : { ended_at: end, canceled_at: end }),
     metadata: { store: handle }, cancel_at: null, cancel_at_period_end: false, pending_update: null,
     items: { object: "list", has_more: false, data: [{
@@ -176,7 +177,8 @@ async function main() {
   {
     const s = await shop(7);
     const GONE = "sub_R18GonePlan07";
-    subscriptions.set(GONE, subscription(GONE, s.customer, s.handle, "canceled"));
+    // Its first plan, bought (and ended) since the store was made today.
+    subscriptions.set(GONE, subscription(GONE, s.customer, s.handle, "canceled", now));
     checkout("cs_test_R18GoneSessn0007", s.customer, GONE, s.handle);
     const answer = await s.come("cs_test_R18GoneSessn0007");
     const after = await s.read();

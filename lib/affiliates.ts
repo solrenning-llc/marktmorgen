@@ -3790,11 +3790,13 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
       if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) continue;
       found.push({ invoice, meta });
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    if (!listed.has_more) {
       complete = true;
       break;
     }
+    // More pages, but no id to go on from: not read in full, so not complete (rule 24).
+    const last = rows[rows.length - 1];
+    if (!last || typeof last.id !== "string") break;
     after = last.id;
   }
   const ids = [...new Set(found.map((f) => f.meta.product).filter((id): id is string => Boolean(id)))];

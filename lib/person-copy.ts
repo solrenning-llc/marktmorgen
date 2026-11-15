@@ -128,6 +128,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/customer-voice.ts": { how: "marks", what: "The store's monthly summary of what its customers said, which may quote your review words without your name; your reviews themselves are in this copy" },
   "lib/buyer-library.ts": { how: "copied", what: "The note that you bought from or joined the store, for your library" },
   "lib/erasure-index.ts": { how: "marks", what: "Links the store emailed you that still work (stop, waitlist, review, free-product and sign-up links)" },
+  "lib/pdf-stamp.ts": { how: "elsewhere", what: "The stamped copies of the PDFs and EPUBs you bought, each with your address on it: downloading them again gives you them" },
   // What the erasure keeps on purpose (lib/person-data.ts, "kept"): still theirs to see.
   "lib/affiliates.ts": { how: "marks", what: "Commissions an affiliate earned on your purchases, which name the sale and not you" },
   "lib/community-dm.ts": { how: "marks", what: "Another member's choice not to get your messages, which is theirs and names nobody's address" },

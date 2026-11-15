@@ -197,26 +197,43 @@ export async function openRuns(flowId: string, emails: string[], nowSeconds = Ma
 }
 
 /**
+ * One claim, written only over a run that still exists (Claude 7 on #4489): a
+ * person erased (or a run aged out) between reading the queue and claiming the
+ * step is not recreated as a bare {open} hash, so nothing is attempted for them
+ * and no later settle finds an attempt to write over. `email` is the field only
+ * openRuns and noteRuns write, so its presence is the proof the run is live.
+ * KEYS: run, log. ARGV: the "open" value, the "attempted" event, keep seconds.
+ * Answers 1 claimed, 0 an attempt already open, 2 no live run.
+ */
+const CLAIM_IF_RUN = `-- marktmorgen:flow-claim-if-run:v1
+if redis.call('HEXISTS', KEYS[1], 'email') == 0 then return 2 end
+if redis.call('HSETNX', KEYS[1], 'open', ARGV[1]) == 0 then return 0 end
+redis.call('RPUSH', KEYS[2], ARGV[2])
+if redis.call('TTL', KEYS[2]) < 0 then redis.call('EXPIRE', KEYS[2], ARGV[3]) end
+return 1`;
+
+/**
  * Claims an attempt of step `index` for each person, before anything is done
  * for them. `claimed` may go ahead; `open` already had an attempt with no
- * known outcome and must not be tried again. Throws when the claim cannot be
- * confirmed, so nothing is attempted on an unknown claim.
+ * known outcome and must not be tried again; `gone` has no live run any more
+ * (erased or aged out) and must not be attempted at all. Throws when the claim
+ * cannot be confirmed, so nothing is attempted on an unknown claim.
  */
-export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ claimed: string[]; open: string[] }> {
-  if (!emails.length) return { claimed: [], open: [] };
+export async function claimAttempts(flowId: string, emails: string[], index: number, stepId: string, kind: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ claimed: string[]; open: string[]; gone: string[] }> {
+  if (!emails.length) return { claimed: [], open: [], gone: [] };
+  const attempted = event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" });
   let reply: unknown;
   try {
-    reply = await redisPipeline(emails.map((email) => ["HSETNX", runKey(flowId, personOf(email)), "open", `${index}:${stepId}`]));
+    reply = await redisPipeline(emails.map((email) => ["EVAL", CLAIM_IF_RUN, 2, runKey(flowId, personOf(email)), logKey(flowId, personOf(email)), `${index}:${stepId}`, attempted, RUN_KEEP_SECONDS]));
   } catch {
     throw new FlowRunUnavailable("A workflow step's attempt could not be recorded");
   }
-  if (!replied(reply, emails.length) || reply.some((r) => r !== 0 && r !== 1)) throw new FlowRunUnavailable("A workflow step's attempt could not be confirmed");
-  const claimed = emails.filter((_, i) => reply[i] === 1);
-  const open = emails.filter((_, i) => reply[i] === 0);
-  if (claimed.length) {
-    await redisPipeline(claimed.map((email) => ["RPUSH", logKey(flowId, personOf(email)), event({ at: nowSeconds, step: index, stepId, kind, state: "attempted", note: "" })])).catch(() => {});
-  }
-  return { claimed, open };
+  if (!replied(reply, emails.length) || reply.some((r) => r !== 0 && r !== 1 && r !== 2)) throw new FlowRunUnavailable("A workflow step's attempt could not be confirmed");
+  return {
+    claimed: emails.filter((_, i) => reply[i] === 1),
+    open: emails.filter((_, i) => reply[i] === 0),
+    gone: emails.filter((_, i) => reply[i] === 2),
+  };
 }
 
 /**
@@ -279,7 +296,9 @@ export type Settled = {
  * KEYS: run, log, index, held. ARGV: the claimed "open" value, mode ("u"
  * uncertain, "c" clear), log op ("push" or "lrem"), the event, email, status,
  * step, note, now, person, held member, keep seconds, terminal ("1" or "0").
- * Every key it writes keeps an expiry. Answers 1 written, 0 gone.
+ * The run and its history keep an expiry; the index and held sets are trimmed
+ * and erased by their own owners (writeIndex, forgetWorkflowPerson). Answers 1
+ * written, 0 gone.
  */
 const SETTLE_IF_OPEN = `-- marktmorgen:flow-settle-if-open:v1
 if redis.call('HGET', KEYS[1], 'open') ~= ARGV[1] then return 0 end

@@ -1319,7 +1319,7 @@ export async function sendDueSteps(
 
     // The attempt is written down before anything is done (lib/flow-runs.ts).
     // Whoever already has an attempt open here is held, never tried again.
-    let claim: { claimed: string[]; open: string[] };
+    let claim: { claimed: string[]; open: string[]; gone: string[] };
     try {
       claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
     } catch {
@@ -1329,6 +1329,8 @@ export async function sendDueSteps(
       counts.dropped += out.size;
       return;
     }
+    // Erased or aged out since the queue was read: nothing is attempted and nothing is written back for them.
+    counts.dropped += claim.gone.length;
     if (claim.open.length) {
       await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
     }

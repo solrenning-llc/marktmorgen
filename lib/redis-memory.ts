@@ -129,6 +129,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/flow-runs.ts CLAIM_IF_RUN: a workflow step's attempt claimed only over a run that still exists.
+        if (key.startsWith("-- marktmorgen:flow-claim-if-run:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, run, log, open, ev, keep] = args;
+          // Not this.run(["HEXISTS", ...]) first on a missing run: the stand-in's hash read makes an empty one, and Redis does not.
+          this.live(run);
+          if (!this.data.has(run) || this.run(["HEXISTS", run, "email"]) !== 1) return 2;
+          if (this.run(["HSETNX", run, "open", open]) !== 1) return 0;
+          this.run(["RPUSH", log, ev]);
+          if (Number(this.run(["TTL", log])) < 0) this.run(["EXPIRE", log, keep]);
+          return 1;
+        }
         // lib/flow-runs.ts SETTLE_IF_OPEN: a workflow step's outcome written only while its run still holds the claimed attempt.
         if (key.startsWith("-- marktmorgen:flow-settle-if-open:v1\n") && args[0] === "4" && args.length === 18) {
           const [, run, log, index, held, open, mode, logOp, ev, email, status, step, note, now, person, member, keep, terminal] = args;

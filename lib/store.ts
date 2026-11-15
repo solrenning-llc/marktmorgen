@@ -1081,7 +1081,8 @@ function parseStore(raw: unknown): Store | null {
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
       inbox: parseInboxSetting(value.inbox),
-      sale: parseSale(value.sale),
+      // The currency's smallest charge goes with the sale and the fair price, set again on every read (DISC-S-1).
+      sale: { ...parseSale(value.sale), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       pastSales: parsePastSales(value.pastSales),
       tiers: parseTiers(value.tiers),
       // Stores written before communities existed simply have none.
@@ -1116,7 +1117,7 @@ function parseStore(raw: unknown): Store | null {
       assistantPlan: parseAssistantPlan(value.assistantPlan),
       nextOffer: parseNextOffer(value.nextOffer),
       assistReminder: parseAssistReminder(value.assistReminder),
-      fair: parseFair(value.fair),
+      fair: { ...parseFair(value.fair), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       cartDeal: parseCartDeal(value.cartDeal),
       // Stores written before a store could pick its language speak English.
       language: parseLanguage(value.language),
@@ -1904,11 +1905,18 @@ export async function createStore(
   const sid = newListId();
   const ref = extraRef(sid);
   const account = await accountKey(email);
-  const [, count] = await redisPipeline([
+  const added = repliesFor(await redisPipeline([
     ["SADD", account, sid],
     ["SCARD", account],
-  ]);
-  if (Number(count) + 1 > MAX_STORES_PER_ACCOUNT) {
+  ]), 2);
+  // Read exactly (unknown is never zero): each store brings free allowances the company pays for, so a count in
+  // another shape (NaN before, which passed the ceiling) takes the new id back out and makes no store.
+  const count = added ? countOf(added[1]) : null;
+  if (count === null) {
+    await redisPipeline([["SREM", account, sid]]);
+    throw new UnknownReplyError("an account's count of stores");
+  }
+  if (count + 1 > MAX_STORES_PER_ACCOUNT) {
     await redisPipeline([["SREM", account, sid]]);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
@@ -4627,6 +4635,27 @@ export async function setSitePages(email: string, raw: unknown): Promise<Section
   const result = await withStore<SectionsResult>(email, async (store, save) => {
     const sitePages = parseSitePages(raw);
     if (sitePages.some((page) => page.target && !hasProduct(store, page.target))) return { ok: false, reason: "unknown" };
+    return { ok: true, store: await save({ ...store, sitePages, statsId: store.statsId ?? newListId() }) };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+export type SitePagesChange = { ok: true; store: Store } | { ok: false; reason: string };
+
+/**
+ * Changes the store's own pages from the list as it is under the store's write lock, never from a copy a request
+ * read before it: `change` gets the latest pages and the store, and answers the whole new list, or a reason to
+ * refuse that is passed back as it is (nothing is written). The new list is held to the same rules as setSitePages.
+ */
+export async function changeSitePages(
+  email: string,
+  change: (pages: SitePage[], store: Store) => SitePage[] | { refuse: string },
+): Promise<SitePagesChange> {
+  const result = await withStore<SitePagesChange>(email, async (store, save) => {
+    const next = change(store.sitePages, store);
+    if (!Array.isArray(next)) return { ok: false, reason: next.refuse };
+    const sitePages = parseSitePages(next);
+    if (sitePages.length !== next.length || sitePages.some((page) => page.target && !hasProduct(store, page.target))) return { ok: false, reason: "unknown" };
     return { ok: true, store: await save({ ...store, sitePages, statsId: store.statsId ?? newListId() }) };
   });
   return result ?? { ok: false, reason: "none" };

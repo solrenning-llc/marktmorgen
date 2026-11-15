@@ -600,7 +600,40 @@ async function readOpened(order: string): Promise<Opened | null> {
   }
 }
 
-type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown } };
+type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown }; links?: unknown };
+
+/**
+ * Whether an Orders v2 answer is this order's own (#4444, Codex X8): its `id` is the order asked about, and every
+ * capture in it whose `up` link names an order names this one. Amount, currency and payee alone do not tell two orders
+ * of the same price apart, so an answer holding another order's completed record would otherwise confirm this one with
+ * that order's capture and buyer. An `up` link that is there but does not name exactly this order's Orders v2 path
+ * (no href, not text, another URL) is not proof either. An answer that is not this order's says nothing about it: its
+ * outcome is unknown.
+ */
+function ownAnswer(done: Record<string, unknown>, order: string): boolean {
+  if (done.id !== order) return false;
+  const units = Array.isArray(done.purchase_units) ? (done.purchase_units as { payments?: { captures?: unknown } }[]) : [];
+  for (const unit of units) {
+    const captures = Array.isArray(unit?.payments?.captures) ? (unit.payments.captures as CaptureRow[]) : [];
+    for (const capture of captures) {
+      const links = Array.isArray(capture?.links) ? (capture.links as { rel?: unknown; href?: unknown }[]) : [];
+      for (const link of links) {
+        if (link?.rel !== "up") continue;
+        // A capture with no links at all is allowed by the API's shape; an `up` link present is declared evidence, so
+        // it must be text whose path is exactly this order's (Codex g's MÉDIO on #4453). Anything else is unknown.
+        if (typeof link.href !== "string") return false;
+        let path: string;
+        try {
+          path = new URL(link.href).pathname;
+        } catch {
+          return false;
+        }
+        if (path !== `/v2/checkout/orders/${order}`) return false;
+      }
+    }
+  }
+  return true;
+}
 
 /** The capture an order holds, and who paid it, as PayPal describes an order (checkout_orders_v2, order). */
 function captureIn(done: Record<string, unknown>): { capture: CaptureRow | null; payee: unknown; email: string } {
@@ -728,6 +761,13 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
       return { ok: false, reason: "error" };
     }
   }
+  // An answer that is not this order's own (another order's record) proves nothing about this one: unknown, kept in
+  // pending for the sweep to ask PayPal again, nothing written down or handed over (#4444, rule 30).
+  if (!ownAnswer(done, order)) {
+    console.error("a PayPal answer named another order", order);
+    await watchLater(order, opened);
+    return { ok: false, reason: "error" };
+  }
   const { capture, payee, email } = captureIn(done);
   // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
   if (!capture) {
@@ -853,6 +893,19 @@ export function nextLook(paidAt: number, now: number): number | null {
 }
 
 /**
+ * How long after the watch's days an order whose capture PayPal answered in a status the watch does not read waits
+ * before it is asked again (Claude 2 on #4536). It is never dropped as "not refunded", but asking every hour until its
+ * paid record ends (400 days) would be about 9,600 reads an order: PAYPAL_WATCH_LOOKS in tests/plan-cost-registry.ts,
+ * held by tests/paypal-watch-unknown-looks.test.ts.
+ */
+export const LATE_LOOK_SECONDS = 30 * 86_400;
+
+/** When an order whose capture's answer the watch could not read is asked again: the watch's own schedule while it lasts, then every LATE_LOOK_SECONDS. */
+export function unknownLook(paidAt: number, now: number): number {
+  return nextLook(paidAt, now) ?? now + LATE_LOOK_SECONDS;
+}
+
+/**
  * The orders one sweep of a store reads from each of its two lists (pending payments, orders due a refund look): one
  * ZRANGEBYSCORE of each list a run, never more orders than this (NOT_A_COST.PAYPAL_WATCH_BATCH and PAYPAL_WATCH_RANGES
  * in tests/plan-cost-registry.ts, held by tests/paypal-watch-cost.test.ts). The rest wait for the next run.
@@ -879,6 +932,12 @@ const CAPTURE_KEEPS: ReadonlySet<string> = new Set(["COMPLETED", "PENDING", "PAR
 /** Of those, the statuses of a payment taken: written down and handed over when the order is still waiting on it. */
 const CAPTURE_PAID: ReadonlySet<string> = new Set(["COMPLETED", "PARTIALLY_REFUNDED"]);
 const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED", "FAILED", "DECLINED"]);
+/**
+ * The capture statuses the refund watch reads (#4536, merged with C4-13): the ones that keep the purchase
+ * (CAPTURE_KEEPS) and the ones that take it back (CAPTURE_TAKEN_BACK). Any other is unknown to it: looked at again
+ * (unknownLook), never read as either and never dropped as "not refunded".
+ */
+const CAPTURE_STATUSES_READ: ReadonlySet<string> = new Set([...CAPTURE_KEEPS, ...CAPTURE_TAKEN_BACK]);
 /** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
 const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
 /** How many due paid orders one run of the refund watch looks at for a store: PAYPAL_WATCH_BATCH, the one batch (PAYPAL_REFUND_WATCH and NOT_A_COST.REFUND_WATCH_BATCH in tests/plan-cost-registry.ts). */
@@ -938,6 +997,9 @@ export async function watchPayPal(
       await later();
       continue;
     }
+    // Another order's record (completed, voided or anything else) says nothing about this one: kept and asked again
+    // (#4444, rule 30). A kept order is let go when its record ends (30 days).
+    if (!ownAnswer(done, order)) continue;
     const { capture, payee, email } = captureIn(done);
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again
@@ -997,10 +1059,18 @@ export async function watchPayPal(
     let status = "";
     try {
       const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
-      // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
+      // Without PayPal's own status it is not known whether it was refunded: asked again (unknownLook), never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
-      if (typeof capture.status !== "string" || !capture.status) {
-        await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
+      // Nor is a reply about another capture this one's (rule 30), nor a status that is not PayPal's word for money
+      // standing or taken back (14 November 2026): every other one is unknown, looked at again (unknownLook) and never
+      // dropped from the watch as "not refunded", even past the watch's days.
+      if (typeof capture.status !== "string" || !capture.status || capture.id !== paid.capture || !CAPTURE_STATUSES_READ.has(capture.status)) {
+        if (typeof capture.status === "string" && capture.id === paid.capture && !CAPTURE_STATUSES_READ.has(capture.status)) {
+          console.error("a PayPal capture is in a status the refund watch does not read; looked at again later", order, capture.status);
+        }
+        // On the watch's own schedule while its days last, then every LATE_LOOK_SECONDS: never every hour for the
+        // paid record's 400 days (Claude 2 on #4536).
+        await redisPipeline([["ZADD", watchKey(statsId), String(unknownLook(paid.at, now)), order]]);
         continue;
       }
       status = capture.status;

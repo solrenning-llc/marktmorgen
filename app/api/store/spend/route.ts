@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   if (!guarded.ok) return guarded.response;
   const { body } = guarded;
   try {
-    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.store.email);
+    const store = guarded.store.statsId ? guarded.store : await ensureStatsId(guarded.ref);
     if (!store?.statsId) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (body.action === "add") {
       // `op`: the add's operation id from the studio (components/ad-spend-editor.tsx), so a retried add stays one line.

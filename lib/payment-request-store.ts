@@ -35,6 +35,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -235,6 +236,31 @@ export async function readRequest(id: string): Promise<PaymentRequest | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * The daily reminder's read of one of this store's requests, exactly (rule 24):
+ * null only when the record is confirmed absent (GET answered nil) or is
+ * another store's. Any other reply (none, a number, an object, a record that
+ * does not parse) throws UnknownReplyError, so the reminder is put off a day
+ * rather than dropped for good; the record's own expiry (KEEP_DAYS) is what
+ * at last makes it a real nil. Same one GET as readRequest.
+ */
+export async function reminderRequestOf(store: Pick<Store, "sid">, id: string): Promise<PaymentRequest | null> {
+  if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a payment request's record");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a payment request's record");
+  let request: PaymentRequest | null;
+  try {
+    request = parseRequest(JSON.parse(raw));
+  } catch {
+    request = null;
+  }
+  if (!request) throw new UnknownReplyError("a payment request's record");
+  return store.sid && request.sid === store.sid ? request : null;
 }
 
 /** One of this store's requests, or null: a request is only ever found under the store that made it. */

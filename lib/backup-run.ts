@@ -343,9 +343,10 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
   return result;
 }
 
-/** Every object of the backup's own, read whole within backupListPages pages; null when the listing is longer. */
+/** Every object of the backup's own, read whole within backupListPages pages, each once; null when the listing is longer. */
 async function listAll(review: BackupCostReview, store: BackupBucket): Promise<BackupListedObject[] | null> {
   const all: BackupListedObject[] = [];
+  const seen = new Set<string>();
   let next: string | null = null;
   for (let page = 0; page < backupListPages(review); page += 1) {
     if (timeLeft() <= 0) throw new RangeError("cutoff");
@@ -353,6 +354,9 @@ async function listAll(review: BackupCostReview, store: BackupBucket): Promise<B
     if (!answer || !Array.isArray(answer.objects) || (answer.next !== null && typeof answer.next !== "string")) throw new Error("Invalid listing");
     for (const object of answer.objects) {
       if (!object || typeof object.id !== "string" || !Number.isSafeInteger(object.writtenAt) || !Number.isSafeInteger(object.bytes) || object.bytes < 0) throw new Error("Invalid listing");
+      // Named again on a later page: counted twice, it would make room by deleting copies the ceiling never asked for.
+      if (seen.has(object.id)) throw new Error("Invalid listing");
+      seen.add(object.id);
       all.push(object);
     }
     if (answer.next === null) return all;

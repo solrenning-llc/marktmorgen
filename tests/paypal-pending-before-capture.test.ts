@@ -491,13 +491,22 @@ async function main(): Promise<void> {
   is("PayPal is asked to take the payment fewer times than the return was opened", (captures.get(replayed) ?? 0) < replays, true);
   is("exactly the bound's number of times, however often the return is opened", captures.get(replayed), tries);
   is("the watch's commands, every return together, stay inside what the registry prices for the order", watchCommands <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
-  is("each return sent the watch once, those past the bound asking PayPal nothing", watches, replays);
+  is("only the returns inside the bound sent the watch; those past it wrote nothing and asked PayPal nothing", watches, tries);
   is("a return past the bound still lands on the thanks page and writes the record nothing more", pastBound.every((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=") && shown.records === 0), true);
   is("the order still stands in pending, never written down as paid", [await pending(replayed), Boolean(await readPaid(replayed))], [true, false]);
   orders.set(replayed, completed(replayed, "49.00", "replayed@example.com"));
   is("PayPal completes it: the next sweep writes it down and hands it over, once, never captured again", [await sweep(), await state(replayed, "replayed@example.com")], [1, {
     paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: tries,
   }]);
+
+  part("Rule 24: an order's count of capture tries that does not read as a number");
+  captureWith = "take";
+  const miscounted = await open("miscounted@example.com");
+  await redis.pipeline([["SET", `nl:ppsell:try:${miscounted}`, "three"]]);
+  const miscountedBack = await returnFor(store, miscounted, "none");
+  is("PayPal is not asked to take anything, as for a record that does not read", captures.get(miscounted) ?? 0, 0);
+  is("and the buyer is never shown the thanks page as paid", miscountedBack.location.includes("/thanks?paypal="), false);
+  is("nothing written: not watched, not in pending", [watchSent.length, await pending(miscounted), Boolean(await readPaid(miscounted))], [0, false, false]);
 
   done();
 }

@@ -124,6 +124,8 @@ const PAID_KEPT_SECONDS = 400 * 86_400;
 
 const orderKey = (order: string) => `nl:ppsell:o:${order}`;
 const paidKey = (order: string) => `nl:ppsell:paid:${order}`;
+/** How many times an order's capture was asked for (watchFirst), until thirty days from its opening. */
+const tryKey = (order: string) => `nl:ppsell:try:${order}`;
 const watchKey = (statsId: string) => `nl:ppsell:watch:${statsId}`;
 /** Orders whose payment PayPal holds as pending, scored by when they were taken. */
 const pendingKey = (statsId: string) => `nl:ppsell:pending:${statsId}`;
@@ -602,8 +604,24 @@ export async function paypalOrdersOf(statsId: string | null, productIds: string[
  */
 async function readOpened(order: string): Promise<Opened | null | "unknown"> {
   const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
-  if (!read) return "unknown";
-  const raw = read[0];
+  return read ? openedFrom(read[0]) : "unknown";
+}
+
+/**
+ * An order's record and how many times its capture was asked for (watchFirst), in one round trip, for captureOrder:
+ * a return past CAPTURE_TRIES_PER_ORDER then writes nothing at all. The count read exactly (rule 24): none is 0, a
+ * string of digits is that number; anything else, or no answer, is "unknown", never 0.
+ */
+async function readOpenedAndTries(order: string): Promise<{ opened: Opened | null | "unknown"; tries: number | "unknown" }> {
+  const read = repliesFor(await redisPipeline([["GET", orderKey(order)], ["GET", tryKey(order)]]), 2);
+  if (!read) return { opened: "unknown", tries: "unknown" };
+  const count = read[1];
+  const tries = count === null ? 0 : typeof count === "string" && /^[0-9]{1,15}$/.test(count) ? Number(count) : "unknown";
+  return { opened: openedFrom(read[0]), tries };
+}
+
+/** An order's record as GET answers it: null when there is none, "unknown" for anything that does not read as one. */
+function openedFrom(raw: unknown): Opened | null | "unknown" {
   if (raw === null) return null;
   if (typeof raw !== "string") return "unknown";
   try {
@@ -695,6 +713,16 @@ const CAPTURE_ROOM_SECONDS = 86_400;
 const KEPT_AFTER_LATE_ANSWER_SECONDS = 6 * 3_600;
 
 /**
+ * The most times PayPal is asked to take one order's payment (Claude 7's cost MEDIUM on #3411): the return route is held
+ * per connection and store, not per order, so a buyer reloading it, or a script replaying it from many addresses, would
+ * otherwise send the watch and a capture each time, for as long as the record lives. Three is the first return and two
+ * reloads; PayPal's own request id makes each a repeat of the first, so a later one never takes more. A return past
+ * them asks PayPal nothing and writes nothing more: the order stays in pending for the sweep (watchPayPal), which reads
+ * PayPal's order and writes down a payment it completes. Priced in tests/plan-cost-registry.ts (PAYPAL_CAPTURE_WATCH).
+ */
+export const CAPTURE_TRIES_PER_ORDER = 3;
+
+/**
  * When an order's record ends at the latest, in unix seconds: thirty days from its opening (`opened.at`, whole seconds,
  * as openOrder writes it). A record without such a time is not known (rule 24): it throws, and PayPal is not asked.
  */
@@ -734,24 +762,36 @@ async function watchLater(order: string, opened: Opened): Promise<void> {
  * take anything, so a buyer is never charged for an order the sweep could not find. "gone" when the EXPIREAT answers 0
  * (the record ended since it was read: PayPal is not asked, and the sweep lets go of the entry), "added" when this call
  * put it in pending (1), "there" when it was there already (0: watched by an earlier try, whose outcome this one does
- * not know). Two commands more an attempted capture (Upstash: COMMAND in tests/plan-cost-registry.ts), inside the
- * order's own work (ORDER_COMPUTE, line "orders"); the record's thirty days are in tests/store-data-registry.ts
- * (nl:ppsell:o:).
+ * not know). In the same step the order's tries are counted (Claude 7's cost MEDIUM on #3411): the INCR of its own
+ * count, read exactly (a whole number from 1), and that count's EXPIREAT to the same ceiling (1, since the INCR just
+ * wrote it); past CAPTURE_TRIES_PER_ORDER the answer is "spent" and PayPal is not asked. Four commands an attempted
+ * capture (Upstash: COMMAND in tests/plan-cost-registry.ts), CAPTURE_TRIES_PER_ORDER of them inside the order's own work
+ * (ORDER_COMPUTE, line "orders"; PAYPAL_CAPTURE_WATCH); the record's thirty days are in tests/store-data-registry.ts
+ * (nl:ppsell:o:), and the count's (nl:ppsell:try:).
  */
-async function watchFirst(order: string, opened: Opened): Promise<"added" | "there" | "gone"> {
+async function watchFirst(order: string, opened: Opened): Promise<"added" | "there" | "gone" | "spent"> {
   const until = keptUntil(opened);
   if (Math.floor(Date.now() / 1000) + CAPTURE_ROOM_SECONDS >= until) return "gone";
   const replies = repliesFor(
     await redisPipeline([
       ["ZADD", pendingKey(opened.s), String(Math.floor(Date.now() / 1000)), order],
       ["EXPIREAT", orderKey(order), String(until)],
+      ["INCR", tryKey(order)],
+      ["EXPIREAT", tryKey(order), String(until)],
     ]),
-    2,
+    4,
   );
-  if (!replies || (replies[0] !== 0 && replies[0] !== 1) || (replies[1] !== 0 && replies[1] !== 1)) {
+  if (
+    !replies ||
+    (replies[0] !== 0 && replies[0] !== 1) ||
+    (replies[1] !== 0 && replies[1] !== 1) ||
+    typeof replies[2] !== "number" || !Number.isSafeInteger(replies[2]) || replies[2] < 1 ||
+    replies[3] !== 1
+  ) {
     throw new UnknownReplyError("putting a PayPal order in pending before its capture");
   }
   if (replies[1] === 0) return "gone";
+  if (replies[2] > CAPTURE_TRIES_PER_ORDER) return "spent";
   return replies[0] === 1 ? "added" : "there";
 }
 
@@ -803,13 +843,20 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   if (!ORDER_ID.test(order) || !store.statsId || !isRedisConfigured()) return { ok: false, reason: "unknown" };
   const already = await readPaid(order);
   if (already) return { ok: true, paid: already, fresh: false };
-  const opened = await readOpened(order);
-  if (!opened || opened === "unknown" || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
+  const { opened, tries } = await readOpenedAndTries(order);
+  if (!opened || opened === "unknown" || opened.s !== store.statsId || tries === "unknown") return { ok: false, reason: "unknown" };
+  // Asked for as many times as an order may be (CAPTURE_TRIES_PER_ORDER; Claude 7's cost MEDIUM on #3411): PayPal is not
+  // asked again and nothing is written. The order was put in pending by those tries, so the sweep writes down a payment
+  // PayPal completes, or lets go of the order when its record ends; the thanks page says where it stands.
+  if (tries >= CAPTURE_TRIES_PER_ORDER) return { ok: false, reason: "pending" };
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown,
   // and a record ended since it was read, or less than a day from thirty past its opening, is no order to take a payment
   // for).
   const watched = await watchFirst(order, opened);
   if (watched === "gone") return { ok: false, reason: "unknown" };
+  // Two returns at once can both read a count under the bound; the count this step took decides (the INCR), so PayPal
+  // is never asked more than CAPTURE_TRIES_PER_ORDER times an order, as above.
+  if (watched === "spent") return { ok: false, reason: "pending" };
   const watchedHere = watched === "added";
   let done: Record<string, unknown>;
   try {

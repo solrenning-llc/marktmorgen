@@ -887,11 +887,16 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
 /**
  * What a PayPal return sends before PayPal is asked to take the payment (lib/paypal-sales.ts, watchFirst; #3404), in
  * Redis commands, held to what the real return route sends by tests/paypal-pending-before-capture.test.ts: the ZADD
- * that puts the order in pending and the EXPIREAT that renews its record until thirty days from its opening, in one
- * pipeline, each time a capture is asked for (none past those thirty days). Inside that order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the
- * record keeps for those thirty days is in tests/store-data-registry.ts (nl:ppsell:o:).
+ * that puts the order in pending, the EXPIREAT that renews its record until thirty days from its opening, and the INCR
+ * and EXPIREAT of the order's count of tries (Claude 7's cost MEDIUM on #3411), in one pipeline, each time a capture is
+ * asked for (none past those thirty days). PayPal is asked at most capturesAskedPerOrderAtMost times an order
+ * (CAPTURE_TRIES_PER_ORDER, lib/paypal-sales.ts): the route is held per connection and store, not per order, and a return
+ * past them asks PayPal nothing and writes nothing (the count is read with the order's record, one GET more in the same
+ * round trip, so it reads what a return of an order that no longer exists reads). Those tries together are inside a tenth of that
+ * order's own work (line orders, ORDER_COMPUTE), besides settle's script; what the record and the count keep for those
+ * thirty days is in tests/store-data-registry.ts (nl:ppsell:o:, nl:ppsell:try:).
  */
-export const PAYPAL_CAPTURE_WATCH = { commandsPerCaptureAsked: 2 } as const;
+export const PAYPAL_CAPTURE_WATCH = { commandsPerCaptureAsked: 4, capturesAskedPerOrderAtMost: 3 } as const;
 /**
  * The PayPal refund watch (lib/paypal-sales.ts, watchPayPal; C4-13 and its pre-review), run by the five-minute job's
  * sweep of a store with PayPal, which until now had no line here:

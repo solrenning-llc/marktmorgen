@@ -174,7 +174,8 @@ async function main(): Promise<void> {
   is("the book marks it sent by PayPal, so the studio draws no Undo", (await readBook(store)).payouts.map((p) => p.sent), [true]);
   await payWithPayPal(store);
   is("after that Undo, the next payday sends nothing more", created.length, 1);
-  const hand = await addPayout(store, { aff: (await readBook(store))!.payouts[0].aff, cents: 500, currency: "USD", date: "2026-11-15", reference: "PayPal 7XK2 sent by hand" });
+  const [sentByPayPal] = (await readBook(store)).payouts;
+  const hand = await addPayout(store, { aff: sentByPayPal.aff, cents: 500, currency: sentByPayPal.currency, date: "2026-11-15", reference: "PayPal 7XK2 sent by hand" });
   is("a payout written by hand is not marked sent", (await readBook(store)).payouts.find((p) => p.id === hand?.id)?.sent, false);
   is("a payout written by hand is still taken off by Undo", await removePayout(store, hand?.id ?? ""), true);
 

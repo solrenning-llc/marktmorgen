@@ -107,7 +107,11 @@ async function main(): Promise<void> {
   is("nor for the same cart, in any order, in a week", await remindAbandoned(await load(), left("cs_test_cartleft000002", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "skip");
   // Claude 7 privacy hunt: deleting the person (lib/person-erasure.ts) forgets their cart's once-a-week mark, a hash of
   // their address with what was in the cart, as it forgets each product's; before, the cart's stayed its whole week.
-  is("deleting the person forgets the cart's once-a-week mark too", await forgetRecoveryPerson((await load()).statsId, [a, b], "ana@example.com"), 1);
+  // Codex G / Codex L, confirmed by Claude 2 (15 November 2026): the carts note is read even when the store lists no
+  // product today (every one removed after the reminder), so an erasure still finds and deletes the cart's mark.
+  is("a store with no products still erases the indexed cart mark", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 1);
+  is("no marks or cart note remain for a second erasure", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 0);
+  is("nor with the products named", await forgetRecoveryPerson((await load()).statsId, [a, b], "ana@example.com"), 0);
   is("so the mark no longer holds back that cart", await remindAbandoned(await load(), left("cs_test_cartleft000005", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
   // The note naming a cart's mark outlives the mark: its expiry is set just before the mark is taken.
   const keysOf = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "MATCH", pattern]]))[0] as [string, string[]])[1];

@@ -1081,7 +1081,8 @@ function parseStore(raw: unknown): Store | null {
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
       inbox: parseInboxSetting(value.inbox),
-      sale: parseSale(value.sale),
+      // The currency's smallest charge goes with the sale and the fair price, set again on every read (DISC-S-1).
+      sale: { ...parseSale(value.sale), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       pastSales: parsePastSales(value.pastSales),
       tiers: parseTiers(value.tiers),
       // Stores written before communities existed simply have none.
@@ -1116,7 +1117,7 @@ function parseStore(raw: unknown): Store | null {
       assistantPlan: parseAssistantPlan(value.assistantPlan),
       nextOffer: parseNextOffer(value.nextOffer),
       assistReminder: parseAssistReminder(value.assistReminder),
-      fair: parseFair(value.fair),
+      fair: { ...parseFair(value.fair), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       cartDeal: parseCartDeal(value.cartDeal),
       // Stores written before a store could pick its language speak English.
       language: parseLanguage(value.language),

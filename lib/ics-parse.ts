@@ -212,9 +212,23 @@ function offsetAt(zone: Zone, ms: number): number {
   for (const rule of zone.rules) {
     const starts: number[] = [];
     if (rule.rule && rule.rule.FREQ === "YEARLY") {
-      for (let y = Math.max(rule.y, year - 1); y <= year + 1; y += 1) {
+      // A rule that has ended (UNTIL, in UTC in a time zone; a date or a local
+      // time read with the offset it changes from) no longer moves the clock:
+      // an Outlook zone carries the US rules before 2007 next to today's.
+      const end = rule.rule.UNTIL ? readStamp(rule.rule.UNTIL, {}) : null;
+      const until = !end ? Infinity
+        : end.date ? Date.UTC(end.y, end.mo - 1, end.d + 1) - 1
+        : Date.UTC(end.y, end.mo - 1, end.d, 0, end.minute, end.second) - (end.utc ? 0 : rule.from * 60000);
+      // A rule that ended before these years still gives its last change, so
+      // its offset stays in force after it (RFC 5545 3.6.5): a zone whose
+      // rules have all ended (summer time abolished) never reads as UTC.
+      const untilYear = Number.isFinite(until) ? new Date(until).getUTCFullYear() : Infinity;
+      const first = untilYear < year - 1 ? untilYear - 1 : year - 1;
+      const last = Math.min(year + 1, untilYear + 1);
+      for (let y = Math.max(rule.y, first); y <= last; y += 1) {
         const date = yearlyDate(rule.rule, y, rule.mo, rule.d);
-        if (date) starts.push(Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000);
+        const at = date ? Date.UTC(y, date.mo - 1, date.d, 0, rule.minute) - rule.from * 60000 : NaN;
+        if (date && at <= until) starts.push(at);
       }
     } else {
       starts.push(Date.UTC(rule.y, rule.mo - 1, rule.d, 0, rule.minute) - rule.from * 60000);
@@ -257,14 +271,25 @@ function yearlyDate(rule: Record<string, string>, y: number, mo: number, d: numb
 /**
  * The instant at which a clock in `zone` shows this date and time. A time in
  * the hour skipped when clocks go forward lands just after the jump, which is
- * what a calendar app shows for it too.
+ * what a calendar app shows for it too; a time the clock shows twice when it
+ * goes back is the first of the two (RFC 5545 3.3.5). Both read the same way
+ * east and west of UTC: the offsets in force a day before and a day after are
+ * each tried, and the one the zone really has at its instant wins.
  */
 function localToUtc(zone: Zone, y: number, mo: number, d: number, minute: number, second = 0): number {
   const naive = Date.UTC(y, mo - 1, d, 0, minute, second);
   if (zone.kind === "utc") return naive;
-  let guess = naive - offsetAt(zone, naive) * 60000;
-  guess = naive - offsetAt(zone, guess) * 60000;
-  return guess;
+  const before = offsetAt(zone, naive - 86_400_000);
+  const after = offsetAt(zone, naive + 86_400_000);
+  const early = naive - before * 60000;
+  const late = naive - after * 60000;
+  const earlyHolds = offsetAt(zone, early) === before;
+  const lateHolds = offsetAt(zone, late) === after;
+  if (earlyHolds && lateHolds) return Math.min(early, late);
+  if (lateHolds) return late;
+  // Held by neither: the skipped hour, read with the offset before the jump,
+  // which lands just after it.
+  return early;
 }
 
 // ---- Dates ------------------------------------------------------------------

@@ -12,7 +12,8 @@
  *
  * Counted by the day, for 35 days, with the last refusal kept as Stripe
  * worded it. The creator is emailed the first time Stripe refuses on a day,
- * and at most once a day: only for a refusal Stripe made on purpose (an
+ * and at most once a day (a send whose result is unknown counts as the day's
+ * one): only for a refusal Stripe made on purpose (an
  * answer from 400 to 499 other than "too many requests"), not for Stripe
  * being slow or down, which is Stripe's to fix and passes by itself. It goes
  * whether or not the numbers emails are stopped, because it is about the
@@ -25,7 +26,7 @@
 import { type Store } from "@/lib/store";
 import { StripeError } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { claimMark, claimValue } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -57,11 +58,12 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
     ["EXPIRE", key(store.statsId), KEEP_SECONDS],
   ]);
   if (!isRefusal(error) || !isSenderConfigured()) return "counted";
-  // The day's email is ours only on an exact claim (lib/claim-mark.ts), and a failed send lets go of our own
-  // mark only: one that ran out and was taken by another run stays.
+  // The day's email is ours only on an exact claim (lib/claim-mark.ts).
   const mark = claimValue(now);
   if ((await claimMark(mailKey(store.statsId, day), 2 * 86_400, mark)) !== "ours") return "counted";
   const sent = await sendEmail({ meter: { by: "store", store: store, kind: "email" },
+    // One key per store and day: a repeat inside the provider's window is answered without sending again.
+    idempotencyKey: `checkout-trouble:${store.statsId}:${day}`,
     from: NIMBUS_FROM,
     to: store.email,
     subject: `${store.name}: Stripe would not open a checkout`.slice(0, 180),
@@ -80,8 +82,9 @@ export async function noteCheckoutTrouble(store: Store, error: unknown, now = Da
       "This email comes at most once a day, and only on a day Stripe refuses.",
     ].join("\n"),
   }).catch(() => false);
-  // Not sent: the day's claim is let go, so the next refusal tries again.
-  if (!sent) await releaseMark(mailKey(store.statsId, day), mark);
+  // sendEmail's false is refused or unknown alike (the provider may have taken it and the reply been lost), and no
+  // refusal it reports is certain, so the day's mark is kept either way (rule 24): the email goes at most once a
+  // day, never twice, and the store's emails are not taken from again. The next day's refusal tells the creator.
   return sent ? "emailed" : "counted";
 }
 

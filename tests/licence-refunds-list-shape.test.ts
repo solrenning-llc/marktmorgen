@@ -66,6 +66,9 @@ const refund = (id: string, intent: string, created: number): Row => ({
   id,
   object: "refund",
   status: "succeeded",
+  // The refund's own amount, as Stripe lists it: the whole charge in one refund, so main's part-refund lookup
+  // (chargeRefundsSettled, lib/licence-keys.ts) is not needed for it.
+  amount: 2900,
   created,
   payment_intent: intent,
   charge: { id: `ch_${intent.slice(3)}`, object: "charge", amount: 2900, amount_refunded: 2900, refunded: true },

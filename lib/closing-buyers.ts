@@ -34,7 +34,7 @@ import { NIMBUS_FROM, sendBatch, type BatchMessage } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
 import { readPayPalSales } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
@@ -361,7 +361,11 @@ export async function tellRefundShort(store: Store, short: { email: string; amou
   return out;
 }
 
-/** Once the store is closed or runs on: the addresses told are let go. */
+/**
+ * Once the store is closed or runs on: the addresses told are let go. Done only on one reply whose count is 0 or 1;
+ * any other answer throws UnknownReplyError before the closing goes on, so the next round deletes again (#4755).
+ */
 export async function forgetTold(folder: string): Promise<void> {
-  await redisPipeline([["DEL", toldKey(folder)]]);
+  const count = countOf(repliesFor(await redisPipeline([["DEL", toldKey(folder)]]), 1)?.[0]);
+  if (count === null || count > 1) throw new UnknownReplyError("whether a closing's told addresses were let go");
 }

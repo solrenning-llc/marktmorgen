@@ -34,6 +34,9 @@ export const FIXED_COST_SOURCE_OBSERVATIONS = {
   * a free allowance. One first visit to a free tool page measured at most 621,508 bytes and 31 requests (lib/free-tools.ts
   * TOOL_PAGE_COST), about US$0.000155. No ceiling bounds the number of visits: the only one possible is a Vercel account
   * spend limit, the owner's setting, so the monthly ceiling stays unknown and this line keeps the company review failing. */
+ // publicSiteDelivery prices only CDN delivery (bytes and requests) of public pages. It does NOT cover the
+ // function calls, CPU, memory or Redis of the force-dynamic status page (247 [SP4], priced only in
+ // tests/status-page.test.ts): that page's work has no line here yet, an open gap for the sp4 branch, never zero.
  publicSiteDelivery: { currency: "USD", perGbMinor: 15, perMillionRequestsMinor: 200, perToolVisitBytesMost: 621508, perToolVisitRequestsMost: 31, checked: "2026-11-15", source: "https://vercel.com/docs/pricing/networking", approvedCeiling: false },
  delaware: { currency: "USD", annualMinor: 40000, source: "https://corp.delaware.gov/alt-entitytaxinstructions/" },
  californiaTax: { currency: "USD", annualMinor: 80000, source: "https://www.ftb.ca.gov/file/business/types/limited-liability-company/index.html" },

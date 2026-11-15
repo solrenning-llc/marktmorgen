@@ -214,6 +214,9 @@ async function main(): Promise<void> {
       { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 1, currency: "usd" },
       { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 12000, currency: "eur" },
       { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" },
+      // Paid in part from a credit balance: a total other than the price, or a card amount other than what was due.
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: 1, amount_due: 1, amount_paid: 1, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: 12000, amount_due: 2000, amount_paid: 1, currency: "usd" },
     ]) {
       // Each case from a clean slate: a failing one must not leave its pending record to the next.
       redis.run(["DEL", pending]);
@@ -230,6 +233,21 @@ async function main(): Promise<void> {
     paidReceipt = undefined;
     stripe = [];
     bunny.length = 0;
+  }
+
+  part("Paid in part from the creator's credit balance (review of f76db511a): the card paid what was left, and it counts");
+  try {
+    stripe = [];
+    bunny.length = 0;
+    redis.run(["DEL", pending]);
+    paidReceipt = { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: CHARGED, amount_due: CHARGED - 2000, amount_paid: CHARGED - 2000, currency: "usd" };
+    const partCredit = await requestAutoCaptions(store, PATH, "en", ["es"]);
+    is("asked for, once, with no invoice voided", [partCredit.ok, bunny.filter((b) => b.path.includes("/transcribe")).length, stripePaths().filter((p) => p.endsWith("/void")).length], [true, 1, 0]);
+  } finally {
+    paidReceipt = undefined;
+    stripe = [];
+    bunny.length = 0;
+    redis.run(["DEL", pending]);
   }
 
   part("Charged first, then asked for");

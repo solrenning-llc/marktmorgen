@@ -48,6 +48,19 @@
 export const DISPUTE_TAKES: ReadonlySet<string> = new Set(["needs_response", "under_review", "lost", "prevented"]);
 
 /**
+ * The dispute states that never change again: won and warning_closed gave the
+ * money back or never took it, lost and prevented took it for good, and the
+ * legacy charge_refunded went back through a refund. Every other state, an
+ * inquiry (warning_*) that can still become a chargeback, a dispute the bank
+ * holds (needs_response, under_review) that can still be won, or one that does
+ * not read, can still change, so what it takes is never kept as if final: the
+ * affiliate book's refund mark (lib/affiliates.ts, AFFILIATE_REFUND_MARK) keeps
+ * only what was refunded or taken in a settled state. Statuses: stripe-node
+ * v22.6.0 Dispute.Status.
+ */
+export const DISPUTE_SETTLED: ReadonlySet<string> = new Set(["won", "lost", "prevented", "warning_closed", "charge_refunded"]);
+
+/**
  * Whether a dispute's own balance transactions took money from the creator
  * and did not put it back. Stripe's `prevented` is either a `resolution`,
  * "resolved (refunded) before it could become a chargeback", or a `block`,

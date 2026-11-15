@@ -80,7 +80,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ object: "list", has_more: false, data: url.searchParams.get("email") === "member@example.com" ? [{ id: "cus_pages000001" }] : [] });
   }
   if (method === "GET" && path === "/subscriptions") {
-    const sub = { id: "sub_pages000001", status: "active", metadata: { store: "listpages", product: "prod000001" }, items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] } };
+    const sub = { id: "sub_pages000001", status: "active", discounts: [], metadata: { store: "listpages", product: "prod000001" }, items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] } };
     return json({ object: "list", has_more: false, data: url.searchParams.get("customer") === "cus_pages000001" ? [sub] : [] });
   }
   if (method === "POST" && path.startsWith("/subscriptions/")) {

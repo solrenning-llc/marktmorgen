@@ -1088,7 +1088,12 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
   // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
   // longer than asked, else unknown and thrown, never "no PayPal sales".
-  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  // A sale's record expires by design PAID_KEPT_SECONDS after it was written, in the same step that listed it, but the
+  // list keeps its member until the next sale trims it. A member older than that is past keeping, not unknown, so the
+  // range starts inside the keeping window (a minute in, for the clock) and a missing record there stays partial
+  // (Claude 1 cloud and Claude 2 I on #4001).
+  const kept = Math.floor(Date.now() / 1000) - PAID_KEPT_SECONDS + 60;
+  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since, kept)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
   if (!orders || orders.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
   const listed = orders.slice(0, limit);
   // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale

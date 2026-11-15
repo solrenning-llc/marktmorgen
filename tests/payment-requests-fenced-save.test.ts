@@ -26,6 +26,9 @@ import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscri
 import { readDraft } from "@/lib/payment-request-rules";
 import { cancelRequest, changeRequest, createRequest, deleteRequest, forgetRequestsPerson, readRequest } from "@/lib/payment-request-store";
 import { releaseLock, takeLock } from "@/lib/redis-lock";
+import { NextRequest } from "next/server";
+import { POST } from "@/app/api/store/payment-requests/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -175,6 +178,24 @@ async function main(): Promise<void> {
     const said = await outcome(() => deleteRequest(store, id, now + 2_000));
     await releaseLock(held);
     is("told the lock is busy, never deleted", said, "lock lost");
+    is("the record is still stored", records().length, 1);
+  }
+
+  part("The studio route answers a delete held up by the lock as busy (503), never a server error");
+  {
+    const store = await freshStore();
+    const id = await make(store, now);
+    await cancelRequest(store, id, now + 1_000);
+    const held = await takeLock(`nl:payreq:w:${id}`, 10, 0);
+    const token = await openSession("payreq-fenced@example.com");
+    const response = await POST(new NextRequest("https://local.example/api/store/payment-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://local.example", Host: "local.example", Cookie: `${SESSION_COOKIE}=${token}` },
+      body: JSON.stringify({ action: "delete", id }),
+    }));
+    await releaseLock(held);
+    const answer = (await response.json()) as { ok: boolean; error: string };
+    is("503 busy, not ok", [response.status, answer.ok, answer.error], [503, false, "busy"]);
     is("the record is still stored", records().length, 1);
   }
 

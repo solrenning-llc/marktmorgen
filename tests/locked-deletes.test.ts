@@ -76,6 +76,7 @@ import { POST as rcommunity_events } from "@/app/api/store/community/events/rout
 import { POST as rcommunity_manage } from "@/app/api/store/community/manage/route";
 import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
+import { POST as rcompanies } from "@/app/api/store/companies/route";
 import { POST as rfile_attach } from "@/app/api/store/file/attach/route";
 import { POST as rcreator_card } from "@/app/api/store/creator-card/route";
 import { POST as rforms } from "@/app/api/store/forms/route";
@@ -131,6 +132,7 @@ const ROUTES: Record<string, Handler> = {
   "community/events": rcommunity_events as Handler,
   "community/manage": rcommunity_manage as Handler,
   "course": rcourse as Handler,
+  "companies": rcompanies as Handler,
   "crm": rcrm as Handler,
   "file/attach": rfile_attach as Handler,
   "creator-card": rcreator_card as Handler,
@@ -364,6 +366,7 @@ async function main(): Promise<void> {
     ["person", { action: "unnote", person: "x", id: "x" }],
     ["person-tasks", { action: "remove", person: "x", id: "x" }],
     ["crm", { action: "undeal", id: "x" }],
+    ["companies", { action: "remove", id: "x" }],
     ["crm", { action: "unpipeline", id: "x", moveTo: "x" }],
     ["notes", { action: "remove", id: "x" }],
     ["spend", { action: "remove", id: "x" }],
@@ -438,6 +441,7 @@ async function main(): Promise<void> {
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
     "creator-card": ["act:page:remove"],
+    "companies": ["act:orders:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
     "discount": ["need:settings"],
@@ -560,6 +564,7 @@ async function main(): Promise<void> {
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },
     "creator-card": { remove: "act:page", save: "open:edits" },
+    "companies": { add: "open:adds", edit: "open:edits", link: "open:edits", remove: "act:orders", restore: "open:adds", unlink: "open:edits" },
     "crm": {
       deal: "open:edits", fields: "lockedFor", pipeline: "open:edits", stages: "open:edits", undeal: "act:orders", value: "open:edits",
       unpipeline: "act:orders",

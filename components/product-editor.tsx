@@ -57,6 +57,7 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handOverRefusal,
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
@@ -292,6 +293,8 @@ async function send(
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
     }
+    // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
+    if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -1953,8 +1956,9 @@ export function ProductEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; product?: unknown };
       if (data.ok) return null;
+      if (data.error === "last_delivery") return handOverRefusal(data.error, typeof data.product === "string" ? data.product : null);
       return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
     } catch {
       return MESSAGES.server_error;

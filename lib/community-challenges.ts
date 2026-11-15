@@ -35,6 +35,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { withLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
 import { newItemId } from "@/lib/community";
@@ -248,12 +249,10 @@ export function readChallengeInput(body: Record<string, unknown>, now = Date.now
  * answer of an unknown shape throws (rule 24): the route says "try again".
  */
 export async function withinChallengeWrites(id: string): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", writesKey(id), "0", "EX", 3_600, "NX"],
-    ["INCR", writesKey(id)],
-  ]), 2);
-  const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
-  if (count === null || count < 1) throw new UnknownReplyError("a count of changes to challenges");
+  // The INCR first, then the hour's expiry only when the key has none (lib/window-count.ts): a SET NX EX before the
+  // INCR let a key that expired between them come back with no expiry and lock the creator out (review of #3452).
+  const count = windowCountOf(await redisPipeline(windowCount(writesKey(id), 3_600)));
+  if (count === null) throw new UnknownReplyError("a count of changes to challenges");
   return count <= CHALLENGE_WRITES_PER_HOUR;
 }
 

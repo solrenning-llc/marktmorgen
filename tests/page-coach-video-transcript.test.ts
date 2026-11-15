@@ -16,6 +16,7 @@
 import { coachChecks, type CoachInput } from "@/lib/page-coach";
 import { TRANSCRIPT_HEADING, pageVideos } from "@/lib/page-video-check";
 import type { PageBlock, Video } from "@/lib/sales-page";
+import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
 
 const yt: Video = { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" };
@@ -45,5 +46,15 @@ const written = [videoBlock("vide0001", "See it made", yt), text("text0001", "Tr
 is("a written transcript right under it: done", [pageVideos(written)[0].transcript, check(written)?.done, check(written)?.label], ["written", true, "Every video has captions and a transcript"]);
 const apart = [videoBlock("vide0001", "See it made", yt), text("text0002", "Why", "Because."), text("text0001", TRANSCRIPT_HEADING, "Words.")];
 is("a transcript further down is not this video's", pageVideos(apart)[0].transcript, "none");
+
+part("The fix is offered in the editor, and only adds an empty block for the creator");
+const coachView = readFileSync("components/page-coach.tsx", "utf8");
+is("the coach draws \"Add a transcript under it\" for an open video check, calling onTranscript with the block", /check\.transcriptFor && onTranscript \?[\s\S]{0,200}onClick=\{\(\) => onTranscript\(check\.transcriptFor as string\)\}[\s\S]{0,120}Add a transcript under it/.test(coachView), true);
+const editor = readFileSync("components/page-editor.tsx", "utf8");
+is("the page editor hands it insertTranscriptAfter", /onTranscript=\{insertTranscriptAfter\}/.test(editor), true);
+const insert = editor.slice(editor.indexOf("function insertTranscriptAfter"), editor.indexOf("function insertTranscriptAfter") + 900);
+is("which puts an empty text block headed Transcript right under that block, and opens it", [/emptyBlock\("text"\)/.test(insert), /heading: TRANSCRIPT_HEADING/.test(insert), /copy\.splice\(at \+ 1, 0,/.test(insert), /setOpen\(block\.id\)/.test(insert)], [true, true, true, true]);
+is("and writes no words for the creator (no body set)", /body:/.test(insert), false);
+is("the focus goes to the new block's first field and the move is said (the pressed button goes away)", [/focusNew\.current = block\.id/.test(insert), /setSaid\(addedSaying\("Transcript"/.test(insert)], [true, true]);
 
 done();

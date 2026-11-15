@@ -23,6 +23,7 @@ import { PAGE_TEST_PAID_WORDS, PAGE_TEST_RUNNING_WORDS } from "@/lib/headline-te
 import { type BlockKind, type FactKey, type PageBlock, type RowElement, type SalesPage, picturesOf } from "@/lib/sales-page";
 import type { PageFacts } from "@/lib/page-facts";
 import { vagueLinkTitle } from "@/lib/link-purpose";
+import { pageVideos } from "@/lib/page-video-check";
 
 export type CoachCheck = {
   id: string;
@@ -35,6 +36,11 @@ export type CoachCheck = {
   weight: 1 | 2 | 3;
   /** The block that would answer it, when adding one is the fix. */
   add?: BlockKind;
+  /**
+   * The block under which an empty transcript would answer it (the video check, lib/page-video-check.ts): the first
+   * video with none. The editor adds the block opened for the creator to write; nothing is written for them.
+   */
+  transcriptFor?: string;
 };
 
 export type CoachInput = {
@@ -241,6 +247,28 @@ export function coachChecks(input: CoachInput): CoachCheck[] {
       why: "Some buyers use a screen reader, which reads the page aloud and says a picture's description in its place. In the box beside each picture, say what it shows; the picture at the top uses the product's own description.",
       done: bare === 0,
       weight: 2,
+    });
+  }
+  // Each video's captions and transcript (AX274 Part A item 6; WCAG 1.2.2, 1.2.8; lib/page-video-check.ts). Asked only
+  // when the version being edited shows a video; captions are asked in words (they live at YouTube, Vimeo or Loom,
+  // where nothing here can see them), the transcript is what the page holds and is counted only with words in it.
+  // Every block, empty ones included: an empty transcript under a video is seen as one (not as none), so a second is never offered.
+  const videos = pageVideos(input.page.blocks);
+  if (videos.length > 0) {
+    const none = videos.filter((v) => v.transcript === "none");
+    const empty = videos.filter((v) => v.transcript === "empty").length;
+    const missing = none.length
+      ? ` (${none.length === 1 ? "1 has no transcript" : `${none.length} have no transcript`})`
+      : empty
+        ? ` (${empty === 1 ? "1 transcript is empty" : `${empty} transcripts are empty`})`
+        : "";
+    checks.push({
+      id: "video_alternatives",
+      label: `Every video has captions and a transcript${missing}`,
+      why: "Some buyers cannot hear a video, and some cannot see it. Turn captions on where the video is kept (YouTube, Vimeo or Loom), and write what is said and shown in a transcript right under it.",
+      done: videos.every((v) => v.transcript === "written"),
+      weight: 2,
+      ...(none.length ? { transcriptFor: none[0].blockId } : {}),
     });
   }
   // A button's own words say what it does (274 [AX1] Part A item 6; WCAG 2.4.4, 2.4.9): a screen reader may list

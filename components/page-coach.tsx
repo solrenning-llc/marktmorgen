@@ -48,6 +48,7 @@ export function PageCoach({
   page,
   reach,
   onAdd,
+  onTranscript,
   onHeadline,
   onTest,
   onFit,
@@ -68,6 +69,11 @@ export function PageCoach({
   page: SalesPage;
   reach: { shares: Record<string, number>; visitors: number } | null;
   onAdd: (kind: BlockKind) => void;
+  /**
+   * Adds an empty transcript block right under this block (a video with none, lib/page-video-check.ts), opened for
+   * the creator to write: nothing is written for them, and nothing is saved until they save. Without it, no button.
+   */
+  onTranscript?: (afterBlockId: string) => void;
   onHeadline: (headline: string, sub: string) => void;
   onTest: (headline: string, sub: string) => void;
   onFit: (yes: string[], no: string[]) => void;
@@ -135,6 +141,12 @@ export function PageCoach({
         </span>
         {!check.done ? <span className="mt-0.5 block text-xs text-ink-soft">{check.why}</span> : null}
       </span>
+      {!check.done && check.transcriptFor && onTranscript ? (
+        <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => onTranscript(check.transcriptFor as string)}>
+          <Icon name="plus" size={14} />
+          Add a transcript under it
+        </button>
+      ) : null}
       {!check.done && check.add ? (
         <button type="button" className="btn btn-ghost btn-sm shrink-0" onClick={() => onAdd(check.add as BlockKind)}>
           <Icon name="plus" size={14} />

@@ -39,6 +39,8 @@ const FULL = parsePage({
     { id: "bene0001", kind: "benefits", heading: "", items: ["One", "Two", "Three"] },
     { id: "step0001", kind: "steps", heading: "", items: [{ title: "Pay" }, { title: "Watch" }, { title: "Cook" }] },
     { id: "pict0001", kind: "video", heading: "", video: { provider: "youtube", id: "dQw4w9WgXcQ", hash: "" }, caption: "" },
+    // A complete page gives its video a written transcript right under it (lib/page-video-check.ts, AX274 item 6).
+    { id: "tran0001", kind: "text", heading: "Transcript", body: "I hold the knife, curl my fingers and cut ten carrots in a minute." },
     { id: "fit00001", kind: "fit", heading: "", yesLabel: "", noLabel: "", yes: ["You cook daily", "You fear knives"], no: ["You are a chef"] },
     { id: "bio00001", kind: "bio", heading: "", body: "I teach cooking.", photo: true },
     { id: "faq00001", kind: "faq", heading: "", items: [{ q: "A?", a: "a" }, { q: "B?", a: "b" }, { q: "C?", a: "c" }] },

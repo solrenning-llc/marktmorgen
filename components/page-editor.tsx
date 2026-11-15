@@ -116,6 +116,7 @@ import {
   readVideo,
   videoAddress,
 } from "@/lib/sales-page";
+import { TRANSCRIPT_HEADING } from "@/lib/page-video-check";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import type { PageFacts } from "@/lib/page-facts";
@@ -814,6 +815,28 @@ export function PageEditor({
       return copy;
     });
     setOpen(block.id);
+  }
+
+  /**
+   * The coach's fix for a video with no transcript (lib/page-video-check.ts): an empty "Transcript" text block right
+   * under that block, opened for the creator to write. Nothing is written for them; it is saved only when they save.
+   */
+  function insertTranscriptAfter(blockId: string) {
+    const under = drafts.findIndex((d) => d.block.id === blockId);
+    if (drafts.length >= MAX_BLOCKS || under < 0) return;
+    const block: PageBlock = { ...(emptyBlock("text") as Extract<PageBlock, { kind: "text" }>), heading: TRANSCRIPT_HEADING };
+    setDrafts((all) => {
+      const at = all.findIndex((d) => d.block.id === blockId);
+      if (all.length >= MAX_BLOCKS || at < 0) return all;
+      const copy = [...all];
+      copy.splice(at + 1, 0, { block, video: "" });
+      return copy;
+    });
+    setOpen(block.id);
+    // The coach's button goes away once pressed: the focus goes to the new block's first field, never to the page,
+    // and the status region says where it went (WCAG 2.4.3, 4.1.3), as a block chosen from the gallery does.
+    focusNew.current = block.id;
+    setSaid(addedSaying("Transcript", under + 1));
   }
 
   /** The coach's headline, in the hero: the one there, or a new hero when the page has none. */
@@ -2319,6 +2342,7 @@ export function PageEditor({
               page={{ ...pageToSend(), blocks: drafts.map((d) => d.block), variant: other ? { id: "", blocks: other.map((d) => d.block) } : null }}
               reach={reach}
               onAdd={(kind) => (kind === "fit" || kind === "facts" || kind === "steps" ? insertNear(emptyBlock(kind), kind === "facts" ? ["hero"] : ["benefits", "inside"]) : add(kind))}
+              onTranscript={insertTranscriptAfter}
               onHeadline={putHeadline}
               onTest={(headline, sub) => {
                 if (other) return;

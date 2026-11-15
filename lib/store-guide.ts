@@ -18,6 +18,7 @@ import { createHash } from "node:crypto";
 import { answerModel, askModel, jsonIn } from "@/lib/ai";
 import { STORE_PAGE, answersOn, deliveryWords, keepAnswer, keptAnswer, priceWords, takeAnswer } from "@/lib/answers";
 import { MAX_FACTS_CHARS, questionKey, readQuestion } from "@/lib/answers-rules";
+import { heldToFacts } from "@/lib/store-assistant-rules";
 import type { Listing, Store } from "@/lib/store";
 
 const GUIDE_TIMEOUT_MS = 20_000;
@@ -93,7 +94,7 @@ export async function guideVisitor(input: { store: Store; products: Listing[]; g
   if (kept) {
     try {
       const value = JSON.parse(kept) as { picks?: unknown };
-      if (Array.isArray(value.picks)) return { ok: true, picks: cleanPicks(value.picks, products, "id") };
+      if (Array.isArray(value.picks)) return { ok: true, picks: cleanPicks(value.picks, products, "id", facts) };
     } catch {}
   }
 
@@ -112,13 +113,21 @@ export async function guideVisitor(input: { store: Store; products: Listing[]; g
   // Not the shape asked for: what happens when the "goal" was an attempt to
   // give the model orders. Nothing it said is shown, and nothing is filed.
   if (!json || !Array.isArray(json.picks)) return { ok: true, picks: [] };
-  const picks = cleanPicks(json.picks, products, "n");
+  const picks = cleanPicks(json.picks, products, "n", facts);
   await keepAnswer(store, hash, JSON.stringify({ picks }), picks.length ? null : { productId: STORE_PAGE, question: goal, now });
   return { ok: true, picks };
 }
 
-/** The model's picks, or kept ones, held to the catalog: real products, each once, with a plain reason. */
-function cleanPicks(raw: unknown[], products: Listing[], by: "n" | "id"): GuidePick[] {
+/**
+ * The model's picks, or kept ones, held to the catalog: real products, each
+ * once, with a plain reason. A reason that states a code, a discount, a
+ * deadline, a number, a link or an address the catalog does not (#4050) is
+ * dropped, as the store assistant's next offer drops its sentence
+ * (heldToFacts): the pick stays, shown without it, and is kept without it. A
+ * kept pick is held again when read, so a reason kept before the check is
+ * never shown either.
+ */
+function cleanPicks(raw: unknown[], products: Listing[], by: "n" | "id", facts: string): GuidePick[] {
   const out: GuidePick[] = [];
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
@@ -129,8 +138,9 @@ function cleanPicks(raw: unknown[], products: Listing[], by: "n" | "id"): GuideP
         : products.find((p) => p.id === value.id);
     if (!product || out.some((p) => p.id === product.id)) continue;
     const why = typeof value.why === "string" ? value.why.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_WHY) : "";
-    if (!why) continue;
-    out.push({ id: product.id, why });
+    // A pick the model gave no reason for is not a pick; one kept without its reason (dropped below) still is.
+    if (!why && by === "n") continue;
+    out.push({ id: product.id, why: why && heldToFacts(why, facts) ? why : "" });
     if (out.length >= GUIDE_PICKS) break;
   }
   return out;

@@ -482,11 +482,26 @@ function without(record: DropRecord, gone: (id: string) => boolean): DropRecord 
 }
 
 /**
- * The same notice to the confirmed recovery address too, which whoever holds
- * the sign-in inbox cannot read (MM-SA-19), read as two-step login reads it.
+ * The confirmed recovery address to tell of a passkey change, read as
+ * two-step login reads it, before the change is made. One that cannot be
+ * read (UnknownReplyError) throws, so the change is refused rather than told
+ * only to the sign-in inbox, which whoever asked may hold (MM-SA-19; Claude 6
+ * on #3154). Any other failure reads as none, as before.
  */
-async function tellRecovery(address: string, subject: string, line: string, own: { ifYou?: string; ifNotYou?: string[] } = {}): Promise<boolean> {
-  const backup = await recoveryAddressOf(address).catch(() => "");
+async function recoveryToTell(address: string): Promise<string> {
+  return recoveryAddressOf(address).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) throw error;
+    console.error("reading the recovery address to tell of a passkey change failed", error);
+    return "";
+  });
+}
+
+/**
+ * The same notice to the confirmed recovery address too (`backup`, read by
+ * recoveryToTell before the change), which whoever holds the sign-in inbox
+ * cannot read (MM-SA-19).
+ */
+async function tellRecovery(address: string, backup: string, subject: string, line: string, own: { ifYou?: string; ifNotYou?: string[] } = {}): Promise<boolean> {
   if (!backup || normaliseEmail(backup) === address) return false;
   return tell(address, subject, `This is the recovery address for the Marktmorgen account ${address}, so you get this notice too.\n\n${line}`, { ...own, to: backup });
 }
@@ -546,6 +561,7 @@ export async function scheduleRemoval(email: string, id: string, session: string
  */
 export async function scheduleRemovalSaid(email: string, id: string, session: string, appOn = false, now = Date.now()): Promise<{ at: number; loggedOut: boolean } | null> {
   const address = normaliseEmail(email);
+  const backup = await recoveryToTell(address);
   let gone: Due = NONE;
   const asked = await withPasskeys(address, async (held) => {
     gone = (await removeDue(held, address, now)) ?? NONE;
@@ -609,7 +625,7 @@ export async function scheduleRemovalSaid(email: string, id: string, session: st
     };
     const toAccount = await tell(address, subject, line, own);
     // Told to the confirmed recovery address too, as whoever asked may hold the sign-in inbox (MM-SA-19).
-    const toRecovery = await tellRecovery(address, subject, line, own);
+    const toRecovery = await tellRecovery(address, backup, subject, line, own);
     // Only the request whose notice this is changes the record after it, compared under the lock by its own token:
     // another request that took over a notice left too long never has its record undone or marked by this one.
     const settle = (next: (record: DropRecord) => DropRecord) =>
@@ -733,6 +749,7 @@ export async function pendingRemoval(email: string, now = Date.now()): Promise<P
  */
 export async function cancelRemoval(email: string, id: string, session: string | undefined, now = Date.now()): Promise<"kept" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
+  const backup = await recoveryToTell(address);
   let gone: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<"kept" | "unknown" | "second_step"> => {
     gone = (await removeDue(held, address, now)) ?? NONE;
@@ -747,7 +764,7 @@ export async function cancelRemoval(email: string, id: string, session: string |
     const line = `“Keep it” was pressed in the studio of your account (${address}), so a passkey that was set to be removed stays.`;
     await tell(address, "Your passkey stays on your Marktmorgen account", line);
     // The recovery address too (MM-SA-19): keeping a passkey is a change whoever holds the sign-in inbox should not hide.
-    await tellRecovery(address, "Your passkey stays on your Marktmorgen account", line);
+    await tellRecovery(address, backup, "Your passkey stays on your Marktmorgen account", line);
   }
   return answer;
 }
@@ -763,6 +780,7 @@ export async function cancelRemoval(email: string, id: string, session: string |
  */
 export async function removePasskey(email: string, id: string, keep?: string, now = Date.now()): Promise<"removed" | "removed-sessions-open" | "unknown" | "second_step"> {
   const address = normaliseEmail(email);
+  const backup = await recoveryToTell(address);
   let due: Due = NONE;
   const answer = await withPasskeys(address, async (held): Promise<Passkey | "unknown" | "second_step"> => {
     due = (await removeDue(held, address, now)) ?? NONE;
@@ -785,7 +803,7 @@ export async function removePasskey(email: string, id: string, keep?: string, no
   await tell(address, "A passkey was removed from your Marktmorgen account", line);
   // A passkey is one of the ways the owner calls off a login without two-step login (lib/two-step.ts),
   // so its removal is told to the confirmed recovery address too (MM-SA-19).
-  await tellRecovery(address, "A passkey was removed from your Marktmorgen account", line);
+  await tellRecovery(address, backup, "A passkey was removed from your Marktmorgen account", line);
   return ended ? "removed" : "removed-sessions-open";
 }
 

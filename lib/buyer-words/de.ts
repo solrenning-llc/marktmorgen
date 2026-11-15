@@ -151,6 +151,7 @@ export const de: BuyerWords = {
   unitSaving: (percent) => `Sie sparen ${percent}\u00a0%`,
   chooseOptionFor: (title) => `Wählen Sie eine Option für ${title}`,
   chooseOne: "Bitte wählen",
+  optionFromLink: (label) => `Sie sind wegen ${label} hier, deshalb ist diese Option unten gewählt. Sie können eine andere wählen.`,
   recommended: "Empfohlen",
   recommendedAfter: " (empfohlen)",
   howToPayFor: (title) => `Zahlungsweise für ${title}`,
@@ -190,14 +191,16 @@ export const de: BuyerWords = {
   whoAnswers: (store) =>
     `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
-  noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
-  noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
+  noPaymentsBody: "Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden.",
+  noPaymentsBodyOne: "Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden.",
+  noPaymentsWrite: (store) => `An ${store} schreiben`,
 
   notices: {
     soldout: { title: "Das ist gerade ausverkauft", body: "Das letzte Exemplar ging kurz vor Ihrem Klick auf Kaufen weg. Es wurde nichts berechnet." },
     busy: { title: "Jemand anderes kauft das gerade", body: "Es wurde nichts berechnet. Klicken Sie gleich noch einmal auf Kaufen." },
     slow: { title: "Viele Versuche in wenigen Minuten", body: "Es wurde nichts berechnet. Warten Sie ein paar Minuten und klicken Sie dann erneut auf Kaufen." },
     error: { title: "Die Zahlungsseite konnte nicht geöffnet werden", body: "Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal." },
+    nocharges: { title: "Dieser Shop kann gerade keine Kartenzahlungen annehmen", body: "Es wurde nichts berechnet. Ein neuer Versuch klappt erst, wenn der Shop das behoben hat." },
     paused: { title: "Dieser Shop nimmt gerade keine neuen Bestellungen an", body: "Es wurde nichts berechnet. Neue Bestellungen sind ab Anfang nächsten Monats wieder möglich, oder früher." },
     "paypal-declined": {
       title: "PayPal hat die Zahlung nicht angenommen",
@@ -287,6 +290,8 @@ export const de: BuyerWords = {
   openFullSize: "Dieses Bild in voller Größe öffnen",
   countdownUnits: { days: "Tage", hours: "Std.", min: "Min.", sec: "Sek." },
   until: (when) => `Bis ${when}`,
+  countdownPause: "Countdown anhalten",
+  countdownResume: "Countdown fortsetzen",
 
   restingTitle: "Diese Seite pausiert vorübergehend",
   restingBody: (store) =>

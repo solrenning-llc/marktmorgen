@@ -41,7 +41,9 @@ export async function POST(request: NextRequest) {
   }
   const store = handle ? await storeForHandle(handle) : null;
   if (!store) return new Response("No such store.", { status: 404 });
-  const product = productId ? await readListing(store, productId) : null;
+  // Switched off after notices about its content (lib/takedown.ts): no sign-up
+  // is taken, as on its list and its free copy; the answer is the store's page.
+  const product = productId && !store.suspended ? await readListing(store, productId) : null;
   const away = (status: string, lead = "") =>
     new Response(null, {
       status: 303,
@@ -54,8 +56,9 @@ export async function POST(request: NextRequest) {
     // Counted under the channel the visitor came from (lib/visit-channel.ts).
     if (result === "sent") after(() => countHit(request, store, { kind: "signup" }));
     // The sign-up as a lead to the creator's ad platforms, with the visitor's yes (lib/ad-events.ts).
+    // Without the address: it is not confirmed yet, so it may be someone else's, who never said yes.
     const lead = result === "sent" && sendsFromServer(store) && allowedBy(request, store) ? newLeadId() : "";
-    if (lead) after(() => sendServerLead(store, request, { id: lead, email, product: product.id }).catch((error) => console.error("sending a lead failed", error)));
+    if (lead) after(() => sendServerLead(store, request, { id: lead, email: "", product: product.id }).catch((error) => console.error("sending a lead failed", error)));
     return away(result, lead);
   } catch (error) {
     console.error("joining a waitlist failed", error);

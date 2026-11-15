@@ -35,10 +35,12 @@ import { fromAnotherSite as crossSite } from "@/lib/request-guard";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { LOCKED_MESSAGE } from "@/lib/locked-words";
 import { lockedOut, lockedUntil } from "@/lib/two-step";
+import { LOCK_UNREAD, lockOrUnread, lockUnreadJson, lockUnreadPage } from "@/lib/two-step-unknown";
 import { type Store, STORE_ID_PATTERN, accountStores, ensureStoreId, storeForEmail, storeForId, storeRef } from "@/lib/store";
 import { type Permission, type Role, PERMISSION_WORDS, can } from "@/lib/team-roles";
 import { logTeam, memberStores, roleIn, teamTwoStepBlocks } from "@/lib/team";
-import { withinEssentialLimit } from "@/lib/request-guard";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { essentialLimitState, essentialTakeBelow, type LimitState } from "@/lib/request-guard";
 import { forceAllowance, giveAllowance, takeAllowance } from "@/lib/store-allowance";
 import { refreshPeriod } from "@/lib/billing-sync";
 import { ESSENTIAL_NEEDS, ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
@@ -84,8 +86,9 @@ export type Creator = Access & {
 /**
  * `locked`: a session let in without its second step, for what waits until two-step login turns off (lib/two-step.ts).
  * `used`: the store's studio requests for its window are used (lib/store-allowance-rules.ts).
+ * `unread`: that lock could not be read just now: neither locked nor free, nothing done (lib/two-step-unknown.ts).
  */
-export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used" | "two_step";
+export type Refusal = "signed_out" | "no_store" | "forbidden" | "gone" | "locked" | "used" | "two_step" | "unread";
 
 /**
  * What a check asks of a role: one permission, or "member" — any role at all
@@ -135,7 +138,13 @@ export async function resolveAccess(
     if (!access) return { ok: false, reason: "gone" };
   } else {
     const remembered = wanted.remembered ?? "";
-    if (STORE_ID_PATTERN.test(remembered)) access = await pick(remembered);
+    // Only a preference: a remembered store whose team answers in an unknown shape is "not this one" (rule 24:
+    // no role is granted on it), and the person's own store is used, never a studio closed by another store's record.
+    if (STORE_ID_PATTERN.test(remembered))
+      access = await pick(remembered).catch((error: unknown) => {
+        if (error instanceof UnknownReplyError) return null;
+        throw error;
+      });
     if (!access) {
       const own = await storeForEmail(email);
       if (own) access = { email, store: own, ref: storeRef(own), role: "owner" };
@@ -178,7 +187,12 @@ export async function studioAccess(
   const email = await emailForSession(session);
   if (!email) return { ok: false, reason: "signed_out" };
   // Let in without the second step: what moves money or data out waits (lib/two-step.ts).
-  if (lockedOut(need, action) && (await lockedUntil(session)) > 0) return { ok: false, reason: "locked" };
+  if (lockedOut(need, action)) {
+    // A lock that could not be read is never read as free (rule 24): nothing is done, and it is said as such.
+    const until = await lockOrUnread(lockedUntil(session));
+    if (until === LOCK_UNREAD) return { ok: false, reason: "unread" };
+    if (until > 0) return { ok: false, reason: "locked" };
+  }
   const result = await resolveAccess(
     email,
     { pinned: pinnedStore(request), remembered: request.cookies.get(STORE_COOKIE)?.value ?? null, session },
@@ -218,13 +232,33 @@ export async function studioAccess(
 }
 
 /**
+ * Takes one of the store's ESSENTIAL_PER_DAY requests of the day: the small
+ * daily figure what the owner needs to leave or pay is counted on (countStudio
+ * below, and the plan's invoices, lib/plan-invoices.ts), with its three
+ * answers. One key for all of them, so none can drift onto another counter.
+ */
+export function takeEssential(store: Pick<Store, "sid" | "handle">): Promise<LimitState> {
+  return essentialLimitState("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400);
+}
+
+/**
+ * One of the same requests for a use that is not leaving or paying, taken
+ * only while fewer than `below` of them were taken in the window (one
+ * script on the same key, lib/request-guard.ts essentialTakeBelow), so the
+ * rest always stays for what the owner needs to leave or pay.
+ */
+export function takeEssentialBelow(store: Pick<Store, "sid" | "handle">, below: number): Promise<LimitState> {
+  return essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400);
+}
+
+/**
  * One studio request for a store, taken from its window: `units` of them for
  * a page drawn. What the owner needs to leave or pay is taken from a small
  * daily figure instead, so it is never shut out by the month's.
  */
 export async function countStudio(store: Store, need: Need | null, units = 1): Promise<{ ok: true; store?: Store } | { ok: false; reason: "used" | "unknown" | "pool" | "daily"; message: string; left?: number; reset?: string }> {
   if (need && ESSENTIAL_NEEDS.includes(need)) {
-    return (await withinEssentialLimit("studio-essential", store.sid || store.handle, ESSENTIAL_PER_DAY, 86_400))
+    return (await takeEssential(store)) === "within"
       ? { ok: true }
       : { ok: false, reason: "daily", message: "Too many of these today. Try again tomorrow, or write to support." };
   }
@@ -244,11 +278,12 @@ export async function countStudio(store: Store, need: Need | null, units = 1): P
 export async function holdStudio(
   store: Store,
   units: number,
-): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string }> {
+): Promise<{ ok: true; give: (n: number) => Promise<void>; force: (n: number) => Promise<void> } | { ok: false; message: string; reason: "used" | "unknown" | "pool"; limit: number; left?: number; reset?: string }> {
   const now = Date.now();
   const current = await refreshPeriod(store);
   const taken = await takeAllowance(current, "studio", units, now);
-  if (!taken.ok) return { ok: false, message: taken.message };
+  // Why it was refused, and how many were left when that was read, for a caller that words it for itself (lib/list-download.ts).
+  if (!taken.ok) return { ok: false, message: taken.message, reason: taken.reason, limit: taken.limit, left: taken.left, reset: taken.reset };
   return {
     ok: true,
     give: async (n) => {
@@ -278,6 +313,8 @@ export function refusedJson(reason: Refusal, message = ""): Response {
       return Response.json({ ok: false, error: "locked", message: LOCKED_MESSAGE }, { status: 403 });
     case "two_step":
       return Response.json({ ok: false, error: "two_step_required" }, { status: 403 });
+    case "unread":
+      return lockUnreadJson();
   }
 }
 
@@ -303,6 +340,7 @@ export async function creatorFrom(
     if (result.reason === "no_store") return away(origin, "/studio?stripe=nostore");
     if (result.reason === "gone") return away(origin, "/studio?team=gone");
     if (result.reason === "locked") return away(origin, "/studio?two-step=locked");
+    if (result.reason === "unread") return lockUnreadPage(`${origin}/studio`, "your studio");
     if (result.reason === "two_step") return away(origin, "/studio?two-step=required#two-step");
     if (result.reason === "used") return away(origin, studioPath(result.store ?? { sid: "" }, `why=${result.why ?? "used"}`, "paused"));
     return away(origin, studioPath(result.store ?? { sid: "" }, "team=forbidden"));

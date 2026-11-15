@@ -62,12 +62,8 @@ export function parseAssistReminder(raw: unknown): AssistReminderSetting {
   return { on: Boolean(raw && typeof raw === "object" && (raw as Record<string, unknown>).on === true) };
 }
 
-/**
- * The version of the box's sentence. Kept with each consent, so what a buyer
- * checked can be read back exactly (lib/buyer-words/assistant-reminder.ts);
- * a change of the sentence in any language is a new version.
- */
-export const ASSIST_REMIND_VERSION = "assist-remind-1";
+/* The version of the box's sentence lives in lib/assistant-reminder-version.ts, so the box reads it without this file. */
+export { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-version";
 
 /** How long after the checkout closed unpaid the reminder goes. */
 export const ASSIST_REMIND_AFTER_SECONDS = 60 * 60;
@@ -102,7 +98,7 @@ export const ASSIST_REMIND_REQUEST_UNITS = 4;
 export const assistRemindKey = (session: string) => `nl:assist:remind:${session}`;
 
 /** Words of pressure the line may never use, in the store languages, beyond the deal words. */
-const PRESSURE =
+export const PRESSURE =
   /\b(now|today|tonight|soon|hurry|quick|quickly|fast|last|left|limited|ending|ends|expires?|deadline|before it'?s gone|don'?t miss|miss out|while (it|they) lasts?|popular|everyone|people love|ahora|hoy|pronto|[uú]ltim[oa]s?|maintenant|aujourd'hui|vite|dernier|jetzt|heute|schnell|letzte|adesso|oggi|subito|nu|vandaag|snel|laatste|agora|hoje|r[aá]pido)\b/i;
 
 /**

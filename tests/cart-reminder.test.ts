@@ -16,7 +16,10 @@ import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, claimHandle, ensureStatsId, setProductLink, setRecovery, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
 import { createCartCheckout } from "@/lib/cart-checkout";
+import * as recovery from "@/lib/checkout-recovery";
 import { cartLink, forgetRecoveryPerson, remindAbandoned } from "@/lib/checkout-recovery";
+import { COMMAND, COST_LINES, figureCost } from "./plan-cost-registry";
+import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { askCartReminder, sendAsked } from "@/lib/checkout-ask";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
@@ -97,7 +100,25 @@ async function main(): Promise<void> {
     ...over,
   });
   is("not without the yes", await remindAbandoned(await load(), left("cs_test_noyes000000001", { consent: { promotions: "opt_out" } }) as never), "skip");
+  // Claude 1 cloud on #3929 (MÉDIO, cost): a cart's reminder notes its mark under the address first (SADD + EXPIRE of
+  // nl:recover:carts:), commands the store-email line did not price. Counted here as they are sent, and held against
+  // CART_NOTE_COMMANDS, which that line now adds to each of the plan's store emails (a cart reminder is one of them).
+  const cartNoteSent: string[] = [];
+  const beforeNote = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    for (const c of commands) if (String(c[1] ?? "").startsWith("nl:recover:carts:")) cartNoteSent.push(String(c[0]));
+    return beforeNote(commands);
+  }) as typeof redis.pipeline;
   is("with it: one email", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "sent");
+  redis.pipeline = beforeNote;
+  const CART_NOTE_COMMANDS = (recovery as unknown as { CART_NOTE_COMMANDS?: number }).CART_NOTE_COMMANDS;
+  is("the cart's note sends SADD and EXPIRE before its mark", cartNoteSent, ["SADD", "EXPIRE"]);
+  is("CART_NOTE_COMMANDS counts every one of them", CART_NOTE_COMMANDS, cartNoteSent.length);
+  const storeEmail = COST_LINES.find((line) => line.id === "store-email")!;
+  for (const tier of ["creator", "pro", "scale"] as const) {
+    const priced = figureCost(STORE_ALLOWANCES[tier], "email") + STORE_ALLOWANCES[tier].email * (CART_NOTE_COMMANDS ?? Number.NaN) * COMMAND;
+    is(`the store-email line prices the note on every store email of ${tier}`, Math.abs(storeEmail.monthlyUsd(tier) - priced) < 1e-12, true);
+  }
   const mail = emails.at(-1)!;
   is("to the buyer, about their cart", [mail.to, mail.subject], ["ana@example.com", "Your cart at Harbor Kitchen"]);
   is("naming everything in it, at today's prices", [mail.text.includes("You put Pantry Guide and Grocery Lists in your cart at Harbor Kitchen"), mail.text.includes("- Pantry Guide: $12"), mail.text.includes("- Grocery Lists: $5")], [true, true, true]);

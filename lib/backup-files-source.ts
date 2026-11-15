@@ -108,15 +108,27 @@ export const BACKUP_FILES_ROUTE_SECONDS = 10;
 
 /**
  * What one admitted page can cost, in whole micro-dollars, at the dearest prices read in docs/backup-costs-2026-11-08.md
- * section 2, no free quota (Claude 7's MÉDIO on #3313): the function call ($0.60 a million), held the whole
+ * section 2, no free quota (Claude 7's MÉDIO on #3313), the same parts as the route's ceiling per call of section 5b
+ * ($0.00154736): the function call ($0.60 a million), held the whole
  * BACKUP_FILES_ROUTE_SECONDS at 2 GB with every second on CPU in the dearest region (gru1: $0.221 a CPU-hour, $0.0183 a
- * GB-hour); its answer at BACKUP_FILES_PAGE_BYTES as Fast Origin Transfer ($0.43 a GB); the day's count, two Upstash
- * commands ($2.00 a million; its few bytes are under a micro-dollar, inside the rounding); one listing and one Blob
+ * GB-hour); its answer at BACKUP_FILES_PAGE_BYTES as Fast Origin Transfer and Fast Data Transfer ($0.43 + $0.35 a GB)
+ * and one CDN Request ($3.20 a million); the day's count, two Upstash commands ($2.00 a million) and a page of Upstash
+ * bandwidth ($0.03 a GB); one listing and one Blob
  * signing token, each as a Blob Advanced Operation ($7.00 a million), the dearer of the two sources on (an R2
  * ListObjectsV2 is a $4.50 Class A, and R2 signs locally).
  */
 export const BACKUP_FILES_PAGE_MICRO_USD = Math.ceil(
-  0.6 + (221_000 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (18_300 * 2 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (BACKUP_FILES_PAGE_BYTES / 1e9) * 430_000 + 2 * 2 + 7 + 7,
+  0.6 +
+    (221_000 * BACKUP_FILES_ROUTE_SECONDS) / 3600 +
+    (18_300 * 2 * BACKUP_FILES_ROUTE_SECONDS) / 3600 +
+    // The answer as Fast Origin Transfer and Fast Data Transfer at the top of their ranges, and its CDN Request.
+    (BACKUP_FILES_PAGE_BYTES / 1e9) * (430_000 + 350_000) +
+    3.2 +
+    // The count's two Upstash commands, and up to a page of Upstash bandwidth (the deletion records' page).
+    2 * 2 +
+    (BACKUP_FILES_PAGE_BYTES / 1e9) * 30_000 +
+    7 +
+    7,
 );
 /** R2 bills operations in blocks of a million, rounded up: one more block a month for the source that lists on R2. */
 const R2_BLOCK_MICRO_USD = 4_500_000;

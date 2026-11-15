@@ -119,6 +119,12 @@ async function main(): Promise<void> {
   is("no clientSigningToken, Blob write token or route secret in the answer", [answer.text.includes("client-signing-secret-synthetic"), answer.text.includes("vercel_blob_rw_"), answer.text.includes(SECRET)], [false, false, false]);
   is("the database: the day's count only (SET NX EX, INCRBY)", commands.map((c) => c[0]), ["SET", "INCRBY"]);
 
+  part("a key with spaces, brackets, a bar and accents: signed, its address leads back to it");
+  reset();
+  blobWorld.pages = [listing([{ pathname: `${PREFIX}photo [1] | café ü.pdf`, size: 3, etag: "e9" }])];
+  answer = await call(`?source=blob&store=${STORE}`);
+  is("answered whole, the one entry signed", [answer.status, (answer.json as BackupFilesPage).complete, (answer.json as BackupFilesPage).entries.length], [200, true, 1]);
+
   part("an empty folder: no token call, complete only because the listing said so");
   reset();
   blobWorld.pages = [listing([])];

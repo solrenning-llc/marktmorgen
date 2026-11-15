@@ -280,6 +280,18 @@ async function listBlob(prefix: string, cursor: string | null): Promise<Listed> 
 
 type Signer = (key: string) => Promise<{ url: string; expiresAt: number }>;
 
+/** Whether a signed address requests exactly `/${key}`: its path, each part decoded, is the key, with no fragment. */
+function leadsTo(address: string, key: string): boolean {
+  try {
+    const url = new URL(address);
+    if (url.hash !== "" || address.includes("#")) return false;
+    const decoded = url.pathname.split("/").map((piece) => decodeURIComponent(piece)).join("/");
+    return decoded === `/${key}`;
+  } catch {
+    return false;
+  }
+}
+
 /** Blob's signer: one get-only token for "*" made on the first object to sign, then a local signature each. */
 function blobSigner(now: () => number): Signer {
   let token: { delegationToken: string; clientSigningToken: string; validUntil: number } | null = null;
@@ -296,6 +308,11 @@ function blobSigner(now: () => number): Signer {
     const signed: unknown = await blob.presignUrl({ delegationToken: held.delegationToken, clientSigningToken: held.clientSigningToken }, { operation: "get", pathname: key, access: "private", validUntil: held.validUntil });
     const url = (signed as { presignedUrl?: unknown } | null)?.presignedUrl;
     if (typeof url !== "string" || !url.startsWith("https://") || url.includes(held.clientSigningToken)) fail("a signed URL it cannot hand out");
+    // Blob signs the raw pathname and puts it into the address as it is (@vercel/blob 2.8.0, constructBlobUrl): a key
+    // with "?", "#" or an encoded part gives an address whose request path is not the signed one. As R2's signer
+    // checks (lib/backup-files-r2.ts), the address must decode back to exactly this key, with no fragment, or the page
+    // is not answered, never handed out as signed (Claude 7's LEVE on #3313).
+    if (!leadsTo(url as string, key)) fail("a signed URL whose address is not the key's");
     return { url: url as string, expiresAt: held.validUntil };
   };
 }

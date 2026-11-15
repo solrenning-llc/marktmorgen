@@ -200,8 +200,19 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
   return keys.length;
 }
 
+/**
+ * Deletes the keys a batch at a time, each batch's count read exactly (rule 24; issue #4390): one integer from 0 to the
+ * batch's size. Any other answer (none, text, an envelope, a count past the batch) throws UnknownReplyError before the
+ * walk's cursor moves, so the store stays in the batch and the next run repeats the same page, never counting as
+ * deleted what a reply that said nothing may have left.
+ */
 async function del(keys: string[]): Promise<void> {
-  for (let i = 0; i < keys.length; i += DEL_BATCH) await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]);
+  for (let i = 0; i < keys.length; i += DEL_BATCH) {
+    const batch = keys.slice(i, i + DEL_BATCH);
+    const replies = repliesFor(await redisPipeline([["DEL", ...batch]]), 1);
+    const gone = replies ? countOf(replies[0]) : null;
+    if (gone === null || gone > batch.length) throw new UnknownReplyError("deleting a closing store's keys");
+  }
 }
 
 /**

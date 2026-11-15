@@ -83,6 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -107,6 +108,15 @@ export type Space = {
    * opens the right to start a conversation, never the right to take part.
    */
   level: number;
+  /**
+   * For a space kept for some buyers: whether a member without one of those
+   * products sees it in the list, locked, with its name, its one line and the
+   * way to buy in (542 [CM1], "Visible and locked"), instead of no sign of it
+   * ("Hidden", the default, and every space made before there was a choice).
+   * Never its posts, comments, members or any count: that is still only
+   * maySeeSpace's to open (lib/community-access.ts, lib/community-locked.ts).
+   */
+  shown?: true;
 };
 
 export type CommunityConfig = {
@@ -289,6 +299,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         only: ids(entry.only, 50).filter((p) => p.length <= 40),
         // Spaces made before there were levels need none.
         level: Number.isInteger(entry.level) && entry.level >= 2 && entry.level <= 9 ? entry.level : 0,
+        // And before a kept space could be shown locked: hidden, as it always was.
+        ...(entry.shown === true ? { shown: true as const } : {}),
       });
       if (spaces.length >= MAX_SPACES) break;
     }
@@ -354,8 +366,36 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   return config;
 }
 
+/**
+ * The settings as readConfigExact reads them, with the exact stored text, for a write that must land only over what
+ * was read (saveConfigIfSame): null only when there is no setup yet; anything unknown throws.
+ */
+export async function readConfigExactRaw(id: string): Promise<{ config: CommunityConfig; raw: string } | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config || typeof replies[0] !== "string") throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
+  return { config, raw: replies[0] };
+}
+
+/**
+ * The settings written only while the stored text is still `read` (Codex X5's review of #3007): true when written,
+ * false when another save landed in between and nothing was written; any other answer throws UnknownReplyError. The
+ * same compare-and-set script as a product's description (lib/product-about.ts, modeled in lib/redis-memory.ts).
+ */
+export async function saveConfigIfSame(id: string, read: string, config: CommunityConfig): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_ABOUT_IF, 1, cfgKey(id), read, JSON.stringify(config)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 0) return false;
+  throw new UnknownReplyError("a community's setup save");
+}
+
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
-  await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
+  // Its own answer read (review of #3007, L2): a save not confirmed throws, so no route says it saved.
+  const replies = repliesFor(await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a community's setup save");
 }
 
 // ------------------------------------------------------------------ members

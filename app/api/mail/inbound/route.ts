@@ -73,12 +73,21 @@ export async function POST(request: NextRequest) {
   if (!report && !isInboundConfigured()) return new Response("Not found.", { status: 404 });
 
   const seenKey = `nl:inbound:seen:${id}`;
+  // Acted on only once its mark is written (MM-SA-55): a mark that could not be written, or whose answer is not
+  // Redis's exact "OK" (CX-123 rule 24), acts on nothing and answers a failure, so the sender tries again later; acting
+  // anyway would let that retry, or a replay within the signature's five minutes, count a bounce or complaint twice.
+  let mark: unknown;
   try {
-    const [fresh] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
-    if (fresh === null) return Response.json({ ok: true });
-  } catch {
-    // Without Redis the sender's idempotency key still keeps a repeat from
-    // being delivered twice; carry on.
+    [mark] = await redisPipeline([["SET", seenKey, "1", "NX", "EX", 86_400]]);
+  } catch (error) {
+    console.error("an inbound notice's mark could not be written; not acted on, the sender will try again", error);
+    return Response.json({ ok: false }, { status: 503 });
+  }
+  if (mark === null) return Response.json({ ok: true });
+  if (mark !== "OK") {
+    console.error("an inbound notice's mark was answered out of shape; not acted on, the sender will try again");
+    await redisPipeline([["DEL", seenKey]]).catch(() => {});
+    return Response.json({ ok: false }, { status: 503 });
   }
 
   if (report) {

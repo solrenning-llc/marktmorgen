@@ -17,7 +17,8 @@ is("one shared helper owns the React change-handler observation", helper.length 
 is(
   "the helper observes the control's installed onChange instead of a timer",
   helper.includes('key.startsWith("__reactProps$")') &&
-    helper.includes('typeof element[key]?.onChange==="function"') &&
+    helper.includes('typeof element[key]?.[name]==="function"') &&
+    helper.includes('await waitForReactHandler(page,control,"onChange");') &&
     !/setTimeout|waitForTimeout/.test(helper),
   true,
 );

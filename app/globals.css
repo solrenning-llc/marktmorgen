@@ -253,6 +253,17 @@ body {
   border-radius: 6px;
 }
 
+/* A file field kept visually hidden (sr-only) behind a label drawn as a button takes the Tab key, but its own ring is
+ * clipped to one pixel: the ring goes on the label that is seen, whether it wraps the field, comes just before it or
+ * just after it (WCAG 2.4.7, 2.4.13; tests/file-input-focus-ring.test.ts). In forced colors the outline keeps a system
+ * color of its own. */
+label:has(> input[type="file"].sr-only:focus-visible),
+label:has(+ input[type="file"].sr-only:focus-visible),
+input[type="file"].sr-only:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
 /*
  * The keyboard ring on a dark section.
  *
@@ -2716,6 +2727,13 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 }
 .st-title-link:hover {
   background-size: 100% 2px;
+}
+/* The embedded card's title: its click area covers the block of the title and the store's name, at least 44 px tall
+   (2.5.5 AAA, tests/embed-title-target.test.ts); the two-line clamp and the focus ring on the words stay. */
+.em-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 .st-title-link:focus-visible,
 .st-cover-link:focus-visible,

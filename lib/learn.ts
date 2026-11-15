@@ -25,6 +25,7 @@
  * Progress is kept per course and per student: which lessons they marked done
  * and when they last came back. That is all, and the creator sees it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -44,7 +45,7 @@ import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
-import { folderFromPathname, recordDelivery } from "@/lib/delivery";
+import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
 import { opened, watchedForAdmission } from "@/lib/watch";
@@ -859,7 +860,10 @@ export type LessonVideo =
   | { kind: "stream"; src: string; width: number; height: number }
   | { kind: "preparing" }
   | { kind: "failed" }
-  | { kind: "paused" };
+  | { kind: "paused" }
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts freeDeliveryPause),
+  // whatever the plan: never told as the no-plan hours being used up.
+  | { kind: "free_paused" };
 
 /**
  * The video of a lesson, for somebody who may watch it; null when it cannot
@@ -875,10 +879,18 @@ export type LessonVideo =
  * including for paid plans. Missing, invalid or unreadable limits never mint
  * a player token. This meter does not bound provider bytes, replay or buffering.
  */
-export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store): Promise<LessonVideo | null> {
+export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, { free = false }: { free?: boolean } = {}): Promise<LessonVideo | null> {
   // The creator contract funds each new media admission before signing a URL or querying a player.
   if (store?.period?.funded === true && !(await reservePaidResourceWindow(store))) return null;
   if (!isStreamPath(file.pathname)) {
+    // A preview played to somebody who does not hold the course is a free copy of the file: it pauses with the
+    // store's other free downloads (lib/serve-file.ts), and a count that cannot be read signs nothing (rule 24).
+    if (free) {
+      const folder = folderFromPathname(file.pathname);
+      const pause = folder ? await freeDeliveryPause(folder) : "open";
+      if (pause === "over") return { kind: "free_paused" };
+      if (pause === "unknown") return null;
+    }
     const src = await signedMedia(file, VIDEO_URL_SECONDS);
     return src ? { kind: "file", src } : null;
   }
@@ -935,12 +947,8 @@ function senderAddress(): string {
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): no course link is emailed on it.
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count !== null && count <= limit;
 }
 
@@ -996,14 +1004,10 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
 /** Spends one open of an emailed link, and says who and what it was for. */
 export async function openCourseLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const replies = repliesFor(await redisPipeline([
-    ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
-    ["INCR", opensKey(token)],
-  ]), 3);
-  const raw = replies?.[0];
+  const replies = await redisPipeline([["GET", linkKey(token)], ...windowCount(opensKey(token), LINK_SECONDS)]);
+  const raw = repliesFor(replies, 3)?.[0];
   // The opens in their exact shape (CX-123 rule 24): an unknown count opens nothing.
-  const opens = countOf(replies?.[2]);
+  const opens = windowCountOf(replies, 1, 3);
   if (typeof raw !== "string" || opens === null || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;

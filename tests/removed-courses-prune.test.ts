@@ -26,15 +26,20 @@ const list = `nl:coursegone:${STATS}`;
 const roomKey = dataKey(room)!;
 const now = () => Math.floor(Date.now() / 1000);
 const old = () => now() - FINISH_KEEP_SECONDS - 86_400;
-const record = (t?: number) => JSON.stringify({ p: "", l: [], m: [], ...(t === undefined ? {} : { t }) });
+const entry = (t?: number) => JSON.stringify({ p: "", ...(t === undefined ? {} : { t }) });
+/** A course's own key beside the list, with its lessons and modules (#4542). */
+const recordKey = (id: string) => `${list}:c:${id}`;
+const RECORD = JSON.stringify({ l: [], m: [] });
 
 /** A full list: the course under test first, then old entries each still holding a certificate slot. */
 function fill(first: string, t?: number): void {
   redis.clear();
-  redis.run(["HSET", list, first, record(t)]);
+  redis.run(["HSET", list, first, entry(t)]);
+  redis.run(["SET", recordKey(first), RECORD]);
   for (let i = 1; i < MAX_REMOVED_COURSES; i += 1) {
     const id = `kept${i}`;
-    redis.run(["HSET", list, id, record(old())]);
+    redis.run(["HSET", list, id, entry(old())]);
+    redis.run(["SET", recordKey(id), RECORD]);
     redis.run(["HSET", roomKey, `cc:${id}`, "100"]);
   }
 }

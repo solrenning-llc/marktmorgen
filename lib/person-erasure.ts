@@ -69,7 +69,7 @@ import { forgetCrmPerson } from "@/lib/crm";
 import { forgetCompanyPerson } from "@/lib/crm-companies";
 import { forgetNotesPerson } from "@/lib/buyer-profile";
 import { forgetFormsPerson } from "@/lib/form-store";
-import { forgetFinishPerson } from "@/lib/course-finish";
+import { finishMarkProbes, forgetFinishPerson } from "@/lib/course-finish";
 import { forgetQuizPerson, passedProbe } from "@/lib/quiz";
 import { forgetTasksPerson } from "@/lib/assignment";
 import { certificateProbe, forgetCertificatesPerson } from "@/lib/certificate";
@@ -77,7 +77,7 @@ import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
 import { forgetWaitlistPerson } from "@/lib/waitlist";
-import { DROPPED_PROBES, type RemovedCourse, removedCourses } from "@/lib/removed-courses";
+import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseRecords } from "@/lib/removed-courses";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
 import { forgetImportedPerson } from "@/lib/imported-purchases";
@@ -231,14 +231,16 @@ export type ErasureResult =
  * exactly: anything but a 0 or a 1 throws, never "no record".
  */
 async function droppedCoursesOf(statsId: string, learner: string, skip: ReadonlySet<string>): Promise<{ courses: RemovedCourse[]; probed: number }> {
-  const dropped = (await removedCourses(statsId)).filter((c) => !skip.has(c.courseId));
+  // The list holds each dropped course's id and product only; a course's lessons and modules are read only where the
+  // person has something (#4542 review: reading every course's ids cost more than the erasure counted).
+  const dropped = (await droppedCourseIds(statsId)).filter((c) => !skip.has(c.courseId));
   if (!dropped.length) return { courses: [], probed: 0 };
-  const probes = dropped.flatMap((c) => [...learnerProbes(c.courseId, learner), passedProbe(c.courseId, learner), certificateProbe(c.courseId, learner)]);
+  const probes = dropped.flatMap((c) => [...learnerProbes(c.courseId, learner), passedProbe(c.courseId, learner), certificateProbe(c.courseId, learner), ...finishMarkProbes(c.courseId, learner)]);
   if (probes.length !== dropped.length * DROPPED_PROBES) throw new Error("a dropped course's probes are not DROPPED_PROBES");
   const replies = repliesFor(await redisPipeline(probes), probes.length);
   if (!replies || !replies.every((r) => r === 0 || r === 1)) throw new UnknownReplyError("a person's records in a store's dropped courses");
-  const courses = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => r === 1));
-  return { courses, probed: dropped.length };
+  const hit = dropped.filter((_, i) => replies.slice(i * DROPPED_PROBES, (i + 1) * DROPPED_PROBES).some((r) => r === 1));
+  return { courses: await droppedCourseRecords(statsId, hit), probed: dropped.length };
 }
 
 export async function erasureScope(store: Store, email: string): Promise<ErasureScope | null> {
@@ -272,6 +274,7 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
     productIds: current.catalog.items.map((item) => item.id),
     communityId: current.community?.id ?? null,
     droppedCourses: dropped.probed,
+    droppedRecords: dropped.courses.length,
   };
 }
 
@@ -297,6 +300,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     events,
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
+    droppedRecords: scope.droppedRecords ?? 0,
   };
 }
 

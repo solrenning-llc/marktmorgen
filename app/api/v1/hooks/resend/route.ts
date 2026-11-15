@@ -1,5 +1,6 @@
 import { apiAdder, apiError, apiOk, takeMoreApi } from "@/lib/api-guard";
 import { RESEND_WORK, apiReadUnits } from "@/lib/api-read-rules";
+import { readRange, resendRange } from "@/lib/api-hook-resend";
 import { resendDelivery } from "@/lib/webhooks";
 
 /** What each refusal of resendDelivery is through the API: its status, its code and, where it has none of its own, its sentence. */
@@ -26,10 +27,28 @@ const REFUSED = {
  * read; the try is one of the store's webhook deliveries for the month, taken
  * before the endpoint is called (refused, nothing is sent), and shares the
  * tests' ten a minute. The delivery log is not read back for this answer.
+ *
+ * `{ "endpoint": "we_…", "from": "…", "to": "…" }` sends that endpoint's
+ * deliveries that failed for good in the interval again instead, oldest
+ * first, at most ten, each the same way (lib/api-hook-resend.ts, resendRange).
  */
 export async function POST(request: Request) {
   const writer = await apiAdder(request);
   if (writer instanceof Response) return writer;
+  // An endpoint's failed deliveries of an interval (lib/api-hook-resend.ts), instead of one by id.
+  if (writer.body.endpoint !== undefined) {
+    if (writer.body.delivery !== undefined) return apiError(400, "invalid_request", "Send either delivery, for one, or endpoint with from and to, for an interval; not both.");
+    const ask = readRange(writer.body);
+    if ("error" in ask) return apiError(400, ask.error, ask.message);
+    try {
+      const done = await resendRange(writer.store, ask);
+      if (done === "no_endpoint") return apiError(404, "not_found", "No endpoint with that id on this store.");
+      return done instanceof Response ? done : apiOk({ data: done });
+    } catch (error) {
+      console.error("api: sending webhook deliveries again failed", error);
+      return apiError(502, "unavailable", "Whether the deliveries were sent again could not be confirmed. Check the store's Webhooks page in the studio, or read GET /api/v1/hooks/deliveries, before trying again.");
+    }
+  }
   const id = typeof writer.body.delivery === "string" ? writer.body.delivery.slice(0, 40) : "";
   if (!/^dlv_[0-9a-f]{24}$/.test(id)) return apiError(400, "invalid_id", "Send the delivery's id as delivery, such as dlv_0123456789abcdef01234567, as GET /api/v1/hooks/deliveries lists it.");
   // Its reads at their most, before any of them.

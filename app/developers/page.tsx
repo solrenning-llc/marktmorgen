@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage, LegalSection } from "@/components/legal-page";
 import { API_PAGE, LEAD_LOOKUP_MOST } from "@/lib/api-read";
+import { RANGE_MAX_DAYS, RANGE_MAX_SENT } from "@/lib/api-hook-resend";
 import { API_RATE } from "@/lib/api-guard";
 import { FIELD_NAME_MAX, MAX_FIELDS_ASKED } from "@/lib/api-fields";
 import { DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
@@ -694,6 +695,17 @@ export default function DevelopersPage() {
           requests, taken before anything is read, and as one of your store&apos;s webhook deliveries for the month; it
           shares the ten a minute with the tests.
         </Endpoint>
+        <p>
+          To send again every delivery to one address that failed for good in an interval, send{" "}
+          <code className="font-mono">{`{"endpoint": "we_…", "from": "2026-11-14T00:00:00Z", "to": "2026-11-15T00:00:00Z"}`}</code>{" "}
+          instead, at most {RANGE_MAX_DAYS} days apart. They are sent again oldest first, each the same way and each
+          counted the same way, at most {RANGE_MAX_SENT} a request, after the deliveries are read as the list above is.
+          The answer lists what was <code className="font-mono">sent</code>, what was{" "}
+          <code className="font-mono">skipped</code> and why (for example <code className="font-mono">resent</code> for
+          one already sent again, so the same request twice sends nothing twice), why it{" "}
+          <code className="font-mono">stopped</code>, if it did (the month&apos;s deliveries or requests, the ten a
+          minute), and how many are <code className="font-mono">left</code>.
+        </p>
       </LegalSection>
 
       <LegalSection title="Sales and refunds">

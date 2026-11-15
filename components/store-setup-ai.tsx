@@ -5,6 +5,7 @@ import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import type { SetupStep } from "@/lib/store-setup-rules";
 
 type Kind = "download" | "course" | "call" | "membership";
 type Setup = { bios: string[]; products: { title: string; summary: string; kind: Kind; price: string }[]; faq: { q: string; a: string }[]; questions?: { q: string; options: string[] }[] };
@@ -32,6 +33,9 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
   const [selling, setSelling] = useState("");
   const [drafting, setDrafting] = useState(false);
   const [saving, setSaving] = useState(false);
+  // 219 [OP5] unit 7: what is still missing before what was kept can sell, from the server's answer (lib/store-setup-rules.ts).
+  const [steps, setSteps] = useState<SetupStep[]>([]);
+  const stepsHeading = useRef<HTMLHeadingElement>(null);
   const [left, setLeft] = useState(startLeft);
   const allowanceId = useId();
   const [note, setNote] = useState("");
@@ -105,8 +109,12 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bio, products: rows.filter((r) => r.keep).map(({ title, summary, kind, price }) => ({ title, summary, kind, price })), faq: keepFaq ? setup.faq : [] }),
       });
-      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; pages?: number; faq: boolean; refused: string[] } };
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; done?: { bio: boolean; products: number; pages?: number; faq: boolean; refused: string[] }; steps?: unknown };
       if (data.ok && data.done) {
+        const next = Array.isArray(data.steps) ? data.steps.filter((step): step is SetupStep => Boolean(step) && typeof step.id === "string" && typeof step.label === "string" && typeof step.href === "string" && step.href.startsWith("/studio")) : [];
+        setSteps(next);
+        // The list is where the next step is: focus moves to its heading, so a screen reader reads it at once.
+        if (next.length) requestAnimationFrame(() => stepsHeading.current?.focus());
         const parts = [data.done.bio ? "the line under your name" : "", data.done.products ? `${data.done.products} draft product${data.done.products === 1 ? "" : "s"}${data.done.pages ? `, ${data.done.pages === data.done.products ? (data.done.products === 1 ? "with its sales page" : "each with its sales page") : `${data.done.pages} with a sales page`}` : ""}` : "", data.done.faq ? "your questions and answers" : ""].filter(Boolean);
         toast(parts.length ? `Kept: ${parts.join(", ")}.` : "Nothing was kept.");
         if (data.done.refused.length) setNote(`Not kept, because it has no price this store can charge yet: ${data.done.refused.join(", ")}. Type its price above and keep it again, or add it from Products.`);
@@ -264,6 +272,23 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
       ) : null}
       {note ? <p role="status" className="mt-4 text-sm font-semibold text-ink">{note}</p> : null}
       <p role="status" className="sr-only">{announce}</p>
+      {steps.length ? (
+        <div className="mt-8 border-t border-line pt-6">
+          <h3 ref={stepsHeading} tabIndex={-1} id="setup-ai-steps" className="text-base font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-ink">
+            Before your store can sell
+          </h3>
+          <p className="mt-2 text-ink-soft">Nothing you kept is on sale yet, and nothing goes live by itself. Do each of these, in order, when you are ready:</p>
+          <ol aria-labelledby="setup-ai-steps" className="mt-4 list-decimal space-y-3 pl-6">
+            {steps.map((step) => (
+              <li key={step.id}>
+                <a href={step.href} className="inline-flex min-h-11 items-center font-semibold text-ink underline underline-offset-4">
+                  {step.label}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -17,6 +17,7 @@ import { MAX_BIO_LENGTH, type Store, addProduct, setFaq, setProductPage, updateD
 import { parseFaq } from "@/lib/store-faq";
 import { EMPTY_PAGE, blocksFromTemplate, parsePage } from "@/lib/sales-page";
 import { writePage } from "@/lib/sales-page-store";
+import { type SetupDraft, type SetupStep, setupSteps } from "@/lib/store-setup-rules";
 
 export type SetupKept = { bio: boolean; products: number; pages: number; faq: boolean; refused: string[] };
 
@@ -29,7 +30,22 @@ export function setupTemplate(kind: unknown, free: boolean): string {
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.slice(0, max) : "");
 
 export async function keepStoreSetup(ref: string, store: Store, body: Record<string, unknown>): Promise<SetupKept> {
+  return (await keepDraft(ref, store, body)).done;
+}
+
+/**
+ * Keeps the draft as keepStoreSetup does, and says what is still missing before anything kept can sell (219 [OP5]
+ * unit 7, lib/store-setup-rules.ts): Stripe, read from the store as it stood when the draft was kept, and each
+ * product kept, by name. Nothing is published.
+ */
+export async function keepStoreSetupWithSteps(ref: string, store: Store, body: Record<string, unknown>): Promise<{ done: SetupKept; steps: SetupStep[] }> {
+  const { done, drafts } = await keepDraft(ref, store, body);
+  return { done, steps: setupSteps({ stripeReady: Boolean(store.stripeAccountId) && store.stripeChargesEnabled, drafts }) };
+}
+
+async function keepDraft(ref: string, store: Store, body: Record<string, unknown>): Promise<{ done: SetupKept; drafts: SetupDraft[] }> {
   const done: SetupKept = { bio: false, products: 0, pages: 0, faq: false, refused: [] };
+  const drafts: SetupDraft[] = [];
   const bio = text(body.bio, MAX_BIO_LENGTH * 2).trim().slice(0, MAX_BIO_LENGTH);
   if (bio) done.bio = (await updateDetails(ref, store.name, bio)).ok;
   for (const raw of Array.isArray(body.products) ? body.products.slice(0, 3) : []) {
@@ -43,6 +59,7 @@ export async function keepStoreSetup(ref: string, store: Store, body: Record<str
       continue;
     }
     done.products += 1;
+    drafts.push({ id: made.product.id, title: made.product.title, priceCents: made.product.priceCents });
     // Its sales page, from the template for its kind, held to every rule a saved page is (parsePage), in the
     // store's data room. As the page route does: the product is marked as having a page, then the page is
     // written; a page that does not fit is left out and the mark taken back, so nothing is shown or kept half-made.
@@ -60,5 +77,5 @@ export async function keepStoreSetup(ref: string, store: Store, body: Record<str
   }
   const faq = parseFaq(body.faq);
   if (faq.length && store.faq.length === 0) done.faq = Boolean(await setFaq(ref, faq));
-  return done;
+  return { done, drafts };
 }

@@ -70,6 +70,34 @@ Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais 
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## AC — Anticonflito: conflito se resolve na hora e não volta (dono, 14/11/2026, por volta das 23h40 Fortaleza)
+
+Pedido do dono, nas palavras dele: "resolve!!!!!!!!!!! gera regras para nao ocorrer mais conflitos". Antes, na mesma noite: "Por favor, resolvam os PRs que estão em conflito e cuidem para que isso não volte a acontecer" (ALL-203, 20h12), "Sempre que surgir um conflito, por favor, iniciem a correção imediatamente e da maneira correta, sem esperar que eu peça" (ALL-204, 20h18) e "resolva todos os conflitos. procure e resolva todos os conflitos. gere regras para que novos conflitos nao sejam criados" (Claude 4, 23h29). Vale para todo agente deste repositório (Claude 1 a 7, cada Codex e qualquer agente novo), em toda sessão. Esta seção junta num só lugar o que estava só no canal (ALL-203, ALL-204 e as 8 regras anticonflito do Claude 4); onde o canal e esta seção divergirem, vale esta seção. Motivo: em 14/11/2026 havia 696 PRs abertos e 239 em conflito com o main; PR em conflito não roda CI, sai da fila de merge e ocupa revisão sem chegar ao cliente.
+
+**Resolver**
+
+(a) **Quem e quando.** O dono do PR começa a correção no mesmo ciclo em que o conflito aparece, sem esperar pedido. Se o autor estiver sem uso, uma sessão de nuvem do Claude 1 adota o PR e escreve "Adopted by ... until the author returns" no PR; quando o autor volta, anuncia no canal `para-claude-1` quais PRs retoma, para dois agentes não juntarem o mesmo PR. Nenhum PR fica em conflito por mais de 2 horas sem uma sessão trabalhando nele.
+
+(b) **Como juntar.** Clone completo (`test -f .git/shallow && git fetch --unshallow origin`); `git merge origin/main`, nunca rebase nem force push; ler os dois lados e os commits do main no arquivo, e manter os dois comportamentos. Arquivos gerados (docs/pricing-*, docs/margin-alignment-*, tabelas de margem e afins) e docs/reservations/* ficam com a versão do main e, quando o PR precisa deles, são regenerados pelo próprio script, nunca editados à mão. Depois: tsc sem erro novo, testes dos arquivos tocados (RED→GREEN se algo quebrou), `git merge-tree` limpo, um push (MV (c), ritmo de 1 push a cada 5 a 20 minutos e Actions medido antes) e o pedido "re-review needed #N @sha10 (merge of main)". Se os dois lados forem dois desenhos incompatíveis, não escolher no escuro: registrar o trecho exato no canal e no PR, e seguir com os outros.
+
+(c) **Varredura.** Cada agente confere seus PRs abertos pelo menos a cada 2 horas só com git, sem gastar API nem Actions: para cada PR, `git merge-tree --write-tree <base atual> <head do PR>`, com a base `origin/main` ou o ramo de baixo da pilha. O relatório diário `prs-parados` (PV (c)) lista os PRs em conflito de todos; o coordenador cobra no canal o dono de cada um.
+
+**Prevenir**
+
+(d) **Arquivos compartilhados.** PR de produto não toca docs/reservations/*, docs/codex-queue.md nem arquivo gerado, salvo quando um teste exige regenerar; nesse caso, regenera pelo script na própria junção. Em listas e registros que muitos editam (tests/plan-cost-registry.ts, lib/data-families.ts, tests/store-data-registry.ts, inventários de testes, aliases de tests/test-config.mjs, docs/e5-money-readers.md e afins), a linha nova entra na posição em ordem alfabética, nunca no fim do arquivo.
+
+(e) **Antes de abrir PR e antes de cada push.** Conferir os PRs abertos que tocam os mesmos arquivos (`gh api repos/solrenning-llc/marktmorgen/pulls/N/files`) e rodar `git merge-tree` contra a base e contra cada um deles. Se colidir, combinar no canal quem vai primeiro; o segundo espera a incorporação do primeiro ou trabalha em cima dele. Em registros de custo (tests/plan-cost-registry.ts, lib/receiving-costs.ts, tabelas de margem), um PR por bloco de cada vez.
+
+(f) **PR pequeno e curto.** Um assunto por PR, de preferência com menos de 400 linhas fora dos testes. O PR que passa 48 horas sem revisão é anunciado no canal para ganhar revisor, porque PR parado é o que mais acumula conflito.
+
+(g) **Pilhas curtas.** No máximo um nível: nenhum PR novo empilhado sobre um PR que já é empilhado. Quando a base entra no main, o empilhado muda a base para `main` na mesma rodada (CV (h)).
+
+(h) **Limite.** No máximo 15 PRs abertos por agente fora da fila (MV (b)). Acima disso, o trabalho novo fica em ramo sem PR até o número baixar; primeiro se resolvem os conflitos e se levam os prontos à fila.
+
+(i) **PRONTO.** "Pronto para fila" só com `git merge-tree` limpo contra o `origin/main` buscado há menos de 1 hora, escrito no próprio aviso junto do head.
+
+Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)
 
 Esta decisão substitui a regra19 e toda instrução anterior conflitante, inclusive MR/SR, Hazelsong, AX274,FX275,VR e Pedidos repetidos. Texto antigo permanece histórico. Usar a interpretação juridicamente mais correta, fundamentada em lei, regulamentação e decisões oficiais, conferidas e citadas com artigo/data; não escolher automaticamente a hipótese que dá mais imposto nem somar regimes/países inaplicáveis. ISS5% não é fato certificado.

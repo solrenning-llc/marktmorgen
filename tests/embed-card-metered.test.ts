@@ -11,14 +11,16 @@
  *
  * Rendered too (Claude 7 on #4645): an open by the checkout script takes the store's request once, not twice; the
  * card's worst render (limited stock with lapsed holds, keys, a bump, the summary, opened by the script) stays inside
- * a later page's commands (COMMANDS.laterPage + COMMANDS.laterCount); and a resting store's card reads none of it.
+ * a later page's commands (COMMANDS.laterPage + COMMANDS.laterCount), and so does a weekly call's times view in a
+ * frame on a listed site; and a resting store's card reads none of it.
  * Synthetic store; Stripe is a stand-in; MemoryRedis.
  */
 import { readFileSync } from "node:fs";
 import { renderToReadableStream } from "react-dom/server";
 import { NextRequest } from "next/server";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
-import { addProduct, claimHandle, ensureStatsId, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setEmbedSites, setProductCall, setProductExtras, setProductKeys, setProductLink, setStripeAccount, setSubscription, storeFolder, storeForEmail } from "@/lib/store";
+import { readSetup, type CallSetup } from "@/lib/call-setup";
 import { DEFAULT_KEYS } from "@/lib/key-setup";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { publicVisitLimit, requestLimitFor } from "@/lib/traffic-rules";
@@ -111,6 +113,30 @@ await render("page", "nosuchprod");
 const missing = log;
 log = null;
 is("one INCRBY of the store's requests (Claude 7 on #4645)", missing.filter((c) => c[0] === "INCRBY").length, 1);
+
+part("A weekly call's times in a frame on a listed site stay inside a later page's commands (Claude 7 on #4645)");
+const caller = "embed-card-times@example.test";
+await claimHandle(caller, "embtimes", "Embed Times", "");
+await ensureStatsId(caller);
+await setSubscription(caller, { customerId: "cus_EmbTimes0001", subscriptionId: "sub_EmbTimes0001", active: true, tier: "scale", cycle: "month", period: paidPeriod() });
+await setStripeAccount(caller, "acct_1EmbTimes001", true);
+const sited = await setEmbedSites(caller, "https://creator-site.example");
+if (!sited.ok) throw new Error(`embed sites fixture: ${sited.reason}`);
+const callMade = await addProduct(caller, "Coaching", "A synthetic call.", "45", null);
+if (!callMade.ok) throw new Error("call fixture");
+const DAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
+const setup = readSetup({ kind: "weekly", minutes: 30, tz: "America/New_York", weekly: DAYS, noticeHours: 1, horizonDays: 14, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] }) as CallSetup;
+const called = await setProductCall(caller, callMade.product.id, setup);
+if (!called.ok) throw new Error(`call setup: ${called.reason}`);
+const times = { mm: "overlay", view: "times" };
+answering(new NextRequest(`https://marktmorgen.com/embed/embtimes/${callMade.product.id}?mm=overlay&view=times`, { headers: { referer: "https://creator-site.example/coaching" } }));
+log = [];
+const timesHtml = await html((await EmbedCard({ params: Promise.resolve({ handle: "embtimes", product: callMade.product.id }), searchParams: Promise.resolve(times) } as never)) as React.ReactElement);
+const timesRead = log;
+log = null;
+is("the times view is what was drawn", timesHtml.includes('id="times-title"'), true);
+is("one INCRBY of the store's requests", timesRead.filter((c) => c[0] === "INCRBY").length, 1);
+is(`a weekly call's times, read as the booking page reads them: at most ${ceiling} commands (${timesRead.length}: ${timesRead.map((c) => c[0]).join(", ")})`, timesRead.length <= ceiling, true);
 
 part("A resting store's card reads none of it");
 await redis.pipeline([["SET", counter, String(publicVisitLimit(requestLimitFor(store, Date.now() / 1000)))]]);

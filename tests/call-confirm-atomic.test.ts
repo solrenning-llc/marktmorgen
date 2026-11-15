@@ -18,8 +18,10 @@
  *
  * Synthetic only.
  */
-import { readFileSync } from "node:fs";
-import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
+import { leadsKey } from "@/lib/affiliate-lead-rules";
+import { leadId } from "@/lib/affiliate-leads";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, type PaidCall, catchUpBookings, confirmBooking, confirmationOwed, confirmedKey, holdAndCheckout } from "@/lib/calls";
@@ -39,6 +41,7 @@ const NY = "America/New_York";
 const OWNER = "quay@example.com";
 const BUYER = "ana@example.com";
 const ORIGIN = "https://marktmorgen.com";
+const LEAD_AFF = "bbbbbbbbbbbb";
 
 let sessions = 0;
 const paidRows: Record<string, unknown>[] = [];
@@ -274,9 +277,23 @@ async function main(): Promise<void> {
       const before = await orders();
       await confirmBooking({ store, product: call, session: unread.session, start: unread.start, end: unread.start + HOUR, buyerEmail: BUYER, buyerTz: NY, amountCents: null, currency: "usd", origin: ORIGIN });
       is("its time kept for good, and no order counted at $0", [(await entryOf(unread.session))?.until, (await orders()) - before], [0, 0]);
-      const source = readFileSync("lib/calls.ts", "utf8");
-      is("an affiliate's lead is written only with an amount that reads, never paid 0 for an unknown one",
-        [/recordLead\(store, \{[^}]*paid: input\.amountCents \?\? 0/.test(source), /countOrder\(store, `call:\$\{session\}:\$\{unit\}`, input\.amountCents \?\? 0\)/.test(source)], [false, false]);
+    }
+
+    part("Through an affiliate's link, where the store pays per booking: a lead only for an amount that reads (review of 6d0218087)");
+    {
+      await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, percent: 30, lead: { kind: "booking", cents: 1_500, hold: 7, daily: 10, budget: 50_000 } }));
+      const paying = (await storeForEmail(OWNER)) as Store;
+      const people = `nl:aff:${paying.statsId}:people`;
+      await run([["HSET", people, LEAD_AFF, JSON.stringify({ id: LEAD_AFF, email: "aff@example.com", code: "aff", status: "approved", appliedAt: clock - 30 * DAY, decidedAt: 1, note: "" })]]);
+      const leads = async () => Number((await run([["HLEN", leadsKey(paying.statsId!)]]))[0]);
+      const before = await leads();
+      const unknown = await take();
+      await confirmBooking({ store: paying, product: call, session: unknown.session, start: unknown.start, end: unknown.start + HOUR, buyerEmail: "unread-amount@example.com", buyerTz: NY, amountCents: null, currency: "usd", origin: ORIGIN, lead: LEAD_AFF, pi: "pi_1LeadUnread" });
+      is("an amount that did not read: no lead hash is written, never one paid 0", (await leads()) - before, 0);
+      const known = await take();
+      await confirmBooking({ store: paying, product: call, session: known.session, start: known.start, end: known.start + HOUR, buyerEmail: "read-amount@example.com", buyerTz: NY, amountCents: 12_000, currency: "usd", origin: ORIGIN, lead: LEAD_AFF, pi: "pi_1LeadRead" });
+      const [raw] = await run([["HGET", leadsKey(paying.statsId!), leadId(paying.statsId!, "read-amount@example.com")]]);
+      is("the control: an amount that reads writes its lead, with what was paid", [(await leads()) - before, typeof raw === "string" ? (JSON.parse(raw) as { paid: number }).paid : null], [1, 12_000]);
     }
     done();
   } finally {

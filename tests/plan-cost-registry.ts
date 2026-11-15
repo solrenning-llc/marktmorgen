@@ -46,6 +46,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
  */
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
+import { CART_NOTE_COMMANDS } from "@/lib/checkout-recovery";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
@@ -1245,16 +1246,18 @@ export const COST_LINES: CostLine[] = [
   {
     id: "store-email",
     feature: "The store's own emails outside the monthly ones: inbox notices and replies, a purchase sent again, contact-form and inbound-mail notices, checkout reminders, come-back, welcome and yearly offers, payment and pause notices to members, community events, affiliates, team invites (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email"),
+    // Each may be a cart's reminder, which first notes its mark under the address (CART_NOTE_COMMANDS; #3929).
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "email") + STORE_ALLOWANCES[tier].email * CART_NOTE_COMMANDS * COMMAND,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
+      { file: "lib/checkout-recovery.ts", names: ["CART_NOTE_COMMANDS", "cartsKey(statsId, email)"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count, and each with a cart reminder's note before it (CART_NOTE_COMMANDS); the daily and per-person limits only spread them.",
   },
   {
     id: "ai",

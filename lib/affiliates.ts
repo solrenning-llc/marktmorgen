@@ -2652,10 +2652,14 @@ function shippingOf(details: SessionLike["total_details"], base: number, shipped
 
 /**
  * The record of `id` for noteSession's code, bond and contact steps, or null for no id. One whose status is not
- * approved leaves the sale to the next step, as a removed first click does (attributedAffiliate).
+ * approved leaves the sale to the next step, as a removed first click does (attributedAffiliate). Read exactly
+ * (rule 24; Claude 6 on #4413): null only when Redis confirms there is no record. An unreadable one throws, so the
+ * sweep keeps the order and reads it again, and the sale never passes to the next step on an unknown answer, which
+ * would credit the wrong affiliate for good (the credit is written once).
  */
 async function approvedOf(store: Store, id: string): Promise<Affiliate | null> {
-  return id ? await readAffiliate(store, id) : null;
+  if (!id || !store.statsId || !isRedisConfigured() || !AFFILIATE_ID_PATTERN.test(id)) return null;
+  return readAffiliateExact(store, id);
 }
 
 /**

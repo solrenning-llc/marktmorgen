@@ -23,7 +23,7 @@
  *     the creator.
  */
 import { autoCaptionCents, CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, readAutoAsk } from "@/lib/auto-captions-rules";
-import { autoRefundsOwed, autoWriting, REFUND_LOOKS_MAX, requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
+import { autoRefundsOwed, autoWriting, captionRefundsStuckMonth, REFUND_LOOKS_MAX, requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { streamCaptions } from "@/lib/stream";
 import { streamPath } from "@/lib/stream-rules";
 import type { Store } from "@/lib/store";
@@ -370,8 +370,14 @@ async function main(): Promise<void> {
     is(`an unreadable list (${answer}) asks for no refund`, [await syncAutoCaptions(VIDEO, lateNow + 1), posts() - before], ["waiting", 0]);
   }
   listAnswer = "error";
+  const stuckMonth = new Date().toISOString().slice(0, 7);
+  const stuckCountBefore = await captionRefundsStuckMonth(stuckMonth);
   for (let i = 0; i < REFUND_LOOKS_MAX; i += 1) await syncAutoCaptions(VIDEO, lateNow + 2 + i);
   const stuckBefore = stripe.length;
+  // Counted for the owner's monthly report (coordinator, 15 November 2026): numbers only, no store, video or person.
+  const stuckCountAfter = await captionRefundsStuckMonth(stuckMonth);
+  is("a refund stuck after every look is counted for the month, once, with what it still owes",
+    [stuckCountBefore, stuckCountAfter], [{ month: stuckMonth, stuck: 0, cents: 0 }, { month: stuckMonth, stuck: 1, cents: 6000 }]);
   is("after every look: kept, marked stuck, out of the queue, shown as stuck, and no more calls", [redis.run(["GET", owedKey]) !== null, queued(), (await autoRefundsOwed(FOLDER)).map((r) => ({ cents: r.cents, stuck: r.stuck }))[0], await syncAutoCaptions(VIDEO, lateNow + 999), stripe.length - stuckBefore], [true, null, { cents: 6000, stuck: true }, "waiting", 0]);
   listAnswer = "ok";
 

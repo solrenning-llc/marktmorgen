@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -1223,7 +1224,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -5323,6 +5324,7 @@ html:has([data-product-editor]) {
   --danger: #ff7b6e;
   --amber-soft: #2e2210;
   --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
   --background: var(--paper);
   --foreground: var(--ink);
 }

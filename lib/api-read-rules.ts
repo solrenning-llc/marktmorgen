@@ -191,6 +191,15 @@ export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
 export const LISTING_BYTES = 16_384;
 
+/**
+ * A refund kept on a sale's, a share's or a lead's record when it was read on its own account (lib/affiliates.ts,
+ * AFFILIATE_REFUND_MARK): at most this many records in one reading of the book (the rest at the next), in one script
+ * per hash, all in one pipeline; and what one record's mark sends at the most (the record's whole new text, its field
+ * and the SHA-1 of the text read).
+ */
+export const REFUND_MARKS_PER_READ = 200;
+export const REFUND_MARK_BYTES = 2_048;
+
 /** What one reading of the affiliate program does (lib/affiliates.ts, readBook), counted from its sizes and the Stripe pages it may wait on. */
 export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   if (!s.kept) return { ...NONE };
@@ -199,17 +208,20 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
+  // Up to REFUND_MARKS_PER_READ records could have their refund kept, one script for each of the three hashes: one trip.
+  const marks = s.stripe && any ? 3 : 0;
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
     // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
     // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
-    // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling.
-    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
+    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid.
+    commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + marks,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 2 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + (marks ? 1 : 0),
   };
 }
 
@@ -489,11 +501,13 @@ export const EVENTS_MOST: EventsSize = {
 /**
  * What the recent events do: the store's log read (LRANGE), each delivery in
  * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
- * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
- * and the messages of the type asked for sent. Without an argument, its most.
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH),
+ * the store's deletion marks read for the people in them (one HMGET, since 14
+ * November 2026: lib/webhooks.ts, recentMessagesOf), and the messages of the
+ * type asked for sent. Without an argument, its most.
  */
 export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
-  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+  return { commands: s.deliveries > 0 ? 3 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 4 : 1 };
 }
 
 /**

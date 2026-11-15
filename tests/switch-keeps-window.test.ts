@@ -546,6 +546,8 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
     // #4246 (claude7/decided-flow-ses-wait) counts the waits for room at Amazon SES in WORST_COMMANDS_PER_RUN
     // (SES_WAITS_PER_RUN × (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY), lib/flow-limits.ts): a dearer
     // workflows line, so each plan keeps less, every figure still above zero (MR). Figures as the model computes them.
@@ -555,6 +557,7 @@ async function main(): Promise<void> {
     // unchanged; every figure above zero (MR).
     // And each counted wait priced at the dearer of an ordinary try and an SES try past its parks
     // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
+    // Merge of main into #4246 (15 November 2026): both changes together; figures as the model computes them.
     is("11: Store, Studio and Scale keep 45.11, 311.76 and 700.20 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "311.76", "700.20"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.

@@ -782,6 +782,20 @@ async function main(): Promise<void> {
   }
   is("five an hour, then limited", answers, ["sent", "sent", "sent", "sent", "sent", "limited"]);
 
+  part("Asking to move does not tell which addresses have a store (MM-SA-46)");
+  const OWNED = "has-a-store@example.com";
+  await claimHandle(OWNED, "has-a-store", "Owned", "");
+  const askOwned = async (session: string) => (((await addressRoute(form(`${ORIGIN}/api/store/address`, { email: OWNED }, `nl_session=${session}`))).headers.get("location") ?? "").split("address=")[1]);
+  is("past the account's five an hour, an address with a store is limited, not taken", await askOwned(askSession), "limited");
+  const staleAsk = await openSession(ASK, "passkey", "cred-ask");
+  await redis.pipeline([["DEL", `nl:auth:fresh:${hex(`nimbus-auth-fresh:${staleAsk}`).slice(0, 40)}`]]);
+  is("from a session that is not fresh, it is reauth, not taken", await askOwned(staleAsk), "reauth");
+  const TKN = "taken-asker@example.com";
+  await claimHandle(TKN, "taken-asker", "Taken asker", "");
+  const tknKey = makePasskey(TKN, "cred-tkn");
+  await tknKey.keep();
+  is("from a fresh session within its hour, it is still taken (nothing is sent)", await askOwned(await signInWithPasskey(tknKey)), "taken");
+
   part("A move that can be neither finished nor undone stays marked until it is repaired (review of 1daa9131e)");
   const BRK = "brk-from@example.com";
   const BRD = "brk-dest@example.com";

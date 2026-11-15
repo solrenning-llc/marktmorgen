@@ -819,7 +819,13 @@ export async function revokeRefunded(store: Store, deadline: number): Promise<nu
   if (!storeHasKeys(store) || !isRedisConfigured()) return 0;
   const account = store.stripeAccountId as string;
   const now = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", refundAnchorKey(store)]]);
+  // The walk's place, read exactly (rule 24): only GET's exact null is "no place yet"; another shape stops the run with
+  // the place as it was, never a newer start that would then be written over the real, older place.
+  const anchorRead = repliesFor(await redisPipeline([["GET", refundAnchorKey(store)]]), 1);
+  const anchorRaw = anchorRead?.[0];
+  if (!anchorRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+    throw new UnknownReplyError("the license keys' refund place");
+  }
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : now - REFUND_LOOKBACK_SECONDS;
   // A little overlap, so a refund created in the second the last run read is
   // not missed; the set of refunds already read keeps it from counting twice.

@@ -72,14 +72,27 @@ async function claimMonth(statsId: string, month: string): Promise<boolean> {
   return got === "ours";
 }
 
-/** Makes the month's claim the month's own, once its email went or may have. A failure is said; the hold then runs out. */
+/**
+ * Makes the month's claim the month's own, once its email went or may have. The EXPIRE is tried twice; when neither
+ * is confirmed, the mark is written again for the month (SET ... EX), so a hold that ran out meanwhile is put back
+ * too. A failure of all three is said: then, and only then, the hold runs out and a later run that month may write
+ * again (Claude 4 on #4667).
+ */
 async function keepMonth(statsId: string, month: string): Promise<void> {
-  try {
-    const replies = repliesFor(await redisPipeline([["EXPIRE", `nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS]]), 1);
-    if (replies?.[0] !== 1) console.error("a store's payday claim could not be kept for the month", replies?.[0]);
-  } catch (error) {
-    console.error("a store's payday claim could not be kept for the month", error);
+  const key = `nl:aff:payday:${statsId}:${month}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return;
+    } catch {
+      // Tried again below.
+    }
   }
+  try {
+    if (repliesFor(await redisPipeline([["SET", key, "kept", "EX", CLAIM_SECONDS]]), 1)?.[0] === "OK") return;
+  } catch {
+    // Said below.
+  }
+  console.error("a store's payday claim could not be kept for the month");
 }
 
 /**

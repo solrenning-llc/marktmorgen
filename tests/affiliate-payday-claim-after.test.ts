@@ -38,7 +38,7 @@ async function storeWithPayday(day: number): Promise<string> {
   sent.length = 0;
   await claimHandle(OWNER, "paydaystore", "Payday Store", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPaydayCatch01", true);
+  await setStripeAccount(OWNER, "acct_1TestPayday02", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: day }));
   const statsId = (await storeForEmail(OWNER))!.statsId!;
   const aff = "a1a1a1a1a1a1";
@@ -78,6 +78,20 @@ async function main(): Promise<void> {
   is("a run two days later sends nothing more", [(await run()).sent, sent.length], [0, 1]);
   const ttl = redis.run(["TTL", `nl:aff:payday:${statsId}:2026-11`]) as number;
   is("the claim is the month's (about 40 days)", ttl > 30 * 86_400, true);
+
+  part("A failed keep never sends a second email (Claude 4 on #4667)");
+  const second = await storeWithPayday(15);
+  const real = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    // Every EXPIRE on the month's claim fails, as when the keep's reply cannot be read.
+    if (commands.some((c) => c[0] === "EXPIRE" && c[1] === `nl:aff:payday:${second}:2026-11`)) throw new Error("the keep failed (test)");
+    return real(commands);
+  }) as typeof redis.pipeline;
+  is("the run sends the email", [(await run()).sent, sent.length], [1, 1]);
+  redis.pipeline = real;
+  advance(DAY * 1000);
+  mock.timers.tick(DAY * 1000);
+  is("a run the next day, after the hold would have run out, sends nothing more", [(await run()).sent, sent.length], [0, 1]);
 
   done();
 }

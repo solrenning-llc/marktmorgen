@@ -56,6 +56,9 @@ async function main(): Promise<void> {
     is("a fraction throws UnknownReplyError", await forget(step, ["prod1", "prod2"], 1.5), "UnknownReplyError");
     is("text throws UnknownReplyError", await forget(step, ["prod1"], "1"), "UnknownReplyError");
     is("a missing reply throws UnknownReplyError", await forget(step, ["prod1"], undefined), "UnknownReplyError");
+    // DEL removes at most one per distinct key (review of the same family, as lib/discord-access.ts).
+    is("control: 1 for the same product named twice", await forget(step, ["prod1", "prod1"], 1), "1 of 2");
+    is("2 for one distinct key sent twice throws UnknownReplyError", await forget(step, ["prod1", "prod1"], 2), "UnknownReplyError");
   }
   done();
 }

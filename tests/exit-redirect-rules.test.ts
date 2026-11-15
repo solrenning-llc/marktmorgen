@@ -114,6 +114,10 @@ is("never shorter than the usual quarantine", exitHoldSeconds(CLOSED, CLOSED + 8
 is("the notice is longer than the quarantine, so the address is held longer", EXIT_NOTICE_DAYS > RELEASE_QUARANTINE_DAYS, true);
 is("the hold is counted from now, rounded up", exitHoldSeconds(CLOSED, CLOSED + 0.5 * DAY, RELEASE_QUARANTINE_DAYS), Math.max(RELEASE_QUARANTINE_DAYS * 86_400, Math.ceil(89.5 * 86_400)));
 is("unknown closing day: the usual quarantine only", exitHoldSeconds(Number.NaN, CLOSED, RELEASE_QUARANTINE_DAYS), RELEASE_QUARANTINE_DAYS * 86_400);
+// A closing day later than now (a record with a far-future closedAt) never holds past the 90 days paid for, counted
+// from now (Claude 1 on #3648, LEVE): the code ceiling equals the funded one.
+is("a far-future closing day: never longer than the notice from now", exitHoldSeconds(Number.MAX_SAFE_INTEGER - 1, CLOSED, RELEASE_QUARANTINE_DAYS), 90 * 86_400);
+is("a closing day a year ahead: the notice from now", exitHoldSeconds(CLOSED + 365 * DAY, CLOSED, RELEASE_QUARANTINE_DAYS), 90 * 86_400);
 is("an unknown quarantine: the longest of the two, never a shorter one", exitHoldSeconds(CLOSED, CLOSED, Number.NaN), EXIT_NOTICE_DAYS * 86_400);
 is("unknown clock: the longest hold, never a shorter one", exitHoldSeconds(CLOSED, Number.NaN, RELEASE_QUARANTINE_DAYS), EXIT_NOTICE_DAYS * 86_400);
 

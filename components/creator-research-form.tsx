@@ -92,6 +92,9 @@ export function CreatorResearchForm() {
         setMessage(
           "Too many submissions from this connection. Please try again in an hour.",
         );
+      } else if (response.status === 503 && result && typeof result === "object" && !Array.isArray(result) && (result as Record<string, unknown>).error === "full") {
+        // The list of answers is at its bound (MM-SA-50): nothing was saved, and nothing older was dropped for it.
+        setMessage(`We have all the answers we can keep right now, so yours was not saved. You can email it to ${SUPPORT_EMAIL} instead.`);
       } else if (typeof errorField === "string" && Object.hasOwn(FIELD_MESSAGES, errorField)) {
         setMessage(FIELD_MESSAGES[errorField]);
       } else {

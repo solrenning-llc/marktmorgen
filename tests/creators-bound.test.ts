@@ -47,8 +47,12 @@ async function main(): Promise<void> {
   const full = await ask("192.0.2.77");
   is("at the bound, an answer is refused and said as full", [full.status, (await full.json()).error], [503, "full"]);
   is("nothing kept was dropped for it", [await kept(), (await store.pipeline([["LINDEX", RESPONSES_KEY, -1]]))[0]], [RESEARCH_MAX_ANSWERS, JSON.stringify({ id: `old-${RESEARCH_MAX_ANSWERS - 1}`, createdAt: JSON.parse(String((await store.pipeline([["LINDEX", RESPONSES_KEY, -1]]))[0])).createdAt })]);
-  await store.pipeline([["RPOP", RESPONSES_KEY]]);
+  await store.pipeline([["LTRIM", RESPONSES_KEY, 0, RESEARCH_MAX_ANSWERS - 2]]);
   is("with room again, an answer is kept", (await ask("192.0.2.78")).status, 201);
+
+  part("The form says it in words");
+  const form = (await import("node:fs")).readFileSync("components/creator-research-form.tsx", "utf8");
+  is("a full list is said, with another way to send it", /error === "full"[\s\S]{0,200}was not saved\. You can email it/.test(form), true);
 
   done();
 }

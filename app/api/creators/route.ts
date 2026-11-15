@@ -11,7 +11,8 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
-import { RESPONSES_KEY } from "@/lib/creator-research-store";
+import { RESEARCH_MAX_ANSWERS, RESPONSES_KEY } from "@/lib/creator-research-store";
+import { shareAddress } from "@/lib/traffic-rules";
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const MAX_BODY_BYTES = 20_000;
@@ -113,7 +114,9 @@ export async function POST(request: NextRequest) {
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "unknown";
-  const rateKey = `nl:rl:creators:${await hashIp(ip)}`;
+  // Counted per network (MM-SA-50): an address of the old kind as it is, the new kind by its /48, which is what one
+  // site is handed (lib/traffic-rules.ts, shareAddress); one machine with a /64 or a /48 is one connection, not many.
+  const rateKey = `nl:rl:creators:${await hashIp(shareAddress(ip) || "unknown")}`;
 
   const answer: CreatorAnswer & {
     id: string;
@@ -141,6 +144,11 @@ export async function POST(request: NextRequest) {
     const count = windowCountOf(await redisPipeline(windowCount(rateKey, RATE_WINDOW_SECONDS)));
     if (count === null || count < 1) throw new UnknownReplyError("the creator research count");
     if (count > RATE_LIMIT) return fail(429, "rate_limited");
+    // The list has a bound of its own (MM-SA-50): at it, an answer is refused and said as full, never kept by dropping
+    // an older one and its consent. Read in its exact shape; an unknown length keeps nothing.
+    const [length] = await redisPipeline([["LLEN", RESPONSES_KEY]]);
+    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) throw new UnknownReplyError("how many research answers are kept");
+    if (length >= RESEARCH_MAX_ANSWERS) return fail(503, "full");
 
     const [saved] = await redisPipeline([["LPUSH", RESPONSES_KEY, JSON.stringify(answer)]]);
     if (typeof saved !== "number" || !Number.isSafeInteger(saved) || saved < 1) {

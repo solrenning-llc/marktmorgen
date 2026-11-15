@@ -45,12 +45,29 @@ const MESSAGES: Record<string, string> = {
 };
 
 /** What to say under a box whose words make no address for its network. */
-function problem(network: SocialNetwork): string {
+export function problem(network: SocialNetwork): string {
   const name = SOCIALS[network].label;
   if (network === "email") return "This is not a whole email address yet.";
   if (network === "website") return "This is not a web address yet. It needs to start with https:// or be like example.com.";
   if (!SOCIALS[network].profile) return `Paste the whole address of your ${name} page, starting with https://.`;
-  return `This is not a ${name} handle or a ${name} address. Only addresses on ${name} itself are linked.`;
+  // No article before the name, so it never reads "a Instagram" (571 [VS1], seen on 30 October 2026).
+  return `This is not a handle or an address on ${name}. Only addresses on ${name} itself are linked.`;
+}
+
+/**
+ * The network a box goes to once something is typed in it (571 [VS1]): the
+ * one the box already has while the words make an address there; else the
+ * network a pasted address is on; else, for a whole web address on no
+ * network the store knows, "Website", as the screen promises ("the network is
+ * picked for you"), unless another box already holds the store's website.
+ * A handle is never taken for a website.
+ */
+export function networkPicked(current: SocialNetwork, typed: string, websiteTaken: boolean): SocialNetwork {
+  if (!/[./@]/.test(typed) || socialUrl(current, typed)) return current;
+  const found = networkFor(typed);
+  if (found) return found;
+  if (!websiteTaken && /^https?:\/\//i.test(typed.trim()) && socialUrl("website", typed)) return "website";
+  return current;
 }
 
 /**
@@ -103,10 +120,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
       if (r.key !== key) return r;
       const row = { ...r, ...part };
       // A pasted address names its own network.
-      if (part.typed !== undefined) {
-        const found = /[./@]/.test(part.typed) ? networkFor(part.typed) : null;
-        if (found && found !== row.network && !socialUrl(row.network, part.typed)) row.network = found;
-      }
+      if (part.typed !== undefined) row.network = networkPicked(row.network, part.typed, rows.some((other) => other.key !== key && other.network === "website"));
       return row;
     }));
   }
@@ -248,7 +262,7 @@ export function SocialsEditor({ socials }: { socials: Social[] }) {
                   </button>
                 </div>
               </div>
-              <p id={`${id}-note`} className={`mt-1.5 break-all text-xs ${wrong ? "font-semibold text-danger-text" : "text-ink-soft"}`}>
+              <p id={`${id}-note`} className={`mt-1.5 break-words text-xs ${wrong ? "font-semibold text-danger-text" : "text-ink-soft"}`}>
                 {wrong
                   ? problem(row.network)
                   : url

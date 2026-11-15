@@ -1084,11 +1084,16 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
  * The store's PayPal sales paid since `since` (seconds), newest first, at most
  * `limit`: one range and one read of the orders. Nothing is asked of PayPal.
  */
-export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
+export async function readPayPalSales(statsId: string | null, since: number, limit: number, nowSeconds = Math.floor(Date.now() / 1000)): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
+  // A sale's record and its score are written in one step from the same time (PAYPAL_SETTLE), and the record expires
+  // after PAID_KEPT_SECONDS while its member stays listed until the next settle trims it. A member older than that is
+  // past keeping by design, not unknown (review of #4001, Claude 1 cloud and Claude 2 cloud I): the range starts inside
+  // the keeping window, with a minute of margin, so it is left out and never makes the reading partial.
+  const from = Math.max(0, since, nowSeconds - PAID_KEPT_SECONDS + 60);
   // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
   // longer than asked, else unknown and thrown, never "no PayPal sales".
-  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(from), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
   if (!orders || orders.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
   const listed = orders.slice(0, limit);
   // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale

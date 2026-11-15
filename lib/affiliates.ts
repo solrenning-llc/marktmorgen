@@ -86,6 +86,7 @@ import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { onAccount } from "@/lib/stripe-account";
+import { hasOwnField, ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
@@ -2804,38 +2805,143 @@ export type Book = {
 };
 
 /**
- * What has been refunded, by payment, on the creator's account, from the
- * oldest sale on the book on. Pending refunds count: the creator already
- * gave the money back.
+ * Adds one refund or dispute Stripe listed to what was taken back from its
+ * payment, in that payment's cents. False when the row cannot be counted
+ * exactly — no id, an amount that is not a whole number of cents, no
+ * currency, or a currency other than the sale's (`currencyOf`, by payment;
+ * cents of another currency added to the sale's mean nothing) — and the
+ * reading is then not complete: a refund that cannot be counted is never
+ * counted as nothing, so no commission is paid on it (rule 24). The same id
+ * listed twice counts once.
  */
-async function refundsSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+function takenBack(
+  byIntent: Map<string, number>,
+  seen: Set<string>,
+  row: Record<string, unknown>,
+  pi: string,
+  currencyOf: ReadonlyMap<string, string>,
+): boolean {
+  const { id, amount, currency } = row;
+  if (typeof id !== "string" || !id) return false;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return false;
+  if (typeof currency !== "string" || !currency) return false;
+  const sale = currencyOf.get(pi);
+  if (sale !== undefined && sale.toLowerCase() !== currency.toLowerCase()) return false;
+  if (seen.has(id)) return true;
+  seen.add(id);
+  byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+  return true;
+}
+
+/**
+ * Every status Stripe gives a refund and a dispute (the Refund and Dispute
+ * objects in Stripe's API reference; the same sets lib/refunds.ts reads,
+ * CX-123). A row whose status is not one of them proves nothing, so the
+ * reading is not complete (rule 24): it is never "not refunded".
+ */
+const REFUND_STATES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const DISPUTE_STATES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
+/**
+ * The refund states that give the money back: made, whether it has left the
+ * balance yet (pending) or waits on the buyer (requires_action, as
+ * lib/plan-refund-write.ts and lib/refund-reserve-rules.ts read it). Failed
+ * and canceled are the only states that give nothing back.
+ */
+const REFUND_TAKES = new Set(["pending", "requires_action", "succeeded"]);
+
+/**
+ * The payment a refund or dispute names: its id, as text or expanded; null
+ * when it says it names none, by an explicit null (a charge made without a
+ * PaymentIntent cannot be on the book, which is keyed by payment); undefined
+ * when it does not read, and when the field is missing altogether: Stripe's
+ * Refund and Dispute objects give it as a nullable field, so a row without it
+ * says nothing (rule 24; Codex G's G97-LPI on #3189).
+ */
+function paymentOf(row: Record<string, unknown>): string | null | undefined {
+  if (!hasOwnField(row, "payment_intent")) return undefined;
+  const raw = ownField(row, "payment_intent");
+  if (raw === null) return null;
+  if (typeof raw === "string") return raw || undefined;
+  if (!plainObject(raw)) return undefined;
+  const id = ownField(raw, "id");
+  return typeof id === "string" && id ? id : undefined;
+}
+
+/**
+ * What one Stripe list took back, by payment, from the oldest sale on the
+ * book on. Complete only when every page read as a list (`object` "list",
+ * `data` a list, `has_more` true or false: readStripePage), every row as a
+ * row of its kind with a status Stripe gives, every counted row's payment and
+ * amount exactly (takenBack), and the last page said there was no more. A
+ * page that says there is more without a readable last row, or a list still
+ * not finished after `pages` pages, is not complete, never "nothing more".
+ */
+async function takenSince(
+  store: Store,
+  list: "refunds" | "disputes",
+  pages: number,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
-  if (!store.stripeAccountId) return { byIntent, complete: false };
+  const seen = new Set<string>();
+  const incomplete = { byIntent, complete: false };
+  if (!store.stripeAccountId) return incomplete;
+  const kind = list === "refunds" ? "refund" : "dispute";
+  const states = list === "refunds" ? REFUND_STATES : DISPUTE_STATES;
+  const takes: ReadonlySet<string> = list === "refunds" ? REFUND_TAKES : DISPUTE_TAKES;
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    return ownField(row, "object") === kind && typeof status === "string" && states.has(status);
+  };
   let after = "";
-  for (let page = 0; page < REFUND_PAGES; page += 1) {
+  for (let page = 0; page < pages; page += 1) {
     const wait = stripeWait(deadline);
-    if (wait === null) return { byIntent, complete: false };
-    const listed = await onAccount(
+    if (wait === null) return incomplete;
+    const listed: unknown = await onAccount(
       "GET",
       store.stripeAccountId,
-      `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      `/${list}?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
       undefined,
       undefined,
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const refund of rows) {
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+    if (!plainObject(listed) || ownField(listed, "object") !== "list") return incomplete;
+    let read: StripePage;
+    try {
+      read = readStripePage(listed, legible);
+    } catch (error) {
+      if (error instanceof StripeListUnreadable) return incomplete;
+      throw error;
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (read.unreadable > 0) return incomplete;
+    for (const row of read.rows) {
+      if (!takes.has(row.status as string)) continue;
+      const pi = paymentOf(row);
+      if (pi === undefined) return incomplete;
+      if (pi !== null && !takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;
+    }
+    if (!read.hasMore) return { byIntent, complete: true };
+    if (!read.lastId) return incomplete;
+    after = read.lastId;
   }
-  return { byIntent, complete: false };
+  return incomplete;
+}
+
+/**
+ * What has been refunded, by payment, on the creator's account, from the
+ * oldest sale on the book on. Pending refunds, and refunds waiting on the
+ * buyer, count: the creator already gave the money back.
+ */
+function refundsSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+  return takenSince(store, "refunds", REFUND_PAGES, since, deadline, currencyOf);
 }
 
 /**
@@ -2844,35 +2950,13 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
  */
-export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
-  const byIntent = new Map<string, number>();
-  if (!store.stripeAccountId) return { byIntent, complete: false };
-  let after = "";
-  for (let page = 0; page < DISPUTE_PAGES; page += 1) {
-    const wait = stripeWait(deadline);
-    if (wait === null) return { byIntent, complete: false };
-    const listed = await onAccount(
-      "GET",
-      store.stripeAccountId,
-      `/disputes?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-      undefined,
-      undefined,
-      undefined,
-      wait,
-    );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
-      const raw = dispute.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
-      if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
-    }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
-  }
-  return { byIntent, complete: false };
+export function disputesSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+  return takenSince(store, "disputes", DISPUTE_PAGES, since, deadline, currencyOf);
 }
 
 /** A sale as it stands today, after any refund. */
@@ -3060,8 +3144,19 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let refundsChecked = true;
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
+    // Each payment's currency, so a refund or dispute in another one is never added to its cents.
+    // Two records of one payment that disagree on it leave its currency
+    // unknown ("", which no refund's currency equals): a refund on it then
+    // holds the book, rather than one record deciding.
+    const currencyOf = new Map<string, string>();
+    for (const r of [...everything, ...bookings]) {
+      if (!r.pi) continue;
+      const currency = r.currency.toLowerCase();
+      const was = currencyOf.get(r.pi);
+      currencyOf.set(r.pi, was === undefined || was === currency ? currency : "");
+    }
     try {
-      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
+      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline, currencyOf) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
       // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
@@ -3097,7 +3192,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     // is owed is not known (refundsChecked), and no payout is made on it.
     if (store.stripeAccountId) {
       try {
-        const disputed = await disputesSince(store, since, limits.deadline);
+        const disputed = await disputesSince(store, since, limits.deadline, currencyOf);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
         refundsChecked = refundsChecked && disputed.complete;
       } catch (error) {

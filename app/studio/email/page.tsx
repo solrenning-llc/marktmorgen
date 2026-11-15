@@ -16,6 +16,7 @@ import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
 import { listBroadcastsStrict } from "@/lib/broadcasts";
@@ -38,7 +39,7 @@ import { can } from "@/lib/team-roles";
 import { isBillingConfigured, trialOffered } from "@/lib/billing";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
-import { MAX_WAITS_PER_RUN, activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
+import { MAX_WAIT_DAYS_PER_STEP, activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
 import { listHeld, runsToday } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 
@@ -130,7 +131,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Email</p>
+        <StudioTrail store={store} here="Email" />
         <h1 className="t-h2 mt-3">Write to your list</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Only the people who agreed to hear from you are written to: those who checked the box when they got
@@ -217,7 +218,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
               <p className="font-semibold">Email from your store is paused while it is switched off</p>
               <p className="mt-2 text-sm text-ink-soft">
-                {`Your store is switched off after notices about its content, so nothing goes out to your list or your community: emails to your list, workflow steps and community announcements wait. They go out by themselves once your store is back on. A workflow step is tried again once a day; a run waits ${MAX_WAITS_PER_RUN} times at the most, then stops at that step, and its history says so.`}
+                {`Your store is switched off after notices about its content, so nothing goes out to your list or your community: emails to your list, workflow steps and community announcements wait. They go out by themselves once your store is back on. A workflow step is checked again by itself and goes on at the first check after your store is back on; if your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after a step began to wait, that run stops at the step, and its history says so. Come-back offers to members who left are sent only while your store is on.`}
               </p>
             </div>
           ) : null}

@@ -35,3 +35,20 @@ The item asks for every competitor fact to be rechecked on its official page, wi
 ## Order
 
 Unit 1 (no invented price) is small and changes what a creator gets today, so it comes first. Then 2 (link reading, with its limits), 4–7 (the draft, progress, review and publish), 8 (measurement), 10 (privacy text, in force with the feature) and 11 (cost) before the switch, and 9 once 571 [VS1] has its tokens. The Instagram half of 2 waits on the owner.
+
+## Measured (unit 8, first part, 15 November 2026)
+
+`tests/ai-store-walk.test.ts` walks the real routes of the studio's "Draft your store with AI" card for a creator who is already signed in and has a store (those steps are measured in docs/signup-to-ready-measured.md). It runs on the in-memory database with the model simulated: nothing real is called, and no account, payment or message is made. The test fails when this record stops matching what the walk measures.
+
+A step is one thing the person does that sends a request. A field counts as required only when the route refuses the same request without it.
+
+| Step | What the person does | Required fields |
+| --- | --- | --- |
+| 1 | Describe what you make | `about` |
+| 2 | Keep what you chose | none |
+
+In total: **2 actions**, with **4 choices** on the review screen between them for a draft of two products with questions: one line under the name, keep or not for each product, and keep or not for the questions. A product kept with no price waits for one before the request is sent.
+
+After step 2 the studio lists **3 steps still missing** before anything can sell: connect Stripe (a kept product has a price and the store cannot take payments yet), then add what each product hands over and choose Publish (unit 7). Every kept product is a hidden draft, so nothing goes live by itself, and the store cannot sell: paid plans are not on sale (`PLANS_ON_SALE` false), so the walk's plan is a synthetic fixture.
+
+Not measured: a person's time, which needs real people (item 202), and Stripe's own onboarding pages. Until then no public page may state a time or claim that setup is easy. The rest of unit 8, from the kept draft to a published store, waits on units 5 and 6.

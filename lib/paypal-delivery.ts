@@ -373,6 +373,14 @@ async function creditAgain(store: Store, order: string): Promise<boolean> {
   const erased = await erasedSincePaid(listId, paid, true);
   const product = await readListing(store, paid.product);
   await creditPayPalSale(store, paid, product?.title ?? "", !erased);
+  // Read once more after the bond, as the hand-over does (Claude 6, MEDIUM on #3858): a deletion that wrote its mark
+  // between the read above and the bond did not see that bond, so it is taken back here. Also when the first read said
+  // erased, so a bond an earlier try wrote before stopping is taken back too. One HGET a try; the forget's reply is
+  // read exactly, and anything but 0 or 1 throws, so the credit stays owed for the next sweep (rule 24).
+  if (paid.via && store.statsId && (erased || (await erasedSincePaid(listId, paid, true)))) {
+    const replies = repliesFor(await redisPipeline([forgetBondCommand(store.statsId, paid.email, paid.via.aff)]), 1);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back the bond of a person deleted during a PayPal credit's retry");
+  }
   return true;
 }
 

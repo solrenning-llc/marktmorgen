@@ -48,7 +48,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
-  "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
+  "nl:call:room:", "nl:captions:stuck:month:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
@@ -227,7 +227,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // gone with it, as its readings' counts are (it also expires in two days).
   "nl:list:try:": E,
   "nl:call:busy:": E, "nl:call:confirmed:": X(430), "nl:call:creator-reminded:": E, "nl:call:lock:": E,
-  "nl:call:moved:": X(730), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E, "nl:call:series:": E,
+  "nl:call:moved:": X(730), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E, "nl:call:series:": E, "nl:captions:stuck:month:": Cr(400),
   "nl:callteam:": E, "nl:callteam:rr:": E,
   "nl:card:link:": X(21), "nl:card:open:": E, "nl:card:opens:": X(21),
   "nl:catalog:": E, "nl:catalog:move:cursor": C,

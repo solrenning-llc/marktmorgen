@@ -327,6 +327,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stream:auto:@lib/auto-captions.ts": { what: "Captions being written for a video, and their charge", parts: [per("upload", 400, KB, "One record a video asked for: seven days, or up to 400 days while a refund Stripe has not confirmed is owed or the charge's order is not settled from Stripe's invoice.")] },
   "nl:stream:autoowed:@lib/auto-captions.ts": short("The videos of a store with a captions refund owed", "upload", 400),
   "nl:stream:autoq@lib/auto-captions.ts": company("Videos to ask about", "One sorted set, its members gone within days."),
+  "nl:captions:stuck:month:@lib/auto-captions.ts": company("Monthly counts of captions refunds still not confirmed after every look", "Two counts a month (how many, what they still owed), no store, video or person; at most 14 monthly keys alive for 400 days."),
   "nl:bench:ranges@lib/benchmarks.ts": company("The benchmark ranges", "One key, the company's, a month."),
   "nl:bench:s:@lib/benchmarks.ts": company("Each store's sample a week", "One key a week with a field a store, three weeks: the company's."),
   "nl:remind:@lib/billing-reminders.ts": company("A billing reminder sent", "The company's emails to creators about their own plan."),

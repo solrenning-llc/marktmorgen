@@ -32,7 +32,7 @@
  * once ask for the same one and money is never returned twice.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { askStream, noteCaptionLanguages, streamCaptions, streamConfig, streamRecord } from "@/lib/stream";
 import { readStreamPath, STREAM_ID_PATTERN } from "@/lib/stream-rules";
@@ -529,6 +529,43 @@ function splitBack(pending: Pending & { card: number }, cents: number | null): {
   return { card, credit: cents - card };
 }
 
+/**
+ * Captions refunds that went stuck (every automatic look made, still not confirmed), counted by the month they did:
+ *   nl:captions:stuck:month:<YYYY-MM>   hash  stuck (how many), cents (what they still owed), STUCK_MONTH_SECONDS
+ * Numbers only, for the monthly owner report (lib/company-owner-report.ts, wired by 465 [MR2]); no store, video or
+ * person. Three commands more at the one look a refund goes stuck, inside that look's pipeline.
+ */
+const stuckMonthKey = (month: string) => `nl:captions:stuck:month:${month}`;
+/** Past the next yearly look at the month. */
+const STUCK_MONTH_SECONDS = 400 * 86_400;
+/** The Redis commands one read of a month's stuck refunds sends (captionRefundsStuckMonth). */
+export const CAPTIONS_STUCK_MONTH_READ_COMMANDS = 2;
+
+/** A month's stuck captions refunds, for the owner's report: how many and what they still owed; null when it does not read. */
+export async function captionRefundsStuckMonth(month: string): Promise<{ month: string; stuck: number; cents: number } | null> {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
+  let raw: unknown;
+  try {
+    raw = await redisPipeline([["HGETALL", stuckMonthKey(month)], ["HLEN", stuckMonthKey(month)]]);
+  } catch {
+    return null;
+  }
+  const replies = repliesFor(raw, CAPTIONS_STUCK_MONTH_READ_COMMANDS);
+  const flat = replies ? stringList(replies[0]) : null;
+  const fields = replies ? countOf(replies[1]) : null;
+  if (!flat || fields === null || flat.length !== fields * 2) return null;
+  const read: Record<string, number> = { stuck: 0, cents: 0 };
+  const seen = new Set<string>();
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!Object.hasOwn(read, flat[i]) || seen.has(flat[i])) return null;
+    const n = /^(0|[1-9][0-9]*)$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(n)) return null;
+    seen.add(flat[i]);
+    read[flat[i]] = n;
+  }
+  return { month, stuck: read.stuck, cents: read.cents };
+}
+
 /** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
 async function giveBack(pending: Pending, cents: number | null, key: string): Promise<boolean> {
   if (mixed(pending)) {
@@ -684,10 +721,15 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
   const looks = owed.looks + 1;
   if (looks >= REFUND_LOOKS_MAX) {
     console.error("a captions refund is still not confirmed after every automatic look", id);
+    const month = stuckMonthKey(new Date(now).toISOString().slice(0, 7));
     await redisPipeline([
       ["SET", pendingKey(id), JSON.stringify({ ...pending, owed: { ...owed, looks, stuck: true } }), "EX", REFUND_KEEP_SECONDS],
       ["ZREM", QUEUE, id],
       ...keepListed(pending),
+      // Counted for the owner's monthly report: how many, and what they still owe; no store, video or person.
+      ["HINCRBY", month, "stuck", 1],
+      ["HINCRBY", month, "cents", owed.cents ?? pending.cents],
+      ["EXPIRE", month, STUCK_MONTH_SECONDS],
     ]);
     return "waiting";
   }

@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { is, part, done } from "./check";
 import {
-  LABEL, TITLE, REQUIRED, decide, earlierNeeded, alarm as alarmRun, unreported, openBody, failureComment, greenComment, closable,
+  LABEL, TITLE, REQUIRED, NOT_FROM_QUEUE, decide, earlierNeeded, alarm as alarmRun, unreported, openBody, failureComment, greenComment, closable,
   type Run, type State, type Api,
 } from "../scripts/main_red_alarm.mjs";
 
@@ -286,14 +286,24 @@ part("a merge_group run that passed on main's very head is that workflow's resul
   const withQueue = (queueRuns: Run[], runs: Run[], redJobs: number[] = [], trigger: Run = neutral) =>
     decide({ runs, trigger, head: HEAD, redJobs, queueRuns } as Parameters<typeof decide>[0]);
   const fromQueue = (d: ReturnType<typeof decide>) => (d as unknown as { queueGreen?: string[] }).queueGreen ?? null;
+  // CodeQL's merge-queue run skips the analysis on purpose (.github/workflows/codeql.yml), so its own push run on
+  // the head is its only result there: in these cases it passed; the cases right below show it is never taken.
+  const CQ = REQUIRED.findIndex((w) => w.file === ".github/workflows/codeql.yml");
+  const butCodeql = (runs: Run[]) => [...runs.filter((r) => r.path !== REQUIRED[CQ].file), allGreen()[CQ]];
   {
     const q = queueGreen();
-    const d = withQueue(q, REQUIRED.map((_, i) => run(i, stopped)));
-    is("(1) all nine passed in the merge queue on the head, its push runs canceled by the next push: close", [d.action, d.red], ["close", []]);
-    is("and the decision names the workflows whose green came from the merge queue", fromQueue(d), REQUIRED.map((w) => w.file));
+    const d = withQueue(q, butCodeql(REQUIRED.map((_, i) => run(i, stopped))));
+    is("(1) all nine passed in the merge queue on the head, its push runs canceled by the next push (CodeQL's passed): close", [d.action, d.red], ["close", []]);
+    is("and the decision names the workflows whose green came from the merge queue, never CodeQL", fromQueue(d), REQUIRED.map((w) => w.file).filter((_, i) => i !== CQ));
   }
-  is("(1) the push runs skipped: close", withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, "skipped"))).action, "close");
-  is("(1) the push runs not there (yet or ever): close", withQueue(queueGreen(), []).action, "close");
+  is("(1) the push runs skipped (CodeQL's passed): close", withQueue(queueGreen(), butCodeql(REQUIRED.map((_, i) => run(i, "skipped")))).action, "close");
+  is("(1) the push runs not there (yet or ever), CodeQL's passed: close", withQueue(queueGreen(), butCodeql([])).action, "close");
+  is("CodeQL is the one workflow never taken from the merge queue", [...NOT_FROM_QUEUE], [".github/workflows/codeql.yml"]);
+  is("CodeQL's push run canceled, skipped or not there: its merge-queue green is never main's result, nothing closes",
+    [withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, stopped))).action, withQueue(queueGreen(), REQUIRED.map((_, i) => run(i, "skipped"))).action,
+      withQueue(queueGreen(), []).action, withQueue(queueGreen(), [...allGreen().filter((_, i) => i !== CQ)]).action], ["none", "none", "none", "none"]);
+  is("an earlier head red on CodeQL stays red while only the merge queue passed it on the current head",
+    withQueue(queueGreen(), [...allGreen().filter((_, i) => i !== CQ), run(CQ, "failure", { head_sha: OLD })]).action, "open");
   is("(1) the push runs passed too (they reused the queue's proof): close, nothing from the queue needed",
     [withQueue(queueGreen(), allGreen()).action, fromQueue(withQueue(queueGreen(), allGreen()))], ["close", []]);
   is("(1) eight passed in the queue and one has no result anywhere on the head: nothing yet",
@@ -576,15 +586,24 @@ async function endToEnd() {
       await alarmRun({ api: gh.api, trigger: canceledHead[0], log: quiet });
       is("(1) and with no issue open, nothing is opened: no alarm", gh.writes, []);
     }
+    // CodeQL never takes the queue's run (NOT_FROM_QUEUE): its own push run on the head must have passed.
+    const cq = REQUIRED.findIndex((w) => w.file === ".github/workflows/codeql.yml");
+    const codeqlGreen = run(cq, "success", { id: 8_960 });
+    const stoppedButCodeql = [...stoppedHead.filter((_, i) => i !== cq), codeqlGreen];
     {
-      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedHead, issues: [botIssue], ...proven });
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: stoppedButCodeql, issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: stoppedHead[0], log: quiet });
-      is("(1) head all canceled by later pushes, the queue green on the head: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
+      is("(1) head all canceled by later pushes but CodeQL's, which passed, the queue green on the head: green", [d.action, writesOf(gh)], ["close", ["POST issues/7/comments", "PATCH issues/7"]]);
     }
     {
-      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [], issues: [botIssue], ...proven });
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [codeqlGreen], issues: [botIssue], ...proven });
       const d = await alarmRun({ api: gh.api, trigger: queueGreen[0], log: quiet });
-      is("(1) no push run on the head yet, the queue green on the head: green", d.action, "close");
+      is("(1) no push run on the head yet but CodeQL's, which passed, the queue green on the head: green", d.action, "close");
+    }
+    for (const [what, headRuns] of [["canceled", stoppedHead], ["not there", []]] as const) {
+      const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: [...headRuns], issues: [botIssue], ...proven });
+      const d = await alarmRun({ api: gh.api, trigger: queueGreen[0], log: quiet });
+      is(`CodeQL's push run ${what}, only its merge-queue run green on the head: the bot's issue stays open`, [d.action, gh.writes], ["none", []]);
     }
     {
       const gh = github({ head: HEAD, defaultJobs: quietJobs, headRuns: allGreen(), issues: [botIssue], ...proven });

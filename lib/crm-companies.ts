@@ -76,8 +76,22 @@ export const GONE_SECONDS = INDEX_SECONDS;
  * restore asked before they came back is still refused or left out while the mark stood.
  */
 export function liftCompanyMarkCommand(statsId: string, email: string): (string | number)[] {
-  return ["DEL", goneKey(statsId, personKey(statsId, email))];
+  return ["DEL", companyGoneKey(statsId, email)];
 }
+
+/**
+ * The key of an address's companies' deletion mark, for a write that lifts it in its own step (lib/contacts.ts
+ * CONTACT_WRITE_IF, KEYS[5]; an order's ORDER_WRITE_IF_SAME), with the suppression and the row: the two never part.
+ */
+export function companyGoneKey(statsId: string, email: string): string {
+  return goneKey(statsId, personKey(statsId, email));
+}
+
+/**
+ * A key of the companies' deletion marks that names nobody (no statsId is "-"), and so is never set: KEYS[5] of a
+ * contact's write that lifts no mark, which only ever deletes it when a lift is asked without a store to name.
+ */
+export const NO_COMPANY_MARK = goneKey("-", "-");
 
 /**
  * KEYS[1] the companies' lock, KEYS[2] their hash, then the deletion marks

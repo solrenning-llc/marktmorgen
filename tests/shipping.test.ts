@@ -314,7 +314,7 @@ async function main(): Promise<void> {
       const beforeEmails=emails.length,beforeOutbox=outbox.commands.length;
       const result=await markShipped(store,String(session.id),"",undefined,runtime);
       is("a malformed no-recipient claim cannot confirm a shipment",result.ok?"marked":result.reason,"unknown");
-      is("malformed no-recipient claims add no re-read, outbox work or email",[seen.map(c=>c[0]),outbox.commands.length-beforeOutbox,emails.length-beforeEmails],[["GET","SET"],0,0]);
+      is("only a confirmed NX miss re-reads; unknown receipts add no mail work",[seen.map(c=>c[0]),outbox.commands.length-beforeOutbox,emails.length-beforeEmails],[Array.isArray(receipt)&&receipt.length===1&&receipt[0]===null?["GET","SET","GET"]:["GET","SET"],0,0]);
     }
     redis.pipeline=async commands=>{
       if(commands.some(c=>c[0]==="SET"&&String(c[1]).startsWith("nl:ship:done:")))throw Error("synthetic no-recipient SET outage");

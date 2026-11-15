@@ -117,6 +117,11 @@ test('a restore whose write lands after the erasure began writes nothing', async
   assert.equal(result.ok, false);
 });
 
+// Main's sign-up writes a yes only when it was given from the second after the deletion on (lib/contacts.ts,
+// afterDeletion: a yes from the deletion's own second is not known to be after it), so the yes coming back is given
+// two seconds later.
+const laterYes = () => new Date(Date.now() + 2_000).toISOString();
+
 // Claude 7's MÉDIO 1 and Claude 1's MÉDIO on #4026: the mark is the erased person's, not the address's. Someone who
 // comes back with their own yes (the suppression lifted, lib/contacts.ts) can be put on a company again at once.
 test('a person who comes back with their own yes after the erasure can be linked to a company again', async () => {
@@ -124,7 +129,7 @@ test('a person who comes back with their own yes after the erasure can be linked
   await erase(who);
   const store = await storeForEmail(owner);
   assert.ok(store?.listId);
-  await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: new Date().toISOString()}, store);
+  await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: laterYes()}, store);
   assert.equal(await isSuppressed(store.listId, who), false);
   const linked = await post({action: 'link', id, person: s.person});
   assert.equal(linked.status, 200, JSON.stringify(await linked.clone().json()));
@@ -162,7 +167,7 @@ test("an order's yes lifts the mark in the same write as the suppression, never 
   }) as never;
   let threw: unknown = null;
   try {
-    await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: new Date().toISOString()}, orderRoom(store));
+    await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: laterYes()}, orderRoom(store));
   } catch (error) {
     threw = error;
   } finally {
@@ -195,3 +200,40 @@ test('the undo says plainly that a deleted person was not put back, by a count o
   assert.equal(restoredSentence('North', 2, 0, 0), 'North is back with its people.');
   assert.equal(restoredSentence('North', 0, 0, 0), 'North is back.');
 });
+
+// Claude 7 on #4026 (adopted, 15 November 2026): the companies' mark is lifted only inside the sign-up's own checked
+// write (lib/contacts.ts CONTACT_WRITE_IF, ORDER_WRITE_IF_SAME), never beside it. A deletion that lands between a
+// sign-up's read and its write leaves the sign-up unwritten, the suppression standing, the companies' mark standing,
+// and the person off every company: neither the store's room nor an order's puts them back.
+for (const [what, roomOf] of [["the store's room", (s: NonNullable<Awaited<ReturnType<typeof storeForEmail>>>) => s], ["an order's room", (s: NonNullable<Awaited<ReturnType<typeof storeForEmail>>>) => orderRoom(s)]] as const) {
+  test(`${what}: a sign-up racing the person's deletion never puts them back on a company`, async () => {
+    const s = await seed();
+    const store = await storeForEmail(owner);
+    assert.ok(store?.listId);
+    const listId = store.listId;
+    const original = redis.pipeline.bind(redis);
+    let raced = false;
+    redis.pipeline = (async (commands: unknown[][]) => {
+      const replies = await original(commands as never);
+      // The sign-up's first read (the row, the list's size, the deleted mark): the deletion lands right after it.
+      if (!raced && commands.length === 3 && commands[0][0] === 'HGET' && String(commands[0][1]).startsWith('nl:store:leads:') && commands[1][0] === 'HLEN') {
+        raced = true;
+        redis.pipeline = original;
+        await erase(who);
+        redis.pipeline = hook;
+      }
+      return replies;
+    }) as never;
+    const hook = redis.pipeline;
+    try {
+      await upsertContact(listId, who, {agreed: true, explicit: true, source: 'free', at: laterYes()}, roomOf(store)).catch(() => null);
+    } finally {
+      redis.pipeline = original;
+    }
+    assert.equal(raced, true, 'control: the deletion ran between the read and the write');
+    assert.equal(await isSuppressed(listId, who), true, 'the deletion stands');
+    assert.equal((await readCompanies(s.statsId)).some((c) => c.people.includes(s.person)), false, 'off every company');
+    const refused = await post({action: 'link', id, person: s.person});
+    assert.notEqual(refused.status, 200, 'and no company can take them');
+  });
+}

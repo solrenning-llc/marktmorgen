@@ -37,6 +37,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
+import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES } from "@/lib/migration-guides";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
@@ -82,9 +83,18 @@ import { storageWords } from "@/lib/storage-quota";
 import { MAX_AUTO_REMINDERS, MAX_LINES, OPEN_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { MAX_VERSIONS as AGREEMENT_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { PLAN_TITLES, TIERS } from "@/lib/plan";
+import { uploadBackendOpen } from "@/lib/upload-budget-policy";
 
 /** Whether stores can be put on their own domain on this deployment. */
 const DOMAINS = isDomainsConfigured();
+/**
+ * Whether a new lesson video can be kept by the video service: the same door
+ * the studio's video upload asks (reserveStoreUpload, app/api/store/stream).
+ * Captions and video made into several sizes exist only for such a video;
+ * while the door is closed a lesson video is a plain file, played at its own
+ * size with no captions, and the pages say only that.
+ */
+const LESSON_VIDEO_SERVICE = uploadBackendOpen("stream");
 /** What Studio and the trial send in a month, as the pages say it: read from the limit the code enforces, never typed. */
 const PRO_EMAILS = PRO_MONTHLY_EMAILS.toLocaleString("en-US");
 const TRIAL_EMAILS = TRIAL_MONTHLY_EMAILS.toLocaleString("en-US");
@@ -317,7 +327,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Courses your students",
     highlight: "open without a password",
     intro:
-      "Modules and lessons with video that plays in the size each student's connection can carry, text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
+      (LESSON_VIDEO_SERVICE ? "Modules and lessons with video that plays in the size each student's connection can carry," : "Modules and lessons with video,") + " text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
     badge: WORKING,
     accent: "from-sky-brand to-violet-brand",
     visual: "course",
@@ -339,11 +349,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "features",
         title: "What a course holds",
         items: [
-          { icon: "play", title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." },
-          { icon: "video", title: "A player students control", body: "Students can pick a size and a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device." },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "play" as const, title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." }] : []),
+          { icon: "video", title: "A player students control", body: `Students can pick ${LESSON_VIDEO_SERVICE ? "a size and " : ""}a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device.` },
           { icon: "phone", title: "Video that stays upright", body: "Up to 5 GB a lesson. A video filmed upright on a phone plays upright, in a frame of its own shape." },
-          { icon: "type", title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
-          { icon: "sparkle", title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "type" as const, title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
+          { icon: "sparkle" as const, title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` }] : []),
           { icon: "lock", title: "A video address that expires", body: "The player on a lesson page is signed for a few hours. Without that signature, the video and its files are refused." },
           { icon: "eye", title: "Free preview lessons", body: "Any lesson can be watched from your store before buying, so the buyer knows what they are paying for." },
           { icon: "calendar", title: "Modules that open over time", body: "A module can open a set number of days after each student joins, and the student gets an email the day it does." },
@@ -376,8 +386,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "No live lessons inside the course itself. Hold them as live events in your community, or put a link in a lesson to where you hold them.",
           `Stream video has a finite threshold of ${paidVideoWords()} a month across your store. New playback pauses at the recorded threshold. The meter is read about once an hour; existing player links may remain valid until they expire. Your studio shows the recorded hours.`,
           `Without a paid plan, lesson videos pause past the store's hours until the plan is paid (for a store with no plan, until the month turns): ${hoursWords(TRIAL_VIDEO_SECONDS)} a month in the free trial, and ${hoursWords(SETUP_VIDEO_SECONDS)} a month before a plan starts and after one ends.`,
-          "Video is kept up to 1080p: a 4K file plays at 1080p.",
-          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`,
+          ...(LESSON_VIDEO_SERVICE ? ["Video is kept up to 1080p: a 4K file plays at 1080p.",
+          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`] : []),
           "A signed address stops a link from being passed around. It does not stop a student from recording their own screen; nothing does.",
         ],
       },
@@ -387,7 +397,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 2: what someone starting out asks, answered by what the code does (lib/course-faq.ts).
           ...courseBeginnerQuestions(),
-          { q: "How long until a video I upload can be watched?", a: "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." },
+          { q: "How long until a video I upload can be watched?", a: LESSON_VIDEO_SERVICE ? "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." : "As soon as its upload finishes. It plays in the student's browser at the size you uploaded it." },
           { q: "How does a student come back next week?", a: "On the device they paid on, the course simply opens. On any other, they ask for a link on the course page and it is emailed to the address they paid with. No account, no password." },
           { q: "Can I sell a course monthly?", a: "Yes. Sold as a membership, the course stays open while the member pays and closes when the membership ends." },
           { q: "Can students pay in installments?", a: "Yes. A course with one price can be offered in two to twelve weekly or monthly payments. The student gets in after the first." },
@@ -2344,7 +2354,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "A sale, and your phone",
     highlight: "tells you",
     intro:
-      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, and a comment under a lesson.",
+      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, a comment under a lesson, and a buyer's message in your inbox.",
     visual: "phone",
     badge: WORKING,
     accent: "from-pink-brand to-amber-brand",
@@ -2371,6 +2381,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "alert", title: "Reports", body: "A member reported a post or a comment in your community." },
           { icon: "handshake", title: "Affiliate applications", body: "Someone confirmed an application to your program." },
           { icon: "chat", title: "Course comments", body: "A student commented under a lesson: which lesson, and the start of what they wrote." },
+          { icon: "mail", title: "Buyer messages", body: "A buyer wrote in your inbox: once until you read it, never what they wrote. Tap it to open the conversation." },
           { icon: "video", title: "Live events", body: "One of your community's live events starts in 15 minutes: time to open the room.", href: "/platform/live-events" },
           { icon: "lock", title: "Written for a lock screen", body: "Amounts, titles, times and the start of a lesson comment, as the student wrote it. We never add a buyer's name or email address." },
           { icon: "users", title: "Each person their own", body: `Up to ${MAX_DEVICES} devices each. Your team members see only their own devices, and hear only what their role may see.` },
@@ -2452,6 +2463,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "An import cannot be undone in one step. A student can be taken off a course, and a member out of the community, one at a time.",
           "Posts and comments from a community elsewhere do not come across. One import runs at a time per store.",
         ],
+      },
+      {
+        kind: "features",
+        title: "Guides for one platform",
+        items: MIGRATION_GUIDES.map((g) => ({ icon: "door" as const, title: `Move from ${g.platform}`, body: g.summary, href: `/platform/${g.slug}` })),
       },
       {
         kind: "faq",
@@ -2541,6 +2557,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       ] },
     ],
   },
+  // 239 [CF2]: one guide per source platform, out of the menu (lib/migration-guides.ts).
+  ...MIGRATION_GUIDE_PAGES,
   {
     slug: "security",
     section: "platform",

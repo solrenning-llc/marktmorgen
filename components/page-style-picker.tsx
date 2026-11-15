@@ -1,5 +1,6 @@
 "use client";
 
+import { Icon } from "@/components/icons";
 import { PAGE_STYLES, type PageStyle } from "@/lib/sales-page";
 
 /**
@@ -54,19 +55,24 @@ export function PageStylePicker({
             onClick={() => onChange(style)}
             className={
               compact
-                ? `inline-flex min-h-11 items-center rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`
+                ? `inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-sm font-semibold ring-1 ${on ? "bg-lilac text-violet-ink ring-violet-brand/40" : "text-ink-soft ring-line"}`
                 : `flex min-h-11 items-start gap-3 rounded-xl p-3 text-left ring-1 transition ${on ? "bg-lilac ring-2 ring-violet-brand" : "bg-white ring-line hover:ring-line-strong"}`
             }
           >
             {compact ? (
-              STYLE_NAMES[style].label
+              <>
+                {STYLE_NAMES[style].label}
+                {on ? <Icon name="check" size={16} /> : null}
+              </>
             ) : (
               <>
                 <Thumb style={style} />
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="block text-sm font-semibold text-ink">{STYLE_NAMES[style].label}</span>
                   <span className="mt-0.5 block text-xs text-ink-soft">{STYLE_NAMES[style].hint}</span>
                 </span>
+                {/* The one on says so with a check, not by color alone: forced colors take the color and the ring away. */}
+                {on ? <Icon name="check" size={16} className="mt-0.5 shrink-0 text-violet-ink" /> : null}
               </>
             )}
           </button>

@@ -45,7 +45,8 @@ test("unknown outer inventory receipts cannot advertise availability or open che
       assert.deepEqual(commands.map(command => command[0]), ["HGETALL"]);
       commands.length = 0;
       await assert.rejects(withStockHold(store, product, async () => { opened += 1; return { id: "cs_test_synthetic" }; }), /Stock reading unavailable/);
-      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "DEL"]);
+      // The lock is let go only if it is still this checkout's (lib/redis-lock.ts, compare-and-delete), since 2 November 2026.
+      assert.deepEqual(commands.map(command => command[0]), ["SET", "HGETALL", "EVAL"]);
     }
   } finally { redis.pipeline = original; }
   assert.equal(opened, 0);

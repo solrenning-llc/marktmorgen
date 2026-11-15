@@ -7,7 +7,7 @@ import { COMMIT_ORDER_CONFIRMATION, prepareOrderConfirmationPreintent } from "@/
 import { createCheckout } from "@/lib/store-checkout";
 import { confirmationFor, confirmPurchase, originalPhysicalConfirmation } from "@/lib/purchase-email";
 import { confirmationOriginRowKey, forgetOrderConfirmationMail, readConfirmationOrigin, reserveConfirmationOrigin, runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
-import { enqueueShipmentMail, runShipmentMail } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, forgetShipmentMail, runShipmentMail, shipmentMailOf } from "@/lib/shipment-mail-outbox";
 import { store as redis } from "./redis-stub";
 import { physicalPaidFixture, originId, confirmationLocalPipeline } from "./order-confirmation-paid-fixture";
 
@@ -18,7 +18,7 @@ async function paid() {
   const session = f.sessions.get(checkout.id)!;
   Object.assign(session, { status: "complete", payment_status: "paid", amount_total: 4000, customer_details: { email: "buyer@example.test" },
     payment_intent: { object: "payment_intent", status: "succeeded", amount_received: 4000, currency: "usd",
-      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false } },
+      latest_charge: { object: "charge", paid: true, amount: 4000, amount_refunded: 0, currency: "usd", refunded: false, disputed: false } },
     shipping_details: { name: "Original Buyer", address: { line1: "1 Original Street", city: "Test City", country: "US" } } });
   f.advance(61_000); // The bound source deliberately schedules its first payment check.
   return { ...f, id: originId(), session, checkout };
@@ -124,6 +124,42 @@ test("paid source refuses substituted or unpaid provider records without a POST"
     const f = await paid(); Object.assign(f.session, change); let posts = 0;
     await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
     assert.equal(posts, 0); assert.ok(await readConfirmationOrigin(f.id, f.runtime));
+  }
+});
+
+test("a disputed charge is deferred without dispatch or original accounting", async () => {
+  const f = await paid();
+  const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+  payment.latest_charge.disputed = true;
+  let posts = 0;
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+  assert.equal(posts, 0, "a disputed payment cannot dispatch its confirmation");
+  const retained = await readConfirmationOrigin(f.id, f.runtime);
+  assert.ok(retained);
+  assert.equal(retained.row.phase, "awaiting_payment");
+  assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+  payment.latest_charge.disputed = false;
+  f.advance(180_000);
+  await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, barrier) => {
+    assert.equal(await barrier(), true); posts++; return "accepted";
+  }, f.runtime, f.id);
+  assert.equal(posts, 1, "fresh undisputed evidence allows the retained confirmation to resume");
+});
+
+test("only an explicit boolean false proves that a charge is undisputed", async t => {
+  for (const value of [undefined, null, "true", "false", 0, 1]) {
+    await t.test(String(value), async () => {
+      const f = await paid();
+      const payment = f.session.payment_intent as { latest_charge: Record<string, unknown> };
+      if (value === undefined) delete payment.latest_charge.disputed;
+      else payment.latest_charge.disputed = value;
+      let posts = 0;
+      await runOrderConfirmationMail(f.runtime.now!() + 30_000, async () => { posts++; return "accepted"; }, f.runtime, f.id);
+      assert.equal(posts, 0);
+      const retained = await readConfirmationOrigin(f.id, f.runtime);assert.ok(retained);
+      assert.equal(retained.row.phase, "awaiting_payment");
+      assert.equal(f.commands.some(c => c[0] === "EVAL" && c[1] === COMMIT_ORDER_CONFIRMATION), false);
+    });
   }
 });
 
@@ -284,4 +320,61 @@ test("the demonstration account can neither reserve nor dispatch a physical conf
   await runOrderConfirmationMail(f.runtime.now!()+30_000,async()=>{posts++;return "accepted";},
     {...f.runtime,provider:async()=>{providerReads++;return f.session;}},f.id);
   assert.equal(providerReads,0);assert.equal(posts,0);assert.ok(await readConfirmationOrigin(f.id,f.runtime));
+});
+
+test("a paid confirmation reported as not posted after its barrier stays queued and is sent later", async () => {
+  // The shared ShipmentMailDispatch type admits "not_posted": an explicit
+  // no-POST outcome must never be recorded as a refusal of the paid email.
+  const f = await paid(); let posts = 0;
+  const first = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); return "not_posted";
+  }, f.runtime, f.id);
+  assert.deepEqual(first, { accepted: 0, waiting: 1, unknown: 0 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin is kept");
+  assert.equal(kept.row.state, "queued"); assert.equal(kept.row.owner, ""); assert.ok(kept.payload.message);
+  f.advance(2 * 61_000); // advance() is absolute from creation: one retry interval after the restore.
+  const later = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); posts++; return "accepted";
+  }, f.runtime, f.id);
+  assert.deepEqual(later, { accepted: 1, waiting: 0, unknown: 0 }); assert.equal(posts, 1);
+  assert.equal(await readConfirmationOrigin(f.id, f.runtime), null);
+});
+
+test("an unrecognized sender value after the paid barrier keeps the confirmation instead of a refusal", async () => {
+  const f = await paid();
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); return "unrecognized" as never;
+  }, f.runtime, f.id);
+  assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the paid origin keeps its permanent barrier");
+  assert.equal(kept.row.state, "dispatching"); assert.ok(kept.payload.message);
+});
+
+test("a refused paid confirmation leaves no shipment refusal summary, so the buyer's copy and erasure still work", async () => {
+  // Paid confirmations share the shipment Lua and its pool HASHes. A refusal
+  // of one must keep the confirmation family's own refused row, never write a
+  // shipment-family summary that shipment erasure and copy cannot own.
+  const f = await paid(); let posts = 0;
+  const result = await runOrderConfirmationMail(f.runtime.now!() + 30_000, async (_message, beforePost) => {
+    assert.equal(await beforePost(), true); posts++; return "refused";
+  }, f.runtime, f.id);
+  assert.equal(posts, 1); assert.deepEqual(result, { accepted: 0, waiting: 0, unknown: 1 });
+  const kept = await readConfirmationOrigin(f.id, f.runtime); assert.ok(kept, "the refused confirmation keeps its own protected row");
+  assert.equal(kept.row.state, "refused");
+  for (const pool of ["nl:ship:mail:pool", `nl:ship:mail:pool:${f.store.statsId}`]) {
+    const fields = (redis.run(["HKEYS", pool]) as string[] | null) ?? [];
+    assert.deepEqual(fields.filter(field => field.startsWith("refused:")), [], `${pool} holds no shipment refusal summary`);
+  }
+  assert.deepEqual(await shipmentMailOf(f.store.statsId!, "buyer@example.test", f.runtime), [], "the person copy succeeds");
+  assert.equal(await forgetShipmentMail(f.store.statsId, "buyer@example.test", f.runtime), 0, "shipment erasure succeeds");
+  const fence = `nl:ship:mail:erased:${f.store.statsId}:${person("buyer@example.test")}`;
+  const ttl = Number(redis.run(["TTL", fence]));
+  assert.ok(ttl > 0 && ttl <= 600, "the person's shipment erasure fence gets its expiry");
+  assert.equal(await forgetOrderConfirmationMail(f.store.statsId, "buyer@example.test", f.runtime), 1, "the confirmation family erases its own refused row");
+  assert.equal(await readConfirmationOrigin(f.id, f.runtime), null);
+  redis.run(["DEL", fence]); // The fence has a finite expiry; model it having passed.
+  const later = await enqueueShipmentMail({ statsId: f.store.statsId!, session: "cs_test_laterShipmentAfter0001", authorizedAt: f.runtime.now!(),
+    shipped: { at: Math.floor(f.runtime.now!() / 1000), tracking: "" },
+    message: { from: "Store <mail@example.test>", to: "buyer@example.test", subject: "Shipped", text: "Synthetic shipping update", replyTo: "owner@example.test" } }, f.runtime);
+  assert.equal(later.ok, true, "a later shipment for the same buyer is not unknown");
 });

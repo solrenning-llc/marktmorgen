@@ -17,6 +17,11 @@
  *   - the words of reviews (lib/reviews.ts);
  *   - what was searched for on the store and found nothing (lib/stats.ts).
  *
+ * A list whose read failed is never taken for an empty one (rule 24): the
+ * summary stands for the whole month, so it is made only from every list
+ * read whole. With any list unread, nothing is asked, counted or kept, and
+ * the creator is told which ("unread"), to try again for the complete report.
+ *
  * From the last 90 days. The model only sorts: it is handed the texts by
  * number and returns a short name for each theme and the numbers that belong
  * to it. The counts are worked out here from those numbers, and the
@@ -162,6 +167,19 @@ redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
 redis.call("DEL", KEYS[1])
 return 1`;
 
+const VOICE_FAILURE_MESSAGES: Record<VoiceSource | "save", string> = {
+  cancel: "reading cancellation feedback for the customer summary failed",
+  question: "reading customer questions for the customer summary failed",
+  review: "reading customer reviews for the customer summary failed",
+  search: "reading customer searches for the customer summary failed",
+  save: "keeping the customer summary failed",
+};
+
+/** Logs only a fixed operation label: provider errors may contain customer text or request data. */
+export function logVoiceFailure(kind: VoiceSource | "save", _error: unknown): void {
+  console.error(VOICE_FAILURE_MESSAGES[kind]);
+}
+
 /** A text as it may be sent: one line, short, with addresses, phone numbers and links taken out. Pure. */
 export function cleanVoice(value: string, max = MAX_TEXT): string {
   return value
@@ -174,27 +192,38 @@ export function cleanVoice(value: string, max = MAX_TEXT): string {
     .slice(0, max);
 }
 
-/** The texts of the last 90 days, newest first in each list, numbered from 1. */
-export async function gatherVoice(store: Store, now = Date.now()): Promise<VoiceItem[]> {
+/**
+ * The texts of the last 90 days, newest first in each list, numbered from 1,
+ * and the lists whose read failed (rule 24): those are named, never taken for
+ * lists with nothing in them. A product's title that cannot be read only
+ * leaves the text without it.
+ */
+export async function gatherVoice(store: Store, now = Date.now()): Promise<{ items: VoiceItem[]; unread: VoiceSource[] }> {
   const since = Math.floor(now / 1000) - DAYS * 86_400;
   const items: Omit<VoiceItem, "id">[] = [];
+  const unread: VoiceSource[] = [];
+  const failed = (source: VoiceSource) => (error: unknown) => {
+    logVoiceFailure(source, error);
+    unread.push(source);
+    return null;
+  };
   const titles = await readTitles(store).catch(() => new Map<string, string>());
   const titleOf = (id: string) => (id === STORE_PAGE ? "the store page" : titles.get(id));
 
   if (store.stripeAccountId && sellsMemberships(store)) {
-    const numbers = await membershipNumbers(store).catch(() => null);
+    const numbers = await membershipNumbers(store).catch(failed("cancel"));
     for (const c of numbers?.leaving?.recent ?? []) {
       if (c.at >= since) items.push({ source: "cancel", text: c.text, n: 1 });
     }
   }
-  for (const q of await missedQuestions(store, 50).catch(() => [])) {
+  for (const q of (await missedQuestions(store, 50).catch(failed("question"))) ?? []) {
     if (q.at >= since) items.push({ source: "question", text: q.question, n: 1, product: titleOf(q.productId) });
   }
-  const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(() => ({ rows: [] }));
-  for (const r of reviews.rows) {
+  const reviews = await studioReviews(store.statsId, { queue: false, offset: 0, limit: 100 }).catch(failed("review"));
+  for (const r of reviews?.rows ?? []) {
     if (r.createdAt / 1000 >= since && r.text.trim()) items.push({ source: "review", text: r.text, n: 1, product: titleOf(r.productId), stars: r.rating });
   }
-  const stats = await readStats(store, now).catch(() => null);
+  const stats = await readStats(store, now).catch(failed("search"));
   if (stats) {
     for (const row of studioStats(store, stats, null, "none", []).searchMisses?.d90 ?? []) {
       if (row.name.trim()) items.push({ source: "search", text: row.name, n: Math.max(1, row.visits) });
@@ -208,7 +237,7 @@ export async function gatherVoice(store: Store, now = Date.now()): Promise<Voice
     out.push({ ...item, text, id: out.length + 1 });
     if (out.length >= MAX_TEXTS) break;
   }
-  return out;
+  return { items: out, unread };
 }
 
 /** What the model is handed: each text by its number, where it came from, and nothing else. Pure. */
@@ -316,7 +345,7 @@ export async function readVoice(store: Store, now = Date.now()): Promise<VoiceSu
 
 export type VoiceResult =
   | { ok: true; summary: VoiceSummary; fresh: boolean; left: number | null }
-  | { ok: false; reason: "few" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number };
+  | { ok: false; reason: "few" | "unread" | "busy" | "off" | "used" | "failed" | "changed" | "late"; texts?: number; unread?: VoiceSource[] };
 
 /**
  * This month's summary: the one already made, or, when there is none and
@@ -334,7 +363,10 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
   });
   if (!held) return { ok: false, reason: "busy" };
   try {
-    const items = await gatherVoice(store, now);
+    const { items, unread } = await gatherVoice(store, now);
+    // A list unread: no summary from part of what customers said, since it would stand for the whole month, and
+    // too few is then not known to be few. Nothing is asked or counted, so the creator can try again.
+    if (unread.length) return { ok: false, reason: "unread", unread, texts: items.length };
     if (items.length < MIN_TEXTS) return { ok: false, reason: "few", texts: items.length };
     // Inside the request's cutoff (the route's withCutoff), the model gets the time left less the
     // margin to save the summary; with too little left, nothing is counted (VOICE_MODEL_MIN_MS).
@@ -361,7 +393,7 @@ export async function makeVoice(store: Store, now = Date.now()): Promise<VoiceRe
     // Kept, and shown, only when nobody was deleted from the store while it was read (forgetVoicePerson took the lock).
     // The job is counted by now: a write that cannot be made says so with "changed", whose words say it counted.
     const kept = await redisPipeline([["EVAL", VOICE_KEEP, 2, held.key, voiceKey(store.statsId, month), held.token, JSON.stringify(done.value), KEEP_SECONDS]]).catch((error: unknown) => {
-      console.error("keeping the summary of what customers say failed", error);
+      logVoiceFailure("save", error);
       return null;
     });
     if (!Array.isArray(kept) || kept[0] !== 1) return { ok: false, reason: "changed" };

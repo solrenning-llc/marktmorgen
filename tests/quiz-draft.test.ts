@@ -55,6 +55,26 @@ async function main(): Promise<void> {
   is("several right answers make a question with several", read[1] ? [read[1].kind, read[1].correct] : null, ["multiple", [0, 1]]);
   is("never more than asked for", readDrafted([q("A", ["x", "y"], [0]), q("B", ["x", "y"], [0]), q("C", ["x", "y"], [0])], 2).length, 2);
   is("nothing that is not a list is read as questions", [readDrafted(null, 5), readDrafted({ text: "x" }, 5)], [[], []]);
+  is(
+    "an empty choice cannot shift the model's correct answer onto another choice",
+    readDrafted([q("Which answer is right?", ["  ", "The right answer", "A wrong answer"], [1])], 1),
+    [],
+  );
+  is(
+    "one out-of-range correct position rejects the whole drafted question",
+    readDrafted([q("Which answers are right?", ["One", "Two", "Three", "Four"], [0, 9])], 1),
+    [],
+  );
+  is(
+    "one non-number correct position rejects the whole drafted question",
+    readDrafted([{ ...q("Which answers are right?", ["One", "Two", "Three", "Four"], [0]), correct: [0, "1"] }], 1),
+    [],
+  );
+  is(
+    "a correct position beyond the kept choices cannot turn multiple into single",
+    readDrafted([q("Which answers are right?", ["One", "Two", "Three", "Four", "Five", "Six", "Seven"], [0, 6])], 1),
+    [],
+  );
 
   part("The right answer moves around");
   const same = Array.from({ length: 12 }, (_, i) => ({ ...q(`Question ${i}`, ["Right", "Wrong one", "Wrong two", "Wrong three"], [0]), kind: "single" as const }));

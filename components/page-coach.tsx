@@ -1,10 +1,10 @@
 "use client";
 
-import { useContext, useState } from "react";
+import { useContext, useId, useState } from "react";
 import { Icon } from "@/components/icons";
-import { AiOn } from "@/components/ai-assist";
+import { AI_ALLOWANCE_UNKNOWN, AiOn, allowanceOf } from "@/components/ai-assist";
 import { MAX_AI_NOTES } from "@/lib/ai-rules";
-import { BLOCK_KINDS, type BlockKind, type SalesPage } from "@/lib/sales-page";
+import { BLOCK_KINDS, type BlockKind, type FactKey, type SalesPage } from "@/lib/sales-page";
 import { BUYER_LENSES, type CoachCheck, coachChecks, coachScore, scoreWord, steepestDrop } from "@/lib/page-coach";
 import type { PageFacts } from "@/lib/page-facts";
 
@@ -44,6 +44,7 @@ export function PageCoach({
   picture,
   pictureAlt,
   facts,
+  factsUnread = [],
   page,
   reach,
   onAdd,
@@ -61,6 +62,8 @@ export function PageCoach({
   /** The product picture's own description, shown at the top when the hero shows a picture. */
   pictureAlt: string;
   facts: PageFacts;
+  /** The numbers whose read did not come back (lib/page-facts-read.ts). */
+  factsUnread?: readonly FactKey[];
   /** The page as it stands in the editor, saved or not. */
   page: SalesPage;
   reach: { shares: Record<string, number>; visitors: number } | null;
@@ -80,10 +83,11 @@ export function PageCoach({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<Review | null>(null);
-  const [left, setLeft] = useState(ai.left);
+  const [left, setLeft] = useState(allowanceOf(ai));
+  const allowanceId = useId();
   const [used, setUsed] = useState<Set<string>>(new Set());
 
-  const checks = coachChecks({ page, productTitle, free, picture, pictureAlt, facts });
+  const checks = coachChecks({ page, productTitle, free, picture, pictureAlt, facts, factsUnread });
   const score = coachScore(checks);
   const missing = checks.filter((c) => !c.done).sort((a, b) => b.weight - a.weight);
   const drop = steepestDrop(page.blocks, reach);
@@ -233,10 +237,10 @@ export function PageCoach({
                 />
               </label>
               <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button type="button" className="btn btn-primary btn-sm" onClick={() => void ask()} disabled={busy || left <= 0} aria-busy={busy}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={() => void ask()} disabled={busy || left === null || left <= 0} aria-busy={busy} aria-describedby={allowanceId}>
                   {busy ? "Reading your page…" : review ? "Review it again" : "Review my page"}
                 </button>
-                <span className="text-xs text-ink-soft">{`${left} left this month`}</span>
+                <span id={allowanceId} className="text-xs text-ink-soft">{left === null ? AI_ALLOWANCE_UNKNOWN : `${left} left this month`}</span>
               </div>
               {error ? (
                 <p className="notice notice-error mt-3 text-sm" role="alert">

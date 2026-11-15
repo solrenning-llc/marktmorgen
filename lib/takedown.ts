@@ -26,8 +26,11 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, noteTakedown, removeStoreLink, setKit, setProductHidden, storeForHandle, storeRef } from "@/lib/store";
 import { del } from "@/lib/blob";
+import { withLock } from "@/lib/redis-lock";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Listing, productIdFromAddress, readListing } from "@/lib/catalog";
 import { type ReportInput, handleIn } from "@/lib/takedown-rules";
+import { type PictureNames, withdrawProductPicture } from "@/lib/picture-withdraw";
 
 const REPORT_SECONDS = 400 * 86_400;
 const TOKEN_SECONDS = 60 * 86_400;
@@ -116,6 +119,47 @@ export async function openReport(token: string): Promise<{ report: Report; store
   }
 }
 
+/**
+ * The takedowns of this notice whose notice to the creator has not been confirmed as sent (the press that took it
+ * down could not send it), with what was taken down and the action that sends it (sendOwedNotice). The statement of
+ * reasons is owed once the content was restricted, even if it is up again since (EU DSA Art. 17(1)), so content that
+ * is up again (a store switched back on, a product published again) stays listed, marked `up`. A takedown whose
+ * steps do not say it landed (`applied`) is listed only when the content is down now; while it is up it was never
+ * confirmed as taken down, so it is not listed as such (Claude 6, focal 6713440905). Every reply is read in its exact
+ * shape (rule 24; Claude 6 on #3087): a read that fails or answers in another shape throws, so an unknown is never
+ * "nothing owed".
+ */
+export async function unsentNotices(report: Pick<Report, "id">, store: Store): Promise<{ action: TakedownAction; what: string; up?: true }[]> {
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", owedKey(report.id)]]), 1);
+  const members = replies ? stringList(replies[0]) : null;
+  if (!members) throw new UnknownReplyError("a notice's owed takedowns");
+  const owed: { action: TakedownAction; what: string; up?: true }[] = [];
+  for (const part of members.slice().sort().slice(0, MAX_OWED)) {
+    const action = actionOfPart(part);
+    if (!action || (action.type === "store" && !action.on)) continue;
+    const steps = await readSteps(noticeKey(report.id, part));
+    if (!steps || steps.sent) continue;
+    // Not confirmed as taken down: whether it is down now decides, read exactly (an unknown throws).
+    if (!steps.applied && (await stillUp(store, action, ""))) continue;
+    // Only a note for the operator: when whether it is up cannot be read, the page claims nothing about it.
+    const up = steps.applied && (await stillUp(store, action, "").then(Boolean, () => false));
+    owed.push(up ? { action, what: steps.what, up: true } : { action, what: steps.what });
+  }
+  return owed;
+}
+
+/** The action a takedown's part names ("<type>-<id>"), as takeDown wrote it. */
+function actionOfPart(part: string): TakedownAction | null {
+  const cut = part.indexOf("-");
+  if (cut < 0) return null;
+  const type = part.slice(0, cut);
+  const id = part.slice(cut + 1);
+  if ((type === "link" || type === "product") && id) return { type, id };
+  if (type === "kit" && !id) return { type: "kit" };
+  if (type === "store" && !id) return { type: "store", on: true };
+  return null;
+}
+
 export type TakedownAction =
   | { type: "link"; id: string }
   | { type: "product"; id: string }
@@ -123,51 +167,299 @@ export type TakedownAction =
   | { type: "store"; on: boolean };
 
 /**
- * Takes one piece of content down, or switches the store off or back on,
- * writes it on the store's record and tells the creator. Returns what was
- * done, in words, or null when there was nothing to do it to.
+ * The email that tells the creator what was taken down could not be sent (Claude 6's rule-24 MEDIUM, 7 Nov 2026).
+ * The law asks for it: the prompt notice of 17 U.S.C. § 512(g)(2)(A), the statement of reasons of EU DSA Art. 17.
+ * The content stays down; pressing again sends the notice, once, under the same idempotency key.
  */
-export async function takeDown(report: Report, store: Store, action: TakedownAction, origin: string): Promise<string | null> {
-  const ref = storeRef(store);
-  let what = "";
+export class TakedownNoticeUnsent extends Error {
+  constructor() {
+    super("the takedown notice to the creator was not sent");
+    this.name = "TakedownNoticeUnsent";
+  }
+}
+
+/**
+ *   nl:report:<id>:n:<action>  JSON  what one takedown of that notice took down and which of its steps are done,
+ *                                    400 days, like the notice itself (the same company family, nl:report:)
+ *
+ * Written before the content is touched, so a press after a step failed (above all the notice to the creator)
+ * finishes what is left instead of taking "already down" for "done". A notice once sent is never sent again.
+ * `at` is when this takedown began: the notice's idempotency key carries it, so every retry of one takedown uses the
+ * same key, while content published again and taken down again under the same notice is a new takedown with a new
+ * key, whose notice the provider never answers with the first one's receipt.
+ */
+const noticeKey = (report: string, part: string) => reportKey(`${report}:n:${part}`);
+/**
+ *   nl:report:<id>:n  set  the takedowns of that notice whose steps were written, until their notice to the creator
+ *                          went out, 400 days: what a page opened again lists as still owed (unsentNotices).
+ */
+const owedKey = (report: string) => reportKey(`${report}:n`);
+/** The most takedowns of one notice a page lists as owed: one notice names one address, so a handful at most. */
+const MAX_OWED = 50;
+/**
+ * `applied`: the content was confirmed taken down (apply returned true and this mark was confirmed). Steps written
+ * before this field existed have none, and are read as not confirmed. `picture`: a product's old picture names, kept
+ * before its record is pointed at the copies (lib/picture-withdraw.ts), so a later press deletes those files and
+ * never moves the picture twice; absent until then.
+ */
+type Steps = { what: string; howLong: string; at: string; applied: boolean; noted: boolean; counted: boolean; sent: boolean; picture?: PictureNames };
+
+/** Kept picture names, exactly: a path, and a smaller copy's path or null. */
+const pictureNames = (value: unknown): value is PictureNames => {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  return Boolean(v && typeof v.path === "string" && v.path && (v.small === null || (typeof v.small === "string" && v.small)));
+};
+
+/**
+ * A takedown's steps, or null only when Redis itself answers null (no steps). A pipeline that answers nothing, or a
+ * reply of any other shape, throws (Codex P on #3087, MEDIUM 1): an unknown is never "nothing owed".
+ */
+async function readSteps(key: string): Promise<Steps | null> {
+  const replies = repliesFor(await redisPipeline([["GET", key]]), 1);
+  if (!replies) throw new UnknownReplyError("a takedown's steps");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a takedown's steps");
+  const value: unknown = JSON.parse(raw);
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!v || typeof v.what !== "string" || !v.what || typeof v.howLong !== "string" || typeof v.at !== "string" || !/^\d+$/.test(v.at) ||
+      (v.applied !== undefined && typeof v.applied !== "boolean") || typeof v.noted !== "boolean" || typeof v.counted !== "boolean" || typeof v.sent !== "boolean" ||
+      (v.picture !== undefined && !pictureNames(v.picture))) {
+    throw new Error("a takedown's steps could not be read");
+  }
+  const picture = pictureNames(v.picture) ? { path: v.picture.path, small: v.picture.small } : null;
+  return { what: v.what, howLong: v.howLong, at: v.at, applied: v.applied === true, noted: v.noted, counted: v.counted, sent: v.sent, ...(picture ? { picture } : {}) };
+}
+
+/**
+ * Writes a takedown's steps, and throws unless Redis answers exactly "OK" (Codex P on #3087, MEDIUM 2): the first
+ * write is the recovery record, so content is never taken down without it being confirmed.
+ */
+async function writeSteps(key: string, steps: Steps): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["SET", key, JSON.stringify(steps), "EX", REPORT_SECONDS]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a takedown's steps write");
+}
+
+/** Lists a takedown as owed until its notice goes out; throws unless both replies are in their exact shape. */
+async function markOwed(report: string, part: string): Promise<void> {
+  const replies = repliesFor(await redisPipeline([["SADD", owedKey(report), part], ["EXPIRE", owedKey(report), REPORT_SECONDS]]), 2);
+  if (!replies || countOf(replies[0]) === null || replies[1] !== 1) throw new UnknownReplyError("a notice's owed takedowns write");
+}
+
+/**
+ * What the action would take down, in words, while it is up; null when it is down or not there. A read that fails,
+ * or a product the store lists whose record answers nothing, throws: an unknown is never "already down".
+ */
+async function stillUp(store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string): Promise<{ what: string; howLong: string } | null> {
+  // Art. 17(3)(a), how long: what the code makes it last, for each kind (Claude 5's MEDIUM on #2928). A link and its file
+  // are deleted; a product or the media kit is unpublished, and the creator can publish it again (the studio does not
+  // stop them), which Terms section 3 lets us answer by suspending the store; a store stays off until we switch it back.
   if (action.type === "link") {
     const link = store.links.find((l) => l.id === action.id && !l.header);
     if (!link) return null;
-    const done = await removeStoreLink(ref, link.id);
-    if (!done.ok) return null;
-    if (done.removed) await del(done.removed.path).catch(() => {});
-    what = `The link "${link.title}" (${link.url})`;
-  } else if (action.type === "product") {
-    // Read by id, however far down the store's list it is (lib/catalog.ts).
-    const product = await readListing(store, action.id).catch(() => null);
-    if (!product || product.hidden) return null;
-    const done = await setProductHidden(ref, product.id, true);
-    if (!done.ok) return null;
-    what = `The product "${product.title}", now unpublished`;
-  } else if (action.type === "kit") {
-    if (!store.kit.on) return null;
-    await setKit(ref, { ...store.kit, on: false });
-    what = "Your media kit, now unpublished";
-  } else {
-    if (Boolean(store.suspended) === action.on) return null;
-    await noteTakedown(ref, null, action.on);
-    if (!action.on) {
-      // Back on: the creator is told, and nothing is added to the record.
-      await sendEmail({ meter: { by: "company" },
-        from: NIMBUS_FROM,
-        to: store.email,
-        replyTo: SUPPORT_EMAIL,
-        subject: `Your store @${store.handle} is back on`,
-        text: [`Your store's pages and sales are switched back on, after the notice about ${report.url}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
-        idempotencyKey: `takedown-${report.id}-restore-${Date.now()}`,
-      }).catch(() => false);
-      return "The store's pages and sales are back on.";
-    }
-    what = "Your store's pages and sales, now switched off";
+    return { what: `The link "${link.title}" (${link.url})`, howLong: "How long: for good. The link and its file are deleted, so there is nothing to put back." };
   }
-  await noteTakedown(ref, { at: new Date().toISOString(), what, report: report.id });
-  await countStep(report, action.type);
-  await sendEmail({ meter: { by: "company" },
+  if (action.type === "product") {
+    if (!store.catalog.items.some((item) => item.id === action.id)) return null;
+    // Read by id, however far down the store's list it is (lib/catalog.ts). A failed read throws to the caller.
+    const product = await readListing(store, action.id);
+    if (!product) throw new Error("the store lists this product, but its record could not be read");
+    if (product.hidden) return null;
+    return {
+      what: `The product "${product.title}", now unpublished`,
+      howLong: `How long: until you publish it again. Publishing it again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
+    };
+  }
+  if (action.type === "kit") {
+    if (!store.kit.on) return null;
+    return {
+      what: "Your media kit, now unpublished",
+      howLong: `How long: until you switch it on again. Switching it on again while the notice stands may lead us to suspend your store (Terms, section 3, ${origin}/terms#selling-through-a-marktmorgen-store).`,
+    };
+  }
+  if (store.suspended) return null;
+  return { what: "Your store's pages and sales, now switched off", howLong: "How long: until we switch your store back on, for example after your answer below." };
+}
+
+/** Takes it down. False when it went in the meantime (nothing was done); throws when the write's outcome is unknown. */
+async function apply(ref: string, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>): Promise<boolean> {
+  if (action.type === "link") {
+    const done = await removeStoreLink(ref, action.id);
+    if (!done.ok) {
+      if (done.reason === "unknown") return false;
+      throw new Error("the store could not be written");
+    }
+    if (done.removed) await del(done.removed.path).catch(() => {});
+    return true;
+  }
+  if (action.type === "product") {
+    const done = await setProductHidden(ref, action.id, true);
+    if (!done.ok) {
+      if (done.reason === "unknown") return false;
+      throw new Error("the store could not be written");
+    }
+    return true;
+  }
+  if (action.type === "kit") {
+    if (!(await setKit(ref, { ...store.kit, on: false }))) throw new Error("the store could not be written");
+    return true;
+  }
+  if (!(await noteTakedown(ref, null, true))) throw new Error("the store could not be written");
+  return true;
+}
+
+/**
+ * Takes one piece of content down, or switches the store off or back on,
+ * writes it on the store's record and tells the creator. Returns what was
+ * done, in words, or null when there was nothing to do it to. Throws when
+ * what is there cannot be known or written, and TakedownNoticeUnsent when
+ * the content is down but the creator could not be told: pressing again
+ * then sends the notice without taking anything down or writing it twice.
+ */
+export async function takeDown(report: Report, store: Store, action: TakedownAction, origin: string): Promise<string | null> {
+  const ref = storeRef(store);
+  if (action.type === "store" && !action.on) {
+    if (!store.suspended) return null;
+    if (!(await noteTakedown(ref, null, false))) throw new Error("the store could not be written");
+    // A switch-off whose notice was not sent stays owed: the statement of reasons is owed once the restriction was
+    // imposed, even after it is lifted (EU DSA Art. 17(1)); the page still offers it (sendOwedNotice).
+    // Back on: the creator is told, and nothing is added to the record.
+    await sendEmail({ meter: { by: "company" },
+      from: NIMBUS_FROM,
+      to: store.email,
+      replyTo: SUPPORT_EMAIL,
+      subject: `Your store @${store.handle} is back on`,
+      text: [`Your store's pages and sales are switched back on, after the notice about ${report.url}.`, "", `Our policy: ${origin}/copyright.`].join("\n"),
+      idempotencyKey: `takedown-${report.id}-restore-${Date.now()}`,
+    }).catch(() => false);
+    return "The store's pages and sales are back on.";
+  }
+  return underLock(report, store, action, (now, part, key) => finish(report, now, action, origin, part, key));
+}
+
+/**
+ * The email still owed for a takedown of this notice, from the page's "Send the email to the creator" (Claude 6 on
+ * #3087, MEDIUM 3): it only finishes the kept steps and never takes anything down, so content the operator switched
+ * back on, or the creator published again, stays up. Finishing writes the original takedown's strike (dated from its
+ * `at`) when it was not written yet, the count, and the statement of reasons in the kept words, under the same
+ * idempotency key. The statement is still sent after a restore: it is owed once the restriction was imposed, even if
+ * it was lifted since (EU DSA Art. 17(1)). Nothing kept, or a notice already sent, is null.
+ *
+ * Steps not confirmed as applied (Claude 6, focal 6713440905): they are written before the content is touched, so they
+ * say a takedown started, not that it is down. The content's state now decides, read exactly (an unknown throws):
+ * down, the write landed, so it is marked applied and finished; up, it is "unconfirmed": no strike, no email, and the
+ * takedown is no longer owed. That includes the case nobody can tell apart from it, a write that landed without being
+ * confirmed and content that went back up before this press: we could not confirm it was taken down, so we say so and
+ * tell the creator nothing that may be false.
+ */
+export async function sendOwedNotice(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string): Promise<{ done: string } | "unconfirmed" | null> {
+  return underLock(report, store, action, async (now, part, key) => {
+    let kept = await readSteps(key);
+    if (!kept || kept.sent) return null;
+    if (!kept.applied) {
+      if (await stillUp(now, action, origin)) {
+        const replies = repliesFor(await redisPipeline([["SREM", owedKey(report.id), part]]), 1);
+        if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("a notice's owed takedowns write");
+        return "unconfirmed" as const;
+      }
+      kept = { ...kept, applied: true };
+      await writeSteps(key, kept);
+    }
+    // The picture too, while the product is still off the store (R44); one the creator published again keeps it.
+    if (action.type === "product") kept = await withdrawPicture(storeRef(now), action.id, key, kept);
+    return { done: await complete(report, now, action, origin, part, key, kept) };
+  });
+}
+
+/**
+ * One press at a time for one piece of content under one notice (Claude 6, #3087, LEVE 3): two presses at once
+ * would both see it up, both write it on the store's record and both tell the creator. The second waits, then reads
+ * the store again, so it finds the content down and the first one's steps, and has only what is left to finish.
+ */
+async function underLock<T>(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, work: (now: Store, part: string, key: string) => Promise<T>): Promise<T> {
+  const ref = storeRef(store);
+  const part = `${action.type}-${"id" in action ? action.id : ""}`;
+  const key = noticeKey(report.id, part);
+  return withLock(`${key}:lock`, TAKEDOWN_LOCK_SECONDS, TAKEDOWN_LOCK_WAIT_MS, async () => {
+    const now = await storeForHandle(store.handle);
+    if (!now || storeRef(now) !== ref) throw new Error("the store could not be read again");
+    return work(now, part, key);
+  });
+}
+
+/** How long one press may hold the content's lock (the notice's send included), and how long another waits for it. */
+const TAKEDOWN_LOCK_SECONDS = 120;
+const TAKEDOWN_LOCK_WAIT_MS = 10_000;
+
+async function finish(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string, part: string, key: string): Promise<string | null> {
+  const ref = storeRef(store);
+  const up = await stillUp(store, action, origin);
+  let steps: Steps;
+  if (up) {
+    steps = { ...up, at: String(Date.now()), applied: false, noted: false, counted: false, sent: false };
+    // The recovery record first, each write confirmed, so nothing is taken down without it (Codex P on #3087).
+    await writeSteps(key, steps);
+    // Owed from here until its notice goes out, so a page opened again can still send it (unsentNotices).
+    await markOwed(report.id, part);
+    if (!(await apply(ref, store, action))) {
+      await redisPipeline([["DEL", key], ["SREM", owedKey(report.id), part]]).catch(() => {});
+      return null;
+    }
+    // Down, confirmed: from here the steps say it landed (Claude 6, focal 6713440905).
+    steps = { ...steps, applied: true };
+    await writeSteps(key, steps);
+  } else {
+    // Down already: only a takedown of this notice whose steps are not all done is left to finish. Steps not marked
+    // applied, with the content down now, mean the write landed without its mark being confirmed.
+    const kept = await readSteps(key);
+    if (!kept || kept.sent) return null;
+    steps = kept;
+    if (!steps.applied) {
+      steps = { ...steps, applied: true };
+      await writeSteps(key, steps);
+    }
+  }
+  // A product's picture leaves the address its pages gave out before the creator is told it is down (R44).
+  if (action.type === "product") steps = await withdrawPicture(ref, action.id, key, steps);
+  return complete(report, store, action, origin, part, key, steps);
+}
+
+/** Moves a product's picture (lib/picture-withdraw.ts), its old names kept with the steps first; the steps as they are now. */
+async function withdrawPicture(ref: string, id: string, key: string, steps: Steps): Promise<Steps> {
+  let kept = steps;
+  await withdrawProductPicture(ref, id, kept.picture ?? null, async (picture) => {
+    kept = { ...kept, picture };
+    await writeSteps(key, kept);
+  });
+  return kept;
+}
+
+/** Whether the store already keeps this strike (as lib/store.ts parseStrikes keeps it: report, time and words). */
+function heldStrike(store: Store, strike: { at: string; what: string; report: string }): boolean {
+  return store.strikes.some((s) => s.report === strike.report.slice(0, 40) && s.at === strike.at.slice(0, 30) && s.what === strike.what.slice(0, 200));
+}
+
+/** The steps left after the content is down: the strike, the count, the notice to the creator, each once. */
+async function complete(report: Report, store: Store, action: Exclude<TakedownAction, { type: "store"; on: false }>, origin: string, part: string, key: string, kept: Steps): Promise<string> {
+  const ref = storeRef(store);
+  let steps = kept;
+  const { what, howLong } = steps;
+  if (!steps.noted) {
+    // One strike per takedown (Claude 6 on #3087, MEDIUM 2): dated when this takedown began, so a retry after the
+    // mark below failed finds it on the store, read under this content's lock (underLock), and writes none.
+    const strike = { at: new Date(Number(steps.at)).toISOString(), what, report: report.id };
+    if (!heldStrike(store, strike) && !(await noteTakedown(ref, strike))) throw new Error("the store could not be written");
+    steps = { ...steps, noted: true };
+    await writeSteps(key, steps);
+  }
+  if (!steps.counted) {
+    // Marked before counting: if the count is then lost, the transparency figure is one short, never one too many
+    // (countStep itself never throws and already drops a count it could not write).
+    steps = { ...steps, counted: true };
+    await writeSteps(key, steps);
+    await countStep(report, action.type);
+  }
+  const sent = await sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: store.email,
     replyTo: SUPPORT_EMAIL,
@@ -177,15 +469,32 @@ export async function takeDown(report: Report, store: Store, action: TakedownAct
       "",
       what,
       "",
+      "Where: everywhere. It is down for every visitor, in every country.",
+      howLong,
+      "",
       report.kind === "copyright" ? `The notice was sent by ${report.name}, who says it uses: ${report.work.slice(0, 600)}` : `The notice says: ${report.work.slice(0, 600)}`,
+      "",
+      `What we relied on: that notice, sent through our form at ${origin}/report as ${report.kind === "copyright" ? "a copyright notice under the US Digital Millennium Copyright Act (17 U.S.C. § 512(c)(3))" : "a notice of illegal content under Article 16 of the EU Digital Services Act"}.`,
+      "We used no automated means to find this content or to decide: a person at Marktmorgen read the notice and made this decision.",
+      report.kind === "copyright"
+        ? "Legal ground: copyright law. The notice says the content infringes the copyright in the work it names, and we took it down for that reason."
+        : "Legal ground: the law the notice says the content breaks, for the reason it gives above. We took it down for that reason.",
+      `Our Terms do not allow content that is unlawful or that infringes someone else's rights: section 3, "Selling through a Marktmorgen store" (${origin}/terms#selling-through-a-marktmorgen-store), and section 4, "Acceptable use" (${origin}/terms#acceptable-use).`,
       "",
       report.kind === "copyright"
         ? "If you believe it was taken down by mistake, or that you have the right to use it, you can send a counter-notice by replying to this email with: your name and signature; what was taken down and where it was; a statement, under penalty of perjury, that you believe in good faith it was taken down by mistake or misidentification; your address and telephone number; and a statement that you consent to the jurisdiction of the federal court for your district (or, outside the US, any judicial district where Marktmorgen may be found) and will accept service from the person who sent the notice. We pass it to them, and put the content back in 10 to 14 business days unless they tell us they have gone to court."
         : "If you believe this was a mistake, reply to this email and say why; we look at it again and tell you what we decided.",
+      `You can also take our decision to a court. Section 16 of our Terms, "Governing law", says which law and courts apply (${origin}/terms#governing-law).`,
       "",
       `Our policy: ${origin}/copyright. Stores that are the subject of repeated valid notices are switched off.`,
     ].join("\n"),
-    idempotencyKey: `takedown-${report.id}-${action.type}-${"id" in action ? action.id : ""}`,
+    // The same key on every try of this takedown, so a notice the provider took is never sent twice; a later
+    // takedown of the same content under the same notice has its own `at`, so its notice is a new email.
+    idempotencyKey: `takedown-${report.id}-${part}-${steps.at}`,
   }).catch(() => false);
+  if (!sent) throw new TakedownNoticeUnsent();
+  await writeSteps(key, { ...steps, sent: true });
+  // No longer owed. If this fails the steps say it was sent, and unsentNotices reads the steps, not the set alone.
+  await redisPipeline([["SREM", owedKey(report.id), part]]).catch(() => {});
   return what;
 }

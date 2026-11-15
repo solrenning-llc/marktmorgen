@@ -192,6 +192,40 @@ export function isMeetProvider(value: unknown): value is MeetProvider {
 /** What each is called where a creator or a buyer reads it. */
 export const MEET_NAMES: Record<MeetProvider, string> = { google: "Google Meet", zoom: "Zoom" };
 
+/**
+ * What a creator is told when a connection was disconnected here but the
+ * provider did not confirm that it took our access back (lib/meet-connect.ts
+ * disconnect, `providerAccessRemoved: false`): the studio notice and the
+ * email. `link` is the provider's own page, given only where its exact
+ * address is already in this site's help (app/help/zoom); none for Google.
+ */
+export const MEET_ACCESS_UNCONFIRMED: Record<MeetProvider, { company: string; lead: string; before: string; link?: { href: string; text: string }; after: string }> = {
+  google: {
+    company: "Google",
+    lead: "We disconnected your Google account here, but Google did not confirm that it removed our access.",
+    before: "You can remove it yourself: in your Google Account, open Security, then the list of third-party apps and services, and remove Marktmorgen.",
+    after: "",
+  },
+  zoom: {
+    company: "Zoom",
+    lead: "We disconnected your Zoom account here, but Zoom did not confirm that it removed our access.",
+    before: "You can remove it yourself: sign in at ",
+    link: { href: "https://marketplace.zoom.us/", text: "marketplace.zoom.us" },
+    after: ", open Manage, then Added Apps, and click Remove next to Marktmorgen.",
+  },
+};
+
+/** How to remove the access at the provider, as plain text. */
+export function meetAccessRemoveWords(provider: MeetProvider): string {
+  const w = MEET_ACCESS_UNCONFIRMED[provider];
+  return `${w.before}${w.link ? w.link.text : ""}${w.after}`;
+}
+
+/** The whole notice as plain text. */
+export function meetAccessUnconfirmedWords(provider: MeetProvider): string {
+  return `${MEET_ACCESS_UNCONFIRMED[provider].lead} ${meetAccessRemoveWords(provider)}`;
+}
+
 /** Whether the platform knows this time zone. */
 export function isTimeZone(tz: unknown): tz is string {
   if (typeof tz !== "string" || !tz || tz.length > 64) return false;

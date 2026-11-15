@@ -1,10 +1,13 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { repliesFor } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Check, verifyAmazonAccount, verifyHostToken, verifyMailLoop, verifyProviderUsage } from "@/lib/verify-mail";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { timed, withCutoff } from "@/lib/fetch-timeout";
+import { STATUS_CHECKS, statusRunCommands, statusRunResult } from "@/lib/status-page";
 
 // The senders announce a bounce within seconds and a spam report within a
 // minute or so; the run waits up to a hundred seconds for both.
@@ -30,8 +33,14 @@ export async function GET(request: NextRequest) {
     if (!isRedisConfigured() || !isSenderConfigured()) {
       return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     }
-    const [got] = await redisPipeline([["SET", "nl:mail-check:lock", "1", "NX", "EX", 170]]);
-    if (got === null) return Response.json({ ok: true, busy: true });
+    // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+    // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+    // own value, so a run never deletes another run's lock. It is held longer than maxDuration (180 s) with room, so
+    // it cannot run out while this run still works (the cutoff stops requests, not the function).
+    const lock = claimValue();
+    const got = await claimMark("nl:mail-check:lock", 210, lock);
+    if (got === "taken") return Response.json({ ok: true, busy: true });
+    if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
     try {
       let accountChecks: Check[];
       let accountFailed = false;
@@ -61,7 +70,8 @@ export async function GET(request: NextRequest) {
       const ok = checks.length > 0 && checks.every((c) => c.ok);
       // In Vercel's logs for every run, passing or not.
       console.log(`mail-check ${ok ? "pass" : "FAIL"}: ${checks.map((c) => `${c.ok ? "PASS" : "FAIL"} ${c.check} (${c.detail})`).join(" | ")}`);
-      const [previous] = await redisPipeline([["GET", LAST]]);
+      const read = repliesFor(await redisPipeline([["GET", LAST]]), 1);
+      const previous = read?.[0];
       // Only the delivery result controls existing notices. A nested usage
       // failure is evidence missing, not a failed bounce/complaint loop.
       let failedBefore = false;
@@ -72,8 +82,13 @@ export async function GET(request: NextRequest) {
             Object.prototype.hasOwnProperty.call(prior, "ok") &&
             (prior as { ok?: unknown }).ok === false;
         } catch { /* Malformed history is not proof of an earlier failure. */ }
+      } else if (ok && (!read || previous !== null)) {
+        // An unknown reply is not an earlier pass either: no "passing again" is
+        // claimed, but a recovery it may hide is said in the log, not dropped.
+        console.error("mail-check passes, but the previous result could not be read: no \"passing again\" notice was sent");
       }
-      await redisPipeline([["SET", LAST, JSON.stringify({ at: Date.now(), ok, checks, usage }), "EX", 30 * 86_400]]);
+      const at = Date.now();
+      await redisPipeline([["SET", LAST, JSON.stringify({ at, ok, checks, usage }), "EX", 30 * 86_400]]);
       if (!ok || failedBefore) {
         await sendEmail({ meter: { by: "company" },
           from: NIMBUS_FROM,
@@ -88,9 +103,12 @@ export async function GET(request: NextRequest) {
           ].join("\n"),
         }).catch((error) => console.error("sending the mail check result failed", error));
       }
+      // Kept for the public status page (lib/status-page.ts), after the save and the notice and apart from
+      // them, so its failure stops neither: its time and whether a delivery loop ran and passed, nothing else.
+      await redisPipeline(statusRunCommands(STATUS_CHECKS[0].key, at, statusRunResult(checks))).catch((error) => console.error("keeping the mail check's run for the status page failed", error));
       return Response.json({ ok, checks, usage }, { headers: { "Cache-Control": "no-store" } });
     } finally {
-      await redisPipeline([["DEL", "nl:mail-check:lock"]]).catch(() => {});
+      await releaseMark("nl:mail-check:lock", lock);
     }
   })).catch(() => Response.json({ ok: false, error: "unavailable" }, {
     status: 503, headers: { "Cache-Control": "no-store" },

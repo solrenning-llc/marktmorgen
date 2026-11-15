@@ -38,14 +38,16 @@ function dayWords(day: string): string {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
-async function post(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string; view?: WaitlistView }> {
+type WaitlistAnswer = { ok: boolean; error?: string; view?: WaitlistView; viewsUnread?: boolean };
+
+async function post(payload: Record<string, unknown>): Promise<WaitlistAnswer> {
   try {
     const response = await fetch("/api/store/waitlist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as { ok: boolean; error?: string; view?: WaitlistView };
+    return (await response.json().catch(() => ({ ok: false, error: "server_error" }))) as WaitlistAnswer;
   } catch {
     return { ok: false, error: "server_error" };
   }
@@ -83,6 +85,8 @@ export function WaitlistPanel({
   const [editingDay, setEditingDay] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Saved, but the numbers could not be read after it (the route's `viewsUnread`).
+  const [saved, setSaved] = useState(false);
   const [note, setNote] = useState("");
   // "Change" on a row of the review before the sale: back to that field, the review closed (487 [IT4], pattern 8).
   function changeAnswer(id: string) {
@@ -95,9 +99,11 @@ export function WaitlistPanel({
   async function act(payload: Record<string, unknown>) {
     setBusy(true);
     setError(null);
+    setSaved(false);
     const answer = await post({ id: productId, ...payload });
     setBusy(false);
     if (answer.ok && answer.view) setView(answer.view);
+    else if (answer.ok && answer.viewsUnread) setSaved(true);
     else setError(MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error ?? "Something went wrong. Try again.");
     return answer.ok;
   }
@@ -315,6 +321,12 @@ export function WaitlistPanel({
           {launch.finished
             ? `Launched. ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} waitlist emails went out.`
             : `On sale. The waitlist email is going out: ${launch.sent.toLocaleString("en-US")} of ${launch.total.toLocaleString("en-US")} so far, sent in batches every five minutes.`}
+        </p>
+      ) : null}
+
+      {saved && !error ? (
+        <p className="notice mt-3 text-sm" role="status">
+          Saved. The waitlist could not be read just now, so what this panel shows may be out of date. Reload this page to see it.
         </p>
       ) : null}
 

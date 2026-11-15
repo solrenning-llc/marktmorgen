@@ -1,6 +1,7 @@
 import { del, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { essentialLimitState, type LimitState } from "@/lib/request-guard";
 
 /**
  * Pictures let in through the picture door (app/api/store/image/upload) and
@@ -30,16 +31,34 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
  * never delete it. A picture put on before this rule stays where it is shown
  * and can still be kept or replaced there.
  *
- * One list per store's picture folder, so one store's doors never push out
- * another's. Notes older than PICTURE_DOOR_SECONDS, and past the newest
- * PICTURE_DOOR_MAX of the store, are dropped as new ones come in, and the list
- * itself expires a window after its last note; a dropped or stale note is
- * never taken, so its file is never deleted by a failure (it costs storage, at
- * most MAX_IMAGE_BYTES in lib/product-image.ts), never deleted wrongly.
+ * One list per store's picture folder, so one store's doors never fill
+ * another's. Notes older than PICTURE_DOOR_SECONDS are dropped as new ones
+ * come in, and the list itself expires a window after its last note; a stale
+ * note is never taken, so its file is never deleted by a failure (it costs
+ * storage, at most MAX_IMAGE_BYTES in lib/product-image.ts), never deleted
+ * wrongly.
+ *
+ * Each door is a write to the file store, and a picture never put on anything
+ * stays there, so the doors are capped before one is signed (owner rule MR: a
+ * ceiling before every spend; rule 24 inventory A1, 8 November 2026): a store
+ * already holding PICTURE_DOOR_MAX fresh notes is refused, counted exactly,
+ * never by pushing its oldest out (which let the door open without end), and
+ * a store's doors are counted by the hour (PICTURE_DOORS_PER_HOUR) before the
+ * file store is asked. A count that cannot be read opens nothing.
  */
 export const PICTURE_DOOR_SECONDS = 24 * 60 * 60;
-/** The most notes a store keeps, newest first: past it the oldest go, and their files are kept, not deleted. */
+/** The most fresh notes a store may hold, nothing taken yet: one more door is refused (PictureDoorFull), none pushed out. */
 export const PICTURE_DOOR_MAX = 1_000;
+/** The doors a store may open in an hour, counted before the file store is asked or anything is signed. */
+export const PICTURE_DOORS_PER_HOUR = 200;
+
+/** The store already holds PICTURE_DOOR_MAX fresh doors: nothing was noted, and the door is not opened. */
+export class PictureDoorFull extends Error {
+  constructor() {
+    super("pictures_waiting");
+    this.name = "PictureDoorFull";
+  }
+}
 
 /** A picture's path is images/<folder>/<file>; its store's list is named by the folder. */
 function doorsKey(path: string): string | null {
@@ -48,8 +67,21 @@ function doorsKey(path: string): string | null {
 }
 
 /**
- * Writes down a picture the door just signed for, in milliseconds; old notes are dropped with it. False when it
- * could not be written: such an upload could never be put on anything, so the door is not opened for it.
+ * Counts one door of this picture's store in the hour, before anything is asked of the file store: "within", or
+ * "exceeded" past PICTURE_DOORS_PER_HOUR, or "unknown" when the count could not be read (lib/request-guard.ts,
+ * essentialLimitState), which opens nothing. A count taken is spent, even when the door is refused later.
+ */
+export async function pictureDoorHour(path: string): Promise<LimitState> {
+  const key = doorsKey(path);
+  if (!key) return "unknown";
+  return essentialLimitState("picture-door", key.slice("nl:pictures:doors:".length), PICTURE_DOORS_PER_HOUR, 60 * 60);
+}
+
+/**
+ * Writes down a picture the door just signed for, in milliseconds; stale notes are dropped with it. False when it
+ * could not be written or its count could not be read: such an upload could never be put on anything, so the door is
+ * not opened for it. Throws PictureDoorFull, with nothing noted, when the store already held PICTURE_DOOR_MAX fresh
+ * notes.
  */
 export async function notePictureDoor(path: string, now = Date.now()): Promise<boolean> {
   const key = doorsKey(path);
@@ -57,14 +89,19 @@ export async function notePictureDoor(path: string, now = Date.now()): Promise<b
   const replies = repliesFor(await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - PICTURE_DOOR_SECONDS * 1000],
     ["ZADD", key, now, path],
-    ["ZREMRANGEBYRANK", key, 0, -(PICTURE_DOOR_MAX + 1)],
+    ["ZCARD", key],
     ["EXPIRE", key, PICTURE_DOOR_SECONDS],
   ]), 4);
-  // Noted only on its whole acknowledgement (Codex P on #2156): a count for each trim, 0 or 1 for the add, and 1
-  // for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
+  // Noted only on its whole acknowledgement (Codex P on #2156): a count for the trim, 0 or 1 for the add, the list's
+  // exact count, and 1 for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
   if (!replies) return false;
-  const [trimmed, added, kept, expires] = replies.map(countOf);
-  return trimmed !== null && (added === 0 || added === 1) && kept !== null && expires === 1;
+  const [trimmed, added, held, expires] = replies.map(countOf);
+  if (trimmed === null || (added !== 0 && added !== 1) || held === null || expires !== 1) return false;
+  if (held <= PICTURE_DOOR_MAX) return true;
+  // Past the cap with this one: it is taken back off (best effort; a note left on a name with no file deletes nothing
+  // and goes with the day), and the door is refused.
+  if (added === 1) await redisPipeline([["ZREM", key, path]]).catch(() => {});
+  throw new PictureDoorFull();
 }
 
 /**
@@ -92,6 +129,8 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
     return [["ZSCORE", key, path], ["ZREM", key, path]];
   }));
   if (!Array.isArray(answers) || answers.length !== 2 * unique.length) throw new Error("could not confirm the pictures taken from the door");
+  // Each reply only in its exact shape (CX-123, rule 24): ZREM the whole number 0 or 1, ZSCORE null or a score (a
+  // number, or the numeric string the REST API sends). Anything else is unknown and throws, never "taken".
   unique.forEach((path, i) => {
     // Read exactly (Codex P on #2156): the score is absent (null) or a number Redis wrote, the removal an exact 0 or
     // 1; anything else is not a confirmed take, and throws as an unconfirmed take does.

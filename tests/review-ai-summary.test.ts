@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     await saveReview(statsId, { productId, email: `buyer${i}@example.com`, reference: `cs_test_sum${i}0000000000`, pi: `pi_sum${i}`, rating: i === 5 ? 1 : 5, text, name: `Buyer ${i}` }, ROOM);
   }
   let store = (await storeForEmail(OWNER))!;
-  const now = Date.UTC(2026, 10, 4, 12);
+  const now = Date.now() - 2 * 86_400_000;
 
   part("Made from the reviews");
   // The numbers the reviews are sent under, newest first: the model's themes cite the ones that say them.

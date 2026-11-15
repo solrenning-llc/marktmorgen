@@ -289,7 +289,9 @@ async function main(): Promise<void> {
   part("Store commands per action, measured");
   for (const [what, n] of Object.entries(measured)) console.log(`        ${String(n).padStart(4)}  ${what}`);
   is("every single action stays within forty commands", Object.entries(measured).filter(([what, n]) => !what.startsWith("delete the person") && n > 40), []);
-  is("deleting the person: two commands an agreement and two more", measured[`delete the person (${left} agreements)`] <= 2 * left + 2, true);
+  // Four an agreement since Codex M on #3151: its lock taken and let go (SET NX, EVAL) around its DEL and ZREM, so a
+  // signature in progress cannot write it back after the erasure; plus the person's set read and deleted.
+  is("deleting the person: four commands an agreement and two more", measured[`delete the person (${left} agreements)`] <= 4 * left + 2, true);
   done();
 }
 

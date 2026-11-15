@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   for (const [shape, reply] of [["the save failing", THROWS], ["the save answered QUEUED", () => ["QUEUED"]]] as const) {
     clearAnswers();
     const a = await fresh();
-    answer((c) => c[0] === "SET" && String(c[1]) === `nl:agree:r:${a.id}` && !c.includes("NX"), reply, { run: false });
+    answer((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:agreement-save:v1") && String(c[4]) === `nl:agree:r:${a.id}`, reply, { run: false });
     const got = await reviseAgreement(store, a.id, edit(a, "Eight months"), now + 1);
     is(`${shape}: unavailable, the record at version 1, no text left behind`, [got.ok, (await agreementOf(store, a.id))?.versions.length, redis.run(["EXISTS", V2(a.id)])], [false, 1, 0]);
     clearAnswers();

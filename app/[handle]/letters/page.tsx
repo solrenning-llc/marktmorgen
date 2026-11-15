@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { EmptyState } from "@/components/empty-state";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { cache } from "react";
@@ -48,9 +49,13 @@ export default async function LettersPage({ params }: Params) {
       <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
         <h1 className="font-display text-3xl font-semibold leading-tight sm:text-4xl">{w.listTitle(store.name)}</h1>
         <p className="st-muted mt-3">{w.listLead(store.name)}</p>
-        {letters.length === 0 ? <p className="st-muted mt-8">{w.empty}</p> : null}
+        {letters === null ? (
+          <p role="status" className="st-note mt-8">{w.unread}</p>
+        ) : letters.length === 0 ? (
+          <EmptyState title={w.emptyTitle} body={w.empty} action={{ href: `/@${store.handle}`, label: w.visit(store.name) }} className="mt-8" />
+        ) : null}
         <ul className="mt-8 space-y-3">
-          {letters.map((letter) => (
+          {(letters ?? []).map((letter) => (
             <li key={letter.id} className="st-card p-5">
               <Link href={`/@${store.handle}/letters/${letter.id}`} className="font-semibold [overflow-wrap:anywhere]">
                 {letter.subject}

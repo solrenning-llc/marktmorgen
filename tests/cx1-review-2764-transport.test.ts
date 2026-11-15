@@ -83,6 +83,8 @@ async function main() {
     }
     for (mode of ["lost response", "exact", "known rejection"]) {
       emails.length = 0; calls.length = 0; chargeRequests = 0;
+      // An unconfirmed switch leaves the membership's lock to run out (lib/tier-switch.ts, keepWhileUnconfirmed): it has, before the next case.
+      await redis.pipeline([["DEL", `nl:tier:${subscription}:lock`]]);
       actualPrice = "price_CX1Monthly0001"; actualConsent = "";
       const result = flow === "tier"
         ? await switchTier(store, token, subscription, b.product.id, now, consent)

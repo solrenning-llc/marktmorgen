@@ -24,6 +24,7 @@ const FAILED = "It could not be saved just now. Try again in a moment.";
 const NOTICES: Record<string, string> = {
   on: "The Store assistant is on. Its chat shows on your store's pages while it is switched on below.",
   pending: "Stripe has not confirmed the payment yet. This page shows it as soon as it does.",
+  failed: "A payment for the Store assistant on this store did not go through, so nothing new was started. This page shows it as on once Stripe has the payment.",
   unfinished: "Nothing was started, and nothing was charged.",
   unconfirmed: "Stripe did not answer just now. If you paid, it shows here within a day.",
   "not-open": "The Store assistant is not on sale yet: it opens with Marktmorgen's plans.",
@@ -37,6 +38,9 @@ const NOTICES: Record<string, string> = {
   canceled: "Nothing was started, and nothing was charged.",
   error: "Something went wrong. Nothing was changed.",
 };
+
+/** A notice's words, read only from NOTICES' own keys: ?assistant=constructor or toString is none of them. */
+const noticeOf = (key: string | null) => (key !== null && Object.hasOwn(NOTICES, key) ? NOTICES[key] : undefined);
 
 /**
  * The Store assistant in the studio (lib/store-assistant-rules.ts): what it
@@ -73,6 +77,8 @@ export function StoreAssistantEditor({
   pin: string;
 }) {
   const router = useRouter();
+  const noticeText = noticeOf(notice);
+  const refusalText = noticeOf(refusal);
   const [on, setOn] = useState(setting.on);
   const [notes, setNotes] = useState(setting.notes);
   const [nextOn, setNextOn] = useState(next.on);
@@ -118,9 +124,9 @@ export function StoreAssistantEditor({
       </p>
       <p className="mt-2 text-sm text-ink-soft">{assistantAllowanceWords()}</p>
 
-      {notice && NOTICES[notice] ? (
+      {noticeText ? (
         <p className="notice mt-4" role="status">
-          {NOTICES[notice]}
+          {noticeText}
         </p>
       ) : null}
 
@@ -154,7 +160,7 @@ export function StoreAssistantEditor({
                 <button type="submit" className="btn btn-primary btn-sm" disabled={refusal !== null}>
                   {`Start the ${ASSISTANT_NAME}`}
                 </button>
-                {refusal && NOTICES[refusal] ? <p className="mt-2 text-xs text-ink-soft">{NOTICES[refusal]}</p> : null}
+                {refusalText ? <p className="mt-2 text-xs text-ink-soft">{refusalText}</p> : null}
               </form>
             ) : null}
           </>

@@ -19,6 +19,7 @@ import { type DataChange, type DataStore, giveData, needData, noteData } from "@
 import { dataBytes } from "@/lib/store-data-rules";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Store } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
 import { pageOut } from "@/lib/site-page-rules";
@@ -73,16 +74,30 @@ export async function readPageFunnelsStrict(statsId: string | null): Promise<Pag
   return funnels.sort((a, b) => a.since - b.since || a.id.localeCompare(b.id));
 }
 
-/** One funnel by its id, or null. */
+/**
+ * One funnel by its id, or null when Redis confirms it is not kept (an HGET
+ * that answers null). Any other answer (no reply, more than one, a slot that
+ * is not a text, a kept record that is not a funnel, as readPageFunnelsStrict
+ * refuses one) throws UnknownReplyError, so a funnel that is there is never
+ * said to be gone (CX-123 rule 24). The visitor's reads (funnelHere,
+ * app/api/store/hit) catch it and show the page on its own, as before.
+ */
 export async function readPageFunnel(statsId: string | null, id: string): Promise<PageFunnel | null> {
   if (!statsId || !id || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", funnelsKey(statsId), id]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["HGET", funnelsKey(statsId), id]]), 1);
+  if (!replies) throw new UnknownReplyError("a funnel read");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a kept funnel");
+  let value: unknown;
   try {
-    return parsePageFunnels([JSON.parse(raw)])[0] ?? null;
+    value = JSON.parse(raw);
   } catch {
-    return null;
+    throw new UnknownReplyError("a kept funnel");
   }
+  const funnel = parsePageFunnels([value])[0];
+  if (!funnel) throw new UnknownReplyError("a kept funnel");
+  return funnel;
 }
 
 /** A single-field mutation must have exactly one explicit Redis acknowledgement. */

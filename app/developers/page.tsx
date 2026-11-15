@@ -134,7 +134,7 @@ export default function DevelopersPage() {
           <code className="whitespace-nowrap font-mono">Retry-After: 60</code>.
         </p>
         <p>
-          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}, and a page of sales as ${API_SALES_UNITS}, and more when it names products that are read for their titles. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: from ${n(EVENTS_LEAST)} to ${n(EVENTS_MOST_COUNT)} each, by the size of the deliveries it reads, measured before they are read; a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters, so ${n(EVENTS_MOST_COUNT)} is the most for messages made since November 4, 2026, and one kept from before counts at its size), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
+          {`A store's keys together also have a figure for each billing month (the month that starts on the day the store's plan renews, or on the day it had before a switch between monthly and yearly): ${STORE_ALLOWANCES.creator.api.toLocaleString("en-US")} requests on ${PLAN_TITLES.creator}, ${STORE_ALLOWANCES.pro.api.toLocaleString("en-US")} on ${PLAN_TITLES.pro} and ${STORE_ALLOWANCES.scale.api.toLocaleString("en-US")} on ${PLAN_TITLES.scale}. A free trial has ${NON_PAYING_ALLOWANCES.trial.api.toLocaleString("en-US")} for the whole trial, and a store without a paid plan has none. A contact added or a product given counts as ${API_WRITE_UNITS}, and a page of sales as ${API_SALES_UNITS}, and more when it names products that are read for their titles. Every read except Store counts as more than one when it reads more than one request's worth: a page of products, of your list or of your members, a course's students, your numbers, your discount codes, your affiliates, your bookings and the recent events (/api/v1/events, the examples a tool such as Zapier shows while you set up a step: from ${n(EVENTS_LEAST)} to ${n(EVENTS_MOST_COUNT)} each, by the size of the deliveries it reads, measured before they are read; a webhook message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, each text in it at most ${MESSAGE_TEXT_MAX} characters, so ${n(EVENTS_MOST_COUNT)} is the most for messages made since November 4, 2026, and one kept from before counts at its size), as said with each below; what it will take is taken before it reads. A read whose size is known only once it is read (a page of your list or your members, your numbers from their copy) sets aside the most it may take first, and gives back at once what it did not need. Past the figure, or when a read needs more than are left, the answer is 429 `}
           <code className="font-mono">monthly_limit</code>
           {", and its message says when the figure opens again, if it does. A trial or a store without a paid plan also needs one of the month's places for such stores; without one, the answer is 429 "}
           <code className="font-mono">no_place</code>
@@ -211,7 +211,9 @@ export default function DevelopersPage() {
         <Endpoint path="/api/v1/leads">
           Your list: everybody who asked for something free, bought, or came in with an import — the same rows as the
           CSV export in your studio. Add <code className="font-mono">?agreed=true</code> for only those who agreed to hear
-          from you and have not unsubscribed: the ones it is fair to email.
+          from you and have not unsubscribed: the ones it is fair to email. If a page holds a contact that could not be
+          read, it leaves that contact out and says how many in <code className="font-mono">unreadable</code>; a page
+          without that field left nobody out.
         </Endpoint>
         <p>{`A page counts as at least ${n(LIST_PAGE_LEAST)} of your API requests (one while your store has no list yet), and more when its rows are long, by the bytes it reads and sends: for example, ${n(LIST_PAGE_EXAMPLE)} for ${n(ROWS_EXAMPLE.rows)} rows of about ${ROWS_EXAMPLE.kb} KB each. A page needs ${n(LIST_PAGE_HELD)} requests free before it is read, what a full page of the longest rows could take; what it did not use is given back at once. With fewer free, the page is refused and nothing is read. Members count the same way: a page of members needs ${n(MEMBERS_PAGE_HELD)} free before it is read.`}</p>
         <Code>{`{
@@ -448,19 +450,21 @@ export default function DevelopersPage() {
           the header <code className="font-mono">Authorization: Bearer nl_live_…</code> and one of your keys.
         </p>
         <p>
-          It has nineteen tools, all reading only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
+          It has twenty-two tools. One prepares a change: a new description for a product, kept as a proposal you read beside the
+          current one and confirm under What the AI proposes in your studio, with undo; nothing changes until you confirm, and it
+          needs a key you allowed to prepare changes. The other twenty-one read only: your numbers (the same as <code className="font-mono">/api/v1/stats</code>),
           your products, revenue by channel read three ways, the funnel from visit to sale, each product&apos;s numbers and
           what buyers buy next, your buyers in numbers, what is worth knowing, your memberships (MRR, churn, why members
           left, month by month), your emails and sequences with what they sold, your affiliates by their codes, a product&apos;s description
           and its sales page block by block (testimonials counted, never quoted), a course&apos;s outline and each lesson&apos;s
           text, quiz and task (files named, never located), how a product&apos;s page test is going, how far down its
-          sales page visitors read and its earlier versions, the sections you saved to reuse, and which store the key belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90.
+          sales page visitors read and its earlier versions, the sections you saved to reuse, which products can go in a bundle and why the others cannot, how your imports from another platform went, in counts, and which store the key belongs to. Most of the ones about a stretch of time take <code className="font-mono">days</code>: 7, 30 or 90.
           It changes nothing, and it does not read anybody&apos;s name or address, buyers&apos;, members&apos;,
           subscribers&apos; or affiliates&apos;: what an assistant reads is kept by whoever runs the assistant,
           and the people on your list did not agree to that. The endpoints above are where your own tools read them.
         </p>
         <p>
-          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. Which store the key belongs to counts as one.`}
+          {`Each tool counts as many of your API requests as the address that reads the same: your numbers and the tools about a stretch of days as /api/v1/stats, read anew or from the copy kept an hour (the tools about a stretch of days keep their own copy, with the products they name, and count those products when read anew), each answer with its asOf; each product's numbers also count what buyers bought next, by its size; your products as /api/v1/products and your affiliates as /api/v1/affiliates. Your memberships count as about ${n(MEMBERSHIPS_COUNT)}, or ${n(MEMBERSHIPS_COUNT_COLD)} when they were not read in the last ten minutes, and more for the names of the products they name; your emails count by how many emails and sequences you have, and more when what they sold was not read in the last ten minutes. A product's description, its sales page, a course's outline or one lesson, a page test and how far a page is read each count as a few, by the most they could read; a page's earlier versions and your saved sections count more as more are kept. A page of products for a bundle and your imports each count as a few, by the most they could read. Preparing a description counts as a few, more as more proposals wait or are kept. Which store the key belongs to counts as one.`}
         </p>
       </LegalSection>
 
@@ -581,13 +585,15 @@ export default function DevelopersPage() {
           podcast or a bundle, by its id or its exact name. They open it from your store&apos;s list of purchases with
           that address, where it shows as given by your store, not as a sale; it is not counted in your numbers, sent to
           webhooks or credited to an affiliate. Send <code className="font-mono">notify: true</code> and they get one email
-          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running.
+          from your store&apos;s name saying so, in your store&apos;s language, while your plan is running. Somebody
+          deleted from your store is never given anything again or emailed.
         </Endpoint>
         <Code>{`{"email": "dana@example.com", "product": "k3j9x2p1ab", "notify": true}
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "given", "emailed": true}}
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "already", "emailed": false}}
-409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}`}</Code>
+409  {"error": "cannot_give", "message": "Memberships, calls and products with several prices cannot be given this way."}
+409  {"error": "deleted", "message": "This person was deleted from your store, so nothing is given to them and they are not emailed."}`}</Code>
         <Endpoint method="DELETE" path="/api/v1/access">
           Takes back a product the API gave, with the same body. Only what the API gave: a sale, an import, a gift or a
           purchase paid with PayPal is not the API&apos;s to take, and gets 404{" "}

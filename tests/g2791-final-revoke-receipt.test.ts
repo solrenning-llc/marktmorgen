@@ -312,8 +312,9 @@ async function main(): Promise<void> {
   const mode = process.env.G_REPLY ?? "extra";
   let injected = 0;
   redis.pipeline = async (commands: (string | number)[][]) => {
-    // Adapted by Claude 4 to the split boundary (the HDEL alone, before the watch is left); assertions unchanged.
-    if (commands.length === 1 && commands[0]?.[0] === "HDEL" && String(commands[0]?.[1]).startsWith("nl:imp:buy:")) {
+    // Adapted by Claude 4 to the split boundary (the HDEL alone, before the watch is left), then to the take-back
+    // script that replaced that HDEL (PAYPAL_REVOKE, Codex G's M1 on #2791); assertions unchanged.
+    if (commands.length === 1 && commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:paypal-revoke:v1\n") && String(commands[0]?.[3]).startsWith("nl:imp:buy:")) {
       injected++;
       if(mode==="control") return actualPipeline(commands);
       return [null]; // removal not applied, its reply unknown

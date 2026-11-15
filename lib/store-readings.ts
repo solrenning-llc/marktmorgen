@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Store, ensureListId, storeRef } from "@/lib/store";
@@ -259,9 +260,11 @@ export async function keptReading<T>(store: Pick<Store, "statsId">, kind: Readin
     return { value: guard.without(value, new Set(names)), at: now, stale: false };
   };
   try {
-    const replies = await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]);
-    const reply: unknown = Array.isArray(replies) && replies.length === 1 ? replies[0] : null;
-    const places = Array.isArray(reply) && reply.every((i) => Number.isInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (reply as number[]) : null;
+    const replies = repliesFor(await redisPipeline([["EVAL", READING_COPY, 2, key, suppressedKey(listId), text, READING_KEEP_SECONDS, ...names.map((e) => suppressionPrint(listId, e))]]), 1);
+    // Each place read from the list's own slots (lib/redis-reply.ts), as keepUnlessErased does: a hole or a getter is
+    // not a place, where Array#every would skip a hole (review of #2865).
+    const list = replies ? replyList(replies[0]) : null;
+    const places = list && list.every((i) => Number.isSafeInteger(i) && (i as number) >= 1 && (i as number) <= names.length) ? (list as number[]) : null;
     if (!places) return await closed();
     if (!places.length) return { value, at: now, stale: false };
     return { value: guard.without(value, new Set(places.map((i) => names[i - 1]))), at: now, stale: false };
@@ -393,6 +396,10 @@ export async function forgetStoreReadings(statsId: string | null | undefined): P
 export async function forgetReadingsPerson(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
   // And the memberships' own cache, which keeps what members wrote when leaving (Codex E2 on #2111).
-  const [gone] = await redisPipeline([["DEL", copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)]]);
-  return Number(gone) || 0;
+  const keys = [copyKey("sales", statsId), copyKey("members", statsId), membershipCacheKey(statsId)];
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (CX-123 rule 24; as forgetLedgerCopy, lib/segments.ts): thrown, so the
+  // erasure says this part did not finish (lib/person-erasure.ts) while a copy naming the person may still be kept.
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of the store's kept sales and memberships readings");
+  return gone;
 }

@@ -38,7 +38,7 @@ export const it: BuyerWords = {
 
   fairHead: (country, percent) => `Prezzo equo per il tuo Paese (${country}): sconto del ${percent}${S}%`,
   fairNote: (store, plan) =>
-    `${store} abbassa i prezzi dove il denaro vale meno. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo ridotto vale per il pagamento in un'unica soluzione" : ""}.`,
+    `${store} abbassa i prezzi dove il denaro vale meno. Questo prezzo è stato stabilito automaticamente per te, in base al Paese della tua connessione internet. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo ridotto vale per il pagamento in un'unica soluzione" : ""}.`,
   saleHead: (name, percent, ends) => `${name ? `${name}: ` : ""}sconto del ${percent}${S}% · ${ends}`,
   saleNote: (until, plan) =>
     `Fino al ${until}. Lo sconto si applica nella pagina di pagamento, senza codice${plan ? "; il prezzo scontato vale per il pagamento in un'unica soluzione" : ""}.`,
@@ -149,6 +149,7 @@ export const it: BuyerWords = {
   unitSaving: (percent) => `risparmi il ${percent}%`,
   chooseOptionFor: (title) => `Scegli un'opzione per ${title}`,
   chooseOne: "Scegline una",
+  optionFromLink: (label) => `Sei arrivato per ${label}, quindi è scelta qui sotto. Puoi sceglierne un'altra.`,
   recommended: "Consigliato",
   recommendedAfter: " (consigliato)",
   howToPayFor: (title) => `Come pagare ${title}`,
@@ -185,15 +186,19 @@ export const it: BuyerWords = {
     `Quando sarà attivo, il pagamento verrà incassato da Stripe sul conto di ${store}: Marktmorgen non trattiene mai il denaro e non ne prende nulla.`,
   paidBy: (takers, store) =>
     `Il pagamento viene incassato da ${takers} sul conto di ${store}. Marktmorgen non trattiene mai il denaro e non ne prende nulla.`,
+  whoAnswers: (store) =>
+    `${store} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   noPaymentsTitle: "Questo negozio non può ancora accettare pagamenti.",
-  noPaymentsBody: (store) => `I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
+  noPaymentsBody: "I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta.",
+  noPaymentsBodyOne: "Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta.",
+  noPaymentsWrite: (store) => `Scrivi a ${store}`,
 
   notices: {
     soldout: { title: "È appena andato esaurito", body: "L'ultimo è stato venduto un attimo prima che premessi acquista. Non è stato addebitato nulla." },
     busy: { title: "Qualcun altro lo sta acquistando proprio ora", body: "Non è stato addebitato nulla. Premi di nuovo acquista tra un momento." },
     slow: { title: "Troppi tentativi in pochi minuti", body: "Non è stato addebitato nulla. Attendi qualche minuto, poi premi di nuovo acquista." },
     error: { title: "Non è stato possibile aprire la pagina di pagamento", body: "Non è stato addebitato nulla. Riprova tra un momento." },
+    nocharges: { title: "Questo negozio non può accettare pagamenti con carta in questo momento", body: "Non è stato addebitato nulla. Riprovare non servirà finché il negozio non avrà risolto il problema." },
     paused: { title: "Questo negozio non accetta nuovi ordini in questo momento", body: "Non è stato addebitato nulla. I nuovi ordini riaprono all'inizio del mese prossimo, o prima." },
     "paypal-declined": {
       title: "PayPal non ha accettato il pagamento",
@@ -283,6 +288,8 @@ export const it: BuyerWords = {
   openFullSize: "Apri questa immagine a grandezza intera",
   countdownUnits: { days: "giorni", hours: "ore", min: "min", sec: "sec" },
   until: (when) => `Fino a ${when}`,
+  countdownPause: "Metti in pausa il conto alla rovescia",
+  countdownResume: "Riprendi il conto alla rovescia",
 
   restingTitle: "Questa pagina è in pausa per ora",
   restingBody: (store) =>
@@ -303,9 +310,12 @@ export const it: BuyerWords = {
   askTermsCut: () => "Qui non ho le condizioni complete. Chiedi al creatore prima di acquistare.",
 
   noLongerOnSale: "Questo prodotto non è più in vendita.",
+  cardUnread: "Non è stato possibile caricare questo prodotto ora. Riprova tra un momento.",
+  cardBuyUnread: "L'acquisto non è disponibile ora. Riprova tra un momento.",
   seeStore: (store) => `Vedi ${store}`,
   cardTestMode: "Modalità di prova: nessuna carta reale viene addebitata.",
   cardCheckout: "Pagamento sicuro con Stripe, in una nuova scheda.",
+  cardSoldBy: (store) => `Venduto da ${store}, che ne risponde.`,
   cardOpens: (store) => `Si apre nel negozio di ${store}, in una nuova scheda.`,
 
   // ---- Email cards (lib/mail-product-price.ts)

@@ -39,8 +39,10 @@ const clean = (value: unknown, max: number) =>
 
 /**
  * What the model sent, made into questions the editor can hold, or none of
- * it: a question without its text, with answers repeated or too few, or with
- * a right answer that is not among them is left out, never repaired by guess.
+ * it: a question without its text, with an empty answer, with answers repeated
+ * or too few, or with a right answer that is not among them is left out, never
+ * repaired by guess. Empty answers are not removed because that would change
+ * the positions the model used in `correct`.
  */
 export function readDrafted(raw: unknown, count: number): DraftedQuestion[] {
   const list = Array.isArray(raw) ? raw : [];
@@ -49,10 +51,12 @@ export function readDrafted(raw: unknown, count: number): DraftedQuestion[] {
     if (out.length >= Math.min(count, MAX_QUESTIONS)) break;
     const value = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
     const text = clean(value.text, MAX_QUESTION_LENGTH);
-    const choices = (Array.isArray(value.choices) ? value.choices : []).map((c) => clean(c, MAX_CHOICE_LENGTH)).filter(Boolean).slice(0, MAX_CHOICES);
-    if (!text || choices.length < MIN_CHOICES) continue;
+    const choices = (Array.isArray(value.choices) ? value.choices : []).slice(0, MAX_CHOICES).map((c) => clean(c, MAX_CHOICE_LENGTH));
+    if (!text || choices.length < MIN_CHOICES || choices.some((choice) => !choice)) continue;
     if (new Set(choices.map((c) => c.toLowerCase())).size !== choices.length) continue;
-    const correct = [...new Set((Array.isArray(value.correct) ? value.correct : []).filter((n): n is number => Number.isInteger(n) && n >= 0 && n < choices.length))].sort((a, b) => a - b);
+    const rawCorrect = Array.isArray(value.correct) ? value.correct : [];
+    if (rawCorrect.some((n) => typeof n !== "number" || !Number.isInteger(n) || n < 0 || n >= choices.length)) continue;
+    const correct = [...new Set(rawCorrect as number[])].sort((a, b) => a - b);
     if (correct.length === 0 || correct.length === choices.length) continue;
     const kind: QuestionKind = correct.length > 1 ? "multiple" : "single";
     out.push({ text, kind, choices, correct, explanation: clean(value.explanation, MAX_EXPLANATION_LENGTH) });

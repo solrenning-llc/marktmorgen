@@ -1,9 +1,9 @@
 /** Synthetic orchestration boundary; provider reader tests exercise real HTTP contracts. */
 import { timeLeft } from "@/lib/fetch-timeout";
-export type Check = { check: string; ok: boolean; detail: string };
+export type Check = { check: string; ok: boolean; detail: string; loop?: boolean };
 export const NIMBUS_FROM = "Marktmorgen <checks@example.test>";
 export const control = {
-  allowed: true, sender: true, deliveryOk: true, throwLoop: false, throwAccount: false,
+  allowed: true, sender: true, deliveryOk: true, throwLoop: false, throwAccount: false, loopRan: true,
   usage: {
     basis: "provider_reported_counters",
     window: { from: "2026-10-31T12:00:00.000Z", through: "2026-11-01T12:00:00.000Z" },
@@ -41,5 +41,6 @@ export async function verifyMailLoop(deadline: number): Promise<Check[]> {
   control.calls.push("loop"); control.deadlines.push(deadline);
   control.cutoffRoom.push(timeLeft());
   if (control.throwLoop) throw new Error("synthetic loop failure");
-  return [{ check: "synthetic delivery loop", ok: control.deliveryOk, detail: "checked" }];
+  if (!control.loopRan) return [{ check: "synthetic sender", ok: true, detail: "not checked: synthetic" }];
+  return [{ check: "synthetic delivery loop", ok: control.deliveryOk, detail: "checked", loop: true }];
 }

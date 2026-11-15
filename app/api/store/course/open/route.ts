@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { storeForHandle } from "@/lib/store";
 import { mintPass, openCourseLink, passCookie, peekCourseLink, storeKey } from "@/lib/learn";
 import { readListing } from "@/lib/catalog";
-import { OPEN_LINK_REQUEST_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { OPEN_LINK_GET_UNITS, OPEN_LINK_TAP_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 const GONE = "This link has expired or was already used too many times. Open the course page and ask for a new one.";
@@ -24,6 +24,11 @@ export async function GET(request: NextRequest) {
   try {
     const grant = await peekCourseLink(token);
     if (!grant) return gone();
+    // This GET's own reads, from the store's month (lib/buyer-actions.ts): a mail filter that fetches the link again and
+    // again is counted every time, never only when somebody presses.
+    const store = await storeForHandle(grant.h);
+    if (!store || storeKey(store) !== grant.k) return gone();
+    if (!(await takeBuyerRead(store, OPEN_LINK_GET_UNITS))) return restingAway(origin, store);
     return new Response(null, { status: 303, headers: { Location: `${origin}/@${grant.h}/course/open?token=${token}`, "Cache-Control": "no-store" } });
   } catch (error) {
     // Not read in its exact shape: nothing was changed, and it is not said as an expired link (CX-123 rule 24).
@@ -50,8 +55,8 @@ export async function POST(request: NextRequest) {
   const grant = await openCourseLink(token);
   const store = grant ? await storeForHandle(grant.h) : null;
   if (!grant || !store || storeKey(store) !== grant.k) return gone();
-  // The store's public requests on the buyers' side (lib/buyer-actions.ts): two, for the GET and the page before it.
-  if (!(await takeBuyerRead(store, OPEN_LINK_REQUEST_UNITS))) return restingAway(origin, store);
+  // The press's own reads (lib/buyer-actions.ts); the GET and the page took theirs.
+  if (!(await takeBuyerRead(store, OPEN_LINK_TAP_UNITS))) return restingAway(origin, store);
   const product = await readListing(store, grant.p);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({

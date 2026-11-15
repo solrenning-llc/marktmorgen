@@ -34,12 +34,19 @@ import { takePublicRequest } from "@/lib/traffic";
 export const PICTURE_REQUEST_UNITS = 4;
 
 /**
- * Public requests the tap that opens an emailed community or course link
- * counts as (MM-SA-41): the link's GET and the page that asks for the tap
- * read before it, so the whole open is two later pages' commands, never one
- * (tests/open-link-post.test.ts holds the count under it).
+ * Public requests each step of opening an emailed community or course link
+ * counts as (MM-SA-41): the link's GET (it reads the link and the store), the
+ * page that asks for the press (it reads the store and draws the form) and the
+ * press itself (it spends the open and writes the pass). Each takes its own
+ * before what it serves, so a mail filter or a script that fetches the link or
+ * its page again and again, and never presses, is counted every time
+ * (tests/open-link-get-counted.test.ts). The whole open is the three together
+ * (tests/open-link-post.test.ts holds its commands under it).
  */
-export const OPEN_LINK_REQUEST_UNITS = 2;
+export const OPEN_LINK_GET_UNITS = 1;
+export const OPEN_LINK_PAGE_UNITS = 1;
+export const OPEN_LINK_TAP_UNITS = 1;
+export const OPEN_LINK_REQUEST_UNITS = OPEN_LINK_GET_UNITS + OPEN_LINK_PAGE_UNITS + OPEN_LINK_TAP_UNITS;
 
 /** One action, taken from the store's month: the buyer's figure, or the creator's studio requests. */
 export async function takeBuyerAction(store: Store, by: "buyer" | "owner" = "buyer"): Promise<boolean> {

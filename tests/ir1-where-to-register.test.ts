@@ -7,7 +7,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { NOT_TAX_ADVICE, needsAttentionPage } from "@/lib/registration-thresholds";
+import { NOT_TAX_ADVICE, needsAttentionPage } from "@/lib/where-to-register";
 
 test("the link opens the Needs attention tab of the same Locations page, in test or live mode", () => {
   assert.equal(needsAttentionPage("https://dashboard.stripe.com/tax/locations"), "https://dashboard.stripe.com/tax/locations?primary_tab=needs_attention");
@@ -23,9 +23,9 @@ test("the fixed sentence the item asks for", () => {
 
 test("the tax page has the section, honest about what Stripe counts, only with a Stripe account", () => {
   const page = readFileSync("app/studio/tax/page.tsx", "utf8");
-  const section = page.slice(page.indexOf('aria-labelledby="thresholds-title"'));
-  assert.ok(page.includes('aria-labelledby="thresholds-title"'), "a named section");
-  assert.match(section, /<h2 id="thresholds-title"[^>]*>Where you may need to register<\/h2>/);
+  const section = page.slice(page.indexOf('aria-labelledby="register-title"'));
+  assert.ok(page.includes('aria-labelledby="register-title"'), "a named section");
+  assert.match(section, /<h2 id="register-title"[^>]*>Where you may need to register<\/h2>/);
   assert.match(section, /needsAttentionPage\(registrations\.dashboard\)/);
   assert.match(section, /<NewTab \/>/, "says it opens a new tab");
   for (const fact of ["only the sales Stripe processed", "refunds", "live mode", "your home country", "10,000 USD"]) {
@@ -33,5 +33,5 @@ test("the tax page has the section, honest about what Stripe counts, only with a
   }
   assert.match(section, /\{NOT_TAX_ADVICE\}/);
   assert.match(section, /sellsThroughPayPal\(store\)/, "PayPal sales are not in Stripe's count, and it says so");
-  assert.ok(page.indexOf('aria-labelledby="thresholds-title"') > page.indexOf('aria-labelledby="registrations-title"'));
+  assert.ok(page.indexOf('aria-labelledby="register-title"') > page.indexOf('aria-labelledby="registrations-title"'));
 });

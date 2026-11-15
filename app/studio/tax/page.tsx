@@ -10,6 +10,7 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { Icon } from "@/components/icons";
 import { NewTab } from "@/components/new-tab";
 import { type TaxRegistration, placeOf, readTaxRegistrations } from "@/lib/tax-registrations";
+import { NOT_TAX_ADVICE, needsAttentionPage } from "@/lib/where-to-register";
 import { sellsThroughPayPal } from "@/lib/paypal-sales";
 
 export const metadata: Metadata = { title: "Where you collect tax — Marktmorgen", robots: { index: false, follow: false } };
@@ -141,6 +142,31 @@ export default async function StudioTaxPage({ searchParams }: Params) {
               </>
             ) : null}
           </section>
+
+          {registrations.state !== "none" && needsAttentionPage(registrations.dashboard) ? (
+            <section aria-labelledby="register-title" className="mt-8 max-w-3xl">
+              <h2 id="register-title" className="text-lg font-semibold text-ink">Where you may need to register</h2>
+              <p className="mt-3 max-w-2xl text-ink-soft">
+                Stripe Tax compares the sales on your Stripe account with the sales limit of each country and US state,
+                and lists the places where you may need to register under Needs attention.
+              </p>
+              <ul className="mt-3 max-w-2xl list-disc space-y-1 pl-5 text-ink-soft">
+                <li>It counts only the sales Stripe processed, minus refunds, and only in live mode.</li>
+                <li>It does not check your home country or your home US state.</li>
+                <li>Stripe emails the owner of your Stripe account when you pass a limit, once your sales reached 10,000 USD in the year before.</li>
+                {sellsThroughPayPal(store) ? <li>Sales paid with PayPal are not in this count.</li> : null}
+              </ul>
+              <a href={needsAttentionPage(registrations.dashboard) ?? undefined} target="_blank" rel="noopener noreferrer" className="btn btn-secondary mt-5">
+                See where you may need to register in Stripe
+                <Icon name="arrow-up-right" size={16} />
+                <NewTab />
+              </a>
+              <p className="mt-2 max-w-2xl text-xs text-ink-soft">
+                {NOT_TAX_ADVICE} Whether you must register in a place is yours to confirm. Marktmorgen never registers
+                or files for you.
+              </p>
+            </section>
+          ) : null}
         </main>
       </StudioStorePin>
     </div>

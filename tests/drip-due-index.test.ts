@@ -15,10 +15,11 @@
  *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
+import { readFileSync } from "node:fs";
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import * as learn from "@/lib/learn";
 import { emailKey, forgetLearnerPerson, registerDrip, sendDripEmails, touchStudent } from "@/lib/learn";
-import type { Course } from "@/lib/course";
+import { type Course, isOpen } from "@/lib/course";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import * as registry from "./plan-cost-registry";
@@ -130,6 +131,39 @@ async function main(): Promise<void> {
     is("the next run sends nothing again", to(due), 1);
     await quietly(() => run(store, NOW + DAY));
     is("a day on, the later student's module is due and emailed once", to(later), 1);
+  }
+
+  part("A student started by the course start route, who never opens the course page, is emailed on the right day (Claude 4 on the index, (b))");
+  {
+    const store = await setup();
+    await registerDrip(store, PRODUCT as never, COURSE);
+    const dripCardFor = L.dripCardFor as ((courseId: string) => Promise<unknown>) | undefined;
+    is("the course's drip card can be read on its own, without the outline", typeof dripCardFor, "function");
+    const card = dripCardFor ? await dripCardFor(COURSE.id) : null;
+    is("the card registerDrip kept", card !== null && card !== "unknown" && typeof card === "object", true);
+    const started = "started-only@example.com";
+    // The start route's call: the card, never the outline (app/api/store/course/start/route.ts).
+    await touchStudent(COURSE.id, started, NOW - 36 * 3600, store, card && card !== "unknown" ? ({ card } as never) : undefined);
+    is("its pairs are in the index without a visit to the course page", (await entries(store)).includes(member(COURSE, started, "module000002")), true);
+    await quietly(() => run(store));
+    is("and the module's email goes on the day it opens, once", to(started), 1);
+    const route = readFileSync("app/api/store/course/start/route.ts", "utf8");
+    is("the start route reads the card and hands it to touchStudent", /dripCardFor\(course\.id\)/.test(route) && /touchStudent\(course\.id, order\.email, order\.created, store, [^)]*card/.test(route), true);
+  }
+
+  part("A pair indexed late, its module opened inside the window, is still emailed once; access never waits for the index (Claude 4 on the index, (a))");
+  {
+    const store = await setup();
+    const late = "late-indexed@example.com";
+    // The module opened two days ago (start three days ago, dripDays 1); the pair is written only now.
+    await touchStudent(COURSE.id, late, NOW - 3 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    is("the pair is kept, inside the window", (await entries(store)).includes(member(COURSE, late, "module000002")), true);
+    await quietly(() => run(store));
+    await quietly(() => run(store));
+    is("emailed once, never twice", to(late), 1);
+    const unit = COURSE.modules[1];
+    is("access opens on its own time, with no index at all", [isOpen(COURSE, unit, NOW - 3 * DAY, NOW), isOpen(COURSE, unit, NOW, NOW)], [true, false]);
+    is("the access rule reads no drip index", /nl:drip:|dueKey/.test(readFileSync("lib/course.ts", "utf8")), false);
   }
 
   part("A store with 2,000 indexed courses and no pair due costs only the fixed commands");

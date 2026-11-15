@@ -84,7 +84,7 @@ function addressOf(email: string): string {
 
 /**
  * The address an answer was sent from, lower case. An answer that does not read as the form writes it (JSON, an
- * object with a non-empty string email) cannot be told apart from theirs, so it is unknown, never someone else's.
+ * object whose email is an address) cannot be told apart from theirs, so it is unknown, never someone else's.
  */
 function senderOf(entry: string): string {
   let parsed: unknown;
@@ -95,8 +95,12 @@ function senderOf(entry: string): string {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new UnknownReplyError("a creator research answer");
   const email = Object.getOwnPropertyDescriptor(parsed, "email")?.value;
-  if (typeof email !== "string" || !email.trim()) throw new UnknownReplyError("a creator research answer");
-  return email.trim().toLowerCase();
+  if (typeof email !== "string") throw new UnknownReplyError("a creator research answer");
+  const sender = email.trim().toLowerCase();
+  // The form keeps only addresses that pass this same pattern (app/api/creators/route.ts), so a kept sender that
+  // fails it was not written by the form: whose it is cannot be told, so it is unknown, never someone else's.
+  if (!EMAIL_PATTERN.test(sender)) throw new UnknownReplyError("a creator research answer");
+  return sender;
 }
 
 /** Walks one look may begin: a walk that finds the list moved under it starts again, at most this many times. */

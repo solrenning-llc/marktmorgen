@@ -16,7 +16,7 @@
  *     one (Claude 6's N3);
  *   - the cost model pricing a route duration other than the route's maxDuration, or still saying no route runs.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as backupRun from "@/lib/backup-run";
 import * as backupAlarm from "@/lib/backup-alarm";
@@ -53,10 +53,12 @@ async function main(): Promise<void> {
   {
     const past: string[] = [];
     const walk = (dir: string): void => {
-      for (const name of readdirSync(dir)) {
+      // The kind comes with the listing (withFileTypes), never from a second look at the path (CodeQL js/file-system-race).
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const name = entry.name;
         const path = join(dir, name);
-        if (statSync(path).isDirectory()) walk(path);
-        else if (/\.(ts|tsx)$/.test(name)) {
+        if (entry.isDirectory()) walk(path);
+        else if (entry.isFile() && /\.(ts|tsx)$/.test(name)) {
           for (const m of readFileSync(path, "utf8").matchAll(/export const maxDuration\s*=\s*(\d+)/g)) if (Number(m[1]) > 300) past.push(`${path}: ${m[1]}`);
         }
       }

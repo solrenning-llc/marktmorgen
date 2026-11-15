@@ -2474,7 +2474,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
   const ids = log.filter((id) => DELIVERY_ID_PATTERN.test(id));
   // The endpoints told on those days, removed since or not.
   const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => members ?? [])]);
-  await redisPipeline([
+  const deletion: (string | number)[][] = [
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
@@ -2483,12 +2483,18 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
     ...[...told].flatMap((endpoint) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, endpoint)])),
     ...[0, 1, 2].map((back) => ["DEL", givenUpEndpointsKey(statsId, today - back)]),
-    ["DEL", logKey(statsId)],
     ...ids.flatMap((id) => [
       ["DEL", deliveryKey(id)],
       ["ZREM", QUEUE_KEY, `${statsId}|${id}`],
     ]),
-  ]);
+    // The log last: it is the only way back to the bodies, so it goes only after them.
+    ["DEL", logKey(statsId)],
+  ];
+  // Every reply read exactly (rule 24; #4679): one a command, each DEL, SREM and ZREM of one key or member answering 0
+  // or 1. Anything else may have left the endpoints' secrets, the bodies or a queued delivery behind, so it throws and
+  // the store's deletion says this step is not done and tries it again.
+  const counts = repliesFor(await redisPipeline(deletion), deletion.length)?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a deleted store's webhooks");
 }
 
 /** Keeps the handle the job looks a store up by current, from the studio. */

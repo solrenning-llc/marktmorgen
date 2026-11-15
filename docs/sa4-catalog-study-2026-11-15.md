@@ -25,15 +25,14 @@ Em média, cerca de US$0,0000025 por produto lido, contando comandos, bytes e CP
 
 O registro da loja tem no máximo `MAX_STORE_BYTES = 1.000.000` bytes (`lib/store.ts:295`) e é lido inteiro em toda visita (`GETRANGE`, `lib/store.ts:1193`). O índice do catálogo vai dentro dele (`catalogRecord`, `lib/catalog.ts`): por produto, `[id, tipo, ...ids das opções]`.
 
-- O id do produto tem 10 caracteres (`lib/store.ts:3292`).
-- Cada produto pode ter até 50 opções (`MAX_OPTIONS`, `lib/product-option.ts:53`), com ids de até 24 caracteres (`OPTION_ID`, `lib/product-option.ts:108`).
+- O id do produto tem 10 caracteres (`lib/store.ts:3292`). A entrada de um produto no índice tem no máximo 33 bytes.
+- As opções de preço têm teto **por loja**, não por produto: `MAX_STORE_OPTIONS = 4.000` (`lib/product-option.ts:65`), com ids de até 24 caracteres (`OPTION_ID`, `:108`). `MAX_OPTIONS = 50` (`:53`) é o teto de um produto.
+- `tests/catalog-ceiling.test.ts` já faz essa conta a partir do código e falha se ela mudar. O pior índice com 2.000 produtos e 4.000 opções tem cerca de 175 KB e cabe no registro de 1 MB. O formato comporta cerca de 5.400 produtos no pior caso e cerca de 37.000 no tamanho de um produto real.
+- Uma gravação que faria o registro passar de 1 MB é recusada com `StoreFullError` (`lib/store.ts:1669`), salvo quando ela diminui o registro, para que remover, encurtar e reordenar continuem possíveis.
 
-Daí:
+(Correção de 15/11/2026: a primeira versão deste estudo contava as opções por produto, chegava a 1,4 KB por produto e dizia que 2.000 produtos poderiam não caber. Errado: o teto é da loja, e o teste acima prova que cabem.)
 
-- Sem opções, cerca de 18 bytes por produto. O registro inteiro comportaria algo em torno de 50 mil produtos, antes dos demais dados da loja e da primeira página.
-- Com o máximo de opções, cerca de 1,4 KB por produto. Por esse cálculo, o teto atual de 2.000 produtos já não caberia no registro se todos tivessem 50 opções. **Conferido:** uma gravação que faria o registro passar de 1 MB é recusada com `StoreFullError` (`lib/store.ts:1669`), salvo quando ela diminui o registro, para que remover, encurtar e reordenar continuem possíveis. Nada se perde, mas, numa loja com muitas opções por produto, o teto do registro chega antes do teto de 2.000 produtos.
-
-Conclusão: um catálogo sem teto fixo, ou um teto muito acima de 2.000, exige tirar o índice do registro da loja (unidade 2). Sem isso, cada visita a uma loja grande ficaria mais cara e mais lenta, e uma loja chegaria ao limite do registro antes do limite de produtos.
+Conclusão: o teto atual cabe com folga, mas um catálogo sem teto fixo, ou um teto acima de uns 5.400 produtos (o pior caso que o formato comporta), exige tirar o índice do registro da loja (unidade 2). Sem isso, cada visita a uma loja grande ficaria mais cara e mais lenta, e uma loja chegaria ao limite do registro antes do limite de produtos.
 
 ## Inventário dos caminhos que leem o catálogo inteiro
 
@@ -81,7 +80,7 @@ Caminhos já limitados, que não leem o catálogo inteiro:
 ## O que isso significa para "produtos ilimitados"
 
 1. **Com o teto atual**, o único caminho público de catálogo inteiro sem preço próprio é a busca, e ele já está tratado pelo #4144 e pelo #4172. O mapa do site fica como ponto a conferir.
-2. **Com 10 mil ou 100 mil produtos**, todo caminho da tabela cresce 5 ou 50 vezes. Uma busca passaria a custar cerca de US$0,025 ou US$0,25, um salvar produto o mesmo, e cada visita trafegaria um registro maior. Sem a unidade 2, nenhum teto mais alto cabe na regra MR, nem cabe no limite de 1 MB do registro.
+2. **Com 10 mil ou 100 mil produtos**, todo caminho da tabela cresce 5 ou 50 vezes. Uma busca passaria a custar cerca de US$0,025 ou US$0,25, um salvar produto o mesmo, e cada visita trafegaria um registro maior. Sem a unidade 2, nenhum teto mais alto cabe na regra MR. Quanto ao limite de 1 MB do registro: com 10 mil produtos, o índice cabe só no tamanho de um produto real, não no pior caso; com 100 mil, não cabe em caso nenhum.
 
 ## Próximas unidades (ainda na fila, nada feito aqui)
 

@@ -1398,7 +1398,7 @@ export function renewalEntries(store: Store, invoices: Record<string, unknown>[]
   return out;
 }
 
-async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; paymentIntents: Set<string> }> {
+async function readRenewals(store: Store, since: number, now: number, pages: number): Promise<SalesStats["renewals"] & { entries: Entry[]; paymentIntents: Set<string>; invoiceIds: Set<string> }> {
   const invoices: Record<string, unknown>[] = [];
   let after = "";
   const seen = new Set<string>();
@@ -1424,7 +1424,9 @@ async function readRenewals(store: Store, since: number, now: number, pages: num
   // either: the reading is incomplete, never a renewal of zero (issue #4388).
   const handles = saleHandles(store);
   if (invoices.some((invoice) => isStoreRenewal(handles, invoice) && minorUnits(invoice.amount_paid) === null)) partial = true;
-  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices) };
+  // The store's own renewal invoices, to find a payment the invoice does not name among the account's invoice payments.
+  const invoiceIds = new Set(invoices.filter((invoice) => invoice.status === "paid" && isStoreRenewal(handles, invoice) && typeof invoice.id === "string").map((invoice) => invoice.id as string));
+  return { ...renewalsFrom(store, invoices, now, store.currency), partial, entries, paymentIntents: renewalPaymentIntents(store, invoices), invoiceIds };
 }
 
 /**
@@ -1902,10 +1904,36 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     // a renewal read) is taken off its kept total. Any other one may be a
     // payment made outside the store, such as a payment link, so the kept
     // total is left unknown rather than reduced by it (X8-2325).
-    const renewalPayments = renewalRead?.paymentIntents ?? new Set<string>();
+    const renewalPayments = new Set(renewalRead?.paymentIntents ?? []);
+    // A payment the store's own invoice does not name (a renewal in the current API shape, a subscription checkout
+    // paid by its invoice) is proven the store's by the account's invoice payments (review of #4549): read only when a
+    // refund or dispute is otherwise unconfirmed. An answer that does not read proves nothing, so it stays unconfirmed.
+    const known = (pi: string) => Boolean(pi) && (byPayment.has(pi) || renewalPayments.has(pi));
+    const adjustments = [...(refundRead?.rows ?? []), ...(disputeRead?.rows ?? [])];
+    const checkoutInvoices = new Map<string, (typeof read)[number]>();
+    for (const sale of read) {
+      const invoice = (sale.row as { invoice?: unknown } | undefined)?.invoice;
+      if (typeof invoice === "string" && invoice) checkoutInvoices.set(invoice, sale);
+    }
+    const storeInvoices = new Set([...(renewalRead?.invoiceIds ?? []), ...checkoutInvoices.keys()]);
+    if (store.stripeAccountId && storeInvoices.size > 0 && adjustments.some((row) => row.paymentIntent && !known(row.paymentIntent))) {
+      const paid = await readInvoicePayments(store, sinceBefore, 5).catch((error) => {
+        console.error("reading invoice payments failed", error);
+        return null;
+      });
+      for (const [invoice, intents] of paid?.byInvoice ?? []) {
+        if (!storeInvoices.has(invoice)) continue;
+        const sale = checkoutInvoices.get(invoice);
+        for (const intent of intents) {
+          if (!intent) continue;
+          if (sale) byPayment.set(intent, sale);
+          else renewalPayments.add(intent);
+        }
+      }
+    }
     const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {
       const entry: Entry = { day: dayKey(row.created), cents: row.cents, currency: row.currency, source: placed(row.paymentIntent) };
-      const confirmed = Boolean(row.paymentIntent) && (byPayment.has(row.paymentIntent) || renewalPayments.has(row.paymentIntent));
+      const confirmed = known(row.paymentIntent);
       return confirmed ? entry : { ...entry, unconfirmed: true };
     };
     out.keptIn = keptByCurrency(

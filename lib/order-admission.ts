@@ -191,6 +191,24 @@ export async function countHeldOrders(folder: string, window: string): Promise<n
   return moved;
 }
 
+/**
+ * The orders counted in a store's window, read exactly (rule 24) for a screen that says the figure: null when the
+ * count cannot be read (no Redis, a lost or malformed reply, text INCRBY never writes), 0 only for a count never
+ * made. lib/orders.ts ordersIn answers 0 for an unread count; a page that read it said "0 orders counted" and
+ * never that new orders were paused. Deciding stays with ADMIT_ORDERS, which refuses on an unread count.
+ */
+export async function ordersCountedExact(folder: string, window: string): Promise<number | null> {
+  if (!folder || !window || !isRedisConfigured()) return null;
+  try {
+    const [raw] = repliesFor(await redisPipeline([["GET", countKey(folder, window)]]), 1) ?? [undefined];
+    if (raw === null) return 0;
+    if (typeof raw === "string") return /^(0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw)) ? Number(raw) : null;
+    return countOf(raw);
+  } catch {
+    return null;
+  }
+}
+
 /** What a checkout carries so its order can give its hour back: the hour, as metadata. */
 export const ADMITTED_FIELD = "mm_admit";
 

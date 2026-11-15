@@ -73,6 +73,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   requests: ["How do I ask one person to pay me a custom amount?"],
   reviews: ["Can buyers leave reviews?"],
   site: ["Can my store have pages besides its products, like an About page?", "Can I use my own domain?"],
+  students: ["Can I sell a course?"],
   tax: ["Is sales tax or VAT added?"],
   team: ["Can I run more than one store, or have someone help me?"],
   totals: ["Can I run more than one store, or have someone help me?"],

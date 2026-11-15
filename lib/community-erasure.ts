@@ -102,7 +102,7 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   await step(() => forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds));
   await step(() => forgetHeldPerson(id, who));
   if (namedGone) {
-    await step(async () => ((await forgetMemberRecord(id, who)) ? 1 : 0));
+    await step(() => forgetMemberRecord(id, who));
   }
   if (failures.length) throw failures[0];
   return records;

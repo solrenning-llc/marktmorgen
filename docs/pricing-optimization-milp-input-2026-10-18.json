@@ -322,7 +322,7 @@
     }
    ],
    "baseMonth": 514,
-   "baseYear": 5989,
+   "baseYear": 5990,
    "coefMonth": {
     "ai": 0,
     "video": 6,
@@ -2235,11 +2235,11 @@
     }
    ],
    "baseMonth": 797,
-   "baseYear": 9230,
+   "baseYear": 9231,
    "coefMonth": {
     "ai": 335,
     "video": 46,
-    "storage": 205,
+    "storage": 206,
     "orders": 95,
     "store-email": 27,
     "transactional-email": 37,
@@ -2250,9 +2250,9 @@
     "ai": 4024,
     "video": 553,
     "storage": 1217,
-    "orders": 1135,
+    "orders": 1136,
     "store-email": 327,
-    "transactional-email": 441,
+    "transactional-email": 442,
     "list-email": 7560,
     "visits": 3165
    }
@@ -6458,7 +6458,7 @@
     }
    ],
    "baseMonth": 1288,
-   "baseYear": 14930,
+   "baseYear": 14931,
    "coefMonth": {
     "ai": 637,
     "video": 92,
@@ -6472,7 +6472,7 @@
    "coefYear": {
     "ai": 7643,
     "video": 1106,
-    "storage": 2434,
+    "storage": 2435,
     "orders": 3785,
     "store-email": 871,
     "transactional-email": 1104,

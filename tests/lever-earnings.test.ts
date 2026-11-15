@@ -234,3 +234,19 @@ test("each card shows what it earned or 'Not measured yet', and a kept reading f
   const none = renderToStaticMarkup(createElement(SalesLevers, { store, reading: null, canConfigure: false }));
   assert.equal((none.match(/Not measured yet\./g) ?? []).length, 6);
 });
+
+test("a bundle in a cart is counted once, in any position, as an order without an exact share (#4737)", () => {
+  // The cart's total also holds the other products, and may hold a discount and tax the record does not split per item.
+  const first = checkout({ cart: "yes", bundle: "inside001,inside002" }, { cents: 5600 });
+  const second = checkout({ cart: "yes", bump: "bundle001", bump_cents: "2400", bump_bundle: "inside001,inside002" }, { cents: 5600 });
+  const third = checkout({ cart: "yes", bump: "other0001", bump_cents: "800", bump2: "bundle001", bump2_cents: "2400", bump2_bundle: "inside001,inside002" }, { cents: 5600 });
+  for (const row of [first, second, third]) {
+    const bundle = measured(leverEarnings([row], "usd", false, now).rows.bundle);
+    assert.deepEqual(bundle.amounts, [{ currency: "usd", cents: 0, orders: 0 }]);
+    assert.equal(bundle.left, 1);
+  }
+  // (control) a bundle sold in its own checkout keeps the whole paid order.
+  assert.deepEqual(measured(leverEarnings([checkout({ bundle: "inside001,inside002" }, { cents: 2400 })], "usd", false, now).rows.bundle).amounts, [{ currency: "usd", cents: 2400, orders: 1 }]);
+  // (control) a cart with no bundle anywhere counts nothing for bundles.
+  assert.deepEqual(measured(leverEarnings([checkout({ cart: "yes", bump: "other0001", bump_cents: "800" }, { cents: 5600 })], "usd", false, now).rows.bundle).left, 0);
+});

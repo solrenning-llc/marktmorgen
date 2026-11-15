@@ -1,4 +1,4 @@
-import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
@@ -31,6 +31,7 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 
@@ -385,8 +386,14 @@ export async function POST(request: NextRequest) {
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
-          await del(file.pathname).catch((error: unknown) => {
-            console.error("could not delete the file of a removed product", error);
+          // A delete that fails is not lost: nothing points at the file any more, so the creator could never delete it
+          // and it would count against the store's storage for good. It goes to the daily job that deletes uploads
+          // nobody keeps (sweepTaskUploads, app/api/cron/courses), as a deleted person's files do (lib/person-erasure.ts).
+          await del(file.pathname).catch(async (error: unknown) => {
+            console.error("could not delete the file of a removed product; it goes to the daily job", error);
+            await noteTaskUpload(file.pathname, 0).catch((noteError: unknown) =>
+              console.error("could not hand a removed product's file to the daily job; it is kept until the store closes", noteError),
+            );
           });
         }
         for (const file of filesOnProduct(going)) await dropStamped(file);
@@ -397,7 +404,9 @@ export async function POST(request: NextRequest) {
       // A link over the file deletes the file and the buyers' stamped copies: a session let in
       // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
       // is its own, so the file is read where the id points (readDelivery), not on a product only.
-      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "products", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(

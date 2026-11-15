@@ -37,6 +37,36 @@ async function main(): Promise<void> {
     is(`${label}: the sweep stops instead of skipping the stores`, outcome, "rejected");
     is(`${label}: the cursor is left in place`, after, ["0|1"]);
   }
+
+  // Reviewer 3rjdf (same family) on this branch: the other shapes the issue lists, each answered as the whole reply to
+  // the index's read, and the next exact read going on as before.
+  part("Every other reply that is not an exact list of distinct, non-empty texts stops the sweep too");
+  const whole = async (replies: unknown[], run: () => Promise<unknown>): Promise<void> => {
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === index) return replies;
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try { await run(); } finally { redis.pipeline = real; }
+  };
+  for (const [label, replies] of [
+    ["an empty member", [[""]]],
+    ["a member twice", [["request-store", "request-store"]]],
+    ["a member that is not text", [[12]]],
+    ["more replies than the one asked", [["request-store"], 0]],
+  ] as const) {
+    await redis.pipeline([["SADD", index, "request-store"], ["SET", cursor, "0|1"]]);
+    let outcome = "resolved";
+    await whole(replies as unknown as unknown[], async () => {
+      try { await sweepCheckouts(Date.now() + 20_000); } catch { outcome = "rejected"; }
+    });
+    is(`${label}: the sweep stops`, outcome, "rejected");
+    is(`${label}: the cursor is left in place`, await redis.pipeline([["GET", cursor]]), ["0|1"]);
+  }
+  part("(control) the next exact read goes on");
+  let resumed = "resolved";
+  try { await sweepCheckouts(Date.now() + 20_000); } catch { resumed = "rejected"; }
+  is("an exact read of the same index: the sweep runs", resumed, "resolved");
   done();
 }
 main().catch((e) => { console.error(e); process.exit(1); });

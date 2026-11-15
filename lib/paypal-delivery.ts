@@ -15,10 +15,11 @@ import { forgetBoughtCommands } from "@/lib/buyer-library";
 import { bondPlace, forgetBondCommand } from "@/lib/affiliate-bond";
 import { PAYPAL_OPEN_ORDER_SECONDS, type Paid, type PayPalReceipt, deliverPayPal, handOverKey, paypalOrdersLeft, paypalPastWatched, readPaidExact, refundSeen, retryCancelNotices, watchPayPal } from "@/lib/paypal-sales";
 import { tellCanceled } from "@/lib/paypal-cancel";
+import { storeForHandleExactly } from "@/lib/store-exact";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { fromStore, storeBase } from "@/lib/purchase-email";
-import { type Store, ensureListId, forgetPayPalPast, storeForHandle, storeRef } from "@/lib/store";
+import { type Store, ensureListId, forgetPayPalPast, storeRef } from "@/lib/store";
 import { creditPayPalSale } from "@/lib/affiliates";
 import { emitEvent } from "@/lib/webhooks";
 import { deriveKey } from "@/lib/secret-box";
@@ -581,8 +582,11 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
  */
 export async function retryPayPalCancelNotices(deadline: number): Promise<number> {
   return retryCancelNotices(deadline, async (canceled, who) => {
-    const store = await storeForHandle(canceled.handle);
-    if (!store || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
+    // Read exactly (rule 24): a reply out of shape is not "no store". It throws, and retryCancelNotices reads the
+    // throw as "refused", so both notices wait for the next run instead of being dropped for good.
+    const store = await storeForHandleExactly(canceled.handle);
+    if (store === "unknown") throw new UnknownReplyError("the store of a canceled PayPal order");
+    if (store === "none" || store.statsId !== canceled.store) return { buyer: "none", creator: "none" };
     return tellCanceled(store, canceled, who);
   });
 }

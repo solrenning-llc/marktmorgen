@@ -134,6 +134,17 @@ async function main(): Promise<void> {
   const notice = at < 0 ? "" : studio.slice(at, at + 400);
   is("and that notice says the permission was kept, not given back", [notice.includes("we kept its permission at Meta"), /given back/i.test(notice)], [true, false]);
 
+  part("What the creator is promised before pressing Disconnect, and what the privacy policy says");
+  // Review of #4159 (Claude 1 cloud, MEDIUM): both promised an unconditional give-back, which disconnectMeta now
+  // makes only when no other store is confirmed to use the same Meta login.
+  const flat = (text: string) => text.replace(/\s+/g, " ");
+  const editor = flat(readFileSync("components/ad-spend-editor.tsx", "utf8"));
+  const privacy = flat(readFileSync("app/privacy/page.tsx", "utf8"));
+  is("the hint beside the button never promises an unconditional give-back", editor.includes("Gives the permission back to Meta and deletes what was read."), false);
+  is("it says when the permission goes back", editor.includes("Gives the permission back to Meta only when we can confirm no other store uses this Meta login."), true);
+  is("the privacy policy never promises an unconditional give-back", /disconnects from the studio, we give the permission back to Meta and delete/.test(privacy), false);
+  is("it says the permission is kept while another store may use the same login", /unless another store still uses the same Meta login, or we cannot confirm that none does/.test(privacy), true);
+
   done();
 }
 

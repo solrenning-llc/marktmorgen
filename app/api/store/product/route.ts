@@ -3,6 +3,9 @@ import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
+import { keepLaunchDraft } from "@/lib/launch-draft";
+import { storeBase } from "@/lib/purchase-email";
+import { productSegment } from "@/lib/product-slug";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
 import {
@@ -141,6 +144,18 @@ export async function GET(request: NextRequest) {
 }
 
 /** Adds, changes, reorders or removes one thing on the creator's store. */
+/**
+ * The launch email's draft for a product just made public (366 [EZ3], lib/launch-draft.ts). Never sends anything,
+ * and never stands in the way of the publish that went through: a failure only means no draft, and says so in the log.
+ */
+async function keepLaunchDraftQuietly(store: Parameters<typeof keepLaunchDraft>[0], product: Parameters<typeof keepLaunchDraft>[1]): Promise<void> {
+  try {
+    await keepLaunchDraft(store, product, `${storeBase(store)}/p/${productSegment(product)}`);
+  } catch (error) {
+    console.error("keeping a launch draft failed", store.handle, error);
+  }
+}
+
 export async function POST(request: NextRequest) {
   // Room for the long description, which is the one big thing sent here.
   const guarded = await guardStoreWrite(request, "products", 40_000);
@@ -442,6 +457,8 @@ export async function POST(request: NextRequest) {
         }
       }
       const done = await setProductHidden(ref, id, body.hidden);
+      // A paid product made public: its launch email waits as a draft, never sent on its own (366 [EZ3], lib/launch-draft.ts).
+      if (done.ok && body.hidden === false && done.product) await keepLaunchDraftQuietly(done.store, done.product);
       result = done.ok ? { ok: true, product: done.product } : done;
     } else if (action === "unlink") {
       // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished

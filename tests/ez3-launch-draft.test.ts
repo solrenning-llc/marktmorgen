@@ -20,7 +20,7 @@ import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
-const product = { id: "prodlaunch01", title: "Glazes 201", summary: "Twelve recipes for stoneware glazes.", priceCents: 2900, hidden: false } as unknown as Listing;
+const product = { id: "prodlaunch01", title: "Glazes 201", summary: "Twelve recipes for stoneware glazes.", priceCents: 2900, hidden: false, options: [], recurring: null, pwyw: null, call: null } as unknown as Listing;
 const store = { name: "Kiln Works", handle: "kiln", language: "en", currency: "usd", listId: "launchlist", catalog: { items: [{ id: "prodlaunch01" }, { id: "prodfree0001" }] } } as unknown as Store;
 
 async function main(): Promise<void> {
@@ -58,7 +58,7 @@ async function main(): Promise<void> {
 
   part("Called only after a publish that went through");
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
-  is("the product route keeps a draft when a product becomes public", /if \(done\.ok && body\.hidden === false && done\.product\) await keepLaunchDraftQuietly\(guarded\.store, done\.product\);/.test(route), true);
+  is("the product route keeps a draft when a product becomes public", /if \(done\.ok && body\.hidden === false && done\.product\) await keepLaunchDraftQuietly\(done\.store, done\.product\);/.test(route), true);
 }
 
 void main().then(done).catch((error) => { console.error(error); process.exit(1); });

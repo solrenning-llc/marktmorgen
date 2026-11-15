@@ -191,6 +191,36 @@ export class MemoryRedis {
             return fields.removed ? "r" : "y";
           }).join("");
         }
+        // lib/community-push.ts DEVICES_TO_SEND: each device's endpoint, p256dh, auth and key id, four strings a device,
+        // only those within their byte bounds and pattern, at most ARGV[1] of them; a row of any other shape is left out.
+        if (key.startsWith("-- marktmorgen:community-devices:v1\n") && args[0] === "1" && args.length === 7) {
+          const [, devices, most, endpoint, p256dh, auth, kid] = args;
+          // Redis answers WRONGTYPE for a key that is not a hash; HVALS here would read it as empty. Real Redis keeps
+          // rows of this size in a hashtable, so which five of more than five come back is not in any order.
+          this.live(devices);
+          const held = this.data.get(devices);
+          if (held !== undefined && !(held instanceof Map)) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+          const plain = (v: unknown, pattern: RegExp, longest: string) => typeof v === "string" && new TextEncoder().encode(v).length <= Number(longest) && pattern.test(v);
+          const keyChars = /^[A-Za-z0-9_-]+={0,2}$/;
+          const out: string[] = [];
+          let found = 0;
+          for (const raw of this.run(["HVALS", devices]) as string[]) {
+            if (found === Number(most)) break;
+            let row: unknown;
+            try {
+              row = JSON.parse(raw);
+            } catch {
+              continue;
+            }
+            if (!row || typeof row !== "object") continue;
+            const d = row as { endpoint?: unknown; p256dh?: unknown; auth?: unknown; kid?: unknown };
+            if (!plain(d.endpoint, /^https:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]+$/, endpoint) || !plain(d.p256dh, keyChars, p256dh)
+              || !plain(d.auth, keyChars, auth) || !plain(d.kid, /^[A-Za-z0-9]+$/, kid)) continue;
+            found += 1;
+            out.push(d.endpoint as string, d.p256dh as string, d.auth as string, d.kid as string);
+          }
+          return out;
+        }
         // lib/group-buy.ts PLACE_RELEASE: a place's opening hold deleted only while its token is still the open's own.
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
@@ -1818,10 +1848,21 @@ export class MemoryRedis {
         else this.until.delete(key);
         return "OK";
       }
-      case "EXPIRE":
+      case "EXPIRE": {
         if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]) * 1000);
+        // Redis 7's options: NX only when the key has no expiry, XX only when it has one, GT/LT only a later/earlier
+        // one (a key with none counts as never expiring). Before, they were ignored, which turned a fixed window
+        // (EXPIRE … NX, lib/window-count.ts) into a sliding one in tests (C7 TTL hunt).
+        const at = this.now() + Number(args[0]) * 1000;
+        const was = this.until.get(key);
+        const option = String(args[1] ?? "").toUpperCase();
+        if (option === "NX" && was !== undefined) return 0;
+        if (option === "XX" && was === undefined) return 0;
+        if (option === "GT" && (was === undefined || at <= was)) return 0;
+        if (option === "LT" && was !== undefined && at >= was) return 0;
+        this.until.set(key, at);
         return 1;
+      }
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1892,7 +1933,11 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // Its expiry goes with it, as in Redis: a key made again under the same name starts with none (C7 TTL hunt).
+        for (const one of [key, ...args]) {
+          if (this.data.delete(one)) gone += 1;
+          this.until.delete(one);
+        }
         return gone;
       }
       case "EXISTS":

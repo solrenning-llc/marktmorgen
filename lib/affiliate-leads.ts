@@ -384,7 +384,10 @@ export async function forgetLeadPerson(store: Store, email: string): Promise<num
     // Only the address changes: every other field is written back as it was kept, never filled in with parseLead's
     // defaults, so a money field of another type stays unreadable to readLeads instead of becoming a readable 0.
     const json = JSON.stringify({ ...kept, email: "" });
-    await redisPipeline([["HSET", leadsKey(statsId), id, json]]);
+    // Read exactly (rule 24; #4676): one reply, 0 or 1 for this one field. Anything else may have left the address on
+    // the lead, so it throws before the book is deleted or room given back, and the erasure says this part is not done.
+    const saved = countOf(repliesFor(await redisPipeline([["HSET", leadsKey(statsId), id, json]]), 1)?.[0]);
+    if (saved === null || saved > 1) throw new UnknownReplyError("the erasure of a person's affiliate lead");
     await forgetBookSnapshot(statsId);
     const freed = dataBytes([id, String(raw)], 1) - dataBytes([id, json], 1);
     if (freed > 0) await giveData(store, [{ slot: LEADS_SLOT, bytes: freed }]);

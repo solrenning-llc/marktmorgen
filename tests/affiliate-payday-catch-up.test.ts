@@ -41,7 +41,7 @@ async function storeWithPayday(day: number): Promise<void> {
   sent.length = 0;
   await claimHandle(OWNER, "paydaystore", "Payday Store", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestPaydayCatch01", true);
+  await setStripeAccount(OWNER, "acct_1TestPayday01", true);
   await setAffiliateSetting(OWNER, parseAffiliateSetting({ ...NO_AFFILIATES, enabled: true, payday: day }));
   const statsId = (await storeForEmail(OWNER))!.statsId!;
   const aff = "a1a1a1a1a1a1";

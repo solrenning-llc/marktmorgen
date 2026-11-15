@@ -1925,12 +1925,7 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
     releasedHandles: [...ownership.released], stripeCustomerId: ownership.customerId,
     email: store.email, statsId: store.statsId,
   } as Store;
-  // The plans the account's other stores keep (keptElsewhere): never this store's live plan, nor one it ends as
-  // lapsed or in its closing. An account that does not read makes every answer below unknown.
-  let elsewhere: Set<string> | null = null;
-  let elsewhereError: Error | null = null;
-  try { elsewhere = await keptElsewhere(observedStore); }
-  catch (error) { elsewhereError = error instanceof Error ? error : new Error("an account's stores are unknown"); }
+  const keeps = store.subscriptionId;
   const query = new URLSearchParams({
     query: handles.map(handle => `metadata['store']:'${handle}'`).join(" OR "),
     limit: String(SEARCH_LIMIT),
@@ -1945,6 +1940,17 @@ export async function observeStoreSubscriptions(store: Store): Promise<StoreSubs
   if (ownership.customerId) {
     try { own = completeSubscriptionPage(await onPlatform("GET", `/subscriptions?${ownQuery}`)); }
     catch (error) { ownError = error instanceof Error ? error : new Error("Subscription customer observation is unknown"); }
+  }
+  // The plans the account's other stores keep (keptElsewhere): never this store's live plan, nor one it ends as
+  // lapsed or in its closing. Read only when Stripe shows a plan other than the one this store keeps (a row that
+  // does not read counts as one): with none, no other store's plan can be among them, and most checkouts read nothing
+  // more. An account that does not read makes every answer below unknown.
+  let elsewhere: Set<string> | null = new Set();
+  let elsewhereError: Error | null = null;
+  const another = [...(search ?? []), ...(own ?? [])].some((row) => !plainObject(row) || ownField(row, "id") !== keeps || keeps === null);
+  if (another) {
+    try { elsewhere = await keptElsewhere(observedStore); }
+    catch (error) { elsewhere = null; elsewhereError = error instanceof Error ? error : new Error("an account's stores are unknown"); }
   }
   const current = new Set(handles), all = new Set([...handles, ...ownership.released]);
   const ownEntries: SearchMember[] = [], searchEntries: SearchMember[] = [];

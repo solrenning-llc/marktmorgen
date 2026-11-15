@@ -214,6 +214,36 @@ async function main() {
     is("found live, so a lost way back never opens a second paid checkout beside it", found.live?.subscriptionId ?? null, "sub_SessOwnFind0000");
   }
 
+  part("The account is read only when Stripe shows a plan the store does not keep (5bNDa, 15 November 2026)");
+  {
+    const owner = "sess-owner-lazy@example.com";
+    await claimHandle(owner, "sessownlazy", "Lazy read", "");
+    await ensureStatsId(owner);
+    const store = (await storeForEmail(owner))!;
+    const kept = { ...subscription("sub_SessOwnLazy0000", "cus_SessOwnLazy000", { store: "sessownlazy", store_sid: store.sid }, Math.floor(Date.now() / 1000)), customer: { id: "cus_SessOwnLazy000", email: owner } };
+    await setSubscription(owner, { customerId: "cus_SessOwnLazy000", subscriptionId: "sub_SessOwnLazy0000", active: true, tier: "creator", cycle: "month", period: paidPeriod() });
+    const real = redis.pipeline.bind(redis);
+    let accountReads = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (commands.some((c) => c[0] === "SMEMBERS")) accountReads += 1;
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      searched = [];
+      listed = [];
+      await findStoreSubscriptions((await storeForEmail(owner))!);
+      searched = [kept];
+      const found = await findStoreSubscriptions((await storeForEmail(owner))!);
+      is("nothing shown, or only the plan the store keeps: no read of the account, and its own plan still live", [accountReads, found.live?.subscriptionId], [0, "sub_SessOwnLazy0000"]);
+      searched = [kept, { ...kept, id: "sub_SessOwnLazyOther", status: "past_due" }];
+      await findStoreSubscriptions((await storeForEmail(owner))!).catch(() => null);
+      is("another plan shown: the account is read, once", accountReads, 1);
+    } finally {
+      redis.pipeline = real;
+      searched = [];
+    }
+  }
+
   part("One customer for the account: the subscription search never gives B the plan A keeps (review of 090840a90)");
   {
     const s = await twoStores(9, () => ({ store: `sessownx9` }));

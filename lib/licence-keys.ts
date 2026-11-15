@@ -422,13 +422,17 @@ async function refundedSale(store: Store, product: Listing, reference: string, w
 
 export async function keyCounts(store: Store, product: Listing): Promise<KeyCounts> {
   if (!store.statsId || !isRedisConfigured()) return { left: 0, issued: 0, revoked: 0, waiting: 0 };
-  const [left, waiting] = await redisPipeline([
+  // Read exactly (unknown is never zero): the studio shows these as real, so a count in another shape throws and
+  // the keys route answers an error, never "0 keys left".
+  const replies = repliesFor(await redisPipeline([
     ["LLEN", poolKey(store, product)],
     ["HLEN", waitingKey(store, product)],
-  ]);
+  ]), 2);
+  const [left, waiting] = (replies ?? [null, null]).map(countOf);
+  if (left === null || waiting === null) throw new UnknownReplyError("a product's license key counts");
   // Keys given are counted from their records: the sales' hash also holds the sales refunded before a key (REFUNDED_SALE).
   const list = await issuedKeys(store, product, "", 0);
-  return { left: Number(left) || 0, issued: list.total, revoked: list.revoked, waiting: Number(waiting) || 0 };
+  return { left, issued: list.total, revoked: list.revoked, waiting };
 }
 
 /**

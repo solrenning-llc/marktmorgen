@@ -5,6 +5,7 @@ import { isScope } from "@/lib/meet-records";
 import { isConfigured } from "@/lib/meet-providers";
 import { isEventScopeOf } from "@/lib/event-meetings";
 import { originFrom } from "@/lib/request-origin";
+import { fromAnotherSite } from "@/lib/request-guard";
 import { away, studioAccess, studioPath } from "@/lib/studio-route";
 
 /** Host links one store may ask for in ten minutes. */
@@ -32,6 +33,9 @@ export async function GET(request: NextRequest) {
   const { store } = result.access;
   const scope = request.nextUrl.searchParams.get("scope") ?? "";
   const back = away(origin, studioPath(store, "meet=host&p=zoom", "meetings"));
+  // The button lives on studio pages (same origin). A GET sent from another site, which the
+  // site-wide guard lets through, goes back before it spends a host link (#4587).
+  if (fromAnotherSite(request)) return back;
   // Only a scope of this store's own: one of its calls, or one of its community's events.
   const ours = (store.callsId && scope.startsWith(`c:${store.callsId}:`)) || isEventScopeOf(scope, store.community?.id);
   if (!isScope(scope) || !store.statsId || !ours) return back;

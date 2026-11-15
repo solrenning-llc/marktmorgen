@@ -78,13 +78,15 @@ async function main(): Promise<void> {
     try {
       await read("cs_test_o6logcurrency1", { currency: "US" });
       await read("cs_test_o6logamount001", { amount_total: null });
+      await read("cs_test_o6logboth00001", { amount_total: null, currency: "USD" });
     } finally {
       console.error = real;
     }
     const lines = logged.filter((args) => args[0] === "a paid checkout's money does not read").map((args) => args[1]);
-    is("one line per unreadable order, naming the session and the field", lines, [
-      { session: "cs_test_o6logcurrency1", field: "currency" },
-      { session: "cs_test_o6logamount001", field: "amount_total" },
+    is("one line per unreadable order, naming the session and every field that does not read", lines, [
+      { session: "cs_test_o6logcurrency1", fields: ["currency"] },
+      { session: "cs_test_o6logamount001", fields: ["amount_total"] },
+      { session: "cs_test_o6logboth00001", fields: ["amount_total", "currency"] },
     ]);
     is("no buyer address in the log", JSON.stringify(logged).includes("buyer@example.com"), false);
   }

@@ -1151,7 +1151,8 @@ export async function readOrder(
   const currencyReads = typeof paidCurrency === "string" && /^[a-z]{3}$/.test(paidCurrency);
   if (!amountReads || !currencyReads) {
     // Logged with the session and the field, never the buyer: Stripe sent a paid order this page cannot read.
-    console.error("a paid checkout's money does not read", { session: sessionId, field: amountReads ? "currency" : "amount_total" });
+    const fields = [...(amountReads ? [] : ["amount_total"]), ...(currencyReads ? [] : ["currency"])];
+    console.error("a paid checkout's money does not read", { session: sessionId, fields });
     return { state: "error" };
   }
 

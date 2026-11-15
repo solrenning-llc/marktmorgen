@@ -4,6 +4,14 @@ import { staticPolicy } from "./lib/csp";
 
 const nextConfig: NextConfig = {
   /**
+   * Whether this build runs on the host whose browser check the server reads
+   * (lib/bot-check.ts, browserProof: only when VERCEL is "1"). The client
+   * starts the check only then (lib/browser-check-client.ts): anywhere else
+   * its challenge script costs the visitor main-thread time for an answer
+   * nobody reads (TODOS-100).
+   */
+  env: { NEXT_PUBLIC_BROWSER_CHECK: process.env.VERCEL === "1" ? "1" : "0" },
+  /**
    * The letters a certificate's PDF is drawn with (lib/certificate-pdf.ts),
    * read from disk by the one route that needs them, so only its function
    * carries them.

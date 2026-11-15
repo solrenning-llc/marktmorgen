@@ -6,6 +6,11 @@ import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { EMPTY_PAGE, MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock, type SalesPage } from "@/lib/sales-page";
 import { pageCopy } from "@/lib/site-page-copy";
+import { formsNamed, importedEntry, importedPage, pageFile, readPageFile } from "@/lib/site-page-file";
+import { redisPipeline } from "@/lib/redis";
+import { UnknownReplyError } from "@/lib/redis-reply";
+import { MAX_FORMS } from "@/lib/forms";
+import { exactReplies } from "@/lib/redis-exact";
 import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, readPageExact, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
@@ -105,6 +110,8 @@ async function placeNewPage(ref: string, store: Store, entry: SitePage, page: Sa
  *
  *   { action: "add", title, slug?, starter? }   a new page, empty or from a starter's blocks
  *   { action: "copy", id }                      a copy of one, kept back, without its pictures (lib/site-page-copy.ts)
+ *   { action: "export", id }                    the page as a file, without its pictures (lib/site-page-file.ts)
+ *   { action: "import", file }                  a new page from such a file, kept back, with what is not this store's left out
  *   { action: "meta", id, title, slug, nav, target }
  *   { action: "order", ids }
  *   { action: "remove", id }                    the page, its blocks and the pictures only it showed
@@ -169,6 +176,59 @@ export async function POST(request: NextRequest) {
       const placed = await placeNewPage(ref, store, made.entry, made.page);
       if (!placed.ok) return refuse(placed.error, placed.status);
       return Response.json({ ok: true, pages: placed.store.sitePages, id: made.entry.id, pictures: made.pictures });
+    }
+
+    if (action === "export") {
+      // 582 [KB3]: the page as a file for the creator to keep, read exactly, never an empty guess.
+      if (!found || !SITE_PAGE_ID.test(found.id)) return refuse("unknown", 404);
+      let held = { ...EMPTY_PAGE, blocks: [] as PageBlock[] };
+      if (store.statsId) {
+        try {
+          held = (await readPageExact(store.statsId, siteKey(found.id))).page ?? held;
+        } catch (error) {
+          console.error("reading a store page before exporting it failed", error);
+          return refuse("page_unread", 503);
+        }
+      }
+      const { file, pictures } = pageFile(found, held);
+      return Response.json({ ok: true, file, pictures });
+    }
+
+    if (action === "import") {
+      // 582 [KB3]: a new page from a file, held to the rules a saved page is, kept back from visitors.
+      if (pages.length >= MAX_SITE_PAGES) return refuse("too_many");
+      const read = readPageFile(body.file);
+      if (!read.ok) return refuse(read.reason === "file" ? "file" : read.reason);
+      // The forms it names, read exactly: an answer nobody can read never decides that a form is not this store's.
+      const named = formsNamed(read.page);
+      let forms = new Set<string>();
+      if (named.length) {
+        if (!store.statsId) forms = new Set();
+        else {
+          try {
+            // The key of the store's forms (lib/form-store.ts, formsKey): its ids in one exact read, at most MAX_FORMS, so
+            // a file naming many forms costs one command, inside the one studio request it took (Claude 1 cloud on #3538).
+            const [ids] = exactReplies(await redisPipeline([["HKEYS", `nl:forms:${store.statsId}`]]), 1, "the store's forms");
+            if (!Array.isArray(ids) || ids.length > MAX_FORMS || ids.some((id) => typeof id !== "string")) throw new UnknownReplyError("the store's forms");
+            const kept = new Set(ids as string[]);
+            forms = new Set(named.filter((id) => kept.has(id)));
+          } catch (error) {
+            console.error("reading a store's forms before bringing in a page failed", error);
+            return refuse("forms_unread", 503);
+          }
+        }
+      }
+      const products = new Set(store.catalog.items.map((item) => item.id));
+      const made = importedPage(read.page, (id) => products.has(id), (id) => forms.has(id));
+      const entry = importedEntry(read.title, pages, randomBytes(5).toString("hex"));
+      if (!entry) return refuse("taken");
+      // A file with no blocks left to bring in keeps no page record, so nothing could keep it back from visitors (as
+      // for a copy, placeNewPage): refused before anything is written, in the import's own words.
+      if (made.page.blocks.length === 0) return refuse("import_empty");
+      // The same order as a copy (placeNewPage): the blocks take the room first, then the page is listed; refused, nothing stays.
+      const placed = await placeNewPage(ref, store, entry, made.page);
+      if (!placed.ok) return refuse(placed.error, placed.status);
+      return Response.json({ ok: true, pages: placed.store.sitePages, id: entry.id, left: made.left });
     }
 
     if (action === "meta") {

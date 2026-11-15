@@ -60,6 +60,7 @@ import { deleteIfHeldOnly } from "@/lib/redis-lock";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
 import { withPrefill } from "@/lib/handle-prefill";
+import { limitAddress } from "@/lib/request-guard";
 
 export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const MAX_EMAIL_LENGTH = 254;
@@ -71,6 +72,14 @@ const RATE_LIMIT = 5;
 // Deliberately higher than RATE_LIMIT, so one machine that has spent its own
 // five cannot, by itself, lock a creator out of their address for an hour.
 const ADDRESS_LIMIT = 8;
+/**
+ * Sign-in emails the whole site sends in an hour, from every machine to every address together. RATE_LIMIT bounds one
+ * connection (an IPv6 one by its /64) and ADDRESS_LIMIT one inbox; neither stops a range of connections typing a
+ * hundred thousand other people's addresses, each a first email, which would bring complaints and bounces on the
+ * sending account until it is paused and no email of the site goes out. Past it, every request is told "too many
+ * tries" for the rest of the hour, whatever the address, so it says nothing about who has an account.
+ */
+export const SIGN_IN_LINKS_PER_HOUR = 600;
 const RATE_WINDOW_SECONDS = 60 * 60;
 
 export function isAuthConfigured(): boolean {
@@ -357,8 +366,13 @@ function removedEach(replies: unknown, commands: number): boolean {
 const sessionsKey = async (email: string) =>
   `nl:auth:sessions:${(await sha256Hex(`nimbus-auth-sessions:${email}`)).slice(0, 40)}`;
 
+// A connection as every limit counts it (lib/request-guard.ts limitAddress): an IPv6 one by its /64, so a client
+// cannot find a new allowance by asking from each of its own addresses.
 const rateKey = async (ip: string) =>
-  `nl:rl:signin:${(await sha256Hex(`nimbus-signin:${ip}`)).slice(0, 32)}`;
+  `nl:rl:signin:${(await sha256Hex(`nimbus-signin:${limitAddress(ip)}`)).slice(0, 32)}`;
+
+/** The hour's one counter for the whole site's sign-in emails (SIGN_IN_LINKS_PER_HOUR). */
+const SITE_LINKS_KEY = "nl:rl:signin-site";
 
 const moveKey = async (token: string) =>
   `nl:auth:move:${(await sha256Hex(`nimbus-auth-move:${token}`)).slice(0, 40)}`;
@@ -379,6 +393,15 @@ async function hourCount(key: string, limit: number): Promise<LimitAnswer> {
 export async function rateLimitAnswer(ip: string): Promise<LimitAnswer> {
   if (!isRedisConfigured()) return "unknown";
   return hourCount(await rateKey(ip), RATE_LIMIT);
+}
+
+/**
+ * The whole site's sign-in emails in this hour, counted just before one is sent: inside, past
+ * SIGN_IN_LINKS_PER_HOUR, or unknown, and then nothing is sent (CX-123 rule 24).
+ */
+export async function siteLinksAnswer(): Promise<LimitAnswer> {
+  if (!isRedisConfigured()) return "unknown";
+  return hourCount(SITE_LINKS_KEY, SIGN_IN_LINKS_PER_HOUR);
 }
 
 /** Five sign-in emails an hour from one address on the internet. */

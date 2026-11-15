@@ -8,9 +8,10 @@ import {
   addressLimitAnswer,
   rateLimitAnswer,
   sendSignInLink,
+  siteLinksAnswer,
   unusedSignInRequest,
 } from "@/lib/auth";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
 import { serviceMailKnownUnavailable } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
@@ -58,10 +59,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  const ip = clientAddress(request);
 
   try {
     // Past the limit is "too many tries"; a count that could not be read is our side's trouble, said as such
@@ -94,6 +92,11 @@ export async function POST(request: NextRequest) {
     if (serviceMailKnownUnavailable()) {
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
+    // The whole site's sign-in emails in the hour (lib/auth.ts SIGN_IN_LINKS_PER_HOUR), counted last, just before one
+    // goes: past it is the same "too many tries" for every address; a count that could not be read sends nothing.
+    const site = await siteLinksAnswer();
+    if (site === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (site === "over") return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     const asked = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
     // Sign-in mail is attempted equally for existing and unknown addresses.
     // The public demo owner is deliberately ignored by sendSignInLink and

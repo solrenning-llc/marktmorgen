@@ -66,7 +66,9 @@ export const HELP_AREAS: readonly HelpArea[] = [
 ];
 
 /** Studio areas the help center has no answer for yet, by folder, each with what that answer is to explain. */
-export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {};
+export const AREAS_WITHOUT_HELP: Readonly<Record<string, string>> = {
+  students: "Filtering a course's students and changing many at once (the Students screen): the course answer says who opened it and how to take a student off, not this screen.",
+};
 
 /** Studio screens that are not an area of their own. */
 export const NOT_AREAS: Readonly<Record<string, string>> = {

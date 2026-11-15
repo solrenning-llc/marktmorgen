@@ -23,7 +23,10 @@
  *     resale rights");
  *   - sexual content, which the Terms' "What you may not sell" forbids (568
  *     [GD2] (b)): words that plainly describe it block, like fast money;
- *     words that only may be adult content are a warning to reread.
+ *     words that only may be adult content are a warning to reread;
+ *   - pirated or counterfeit goods, which the same list forbids as "anything
+ *     that infringes someone else's rights" (568 [GD2] (b), unit 2): plain
+ *     offers block; words that only may be someone else's goods warn.
  * A sentence that says the opposite is never warned, because the fix would
  * tell the creator to delete a protective sentence: a negation in the same
  * clause before the words ("No resale rights", "we do not guarantee any
@@ -44,22 +47,23 @@ export const MAX_WARNINGS = 30;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights" | "sexual_content" | "adult_content";
+export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights" | "sexual_content" | "adult_content" | "infringing" | "maybe_infringing";
 
 /**
  * The kinds that stop a product from being published, not only warn (567 [GD1] (d)): what the Terms already forbid.
  * "What you may not sell" (app/terms/page.tsx) includes "anything that promises fast or easy money, or income for
- * little effort" and "sexual content" (568 [GD2] (b)). Every other kind is a warning the creator may act on or not.
+ * little effort", "sexual content" and "anything that infringes someone else's rights" (568 [GD2] (b)). Every other
+ * kind is a warning the creator may act on or not.
  */
-export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content"]);
+export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content", "infringing"]);
 
 /** What keeps a product off the store, in words for the start of a sentence; "" when nothing blocks. */
 export function blockingWhat(kinds: readonly TermsWarningKind[]): string {
-  const money = kinds.includes("fast_money");
-  const sexual = kinds.includes("sexual_content");
-  if (money && sexual) return "A promise of fast or easy money and sexual content";
-  if (money) return "A promise of fast or easy money";
-  return sexual ? "Sexual content" : "";
+  const named = ([["fast_money", "a promise of fast or easy money"], ["sexual_content", "sexual content"], ["infringing", "pirated or counterfeit goods"]] as const)
+    .filter(([kind]) => kinds.includes(kind))
+    .map(([, words]) => words);
+  const said = named.length > 2 ? `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}` : named.join(" and ");
+  return said ? `${said[0].toUpperCase()}${said.slice(1)}` : "";
 }
 
 /**
@@ -198,9 +202,9 @@ const SLANG_BEFORE = /\b(?:food|earth|cabin|ruin|book|plant|travel|interior|desi
  * sexual content") or right after them ("porn is not allowed"). Narrower than `negated`, because here a negation lets
  * words through a block: a "no" further back in the clause ("No paywall, porn clips") does not count.
  */
-const SEXUAL_NEGATION_BEFORE = /\b(?:no|not|never|without|nothing|zero|free of)\s+(?:(?:any|such|explicit|sexual|graphic|adult)\s+){0,2}$/i;
-function sexualNegated(text: string, index: number, length: number): boolean {
-  return SEXUAL_NEGATION_BEFORE.test(text.slice(Math.max(0, index - 60), index)) || NEGATED_AFTER.test(text.slice(index + length, index + length + 60));
+const NEAR_NEGATION_BEFORE = /\b(?:no|not|never|without|nothing|zero|free of)\s+(?:(?:any|such|explicit|sexual|graphic|adult)\s+){0,2}$/i;
+function nearNegated(text: string, index: number, length: number): boolean {
+  return NEAR_NEGATION_BEFORE.test(text.slice(Math.max(0, index - 60), index)) || NEGATED_AFTER.test(text.slice(index + length, index + length + 60));
 }
 
 /** The sentence is plainly about the subject (recovery, the law, protection) or the word is slang: a warning, not a block. */
@@ -224,6 +228,44 @@ const SEXUAL_FIX =
 const ADULT_WHY =
   "This may describe adult content. The Terms do not allow selling sexual content; if this product is not sexual content, it is fine.";
 const ADULT_FIX = "Reread it: describe what the product contains, so that no reader takes it for sexual content.";
+
+/**
+ * Words that plainly offer pirated or counterfeit goods, which the Terms forbid as "anything that infringes someone
+ * else's rights" (568 [GD2] (b), unit 2): they block publication unless the sentence is plainly about protecting
+ * against them (infringingExcused), and then they are only a warning. Each needs the thing it is said of, so ordinary
+ * words ("cracked pepper", "a leaked roof", "crack the code") are never here.
+ */
+const PIRATED_THING = String.raw`(?:software|apps?|games?|plugins?|themes?|versions?|copies|copy|courses?|e-?books?|books?|fonts?|presets?|templates?|movies?|films?|music|albums?|songs?|content|files?|videos?|programs?|licen[cs]es?)`;
+const INFRINGING: readonly RegExp[] = [
+  new RegExp(String.raw`\b(?:cracked|pirated|nulled)\s+(?:[\w-]+\s+){0,2}?${PIRATED_THING}\b`, "gi"),
+  new RegExp(String.raw`\b${PIRATED_THING}\s+(?:cracked|pirated|nulled)\b`, "gi"),
+  /\bcracked\s+version\b/gi,
+  /\bkey\s?gens?\b/gi,
+  /\bleaked\s+(?:courses?|e-?books?|content|files?|videos?|masterclass(?:es)?|programs?|templates?)\b/gi,
+  /\bcounterfeit\s+[\w-]+/gi,
+];
+/** Words before it that make the sentence about protecting against it: spotting, avoiding, reporting, the risks. */
+const INFRINGING_ABOUT_BEFORE = /\b(?:spot|spotting|detect|detecting|identify|identifying|recogni[sz]e|tell|avoid|avoiding|protect|protecting|prevent|preventing|report|reporting|fight|fighting|stop|stopping|beware|why|risks? of|dangers? of|laws?|legal|history of)\b/i;
+/** Words after it that do the same. */
+const INFRINGING_ABOUT_AFTER = /^[\s"'”’:-]*(?:sites?|is a (?:security )?risk|are a (?:security )?risk|risks?|laws?|detection|scams?)\b/i;
+
+function infringingExcused(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 80), index);
+  if (INFRINGING_ABOUT_AFTER.test(text.slice(index + length, index + length + 40))) return true;
+  const clause = before.split(/[.!?;\n]/).pop() ?? "";
+  return INFRINGING_ABOUT_BEFORE.test(clause);
+}
+
+/** Words that may be someone else's goods but may not: a warning to reread, never a block. */
+const MAYBE_INFRINGING = /\b(?:replicas?|dupes?|knock-?offs?|torrents?|bootlegs?|bootlegged|unofficial)\b/gi;
+
+const INFRINGING_WHY =
+  "This offers pirated or counterfeit goods. The Terms do not allow selling anything that infringes someone else's rights, so the product cannot be published with it.";
+const INFRINGING_FIX =
+  "Remove these words, and sell only what you made or hold a license to sell. If the product is about protecting against piracy, say so plainly in the same sentence.";
+const MAYBE_INFRINGING_WHY =
+  "This may be someone else's goods or work. The Terms do not allow selling anything that infringes someone else's rights; if this is yours to sell, it is fine.";
+const MAYBE_INFRINGING_FIX = "Reread it: say what is yours in the product, or the license that lets you sell it.";
 
 /** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
 const W = String.raw`[\s-]+`;
@@ -439,7 +481,7 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     for (const m of text.matchAll(pattern)) {
       const at = m.index ?? 0;
       sexual.push([at, at + m[0].length]);
-      if (sexualNegated(text, at, m[0].length)) continue;
+      if (nearNegated(text, at, m[0].length)) continue;
       if (sexualContentExcused(text, at, m[0].length)) add("adult_content", at, m[0].length, ADULT_WHY, ADULT_FIX);
       else add("sexual_content", at, m[0].length, SEXUAL_WHY, SEXUAL_FIX);
     }
@@ -448,8 +490,24 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     const at = m.index ?? 0;
     if (sexual.some(([from, to]) => at >= from && at < to)) continue;
     if (/^nude$/i.test(m[0]) && NUDE_COLOR_AFTER.test(text.slice(at + m[0].length, at + m[0].length + 30))) continue;
-    if (sexualNegated(text, at, m[0].length)) continue;
+    if (nearNegated(text, at, m[0].length)) continue;
     add("adult_content", at, m[0].length, ADULT_WHY, ADULT_FIX);
+  }
+
+  const infringing: [number, number][] = [];
+  for (const pattern of INFRINGING) {
+    for (const m of text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      infringing.push([at, at + m[0].length]);
+      if (nearNegated(text, at, m[0].length)) continue;
+      if (infringingExcused(text, at, m[0].length)) add("maybe_infringing", at, m[0].length, MAYBE_INFRINGING_WHY, MAYBE_INFRINGING_FIX);
+      else add("infringing", at, m[0].length, INFRINGING_WHY, INFRINGING_FIX);
+    }
+  }
+  for (const m of text.matchAll(MAYBE_INFRINGING)) {
+    const at = m.index ?? 0;
+    if (infringing.some(([from, to]) => at >= from && at < to) || nearNegated(text, at, m[0].length)) continue;
+    add("maybe_infringing", at, m[0].length, MAYBE_INFRINGING_WHY, MAYBE_INFRINGING_FIX);
   }
 
   if (!input.resaleLicense) {

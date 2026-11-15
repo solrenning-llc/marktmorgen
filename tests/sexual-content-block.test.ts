@@ -98,7 +98,7 @@ is("the title is read", fastMoneyRefusal({ title: "Hentai pack", summary: "", ab
 is("the summary is read", fastMoneyRefusal({ title: "Pack", summary: "XXX videos", about: "" })?.field, "summary");
 is("a sales page is refused the same way", fastMoneyOnPage(["Welcome", "Uncensored porn clips inside"])?.field, "page");
 is("plain product words pass", fastMoneyRefusal({ title: "Bread basics", summary: "Ten loaves.", about: "Flour, water, salt." }), null);
-is("both of the Terms' prohibitions block, and only they do", [...BLOCKING_KINDS].sort(), ["fast_money", "sexual_content"]);
+is("the Terms' prohibitions block, and only they do", [...BLOCKING_KINDS].sort(), ["fast_money", "infringing", "sexual_content"]);
 
 part("A crowded text still keeps the passage that blocks");
 const crowded = Array.from({ length: MAX_WARNINGS + 5 }, (_, i) => `https://outside${i}.com`).join(". ") + ". Porn clips inside.";

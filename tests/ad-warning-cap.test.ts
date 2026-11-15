@@ -30,8 +30,8 @@ for (const text of ["Practice drawing every day.", "We do not promise any income
 }
 is("real deadline stays sendable", checkAdText(ad("text", prefix + "Limited time offer, act now."), { ...context, realDeadline: true }).sendable, true);
 is("real stock stays sendable", checkAdText(ad("text", prefix + "Only 3 spots left."), { ...context, realStockLimit: true }).sendable, true);
-// The cap fix adds no blocking kind of its own; sexual content blocks since 568 [GD2] (b) (tests/sexual-content-block.test.ts).
-is("product blocking kinds stay the Terms' own prohibitions", [...BLOCKING_KINDS], ["fast_money", "sexual_content"]);
+// The cap fix adds no blocking kind of its own; sexual content and pirated or counterfeit goods block since 568 [GD2] (b) (tests/sexual-content-block.test.ts, tests/piracy-block.test.ts).
+is("product blocking kinds stay the Terms' own prohibitions", [...BLOCKING_KINDS], ["fast_money", "sexual_content", "infringing"]);
 const warnings = checkCreatorTerms({ text: prefix + "Earn $5,000 a month.", ownHosts: [], priceCents: 2900, currency: "usd", immediateAccessConsent: true, realDeadline: false, realStockLimit: false, resaleLicense: true });
 is("ordinary terms still keep the existing cap", warnings.length, MAX_WARNINGS);
 

@@ -2326,7 +2326,7 @@ export async function removePayout(store: Store, id: string): Promise<boolean | 
   if (held === null || held === undefined) return false;
   if (typeof held !== "string") throw new UnknownReplyError("a payout before it is taken off");
   const payout = parsePayout(held);
-  if (payout && paidThroughPayPal(payout)) return "sent";
+  if (payout && (await sentThroughPayPal([payout]))[0]) return "sent";
   const [removed] = await redisPipeline([["HDEL", payoutsKey(store.statsId), id]]);
   if (Number(removed) === 1) await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
   return Number(removed) === 1;
@@ -2338,8 +2338,34 @@ export async function removePayout(store: Store, id: string): Promise<boolean | 
  * random id, so a reference they typed as "PayPal ..." is still theirs to undo.
  */
 export function paidThroughPayPal(payout: Payout): boolean {
-  const item = /^PayPal (\S+)$/.exec(payout.reference)?.[1];
-  return item !== undefined && payoutIdForItem(item) === payout.id;
+  const item = paypalItemOf(payout);
+  return item !== null && payoutIdForItem(item) === payout.id;
+}
+
+/** The PayPal item a payout's reference names ("PayPal <item>"), or null. */
+const paypalItemOf = (payout: Payout): string | null => /^PayPal (\S+)$/.exec(payout.reference)?.[1] ?? null;
+
+/**
+ * Whether each payout is one PayPal sent, also for those written before 08/11/2026 (Claude 2 cloud H on #4614): a run
+ * then wrote a PayPal payout under a random id with the reference "PayPal <item>", and marked the item
+ * nl:pp:item:<item> (lib/paypal-payouts.ts, earlierItemMark: the same key). Such a payout is sent when its item's
+ * mark is there. The marks are read exactly, in one round trip, and only for payouts with a PayPal reference whose id
+ * is not their item's: nil is not sent; any text is sent; any other answer throws UnknownReplyError, so nothing is
+ * taken off the book on a guess.
+ */
+export async function sentThroughPayPal(payouts: Payout[]): Promise<boolean[]> {
+  const answers = payouts.map((payout) => paidThroughPayPal(payout));
+  const asked = payouts.map((payout, i) => ({ i, item: answers[i] ? null : paypalItemOf(payout) })).filter((a): a is { i: number; item: string } => a.item !== null);
+  if (!asked.length) return answers;
+  const replies = repliesFor(await redisPipeline(asked.map(({ item }) => ["GET", `nl:pp:item:${item}`])), asked.length);
+  if (!replies) throw new UnknownReplyError("a PayPal payout item's mark");
+  asked.forEach(({ i }, k) => {
+    const mark = replies[k];
+    if (mark === null) return;
+    if (typeof mark === "string" && mark !== "") answers[i] = true;
+    else throw new UnknownReplyError("a PayPal payout item's mark");
+  });
+  return answers;
 }
 
 /** Where what the creator says they paid their affiliates is counted in the store's data room (lib/store-data.ts). */
@@ -3434,8 +3460,10 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  // Each payout says whether PayPal sent it (#4606): the studio draws no Undo on those.
-  return { rows, lines, payouts: paid.map((payout) => ({ ...payout, sent: paidThroughPayPal(payout) })), refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
+  // Each payout says whether PayPal sent it (#4606), also an older one under a random id with its item's mark: the
+  // studio draws no Undo on those. Marks that cannot be read draw no Undo either; the route refuses all the same.
+  const sent = await sentThroughPayPal(paid).catch(() => paid.map(() => true));
+  return { rows, lines, payouts: paid.map((payout, i) => ({ ...payout, sent: sent[i] })), refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */

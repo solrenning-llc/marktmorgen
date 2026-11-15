@@ -48,7 +48,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "is-there-a-limit-on-how-much-my-buyers-download": { created: "2026-09-20", updated: "2026-09-28", digest: "36e210646ce8" },
   "how-many-visits-does-my-plan-cover": { created: "2026-10-07", updated: "2026-10-17", digest: "517136f53cc6" },
   "what-if-i-sell-a-very-large-number-of-things": { created: "2026-10-13", updated: "2026-11-02", digest: "ea768336b3cf" },
-  "when-do-my-plans-monthly-figures-start-again": { created: "2026-10-17", updated: "2026-10-17", digest: "2080839b462c" },
+  "when-do-my-plans-monthly-figures-start-again": { created: "2026-10-17", updated: "2026-11-09", digest: "c112d97ccdf2" },
   "what-else-does-my-plan-cover-each-month": { created: "2026-10-17", updated: "2026-11-02", digest: "c8d5e3ebd6b4" },
   "how-much-can-my-store-hold": { created: "2026-10-07", updated: "2026-10-17", digest: "4a9c139efd68" },
   "what-happens-when-my-plan-ends": { created: "2026-10-17", updated: "2026-11-05", digest: "a2b62e19232b" },

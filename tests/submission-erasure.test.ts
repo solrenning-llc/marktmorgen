@@ -393,6 +393,64 @@ async function main(): Promise<void> {
     is("and leaves no door behind", (await redis.pipeline([["EXISTS", `nl:sub:door:${FOLDER}:${id}`]]))[0], 0);
   }
 
+  // Codex N1's MÉDIO on #3570 (RED from Codex U and X4): a close or abort takes the door with GETDEL and waits on the
+  // vault; an erasure that runs then finds no door, and a refused vault step must not put the buyer's door back.
+  part("A failed vault step cannot put a door back after the buyer was erased");
+  {
+    const who = "8".repeat(32);
+    const files: string[] = [];
+    let erased: number | string = "not run";
+    const racing = world({
+      closeReservedVault: async () => {
+        erased = await forgetSubmissionsPerson(FOLDER, who, files, world().steps, SHOP);
+        return { ok: false as const, reason: "unavailable" as const };
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(43)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const id = opened.upload.pathname.split("/")[2].slice(4);
+    const closed = await closeSubmissionDoor(
+      { store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(43), who, data: SHOP, note: "" },
+      opened.upload.pathname, ["e"], NOW, racing.steps,
+    );
+    const door = (await redis.pipeline([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0];
+    is("control: the erasure finished and collected the path", [erased, files.includes(opened.upload.pathname)], [0, true]);
+    is("the refused close stays refused without restoring personal data", [closed, door], [{ ok: false, reason: "unavailable" }, null]);
+  }
+  {
+    const who = "0".repeat(32);
+    let erased: number | string = "not run";
+    const racing = world({
+      abortReservedVault: async () => {
+        erased = await forgetSubmissionsPerson(FOLDER, who, [], world().steps, SHOP);
+        return false;
+      },
+    });
+    const opened = await openSubmissionDoor(ask(who, lesson(44)), racing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const id = opened.upload.pathname.split("/")[2].slice(4);
+    const result = await abortSubmissionDoor(
+      { store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(44), who, data: SHOP },
+      opened.upload.pathname, racing.steps, NOW,
+    );
+    const door = (await redis.pipeline([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0];
+    is("control: the erasure finished while abort waited", erased, 0);
+    is("the refused abort stays refused without restoring personal data", [result, door], ["unavailable", null]);
+  }
+  {
+    // Control: a refused close for a buyer still there puts the door back, so they can close it again.
+    const who = "9".repeat(32);
+    const refusing = world({ closeReservedVault: async () => ({ ok: false as const, reason: "unavailable" as const }) });
+    const opened = await openSubmissionDoor(ask(who, lesson(45)), refusing.steps);
+    if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+    const id = opened.upload.pathname.split("/")[2].slice(4);
+    await closeSubmissionDoor(
+      { store: SHOP, folder: FOLDER, courseId: COURSE, lessonId: lesson(45), who, data: SHOP, note: "" },
+      opened.upload.pathname, ["e"], NOW, refusing.steps,
+    );
+    is("control: a buyer still there gets the door back after a refused close", typeof (await redis.pipeline([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0], "string");
+  }
+
   done();
 }
 

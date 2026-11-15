@@ -191,6 +191,10 @@ const en = {
   nudgeCourse: "Open the course:",
   nudgeCommunity: "Come into the community:",
   nudgeReply: (store: string) => `If something is in the way, reply to this email and it reaches ${store}.`,
+  /** 361 [AP1] (e): the reminder the day before a membership ends; the date is the real end. */
+  endingSubject: (title: string, date: string) => `Your ${title} membership ends on ${date}`,
+  endingLead: (title: string, store: string, date: string) => `Your ${title} membership with ${store} ends on ${date}. Until then you keep everything it includes.`,
+  endingKeep: "If you would like to keep it, you can change that on your membership page:",
 
   // ---- Paying yearly instead of monthly (added 12 October 2026) ------------------------------
   payYearly: (yearly: string, saving: string) => `Pay yearly: ${yearly}, saves ${saving}`,
@@ -566,6 +570,9 @@ const es: MembershipWords = {
   nudgeCourse: "Abre el curso:",
   nudgeCommunity: "Entra en la comunidad:",
   nudgeReply: (store) => `Si algo te lo impide, responde a este correo y le llegará a ${store}.`,
+  endingSubject: (title, date) => `Tu membresía ${title} termina el ${date}`,
+  endingLead: (title, store, date) => `Tu membresía ${title} con ${store} termina el ${date}. Hasta entonces conservas todo lo que incluye.`,
+  endingKeep: "Si quieres mantenerla, puedes cambiarlo en la página de tu membresía:",
 
   // ---- Pagar al año en vez de al mes ----------------------------------------------------------
   payYearly: (yearly, saving) => `Paga al año: ${yearly}, ahorras ${saving}`,
@@ -932,6 +939,9 @@ const fr: MembershipWords = {
   nudgeCourse: `Ouvrir la formation${S}:`,
   nudgeCommunity: `Entrer dans la communauté${S}:`,
   nudgeReply: (store) => `Si quelque chose vous en empêche, répondez à cet e-mail et ${store} le recevra.`,
+  endingSubject: (title, date) => `Votre abonnement ${title} se termine le ${date}`,
+  endingLead: (title, store, date) => `Votre abonnement ${title} chez ${store} se termine le ${date}. D'ici là, vous gardez tout ce qu'il comprend.`,
+  endingKeep: "Si vous souhaitez le garder, vous pouvez le modifier sur la page de votre abonnement :",
 
   // ---- Payer à l'année plutôt qu'au mois ------------------------------------------------------
   payYearly: (yearly, saving) => `Payer à l'année : ${yearly}, soit ${saving} d'économie`,
@@ -1300,6 +1310,9 @@ const de: MembershipWords = {
   nudgeCourse: "Zum Kurs:",
   nudgeCommunity: "Zur Community:",
   nudgeReply: (store) => `Wenn Ihnen etwas im Weg steht, antworten Sie auf diese E-Mail, sie erreicht ${store}.`,
+  endingSubject: (title, date) => `Ihre Mitgliedschaft ${title} endet am ${date}`,
+  endingLead: (title, store, date) => `Ihre Mitgliedschaft ${title} bei ${store} endet am ${date}. Bis dahin behalten Sie alles, was sie enthält.`,
+  endingKeep: "Wenn Sie sie behalten möchten, können Sie das auf der Seite Ihrer Mitgliedschaft ändern:",
 
   // ---- Jährlich statt monatlich zahlen --------------------------------------------------------
   payYearly: (yearly, saving) => `Jährlich zahlen: ${yearly}, Sie sparen ${saving}`,
@@ -1681,6 +1694,9 @@ const it: MembershipWords = {
   nudgeCourse: "Apri il corso:",
   nudgeCommunity: "Entra nella community:",
   nudgeReply: (store) => `Se qualcosa te lo impedisce, rispondi a questa email e arriverà a ${store}.`,
+  endingSubject: (title, date) => `Il tuo abbonamento ${title} termina il ${date}`,
+  endingLead: (title, store, date) => `Il tuo abbonamento ${title} con ${store} termina il ${date}. Fino ad allora mantieni tutto ciò che include.`,
+  endingKeep: "Se vuoi mantenerlo, puoi cambiarlo nella pagina del tuo abbonamento:",
 
   // ---- Pagare annualmente invece che mensilmente ---------------------------------------------
   payYearly: (yearly, saving) => `Paga annualmente: ${yearly}, risparmi ${saving}`,
@@ -2047,6 +2063,9 @@ const nl: MembershipWords = {
   nudgeCourse: "Open de cursus:",
   nudgeCommunity: "Kom naar de community:",
   nudgeReply: (store) => `Als er iets in de weg zit, beantwoord deze e-mail en het komt bij ${store}.`,
+  endingSubject: (title, date) => `Je lidmaatschap ${title} eindigt op ${date}`,
+  endingLead: (title, store, date) => `Je lidmaatschap ${title} bij ${store} eindigt op ${date}. Tot die tijd houd je alles wat erbij hoort.`,
+  endingKeep: "Wil je het houden, dan kun je dat wijzigen op de pagina van je lidmaatschap:",
 
   // ---- Per jaar betalen in plaats van per maand -----------------------------------------------
   payYearly: (yearly, saving) => `Betaal per jaar: ${yearly}, je bespaart ${saving}`,
@@ -2411,6 +2430,9 @@ const pt: MembershipWords = {
   nudgeCourse: "Abrir o curso:",
   nudgeCommunity: "Entrar na comunidade:",
   nudgeReply: (store) => `Se algo está a impedir, responda a este email e chega a ${store}.`,
+  endingSubject: (title, date) => `A sua subscrição ${title} termina a ${date}`,
+  endingLead: (title, store, date) => `A sua subscrição ${title} com ${store} termina a ${date}. Até lá, mantém tudo o que ela inclui.`,
+  endingKeep: "Se quiser mantê-la, pode alterar isso na página da sua subscrição:",
 
   // ---- Pagar anualmente em vez de mensalmente -------------------------------------------------
   payYearly: (yearly, saving) => `Pagar anualmente: ${yearly}, poupa ${saving}`,

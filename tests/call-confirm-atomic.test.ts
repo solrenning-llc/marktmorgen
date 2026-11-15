@@ -18,6 +18,7 @@
  *
  * Synthetic only.
  */
+import { readFileSync } from "node:fs";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
@@ -266,6 +267,17 @@ async function main(): Promise<void> {
     const owedOdd = await confirmationOwed(odd.session).then(String, (error) => String(error?.name ?? error));
     is("a mark not known is thrown, never taken for done or owed, and sends nothing (rule 24)", [refused, owedOdd, confirmations(from)], ["UnknownReplyError", "UnknownReplyError", [0, 0]]);
     is("the mail job's question: owed when never begun or left short, not once done", [await confirmationOwed("cs_test_never_begun_000001"), await confirmationOwed(control)], [true, false]);
+
+    part("A paid booking whose amount did not read (null): booked, but never counted as an order of $0 (paid-amount-exact)");
+    {
+      const unread = await take();
+      const before = await orders();
+      await confirmBooking({ store, product: call, session: unread.session, start: unread.start, end: unread.start + HOUR, buyerEmail: BUYER, buyerTz: NY, amountCents: null, currency: "usd", origin: ORIGIN });
+      is("its time kept for good, and no order counted at $0", [(await entryOf(unread.session))?.until, (await orders()) - before], [0, 0]);
+      const source = readFileSync("lib/calls.ts", "utf8");
+      is("an affiliate's lead is written only with an amount that reads, never paid 0 for an unknown one",
+        [/recordLead\(store, \{[^}]*paid: input\.amountCents \?\? 0/.test(source), /countOrder\(store, `call:\$\{session\}:\$\{unit\}`, input\.amountCents \?\? 0\)/.test(source)], [false, false]);
+    }
     done();
   } finally {
     console.error = quiet;

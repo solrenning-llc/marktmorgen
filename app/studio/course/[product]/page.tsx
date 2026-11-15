@@ -216,7 +216,7 @@ export default async function StudioCoursePage({
           </section>
         ) : null}
         {captionsMoney === null ? (
-          <p className="mt-5 max-w-[80ch] text-sm text-ink" role="status" data-captions-money-unread>
+          <p className="mt-5 max-w-[80ch] text-sm text-ink" role="status" data-captions-money-unread data-captions-refunds-unread>
             We could not read your AI captions refunds and charges just now. Reload the page in a moment to see them.
           </p>
         ) : null}
@@ -368,6 +368,11 @@ export default async function StudioCoursePage({
           <p className="mt-2 text-ink-soft">
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
+          </p>
+          <p className="mt-2 text-sm">
+            <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+              Filter students and change many at once
+            </Link>
           </p>
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">

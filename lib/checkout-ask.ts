@@ -53,7 +53,7 @@
 import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { recoveryOn } from "@/lib/recovery-setting";
 import { type RemindOutcome, remindAsked } from "@/lib/checkout-recovery";
 import { REMINDER_RETRIES, reminderRetryAfter, retriesOf } from "@/lib/reminder-retry";
@@ -150,8 +150,8 @@ async function keep(store: Store, productId: string, typed: string, ip: string, 
   const statsId = store.statsId as string;
   const email = normaliseEmail(typed);
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
-  if (!(await withinLimit("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600))) return "limited";
-  if (!(await withinLimit("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400))) return "limited";
+  if (!(await withinEssentialLimit("remind-ask", ip, ASKS_PER_ADDRESS_HOUR, 3600))) return "limited";
+  if (!(await withinEssentialLimit("remind-store", statsId, ASKS_PER_STORE_DAY, 86_400))) return "limited";
   const askedAt = Math.floor(Date.now() / 1000);
   await redisPipeline([
     ["ZADD", QUEUE, askedAt + after, askMember({ statsId, handle: store.handle, productId, email, askedAt, from, after })],

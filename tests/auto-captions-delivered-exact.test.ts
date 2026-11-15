@@ -267,7 +267,9 @@ async function main(): Promise<void> {
       videos: ranOn("nl:stream:due"),
       captions: ranOn(QUEUE),
       watch: ranOn("nl:watch:due"),
-      letGo: seen.some((c) => c[0] === "DEL" && c[1] === "nl:stream:lock"),
+      // Let go = this run touched the lock and it is gone afterward, whatever command released it (DEL here, the
+      // compare-and-delete script of lib/redis-lock.ts on main), so the check reads the outcome, not one command.
+      letGo: seen.some((c) => c.includes("nl:stream:lock")) && redis.run(["GET", "nl:stream:lock"]) === null,
     };
   };
   reset();
@@ -316,6 +318,19 @@ async function main(): Promise<void> {
       during = () => {};
       video = { status: 200, body: { guid: VIDEO, status: 4, captions: [{ srclang: "en" }] } };
       is(`${branch}, ${name}: a known answer afterward asks for no refund again`, [await look(at + HOUR), refundsAsked.length], ["none", 0]);
+
+      reset();
+      seed();
+      video = answer;
+      // The hook's refund was not confirmed meanwhile and queued to be looked at again (settle's SET + ZADD).
+      during = () => {
+        const now = JSON.parse(String(redis.run(["GET", KEY]))) as Pending;
+        redis.run(["SET", KEY, JSON.stringify({ ...now, owed: { cents: 6000, key: REFUND_KEY, since: at, looks: 0 } }), "EX", 400 * 86_400]);
+        redis.run(["ZADD", QUEUE, at + HOUR, VIDEO]);
+        redis.run(["SADD", OWED_KEY, VIDEO]);
+      };
+      await look(at);
+      is(`${branch}, ${name}, a refund owed queued during the look: it stays queued, so the refund is still collected`, queuedAt() !== null, true);
 
       reset();
       seed();

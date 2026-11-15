@@ -249,8 +249,20 @@ async function main(): Promise<void> {
   await syncAutoCaptions(VIDEO, LATE + HOUR);
   is("a refund never confirmed: counted once, and shown as stuck", [await keptMonth(), await money()], [{ delivery: 0, order: 0, refund: 1 }, { owed: [{ id: VIDEO, cents: PRICE, stuck: true }], unconfirmed: [] }]);
 
+  // Codex P's MEDIUM at f830b9f4d0 (adopted by Claude 3, nuvem E): a ZREM whose reply is lost and not applied left the
+  // order queued and counted it again on every retry.
+  part("An order kept after a ZREM whose reply is lost (and not applied) is counted once across retries");
+  reset();
+  redis.run(["SET", KEY, JSON.stringify({ order: "o1", at: T, cents: PRICE, langs: ["en"], path: PATH, customer: "cus_Store000006" }), "EX", 400 * 86_400]);
+  redis.run(["ZADD", QUEUE, T, VIDEO]);
+  replyFor = (commands) => (commands.length === 1 && commands[0][0] === "ZREM" && commands[0][1] === QUEUE ? [] : null);
+  await syncAutoCaptions(VIDEO, LATE);
+  await syncAutoCaptions(VIDEO, LATE + HOUR);
+  replyFor = () => null;
+  is("counted once, though the order stayed queued and was kept twice", await keptMonth(), { delivery: 0, order: 1, refund: 0 });
+
   part("The store's list read in an unknown shape is unknown, never nothing owed");
-  for (const [name, reply] of [["the list an object", [{}]], ["a member a number", [[VIDEO, 7]]], ["no reply", []]] as const) {
+  for (const [name, reply] of [["the list an object", [{}]], ["a member a number", [[VIDEO, 7]]], ["no reply", []], ["a member that is not a video id", [["not-a-stream-id"]]]] as const) {
     reset();
     await keep();
     replyFor = (commands) => (commands.length === 1 && commands[0][0] === "SMEMBERS" && commands[0][1] === OWED ? (reply as unknown as unknown[]) : null);

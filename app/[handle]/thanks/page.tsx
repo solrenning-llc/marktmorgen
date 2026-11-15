@@ -58,6 +58,7 @@ import { readListing } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { after } from "next/server";
 import { CONFIRM_WITHIN_SECONDS, canConfirm, confirmPurchase, fromStore, introOf, storeBase } from "@/lib/purchase-email";
+import { firstChargeCents } from "@/lib/yearly-price";
 import { readConfig } from "@/lib/community";
 import { type SaleKey, activeKeys, keyForSale } from "@/lib/licence-keys";
 import { renewPath } from "@/lib/membership-access";
@@ -589,7 +590,9 @@ export default async function ThanksPage({ params, searchParams }: Params) {
             : undefined,
         })
       : null;
-  const offer = funnel?.offer ?? null;
+  // A store switched off after a report (lib/takedown.ts) sells nothing: no offer after paying, no next step of a funnel,
+  // no Renew, no affiliate link and no review (its review page is closed then); what was bought stays.
+  const offer = store.suspended ? null : funnel?.offer ?? null;
 
   // A purchase that opens the creator's community says so, with the way in —
   // counting what was ticked at checkout and what was added after paying, as
@@ -631,6 +634,8 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   const thanksNote = order.state === "paid" && order.product.note ? await readThanksNote(store.statsId, order.product.id).catch(() => null) : null;
   // How often a membership charges as it was bought: a monthly one may have been paid yearly (lib/yearly-price.ts).
   const paidEvery = order.state === "paid" && order.product.recurring ? (((order.record.metadata ?? {}) as Record<string, string>).every === "year" ? "year" : order.product.recurring.interval) : "month";
+  // The first charge after a free trial or a move, as the checkout made it: the year's price when paid yearly.
+  const firstCents = order.state === "paid" && order.product.recurring ? firstChargeCents(order.product, order.option, paidEvery, store.tiers) : null;
   // A membership's introductory price, as its checkout carried it (lib/intro-price.ts).
   const introPaid = order.state === "paid" && order.product.recurring ? introOf((order.record.metadata ?? {}) as Record<string, string>) : null;
 
@@ -688,7 +693,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // for, by this checkout, with money (lib/review-proof.ts has the rule the
   // form is checked against again when it is sent).
   const toReview =
-    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store)
+    order.state === "paid" && sessionId && !booked && !ended && order.amount > 0 && order.email && takesReviews(store) && !store.suspended
       ? [order.product, ...order.bumps.map((added) => added.product), ...bundled]
           .filter(reviewable)
           .filter((p, i, all) => all.findIndex((q) => q.id === p.id) === i)
@@ -766,7 +771,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
       await countFunnelDone(statsId, funnelHereNow.funnel, funnelHereNow.index, funnelVisitor(statsId, funnelHereNow.funnel.id, clientAddress(asker), asker.headers.get("user-agent") ?? ""));
     });
   }
-  const funnelNext = funnelHereNow?.next && !offer ? funnelHereNow.next : null;
+  const funnelNext = funnelHereNow?.next && !offer && !store.suspended ? funnelHereNow.next : null;
 
   // Bought through the checkout script on one of the creator's own sites
   // (lib/embed-sites.ts): the way back there, with the mark that lets the
@@ -841,24 +846,24 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                     )}
                 {t.sentenceEnd}
               </p>
-              {order.product.recurring && order.firstChargeAt > 0 && !ended ? (
+              {order.product.recurring && order.firstChargeAt > 0 && !ended && firstCents !== null ? (
                 <p
                   className="mt-3 rounded-2xl px-4 py-3 text-sm"
                   style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
                 >
                   {t.movedNote(
-                    money(order.option ? order.option.priceCents : order.product.priceCents, order.currency),
+                    money(firstCents, order.currency),
                     store.tax.enabled && !store.tax.included,
                     longDate(order.firstChargeAt),
                   )}
                 </p>
-              ) : order.product.recurring && order.trialDays > 0 && !ended ? (
+              ) : order.product.recurring && order.trialDays > 0 && !ended && firstCents !== null ? (
                 <p
                   className="mt-3 rounded-2xl px-4 py-3 text-sm"
                   style={{ background: "var(--st-accent-soft)", color: "var(--st-text)" }}
                 >
                   {t.trialNote(
-                    money(order.option ? order.option.priceCents : order.product.priceCents, order.currency),
+                    money(firstCents, order.currency),
                     store.tax.enabled && !store.tax.included,
                     order.trialDays,
                     longDate(order.created + order.trialDays * 86400),
@@ -900,11 +905,13 @@ export default async function ThanksPage({ params, searchParams }: Params) {
                 <div className="st-note mt-7" role="status">
                   <p className="font-bold" style={{ color: "var(--st-text)" }}>{t.endedTitle}</p>
                   <p className="mt-1 text-sm">
-                    {t.endedBody}
+                    {store.suspended ? o.endedClosedNote : t.endedBody}
                   </p>
-                  <Link href={renewPath(store, order.product)} className="btn st-btn mt-4">
-                    {t.renew}
-                  </Link>
+                  {store.suspended ? null : (
+                    <Link href={renewPath(store, order.product)} className="btn st-btn mt-4">
+                      {t.renew}
+                    </Link>
+                  )}
                 </div>
               ) : booked ? (
                 <>
@@ -1404,7 +1411,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         ) : null}
 
         {/* The store lets buyers take their own affiliate link (lib/affiliates.ts, joinAsBuyer). */}
-        {order.state === "paid" && sessionId && buyersJoin(store) ? (
+        {order.state === "paid" && sessionId && buyersJoin(store) && !store.suspended ? (
           <section aria-labelledby="share-title" className="st-card mt-6 p-7 sm:p-10">
             <h2 id="share-title" className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em]">
               {t.earnBy(store.affiliates.percent, store.name)}

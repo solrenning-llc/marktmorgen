@@ -142,14 +142,16 @@ function filesUnder(dir: string): string[] {
 }
 
 /**
- * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST
- * service that does not take it would: the code keeps to SET NX EX and INCR,
- * the pattern every counter already uses.
+ * EXPIRE with an option (NX, XX, GT, LT) on the letters' own keys (nl:letters:) is refused here, as a Redis or REST
+ * service that does not take it would: lib/letter-access.ts keeps to SET NX EX and INCR and repairs a key left with
+ * no expiry itself. The store's other counters (the monthly allowances it sends the emailed link under, the
+ * limiters) count with INCR or INCRBY and EXPIRE … NX since #4541 and #4698 (lib/window-count.ts), so the refusal
+ * is held to the letters' keys, which are what this file tests.
  */
 let expireOptions = 0;
 const realPipeline = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof realPipeline }).pipeline = (commands) => {
-  if (commands.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3)) {
+  if (commands.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3 && String(c[1]).startsWith("nl:letters:"))) {
     expireOptions += 1;
     return Promise.reject(new Error("ERR syntax error"));
   }
@@ -548,7 +550,7 @@ async function main(): Promise<void> {
   is("the studio's route takes the products", [viaRoute.status, routeBody.ok, (await readLetter(store, letter.id))?.products], [200, true, [club]]);
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
-  is("no EXPIRE with an option was ever sent", expireOptions, 0);
+  is("no EXPIRE with an option was ever sent on a letter's key", expireOptions, 0);
   is("the store lists all four", (await listLetters(store))?.length, 4);
 
   part("The feature page says what is true of an email kept for members");

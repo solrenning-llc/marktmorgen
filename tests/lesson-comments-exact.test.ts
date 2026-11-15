@@ -16,6 +16,7 @@ import { CourseCommentsStudio } from "@/components/course-comments-studio";
 import { CourseToggle } from "@/components/course-toggle";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
+import { dataUsed } from "@/lib/store-data";
 
 const COURSE = "e".repeat(32), LESSON = "lessonone001", STUDENT = "synthetic-student-key";
 type Commands = (string | number)[][];
@@ -116,6 +117,53 @@ for (const [label, reply] of malformed) {
     });
   }
 }
+
+/**
+ * Two first posts by one student at once (Codex V MEDIUM on #3554): the first two name reads are held until both
+ * have started and answered "no name yet", as two requests racing would see them.
+ */
+async function racingFirstPosts(names: [string, string]) {
+  const original = redis.pipeline.bind(redis);
+  let held = 0;
+  let release!: () => void;
+  const bothStarted = new Promise<void>((resolve) => (release = resolve));
+  redis.pipeline = async (commands: Commands) => {
+    if (held < 2 && commands.length === 1 && commands[0][0] === "HGET" && String(commands[0][1]).endsWith(":names")) {
+      held += 1;
+      if (held === 2) release();
+      await bothStarted;
+      return [null] as never;
+    }
+    return original(commands);
+  };
+  try {
+    return await Promise.all(names.map((name, i) => addComment({ room: ROOM, courseId: COURSE, lessonId: LESSON, by: STUDENT, name, text: `First ${i}`, now: 100 + i })));
+  } finally {
+    redis.pipeline = original;
+  }
+}
+
+test("two first posts at once with different names: both comments and the kept name carry the one that won", async () => {
+  redis.clear();
+  const [a, b] = await racingFirstPosts(["Dana", "Eli"]);
+  assert.ok(a.ok && b.ok);
+  const kept = await commenterName(COURSE, STUDENT);
+  assert.ok(kept === "Dana" || kept === "Eli");
+  assert.equal(a.comment.name, kept);
+  assert.equal(b.comment.name, kept);
+});
+
+test("two first posts at once with the same name: the name is charged once, as two posts one after the other", async () => {
+  redis.clear();
+  assert.ok((await addComment({ room: ROOM, courseId: COURSE, lessonId: LESSON, by: STUDENT, name: "Dana", text: "First 0", now: 100 })).ok);
+  assert.ok((await addComment({ room: ROOM, courseId: COURSE, lessonId: LESSON, by: STUDENT, name: "Dana", text: "First 1", now: 101 })).ok);
+  const sequential = (await dataUsed(ROOM))?.used;
+  assert.equal(typeof sequential, "number");
+  redis.clear();
+  const [a, b] = await racingFirstPosts(["Dana", "Dana"]);
+  assert.ok(a.ok && b.ok);
+  assert.equal((await dataUsed(ROOM))?.used, sequential);
+});
 
 async function oneComment() {
   redis.clear();

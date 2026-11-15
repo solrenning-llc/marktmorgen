@@ -10,7 +10,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { makeWorld } from "./erasure-world";
 import { erasePerson } from "@/lib/person-erasure";
-import { memberHealth } from "@/lib/member-health";
+import { MEMBER_HEALTH_ERASURE_COMMANDS, memberHealth } from "@/lib/member-health";
+import { NOT_A_COST } from "./plan-cost-registry";
 
 const DAY = 86_400;
 const NOW = Math.floor(Date.now() / 1000);
@@ -64,6 +65,23 @@ async function main(): Promise<void> {
   is("the report does not name Ben", raced?.members.some((m) => m.email === "ben@example.com"), false);
   is("no copy names Ben", String(await cached()).includes("ben@example.com"), false);
   is("a copy hit does not name Ben", (await memberHealth(world.store))?.members.some((m) => m.email === "ben@example.com"), false);
+
+  part("What a refresh costs: one HMGET of the deleted people, and one EVAL in place of the copy's SET");
+  {
+    const realPipeline = redis.pipeline.bind(redis);
+    const sent: (string | number)[][] = [];
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent.push(...commands);
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
+    await memberHealth(world.store, true);
+    redis.pipeline = realPipeline;
+    const erasedReads = sent.filter((c) => c[0] === "HMGET" && String(c[1]).startsWith("nl:erased:")).length;
+    const keeps = sent.filter((c) => c[0] === "EVAL" && String(c[3]) === cacheKey).length;
+    const sets = sent.filter((c) => c[0] === "SET" && c[1] === cacheKey).length;
+    is("one read of the deleted people, one kept copy, no plain SET", [erasedReads, keeps, sets], [MEMBER_HEALTH_ERASURE_COMMANDS.reads, MEMBER_HEALTH_ERASURE_COMMANDS.keepInsteadOfSet, 0]);
+    is("its cost line is in the registry, with what it is not", /not a line of lib\/llc-fixed-costs\.ts, not certified, never zero/.test(NOT_A_COST.MEMBER_HEALTH_ERASURE_COMMANDS ?? ""), true);
+  }
 
   part("When who was deleted cannot be read, nobody is named");
   const realPipeline = redis.pipeline.bind(redis);

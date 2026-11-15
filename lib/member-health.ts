@@ -227,6 +227,13 @@ export async function scoreMembers(store: Store, rows: Raw[], now = Date.now()):
   return (await scoredMembers(store, rows, now)).members;
 }
 
+/**
+ * The store commands a refresh of the members' health adds to keep an erased buyer out (#4749): one HMGET of the
+ * store's deleted people (suppressedAmong) and, when the copy names somebody, one EVAL (keepUnlessErased, billed 1 + 2)
+ * in place of the copy's SET. Held by tests/member-health-erasure.test.ts and NOT_A_COST in tests/plan-cost-registry.ts.
+ */
+export const MEMBER_HEALTH_ERASURE_COMMANDS = { reads: 1, keepInsteadOfSet: 1 } as const;
+
 export async function memberHealth(store: Store, fresh = false, now = Date.now()): Promise<Health | null> {
   if (!store.stripeAccountId || !store.statsId) return null;
   if (!fresh && isRedisConfigured()) {

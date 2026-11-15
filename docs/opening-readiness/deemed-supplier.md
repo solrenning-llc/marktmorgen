@@ -116,7 +116,7 @@ Mesmo onde o produto digital não é tributado, a MPF cobre os **bens físicos**
 | Wisconsin | Sim | Tributa / isento | US$ 100 mil | Permissão de seller | Contar; cadastrar antes do limite | https://www.revenue.wi.gov |
 | Wyoming | Sim | A conferir / isento | US$ 100 mil (o teste de 200 transações saiu em 2024) | Licença de sales tax | Contar; cadastrar antes do limite | https://revenue.wyo.gov |
 
-Contagem desta tabela, a conferir: 45 estados e o DC com sales tax (ou imposto equivalente: GET no Havaí, GRT no Novo México, código da ARSSTC no Alasca) e MPF; 4 estados sem imposto geral sobre vendas (Delaware, Montana, New Hampshire e Oregon).
+Contagem desta tabela (51 linhas, conferida linha a linha em 15/11/2026): 45 estados e o DC com sales tax estadual ou imposto equivalente (GET no Havaí, GRT no Novo México) e MPF; o Alasca, sem imposto estadual, com imposto local pelo código da ARSSTC e MPF, o que dá 46 estados e o DC onde há imposto a cobrar; 4 estados sem imposto geral sobre vendas (Delaware, Montana, New Hampshire e Oregon). Total: 50 estados e o DC.
 
 **Custos do `collect` nos EUA, a conferir antes de qualquer número:**
 

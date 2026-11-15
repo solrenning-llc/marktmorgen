@@ -98,13 +98,28 @@ test("a hand-over that throws stops nothing else in the pass, and stays owed in 
   await putPendingOrder(first);
   await putPendingOrder(second);
   const handed: string[] = [];
-  await assert.doesNotReject(
-    sweep(async (paid) => {
-      if (paid.order === first) throw new Error("synthetic hand-over failure");
-      handed.push(paid.order);
-    }),
-  );
+  // Every command the pass sends, to see that the store's refund watch still runs after the failed hand-over.
+  const sent: (string | number)[][] = [];
+  const pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sent.push(...commands);
+    return pipeline(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await assert.doesNotReject(
+      sweep(async (paid) => {
+        if (paid.order === first) throw new Error("synthetic hand-over failure");
+        handed.push(paid.order);
+      }),
+    );
+  } finally {
+    redis.pipeline = pipeline;
+  }
   assert.deepEqual(handed, [second], "the next order is still written down and handed over");
+  assert.ok(
+    sent.some((c) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${sid}`),
+    "the store's refund watch in the same pass still reads its list after the failed hand-over",
+  );
   const [owed] = await redis.pipeline([["ZSCORE", `nl:ppsell:handover:${sid}`, first]]);
   assert.notEqual(owed, null, "the one whose hand-over threw stays owed, for handOverAgain");
   assert.equal(await isPending(first), false, "and it is off pending: written down with every list");

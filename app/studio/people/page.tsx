@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { PersonFind } from "@/components/person-find";
 import { PersonNotes } from "@/components/person-notes";
@@ -23,7 +24,7 @@ import { type PersonTask, taskAssignees } from "@/lib/person-tasks";
 import { TasksAgendaList } from "@/components/tasks-agenda";
 import { readTeam } from "@/lib/team";
 import type { CrmField } from "@/lib/crm-rules";
-import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken } from "@/lib/buyer-profile";
+import { type BuyerProfile, type ProfileMembership, type ProfileOrder, SALE_REFERENCE, addressForSale, addressForToken, buyerProfile, findToken, profileUnreadWords } from "@/lib/buyer-profile";
 import { channelName } from "@/lib/channel-names";
 import { formatMoney } from "@/lib/money";
 import { listSales } from "@/lib/store-checkout";
@@ -144,7 +145,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Buyers</p>
+          <StudioTrail store={store} {...(profile ? { path: [{ label: "Buyers", href: studioPath(store, "", "people") }], here: profile.name || profile.email || "One buyer" } : { here: "Buyers" })} />
           {profile ? (
             <Profile store={store} profile={profile} fields={fields} values={values} eraseToken={eraseToken} tasks={tasks} assignees={assignees} companies={companies} companiesRefusal={companyRead?.state === "refused" ? companyRead.message : ""} />
           ) : (
@@ -173,7 +174,7 @@ export default async function StudioPeoplePage({ searchParams }: Params) {
                     : token
                       ? "That search has run out: it works for an hour. Look the address up again below."
                       : who
-                        ? "That person is not among the buyers read from your Stripe account just now. Look their address up below."
+                        ? "That person is not among your buyers as last read from your Stripe account, which can be up to an hour ago. Look their address up below."
                         : "That sale is not one of this store's, or it has no email address on it."}
                 </p>
               ) : null}
@@ -285,7 +286,11 @@ async function LatestBuyers({ store }: { store: Store }) {
                 </Link>
                 <span className="block text-sm text-ink-soft">{`${s.title} · ${day(s.paidAt)}`}</span>
               </span>
-              <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              {s.amount === null ? (
+                <span role="status" className="text-sm font-semibold text-ink">Amount could not be loaded</span>
+              ) : (
+                <span className="font-display font-semibold tabular-nums text-ink">{formatMoney(s.amount, s.currency)}</span>
+              )}
             </li>
           ))}
         </ul>
@@ -320,7 +325,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         ? "Taken off your list: their address could not receive email."
         : contact.gone === "complained"
           ? "Taken off your list: they marked an email as spam."
-          : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
+          : contact.gone === "refused"
+            ? "Taken off your list: the email service refused their address."
+            : `Left your list${isoDay(contact.unsubAt) ? ` on ${isoDay(contact.unsubAt)}` : ""}. They are not written to again.`
       : contact.agreed
         ? `On your list, and agreed to hear from you${isoDay(contact.agreedAt) ? ` on ${isoDay(contact.agreedAt)}` : ""}.`
         : "On your list, without agreeing to hear from you: only their purchase emails reach them.";
@@ -340,6 +347,11 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
         </p>
       ) : !store.stripeAccountId ? (
         <p className="notice notice-info mt-6">Connect your Stripe account, and what they paid is shown here.</p>
+      ) : null}
+      {profile.unread.length ? (
+        <p className="notice notice-warn mt-6" role="status">
+          {profileUnreadWords(profile.unread)}
+        </p>
       ) : null}
 
       <dl className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -508,7 +520,9 @@ function Profile({ store, profile, fields, values, eraseToken, tasks, assignees,
       <section aria-labelledby="notes-title" className="card mt-8 p-6 sm:p-8">
         <h2 id="notes-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Notes</h2>
         <p className="mt-1 text-sm text-ink-soft">For you and your team only. The buyer never sees them.</p>
-        {profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
+        {profile.unread.includes("notes") ? (
+          <p className="mt-2 text-sm text-ink-soft" role="status">Your team&apos;s notes about this person could not be loaded just now. Nothing was changed. Open this page again in a moment.</p>
+        ) : profile.person ? <PersonNotes person={profile.person} initial={profile.notes} /> : null}
       </section>
 
       {eraseToken ? (

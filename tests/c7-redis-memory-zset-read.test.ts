@@ -67,6 +67,17 @@ async function main(): Promise<void> {
     is(`${name}: the key is gone`, await exists("z"), 0);
   }
 
+  part("ZUNIONSTORE and ZINTERSTORE with an empty result delete the destination, as on Redis");
+  for (const [name, command] of [
+    ["ZUNIONSTORE of a missing source", ["ZUNIONSTORE", "d", 1, "nk"]],
+    ["ZINTERSTORE of two sets with nothing in common", ["ZINTERSTORE", "d", 2, "a", "b"]],
+  ] as [string, (string | number)[]][]) {
+    redis.clear();
+    await redis.pipeline([["SET", "d", "x"], ["EXPIRE", "d", 100], ["ZADD", "a", 1, "m"], ["ZADD", "b", 1, "n"]]);
+    is(`${name}: answers 0`, await run(command), 0);
+    is(`${name}: the destination is gone`, await exists("d"), 0);
+  }
+
   part("Control: a sorted set that exists reads and writes as before");
   redis.clear();
   await redis.pipeline([["ZADD", "z", 2, "b", 1, "a"]]);

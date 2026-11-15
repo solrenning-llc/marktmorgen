@@ -31,7 +31,9 @@
  *   main only fast-forwards to the merge queue's commit, so the queue already ran the nine on the
  *   head, and the push to main repeats them (C1-0305-C4-28). Only a success, only on the current
  *   head, never on an earlier one; a merge_group failure never opens and never blocks a green push
- *   run. The newest counted run still decides: a push or schedule run on the head that completed red,
+ *   run. Never for CodeQL (NOT_FROM_QUEUE): its merge-queue run skips the analysis on purpose
+ *   (.github/workflows/codeql.yml), so only its own push or schedule run on the head is its result.
+ *   The newest counted run still decides: a push or schedule run on the head that completed red,
  *   still runs, is queued or ended otherwise is never replaced by the merge queue, so a later red
  *   still opens. An unreadable merge_group listing is logged and not used: never green, and the
  *   decision stays as without it. Every open main-vermelho issue the alarm opened gets "MAIN VERDE"
@@ -75,6 +77,8 @@ export const REQUIRED = [
   { file: ".github/workflows/product-checks.yml", name: "Product checks", check: "All checks (product-checks)" },
 ];
 
+/** The workflows whose merge_group run is never main's result: CodeQL analyzes on main itself, not in the queue. */
+export const NOT_FROM_QUEUE = new Set([".github/workflows/codeql.yml"]);
 const COUNTED_EVENTS = new Set(["push", "schedule"]);
 const RED = new Set(["failure", "timed_out", "startup_failure"]);
 /** A job's results that make the canceled run holding it red. */
@@ -218,7 +222,7 @@ export function decide({ runs, trigger, head, redJobs = [], stoppedJobs = [], st
     } else {
       // No result from the head's own push or schedule runs: the merge queue's newest run of this file on
       // this very head stands, only when it passed. A failure there is never red.
-      const queued = newest(queue.filter((r) => r.path === file));
+      const queued = NOT_FROM_QUEUE.has(file) ? undefined : newest(queue.filter((r) => r.path === file));
       if (queued && queued.status === "completed" && queued.conclusion === "success") {
         state = "green";
         latest = queued;
@@ -261,7 +265,7 @@ export function openBody(red, head) {
     ...red.map(line),
     "",
     "Regra MV (AGENTS.md): enquanto esta issue estiver aberta, ninguém faz push em PR nenhum além do PR que conserta o main, e ninguém incorpora outra coisa. O trabalho local e as revisões continuam.",
-    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main; um workflow cujo run de push nesse head foi cancelado, pulado ou não existe conta o run de merge_group que passou na fila de merge nesse mesmo commit (scripts/main_red_alarm.mjs).",
+    "Esta issue fecha sozinha quando os 9 workflows obrigatórios passarem no head atual do main; um workflow cujo run de push nesse head foi cancelado, pulado ou não existe conta o run de merge_group que passou na fila de merge nesse mesmo commit, exceto o CodeQL, que só conta a análise do próprio main (scripts/main_red_alarm.mjs).",
   ].join("\n");
 }
 

@@ -538,8 +538,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
                     </>
                   ) : (
-                    <p className="st-note mt-6 text-sm">
-                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}
+                    <p className="st-note mt-6 text-sm" data-no-payments>
+                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody}
+                      {/* A way to the creator only where there is one: never "write to them" with nowhere to write. */}
+                      {shown.contact ? <> <a href="#contact" className="underline underline-offset-2">{w.noPaymentsWrite(store.name)}</a></> : null}
                     </p>
                   )}
                 </>

@@ -624,9 +624,10 @@ export async function sendSignInLink(
   email: string,
   origin: string,
   handle?: unknown,
+  // The id already given to the browser, when the email is sent after the answer (past SIGN_IN_LINKS_PER_HOUR).
+  request: string = randomToken(),
 ): Promise<SignInRequest> {
   const address = normaliseEmail(email);
-  const request = randomToken();
   // The demo store's owner is nobody (lib/house-store.ts): no link is made
   // for that address, so no session can ever be opened as it. The caller
   // answers as it does for any address, and says nothing about this one.

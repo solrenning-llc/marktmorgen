@@ -32,7 +32,12 @@ import {
 } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
 import { installSesMailFixture } from "./ses-mail-fixture";
+// "next/server" here is this world (tests/test-config.mjs): what a route leaves for after its answer is held, not run.
+import { afterTasks } from "./next-server-after-world";
 import { done, is, part } from "./check";
+
+// The deployment secret the code in a sign-in email is kept under (lib/auth.ts codeHash), as tests/wg12-signin-code.test.ts.
+process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 
 const ORIGIN = "https://marktmorgen.com";
 const SITE = "nl:rl:signin-site";
@@ -97,26 +102,46 @@ async function main(): Promise<void> {
   const warned: string[] = [];
   const warn = console.warn;
   console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
-  let forCreator: Response;
-  let forNew: Response;
+  // Every command a request runs before its answer, its keys without their one-way hash: what its time is made of.
+  const shapeOf = async (address: string, email: string): Promise<{ answer: Response; shape: string[] }> => {
+    const seen: string[] = [];
+    redis.pipeline = (async (commands: Command[]) => {
+      seen.push(...commands.map((c) => `${c[0]} ${String(c[1]).replace(/[0-9a-f]{32,}$/, "#")}`));
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      return { answer: await signIn(request(address, email)), shape: seen };
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+  afterTasks.length = 0;
+  mail.clearCaptured();
+  let forCreator: { answer: Response; shape: string[] };
+  let forNew: { answer: Response; shape: string[] };
   let again: Response;
   try {
-    forCreator = await signIn(request("203.0.113.10", creator));
-    const linksForCreator = links();
-    forNew = await signIn(request("203.0.113.11", "newcomer@example.test"));
-    is("an address with an account is still sent its email past the ceiling", [linksForCreator, mail.sent.filter((m) => m.to.includes(creator)).length], [1, 1]);
-    is("a new address is sent nothing past the ceiling", [links(), mail.sent.filter((m) => m.to.includes("newcomer@example.test")).length], [1, 0]);
+    forCreator = await shapeOf("203.0.113.10", creator);
+    forNew = await shapeOf("203.0.113.11", "newcomer@example.test");
+    is("both answers go before anything is sent or an account is read", [links(), mail.sent.length, afterTasks.length], [0, 0, 2]);
+    is("and run the very same commands first: the time of the answer cannot tell an account", forCreator.shape, forNew.shape);
+    is("none of them reads an account", forCreator.shape.some((line) => /nl:store:owner|nl:account:stores/.test(line)), false);
     again = await signIn(request("203.0.113.12", "another@example.test"));
   } finally {
     console.warn = warn;
   }
-  const [a, b] = [await forCreator.json(), await forNew.json()];
-  is("both are told the same: busy, with the honest message", [forCreator.status, a.ok, a.error, a.message, forNew.status, b.ok, b.error, b.message], [503, false, "busy", SIGN_IN_BUSY_MESSAGE, 503, false, "busy", SIGN_IN_BUSY_MESSAGE]);
+  const [a, b] = [await forCreator.answer.json(), await forNew.answer.json()];
+  for (const task of afterTasks.splice(0)) await (task as () => Promise<void>)();
+  is("then an address with an account is sent its email", mail.sent.filter((m) => m.to.includes(creator)).length, 1);
+  is("under the very request id its browser was given, so the code in it opens there", redis.keys().includes(`nl:auth:code:${sha(`nimbus-auth-code:${a.request}`).slice(0, 40)}`), true);
+  is("and a new address is sent nothing", [links(), mail.sent.filter((m) => !m.to.includes(creator)).length], [1, 0]);
+  is("both are told the same: busy, with the honest message", [forCreator.answer.status, a.ok, a.error, a.message, forNew.answer.status, b.ok, b.error, b.message], [503, false, "busy", SIGN_IN_BUSY_MESSAGE, 503, false, "busy", SIGN_IN_BUSY_MESSAGE]);
   is("both are given a request id of the same shape", [typeof a.request, typeof b.request, String(a.request).length === String(b.request).length], ["string", "string", true]);
   is("never \"too many tries\", which is false for one who asked once", [a.error, b.error].includes("rate_limited"), false);
-  is("the same headers for both", [forCreator.headers.get("Retry-After"), forNew.headers.get("Retry-After"), forCreator.headers.get("Cache-Control")], ["3600", "3600", "no-store"]);
+  is("the same headers for both", [forCreator.answer.headers.get("Retry-After"), forNew.answer.headers.get("Retry-After"), forCreator.answer.headers.get("Cache-Control")], ["3600", "3600", "no-store"]);
   is("the log says once a window that the ceiling was reached, with no address in it", [warned.filter((line) => line.includes("emails an hour were reached")).length, warned.some((line) => /@|203\.0\.113/.test(line))], [1, false]);
   is("and a third request past it is still busy", again.status, 503);
+  afterTasks.length = 0;
   is("the message says nothing about the address it answers", /creator|newcomer|example/.test(SIGN_IN_BUSY_MESSAGE), false);
 
   part("An account that cannot be read past the ceiling is sent nothing, under the same answer");
@@ -128,6 +153,7 @@ async function main(): Promise<void> {
   console.error = () => {};
   try {
     const unreadable = await signIn(request("203.0.113.20", creator));
+    for (const task of afterTasks.splice(0)) await (task as () => Promise<void>)();
     is("busy, nothing sent", [unreadable.status, (await unreadable.json()).error, links(), mail.sent.length], [503, "busy", 0, 0]);
   } finally {
     redis.pipeline = real;

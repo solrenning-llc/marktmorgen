@@ -119,6 +119,7 @@ function centralAliases(file,root,here){
  }
  if(file==='stripe-charges-off.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='signup-to-ready-walk.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
+ if(file==='auth-link-limit.test.ts')aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='path-wording-provider.test.ts'){
   aliases['@/lib/redis']=join(here,'path-wording-provider-world.ts');
   aliases['@/lib/ai-spend']=join(root,'lib/ai-spend.ts');

@@ -1,4 +1,4 @@
-import type { NextRequest } from "next/server";
+import { type NextRequest, after } from "next/server";
 import { linkOrigin } from "@/lib/request-origin";
 import { prefillHandle } from "@/lib/handle-prefill";
 import {
@@ -105,14 +105,19 @@ export async function POST(request: NextRequest) {
     if (site === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     if (site === "over") {
       // Past it, a flood must not stop the creators' own logins: an address that already has an account is still sent
-      // its email, a new one waits, and both get the same "busy" answer and a request id, so nothing tells them apart.
-      // An account that cannot be read is sent nothing (CX-123 rule 24), under the same answer.
-      let issued = unusedSignInRequest();
-      try {
-        if (await hasAccount(email)) issued = (await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle))).request;
-      } catch (error) {
-        console.error("sign-in past the site's ceiling: nothing was sent", error);
-      }
+      // its email, a new one waits. Both get the same "busy" answer and a request id, and the answer goes before the
+      // account is even read: the reads and the email run after it (next/server after), so neither the answer nor the
+      // time it takes tells an account from a new address while the site is under a flood. An account that cannot be
+      // read is sent nothing (CX-123 rule 24).
+      const issued = unusedSignInRequest();
+      const [origin, handle] = [linkOrigin(request), prefillHandle(body.handle)];
+      after(async () => {
+        try {
+          if (await hasAccount(email)) await sendSignInLink(email, origin, handle, issued);
+        } catch (error) {
+          console.error("sign-in past the site's ceiling: nothing was sent", error);
+        }
+      });
       return Response.json(
         { ok: false, error: "busy", message: SIGN_IN_BUSY_MESSAGE, request: issued },
         { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "3600" } },

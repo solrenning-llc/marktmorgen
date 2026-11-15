@@ -51,6 +51,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
+import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -726,6 +727,22 @@ export async function createCheckout(
   // line is still at its floor here, which is the least it can be.
   applyShare(body, store, { recurring, least: leastPaid(linesTotal(body).cents, mayComeOff) });
 
+  // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
+  // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
+  // inTheCurrencyShown set it above. Judged here, after the share, on the
+  // session as it will be sent. The creator's choice and own prices arrive
+  // with their fields in unit 3b; until then a store is (a), automatic.
+  if (BUYER_CURRENCY_LIVE) {
+    applyBuyerCurrency(body, buyerCurrencyPlan({
+      live: BUYER_CURRENCY_LIVE,
+      mode: DEFAULT_BUYER_CURRENCY_MODE,
+      fee: hasApplicationFee(body),
+      settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId)),
+      manualPrices: false,
+      taxRates: hasTaxRates(body),
+    }));
+  }
+
   // The yes, with its version, its kind and its time, written last before the
   // order is admitted, with a field held back for the admitted mark: refused
   // rather than dropped when Stripe's fields have no room for it
@@ -1169,7 +1186,12 @@ export type Sale = {
   /** Stripe's own id for the sale. The creator can search it in Stripe. */
   reference: string;
   title: string;
-  amount: number;
+  /**
+   * What it cost, in the currency's smallest unit, exactly as Stripe gave it.
+   * null when Stripe did not give a whole number of at least zero: unknown,
+   * shown as unknown, never as 0 (rule 24).
+   */
+  amount: number | null;
   /** What it was paid in, as Stripe says. */
   currency: string;
   email: string | null;
@@ -1270,7 +1292,9 @@ export async function listSales(store: Store): Promise<SaleList> {
           row.metadata?.title ||
           known?.title ||
           "A product that is no longer listed",
-        amount: typeof row.amount_total === "number" ? row.amount_total : 0,
+        // Only a whole number of the smallest unit, at least zero, is an amount; anything
+        // else Stripe gave is unknown, never $0.00 nor the odd figure.
+        amount: Number.isSafeInteger(row.amount_total) && (row.amount_total as number) >= 0 ? (row.amount_total as number) : null,
         currency: typeof row.currency === "string" && row.currency ? row.currency : "usd",
         email: typeof email === "string" && email ? email : null,
         paidAt,

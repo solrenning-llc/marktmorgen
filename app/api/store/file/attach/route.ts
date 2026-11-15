@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { lockRead } from "@/lib/two-step-unknown";
 import { deleteFile as del, headFile as head } from "@/lib/file-store";
 import { setProductFile, storeForEmail, storeFolder } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -47,7 +48,10 @@ export async function POST(request: NextRequest) {
     // own, so the file is read where the id points (readDelivery), not on a product only.
     // Read once, only for a new file (the lock and the episodes need it); a detach reads it after its write instead.
     const delivery = detach ? null : await readDelivery(store, id);
-    if (!detach && (await lockedFor(request, "products", "replace")) && deliveredFile(delivery)) {
+    // The lock read exactly (main): an unknown read answers its own error, never "not locked".
+    const lock = detach ? false : await lockRead(lockedFor(request, "products", "replace"));
+    if (lock instanceof Response) return lock;
+    if (lock && deliveredFile(delivery)) {
       // An upload this session finished after another one attached a file first (the "open" check passed while there
       // was none) is deleted, not left held against the store and billed (Codex V on #4022). Only a finished upload
       // never attached, in this item's own folder and not its file (retireFreshUpload): never a path on the client's word.

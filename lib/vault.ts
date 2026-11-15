@@ -36,6 +36,7 @@
  *   R2_BUCKET              the bucket's name
  *
  *   nl:vault:up:<hash>     an upload that was opened and not yet closed
+ *   nl:vault:fresh:<hash>  an upload that was finished and not yet attached (FRESH_UPLOAD_SECONDS)
  */
 import { createHash, randomBytes } from "node:crypto";
 import { type AwsKey, EMPTY_HASH, hashOf, presignV4, signV4 } from "@/lib/aws-sign";
@@ -150,6 +151,12 @@ type Upload = {
 const UPLOAD_ID = /^[A-Za-z0-9._~+/=-]{1,1024}$/;
 
 const uploadKey = (pathname: string) => `nl:vault:up:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+const freshKey = (pathname: string) => `nl:vault:fresh:${createHash("sha256").update(pathname).digest("hex").slice(0, 40)}`;
+/**
+ * How long a finished upload is noted as not yet attached: its random path is the only proof that it was this
+ * store's own upload and is still nobody's file, so the attach that refuses it may delete it (retireFreshUpload).
+ */
+export const FRESH_UPLOAD_SECONDS = 7 * 86_400;
 
 /**
  * The upload opened at this path; null only when Redis confirms there is none.
@@ -317,8 +324,30 @@ export async function closeVaultUpload(
     await redisPipeline([["DEL", uploadKey(pathname)]]);
     return { ok: false, reason: "invalid" };
   }
-  await redisPipeline([["DEL", uploadKey(pathname)]]);
+  // Noted as finished and not yet attached in the same step that forgets the open upload (Codex V on #4022).
+  await redisPipeline([["DEL", uploadKey(pathname)], ["SET", freshKey(pathname), "1", "EX", FRESH_UPLOAD_SECONDS]]);
   return { ok: true, file: { pathname, bytes: found.bytes, contentType: found.contentType || upload.type } };
+}
+
+/**
+ * Deletes a finished upload that was never attached, when its attach is refused (a session let in without its second
+ * step, lib/two-step.ts, beaten to the product by another one: Codex V on #4022). Only a path noted as finished and not
+ * attached (closeVaultUpload) is deleted, so a path a client names, or a file already attached, never is. The note goes
+ * only after the store confirms the deletion; a failed one keeps it, for the next refusal. A note that cannot be read
+ * is unknown and deletes nothing (rule 24). True when the file was deleted.
+ */
+export async function retireFreshUpload(pathname: string): Promise<boolean> {
+  if (!isVaultPath(pathname) || !vaultConfig() || !isRedisConfigured()) return false;
+  const read = repliesFor(await redisPipeline([["GET", freshKey(pathname)]]), 1);
+  if (!read || read[0] !== "1") return false;
+  if (!(await deleteVault([pathname]))) return false;
+  await redisPipeline([["DEL", freshKey(pathname)]]);
+  return true;
+}
+
+/** A finished upload is attached: it is a file now, never to be deleted as a refused upload. */
+export async function forgetFreshUpload(pathname: string): Promise<void> {
+  if (isVaultPath(pathname) && isRedisConfigured()) await redisPipeline([["DEL", freshKey(pathname)]]);
 }
 
 /** Forgets an upload only after the provider confirms its cancellation. */

@@ -36,6 +36,8 @@ import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
+import { PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
+import { ORDER_WRITE } from "@/lib/order-data";
 import { done, is, part } from "./check";
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -280,6 +282,44 @@ async function main(): Promise<void> {
   // the names and answers are those of the code: "paypal:" and 64, a time of 12, an order of 36, a score of 24.
   is("what one answer and its name weigh is counted, both questions (HMGET and ZMSCORE)", BOOK_KEPT_REFUND_BYTES >= 4 * 8 + 71 + 12 + 36 + 24, true);
   is("the entry's own bytes are still counted", AFFILIATE_ENTRY_BYTES, 4_096);
+
+  // Claude 7 on #3464 (MÉDIO, cost): the watch's lasting write is one ORDER_WRITE EVAL a refund look, tried again an
+  // hour on while it fails; tests/plan-cost-registry.ts prices it (PAYPAL_REFUND_KEPT), never "not certified".
+  part("The lasting write's commands are the cost line's, retries included");
+  {
+    const scripts = async (run: () => Promise<unknown>) => {
+      const original = redis.pipeline;
+      const sent: (string | number)[][] = [];
+      redis.pipeline = async (commands) => {
+        sent.push(...commands);
+        return original.call(redis, commands);
+      };
+      try {
+        await run();
+      } finally {
+        redis.pipeline = original;
+      }
+      const kept = sent.filter((c) => c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:order-write:v1") && c.some((a) => String(a).startsWith(`nl:ppsell:back:${SID}`)));
+      return { kept, sent };
+    };
+    await setup();
+    captures.set(CAPTURE, "REFUNDED");
+    const ok = await scripts(() => watch());
+    is("one ORDER_WRITE script a refund look", ok.kept.length, PAYPAL_REFUND_KEPT.scriptsPerRefundLook);
+    is("carrying one write, the HSETNX", ok.kept.map((c) => [Number(c[2 + Number(c[2]) + 1]), c[2 + Number(c[2]) + 2]]), [[PAYPAL_REFUND_KEPT.writesPerScript, "HSETNX"]]);
+    // The script's own calls for one HSETNX field at its dearest (lib/order-data.ts, ORDER_WRITE): EXISTS, TYPE,
+    // HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET; with EVAL.
+    const calls = ["EXISTS", "TYPE", "HEXISTS", "HSTRLEN", "HSETNX", "HEXISTS", "HSTRLEN", "HGET", "HGET", "HSET"];
+    is("every call counted is one the script makes", calls.every((name) => name === "HSETNX" || ORDER_WRITE.includes(`redis.call('${name}'`)), true);
+    is("the line counts the script and each of its calls", PAYPAL_REFUND_KEPT.commandsPerScriptAtMost >= 1 + calls.length, true);
+    await setup();
+    captures.set(CAPTURE, "REFUNDED");
+    const failed = await scripts(() => answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch()));
+    const again = failed.sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER);
+    is("a failed write is one script and one ZADD an hour on", [failed.kept.length, again.length], [PAYPAL_REFUND_KEPT.scriptsPerRefundLook, PAYPAL_REFUND_KEPT.retryWritesPerFailedLook]);
+    is("tried again at most hourly, as the watch's looks", PAYPAL_REFUND_KEPT.looksPerDayAtMost, PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost);
+    is("and no longer than the watch keeps the order", PAYPAL_REFUND_KEPT.daysAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost);
+  }
 
   part("The refund seen twice, in the lasting record and in the set, counts once");
   await setup();

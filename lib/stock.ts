@@ -51,6 +51,24 @@ type Entry = { until: number; paid?: boolean };
 
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
 const lockKey = (id: string, productId: string) => `nl:stock:lock:${id}:${productId}`;
+/** The one hand-back a held checkout carries (handBackOnce), kept no longer than its hold. */
+const backKey = (id: string, session: string) => `nl:stock:back:${id}:${session}`;
+
+/**
+ * Takes the one hand-back a held checkout carries (Codex X5's and Codex L's MÉDIO on #4409), with the cleanup of
+ * its hold fields in the same round trip. Only the first answer that proves Stripe closed it may skip holdAdmission:
+ * a repeat with the same cookie, through the product checkout or the cart, gets null for its SET NX and answers
+ * false. A hold that already ran out carries none, and a reply in any other shape is unknown: false.
+ */
+async function handBackOnce(statsId: string, session: string, until: number, fields: (string | number)[][]): Promise<boolean> {
+  const seconds = Math.ceil((until - Date.now()) / 1000);
+  if (!(seconds > 0)) {
+    await redisPipeline(fields).catch(() => {});
+    return false;
+  }
+  const receipt = await redisPipeline([["SET", backKey(statsId, session), "1", "NX", "EX", seconds], ...fields]).catch(() => null);
+  return Array.isArray(receipt) && receipt.length === fields.length + 1 && receipt[0] === "OK";
+}
 
 async function readEntries(store: Store, product: Listing): Promise<Map<string, Entry>> {
   const receipt = await redisPipeline([["HGETALL", stockKey(store.statsId!, product.id)]]);
@@ -227,7 +245,7 @@ export async function confirmStock(store: Store, product: Listing, session: stri
  * Hands back the unit a buyer was holding when they go back from Stripe's
  * page and press buy again: the old checkout is closed at Stripe first, so it
  * can never be paid as well. A paid checkout cannot be closed, and stays sold.
- * True only when a held unit was handed back (holdAdmission is then not charged).
+ * True only for the one hand-back the checkout carries (handBackOnce; holdAdmission is then not charged).
  */
 export async function releaseStockHold(store: Store, product: Listing, session: string): Promise<boolean> {
   if (limitedStock(product) === null || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return false;
@@ -246,8 +264,7 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
   } catch {
     return false;
   }
-  await redisPipeline([["HDEL", stockKey(store.statsId, product.id), session]]);
-  return true;
+  return handBackOnce(store.statsId, session, entry.until, [["HDEL", stockKey(store.statsId, product.id), session]]);
 }
 
 /** Exactly `count` replies, each an explicit 0 or 1, read by index so a hole in a sparse reply is never taken for one. */
@@ -493,10 +510,14 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   if (limited.length === 0 || !store.statsId || !store.stripeAccountId || !isRedisConfigured()) return false;
   if (!/^cs_(test|live)_[A-Za-z0-9]{8,200}$/.test(session)) return false;
   const holding: Listing[] = [];
+  let until = 0;
   for (const product of limited) {
     const entry = (await readEntries(store, product)).get(session);
     if (entry?.paid) return false;
-    if (entry) holding.push(product);
+    if (entry) {
+      holding.push(product);
+      until = Math.max(until, entry.until);
+    }
   }
   if (holding.length === 0) return false;
   try {
@@ -506,6 +527,5 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
     return false;
   }
   const statsId = store.statsId;
-  await redisPipeline(holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
-  return true;
+  return handBackOnce(statsId, session, until, holding.map((product) => ["HDEL", stockKey(statsId, product.id), session]));
 }

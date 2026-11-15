@@ -217,12 +217,13 @@ export const ORDER_COMPUTE = 0.0003;
  * A cart's stock work at its worst (lib/stock.ts, withCartStockHolds; 513 [PF1], the independent review of 5 November 2026):
  * every limited product of a cart of MAX_CART, its lock taken at its most tries, its count, its provisional hold, the admission
  * and the hand-over scripts with the commands they run inside, the hand-over's failure path, and the previous checkout's units
- * handed back first (releaseCartStockHolds). Measured in tests/cart-stock.test.ts and held to a declared share of ORDER_COMPUTE,
+ * handed back first (releaseCartStockHolds, with its one hand-back taken by a SET NX in the same round trip as the HDELs since
+ * Codex X5's and Codex L's MÉDIO on #4409, one command more). Measured in tests/cart-stock.test.ts and held to a declared share of ORDER_COMPUTE,
  * so the rest of it is left for the order's pages and jobs. Stripe is never asked while a lock is held; the holds that ran out
  * are asked about after the locks are let go, every product at once, at most MAX_CHECKS times each at CHECK_MS (lib/stock.ts),
  * so the waiting is at most CART_STOCK_STRIPE_WAIT_MS besides the locks' own short waits.
  */
-export const CART_STOCK_COMMANDS_MOST = 70;
+export const CART_STOCK_COMMANDS_MOST = 71;
 export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**

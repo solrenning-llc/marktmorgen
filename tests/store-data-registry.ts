@@ -968,6 +968,7 @@ export const FAMILIES: Record<string, Family> = {
     ],
   },
   "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
+  "nl:stock:back:@lib/stock.ts": short("A held checkout's one hand-back, kept no longer than its hold (Codex X5 and L on #4409)", "request", 1, 128, REQ("checkout")),
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),

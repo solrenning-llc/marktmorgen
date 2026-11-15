@@ -46,6 +46,9 @@ test("in another currency the VAT is also stated in euro at a recent ECB rate, r
   assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: "2026-11-15" } }), null, "a rate after the sale");
   assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: "2026-11-01" } }), null, "a rate too old");
   assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "abc", day: "2026-11-13" } }), null);
+  for (const impossible of ["2026-13-01", "2026-11-31", "2026-02-30"]) {
+    assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: impossible } }), null, `${impossible} is no day, and never a throw`);
+  }
   assert.equal(euInvoice({ ...collect, currency: "JPY" }), null, "minor units other than hundredths are not modelled");
 });
 

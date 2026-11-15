@@ -113,9 +113,23 @@ const namedId = (raw: unknown): string =>
 function ownInvoice(sub: Sub, invoice: Record<string, unknown>): boolean {
   const subId = namedId(sub.id);
   const customerId = namedId(sub.customer);
-  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
-  const named = [namedId(invoice.subscription), namedId(parent?.subscription_details?.subscription)].filter(Boolean);
-  return subId !== "" && customerId !== "" && named.length > 0 && named.every((one) => one === subId) && namedId(invoice.customer) === customerId;
+  if (subId === "" || customerId === "") return false;
+  const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const present = (holder: Record<string, unknown>, key: string) => Object.hasOwn(holder, key) && holder[key] !== null && holder[key] !== undefined;
+  // A name that is truly absent may be given by the other API version's place; one that is present must be read as
+  // this subscription's id. A present but unreadable name, or a parent of another shape, may hide another subscription
+  // (Codex P on this branch, rule 30): the invoice is then not this membership's own.
+  const named: string[] = [];
+  if (present(invoice, "subscription")) named.push(namedId(invoice.subscription));
+  if (present(invoice, "parent")) {
+    if (!isObject(invoice.parent)) return false;
+    if (present(invoice.parent, "subscription_details")) {
+      const details = invoice.parent.subscription_details;
+      if (!isObject(details)) return false;
+      if (present(details, "subscription")) named.push(namedId(details.subscription));
+    }
+  }
+  return named.length > 0 && named.every((one) => one === subId) && namedId(invoice.customer) === customerId;
 }
 
 /** What the email says, and nothing else: pure, so it can be read before it is sent. */

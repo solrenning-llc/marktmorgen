@@ -935,7 +935,7 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
 
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */
 export async function eventCount(id: string): Promise<number> {
-  if (!isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  return Math.min(Number(n) || 0, MAX_KEPT_EVENTS);
+  // Read exactly (rule 24; Claude 4 nuvem R): an unknown count throws, and the erasure answers "unavailable" instead
+  // of paying for fewer units than it goes through.
+  return eventCountExact(id);
 }

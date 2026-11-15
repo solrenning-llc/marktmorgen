@@ -77,7 +77,7 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
-import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
+import { alignRecoveryLock, bindLink, endRecoveryLock, hideAddress, keepRecoveryAddress, linkStillBound, recoveryAddress } from "@/lib/recovery-address";
 
 export { hideAddress };
 
@@ -365,7 +365,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     (the questions the answers and the assistant missed) and "replace";
  *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
  *     "move" (an edit that changes the time, emailing everyone coming);
- *   - community: "report-delete" (a reported post or comment), and, for the
+ *   - community: "report-delete" (a reported post or comment), "held-remove"
+ *     (a member's post or comment waiting for approval, not published:
+ *     app/api/store/community/approval), and, for the
  *     creator inside their own community (app/api/store/community, chat and
  *     the lesson comments, where the owner is known by the address and not
  *     by studioAccess), "email" (an announcement emailed to every member),
@@ -390,7 +392,7 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
-  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
   orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
@@ -482,9 +484,14 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
  * whether this session is a member; an answer of another shape counts as one.
  * Three commands, only for the sessions of such an account, for as long as its
  * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
+ * The three replies are read only in their exact shape (CX-123 rule 24): a
+ * pipeline cut short, with a reply too many, a hole, a getter or a Proxy is
+ * unknown, and an unknown lock is locked, never set free by a stray zero.
  */
 async function keptListed(session: string, owner: string, now: number): Promise<number> {
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
+  const replies = repliesFor(await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]), 3);
+  if (!replies) return now + SESSION_TTL_SECONDS * 1000;
+  const [kept, member, left] = replies;
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
@@ -502,11 +509,12 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
+  // Who is told, and everything else the notice needs, is read before anything is written (review of #2883; Claude 6
+  // on #2948): an unknown recovery address (rule 24) throws here, with the waiting login not spent, no reset day set
+  // and nothing opened, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
-  // Everything the notice needs is read before anything is written (Claude 6 on #2948): a read that fails here spends
-  // nothing, sets no day and opens nothing, so two-step login never turns off on a login the owner was not told of.
-  const backup = await backupOf(email, record);
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
   if (countOf(removed) !== 1) return null;
@@ -662,7 +670,7 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
  * until they end (endLocked); whoever says so to the owner never says they
  * were logged out (review of #2556).
  */
-export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
+export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
@@ -674,7 +682,9 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
   const canceled =
     why === "login"
       ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled"
-      : "The request to turn off two-step login was canceled from your studio";
+      : why === "recovery"
+        ? "The recovery address was changed from your studio, so the request to turn off two-step login was canceled"
+        : "The request to turn off two-step login was canceled from your studio";
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",
@@ -823,9 +833,14 @@ export async function finishSetup(
   });
   if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
-  await keepRecoveryAddress(email, pending.b);
+  // Two-step login is on either way, and its codes are answered once: a keep Redis did not confirm is said as not
+  // kept, never as a way back in (review of #2883).
+  const keptBackup = await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
-  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`);
+  const way = keptBackup
+    ? `If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`
+    : `Your recovery address (${hideAddress(pending.b)}) could not be saved just now: add it again under Account in your studio, so a link sent there can let you back in if you ever lose your phone and your recovery codes.`;
+  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. ${way}`);
   return { codes };
 }
 
@@ -845,6 +860,8 @@ export async function sendRescue(token: string, origin: string): Promise<"sent" 
   if (!backup) return "none";
   if (!(await withinLimit("two-step-rescue", normaliseEmail(email), 3, 60 * 60))) return "limited";
   const rescue = randomBytes(32).toString("hex");
+  // Tied to the address it goes to first: once the owner takes that address away or replaces it, it turns nothing off.
+  if (!(await bindLink("rescue", rescue, backup, 15 * 60))) return "unsent";
   await redisPipeline([["SET", rescueKey(rescue), normaliseEmail(email), "EX", 15 * 60]]);
   const sent = isSenderConfigured()
     ? await sendEmail({ meter: { by: "company" },
@@ -878,6 +895,9 @@ export async function spendRescue(token: string): Promise<string | null> {
   }
   if (typeof email !== "string" || !email) return null;
   const address = email;
+  // Mailed to a recovery address the owner has since taken away or replaced: it turns nothing off.
+  const record = await read(address);
+  if (!record || !(await linkStillBound("rescue", token, await backupOf(address, record)))) return null;
   // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
   const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
   if (!off) return null;

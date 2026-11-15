@@ -101,6 +101,8 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const { handle, product: productId } = await params;
   const query = await searchParams;
   const loaded = await load(handle, productId, textOf(query, "pkg"), textOf(query, "move")).catch(() => null);
+  // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab.
+  if (loaded?.store.suspended) return { title: "Book a call — Marktmorgen", robots: { index: false, follow: true } };
   // Resting: the tab says so, and names nothing of the call, which was not read or is not drawn.
   if (loaded?.state === "resting") return { title: `${speech(loaded.store).w.restingTitle} — ${loaded.store.name}`, robots: { index: false, follow: true } };
   // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
@@ -140,6 +142,10 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkgToken = textOf(query, "pkg");
   const { pkg, soon } = loaded;
   const pkgState = pkg ? await packageState(pkg.bought) : null;
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page; a booking
+  // already paid (moved above) and a package already bought with a session still to book are the buyer's, and keep
+  // their way in. A package used up or past its last day books nothing, so it opens nothing either (Codex G on #3193).
+  if (store.suspended && !(pkgState && pkgState.left > 0)) return <StoreResting store={store} suspended />;
   const sellable = canSellProduct(store, product);
   const open = sellable && soon === false;
   const unread = sellable && soon === null;
@@ -386,7 +392,8 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
           <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
-          <StoreTracking store={store} presence />
+          {/* Switched off after a report (lib/takedown.ts): what stays open carries no ad pixels and counts no visit. */}
+          {store.suspended ? null : <StoreTracking store={store} presence />}
         </div>
       </main>
     </div>

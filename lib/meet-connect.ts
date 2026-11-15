@@ -532,12 +532,22 @@ function confirmDeleted(replies: unknown, commands: number, what: string): void 
 export async function forgetUser(
   provider: MeetProvider,
   accountId: string,
+  /**
+   * When the person removed the app, in milliseconds, as the notice says (Zoom's `deauthorization_time`). A
+   * connection made after it is a new grant, connected again since: kept, and kept in the account's index, so the
+   * provider's notice for that grant still finds it. Without a time, every connection of the account goes, as before.
+   */
+  removedAt?: number,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
   const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(provider, accountId)]]), 1)?.[0]);
   if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   const pass = stores.slice(0, FORGET_PASS);
+  // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while
+  // the creator connected anew in between; webhooks/cron audit, Claude 1, 12/11/2026): their new connection stays.
+  const newer: string[] = [];
+  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   try {
     for (const statsId of pass) {
       const c = await withLock(refreshLockKey(statsId, provider), 20, 9_000, async () => {
@@ -547,16 +557,25 @@ export async function forgetUser(
         const found = parseConnection(read[0], provider);
         if (!found) throw new UnknownReplyError("a meeting connection");
         if (found.account.id !== accountId) return null;
+        if (known && found.connectedAt > (removedAt as number)) {
+          newer.push(statsId);
+          return null;
+        }
         confirmDeleted(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)]]), 2, "a meeting connection's deletion");
         return found;
       });
       if (c) forgot.push({ statsId, owner: c.owner, account: viewOf(c).account });
     }
+    const walked = pass.filter((statsId) => !newer.includes(statsId));
     if (stores.length > pass.length) {
-      confirmDeleted(await redisPipeline([["SREM", userKey(provider, accountId), ...pass]]), 1, "a meeting account's walked stores");
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(provider, accountId), ...walked]]), 1, "a meeting account's walked stores");
       throw new IncompleteForget(forgot, "more stores than one pass walks; the next notice walks the rest");
     }
-    confirmDeleted(await redisPipeline([["DEL", userKey(provider, accountId)]]), 1, "a meeting account's index deletion");
+    if (newer.length) {
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(provider, accountId), ...walked]]), 1, "a meeting account's walked stores");
+    } else {
+      confirmDeleted(await redisPipeline([["DEL", userKey(provider, accountId)]]), 1, "a meeting account's index deletion");
+    }
   } catch (error) {
     throw error instanceof IncompleteForget ? error : new IncompleteForget(forgot, error);
   }

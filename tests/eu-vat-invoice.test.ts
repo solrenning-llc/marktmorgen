@@ -38,18 +38,28 @@ test("until the owner's OSS registration is configured, no collected sale can be
   }
 });
 
-test("in another currency the VAT is also stated in euro at a recent ECB rate, rounded half up once", () => {
-  const usd = { ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: "2026-11-13" } };
-  const invoice = euInvoice(usd);
-  assert.deepEqual(invoice?.vatNational, { currency: "EUR", cents: 164, perEuro: "1.1606", day: "2026-11-13", source: ECB_REFERENCE_RATES });
+test("in another currency the VAT is also stated in euro at the latest ECB rate published before the sale's day", () => {
+  // 2026-11-14 is a Saturday: Friday's rate is the latest before it; Thursday's is older and never chosen.
+  const ecb = [{ day: "2026-11-12", perEuro: "1.2000" }, { day: "2026-11-13", perEuro: "1.1606" }];
+  const usd = { ...collect, currency: "USD", ecb };
+  assert.deepEqual(euInvoice(usd)?.vatNational, { currency: "EUR", cents: 164, perEuro: "1.1606", day: "2026-11-13", source: ECB_REFERENCE_RATES });
+  // The sale's own day is never used: the ECB publishes around 16:00 CET, after a sale earlier that day.
+  assert.equal(euInvoice({ ...usd, ecb: [{ day: "2026-11-14", perEuro: "1.1606" }] }), null);
+  assert.equal(euInvoice({ ...usd, ecb: [{ day: "2026-11-15", perEuro: "1.1606" }] }), null, "a rate after the sale");
+  assert.equal(euInvoice({ ...usd, ecb: [{ day: "2026-11-01", perEuro: "1.1606" }] }), null, "a rate too old");
   assert.equal(euInvoice({ ...collect, currency: "USD" }), null, "no rate, no invoice");
-  assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: "2026-11-15" } }), null, "a rate after the sale");
-  assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: "2026-11-01" } }), null, "a rate too old");
-  assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "abc", day: "2026-11-13" } }), null);
+  assert.equal(euInvoice({ ...usd, ecb: [{ day: "2026-11-13", perEuro: "abc" }] }), null);
+  assert.equal(euInvoice({ ...usd, ecb: [{ day: "2026-11-13", perEuro: "1.1606" }, { day: "2026-11-13", perEuro: "1.3000" }] }), null, "one day, two rates");
   for (const impossible of ["2026-13-01", "2026-11-31", "2026-02-30"]) {
-    assert.equal(euInvoice({ ...collect, currency: "USD", ecb: { perEuro: "1.1606", day: impossible } }), null, `${impossible} is no day, and never a throw`);
+    assert.equal(euInvoice({ ...usd, ecb: [{ day: impossible, perEuro: "1.1606" }] }), null, `${impossible} is no day, and never a throw`);
   }
   assert.equal(euInvoice({ ...collect, currency: "JPY" }), null, "minor units other than hundredths are not modelled");
+});
+
+test("an invoice's VAT must be the rate's on the taxable amount, half up", () => {
+  assert.equal(euInvoice({ ...collect, vat: { priceCents: 1000, vatCents: 1, totalCents: 1001, basisPoints: 1900, country: "DE" } }), null);
+  assert.equal(euInvoice({ ...collect, vat: { priceCents: 1000, vatCents: 191, totalCents: 1191, basisPoints: 1900, country: "DE" } }), null);
+  assert.notEqual(euInvoice({ ...collect, taxableCents: 3, vat: { priceCents: 3, vatCents: 1, totalCents: 4, basisPoints: 1900, country: "DE" } }), null, "0.57 rounds up to 1");
 });
 
 test("toEuroCents converts in integers, half up", () => {

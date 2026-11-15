@@ -92,10 +92,13 @@ const isoMoment = (value: unknown): string | null => {
  * "unavailable": the VAT is charged, never waived, whatever VIES could not say.
  */
 export function readViesAnswer(asked: { country: string; number: string }, status: number, body: unknown, askedAt: Date): ViesAnswer {
+  const when = askedAt instanceof Date && Number.isFinite(askedAt.getTime()) ? askedAt.toISOString() : null;
   const base: ViesAnswer = {
-    state: "unavailable", country: asked.country, number: asked.number, askedAt: askedAt.toISOString(), viesDate: null, error: null,
+    state: "unavailable", country: asked.country, number: asked.number, askedAt: when ?? "", viesDate: null, error: null,
     name: null, address: null, requestIdentifier: null,
   };
+  // A clock that is not a moment cannot date the check, so the answer cannot be used: never valid.
+  if (when === null) return base;
   if (!body || typeof body !== "object" || Array.isArray(body)) return base;
   const answer = body as Record<string, unknown>;
   if (answer.actionSucceed === false) {
@@ -162,11 +165,17 @@ export async function checkVies(raw: unknown, options: { fetcher?: Fetcher; now?
 /** The longest a VIES answer may be old when the sale uses it: VIES confirms validity only for the current day. */
 export const VIES_FRESH_SECONDS = 3600;
 
-/** Whether `answer` is a "valid" VIES answer for `country`, asked at most VIES_FRESH_SECONDS before `now` (and not after it). */
+/**
+ * Whether `answer` confirms a business for `country` at `now`: VIES answered "valid" and gave the associated name and
+ * address (Regulation 282/2011 art. 18(1)(a): confirmation "of the validity of that identification number and of the
+ * associated name and address"; a Member State that does not display them, VIES FAQ resp17, leaves the business
+ * unconfirmed and its VAT charged), asked at most VIES_FRESH_SECONDS before `now`, on the same day, never after it.
+ */
 export function viesValidFor(answer: unknown, country: string, now: Date): answer is ViesAnswer {
-  if (!answer || typeof answer !== "object") return false;
+  if (!answer || typeof answer !== "object" || !(now instanceof Date) || !Number.isFinite(now.getTime())) return false;
   const a = answer as Partial<ViesAnswer>;
   if (a.state !== "valid" || a.country !== country || typeof a.number !== "string" || !BODY.test(a.number)) return false;
+  if (typeof a.name !== "string" || a.name.trim() === "" || typeof a.address !== "string" || a.address.trim() === "") return false;
   const asked = typeof a.askedAt === "string" ? Date.parse(a.askedAt) : NaN;
   if (!Number.isFinite(asked)) return false;
   const age = (now.getTime() - asked) / 1000;

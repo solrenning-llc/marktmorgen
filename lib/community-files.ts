@@ -291,7 +291,10 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
   // With nothing else naming it, false means only that the delete failed.
   if (await removeCommunityImage(path)) return;
   console.error("a community picture whose delete failed is listed for the daily sweep");
-  await redisPipeline([["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
+  // Its mark goes first (merge of main's 25c1b63df with this PR's mark): a picture marked TAKEN is kept by the sweep,
+  // so a dropped picture listed with its mark would stay in storage for good, its place counted. No post keeps it any
+  // more, and its name is not reopened: a door asks the file store first and refuses a name it still has.
+  await redisPipeline([["DEL", uploadKey(path)], ["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
     console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
   );
 }

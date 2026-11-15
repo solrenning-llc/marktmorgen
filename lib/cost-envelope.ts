@@ -35,6 +35,9 @@ export function remainingResourceCostCents(
       remaining -= BigInt(cost);
       if (remaining < BigInt(0)) return null;
     }
+    // All entries are now validated primitive data. Reflection alone cannot
+    // prove completeness: a Proxy may conceal a liability by lying about length.
+    structuredClone(otherCostCeilings);
     return Number(remaining);
   } catch { return null; }
 }

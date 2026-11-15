@@ -157,9 +157,13 @@ export function parseQuiz(raw: unknown): Quiz | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
-    const questions = Array.isArray(value.questions)
-      ? value.questions.map(parseQuestion).filter((q): q is Question => q !== null).slice(0, MAX_QUESTIONS)
-      : [];
+    if (!Array.isArray(value.questions)) return null;
+    const questions: Question[] = [];
+    for (const raw of value.questions) {
+      const question = parseQuestion(raw);
+      if (!question) return null;
+      if (questions.length < MAX_QUESTIONS) questions.push(question);
+    }
     const attempts = wholeIn(value.attempts, 0, MAX_ATTEMPTS);
     if (questions.length === 0 || attempts === null || (value.usagePolicy !== undefined && value.usagePolicy !== QUIZ_USAGE_POLICY)) return null;
     return {

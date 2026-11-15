@@ -496,7 +496,7 @@ export type SesOutcome = "sent" | "busy" | "account" | "refused";
 
 const ACCOUNT_ERRORS = /AccountSuspended|SendingPaused|MailFromDomainNotVerified|LimitExceeded|AccessDenied|InvalidClientTokenId|SignatureDoesNotMatch|UnrecognizedClient|ExpiredToken|NotFound/i;
 
-export async function sesSend(config: SesConfig, message: SesMessage, beforePost?: () => Promise<boolean>): Promise<{ outcome: SesOutcome; why: string; uncertain?: true }> {
+export async function sesSend(config: SesConfig, message: SesMessage, beforePost?: () => Promise<boolean>): Promise<{ outcome: SesOutcome; why: string; uncertain?: true; notPosted?: true }> {
   const payload = JSON.stringify({
     FromEmailAddress: message.from,
     Destination: { ToAddresses: [message.to] },
@@ -543,7 +543,7 @@ export async function sesSend(config: SesConfig, message: SesMessage, beforePost
     if (ACCOUNT_ERRORS.test(why) || /not verified|sandbox|quota/i.test(why)) return { outcome: "account", why };
     return { outcome: "refused", why };
   } catch (error) {
-    if (error instanceof SesPostNotAuthorized) return { outcome: "refused", why: error.message };
+    if (error instanceof SesPostNotAuthorized) return { outcome: "refused", why: error.message, notPosted: true };
     // A lost response is not proof that SES did not accept the message.
     return { outcome: "busy", why: error instanceof Error ? error.message.slice(0, 200) : "no answer", uncertain: true };
   }
@@ -600,17 +600,18 @@ export async function sesBatch<T extends SesMessage>(
   messages: T[],
   batchKey: string,
   beforePost?: () => Promise<boolean>,
-): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true }> {
+): Promise<{ taken: T[]; left: T[]; down: string; uncertain?: true; notPosted?: true }> {
   const taken: T[] = [];
   const refused = new Set<T>();
   const perSecond = Math.max(1, Math.floor(state.rate || 1));
   const started = Date.now();
   let down = "";
   let uncertain = false;
+  let notPosted = false;
   let queue = [...messages];
-  for (let round = 0; round < 2 && queue.length && !down && !uncertain; round += 1) {
+  for (let round = 0; round < 2 && queue.length && !down && !uncertain && !notPosted; round += 1) {
     const again: T[] = [];
-    for (let i = 0; i < queue.length && !down && !uncertain; i += perSecond) {
+    for (let i = 0; i < queue.length && !down && !uncertain && !notPosted; i += perSecond) {
       if (Date.now() - started > BATCH_MS) {
         again.push(...queue.slice(i));
         break;
@@ -620,7 +621,12 @@ export async function sesBatch<T extends SesMessage>(
       const results = await Promise.all(wave.map((m) => sesSend(config, m, beforePost)));
       const done: T[] = [];
       results.forEach((result, j) => {
-        if (result.uncertain === true) {
+        if (result.notPosted === true) {
+          // An allowance refusal is not a bad recipient. Keep the exact
+          // unsent message and stop before another wave or provider route.
+          notPosted = true;
+          again.push(wave[j]);
+        } else if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
           uncertain = true;
@@ -640,14 +646,14 @@ export async function sesBatch<T extends SesMessage>(
         // leaves these people out.
         await redisPipeline(done.map((m) => ["SET", didKey(batchKey, m.to), "1", "EX", DID_SECONDS])).catch(() => {});
       }
-      if (down || uncertain) again.push(...queue.slice(i + perSecond));
+      if (down || uncertain || notPosted) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }
     queue = again;
-    if (queue.length && !down && !uncertain && round === 0) {
+    if (queue.length && !down && !uncertain && !notPosted && round === 0) {
       if (Date.now() - started > BATCH_MS) break;
       await pause(1_000);
     }
   }
-  return { taken, left: queue.filter((m) => !refused.has(m)), down, ...(uncertain ? { uncertain: true as const } : {}) };
+  return { taken, left: queue.filter((m) => !refused.has(m)), down, ...(uncertain ? { uncertain: true as const } : {}), ...(notPosted ? { notPosted: true as const } : {}) };
 }

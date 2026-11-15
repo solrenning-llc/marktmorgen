@@ -46,6 +46,7 @@ function fixture(hash = "") {
       return [states[slot], (value: unknown) => { states[slot] = value; }];
     },
     useId: () => "help-hint",
+    useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => boolean) => getSnapshot(),
     useEffect: (effect: () => void | (() => void)) => { if (!mounted) effects.push(effect); },
   };
   const exports: { HelpSearch?: () => Node } = {};

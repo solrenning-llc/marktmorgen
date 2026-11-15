@@ -11,7 +11,9 @@
 import { apiError, apiOk } from "@/lib/api-guard";
 
 export const MAX_FIELDS_ASKED = 30;
-const NAME = /^[a-z][a-z0-9_]{0,39}$/;
+/** The longest a field name may be: lowercase letters, digits and underscores, starting with a letter. */
+export const FIELD_NAME_MAX = 40;
+const NAME = new RegExp(`^[a-z][a-z0-9_]{0,${FIELD_NAME_MAX - 1}}$`);
 
 /** The fields asked for, null when none; or the name that cannot be a field. */
 export function fieldsAsked(url: string): { ok: true; fields: string[] | null } | { ok: false; bad: string } {
@@ -48,7 +50,7 @@ export function pickFields(body: unknown, fields: string[] | null): { ok: true; 
  */
 export function badFields(request: Request, known?: readonly string[]): Response | null {
   const asked = fieldsAsked(request.url);
-  if (!asked.ok) return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. Use letters, digits and underscores, at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
+  if (!asked.ok) return apiError(400, "fields", asked.bad ? `“${asked.bad}” cannot be a field name. A field name is lowercase letters, digits and underscores, starting with a letter, up to ${FIELD_NAME_MAX} characters; ask for at most ${MAX_FIELDS_ASKED} fields.` : "Name at least one field, separated by commas.");
   const unknown = known && asked.fields?.find((f) => !known.includes(f));
   return unknown ? apiError(400, "unknown_field", `No item in this answer has a field named “${unknown}”.`) : null;
 }

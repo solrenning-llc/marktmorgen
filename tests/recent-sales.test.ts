@@ -25,11 +25,12 @@ process.env.STRIPE_SECRET_KEY = "sk_test_recent_only_a_stand_in";
 let refunds: Record<string, unknown>[] = [];
 let stripeDown = false;
 let asked = 0;
+let refundReply: unknown;
 globalThis.fetch = (async (input: string | URL | Request) => {
   if (String(input).includes("/refunds")) {
     asked += 1;
     if (stripeDown) return new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 });
-    return new Response(JSON.stringify({ object: "list", data: refunds, has_more: false }), { status: 200 });
+    return new Response(JSON.stringify(refundReply === undefined ? { object: "list", data: refunds, has_more: false } : refundReply), { status: 200 });
   }
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
 }) as typeof fetch;
@@ -103,6 +104,48 @@ async function main(): Promise<void> {
   is("Stripe cannot be asked: nothing shown", await recentSales(on), []);
   stripeDown = false;
   is("and asked again on the next visit, not left empty", (await recentSales(on)).length, 3);
+
+  part("Incomplete refund evidence never certifies public purchases");
+  const page = (data: unknown, has_more: unknown = false) => ({ object: "list", data, has_more });
+  const refund = { status: "succeeded", payment_intent: "pi_live2abcdef", amount: 500 };
+  const invalidPages: [string, unknown][] = [
+    ["missing envelope", {}], ["null envelope", null], ["array envelope", []],
+    ["missing list kind", { data: [], has_more: false }],
+    ["wrong list kind", { object: "refund", data: [], has_more: false }],
+    ["missing rows", { object: "list", has_more: false }], ["null rows", page(null)],
+    ["missing completion", { object: "list", data: [] }],
+    ["null completion", page([], null)], ["numeric completion", page([], 0)],
+    ["more pages", page([refund], true)], ["empty partial page", page([], true)],
+    ["missing row fields", page([{}])], ["null row", page([null])],
+    ["missing payment identity", page([{ status: "succeeded" }])],
+    ["invalid payment identity", page([{ ...refund, payment_intent: "" }])],
+    ["missing refund status", page([{ payment_intent: refund.payment_intent }])],
+    ["unknown refund status", page([{ ...refund, status: "unknown" }])],
+    ["partly valid page", page([refund, {}])],
+    ["overfull page", page(Array.from({ length: 101 }, () => refund))],
+  ];
+  for (const [name, reply] of invalidPages) {
+    await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
+    refundReply = reply;
+    const calls = asked;
+    is(name + ": no unchecked purchase shown", await recentSales(on), []);
+    is(name + ": no successful feed cached", await redis.pipeline([["GET", `nl:recent:feed:${base.statsId}`]]), [null]);
+    is(name + ": only the existing refund read", asked - calls, 1);
+  }
+  refundReply = page([refund]);
+  is("a confirmed retry still excludes the refunded purchase", (await recentSales(on)).map(s => s.at), [NOW - 3600, NOW - 3 * 3600, NOW - 30 * 3600]);
+  for (const status of ["pending", "requires_action", "succeeded", "failed", "canceled"]) {
+    await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
+    refundReply = page([{ ...refund, status }]);
+    is(status + ": confirmed refund state respected", (await recentSales(on)).some(s => s.at === NOW - 2 * 3600), status === "failed" || status === "canceled");
+  }
+  await redis.pipeline([["DEL", `nl:recent:feed:${base.statsId}`]]);
+  refundReply = page([]);
+  is("an explicitly empty complete page allows real purchases", (await recentSales(on)).length, 3);
+  const cachedCalls = asked;
+  await recentSales(on);
+  is("confirmed empty page keeps the existing cache behavior", asked, cachedCalls);
+  refundReply = undefined;
 
   part("Unknown or stale cached evidence is not public proof");
   await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW+3600,country:"DE"}])]]);

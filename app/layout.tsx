@@ -7,6 +7,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { SITE_OG_IMAGE } from "@/lib/site-og";
 import { REVEAL_ON, REVEAL_WATCH } from "@/lib/reveal-scripts";
 import { feeWords } from "@/lib/fee-words";
+import { PLANS_ON_SALE, PREVIEW_LINE } from "@/lib/opening";
 
 /* Optional font display avoids a late font swap shifting a cold mobile page.
    Creator-selected faces below retain their existing choices and behavior.
@@ -41,10 +42,12 @@ const friendly = Nunito({ variable: "--font-st-friendly", subsets: ["latin"], di
 const bold = Bricolage_Grotesque({ variable: "--font-st-bold", subsets: ["latin"], display: "swap", preload: false });
 const STORE_FONTS = [editorial, elegant, friendly, bold].map((f) => f.variable).join(" ");
 
-const SITE_TITLE =
-  "Marktmorgen — the link-in-bio store that pays into your own Stripe";
-const SITE_DESCRIPTION =
-  "A storefront for creators selling digital products, courses, memberships and booked sessions. Payments are processed through your own Stripe account, and " + feeWords().takes;
+const SITE_TITLE = PLANS_ON_SALE
+  ? "Marktmorgen — the link-in-bio store that pays into your own Stripe"
+  : "Marktmorgen — prepare your creator store";
+const SITE_DESCRIPTION = PLANS_ON_SALE
+  ? "A storefront for creators selling digital products, courses, memberships and booked sessions. Payments are processed through your own Stripe account, and " + feeWords().takes
+  : PREVIEW_LINE;
 
 export const viewport: Viewport = {
   /*

@@ -62,6 +62,11 @@ async function main(): Promise<void> {
   part("Nothing the row does not say");
   is("a button's address is never told", facts.includes("secret-recipes"), false);
   is("a decorative picture says nothing", facts.includes("Swirls"), false);
+  {
+    // A video behind a button is on the page, so it is a fact (review of #2135).
+    const page2 = { blocks: [{ id: "row00009", kind: "row", columns: [[{ kind: "video-window", video: { provider: "youtube", id: "dQw4w9WgXcQ" }, title: "The tour", label: "Watch the tour" }]] }] } as unknown as Parameters<typeof factsFor>[3];
+    is("a video in a window is told, with its button's words and its title", factsFor(store, product, "", page2).includes('A video, opened from the button "Watch the tour": The tour'), true);
+  }
   is("an empty row adds nothing", factsFor(store, product, "", parsePage({ blocks: [{ id: "row00002", kind: "row", columns: [[{ kind: "icon", name: "sparkle", label: "" }]] }] })).includes("Columns on the page"), false);
 
   done();

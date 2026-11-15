@@ -32,7 +32,7 @@ export const MAX_DRAFTED_SUBJECT = 120;
 
 export type DraftedStep = { delayHours: number; subject: string; body: string };
 
-const ADDRESS = /https?:\/\/[^\s<>()"']+/g;
+const ADDRESS = /https?:\/\/[^\s<>()"']+/gi;
 
 /**
  * The body without any line that holds a web address other than `allowed`:
@@ -40,8 +40,9 @@ const ADDRESS = /https?:\/\/[^\s<>()"']+/g;
  * no sentence is left pointing at nothing.
  */
 export function keepOwnLinks(body: string, allowed: readonly string[]): string {
-  const own = new Set(allowed.map((link) => link.replace(/\/+$/, "")));
-  const ours = (found: string) => own.has(found.replace(/[.,;:!?]+$/, "").replace(/\/+$/, ""));
+  const protocolKey = (link: string) => link.replace(/^https?:/i, (scheme) => scheme.toLowerCase());
+  const own = new Set(allowed.map((link) => protocolKey(link).replace(/\/+$/, "")));
+  const ours = (found: string) => own.has(protocolKey(found).replace(/[.,;:!?]+$/, "").replace(/\/+$/, ""));
   return body
     .split("\n")
     .filter((text) => (text.match(ADDRESS) ?? []).every(ours))

@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       const key = `nl:rl:export:${store.statsId}:ended:${ended}`;
       const [, taken] = await redisPipeline([["SET", key, "0", "EX", ENDED_EXPORT_SECONDS, "NX"], ["INCR", key]]);
       if (Number(taken) > ENDED_STORE_EXPORTS) {
-        return plain(429, `You have downloaded your whole store ${ENDED_STORE_EXPORTS} times since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
+        return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS} times since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
       }
     } else {
       const took = await takeAllowance(store, "studio", exportUnits(await exportShape(store)));

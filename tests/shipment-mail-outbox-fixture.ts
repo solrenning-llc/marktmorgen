@@ -3,7 +3,7 @@
  * real Redis in scripts/test_shipment_mail_outbox_redis.py.
  */
 import { store } from "./redis-stub";
-import { SHIPMENT_MAIL_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
+import { SHIPMENT_MAIL_SCRIPT, SHIPMENT_MAIL_REFUSED_SCRIPT, type ShipmentMailPolicy, type ShipmentMailPipeline } from "@/lib/shipment-mail-outbox";
 
 export const shipmentPolicy = (now = Date.now()): ShipmentMailPolicy => ({
   reviewId: "SYNTHETIC_SHIPMENT_ONLY", evidence: "SYNTHETIC; no live funding or account",
@@ -21,6 +21,33 @@ export function shipmentOutboxFixture() {
     const answers: unknown[] = [];
     for (const c of batch) {
       commands.push([...c]);
+      if (c[0] === "EVAL" && c[1] === SHIPMENT_MAIL_REFUSED_SCRIPT) {
+        const count = Number(c[2]), pools = c.slice(3, 3 + count).map(String);
+        const [operation, field, expected] = c.slice(3 + count).map(String);
+        if (pools.some(pool => !["none", "hash"].includes(String(store.run(["TYPE", pool]))))) { answers.push([0]); continue; }
+        if (operation === "one") {
+          const raw = store.run(["HGET", pools[0], field]);
+          answers.push(typeof raw === "string" && Buffer.byteLength(raw) > 1024 ? [0] : [1, raw ?? ""]);
+        } else if (operation === "list") {
+          const values = store.run(["HGETALL", pools[0]]) as string[];
+          const picked: string[] = []; let valid = values.length <= 20004;
+          for (let i = 0; i < values.length; i += 2) {
+            if (!values[i].startsWith("refused:")) continue;
+            if (!/^refused:[a-f0-9]{64}:[a-f0-9]{64}$/.test(values[i])) valid = false;
+            if (!field || values[i].startsWith(field)) {
+              if (Buffer.byteLength(values[i + 1]) > 1024) valid = false;
+              picked.push(values[i], values[i + 1]);
+            }
+          }
+          answers.push(valid ? [1, picked] : [0]);
+        } else if (operation === "erase") {
+          const gf = `refused:${field.slice(-64)}`;
+          const g = store.run(["HGET", pools[0], gf]), own = store.run(["HGET", pools[1], field]);
+          if ((g !== null && g !== expected) || (own !== null && own !== expected)) answers.push([0]);
+          else { store.run(["HDEL", pools[0], gf]); store.run(["HDEL", pools[1], field]); answers.push([1]); }
+        } else answers.push([0]);
+        continue;
+      }
       if (c[0] !== "EVAL" || c[1] !== SHIPMENT_MAIL_SCRIPT) {
         answers.push(...await base([c])); continue;
       }
@@ -48,10 +75,21 @@ export function shipmentOutboxFixture() {
           answer = ["queued", supplied];
         }
       } else if (!raw) answer = ["missing"];
-      else if (raw !== expected) answer = ["changed"];
+      else if (raw !== expected && !(op === "not-posted" && (() => {
+        try {
+          const current = JSON.parse(raw), prior = JSON.parse(expected);
+          return current.state === "dispatching" && current.owner === owner && prior.state === "preparing" && prior.owner === owner &&
+            ["id", "statsId", "session", "person", "sourceValue", "sealed", "fingerprint", "bytes", "created", "authorizedAt", "checks", "reviewId"].every(key => prior[key] === current[key]);
+        } catch { return false; }
+      })())) answer = ["changed"];
       else {
         const value = JSON.parse(raw);
-        if (op === "accepted" || op === "cancel" || op === "refused" && value.originKind === "single_digital_renewal" && value.state === "dispatching" && value.owner === owner) {
+        if (op === "accepted" || op === "cancel" || op === "refused" && (value.kind !== "confirmation" || value.originKind === "single_digital_renewal")) {
+          if (op === "refused" && value.kind !== "confirmation") {
+            const summary = JSON.stringify({ state: "refused", at: now, session: value.session });
+            store.run(["HSET", k[5], `refused:${value.id}`, summary]);
+            store.run(["HSET", k[6], `refused:${value.person}:${value.id}`, summary]);
+          }
           if(value.originKind==="single_digital_renewal"){store.run(["DEL",k[10]]);store.run(["SREM",k[11],value.id]);}
           store.run(["DEL", k[0]]); store.run(["ZREM", k[2], value.id]);
           for (const index of [3, 4, 7]) store.run(["SREM", k[index], value.id]);
@@ -66,7 +104,8 @@ export function shipmentOutboxFixture() {
         } else if (value.owner !== owner) answer = ["held", raw];
         else {
           value.state = op === "dispatch" ? "dispatching" : op === "refused" ? "refused" : "queued";
-          value.leaseUntil = 0;
+          value.leaseUntil = op === "dispatch" ? now + 60000 : 0;
+          if (["not-posted", "not-accepted", "defer"].includes(op)) value.owner = "";
           value.next = value.state === "queued" ? now + policy!.retryMilliseconds : 0;
           const next = JSON.stringify(value); store.run(["SET", k[0], next]);
           if (value.next) store.run(["ZADD", k[2], value.next, value.id]); else store.run(["ZREM", k[2], value.id]);

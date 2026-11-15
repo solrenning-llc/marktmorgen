@@ -161,6 +161,7 @@ const en = {
   checkingOlder: "Checking older purchases…",
   olderShown: (count: number) =>
     count === 0 ? "None of the purchases checked can be opened again." : count === 1 ? "1 more purchase is now on the list." : `${count} more purchases are now on the list.`,
+  olderBatchShown: (count: number) => count === 0 ? "No purchases in this batch can be opened again." : count === 1 ? "This page shows 1 purchase from this batch." : `This page shows ${count} purchases from this batch.`,
   olderFailed: "Older purchases could not be checked just now. Try again in a moment.",
   /** The pages drawn without JavaScript (app/[handle]/orders/page.tsx): a bundle's products, or a batch of older purchases, and the way back. */
   backToList: "Back to all your purchases",
@@ -418,6 +419,7 @@ const es: OrdersWords = {
   checkingOlder: "Comprobando compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Ninguna de las compras comprobadas se puede volver a abrir." : count === 1 ? "1 compra más está ahora en la lista." : `${count} compras más están ahora en la lista.`,
+  olderBatchShown: (count) => count === 0 ? "No se puede volver a abrir ninguna compra de este grupo." : count === 1 ? "Esta página muestra 1 compra de este grupo." : `Esta página muestra ${count} compras de este grupo.`,
   olderFailed: "No se han podido comprobar las compras anteriores ahora. Inténtalo de nuevo en un momento.",
   backToList: "Volver a todas tus compras",
   olderTitle: "Compras anteriores",
@@ -659,6 +661,7 @@ const fr: OrdersWords = {
   checkingOlder: "Vérification des achats plus anciens…",
   olderShown: (count) =>
     count === 0 ? "Aucun des achats vérifiés ne peut être rouvert." : count < 2 ? "1 achat de plus figure maintenant dans la liste." : `${count}${S}achats de plus figurent maintenant dans la liste.`,
+  olderBatchShown: (count) => count === 0 ? "Aucun achat de ce groupe ne peut être rouvert." : count === 1 ? "Cette page présente 1 achat de ce groupe." : `Cette page présente ${count} achats de ce groupe.`,
   olderFailed: "Les achats plus anciens ne peuvent pas être vérifiés pour le moment. Réessayez dans un instant.",
   backToList: "Retour à tous vos achats",
   olderTitle: "Achats plus anciens",
@@ -900,6 +903,7 @@ const de: OrdersWords = {
   checkingOlder: "Ältere Käufe werden geprüft…",
   olderShown: (count) =>
     count === 0 ? "Keiner der geprüften Käufe kann erneut geöffnet werden." : count === 1 ? "1 weiterer Kauf steht jetzt in der Liste." : `${count} weitere Käufe stehen jetzt in der Liste.`,
+  olderBatchShown: (count) => count === 0 ? "Kein Kauf aus dieser Gruppe kann erneut geöffnet werden." : count === 1 ? "Diese Seite zeigt 1 Kauf aus dieser Gruppe." : `Diese Seite zeigt ${count} Käufe aus dieser Gruppe.`,
   olderFailed: "Ältere Käufe können gerade nicht geprüft werden. Versuchen Sie es gleich noch einmal.",
   backToList: "Zurück zu all Ihren Käufen",
   olderTitle: "Ältere Käufe",
@@ -1145,6 +1149,7 @@ const it: OrdersWords = {
   checkingOlder: "Verifica degli acquisti precedenti…",
   olderShown: (count) =>
     count === 0 ? "Nessuno degli acquisti verificati può essere riaperto." : count === 1 ? "1 acquisto in più è ora nell'elenco." : `${count} acquisti in più sono ora nell'elenco.`,
+  olderBatchShown: (count) => count === 0 ? "Nessun acquisto di questo gruppo può essere riaperto." : count === 1 ? "Questa pagina mostra 1 acquisto di questo gruppo." : `Questa pagina mostra ${count} acquisti di questo gruppo.`,
   olderFailed: "Non è stato possibile verificare gli acquisti precedenti ora. Riprova tra un momento.",
   backToList: "Torna a tutti i tuoi acquisti",
   olderTitle: "Acquisti precedenti",
@@ -1385,6 +1390,7 @@ const nl: OrdersWords = {
   checkingOlder: "Oudere aankopen worden gecontroleerd…",
   olderShown: (count) =>
     count === 0 ? "Geen van de gecontroleerde aankopen kan opnieuw worden geopend." : count === 1 ? "1 aankoop extra staat nu in de lijst." : `${count} aankopen extra staan nu in de lijst.`,
+  olderBatchShown: (count) => count === 0 ? "Geen aankoop uit deze groep kan opnieuw worden geopend." : count === 1 ? "Deze pagina toont 1 aankoop uit deze groep." : `Deze pagina toont ${count} aankopen uit deze groep.`,
   olderFailed: "Oudere aankopen kunnen nu niet worden gecontroleerd. Probeer het zo opnieuw.",
   backToList: "Terug naar al je aankopen",
   olderTitle: "Oudere aankopen",
@@ -1626,6 +1632,7 @@ const pt: OrdersWords = {
   checkingOlder: "A verificar compras anteriores…",
   olderShown: (count) =>
     count === 0 ? "Nenhuma das compras verificadas pode ser aberta novamente." : count === 1 ? "Mais 1 compra está agora na lista." : `Mais ${count} compras estão agora na lista.`,
+  olderBatchShown: (count) => count === 0 ? "Nenhuma compra deste grupo pode ser aberta novamente." : count === 1 ? "Esta página mostra 1 compra deste grupo." : `Esta página mostra ${count} compras deste grupo.`,
   olderFailed: "Não foi possível verificar as compras anteriores agora. Tente novamente daqui a pouco.",
   backToList: "Voltar a todas as suas compras",
   olderTitle: "Compras anteriores",

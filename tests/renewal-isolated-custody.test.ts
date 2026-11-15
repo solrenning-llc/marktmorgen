@@ -7,7 +7,7 @@ import {
   readCourseConfirmationOrigin, readSingleDigitalRenewalOrigin, reserveCourseConfirmationOrigin,
   runOrderConfirmationMail, type ConfirmationOriginRuntime,
 } from "@/lib/order-confirmation-outbox";
-import { SHIPMENT_MAIL_SCRIPT } from "@/lib/shipment-mail-outbox";
+import { enqueueShipmentMail, runShipmentMail, SHIPMENT_MAIL_SCRIPT } from "@/lib/shipment-mail-outbox";
 import { paidDownloadRenewalPost } from "@/app/api/store/download/route";
 import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { createCheckout } from "@/lib/store-checkout";
@@ -298,6 +298,39 @@ test("native Redis: the twelve-key renewal custody footprint fits its reserved r
   } finally { await w.cleanup(); }
 });
 
+test("native Redis: ending a renewal preserves refused physical evidence in the same pool", { skip: !native }, async () => {
+  const w = await world(true);
+  try {
+    const now = w.runtime.now!(), statsId = w.f.store.statsId!;
+    const session = "cs_test_SharedPoolShipment000001";
+    const queued = await enqueueShipmentMail({ statsId, session, authorizedAt: now,
+      shipped: { at: Math.floor(now / 1000), tracking: "" },
+      message: { from: "Store <owner@example.test>", to: "physical-buyer@example.test", subject: "Shipment", text: "Original shipment", replyTo: "owner@example.test" },
+    }, w.runtime);
+    assert.ok(queued.ok);
+    await runShipmentMail(w.runtime.now!() + 30_000, async (_message, beforePost) => {
+      assert.equal(await beforePost(), true); return "refused";
+    }, w.runtime);
+    const globalPool = "nl:ship:mail:pool", storePool = `${globalPool}:${statsId}`;
+    const summaryFields = await w.run([["HKEYS", storePool]]);
+    assert.ok(Array.isArray(summaryFields[0]));
+    const fields = (summaryFields[0] as string[]).filter(field => field.startsWith("refused:"));
+    assert.equal(fields.length, 1);
+    const before = await w.run([["HGET", storePool, fields[0]]]);
+    assert.equal(typeof before[0], "string");
+    const renewal = await enqueueSingleDigitalRenewal(w.f.store, w.original, nonce(1100), w.runtime);
+    assert.ok(renewal.ok);
+    const result = await runOrderConfirmationMail(w.runtime.now!() + 30_000, async (_message, beforePost) => {
+      assert.equal(await beforePost(), true); return "accepted";
+    }, w.runtime);
+    assert.equal(result.accepted, 1);
+    assert.equal(await readSingleDigitalRenewalOrigin(renewal.id, w.runtime), null);
+    assert.deepEqual(await w.run([["HGET", storePool, fields[0]]]), before, "renewal release cannot delete a physical outcome");
+    assert.deepEqual(await w.run([["HGET", storePool, "items"], ["HGET", storePool, "bytes"], ["HLEN", storePool]]), [null, null, 1]);
+    assert.equal((await w.run([["HLEN", globalPool]]))[0], 3, "global counters and physical outcome survive");
+  } finally { await w.cleanup(); }
+});
+
 test("native Redis: INFO measures the exact twelve-key app Lua without observer commands", { skip: !native }, async () => {
   const w = await world(true), base = w.runtime.pipeline!;
   type Profile = { operation: string; result: string; total: number; calls: Record<string, number> };
@@ -332,8 +365,9 @@ test("native Redis: INFO measures the exact twelve-key app Lua without observer 
       // supplier invoice nor financial approval of the synthetic policy.
       const result = executed[1] as unknown[]; assert.ok(Array.isArray(result));
       const operation = String(command[3 + Number(command[2])]);
-      const ceilings: Record<string, number> = { "enqueue:queued": 34, "enqueue:duplicate": 18, "cancel:canceled": 32, "claim:preparing": 20, "renewal-prepare:prepared": 19, "dispatch:dispatching": 20, "accepted:accepted": 33 };
+      const ceilings: Record<string, number> = { "enqueue:queued": 35, "enqueue:duplicate": 18, "cancel:canceled": 32, "claim:preparing": 20, "renewal-prepare:prepared": 19, "dispatch:dispatching": 20, "accepted:accepted": 33 };
       const ceiling = ceilings[`${operation}:${result[0]}`]; assert.ok(Number.isSafeInteger(ceiling));
+      console.log(JSON.stringify({ proof: "CX121-parent-integration-red", operation, result: result[0], observed: total, ceiling, calls }));
       assert.ok(total <= ceiling, `${operation}/${result[0]} observed ${total} commands, above the measured ${ceiling} ceiling`);
       profiles.push({ operation, result: String(result[0]), total, calls });
       answers.push(result);

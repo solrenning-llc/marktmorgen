@@ -139,6 +139,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `app/studio/bundles/page.tsx` | SETTING | 128–167: bundle price labels and editor | no |
 | `app/studio/community/page.tsx` | SETTING | 211–216: product price labels | no |
 | `app/studio/deals/page.tsx` | SETTING | 63: deal values the creator types (not sale money) | no |
+| `components/deal-channels-table.tsx` | SETTING | 17, 72: deals' values by their person's first channel, the values the creator typed (not sale money), shown in the store's currency (639 [GL7](9)) | no |
 | `app/studio/forms/page.tsx` | SETTING | 81: a deal value from a form | no |
 | `app/studio/funnels/page.tsx` | SETTING | 203/342–343: offer planning and funnel editor prices | no |
 | `app/studio/import/page.tsx` | SETTING | 125: an imported product's price label | no |

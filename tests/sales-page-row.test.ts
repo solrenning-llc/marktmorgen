@@ -19,6 +19,7 @@
  *     an empty row takes no place;
  *   - "row" is in the block gallery for a product's page, and only there.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { type BlockContext, BlockView, PageSections } from "@/components/sales-blocks";
@@ -34,7 +35,9 @@ import {
   MAX_ROW_PARAGRAPH,
   ROW_ICONS,
   type PageBlock,
+  type Video,
   copyOfPage,
+  embedUrl,
   emptyBlock,
   keepPictures,
   pageProblem,
@@ -58,6 +61,7 @@ const el = {
   link: { kind: "button", label: "See the recipes", url: "https://example.com/recipes" },
   image: { kind: "image", picture: picture(1), decorative: false },
   video: { kind: "video", video: youtube, title: "A week, planned" },
+  window: { kind: "video-window", video: youtube, title: "A tour of the planner", label: "Watch the tour" },
 };
 
 const row = (columns: unknown, id = "row00001") => ({ id, kind: "row", columns });
@@ -115,6 +119,9 @@ const refused: [string, unknown][] = [
   ["a picture from elsewhere", { kind: "image", picture: { ...picture(1), path: "https://evil.example/x.png" }, decorative: false }],
   ["a picture with no description", { kind: "image", picture: picture(1, ""), decorative: false }],
   ["a video from elsewhere", { kind: "video", video: { provider: "evil", id: "x" }, title: "" }],
+  ["a video in a window from elsewhere", { kind: "video-window", video: { provider: "evil", id: "x" }, title: "", label: "Watch" }],
+  ["a video in a window with no button words", { kind: "video-window", video: youtube, title: "A tour", label: "   " }],
+  ["a video in a window with no video", { kind: "video-window", title: "A tour", label: "Watch" }],
   ["not an object", "heading"],
 ];
 for (const [what, value] of refused) is(`${what}: refused`, parseRowElement(value), null);
@@ -176,6 +183,38 @@ is("buttons use the theme's button, at least 44 pixels high", (html.match(/class
 is("in the studio's preview a link button does nothing", draw(three, { ...ctx, preview: true }).includes('href="https://example.com/recipes"'), false);
 const video = draw(keep([row([[el.video]])]).page.blocks[0]);
 is("a video is the lazy player, loading nothing before play", [video.includes("<iframe"), video.includes("A week, planned")], [false, true]);
+{
+  // Unit 5: a video in a window. Drawn on the server as a button and a closed, empty dialog: no player, no request.
+  const windowed = keep([row([[el.window]])]);
+  is("a video in a window is kept as sent", [windowed.problem, windowed.page.blocks[0]?.kind === "row" ? windowed.page.blocks[0].columns[0][0] : null], [null, el.window]);
+  const shown = draw(windowed.page.blocks[0]);
+  {
+    const css = readFileSync("app/globals.css", "utf8");
+    is("the window scrolls to the player's controls when a long title takes its room (400% zoom; review of #2135)", /\.vw-dialog \{[^}]*overflow-y: auto;/.test(css), true);
+    is("the Close button keeps its words at 7:1 under the pointer: its own darker hover", /\.pv-button\.vw-close:hover \{\s*background-color: rgb\(255 255 255 \/ 0\.18\);/.test(css), true);
+  }
+  is("a theme button, at least 44 pixels high, that says it opens a video", [shown.includes('<button type="button" class="btn st-btn sp-row-btn" aria-haspopup="dialog">Watch the tour <span class="sp-video-window-mark">(video)</span></button>')], [true]);
+  is("its window is closed and empty until pressed: no player, nothing loaded", [/<dialog[^>]*class="pv-dialog vw-dialog"/.test(shown), /<dialog[^>]* open/.test(shown), shown.includes("<iframe"), shown.includes("youtube")], [true, false, false, false]);
+  const preview = draw(windowed.page.blocks[0], { ...ctx, preview: true });
+  is("in the studio's preview the button is drawn and does nothing", [preview.includes("Watch the tour"), preview.includes("<button"), preview.includes("<dialog")], [true, false, false]);
+  is("the mark is said in the page's language", draw(windowed.page.blocks[0], { ...ctx, lang: "pt" }).includes('<span class="sp-video-window-mark">(vídeo)</span>'), true);
+  is("the player waits for its own play button for a visitor who asked for less motion", [embedUrl(youtube as Video).includes("autoplay=1"), embedUrl(youtube as Video, { autoplay: false }).includes("autoplay=0"), embedUrl(youtube as Video, { autoplay: false }).includes("autoplay=1")], [true, true, false]);
+  const source = readFileSync("components/video-window.tsx", "utf8");
+  is(
+    "the window: native modal dialog (page inert, Escape closes), focus in on open and back on close, frame only while open, named by its title",
+    [
+      source.includes("box.showModal();"),
+      source.includes("close.current?.focus();"),
+      /onClose=\{\(\) => \{[^}]*setOpen\(false\);\s*opener\.current\?\.focus\(\);/.test(source),
+      /\{open \? \(\s*<div className="pv-frame">/.test(source),
+      source.includes("aria-labelledby={titleId}"),
+      source.includes('matchMedia("(prefers-reduced-motion: reduce)")') && source.includes("embedUrl(video, { autoplay: !still })"),
+      // The Close button says its name in words, not only an icon.
+      /className="pv-button vw-close"[\s\S]{0,400}\{words\.viewerClose\}\s*<\/button>/.test(source),
+    ],
+    [true, true, true, true, true, true, true],
+  );
+}
 const tags = draw(keep([row([[{ kind: "heading", text: "<script>alert(1)</script>" }, { kind: "paragraph", text: '<img src=x onerror="alert(1)">' }]])]).page.blocks[0]);
 is("a tag typed is drawn as text, never as markup", [tags.includes("<script>"), tags.includes("&lt;script&gt;"), tags.includes("<img src=x")], [false, true, false]);
 is("a row with nothing in it is not drawn", draw({ id: "row00009", kind: "row", columns: [[], []] }), "");

@@ -255,7 +255,7 @@ async function main(): Promise<void> {
   for (;;) if (!(await takeAllowance(one, "webhook")).ok) break;
   const hook = await emitEvent(one, "refund.issued", "re_test_0099", { amount_cents: 100 });
   view = await webhooksView(one);
-  is("past the figure a delivery is not tried, and says why", [hook, received.length, view.log[0].state, view.log[0].attempts, view.log[0].lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], [1, sentSoFar, "failed", 0, true]);
+  is("past the figure a delivery is not tried, and says why", [hook, received.length, view.log[0].state, view.log[0].attempts, view.log[0].lastError.startsWith("Not sent. Your webhook deliveries for this month are used")], [0, sentSoFar, "failed", 0, true]);
   is("it is not tried again either", [(await deliverDue(Date.now() + 10_000, Date.now() + 86_400_000)).tried, received.length], [0, sentSoFar]);
   is("Store's figure is the one published", STORE_ALLOWANCES.creator.webhook > 0, true);
 

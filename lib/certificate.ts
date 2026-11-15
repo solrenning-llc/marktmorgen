@@ -132,28 +132,62 @@ export function hasFinished(course: Course, done: Set<string>, passed: Set<strin
   return lessons.every(({ lesson }) => done.has(lesson.id)) && requiredQuizLessons(course).every((id) => passed.has(id));
 }
 
-function parseCertificate(raw: unknown): Certificate | null {
+type CertificateRecord = Record<string, unknown> & Pick<Certificate, "id" | "name" | "title" | "store">;
+/** Privacy export keeps status as stored, without claiming that it is valid. */
+type CertificateCopy = Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> & Partial<Record<"issuedAt" | "withdrawnAt" | "validUntil", unknown>>;
+
+function certificateRecord(raw: unknown): CertificateRecord | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
-    const value = JSON.parse(raw) as Partial<Certificate>;
+    const value = JSON.parse(raw) as Record<string, unknown> | null;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
     if (typeof value.id !== "string" || !CERT_ID_PATTERN.test(value.id)) return null;
     if (typeof value.name !== "string" || typeof value.title !== "string" || typeof value.store !== "string") return null;
-    return {
-      id: value.id,
-      store: value.store,
-      productId: typeof value.productId === "string" ? value.productId : "",
-      courseId: typeof value.courseId === "string" ? value.courseId : "",
-      name: value.name,
-      title: value.title,
-      creator: typeof value.creator === "string" ? value.creator : "",
-      email: typeof value.email === "string" ? value.email : "",
-      issuedAt: typeof value.issuedAt === "number" ? value.issuedAt : 0,
-      withdrawnAt: typeof value.withdrawnAt === "number" ? value.withdrawnAt : 0,
-      ...(typeof value.validUntil === "number" && value.validUntil > 0 ? { validUntil: value.validUntil } : {}),
-    };
+    return value as CertificateRecord;
   } catch {
     return null;
   }
+}
+
+function certificateFields(value: CertificateRecord): Omit<Certificate, "issuedAt" | "withdrawnAt" | "validUntil"> {
+  return {
+    id: value.id,
+    store: value.store,
+    productId: typeof value.productId === "string" ? value.productId : "",
+    courseId: typeof value.courseId === "string" ? value.courseId : "",
+    name: value.name,
+    title: value.title,
+    creator: typeof value.creator === "string" ? value.creator : "",
+    email: typeof value.email === "string" ? value.email : "",
+  };
+}
+
+function copyCertificate(value: CertificateRecord): CertificateCopy {
+  return {
+    ...certificateFields(value),
+    ...(Object.hasOwn(value, "issuedAt") ? { issuedAt: value.issuedAt } : {}),
+    ...(Object.hasOwn(value, "withdrawnAt") ? { withdrawnAt: value.withdrawnAt } : {}),
+    ...(Object.hasOwn(value, "validUntil") ? { validUntil: value.validUntil } : {}),
+  };
+}
+
+function parseCertificate(raw: unknown): Certificate | null {
+  const value = certificateRecord(raw);
+  if (!value) return null;
+  // Status is evidence, not a default. Only absence of expiration means
+  // a legacy permanent certificate; malformed dates must never make one
+  // standing again. Bound dates to what JavaScript can actually display.
+  const seconds = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0 && n <= 8_640_000_000_000;
+  if (!Object.hasOwn(value, "issuedAt") || !seconds(value.issuedAt)) return null;
+  if (!Object.hasOwn(value, "withdrawnAt") || !seconds(value.withdrawnAt)) return null;
+  const hasExpiration = Object.hasOwn(value, "validUntil");
+  if (hasExpiration && (!seconds(value.validUntil) || value.validUntil === 0)) return null;
+  return {
+    ...certificateFields(value),
+    issuedAt: value.issuedAt,
+    withdrawnAt: value.withdrawnAt,
+    ...(hasExpiration ? { validUntil: value.validUntil as number } : {}),
+  };
 }
 
 export const certKey = (id: string) => `nl:cert:${id}`;
@@ -296,7 +330,8 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
       const chunk = others.slice(i, i + 500);
       const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
       (Array.isArray(rows) ? rows : []).forEach((raw, j) => {
-        if (parseCertificate(raw)?.email.trim().toLowerCase() === address) ids.add(chunk[j]);
+        const record = certificateRecord(raw);
+        if (typeof record?.email === "string" && record.email.trim().toLowerCase() === address) ids.add(chunk[j]);
       });
     }
     const list = [...ids].filter((id) => CERT_ID_PATTERN.test(id));
@@ -316,11 +351,11 @@ export async function forgetCertificatesPerson(courseIds: string[], email: strin
  * address), withdrawn ones included: for the copy of their data (619 [SZ3]).
  * Only reads.
  */
-export async function certificatesOf(courseIds: string[], email: string): Promise<Certificate[]> {
+export async function certificatesOf(courseIds: string[], email: string): Promise<CertificateCopy[]> {
   if (!courseIds.length || !isRedisConfigured()) return [];
   const who = emailKey(email);
   const address = email.trim().toLowerCase();
-  const out: Certificate[] = [];
+  const out: CertificateCopy[] = [];
   for (const courseId of courseIds) {
     const [mine, current, size] = await redisPipeline([["SMEMBERS", byKey(courseId, who)], ["HGET", indexKey(courseId), who], ["SCARD", allKey(courseId)]]);
     const [all] = Number(size) > 0 && Number(size) <= LEGACY_SCAN ? await redisPipeline([["SMEMBERS", allKey(courseId)]]) : [[]];
@@ -330,8 +365,8 @@ export async function certificatesOf(courseIds: string[], email: string): Promis
       const chunk = candidates.slice(i, i + 500);
       const [rows] = await redisPipeline([["MGET", ...chunk.map(certKey)]]);
       (Array.isArray(rows) ? rows : []).forEach((raw, k) => {
-        const certificate = parseCertificate(raw);
-        if (certificate && (ids.has(chunk[k]) || certificate.email.trim().toLowerCase() === address)) out.push(certificate);
+        const record = certificateRecord(raw);
+        if (record && (ids.has(chunk[k]) || (typeof record.email === "string" && record.email.trim().toLowerCase() === address))) out.push(copyCertificate(record));
       });
     }
   }

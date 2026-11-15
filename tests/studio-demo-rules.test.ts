@@ -27,7 +27,13 @@ const verdict = (v: { ok: boolean; reason?: string }) => (v.ok ? "ok" : v.reason
 part("Off, and off while any cost is unknown");
 is("STUDIO_DEMO_ON is false", STUDIO_DEMO_ON, false);
 is("an unknown cost is listed, so it could not be on", DEMO_UNKNOWN_COSTS.length > 0, true);
-is("on only when no cost is unknown", !STUDIO_DEMO_ON || DEMO_UNKNOWN_COSTS.length === 0, true);
+// The two conditions docs/studio-demo.md sets besides the costs: the privacy policy says what the demo keeps, and the exposure has its reviewed line.
+const privacy = readFileSync("app/privacy/page.tsx", "utf8");
+const funded = readFileSync("docs/funded-exposure-review.md", "utf8");
+const privacyNamesDemo = privacy.includes("nl_studio_demo") && /fingerprint/i.test(privacy.slice(Math.max(0, privacy.indexOf("nl_studio_demo") - 600), privacy.indexOf("nl_studio_demo") + 600));
+// The demo's own line: one row of the review's tables naming both the item and the demo, not two words anywhere.
+const fundedHasDemo = funded.split("\n").some((line) => line.startsWith("|") && line.includes("256 [KJ1]") && /studio demo/i.test(line));
+is("on only when no cost is unknown, the privacy policy names the demo's cookie and the address's daily fingerprint, and docs/funded-exposure-review.md has the demo's line", !STUDIO_DEMO_ON || (DEMO_UNKNOWN_COSTS.length === 0 && privacyNamesDemo && fundedHasDemo), true);
 is("off: no session opens, whatever the counts", verdict(demoSessionAllowed({ today: "2026-11-04", sessionsToday: 0, commandsToday: 0 })), "off");
 is("off: no action runs", verdict(demoActionAllowed({ actions: 0, bytes: 0, startedAt: 0, now: 1, commandsToday: 0 }, { commands: 1, bytes: 1 })), "off");
 
@@ -102,32 +108,53 @@ const refusals = num("DEMO_REFUSALS_PER_DAY");
 const perOpening = num("DEMO_START_FUNCTION_MICRO_USD") + num("DEMO_SESSION_KEPT_MICRO_USD") + cdnPerAnswer;
 const perAction = DEMO_ACTION_FUNCTION_MICRO_USD + cdnPerAnswer;
 const perRefusal = num("DEMO_REFUSAL_FUNCTION_MICRO_USD") + cdnPerAnswer;
-const cohortMicroUsd = call("demoCohortFunctionWorstMicroUsd") + (reachable + actions) * cdnPerAnswer;
+const sessionRefusals = call("demoDaySessionRefusals");
+is("each reachable session counts its own refusals, at most", sessionRefusals, reachable * num("DEMO_REFUSALS_PER_SESSION"));
+const cohortMicroUsd = call("demoCohortFunctionWorstMicroUsd") + (reachable + actions + sessionRefusals) * cdnPerAnswer;
 const refusalsMicroUsd = call("demoRefusalsFunctionWorstMicroUsd") + refusals * cdnPerAnswer;
-const dayMicroUsd = cohortMicroUsd + refusalsMicroUsd;
-is("the day's function worst is one day's openings and its refusals", demoDayFunctionWorstMicroUsd(), call("demoCohortFunctionWorstMicroUsd") + call("demoRefusalsFunctionWorstMicroUsd"));
-// Every pair a day can hold, by brute force: s sessions open only while s whole worsts fit, each takes up to its actions.
+const keptDay = num("DEMO_DAY_HASHES_KEPT_MICRO_USD");
+is("the day's own hashes kept are priced, never zero", keptDay > 0, true);
+const dayMicroUsd = cohortMicroUsd + refusalsMicroUsd + keptDay;
+is("the day's function worst is one day's openings, its refusals and its own hashes kept", demoDayFunctionWorstMicroUsd(), call("demoCohortFunctionWorstMicroUsd") + call("demoRefusalsFunctionWorstMicroUsd") + keptDay);
+// Every count a day can hold, by brute force: s sessions open only while s whole worsts fit; each takes up to its
+// actions and counts up to its own refusals; the site counts up to its refusals. The sessions' own refusals q go
+// from 0 to s times their cap in steps of a session's cap, and the site's r in steps of a tenth, so a formula that
+// took the wrong cap or counted a term twice gives another most than this search.
+const perSessionRefusals = num("DEMO_REFUSALS_PER_SESSION");
 let best = 0;
 for (let s = 0; s <= DEMO_SESSIONS_PER_DAY; s += 1) {
   if (s * DEMO_SESSION_WORST_COMMANDS > DEMO_COMMANDS_PER_DAY) break;
-  for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += 1) {
-    for (const r of [0, refusals]) best = Math.max(best, s * perOpening + a * perAction + r * perRefusal);
+  for (let a = 0; a <= s * DEMO_ACTIONS_PER_SESSION; a += Math.max(1, DEMO_ACTIONS_PER_SESSION)) {
+    for (let q = 0; q <= s * perSessionRefusals; q += Math.max(1, perSessionRefusals)) {
+      for (let r = 0; r <= refusals; r += Math.max(1, refusals / 10)) best = Math.max(best, s * perOpening + a * perAction + q * perRefusal + r * perRefusal + keptDay);
+    }
   }
 }
 is("the day's ceiling is the most of every pair the caps allow", Math.abs(dayMicroUsd - best) < 1e-6, true);
 const dollars = (micro: number) => `$${(micro / 1e6).toFixed(2)}`;
 // A session lives past midnight, so thirty days can hold the actions of thirty-one days of openings.
-const thirtyMicroUsd = 31 * cohortMicroUsd + 30 * refusalsMicroUsd;
+const thirtyMicroUsd = 31 * cohortMicroUsd + 30 * (refusalsMicroUsd + keptDay);
+is(`the doc states what a day's own hashes cost kept (${keptDay.toFixed(2)} µ$)`, readFileSync("docs/studio-demo.md", "utf8").includes(`| ${keptDay.toFixed(2)} µ$ |`), true);
 const doc = readFileSync("docs/studio-demo.md", "utf8");
 is("an action at its worst, in micro-USD", Math.round(perAction * 100) / 100, 51.77);
 is(`the doc states the day's known worst (${dollars(dayMicroUsd)})`, doc.includes(`${dollars(dayMicroUsd)} a day`), true);
 is(`the doc states thirty days (${dollars(thirtyMicroUsd)})`, doc.includes(`${dollars(thirtyMicroUsd)} in thirty days`), true);
+{
+  // The cost registry's demo lines say the same day's worst, so a change of the figure cannot leave them behind
+  // (review of #2176: they had kept $1.38).
+  const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  const demoLines = registry.split("\n").filter((line) => /^\s+DEMO_[A-Z_]+: "/.test(line) && line.includes(" a day at the most"));
+  is(`every DEMO_ line of the registry states ${dollars(dayMicroUsd)} a day`, [demoLines.length > 0, demoLines.every((line) => line.includes(`${dollars(dayMicroUsd)} a day`))], [true, true]);
+}
+is(`the doc states the sessions' own refused actions (${sessionRefusals})`, doc.includes(`sessions' own ${sessionRefusals.toLocaleString("en-US")} refused actions`), true);
 is(`the doc states the reachable sessions and actions (${reachable}, ${actions})`, doc.includes(`${reachable} openings and ${actions.toLocaleString("en-US")} actions`), true);
 is("the doc says the demo stays off while a cost is unknown", /unknown/i.test(doc) && /STUDIO_DEMO_ON/.test(doc), true);
 
 part("Its life, refusals and addresses");
 is("a session lives longer than twenty hours (WCAG 2.2.1, its twenty-hour exception)", DEMO_SESSION_SECONDS > 20 * 3600, true);
 const kept = num("DEMO_SESSION_KEPT_MICRO_USD");
+const atEveryCap = perOpening + DEMO_ACTIONS_PER_SESSION * perAction + num("DEMO_REFUSALS_PER_SESSION") * perRefusal;
+is(`the doc states a session at every cap (${Math.round(atEveryCap)} µ$)`, doc.includes(`**${Math.round(atEveryCap).toLocaleString("en-US")} µ$ ($${(atEveryCap / 1e6).toFixed(4)})**`), true);
 is(`the doc states what a session's bytes cost for its whole life (${kept.toFixed(2)} µ$)`, doc.includes(`${kept.toFixed(2)} µ$`), true);
 is("a refusal's commands are bounded and its day's refusals capped", [Number.isSafeInteger(num("DEMO_REFUSAL_WORST_COMMANDS")) && num("DEMO_REFUSAL_WORST_COMMANDS") > 0, Number.isSafeInteger(refusals) && refusals > 0], [true, true]);
 is("no text says refusals are bounded per address", DEMO_UNKNOWN_COSTS.some((t) => /bounded per address/.test(t)), false);

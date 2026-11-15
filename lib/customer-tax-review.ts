@@ -87,6 +87,11 @@ function detached(value: unknown): unknown {
       for (const key of keys as string[]) record[key] = copy(own(key), depth + 1);
       out = record;
     }
+    // Validate each original subtree after its own data is checked. Proxy
+    // reflection may conceal a tax or exchange; reject it before an outer
+    // snapshot can lose that evidence. Children are checked first so a Proxy
+    // cannot introduce a getter into an earlier branch before it is cloned.
+    structuredClone(v);
     active.delete(v);
     return out;
   }

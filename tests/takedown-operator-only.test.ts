@@ -1,8 +1,10 @@
 /**
  * A notice's link acts only for the operator (issue #4036). The support email
- * that carries `/takedown/<token>` is sent with Reply-To set to the reporter and
- * says "Reply to this email to answer the sender", so a reply that quotes it
- * hands the token to the reporter. The token alone must not take a store down:
+ * that carries `/takedown/<token>` was sent with Reply-To set to the reporter and
+ * said "Reply to this email to answer the sender", so a reply that quoted it
+ * handed the token to the reporter; since #3612 its Reply-To is the support inbox
+ * (checked below), and a token that reaches the reporter another way (a forward)
+ * must still do nothing. The token alone must not take a store down:
  * the route answers anybody but the operator (DEMO_STUDIO_ADMIN, the person who
  * runs the site, as lib/search-console.ts isOperator reads it) exactly as it
  * answers an unknown token, and the page that shows the notice, with the
@@ -16,6 +18,7 @@ import { addStoreLink, claimHandle, ensureStatsId, setStripeAccount, setSubscrip
 import { readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
 import { isOperator } from "@/lib/search-console";
+import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -76,8 +79,8 @@ async function main(): Promise<void> {
     return { status: response.status, body: (await response.json()) as unknown };
   };
 
-  part("The support email's token reaches the reporter on a quoting reply");
-  is("the email replies to the reporter and carries the token", [mail.reply_to, mail.text.includes(`/takedown/${token}`)], ["mallory@example.com", true]);
+  part("The support email carries the token, and a Reply goes only to the support inbox (#3612)");
+  is("the email replies to the support inbox and carries the token", [mail.reply_to, mail.text.includes(`/takedown/${token}`)], [SUPPORT_EMAIL, true]);
 
   part("The token alone does nothing");
   is("no session: answered as an unknown token", await act(null), { status: 404, body: { ok: false, error: "gone" } });

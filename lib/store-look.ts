@@ -283,6 +283,11 @@ export type LookColours = {
   line: string;
   lineStrong: string;
   field: string;
+  /**
+   * The border of a text field, its only outline (WCAG 1.4.11, 274 [AX1]): the strong line moved towards the page's
+   * text until it keeps 3:1 against the field and every surface a field sits on (tests/field-edge-contrast.test.ts).
+   */
+  fieldEdge: string;
   /** The fill of the buttons: the creator's colour, moved until it can be seen. */
   accent: string;
   /** The words on that fill. */
@@ -359,6 +364,12 @@ export function lookColours(look: LookPaint): LookColours {
     (c) => contrast(c, palette.text) >= 7 && contrast(c, palette.muted) >= 7 && contrast(c, accentText) >= 7,
   );
 
+  const fieldEdge = nearestPassing(
+    palette.lineStrong,
+    palette.text,
+    (c) => [palette.field, palette.card, palette.item, palette.bg].every((surface) => contrast(c, surface) >= 3),
+  );
+
   // The band behind the name on the Colour theme runs from the fill to a
   // shade of it. The shade moves in the direction that helps the words on it.
   const accent2 = onAccent === WHITE ? mix(fill, BLACK, 0.3) : mix(fill, WHITE, 0.35);
@@ -372,6 +383,7 @@ export function lookColours(look: LookPaint): LookColours {
     line: palette.line,
     lineStrong: palette.lineStrong,
     field: palette.field,
+    fieldEdge,
     accent: fill,
     onAccent,
     accentText,
@@ -395,6 +407,7 @@ export function lookStyle(look: LookPaint): Record<string, string> {
     "--st-line": c.line,
     "--st-line-strong": c.lineStrong,
     "--st-field": c.field,
+    "--st-field-edge": c.fieldEdge,
     "--st-accent": c.accent,
     "--st-on-accent": c.onAccent,
     "--st-accent-text": c.accentText,

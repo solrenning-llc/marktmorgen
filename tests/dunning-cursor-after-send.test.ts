@@ -37,6 +37,10 @@ let outOfTimeOnSend = false;
 /** Memberships told to keep the card that pays (before a first failed-payment email). */
 const kept: string[] = [];
 
+/** Card pages kept for a membership (finishCardUpdate's session), the sets asked of Stripe, and those answered 500. */
+const cardPages = new Map<string, { sub: string; customer: string; store: string }>();
+const cardSets: string[] = [];
+const unsure = new Set<string>();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
@@ -64,6 +68,22 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
       shift += 60_000;
     }
     return answer({ object: "list", data: all.slice(from, from + limit), has_more: from + limit < all.length });
+  }
+  // A card page (lib/card-update.ts finishCardUpdate): the session, the membership and the card's setting.
+  const page = path.match(/^\/checkout\/sessions\/(cs_test_\w+)$/);
+  if (page && cardPages.has(page[1]) && method === "GET") {
+    const { sub, customer, store } = cardPages.get(page[1])!;
+    return answer({ id: page[1], object: "checkout.session", mode: "setup", status: "complete", customer, metadata: { kind: "card", store, subscription: sub }, setup_intent: { status: "succeeded", payment_method: "pm_NewCardUnsure01", metadata: { subscription: sub } } });
+  }
+  const one = path.match(/^\/subscriptions\/(sub_\w+)$/);
+  if (one && method === "GET") {
+    const row = [...active.values()].flat().find((r) => r.id === one[1]);
+    return row ? answer({ ...row, customer: (row.customer as { id: string }).id, latest_invoice: null }) : answer({ error: { message: "no such subscription" } }, 404);
+  }
+  if (one && method === "POST" && [...cardPages.values()].some((p) => p.sub === one[1])) {
+    cardSets.push(one[1]);
+    if (unsure.has(one[1])) return answer({ error: { type: "api_error", message: "An unknown error occurred" } }, 500);
+    return answer({ id: one[1], default_payment_method: new URLSearchParams(String(init?.body ?? "")).get("default_payment_method") });
   }
   if (/^\/subscriptions\/sub_\w+$/.test(path) && method === "POST") {
     kept.push(path.split("/").pop() as string);
@@ -156,6 +176,9 @@ function reset(): void {
   slow.clear();
   slowActive.clear();
   outOfTimeOnSend = false;
+  cardPages.clear();
+  cardSets.length = 0;
+  unsure.clear();
 }
 
 async function main(): Promise<void> {
@@ -204,6 +227,24 @@ async function main(): Promise<void> {
     is("the next run reads it again and tells the member", told("cardopen-0010@example.com"), 1);
     await run();
     is("and never twice", told("cardopen-0010@example.com"), 1);
+  }
+
+  part("Card notices: a card page whose setting is unsure is read again on the next run (merge of main's \"unsure\")");
+  reset();
+  {
+    const account = "acct_1TestCardUnsure1";
+    const product = await makeStore("cards-unsure@example.com", "cardunsure", account, true);
+    active.set(account, running("cardunsure", product, 600, [10]));
+    const sub = "sub_cardunsureRun0010";
+    const session = "cs_test_CardUnsure0000000001";
+    cardPages.set(session, { sub, customer: "cus_cardunsureRun0010", store: "cardunsure" });
+    await redis.pipeline([["SET", `nl:card:open:${account}:${sub}`, session]]);
+    unsure.add(sub);
+    await run();
+    is("unsure (the set answered 500): no notice on a guess, the page kept open", [told("cardunsure-0010@example.com"), cardSets.filter((s) => s === sub).length, (await redis.pipeline([["GET", `nl:card:open:${account}:${sub}`]]))[0]], [0, 1, session]);
+    unsure.delete(sub);
+    await run();
+    is("the next run reads that member again and finishes the page, never a notice", [cardSets.filter((s) => s === sub).length, told("cardunsure-0010@example.com")], [2, 0]);
   }
 
   part("Card notices: a healthy store whose list ends in one run (control)");

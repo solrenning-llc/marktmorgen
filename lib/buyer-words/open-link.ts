@@ -2,7 +2,7 @@
  * The page an emailed community or course link lands on (MM-SA-41;
  * app/[handle]/community/open/page.tsx, app/[handle]/course/open/page.tsx),
  * in the store's language (lib/store-language.ts). Plain words: the link is
- * ready, one press opens it, and why the press is asked for.
+ * one press opens it (nothing said about its state, which only the press reads), and why the press is asked for.
  *
  * Browser-safe: plain data, nothing from the server.
  */
@@ -23,7 +23,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   en: {
     title: "Open your link",
     heading: "Open your link",
-    lead: (store) => `Your link from ${store} is ready to use. Select the button to open it on this device.`,
+    lead: (store) => `Select the button to open your link from ${store} on this device.`,
     community: "Open the community",
     course: "Open my courses",
     pending: "Opening…",
@@ -33,7 +33,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   es: {
     title: "Abre tu enlace",
     heading: "Abre tu enlace",
-    lead: (store) => `Tu enlace de ${store} está listo. Selecciona el botón para abrirlo en este dispositivo.`,
+    lead: (store) => `Selecciona el botón para abrir tu enlace de ${store} en este dispositivo.`,
     community: "Abrir la comunidad",
     course: "Abrir mis cursos",
     pending: "Abriendo…",
@@ -43,7 +43,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   fr: {
     title: "Ouvrez votre lien",
     heading: "Ouvrez votre lien",
-    lead: (store) => `Votre lien de ${store} est prêt. Sélectionnez le bouton pour l’ouvrir sur cet appareil.`,
+    lead: (store) => `Sélectionnez le bouton pour ouvrir votre lien de ${store} sur cet appareil.`,
     community: "Ouvrir la communauté",
     course: "Ouvrir mes cours",
     pending: "Ouverture…",
@@ -53,7 +53,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   de: {
     title: "Link öffnen",
     heading: "Link öffnen",
-    lead: (store) => `Ihr Link von ${store} ist bereit. Wählen Sie die Schaltfläche, um ihn auf diesem Gerät zu öffnen.`,
+    lead: (store) => `Wählen Sie die Schaltfläche, um Ihren Link von ${store} auf diesem Gerät zu öffnen.`,
     community: "Community öffnen",
     course: "Meine Kurse öffnen",
     pending: "Wird geöffnet…",
@@ -63,7 +63,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   it: {
     title: "Apri il tuo link",
     heading: "Apri il tuo link",
-    lead: (store) => `Il tuo link da ${store} è pronto. Seleziona il pulsante per aprirlo su questo dispositivo.`,
+    lead: (store) => `Seleziona il pulsante per aprire il tuo link da ${store} su questo dispositivo.`,
     community: "Apri la community",
     course: "Apri i miei corsi",
     pending: "Apertura…",
@@ -73,7 +73,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   nl: {
     title: "Open je link",
     heading: "Open je link",
-    lead: (store) => `Je link van ${store} staat klaar. Kies de knop om hem op dit apparaat te openen.`,
+    lead: (store) => `Kies de knop om je link van ${store} op dit apparaat te openen.`,
     community: "De community openen",
     course: "Mijn cursussen openen",
     pending: "Openen…",
@@ -83,7 +83,7 @@ export const OPEN_LINK_WORDS: Record<LanguageCode, OpenLinkWords> = {
   pt: {
     title: "Abra a sua ligação",
     heading: "Abra a sua ligação",
-    lead: (store) => `A sua ligação de ${store} está pronta. Selecione o botão para a abrir neste dispositivo.`,
+    lead: (store) => `Selecione o botão para abrir a sua ligação de ${store} neste dispositivo.`,
     community: "Abrir a comunidade",
     course: "Abrir os meus cursos",
     pending: "A abrir…",

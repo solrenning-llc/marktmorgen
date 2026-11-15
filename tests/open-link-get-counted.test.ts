@@ -83,7 +83,8 @@ async function main(): Promise<void> {
   part("The page's words");
   for (const [code, w] of Object.entries(OPEN_LINK_WORDS)) {
     const lead = w.lead("Open Count");
-    is(`${code}: the lead never says the link is good before the tap reads it`, /\b(is good|es válido|est valide|ist gültig|è valido|is geldig|é válida)\b/i.test(lead), false);
+    // The page has read nothing of the link's state (its count of opens is read only at the press): no word of it.
+    is(`${code}: the lead never says the link's state before the press reads it`, /(is good|is ready|ready to use|válid|valide|gültig|valido|geldig|listo|prêt|bereit|pronto|pronta|klaar)/i.test(lead), false);
   }
   const en = OPEN_LINK_WORDS.en;
   is("en: no word asks for a tap only, which a keyboard or mouse does not make", /\btap\b/i.test([en.heading, en.lead("S"), en.why, en.bad].join(" ")), false);

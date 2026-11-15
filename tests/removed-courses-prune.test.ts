@@ -85,6 +85,14 @@ async function main(): Promise<void> {
   is("the list stays full", await next(), "full");
   is("the entry is kept", await listed("crow"), true);
 
+  part("RED (Claude 1 cloud R on #4563): work handed in, still in the course's tasks index, keeps the entry with no ca: slot");
+  fill("ctask", old());
+  redis.run(["SET", "nl:course:ctask:task:l1:sub:somebody", JSON.stringify({ text: "my work", files: ["f.pdf"] })]);
+  redis.run(["ZADD", "nl:course:ctask:tasks:all", 1, "l1|somebody"]);
+  is("RED: the list stays full", await next(), "full");
+  is("RED: the entry is kept", await listed("ctask"), true);
+  is("and its own key with it", redis.run(["EXISTS", recordKey("ctask")]), 1);
+
   part("An entry noted before the drop time was kept never leaves");
   fill("cuntimed");
   is("the list stays full", await next(), "full");

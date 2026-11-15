@@ -389,8 +389,12 @@ async function readStored(id: string): Promise<{ job: ImportJob; raw: string } |
   const replies = repliesFor(await redisPipeline([["GET", jobKey(id)]]), 1);
   const raw = replies?.[0];
   if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("an import");
+  if (raw === null) return null;
+  // The record GET nl:import:B answers is import B's only when it says so; a text that is not an import, or one naming
+  // another import, is unknown, never read as B's nor as gone (Revisor 2 on #3686, rule 30).
   const job = parseJob(raw);
-  return job && typeof raw === "string" ? { job, raw } : null;
+  if (!job || job.id !== id) throw new UnknownReplyError("an import");
+  return { job, raw };
 }
 
 /** readStored for one import of this store, or null when it is not this store's. */
@@ -443,35 +447,51 @@ async function writeJobIf(raw: string, job: ImportJob, batch?: string[][]): Prom
  * The store's last imports, newest first, and the one running now if any. Every read in its exact shape (sweep A3,
  * CX-123 rule 30): an unknown list, or an import on it answering in an unknown shape, throws UnknownReplyError rather
  * than tell the creator there is no import (none running, "None yet"); only an import whose GET answered nothing is
- * left out.
+ * left out. A kept text that is not an import, and a list entry that is not an import id, are unknown as well.
  */
 export async function storeImports(store: Store): Promise<ImportJob[]> {
-  return (await readStoreImports(store)).jobs;
+  // The studio's list never shorter on an unreadable entry: unknown (rule 30); another store's import is not listed.
+  const read = await readStoreImports(store);
+  if (read.unreadable) throw new UnknownReplyError("one of the store's imports");
+  return read.jobs;
 }
 
 /**
  * storeImports with what it leaves out counted (Codex U on #4321): `listed` is how many entries the store's list
  * held, `unreadable` how many of them were kept but could not be read as one of its imports (an id of another shape,
- * a record parseJob refuses, or one naming another store). A missing record (its GET answered nothing) is gone, not
- * unreadable.
+ * a record parseJob refuses, one naming another import, or one whose store is not said), `foreign` how many name
+ * another store. A missing record (its GET answered nothing) is gone, not unreadable.
  */
-async function readStoreImports(store: Store): Promise<{ jobs: ImportJob[]; listed: number; unreadable: number }> {
-  if (!store.sid || !isRedisConfigured()) return { jobs: [], listed: 0, unreadable: 0 };
+async function readStoreImports(store: Store): Promise<{ jobs: ImportJob[]; listed: number; unreadable: number; foreign: number }> {
+  if (!store.sid || !isRedisConfigured()) return { jobs: [], listed: 0, unreadable: 0, foreign: 0 };
   const ids = stringList(repliesFor(await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]), 1)?.[0]);
   if (ids === null) throw new UnknownReplyError("the store's imports");
+  // An entry of the list that is not an import id is unreadable (Revisor 2 on #3686, rule 30).
   const list = ids.filter((id) => IMPORT_ID_PATTERN.test(id));
   let unreadable = ids.length - list.length;
-  if (!list.length) return { jobs: [], listed: ids.length, unreadable };
+  let foreign = 0;
+  if (!list.length) return { jobs: [], listed: ids.length, unreadable, foreign };
   const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", jobKey(id)])), list.length);
   if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's imports");
   const jobs: ImportJob[] = [];
-  for (const raw of raws) {
-    if (raw === null) continue;
+  raws.forEach((raw, i) => {
+    // Only a GET that answered nothing is left out as gone.
+    if (raw === null) return;
     const job = parseJob(raw);
-    if (job !== null && job.sid === store.sid) jobs.push(job);
-    else unreadable += 1;
-  }
-  return { jobs, listed: ids.length, unreadable };
+    // A kept text that does not read as an import, one naming another import (Codex V on #3661), or one whose store is
+    // missing, null, empty or not text (Claude 4 cloud A on #3686) is unreadable: it says nothing of whose it is.
+    if (job === null || job.id !== list[i] || typeof (job as { sid?: unknown }).sid !== "string" || !job.sid) {
+      unreadable += 1;
+      return;
+    }
+    // Another store's, by its own word: not this store's import.
+    if (job.sid !== store.sid) {
+      foreign += 1;
+      return;
+    }
+    jobs.push(job);
+  });
+  return { jobs, listed: ids.length, unreadable, foreign };
 }
 
 /**
@@ -679,7 +699,9 @@ export function readBatch(kind: ImportKind, raw: unknown): string[][] | null {
   for (const entry of raw) {
     // A page loaded before a kind gained a column sends one cell fewer: the missing ones read as empty.
     if (!Array.isArray(entry) || entry.length < 2 || entry.length > caps.length + 1) return null;
-    const line = Number(entry[0]);
+    // The page sends String(line); Number() would also read true, "1e1", "0x10", " 3" or [5] as one (input fuzz, Claude 7).
+    const first: unknown = entry[0];
+    const line = typeof first === "number" ? first : typeof first === "string" && /^[1-9][0-9]{0,7}$/.test(first) ? Number(first) : NaN;
     if (!Number.isInteger(line) || line < 1 || line > 10_000_000) return null;
     const cells: string[] = [String(line)];
     for (let i = 0; i < caps.length; i += 1) {
@@ -1734,7 +1756,8 @@ export async function importTracesOf(store: Store, email: string, now = Date.now
   const records: ImportTrace[] = [];
   const unread: string[] = [];
   if (!address) return { records, unread };
-  const { jobs, listed, unreadable } = await readStoreImports(store);
+  const { jobs, listed, unreadable: unread0, foreign } = await readStoreImports(store);
+  const unreadable = unread0 + foreign;
   if (unreadable) unread.push(`${unreadable === 1 ? "An import" : `${unreadable} imports`} on the store's list could not be read for this copy.`);
   // Each cell's addresses compared whole: never a longer address that only contains theirs (Codex G on #4321).
   const names = (cells: string[]) => cells.some((cell) => namesAddress(cell, address));

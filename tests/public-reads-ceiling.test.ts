@@ -37,7 +37,7 @@ import { admitAffiliatePage, affiliatePageCost } from "@/lib/affiliate-page-admi
 import {
   AFFILIATE_PAGE_MAX_SECONDS, BOOK_FRESH_SECONDS, BOOK_KEEP_SECONDS, BOOK_LOCK_SECONDS, BOOK_READ_SECONDS, BOOK_SHORT_SECONDS, BOOK_SHORT_TRIES, BOOK_SNAPSHOT_MAX_BYTES,
   BOOK_ATTEMPT, BOOK_BEGIN, BOOK_COMMIT, BOOK_FORGET, BOOK_MARK, BOOK_ROUND, BOOK_UNDO,
-  beginAttempt, bookSlice, claimRefresh, forgetBookSnapshot, keptSlice, readBookVersion, releaseRefresh, snapshotState, undoAttempt, writeSnapshot,
+  beginAttempt, bookSlice, claimRefresh, forgetBookSnapshot, keptSlice, needsRefresh, readBookVersion, releaseRefresh, snapshotState, undoAttempt, writeSnapshot,
 } from "@/lib/affiliate-book-snapshot";
 import { PERSON_DATA } from "@/lib/person-data";
 import { AFFILIATES_WORDS } from "@/lib/buyer-words/affiliates";
@@ -340,6 +340,22 @@ async function main(): Promise<void> {
   await releaseRefresh(other!);
   const refreshed = await watched(() => admitAffiliatePage(shop, as(idOf(3)), later));
   is("the lock let go, the next load past a day works it out again, once", [count(refreshed.names, "HGETALL"), refreshed.taken], [7, load + full]);
+
+  part("A kept book whose stored mark is missing or not 0/1 is worked out again, paid once, never refused for days (51LL on #4741)");
+  // The replies are exact; only what was stored is out of shape. Nothing else rewrites the book (BOOK_KEEP_SECONDS),
+  // so a refusal here would stop every affiliate's page of the store until the book's keep ran out.
+  for (const [label, mend] of [
+    ["the kept mark missing", ["HDEL", `nl:aff:${statsId}:book`, "_kept"]],
+    ["the retry mark missing", ["HDEL", `nl:aff:${statsId}:book`, "_short"]],
+    ["the kept mark stored as ?", ["HSET", `nl:aff:${statsId}:book`, "_kept", "?"]],
+    ["the retry mark stored as ?", ["HSET", `nl:aff:${statsId}:book`, "_short", "?"]],
+  ] as [string, (string | number)[]][]) {
+    await redis.pipeline([mend]);
+    const mended = await watched(() => admitAffiliatePage(shop, as(idOf(3)), later));
+    is(`${label}: the load is let in and the book worked out again, paid once`, [mended.value.admitted && shownOf(mended.value) !== null, count(mended.names, "HGETALL"), mended.taken], [true, 7, load + full]);
+    const after = await snapshotState(shop, idOf(3));
+    is(`${label}: the book kept again has both marks, in date`, after !== null && after.at > 0 && !needsRefresh(after, Math.floor(later / 1000)), true);
+  }
 
   part("An affiliate not approved sees no book");
   const pending = await watched(() => admitAffiliatePage(shop, as("cccccccccccc", "pending")));

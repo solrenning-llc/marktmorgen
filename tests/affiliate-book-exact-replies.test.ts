@@ -200,12 +200,6 @@ const STATE_SHAPES: [string, Alter][] = [
   ["the time answered 1e9", meta(["1e9", "1", "0"])],
   ["the time answered a number", meta([NOW - 60, "1", "0"])],
   ["the kept mark answered a number", meta([String(NOW - 60), 1, "0"])],
-  // #4741: a kept book whose marks are missing or unknown is unknown, never the "not kept" or "a day" a valid mark says.
-  ["the kept mark answered unknown text", meta([String(NOW - 60), "?", "0"])],
-  ["the kept mark was missing from an existing book", meta([String(NOW - 60), null, "0"])],
-  ["the retry mark answered unknown text", meta([String(NOW - 60), "1", "?"])],
-  ["the retry mark was missing from an existing book", meta([String(NOW - 60), "1", null])],
-  ["the time was missing while the book was present", meta([null, "1", "0"])],
   ["the part's length answered null", at(1, null)],
   ["the part's length answered the text 12", at(1, "12")],
   ["the part's length answered 1.5", at(1, 1.5)],
@@ -222,6 +216,27 @@ for (const [label, alter] of STATE_SHAPES) {
     const result = await withReplies(alter, () => snapshotState(SHOP, AFF));
     assert.ok("value" in result, "the state never throws");
     assert.equal(result.value, null, `${label}: null`);
+  });
+}
+
+// #4741, then 51LL on it: the replies exact, only what is stored out of shape (a mark missing or not "0"/"1" beside a
+// time, a time missing beside a mark). Never the "not kept" or "a day" a valid mark says, and never null either: null
+// refuses every affiliate's page of the store until the book's keep runs out, with nothing to rewrite it. It is a book
+// to work out again, paid as any refresh is, which writes it whole.
+const STORED_OUT_OF_SHAPE: [string, Alter][] = [
+  ["the kept mark stored as text not 0 or 1", meta([String(NOW - 60), "?", "0"])],
+  ["the kept mark missing from an existing book", meta([String(NOW - 60), null, "0"])],
+  ["the retry mark stored as text not 0 or 1", meta([String(NOW - 60), "1", "?"])],
+  ["the retry mark missing from an existing book", meta([String(NOW - 60), "1", null])],
+  ["the time missing while the book is present", meta([null, "1", "0"])],
+];
+for (const [label, alter] of STORED_OUT_OF_SHAPE) {
+  test(`state, ${label}: a book to work out again, not kept, never null`, async () => {
+    await seedBook();
+    const result = await withReplies(alter, () => snapshotState(SHOP, AFF));
+    assert.ok("value" in result && result.value !== null, `${label}: a state`);
+    const state = (result as { value: NonNullable<Awaited<ReturnType<typeof snapshotState>>> }).value;
+    assert.deepEqual([state.at, state.kept, needsRefresh(state, NOW)], [0, false, true], `${label}: out of date, nothing kept read from it`);
   });
 }
 

@@ -146,7 +146,7 @@ export async function POST(request: NextRequest) {
         throw error;
       });
       // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
-      if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email);
+      if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email, lesson.id);
       // The new file is the work's now: its hold for the sweep is let go (lib/assignment.ts, takeTaskUpload).
       if (taken && file) await releaseTaskHold(file.path);
       // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the

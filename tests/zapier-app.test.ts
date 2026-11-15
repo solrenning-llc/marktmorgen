@@ -240,7 +240,7 @@ async function main(): Promise<void> {
   is("each event's trigger is the one named for it", app.EVENTS.every((e) => app.triggers[e.key]?.operation.type === "hook" && e.key === e.event.replace(".", "_")), true);
 
   part("Each example says what its webhook really sends, field by field");
-  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"], ["waitlist.joined", "lib/waitlist.ts"], ["course.completed", "lib/course-finish.ts"], ["product.published", "app/api/store/product/route.ts"], ["membership.trial_ending", "lib/webhooks.ts"]] as const) {
+  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"], ["waitlist.joined", "lib/waitlist.ts"], ["course.completed", "lib/course-finish.ts"], ["product.published", "app/api/store/product/route.ts"], ["membership.trial_ending", "lib/webhooks.ts"], ["course.lesson_completed", "lib/course-finish.ts"]] as const) {
     const spec = app.EVENTS.find((e) => e.event === event);
     const sample = spec ? (app.triggers[spec.key].operation.sample as { type?: string; data?: Record<string, unknown> }) : null;
     is(`${event}: the example is that event's message`, sample?.type, event);
@@ -262,6 +262,7 @@ async function main(): Promise<void> {
     ["course_completed", "course.completed", "course|c1|k1", { email: "ada@example.com", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, lessons: 3, completed_at: "2026-10-28T18:20:00.000Z" }],
     ["product_published", "product.published", "published|p1|1", { product: { id: guide.product.id, title: "The Weeknight Cookbook", price_cents: 2900, currency: "usd", url: "https://marktmorgen.com/@harbor/x" }, how: "added", published_at: "2026-10-19T14:05:00.000Z" }],
     ["membership_trial_ending", "membership.trial_ending", "sub_Z9|trial|1", { subscription: "sub_Z9", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, option: null, trial_ends_at: "2026-11-01T14:05:00.000Z", buyer: { email: "ada@example.com", customer: "cus_Z9" } }],
+    ["course_lesson_completed", "course.lesson_completed", "lesson|c1|k1|l1", { email: "ada@example.com", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, lesson: { id: "l1", title: "One" }, lessons_done: 1, lessons: 3, completed_at: "2026-10-21T18:20:00.000Z" }],
   ] as const) {
     const op = app.triggers[key].operation as Op & { performList: (z: Z, b: Bundle) => Promise<{ type: string }[]> };
     const zap = await op.performSubscribe!(makeZ(writer.key), bundle({ targetUrl: `https://hooks.zapier.com/hooks/catch/1/${key}` }));

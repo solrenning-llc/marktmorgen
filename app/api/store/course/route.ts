@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
       const result = await review({ courseId, lessonId: found.lesson.id, who, email: to ?? "", verdict, feedback, data: store });
       if (!result.ok) return Response.json({ ok: false, error: result.reason === "unknown" ? "gone" : "reviewed" }, { status: 409 });
       // Approved work may be the last lesson of the course (lib/course-finish.ts).
-      if (verdict === "approved" && to) await noteIfFinished(store, product.id, courseId, to);
+      if (verdict === "approved" && to) await noteIfFinished(store, product.id, courseId, to, found.lesson.id);
       const told = to
         ? await tellStudentOfReview({
             store,

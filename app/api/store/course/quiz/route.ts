@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
   if (!result.ok && result.reason === "stale") return away(`${base}/${lessonId}?quiz=stale#quiz`);
   if (result.ok && result.grade.passed) {
     await markLesson(course.id, access.learner.email, lessonId, true, store, true);
-    await noteIfFinished(store, product.id, course.id, access.learner.email);
+    await noteIfFinished(store, product.id, course.id, access.learner.email, lessonId);
   }
   return away(`${base}/${lessonId}?quiz=marked#quiz`);
 }

@@ -428,6 +428,21 @@ const EVENTS = [
       buyer: { email: "ada@example.com", customer: "cus_a1b2c3" },
     },
   },
+  {
+    key: "course_lesson_completed",
+    event: "course.lesson_completed",
+    noun: "Lesson Completion",
+    label: "Lesson Completed",
+    description: "Triggers when a student finishes a lesson of one of your courses.",
+    data: {
+      email: "ada@example.com",
+      product: { id: "p_7c1d2e", title: "Sourdough at Home" },
+      lesson: { id: "l_4a5b6c", title: "Feeding your starter" },
+      lessons_done: 3,
+      lessons: 12,
+      completed_at: "2026-10-21T18:20:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

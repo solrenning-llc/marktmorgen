@@ -33,6 +33,7 @@ not already.
   - Course Completed (`course.completed`)
   - Product Published (`product.published`)
   - Trial Ending (`membership.trial_ending`)
+  - Lesson Completed (`course.lesson_completed`)
 
   Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
   its trigger, and each example has exactly the fields its webhook sends

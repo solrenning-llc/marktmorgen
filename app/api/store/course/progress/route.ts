@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       throw error;
     }
     // The last lesson done starts what finishing the course starts (lib/course-finish.ts).
-    if (done) await noteIfFinished(store, product.id, product.course.id, access.learner.email);
+    if (done) await noteIfFinished(store, product.id, product.course.id, access.learner.email, lessonId);
   }
   const target = done && ITEM_ID_PATTERN.test(next) ? next : lessonId;
   return new Response(null, { status: 303, headers: { Location: `${base}/${target}`, "Cache-Control": "no-store" } });

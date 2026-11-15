@@ -66,23 +66,44 @@ export async function noteIfOpened(store: Store, productId: string, courseId: st
  * After a lesson is marked done: whether that finished the course for this
  * student, the first time, and if so starts what finishing starts. Never
  * throws: a lesson marked done must never fail on what comes after it.
+ *
+ * `lessonId`, the lesson just marked done, sends course.lesson_completed to
+ * the creator's webhooks first (378 [TB4] complement WG (a)): only when the
+ * course has that lesson and it reads as done, once per student and lesson
+ * (its seed), whatever the finish check says after it.
  */
-export async function noteIfFinished(store: Store, productId: string, courseId: string, email: string): Promise<boolean> {
+export async function noteIfFinished(store: Store, productId: string, courseId: string, email: string, lessonId?: string): Promise<boolean> {
   try {
     if (!email || !isRedisConfigured()) return false;
     const course = await readCourse(courseId);
-    const lessons = course ? lessonsInOrder(course).map(({ lesson }) => lesson.id) : [];
+    const ordered = course ? lessonsInOrder(course) : [];
+    const lessons = ordered.map(({ lesson }) => lesson.id);
     if (!lessons.length) return false;
     const done = await doneLessons(courseId, email);
+    let listing: Awaited<ReturnType<typeof readListing>> | undefined;
+    const title = async () => {
+      if (listing === undefined) listing = await readListing(store, productId).catch(() => null);
+      return listing?.title ?? null;
+    };
+    const lesson = lessonId ? ordered.find((l) => l.lesson.id === lessonId)?.lesson : undefined;
+    if (lesson && done.has(lesson.id)) {
+      await emitEvent(store, "course.lesson_completed", `lesson|${courseId}|${emailKey(email)}|${lesson.id}`, {
+        email,
+        product: { id: productId, title: await title() },
+        lesson: { id: lesson.id, title: lesson.title },
+        lessons_done: lessons.filter((id) => done.has(id)).length,
+        lessons: lessons.length,
+        completed_at: new Date().toISOString(),
+      }).catch((error) => console.error("queueing the course.lesson_completed webhook failed", error));
+    }
     if (!lessons.every((id) => done.has(id))) return false;
     const claim = await redisPipeline([["SET", finishedKey(courseId, email), "1", "NX", "EX", 400 * 86_400]]);
     if (!confirmedClaim(claim)) return false;
     // The creator's webhooks hear of it once, under the same once-only claim (378 [TB4] complement WG (a)); a failure
     // to queue it is said and never stops the sequences below.
-    const listing = await readListing(store, productId).catch(() => null);
     await emitEvent(store, "course.completed", `course|${courseId}|${emailKey(email)}`, {
       email,
-      product: { id: productId, title: listing?.title ?? null },
+      product: { id: productId, title: await title() },
       lessons: lessons.length,
       completed_at: new Date().toISOString(),
     }).catch((error) => console.error("queueing the course.completed webhook failed", error));

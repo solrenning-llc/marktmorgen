@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
+import { StudioTrail } from "@/components/breadcrumb";
 import { ApplyFirstStudio } from "@/components/apply-first-studio";
 import { can } from "@/lib/team-roles";
 import { readTitles } from "@/lib/catalog";
@@ -45,7 +46,7 @@ export default async function StudioApplicationsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Applications</p>
+          <StudioTrail store={store} here="Applications" />
           <h1 className="t-h2 mt-3">People who asked to buy</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Each person here asked to buy a product before paying. Approve one to give them a buy link for a number of days you choose,

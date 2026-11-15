@@ -130,6 +130,10 @@ export async function joinWaitlist(input: {
   const size = countOf(read?.[1]);
   if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
   const before = parseEntry(existing);
+  // Only a place that is not there (null) is "not on the list". A place kept as text that does not read is unknown
+  // (#4792): written over as a new one, it would lose a confirmed place and its leave token, take data room again and
+  // send a new confirmation. It is left as it is, and nothing is sent.
+  if (existing !== null && !before) return "error";
   if (!before && size >= MAX_WAITLIST) return "full";
 
   const leave = before?.t ?? newToken();

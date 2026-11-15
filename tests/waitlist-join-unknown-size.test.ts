@@ -93,6 +93,27 @@ async function main(): Promise<void> {
     is(`(${label}) the confirmed place is not written over`, redis.run(["HGET", list, "kept@example.com"]), confirmed);
   }
 
+  part("A place kept as text that does not read is never \"not on the list\" (#4792; Claude 6's LOW on #4416)");
+  // parseEntry gives null for each of these, which used to read as absent: the join wrote a new place over the old one,
+  // took data room again and sent a new confirmation, losing a confirmed place and its leave token.
+  for (const [label, raw] of [
+    ["not JSON", "{not-json"],
+    ["JSON with no token", JSON.stringify({ at: 1, ok: 2, c: true })],
+    ["a token that is not text", JSON.stringify({ at: 1, ok: 2, c: true, t: 5 })],
+    ["JSON null", "null"],
+    ["an empty text", ""],
+  ] as [string, string][]) {
+    mails = 0;
+    const email = `unread-${label.replace(/\W/g, "").toLowerCase()}@example.com`;
+    redis.run(["HSET", list, email, raw]);
+    const size = redis.run(["HLEN", list]);
+    is(`(${label}) answered as an error`, await join(email), "error");
+    is(`(${label}) no email`, mails, 0);
+    is(`(${label}) the kept text is not written over`, redis.run(["HGET", list, email]), raw);
+    is(`(${label}) no place added`, redis.run(["HLEN", list]), size);
+    redis.run(["HDEL", list, email]);
+  }
+
   part("Control: an address already on the list is emailed again, its place kept");
   mails = 0;
   is("sent", await join("kept@example.com"), "sent");

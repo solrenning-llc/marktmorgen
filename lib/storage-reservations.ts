@@ -90,7 +90,7 @@ export async function releaseStorage(folder: string, id: string): Promise<void> 
 export const RETIRE_ATTEMPTS = 2;
 
 /** Retires at most one expired session, asking the provider at most RETIRE_ATTEMPTS times.
- * Failure retains every reserved byte. A session the provider did not retire goes to the
+ * Failure (a refusal or an error) retains every reserved byte. A session the provider did not retire goes to the
  * back of the line, so one that can never be retired does not block the cleanup of others.
  */
 export async function retireStorage(folder: string, before: number, retire: (entry: Readonly<StorageReservation>) => Promise<boolean>): Promise<boolean> {
@@ -104,7 +104,11 @@ export async function retireStorage(folder: string, before: number, retire: (ent
       if (entry.pathname !== undefined) {
         if (asked >= RETIRE_ATTEMPTS) break;
         asked++;
-        if (!(await retire(Object.freeze({ ...entry })))) { refused.push(...rows.splice(index, 1)); continue; }
+        let done = false;
+        // A provider error is a refusal (main's a61304c06d): logged, every reserved byte kept, the session moved back.
+        try { done = await retire(Object.freeze({ ...entry })); }
+        catch (error) { console.error("an expired upload session could not be retired", error); }
+        if (!done) { refused.push(...rows.splice(index, 1)); continue; }
       }
       rows.splice(index, 1);
       retired = true;

@@ -6,7 +6,7 @@
  * and keeps nothing of them. Reproduction transcribed from the issue; Stripe and the sender are stand-ins.
  */
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setStripeAccount, setSubscription, setWinBack, storeForEmail } from "@/lib/store";
-import { upsertContact } from "@/lib/contacts";
+import { leadsKey, upsertContact } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
 import { forgetWinbackPerson, sendWinBacks } from "@/lib/winback-send";
 import { forgetNoted } from "@/lib/erasure-index";
@@ -136,6 +136,42 @@ async function main(): Promise<void> {
     is("the erasure ran after the grant was written", fired, true);
     is("no email reached the person erased before the send", handed.filter((m) => m.to.includes(email)).length, 0);
     is("nothing of them kept", holdingAddress(email), []);
+  }
+
+  part("The dearest offer that is sent, every script's own command counted (3rjdf on #4807): inside WINBACK_OFFER_COMMANDS");
+  {
+    const email = "dee@example.com";
+    const { store } = await world("dearest", email, "sub_DeeDear00001", "cus_DeeDear0001");
+    const key = leadsKey(store.listId as string);
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    let casRounds = 0;
+    let sentClaim = false;
+    let offerClaim = false;
+    redis.run = ((c: (string | number)[]) => {
+      commands += 1;
+      // The unsubscribe token's contact write (CAS_HSET): the row changes just before it twice (two rounds lost, the
+      // most that still hand out a token), and on the third the script runs but its answer is lost (read back).
+      if (c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:contact-cas-hset:")) {
+        casRounds += 1;
+        if (casRounds <= 2) {
+          const raw = run(["HGET", key, email]);
+          if (typeof raw === "string") run(["HSET", key, email, `${raw} `]);
+        } else {
+          run(c);
+          return ["lost"];
+        }
+      }
+      // The membership's claim and the offer's claim each answered in another shape after landing: read back.
+      if (!sentClaim && c[0] === "SET" && String(c[1]).startsWith("nl:wb:acct_")) { sentClaim = true; run(c); return "QUEUED"; }
+      if (!offerClaim && c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:winback-claim:")) { offerClaim = true; run(c); return "QUEUED"; }
+      return run(c);
+    }) as typeof redis.run;
+    const result = await sendWinBacks(Date.now() + 30_000, now).finally(() => { redis.run = run; });
+    console.log(`  the dearest offer sent: ${commands} commands (${casRounds} contact writes tried)`);
+    is("contested as meant: three contact writes, both claims read back", [casRounds, sentClaim, offerClaim], [3, true, true]);
+    is("and still sent once", [result.sent, handed.filter((m) => m.to.includes(email)).length], [1, 1]);
+    is(`at most WINBACK_OFFER_COMMANDS (${WINBACK_OFFER_COMMANDS})`, commands <= WINBACK_OFFER_COMMANDS, true);
   }
 
   part("Control: nobody erased, the offer goes once with its mark and link");

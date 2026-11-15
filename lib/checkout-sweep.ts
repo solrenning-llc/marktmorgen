@@ -65,7 +65,7 @@ import { revokeRefunded, storeHasKeys } from "@/lib/licence-keys";
 import { markRefundedReviews, storeHasReviews } from "@/lib/review-proof";
 import { listensToSales, noteSales } from "@/lib/sale-events";
 import { putOnList, listedAlready } from "@/lib/buyer-list";
-import { rememberBuyers } from "@/lib/buyer-library";
+import { rememberBuyersAt } from "@/lib/buyer-library";
 import { isHouseStore } from "@/lib/house-store";
 import { deliveredIds } from "@/lib/bundle-rules";
 import { sendPaidOrders, sendRenewals, sendsFromServer } from "@/lib/ad-events";
@@ -637,13 +637,15 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       const buyers = paid.flatMap((row) => {
         const meta = row.metadata ?? {};
         const email = typeof row.customer_details?.email === "string" ? row.customer_details.email : "";
-        return email && handles.has(meta.store ?? "") && meta.kind !== "tip" && deliveredIds(meta).length > 0 ? [email] : [];
+        // The checkout's own time: a buyer deleted from the store at or after it is not noted again (#4754).
+        const at = typeof row.created === "number" ? row.created : NaN;
+        return email && handles.has(meta.store ?? "") && meta.kind !== "tip" && deliveredIds(meta).length > 0 ? [{ email, at }] : [];
       });
       // Never the demo store's, whose checkout takes any address (lib/house-store.ts).
       if (buyers.length && !isHouseStore(store)) {
         // A store made before stores had ids is given its own now.
         const sid = store.sid || (await ensureStoreId(storeRef(store)).catch(() => null))?.sid || "";
-        await rememberBuyers(sid, buyers);
+        await rememberBuyersAt(sid, store.listId ?? null, buyers);
       }
     }
     // A buyer who never reached the thanks page is put on the list all the

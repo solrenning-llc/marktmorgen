@@ -47,6 +47,7 @@ import { orderWrite } from "@/lib/order-data";
 import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 export const LIBRARY_LINK_SECONDS = 24 * 60 * 60;
 export const LIBRARY_TOKEN = /^[0-9a-f]{64}$/;
@@ -105,6 +106,66 @@ export async function forgetLibraryPerson(sid: string, email: string): Promise<n
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("forgetting a library's store");
   return (counts as number[]).reduce((sum, n) => sum + n, 0);
+}
+
+/**
+ * The deletion marks of these addresses on the store's list (lib/suppression.ts: the second each was deleted from the
+ * store, written before anything of them is deleted), read exactly (rule 24): null where there is none. Throws
+ * UnknownReplyError on any other answer.
+ */
+async function deletionMarks(listId: string, emails: string[]): Promise<(number | null)[]> {
+  const fields = emails.map((email) => suppressionPrint(listId, email));
+  const replies = repliesFor(await redisPipeline([["HMGET", suppressedKey(listId), ...fields]]), 1);
+  const marks = replies?.[0];
+  if (!Array.isArray(marks) || marks.length !== fields.length) throw new UnknownReplyError("the deletion marks of a store's buyers");
+  return marks.map((mark) => {
+    if (mark === null) return null;
+    if (typeof mark !== "string" || !/^[0-9]{1,12}$/.test(mark)) throw new UnknownReplyError("a deletion mark of a store's buyer");
+    return Number(mark);
+  });
+}
+
+/**
+ * rememberBuyers for purchases made at known times (#4754): an address deleted from the store at or after its latest
+ * purchase here (any deletion: the library is forgotten by both, lib/person-erasure.ts) is not noted again, so a
+ * checkout seen again after the deletion leaves the library as the deletion left it; a purchase after the deletion is
+ * noted as any. The marks are read before the write and again after it: a deletion that wrote its mark between the
+ * two takes back what the write added for that address (forgetBoughtCommands), and one that writes it after the
+ * second read deletes the write itself (it deletes after its mark). Marks that do not read write nothing; marks that
+ * do not read after the write take back what was written, which the next sweep notes again if it still stands.
+ * `listId` is the store's list, where the marks are kept; with none, nobody was ever deleted from the store.
+ */
+export async function rememberBuyersAt(sid: string, listId: string | null, buyers: { email: string; at: number }[]): Promise<void> {
+  const latest = new Map<string, number>();
+  for (const { email, at } of buyers) {
+    if (typeof email !== "string" || !EMAIL_PATTERN.test(normaliseEmail(email)) || !Number.isFinite(at)) continue;
+    const key = normaliseEmail(email);
+    latest.set(key, Math.max(latest.get(key) ?? 0, at));
+  }
+  if (!STORE_ID.test(sid) || !latest.size || !isRedisConfigured()) return;
+  if (!listId) return rememberBuyers(sid, [...latest.keys()]);
+  const emails = [...latest.keys()];
+  let before: (number | null)[];
+  try {
+    before = await deletionMarks(listId, emails);
+  } catch (error) {
+    console.error("reading buyers' deletion marks failed; their library is noted at the next sweep", error);
+    return;
+  }
+  const kept = emails.filter((email, i) => before[i] === null || (before[i] as number) < (latest.get(email) as number));
+  if (!kept.length) return;
+  await rememberBuyers(sid, kept);
+  let after: (number | null)[] | null = null;
+  try {
+    after = await deletionMarks(listId, kept);
+  } catch (error) {
+    console.error("reading buyers' deletion marks after noting them failed; what was noted is taken back", error);
+  }
+  const gone = kept.filter((email, i) => after === null || (after[i] !== null && (after[i] as number) >= (latest.get(email) as number)));
+  if (!gone.length) return;
+  await redisPipeline(gone.flatMap((email) => forgetBoughtCommands(sid, email))).catch((error) =>
+    console.error("taking back a deleted buyer's library failed", error),
+  );
 }
 
 /**

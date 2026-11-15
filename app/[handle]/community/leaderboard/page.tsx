@@ -4,9 +4,10 @@ import { cookies } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
-import { readMembers } from "@/lib/community";
+import { type Member, readMembersExact } from "@/lib/community";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { communityVisitor } from "@/lib/community-page";
-import { LEVELS, type Period, board, levelOf, pointsOf, readRewards, toNextLevel } from "@/lib/community-points";
+import { LEVELS, type Period, board, boardShown, levelOf, pointsOf, readRewards, toNextLevel } from "@/lib/community-points";
 import { readListings } from "@/lib/catalog";
 import { CommunityBar, Face, LevelBadge } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
@@ -55,10 +56,16 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
     owner ? Promise.resolve(new Map<string, number>()) : pointsOf(id, [key]),
   ]);
   const [members, allTime, courses] = await Promise.all([
-    readMembers(id, standing.top.map((s) => s.key)),
+    // Read exactly (rule 24): a reply lost or cut short is unknown, and shows nobody rather than a list it cannot vouch for.
+    readMembersExact(id, standing.top.map((s) => s.key)).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return new Map<string, Member>();
+      throw error;
+    }),
     pointsOf(id, standing.top.map((s) => s.key)),
     rewards.length ? readListings(store, rewards.map((r) => r.product)) : Promise.resolve([]),
   ]);
+  // A member the creator removed is not shown on the board (lib/community-points.ts, boardShown).
+  const shown = boardShown(standing.top, members);
   const myPoints = mineAll.get(key) ?? 0;
   const myLevel = levelOf(myPoints);
   const toNext = toNextLevel(myPoints);
@@ -119,11 +126,11 @@ export default async function CommunityLeaderboardPage({ params, searchParams }:
           ))}
         </nav>
 
-        {standing.top.length === 0 ? (
+        {shown.length === 0 ? (
           <EmptyState title={w.nothingHereYet} body={period === "all" ? w.nobodyPoints : w.noPointsPeriod} className="mt-6" />
         ) : (
           <ol className="mt-4 space-y-2">
-            {standing.top.map((s, i) => {
+            {shown.map((s, i) => {
               const member = members.get(s.key);
               const name = member?.n || w.aMember;
               return (

@@ -319,7 +319,7 @@ export async function paidCalls(store: Store): Promise<
     answers: Answer[];
     /** What was paid, in cents. */
     amount: number;
-    /** The currency it was paid in, as the checkout session says; empty when it says none, and readers fall back to the store's (22 [E5], unit 2b). */
+    /** The currency it was paid in, as the checkout session says (chargedIn); empty when it says none or another shape (22 [E5], unit 2b). */
     currency: string;
     /** A team booking's hosts' ids and the claim on their time; empty for an ordinary call. */
     hosts: string[];
@@ -408,7 +408,7 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
     moves: 0,
     answers: readAnswers(row),
     amount: typeof row.amount_total === "number" ? row.amount_total : 0,
-    currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",
+    currency: chargedIn(row.currency) ?? "",
     ...(teamOf({ h: (meta.hosts ?? "").split(","), c: meta.claim }) ?? { hosts: [], claim: "" }),
     lead: /^[0-9a-f]{12}$/.test(meta.lead_via ?? "") ? (meta.lead_via as string) : "",
     pi: paymentOf(row.payment_intent),
@@ -421,6 +421,15 @@ function callFromRow(row: SessionRow, handles: Set<string>): CallRow | "refunded
 export function paymentOf(raw: unknown): string {
   if (typeof raw === "string") return raw;
   return raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
+}
+
+/**
+ * The currency Stripe charged a booking in, read exactly (CX-123 rule 24; audit R48): three lowercase letters, as
+ * Stripe gives it. Anything else is null, and the booking's alert and emails leave its amounts out, never the
+ * store's own currency in its place (a store may have changed its currency since).
+ */
+export function chargedIn(raw: unknown): string | null {
+  return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : null;
 }
 
 async function withMoves(found: CallRow[]): Promise<CallRow[]> {
@@ -514,12 +523,13 @@ async function readBusy(
 ): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
   const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
   let paid: PaidCall[] = [];
-  // Read alongside Stripe, and never a reason to fail: a calendar that does
-  // not answer blocks nothing.
+  // Read alongside Stripe. A calendar whose busy times are not known closes
+  // its window (calendarBusy, which does not throw); were the reading to
+  // throw, no time is offered (the throw below), never every time.
   const weekly = sellsAny(store, "weekly");
-  const calendar = weekly
-    ? calendarBusy(store, now).catch(() => ({ busy: [] as Busy[] }))
-    : Promise.resolve({ busy: [] as Busy[] });
+  const calendar = weekly ? calendarBusy(store, now) : Promise.resolve({ busy: [] as Busy[] });
+  // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
+  calendar.catch(() => {});
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
@@ -1569,12 +1579,10 @@ export async function moveBooking(input: {
 
   const moves = from.moves + 1;
   if (letGo) await releaseClaim(letGo.hosts, letGo.claim).catch(() => {});
-  try {
-    await unplanReminders(callsId, store.handle, session, from.start);
-    if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start);
-  } catch (error) {
-    console.error("planning reminders after a move failed", error);
-  }
+  // Each on its own (Claude 7, 13 November 2026): a failure dropping the old time's reminders never skips planning the
+  // new time's. An old reminder left in the queue is not sent: the reminder job sends only for the booking's start now.
+  await unplanReminders(callsId, store.handle, session, from.start).catch((error) => console.error("dropping a moved booking's old reminders failed", error));
+  if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start).catch((error) => console.error("planning reminders after a move failed", error));
   // A Google Meet or Zoom meeting moves with the booking (lib/meet-links.ts),
   // before anybody is told, so the emails carry the link of the new time.
   await callMoved({ store, product, session, from, start, end, email: input.booked.email }).catch((error) =>
@@ -1823,8 +1831,8 @@ export async function confirmBooking(input: {
   answers?: Answer[];
   /** What was paid, in cents, for the creator's phone; left out when not known. */
   amountCents?: number | null;
-  /** The currency it was paid in; the store's when not known (a store may have changed its currency since). */
-  currency?: string;
+  /** The currency Stripe charged it in, as Stripe gave it; read by chargedIn, and not known leaves every amount out. */
+  currency?: unknown;
   /** The affiliate a lead is credited to (metadata lead_via), and the booking's payment, which a refund is made against. */
   lead?: string;
   pi?: string;
@@ -1907,6 +1915,26 @@ export async function confirmBooking(input: {
   }
   // Moved before it was done ("moved"): what a booking does besides its two emails, which the move's stand in for.
   if (stage === "sending" || stage === "moved") {
+    // The creator's webhooks are told first, and a failure is thrown, not only logged (issue #3937): emitEvent throws
+    // so its caller tries again when it could not record the event (its own once-only mark unknown, or its deliveries
+    // not written). Thrown here, the mark stays at this stage, which is owed (CONFIRM_OWED), so the mail job,
+    // catchUpBookings and the thanks page resume it, and nothing below has run yet: the team's round robin
+    // (confirmTeam's HINCRBY) is never counted twice by a resumed try. The event's id is made from the session
+    // (lib/webhooks.ts), so it is recorded once however often this is tried. Known edge (review of #4099, LOW): an event
+    // that keeps failing until the call's end is never confirmed, since the retries look only at calls not yet ended.
+    try {
+      await emitEvent(store, "call.booked", session, {
+        checkout_session: session,
+        product: { id: product.id, title: product.title },
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+        kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
+        buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
+        answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
+      });
+    } catch (error) {
+      throw new Error("queueing the call.booked webhook failed; confirmed later", { cause: error });
+    }
     // Booked: the orders it was admitted as are the window's (lib/orders.ts), once each by its reference, however
     // often this is tried, by the checkout.
     for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
@@ -1927,20 +1955,11 @@ export async function confirmBooking(input: {
         console.error("planning call reminders failed", error),
       );
     }
-    // Once per checkout however often it is noticed: its event id is made from the session (lib/webhooks.ts).
-    await emitEvent(store, "call.booked", session, {
-      checkout_session: session,
-      product: { id: product.id, title: product.title },
-      start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(),
-      kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
-      buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
-      answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
-    }).catch((error) => console.error("queueing the call.booked webhook failed", error));
     // The creator's phone, when a device of theirs asked for bookings
     // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid, once per `seed`.
-    // In the currency it was paid in: the store's own, unless the store changed its currency since.
-    const paid = typeof input.amountCents === "number" && input.amountCents > 0 ? formatMoney(input.amountCents, input.currency || store.currency) : "";
+    // In the currency Stripe charged it in, read exactly (chargedIn); not known, the amount is left out.
+    const paidIn = chargedIn(input.currency);
+    const paid = paidIn && Number.isSafeInteger(input.amountCents) && Number(input.amountCents) > 0 ? formatMoney(Number(input.amountCents), paidIn) : "";
     await alertCreator(
       store,
       "booking",
@@ -1963,6 +1982,8 @@ export async function confirmBooking(input: {
     }
   }
   const hosts = team?.emails ?? [];
+  // The currency Stripe charged the booking in, read exactly (chargedIn): the emails' amounts below are said only in it.
+  const paidIn = chargedIn(input.currency);
   // A Google Meet or Zoom meeting, when the product makes them: made now, on
   // the creator's account, so both emails carry its link, and made even
   // where email is off, since the pages show it too (lib/meet-links.ts). It
@@ -1984,7 +2005,6 @@ export async function confirmBooking(input: {
   const place = whereOf(setup).kind === "place" ? setup.place! : null;
   const room = place ? null : await roomOf(store.callsId, { product: product.id, setup, session, start, end });
   const video = isVideoRoom(room);
-  const paidIn = input.currency || store.currency;
   const invite = (note: string, words?: BookingWords) =>
     Buffer.from(
       callInvite({ uid: session, start, end, title: product.title, storeName: store.name, room, place, note, sequence: (input.moves ?? 0) + (meeting?.updates ?? 0), words }),
@@ -2013,7 +2033,8 @@ export async function confirmBooking(input: {
         "",
         place ? b.whereAt(placeLine(place)) : room ? b.joinAtThatTime(room) : b.willSendLink(store.name),
         // The same sentences Stripe's page showed before paying: the code, and what is left to pay in person.
-        ...dueLines(b, due, { currency: paidIn, locale, storeName: store.name }),
+        // Their amounts only in the currency Stripe charged; not known, they are left out rather than said in the store's.
+        ...(paidIn ? dueLines(b, due, { currency: paidIn, locale, storeName: store.name }) : []),
         ...(video ? [b.videoRoomNote] : []),
         "",
         // The reminders planned above: each only while it is at least an hour away (lib/call-records.ts).

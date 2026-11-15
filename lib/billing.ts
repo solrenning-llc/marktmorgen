@@ -854,6 +854,28 @@ export async function subscriptionRecord(subscriptionId: string): Promise<Record
   }
 }
 
+/** The id an expanded Stripe field names: the string itself, or the object's own `id`; "" otherwise. */
+function namedId(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
+  return "";
+}
+
+/**
+ * Whether a subscription's expanded latest invoice is that subscription's and its customer's own (#4449): it names
+ * the subscription (at the top level in older API versions, or under parent.subscription_details) and the same
+ * customer. An invoice of another subscription or customer, or one naming neither, is never used for a pay link or
+ * an email: its link and amount would be someone else's.
+ */
+export function ownLatestInvoice(subscription: Record<string, unknown>, invoice: Record<string, unknown>): boolean {
+  const subscriptionId = namedId(subscription.id);
+  const customerId = namedId(subscription.customer);
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const named = [namedId(invoice.subscription), namedId(parent?.subscription_details?.subscription)].filter(Boolean);
+  if (!subscriptionId || !customerId || named.length === 0 || named.some((id) => id !== subscriptionId)) return false;
+  return namedId(invoice.customer) === customerId;
+}
+
 /**
  * Stripe's own page where an unpaid renewal is paid (232 [CA1] unit 4): the
  * hosted page of the subscription's latest invoice, while the subscription
@@ -871,6 +893,7 @@ export async function renewalInvoicePage(subscriptionId: string): Promise<string
     if (subscription?.id !== subscriptionId || subscription.status !== "past_due") return null;
     const invoice = subscription.latest_invoice as { status?: unknown; amount_due?: unknown; hosted_invoice_url?: unknown } | string | null;
     if (!invoice || typeof invoice !== "object" || invoice.status !== "open") return null;
+    if (!ownLatestInvoice(subscription, invoice as Record<string, unknown>)) return null;
     if (typeof invoice.amount_due !== "number" || invoice.amount_due <= 0) return null;
     const url = typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : "";
     return INVOICE_PAGE.test(url) ? url : null;
@@ -2112,8 +2135,13 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     const listed = await onPlatform("GET", `/refunds?${query}`, undefined, { version: CHARGE_VERSION });
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return null;
     const out = { returned: 0, inFlight: 0, failed: 0, paid: intent.amount_received as number };
+    // Each refund counts once, by its own id: a list that repeats an id cannot
+    // prove its rows are distinct, so it is unreadable, never a doubled sum
+    // that would close a debt only partly returned (issue #4452).
+    const seen = new Set<string>();
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string") return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;
       if (row.status === "succeeded") {

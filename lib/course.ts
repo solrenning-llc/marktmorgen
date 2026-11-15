@@ -613,6 +613,33 @@ export async function readCoursesExact(ids: string[], what = "the course outline
 }
 
 /**
+ * readCoursesExact with an answer for each course instead of one for all, for the daily drip walk (lib/learn.ts,
+ * sendDripEmails; the cost ceiling under Claude 7's MÉDIO on #3344): a hundred at a command (MGET), the same pattern;
+ * the course for each, null only for the exact null (no such course), "unknown" for an entry it cannot read, which
+ * keeps that course for another run and never stops the others. Throws UnknownReply only when the MGET itself is not
+ * answered whole, so no course of it is taken for read.
+ */
+export async function readCoursesEach(ids: string[], what = "the drip walk's courses"): Promise<Map<string, Course | null | "unknown">> {
+  const found = new Map<string, Course | null | "unknown">();
+  const valid = [...new Set(ids)];
+  for (const id of valid) if (!COURSE_ID_PATTERN.test(id)) found.set(id, "unknown");
+  const asked = valid.filter((id) => COURSE_ID_PATTERN.test(id));
+  if (asked.length === 0) return found;
+  if (!isRedisConfigured()) throw new UnknownReply(what);
+  for (let i = 0; i < asked.length; i += 100) {
+    const some = asked.slice(i, i + 100);
+    const [rows] = exactReplies(await redisPipeline([["MGET", ...some.map(courseKey)]]), 1, what);
+    const each = exactReplies(rows, some.length, what);
+    some.forEach((id, n) => {
+      if (each[n] === null) return found.set(id, null);
+      const course = parseCourse(each[n]);
+      found.set(id, course && course.id === id ? course : "unknown");
+    });
+  }
+  return found;
+}
+
+/**
  * Where a course is counted in the store's data room (lib/store-data.ts):
  * its outline in one slot, its lessons' text in another, each lesson's words
  * as the community's search may index them (lib/community-index.ts) included.

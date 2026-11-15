@@ -16,7 +16,7 @@
  */
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE, emailKey, sendDripEmails } from "@/lib/learn";
-import type { Course } from "@/lib/course";
+import { type Course, readCoursesEach } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { type SesMailFixtureOptions, installSesMailFixture } from "./ses-mail-fixture";
@@ -29,16 +29,18 @@ const mail = installSesMailFixture(sesHooks);
 type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
 const seen: Cmd[] = [];
+/** A test's hand on a batch: answers it itself when it returns a promise. */
+let inject: ((commands: Cmd[]) => Promise<unknown[]> | null) | null = null;
 redis.pipeline = (async (commands: Cmd[]) => {
   seen.push(...commands);
-  return original(commands);
+  return inject?.(commands) ?? original(commands);
 }) as typeof redis.pipeline;
 
 const NOW = Math.floor(Date.now() / 1000);
 const DRIP = "nl:courses:drip";
 const lesson = { id: "lesson000001", title: "First", preview: false, video: null, files: [], link: null, hasBody: false, quiz: null };
 const courseWith = (id: string) => ({ id, certificate: false, startsAt: null, modules: [{ id: "module000002", title: "Week two", dripDays: 1, lessons: [lesson] }] }) as unknown as Course;
-const COURSES = ["a", "b", "c", "d", "e", "f", "g", "h"].map((c) => courseWith(c.repeat(32)));
+const COURSES = ["a", "b", "c", "d", "e", "f", "1", "2"].map((c) => courseWith(c.repeat(32)));
 const products = COURSES.map((course, n) => ({ id: `prod00000${String(n).padStart(3, "0")}`, title: `Course ${n}`, summary: "", priceCents: 6900, createdAt: 1, course: { id: course.id } }));
 const OWNER = "drip-ceiling@example.com";
 
@@ -120,6 +122,41 @@ async function main(): Promise<void> {
     const run = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
     sesHooks.onSes = undefined;
     is("the other course's thirty are emailed", run.sent, 30);
+  }
+
+  part("Courses read a hundred at a command (readCoursesEach), never a GET each");
+  {
+    const store = await setup(8);
+    for (const course of COURSES) await original([["SET", `nl:course:${course.id}`, JSON.stringify(course)]]);
+    seen.length = 0;
+    const run = await quietly(() => sendDripEmails(async () => store, async () => { throw new Error("one at a time is not used"); }, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
+    is("everyone due emailed", run.sent, 240);
+    is("eight courses, one MGET, no GET of a course", [seen.filter((c) => c[0] === "MGET").length, seen.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:course:")).length], [1, 0]);
+  }
+
+  part("An entry of the batch: its exact null is a course gone; one it cannot read keeps that course, the others go on");
+  {
+    const store = await setup(3);
+    const before = mail.sent.filter((m) => m.to.some((a) => a.startsWith("student-2-"))).length;
+    await original([["SET", `nl:course:${COURSES[0].id}`, JSON.stringify(COURSES[0])], ["SET", `nl:course:${COURSES[2].id}`, "{not a course"]]);
+    const run = await quietly(() => sendDripEmails(async () => store, async () => null, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
+    const inSet = async (n: number) => (await original([["SISMEMBER", DRIP, `${COURSES[n].id}|${store.handle}|${products[n].id}`]]))[0];
+    is("the readable course's thirty emailed", run.sent, 30);
+    is("the course whose record is gone (exact null) leaves the set; the unreadable one stays, counted failed", [await inSet(0), await inSet(1), await inSet(2), run.failed], [1, 0, 1, 1]);
+    is("nobody of the unreadable course emailed", mail.sent.filter((m) => m.to.some((a) => a.startsWith("student-2-"))).length - before, 0);
+  }
+
+  part("The batch not answered whole: nothing sent on its courses, every one kept for the next run");
+  {
+    const store = await setup(3);
+    for (const course of COURSES.slice(0, 3)) await original([["SET", `nl:course:${course.id}`, JSON.stringify(course)]]);
+    let hits = 0;
+    inject = (commands) => (commands[0]?.[0] === "MGET" ? (hits += 1, Promise.reject(new Error("synthetic: the database did not answer"))) : null);
+    const run = await quietly(() => sendDripEmails(async () => store, async () => null, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
+    inject = null;
+    const kept = await original(COURSES.slice(0, 3).map((course, n) => ["SISMEMBER", DRIP, `${course.id}|${store.handle}|${products[n].id}`]));
+    is("the batch was the walk's own read", hits > 0, true);
+    is("nothing sent, every course failed and kept", [run.sent, run.failed, kept], [0, 3, [1, 1, 1]]);
   }
 }
 

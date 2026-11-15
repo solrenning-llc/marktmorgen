@@ -284,14 +284,18 @@ async function main(): Promise<void> {
       const { value } = await quiet(async () => (await coursesRoute.GET(new NextRequest("https://local.example/api/cron/courses"))).json() as Promise<Counts>);
       return value === "rejected" ? {} : value;
     };
+    // The course's record is read in a batch (MGET, readCoursesEach): its entry answered in another shape, and the
+    // whole batch answered nothing; the store's address is still one GET.
     for (const [label, key, reply] of [
-      ["the course's record answered in another shape", `nl:course:${course.id}`, "QUEUED"],
+      ["the course's record answered in another shape", `nl:course:${course.id}`, ["QUEUED"]],
       ["the course's record answered nothing", `nl:course:${course.id}`, undefined],
       ["the store's address answered in another shape", `nl:store:handle:${handle}`, 7],
     ] as [string, string, unknown][]) {
-      inject = (commands) => (commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === key ? Promise.resolve([reply]) : null);
+      let hits = 0;
+      inject = (commands) => (commands.length === 1 && ((commands[0][0] === "GET" && commands[0][1] === key) || (commands[0][0] === "MGET" && commands[0].includes(key))) ? (hits += 1, Promise.resolve([reply])) : null);
       await call();
       inject = null;
+      is(`${label}: the answer was given to the walk's own read`, hits > 0, true);
       is(`${label}: the course stays in the drip set`, await inSet(member), true);
     }
     inject = (commands) => (commands.some((c) => c[0] === "SMEMBERS" && c[1] === DRIP) ? Promise.resolve(commands.map(() => "QUEUED")) : null);

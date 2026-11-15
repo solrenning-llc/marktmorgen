@@ -1120,6 +1120,10 @@ const ALL_TIERS_SAME = (usd: number) => () => usd;
 
 /** How many times a day the checkout sweep runs: every five minutes (vercel.json, app/api/cron/mail). */
 export const CHECKOUT_SWEEP_RUNS_PER_DAY = 288;
+/** Redis commands a run reads the payment-request store list with: one SMEMBERS (storesWithRequests). */
+export const PAYMENT_REQUEST_INDEX_COMMANDS = 1;
+/** How many times a UTC day the sweep settles one store of that list (lib/checkout-sweep.ts, sweepCheckouts). */
+export const PAYMENT_REQUEST_SETTLES_PER_DAY = 1;
 
 export const COST_LINES: CostLine[] = [
   {
@@ -1252,14 +1256,14 @@ export const COST_LINES: CostLine[] = [
   },
   {
     id: "payment-request-sweep",
-    feature: "The checkout sweep's look at a store's payment requests, every run while it has any (lib/checkout-sweep.ts, settleStoreList; issue #4728)",
-    monthlyUsd: () => DAY_WINDOWS * CHECKOUT_SWEEP_RUNS_PER_DAY * (1 + OPEN_COUNT_COMMANDS + REMOVE_IDLE_STORE_COMMANDS) * COMMAND,
+    feature: "The checkout sweep's look at a store's payment requests: the list read every run, the store settled once a day (lib/checkout-sweep.ts, sweepCheckouts; settleStoreList; issue #4728)",
+    monthlyUsd: () => DAY_WINDOWS * (CHECKOUT_SWEEP_RUNS_PER_DAY * PAYMENT_REQUEST_INDEX_COMMANDS + PAYMENT_REQUEST_SETTLES_PER_DAY * (OPEN_COUNT_COMMANDS + REMOVE_IDLE_STORE_COMMANDS)) * COMMAND,
     sources: [
       { file: "lib/payment-request-store.ts", names: ["storesWithRequests", "settleStoreList", "OPEN_COUNT_COMMANDS", "REMOVE_IDLE_STORE_COMMANDS", "REMOVE_IDLE_STORE"] },
-      { file: "lib/checkout-sweep.ts", names: ["storesWithRequests()", "settleStoreList(store.sid)"] },
+      { file: "lib/checkout-sweep.ts", names: ["storesWithRequests()", "settleStoreList(sid)", "DAY_MS"] },
       { file: "vercel.json", names: ["*/5 * * * *"] },
     ],
-    basis: "Every run of the day (CHECKOUT_SWEEP_RUNS_PER_DAY) at its worst for one store: its share of the index's read counted whole (1), its open requests counted (OPEN_COUNT_COMMANDS) and its one-step removal from the list (REMOVE_IDLE_STORE_COMMANDS), measured in tests/c7-payreq-idle-store-race.test.ts; a removal happens at most once a run, since a store comes back on the list only with a new request.",
+    basis: "Every run of the day (CHECKOUT_SWEEP_RUNS_PER_DAY) reads the list of stores with open requests once, its read counted whole for one store (PAYMENT_REQUEST_INDEX_COMMANDS); once a UTC day (PAYMENT_REQUEST_SETTLES_PER_DAY) each store on it has its open requests counted (OPEN_COUNT_COMMANDS) and, with none left, is taken off in one step (REMOVE_IDLE_STORE_COMMANDS); the day and the last store settled are kept in the cursor's own SET, no command more, so a run that stops part way goes on after that store and none is settled twice a day. Measured in tests/c7-payreq-idle-store-race.test.ts and tests/c7-payreq-daily-settle.test.ts. Since 15 November 2026 (in place of the count and removal on every run, 7 commands a run): 294 commands a UTC day where 2,016 were.",
   },
   {
     id: "store-email",
@@ -2096,7 +2100,7 @@ export const NOT_A_COST: Record<string, string> = {
   PITCHES_PER_DAY: "Outreach pitches are drafts the creator sends from their own mailbox: nothing is sent from here, and reading a business's site is a call out (line integrations).",
   OPENS_PER_DAY: "A daily burst limit on one numbers link: each opening is one of the store's public requests (line public-requests).",
   MAX_RANGES_PER_DAY: "How many time ranges a host may set on one day of the week: a setting, not a use.",
-  REQUEST_LIMITS: "How many payment requests a store keeps open and in all: each costs only the store emails it sends (line store-email), the order its payment becomes (line orders), its record in the data room (line database-storage) and, while the store has any, the checkout sweep's look at them every run (line payment-request-sweep).",
+  REQUEST_LIMITS: "How many payment requests a store keeps open and in all: each costs only the store emails it sends (line store-email), the order its payment becomes (line orders), its record in the data room (line database-storage) and, while the store has any, the checkout sweep's look at them, the list every run and the store once a day (line payment-request-sweep).",
   NON_PAYING_REQUEST_LIMITS: "The same for a store that pays nothing: its emails and orders are in its own figures (nonPayingWorst), its records in its data room.",
   NON_PAYING_ALLOWANCES: "The figures of a store that pays nothing: in nonPayingWorst (line free-share).",
   PIPELINES_BY_TIER: "How many deal pipelines a store keeps: a setting in one record counted in the store's data room (tests/store-data-registry.ts, nl:crm:pipes:); changing or moving deals are studio requests (line studio), and a deal entering a stage takes one more before its workflow is checked (lib/deal-stage-trigger.ts, STAGE_TRIGGER_UNITS).",

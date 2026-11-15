@@ -75,6 +75,8 @@ import { TAKE_DATA, dataKey, monthOf, type DataStore } from "@/lib/store-data";
 import { contentRoomFor } from "@/lib/store-data-rules";
 
 const CURSOR_KEY = "nl:sweep:cursor";
+/** A UTC day in milliseconds: the payment-request stores are settled once in each (sweepCheckouts). */
+const DAY_MS = 86_400_000;
 
 /** A diagnostic observation policy, never legal coverage or a sales gate.
  * This stage has no production policy, environment setting or request input.
@@ -716,8 +718,7 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
       await startAbandonedWorkflows(store, rows).catch((error) => console.error("starting abandoned-checkout workflows failed", store.handle, error));
     }
   });
-  // A store with no open payment request left comes off their list (settleStoreList counts the open ones itself).
-  if (requesting) await settleStoreList(store.sid).catch(() => undefined);
+  // A store with no open payment request left comes off their list once a day, at the start of a run (sweepCheckouts).
 }
 
 /**
@@ -734,13 +735,45 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   const taxPass = { policy: taxPolicyValue, pagesLeft: MAX_PAGES_PER_STORE };
 
   const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
+  const [savedCursor, savedDone, savedDay, savedAfter] = typeof saved === "string" ? saved.split("|") : ["0", "0", "", ""];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
   // The stores with open payment requests, read once a run.
   // Read exactly (issue #4729): an unreadable index throws here, before the first page, so the cursor stays where it
   // was for the next run and the cron reports this step as not done.
   const requesting = await storesWithRequests();
+  // Once a UTC day, every store on that list is counted and, with no open request left, taken off it in one step
+  // (settleStoreList; issue #4728), so a store whose last request expired or was paid leaves within a day. Not on
+  // every run: a store with open requests costs the job no command of its own in between (line
+  // payment-request-sweep in tests/plan-cost-registry.ts). The day and the last store settled are kept with the
+  // cursor, no command more: a run that stops part way goes on after that store next time, so each store is settled
+  // at most once a day.
+  // `day`: the last UTC day a pass over the list finished. `after`: the last store of a pass not yet finished.
+  let day = /^\d+$/.test(savedDay ?? "") ? Number(savedDay) : -1;
+  let after = "";
+  try {
+    after = decodeURIComponent(savedAfter ?? "");
+  } catch {
+    after = "";
+  }
+  const today = Math.floor(Date.now() / DAY_MS);
+  if (day !== today) {
+    let finished = true;
+    for (const sid of [...requesting].sort()) {
+      if (after && sid <= after) continue;
+      if (Date.now() >= deadline) {
+        finished = false;
+        break;
+      }
+      await settleStoreList(sid).catch(() => undefined);
+      after = sid;
+    }
+    if (finished) {
+      day = today;
+      after = "";
+    }
+  }
+  const settleMark = `${day}|${encodeURIComponent(after)}`;
   // Redis's SCAN may hand back the same key on more than one page (and a store
   // moving between addresses is seen under both), so each store is swept at
   // most once a run: the job's per-store figures (PAYPAL_WATCH_RANGES and
@@ -777,7 +810,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       done += 1;
     }
     if (done < stores.length) {
-      await redisPipeline([["SET", CURSOR_KEY, `${cursor}|${done}`]]);
+      await redisPipeline([["SET", CURSOR_KEY, `${cursor}|${done}|${settleMark}`]]);
       return counts;
     }
     skip = 0;
@@ -786,7 +819,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
     // than this one reading the first stores twice in a row.
     if (next === "0") break;
   }
-  await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0`]]);
+  await redisPipeline([["SET", CURSOR_KEY, `${cursor}|0|${settleMark}`]]);
   return counts;
 }
 

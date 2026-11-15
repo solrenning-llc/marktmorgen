@@ -1147,7 +1147,11 @@ export async function readOrder(
   // explicit amount_total of 0.
   const paidAmount = session.amount_total;
   const paidCurrency = session.currency;
-  if (typeof paidAmount !== "number" || !Number.isSafeInteger(paidAmount) || paidAmount < 0 || typeof paidCurrency !== "string" || !/^[a-z]{3}$/.test(paidCurrency)) {
+  const amountReads = typeof paidAmount === "number" && Number.isSafeInteger(paidAmount) && paidAmount >= 0;
+  const currencyReads = typeof paidCurrency === "string" && /^[a-z]{3}$/.test(paidCurrency);
+  if (!amountReads || !currencyReads) {
+    // Logged with the session and the field, never the buyer: Stripe sent a paid order this page cannot read.
+    console.error("a paid checkout's money does not read", { session: sessionId, field: amountReads ? "currency" : "amount_total" });
     return { state: "error" };
   }
 

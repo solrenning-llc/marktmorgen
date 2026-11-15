@@ -14,15 +14,14 @@ const OWNER = "maker@example.com";
 const ACCOUNT = "acct_1TestReadOrder01";
 const NOW = Math.floor(Date.now() / 1000);
 const oneSession: Record<string, Record<string, unknown>> = {};
+// A body sent as Stripe wrote it, for the values JSON.stringify cannot write (1e999 parses to Infinity).
+const rawBody: Record<string, string> = {};
 
 globalThis.fetch = (async (input: string | URL | Request) => {
   const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
   const one = /^\/checkout\/sessions\/(cs_[A-Za-z0-9_]+)$/.exec(path);
-  if (one && oneSession[one[1]]) {
-    // 1e999 is valid JSON that parses to Infinity; a number JSON.stringify cannot write.
-    const body = JSON.stringify(oneSession[one[1]]).replace("-1234567", "1e999");
-    return new Response(body, { status: 200 });
-  }
+  if (one && rawBody[one[1]]) return new Response(rawBody[one[1]], { status: 200 });
+  if (one && oneSession[one[1]]) return new Response(JSON.stringify(oneSession[one[1]]), { status: 200 });
   return new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 });
 }) as typeof fetch;
 
@@ -55,6 +54,40 @@ async function main(): Promise<void> {
   part("a paid checkout with unreadable money cannot invent zero in the store currency");
   is("amount_total null is an error", await read("cs_test_o6amountnull01", { amount_total: null }), { state: "error" });
   is("currency null is an error", await read("cs_test_o6currencynul01", { currency: null }), { state: "error" });
+  is("a fraction of a cent is an error", await read("cs_test_o6amountfrac01", { amount_total: 4900.5 }), { state: "error" });
+  is("a negative amount is an error", await read("cs_test_o6amountneg001", { amount_total: -4900 }), { state: "error" });
+  is("an amount as text is an error", await read("cs_test_o6amounttext01", { amount_total: "4900" }), { state: "error" });
+  is("an empty currency is an error", await read("cs_test_o6currencyemp1", { currency: "" }), { state: "error" });
+  is("an uppercase currency is an error", await read("cs_test_o6currencyup01", { currency: "USD" }), { state: "error" });
+  {
+    const name = "cs_test_o6amountinf001";
+    rawBody[name] = JSON.stringify(paid(name, id, { amount_total: 0 })).replace('"amount_total":0', '"amount_total":1e999');
+    const r = await readOrder(store, name);
+    is("an amount of 1e999 (Infinity) is an error", r.state, "error");
+  }
+
+  part("a free checkout keeps Stripe's explicit 0 in its own currency");
+  is("no_payment_required, 0 usd, is paid at 0", await read("cs_test_o6freezero0001", { payment_status: "no_payment_required", amount_total: 0 }), { state: "paid", amount: 0, currency: "usd", secondsLeft: 172_799 });
+  is("no_payment_required with no amount is an error", await read("cs_test_o6freenull0001", { payment_status: "no_payment_required", amount_total: null }), { state: "error" });
+
+  part("the error is logged with the session and the field, never the buyer");
+  {
+    const logged: unknown[][] = [];
+    const real = console.error;
+    console.error = (...args: unknown[]) => { logged.push(args); };
+    try {
+      await read("cs_test_o6logcurrency1", { currency: "US" });
+      await read("cs_test_o6logamount001", { amount_total: null });
+    } finally {
+      console.error = real;
+    }
+    const lines = logged.filter((args) => args[0] === "a paid checkout's money does not read").map((args) => args[1]);
+    is("one line per unreadable order, naming the session and the field", lines, [
+      { session: "cs_test_o6logcurrency1", field: "currency" },
+      { session: "cs_test_o6logamount001", field: "amount_total" },
+    ]);
+    is("no buyer address in the log", JSON.stringify(logged).includes("buyer@example.com"), false);
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

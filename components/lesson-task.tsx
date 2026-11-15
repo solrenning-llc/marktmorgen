@@ -3,11 +3,16 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { uploadPresigned } from "@vercel/blob/client";
-import { MAX_ANSWER_TEXT, MAX_TASK_FILE_BYTES, type Submission, TASK_ACCEPT, TASK_FILE_TYPES } from "@/lib/assignment-rules";
+import { MAX_ANSWER_TEXT, MAX_TASK_FILE_BYTES, type Submission, TASK_ACCEPT, TASK_FILE_TYPES, taskUploadPath } from "@/lib/assignment-rules";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import type { LanguageCode } from "@/lib/store-language";
 
 const MB = Math.round(MAX_TASK_FILE_BYTES / (1024 * 1024));
+
+/** A fresh id for a file's name: 32 hexadecimal letters, from crypto.getRandomValues, which older phones have too. */
+function freshId(): string {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 /** A file's kind by its name, as the store keeps it: browsers name some kinds differently, or not at all. */
 function kindOf(file: File): string | null {
@@ -30,6 +35,7 @@ export function LessonTask({
   mode,
   where,
   storeName,
+  folder = "",
   language = "en",
 }: {
   prompt: string;
@@ -39,6 +45,11 @@ export function LessonTask({
   mode: "student" | "owner" | "visitor";
   where: { handle: string; product: string; lesson: string };
   storeName: string;
+  /**
+   * The student's own folder for this lesson's files (lib/assignment-rules.ts, taskFolder), given by the lesson page:
+   * the file is sent under a fresh name in it, the name the upload door checks and signs.
+   */
+  folder?: string;
   language?: LanguageCode;
 }) {
   const w = coursesWords(language);
@@ -71,7 +82,8 @@ export function LessonTask({
     if (chosen.size > MAX_TASK_FILE_BYTES) return setError(w.taskTooBig(MB));
     setUploading(0);
     try {
-      const done = await uploadPresigned(`task.${TASK_FILE_TYPES[type]}`, chosen, {
+      // A fresh name in this student's folder: the door signs exactly the name asked for, and the file is sent under it.
+      const done = await uploadPresigned(taskUploadPath(folder, TASK_FILE_TYPES[type], freshId()), chosen, {
         access: "private",
         handleUploadUrl: "/api/store/course/task/upload",
         clientPayload: JSON.stringify({ ...where, type }),
@@ -79,9 +91,11 @@ export function LessonTask({
         onUploadProgress: (progress) => setUploading(progress.percentage),
       });
       setFile({ path: done.pathname, name: chosen.name });
-    } catch (thrown) {
-      const message = thrown instanceof Error ? thrown.message : "";
-      setError(message.includes("full") ? w.taskFull : w.taskFailed);
+    } catch {
+      // @vercel/blob 2.8.0 says only "Failed to retrieve the presigned URL" for any refusal of the door, and takes no
+      // payload the page could ask for itself: the reason (no room, too many files this hour, a pause) cannot be read
+      // here, so the student is told the likely ones (pre-review of 9 November 2026).
+      setError(w.taskFileFailed);
     } finally {
       setUploading(null);
       if (picker.current) picker.current.value = "";

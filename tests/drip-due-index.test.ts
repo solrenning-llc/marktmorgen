@@ -262,8 +262,10 @@ async function main(): Promise<void> {
   {
     const store = await setup();
     await registerDrip(store, PRODUCT as never, COURSE);
-    // Fifteen pages of one student each: HSCAN answers page n with the cursor n + 1, the last with "0".
-    const PAGES = 15;
+    // More pages than one run's budget and fewer than two (one student each): HSCAN answers page n with the cursor
+    // n + 1, the last with "0".
+    const budget = L.DRIP_INDEX_PAGES_PER_RUN as number;
+    const PAGES = budget + Math.ceil(budget / 2);
     const scans: string[] = [];
     inject = (commands) => {
       if (commands.length !== 1 || commands[0][0] !== "HSCAN") return null;
@@ -273,7 +275,6 @@ async function main(): Promise<void> {
       return Promise.resolve([[at + 1 >= PAGES ? "0" : String(at + 1), [emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]]);
     };
     await quietly(() => run(store));
-    const budget = L.DRIP_INDEX_PAGES_PER_RUN as number;
     const pendingMember = `${COURSE.id}|${store.handle}|${PRODUCT.id}`;
     is("the first run reads the page budget, from the first page", [scans.length, scans[0]], [budget, "0"]);
     is("the course still pending, its walk kept at the next page", [(await original([["SISMEMBER", pendingKey(store), pendingMember]]))[0], (await original([["HGET", `nl:drip:walk:${store.statsId}`, COURSE.id]]))[0]], [1, String(budget)]);
@@ -310,9 +311,12 @@ async function main(): Promise<void> {
     const monthly = R.dripRunMonthlyUsd as (tier: "creator" | "pro" | "scale") => number;
     const line = (["creator", "pro", "scale"] as const).map((tier) => Math.round(monthly(tier) * 1e4) / 1e4);
     // Store, Studio and Scale a month, in dollars (docs/margin-alignment-2026-10-18.md): the Store line under the
-    // US$0.0245 a refunded Store first year has under US$65 without it.
-    is("Store, Studio and Scale a month, in dollars", line, [0.0155, 0.032, 0.0691]);
-    is("the Store line under the room of US$0.0245", line[0] < 0.0245, true);
+    // US$0.0154 a refunded Store first year has under US$65 on main without it (64.9846 at the merge of 15 November
+    // 2026; it was US$0.0245 before main's later costs, so the page budget went from 10 to 8: it leaves
+    // US$0.0006 under the ceiling (64.9994) and still walks a store's eight pending courses within the window,
+    // tests/drip-run-ceiling.test.ts).
+    is("Store, Studio and Scale a month, in dollars", line, [0.0145, 0.0311, 0.0682]);
+    is("the Store line under the room of US$0.0154", line[0] < 0.0154, true);
     is("the registry's ceilings are the code's", [R.DRIP_REFUSALS_PER_STORE_RUN, R.DRIP_INDEX_PAGES_RUN], [learn.DRIP_REFUSALS_PER_STORE, L.DRIP_INDEX_PAGES_PER_RUN]);
   }
 }

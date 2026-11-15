@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   const month = (["creator", "pro", "scale"] as const).map((tier) => Math.round(dripRunMonthlyUsd(tier) * 100) / 100);
   // Store, Studio and Scale at full use: with the index (docs/drip-due-index.md) a few cents, where the marks without
   // the ceiling cost more than each plan's whole net profit and the walk of every course 31 to 87 cents.
-  is("Store, Studio and Scale a month, in dollars", month, [0.02, 0.03, 0.07]);
+  is("Store, Studio and Scale a month, in dollars", month, [0.01, 0.03, 0.07]);
 
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {

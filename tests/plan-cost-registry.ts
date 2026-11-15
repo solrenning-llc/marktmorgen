@@ -373,7 +373,7 @@ export const DRIP_WALK_FIXED_COMMANDS = 2;
 /** A page of the walk: its HSCAN, its room, its ZADD, and where it stopped (HSET) or its end (SREM and HDEL). */
 export const DRIP_WALK_PAGE_COMMANDS = 5;
 /** The walk's pages a store a run: lib/learn.ts DRIP_INDEX_PAGES_PER_RUN. */
-export const DRIP_INDEX_PAGES_RUN = 10;
+export const DRIP_INDEX_PAGES_RUN = 8;
 /** The pairs a walk writes a run before it stops at the next page: lib/learn.ts DRIP_INDEX_PAIRS_PER_RUN. */
 export const DRIP_INDEX_PAIRS_RUN = 4_000;
 /** The runs a pair's window lasts, over which a store's email figure is read: lib/learn.ts DRIP_WINDOW_RUNS. */
@@ -2111,6 +2111,22 @@ export const ADD_ON_LINES: AddOnLine[] = [
  * Why they are the five-minute job's, not a plan's: NOT_A_COST.PAYPAL_WATCH_BATCH.
  */
 export const PAYPAL_WATCH_RANGES = { rangeReadsPerStoreRun: 2, ordersPerRangeRead: 25 } as const;
+
+/**
+ * The PayPal watch's capture reads for one order (lib/paypal-sales.ts, watchPayPal, nextLook and unknownLook; Claude 2
+ * on #4536), held to what the real watch asks by tests/paypal-watch-unknown-looks.test.ts, each sweep run at the
+ * moment the order is next due:
+ * - looksPerOrderWatched: an order whose capture stays standing is asked hourly for 7 days, every 6 hours to day 30,
+ *   then daily to the end of the watch's 180 days, and leaves the watch;
+ * - lateLookSeconds, lateLooksPerOrder: an order whose capture PayPal answers in a status the watch does not read (or
+ *   about another capture) is never dropped, so after the watch's days it is asked every lateLookSeconds
+ *   (LATE_LOOK_SECONDS) until its paid record ends at 400 days: at most lateLooksPerOrder more reads. Before this it
+ *   was asked hourly to the end, about 9,600 reads an order.
+ * A read PayPal fails, or a paid record Redis does not answer, is still looked at again in an hour; those are not
+ * counted here, so they are not certified, never zero. Like the rest of the five-minute job (NOT_A_COST.PAYPAL_WATCH_BATCH),
+ * a company fixed cost, not a plan's allowance, and not yet a dollar line of lib/llc-fixed-costs.ts.
+ */
+export const PAYPAL_WATCH_LOOKS = { looksPerOrderWatched: 410, lateLookSeconds: 30 * 86_400, lateLooksPerOrder: 8 } as const;
 
 /** Per-use costs that no monthly figure bounds yet: not in worstCost, so nothing here is certified. */
 export type OpenItem = { id: string; what: string; names?: string[] };

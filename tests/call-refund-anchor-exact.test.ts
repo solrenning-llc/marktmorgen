@@ -22,6 +22,8 @@ const NOW = Math.floor(Date.now() / 1000);
 const CALLS = "e".repeat(16);
 const anchorKey = `nl:meet:rf:${CALLS}:since`;
 const seenKey = `nl:meet:rf:${CALLS}:seen`;
+// A refund with no payment has payment_intent null, as Stripe gives it (an empty id is a row in another shape for
+// lib/refunds.ts refundRowKnown, which holds the place: a fixture with one would keep the place for that reason alone).
 let refunds: Record<string, unknown>[] = [];
 let sessionsData: unknown = [];
 /** The refunds' second page, when set: the first page then says it has more. */
@@ -57,7 +59,10 @@ for (const [label, reply] of [["no reply", []], ["a number", [7]], ["text that i
     refunds = [];
     const older = String(NOW - 20 * 86_400);
     await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
-    redis.pipeline = (async (b: Batch) => (b.length === 1 && b[0][0] === "GET" && b[0][1] === anchorKey ? reply : pipeline(b))) as typeof redis.pipeline;
+    // The place's GET answered as `reply`, alone or first in the batch that reads it (a walk that reads its pass with it):
+    // no reply at all answers nothing for the batch.
+    redis.pipeline = (async (b: Batch) =>
+      b[0]?.[0] === "GET" && b[0][1] === anchorKey ? (reply.length ? [...reply, ...(b.length > 1 ? await pipeline(b.slice(1)) : [])] : reply) : pipeline(b)) as typeof redis.pipeline;
     try {
       await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
     } finally {
@@ -110,7 +115,7 @@ for (const [label, page] of [["a number", 7], ["an object", {}], ["a list holdin
     await seed();
     const older = String(NOW - 20 * 86_400);
     await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
-    refunds = [{ id: "re_CallRefund0002", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
+    refunds = [{ id: "re_CallRefund0002", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
     secondPage = page;
     try {
       await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
@@ -127,7 +132,7 @@ for (const [label, rows] of [["a number", [7]], ["null", [null]], ["a refund wit
     const older = String(NOW - 20 * 86_400);
     await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
     // Beside a healthy, newer refund the walk reads: the place must not move past the row it could not read.
-    refunds = [...rows, { id: "re_CallRefund0004", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }] as Record<string, unknown>[];
+    refunds = [...rows, { id: "re_CallRefund0004", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }] as Record<string, unknown>[];
     try {
       await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
     } finally {
@@ -141,7 +146,7 @@ test("a healthy page read to its end moves the place", async () => {
   await seed();
   const older = String(NOW - 20 * 86_400);
   await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
-  refunds = [{ id: "re_CallRefund0003", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
+  refunds = [{ id: "re_CallRefund0003", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 5000, refunded: true } }];
   await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);
   const [place] = await pipeline([["GET", anchorKey]]);
   assert.notEqual(place, older);
@@ -153,7 +158,7 @@ for (const [label, more] of [["the text \"true\"", "true"], ["the number 1", 1],
     const older = String(NOW - 20 * 86_400);
     await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
     // Page one gives nothing back; page two holds a full refund that would be left behind for good.
-    refunds = [{ id: "re_CallRefund0005", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
+    refunds = [{ id: "re_CallRefund0005", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
     secondPage = [refunded("0006")];
     firstHasMore = more;
     try {
@@ -170,8 +175,8 @@ test("control: a refunds page whose has_more is exactly true reads the next page
   await seed();
   const older = String(NOW - 20 * 86_400);
   await pipeline([["SET", anchorKey, older, "EX", 86_400 * 60]]);
-  refunds = [{ id: "re_CallRefund0007", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
-  secondPage = [{ id: "re_CallRefund0008", object: "refund", created: NOW - 50, status: "succeeded", payment_intent: "", charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
+  refunds = [{ id: "re_CallRefund0007", object: "refund", created: NOW - 60, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
+  secondPage = [{ id: "re_CallRefund0008", object: "refund", created: NOW - 50, status: "succeeded", payment_intent: null, charge: { object: "charge", amount: 5000, amount_refunded: 0, refunded: false } }];
   firstHasMore = true;
   try {
     await syncMeetings(find, Date.now() + 10_000, "https://marktmorgen.com").catch(() => null);

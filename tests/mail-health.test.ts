@@ -163,6 +163,32 @@ async function main(): Promise<void> {
   is("off the list, and counted apart from bounces", [await isMailable(list, "reader4@example.com"), (await listHealth(id)).complained, (await listHealth(id)).bounced], [false, 1, 1]);
   is("their own unsubscribe, already made, is not counted as anything", await stopWriting(list, "reader4@example.com", "bounced"), false);
 
+  part("A notice whose replay mark cannot be written is not acted on (MM-SA-55)");
+  // Signed notices are acted on once: the id is marked first. When that mark cannot be written (Redis failed, or
+  // answered out of shape), acting anyway would let the sender's retry, or a replay within the five minutes, count the
+  // same complaint again: so nothing is acted on, and the answer asks for the retry.
+  const markPipe = redis.pipeline.bind(redis);
+  for (const broken of ["throw", "shape"] as const) {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (String(commands[0]?.[1] ?? "").startsWith("nl:inbound:seen:")) {
+        if (broken === "throw") throw new Error("synthetic: connection reset");
+        await markPipe(commands);
+        return ["QUEUED"];
+      }
+      return markPipe(commands);
+    }) as typeof redis.pipeline;
+    const before = (await listHealth(id)).complained;
+    const unmarked = await POST(announce("email.complained", { to: [`reader-mark-${broken}@example.com`], tags: [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }] }, { id: `msg_mark_${broken}` }));
+    redis.pipeline = markPipe;
+    is(`mark ${broken === "throw" ? "not written" : "answered out of shape"}: a failure, so the sender tries again`, unmarked.status >= 500, true);
+    is("and nothing was counted for it", (await listHealth(id)).complained, before);
+  }
+  await redis.pipeline([["DEL", "nl:inbound:seen:msg_mark_throw"], ["DEL", "nl:inbound:seen:msg_mark_shape"]]);
+  const retried = await POST(announce("email.complained", { to: ["reader-mark-throw@example.com"], tags: [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }] }, { id: "msg_mark_throw" }));
+  const countedOnce = (await listHealth(id)).complained;
+  await POST(announce("email.complained", { to: ["reader-mark-throw@example.com"], tags: [{ name: STORE_TAG, value: id }, { name: LIST_TAG, value: list }] }, { id: "msg_mark_throw" }));
+  is("the retry, marked this time, is counted once", [(await retried.json()).result, (await listHealth(id)).complained], ["counted", countedOnce]);
+
   part("A handful of bad addresses pauses nobody");
   is("not paused", await pausedFor(id), null);
   await noteSent(id, 1_000);

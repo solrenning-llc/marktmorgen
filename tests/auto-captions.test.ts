@@ -86,7 +86,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     // An answer that is not a payment: the invoice stays open, as Stripe keeps it.
     if (paidReceipt !== undefined) return json(paidReceipt);
     if (invoiceState) invoiceState.status = "paid";
-    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount")), currency: "usd" });
+    const charged = Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount"));
+    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: charged, amount_due: charged, amount_paid: charged, currency: "usd" });
   }
   if (path.endsWith("/void")) {
     if (invoiceState?.status === "paid") return json({ error: { code: "invoice_not_voidable", message: "paid" } }, 400);
@@ -208,11 +209,11 @@ async function main(): Promise<void> {
       { status: "paid", payment_intent: "" }, { status: "paid", payment_intent: false },
       { status: "paid", payment_intent: 1 }, { status: "paid", payment_intent: {} },
       // Issue #4746 (MEDIUM, money): a "paid" that is not this invoice's own, or not its amount in its currency.
-      { id: "in_OtherCaption001", status: "paid", payment_intent: "pi_OtherCaption001", amount_paid: 12000, currency: "usd" },
-      { status: "paid", payment_intent: "pi_Captions000001", amount_paid: 12000, currency: "usd" },
-      { id: "in_Captions00001", status: "paid", payment_intent: "not_an_intent", amount_paid: 12000, currency: "usd" },
-      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 1, currency: "usd" },
-      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 12000, currency: "eur" },
+      { id: "in_OtherCaption001", status: "paid", payment_intent: "pi_OtherCaption001", total: 12000, amount_due: 12000, amount_paid: 12000, currency: "usd" },
+      { status: "paid", payment_intent: "pi_Captions000001", total: 12000, amount_due: 12000, amount_paid: 12000, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "not_an_intent", total: 12000, amount_due: 12000, amount_paid: 12000, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: 12000, amount_due: 12000, amount_paid: 1, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: 12000, amount_due: 12000, amount_paid: 12000, currency: "eur" },
       { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" },
       // Paid in part from a credit balance: a total other than the price, or a card amount other than what was due.
       { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: 1, amount_due: 1, amount_paid: 1, currency: "usd" },

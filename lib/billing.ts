@@ -2083,10 +2083,14 @@ export async function chargeNow(input: {
     if (paid.status !== "paid" || !intent) throw new BillingError(402, "not_paid", "The invoice was not paid.");
     // "Paid" counts only as this very invoice's, for its amount in its currency, with a payment id that reads
     // (issue #4746): another invoice's reply, or one that does not say, is not a payment, so nothing the charge pays
-    // for (AI captions, a booking) is started on it. It falls to the invoice's own reconciliation, as an error.
+    // for (AI captions, a booking) is started on it. It falls to the invoice's own reconciliation, as an error. Its
+    // total is the price; the card paid all that was left due after any credit balance (amount_paid = amount_due).
+    const total = ownField(paid, "total");
+    const due = ownField(paid, "amount_due");
     if (
       !plainObject(paid) || ownField(paid, "id") !== invoiceId || !PAYMENT_INTENT_ID.test(intent) ||
-      ownField(paid, "amount_paid") !== input.cents || ownField(paid, "currency") !== "usd"
+      total !== input.cents || typeof due !== "number" || !Number.isSafeInteger(due) || due <= 0 || due > input.cents ||
+      ownField(paid, "amount_paid") !== due || ownField(paid, "currency") !== "usd"
     ) {
       throw new Error("Stripe did not confirm this invoice's own payment");
     }

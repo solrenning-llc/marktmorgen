@@ -20,6 +20,9 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, setProductHidden, setProductPodcast, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { savePodcast } from "@/lib/podcast";
+import { allowanceUsed } from "@/lib/store-allowance";
+import { PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { readFileSync } from "node:fs";
 import type { Podcast } from "@/lib/podcast-rules";
 import { forgetPublicFeeds } from "@/lib/podcast-public-show";
 import { dataKey } from "@/lib/store-data";
@@ -244,6 +247,26 @@ async function main(): Promise<void> {
     is("and its room given back", redis.run(["HGET", room, `pod:${POD3}:public`]), null);
     is("the lock is not left held", redis.run(["EXISTS", LOCK3]), 0);
   }
+
+  part("Each request pays for what it moves (Claude 7's cost MEDIUM on #3544)");
+  {
+    // A podcast at a large size: 300 episodes with long notes, more than a studio request's 50 kilobytes many times over.
+    const big: Podcast = { id: POD, episodes: Array.from({ length: 300 }, (_, i) => ({ id: `ep${String(i).padStart(10, "0")}`, title: `Episode ${i}`, notes: "n".repeat(3_900), pathname: `stores/x/p/${i}.mp3`, bytes: 1000 + i, contentType: "audio/mpeg", at: 1_790_000_000 + i })) };
+    await savePodcast(big);
+    const podcastBytes = Buffer.byteLength(JSON.stringify(big), "utf8");
+    if ((await post({ action: "on", id: pid, category: "Education", explicit: false, understood: true })).status !== 200) throw new Error("the feed did not turn on");
+    const owner = (await storeForEmail(OWNER)) as Store;
+    const before = await allowanceUsed(owner, "studio");
+    const marked = await post({ action: "episode", id: pid, episode: big.episodes[7].id, public: true, audio: AUDIO });
+    const used = (await allowanceUsed(owner, "studio")) - before;
+    is("the episode is marked", marked.status, 200);
+    is("its studio requests cover the podcast it read, one each 50 kilobytes", used >= Math.ceil(podcastBytes / PAGE_INCLUDED_BYTES), true);
+    const small = await post({ action: "read", id: pid });
+    const usedRead = (await allowanceUsed(owner, "studio")) - before - used;
+    is("a read of a small record still costs one request, what is not moved is given back", [small.status, usedRead], [200, 1]);
+    await savePodcast(podcast(POD));
+  }
+  is("the takedown says when it takes effect, as the feed's cache gives it", /within 5 minutes/.test(readFileSync("components/podcast-public-feed.tsx", "utf8")), true);
 
   part("The store's closing erases it, by the podcast's id; another store's stays");
   await claimHandle(OTHER, "shorecast", "Shore", "");

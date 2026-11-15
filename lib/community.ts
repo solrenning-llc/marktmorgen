@@ -1486,11 +1486,18 @@ async function exactBatch(commands: (string | number)[][]): Promise<unknown[]> {
  */
 async function postsForCopy(id: string, posts: string[]): Promise<Post[]> {
   const ids = posts.filter((p) => ITEM_ID.test(p));
+  // A listed id that is not a post id names no post record: passed over, and how many said in the log.
+  if (ids.length < posts.length) console.warn("a member's copy passed over community post ids that are not post ids", posts.length - ids.length);
   const rows = await exactBatch(ids.map((p) => ["GET", postKey(id, p)]));
-  return rows.flatMap((raw) => {
+  return rows.flatMap((raw, i) => {
     if (raw === null) return [];
     const post = typeof raw === "string" ? parsePost(raw) : null;
-    if (!post) throw new UnknownReplyError("a community post, for a member's copy");
+    if (!post) {
+      // Said with the post's id only (never its words nor anybody's address), so the record can be found and mended:
+      // until then every copy of this member fails, rather than come out complete without it.
+      console.warn("a community post did not read for a member's copy; the copy fails until it is mended", ids[i]);
+      throw new UnknownReplyError("a community post, for a member's copy");
+    }
     return [post];
   });
 }
@@ -1530,10 +1537,12 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
       // The post's comments read exactly too (#4780): a flat list of text pairs (or an object of texts); any other
       // shape is unknown and fails the copy, never "no comments".
       const flat = replies[k * 3];
-      const pairs = Array.isArray(flat) && flat.length % 2 === 0 && flat.every((x) => typeof x === "string");
+      // stringList holds a list whole (no hole, every slot its own text); an object of texts is the in-memory Redis's.
+      const listed = Array.isArray(flat) ? stringList(flat) : null;
+      const pairs = listed !== null && listed.length % 2 === 0;
       const record = !Array.isArray(flat) && flat !== null && typeof flat === "object" && Object.values(flat).every((x) => typeof x === "string");
       if (!pairs && !record) throw new UnknownReplyError("a post's comments, for a member's copy");
-      const values = pairs ? (flat as string[]).filter((_, n) => n % 2 === 1) : Object.values(flat as Record<string, string>);
+      const values = pairs ? (listed as string[]).filter((_, n) => n % 2 === 1) : Object.values(flat as Record<string, string>);
       for (const value of values) {
         const comment = parseComment(value);
         if (!comment) continue;

@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     for (const [what, damage] of DAMAGES) is(`${what}: the copy fails, never complete without them`, await copyWith(id, ada, damage), "threw");
     if (way === "the whole community") {
       // The post's comments (HGETALL, first in each post's three) in a shape that is not text pairs: unknown, never none.
-      for (const [what, odd] of [["null", null], ["a number", 7], ["an odd-length list", ["c1"]], ["a list with a number", ["c1", 7]]] as [string, unknown][]) {
+      for (const [what, odd] of [["null", null], ["a number", 7], ["an odd-length list", ["c1"]], ["a list with a number", ["c1", 7]], ["an even-length list with a hole", ["c1", , "c2", "x"]]] as [string, unknown][]) {
         is(`a post's comments answered ${what}: the copy fails`, await copyWith(id, ada, (r, i) => ((r[i - 1] = odd), r)), "threw");
       }
     }
@@ -123,6 +123,24 @@ async function main(): Promise<void> {
   part("Her trace (SMEMBERS)");
   is("(control) read from her trace, her post is there", await readWith("NONE", null), JSON.stringify([1, [theirs.post.id], [`post ${creators.post.id}`]]));
   for (const [what, reply] of ODD) is(`answered ${what}: the copy fails, never "nothing she did"`, await readWith("SMEMBERS", reply), "threw");
+  part("A post record that does not read: the copy fails, and the log names the post by its id only");
+  const kept = String(redis.run(["GET", `nl:cm:${id}:p:${mine.post.id}`]));
+  redis.run(["SET", `nl:cm:${id}:p:${mine.post.id}`, "{not a post"]);
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+  let failed = false;
+  try {
+    await memberTraces(id, ada);
+  } catch {
+    failed = true;
+  } finally {
+    console.warn = warn;
+    redis.run(["SET", `nl:cm:${id}:p:${mine.post.id}`, kept]);
+  }
+  is("the copy fails", failed, true);
+  is("the log names the post's id", warned.some((line) => line.includes(mine.post.id)), true);
+  is("and never its words", warned.some((line) => line.includes("My first post") || line.includes("not a post")), false);
   Date.now = realNow;
   done();
 }

@@ -68,6 +68,7 @@ import { StoreTracking } from "@/components/store-tracking";
 import { FunnelBeacon } from "@/components/store-beacon";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
+import { queryReader, visitFacts } from "@/lib/funnel-branch-rules";
 import { funnelWords } from "@/lib/buyer-words/funnel";
 import { isResting } from "@/lib/traffic";
 import { StoreResting } from "@/components/store-resting";
@@ -304,7 +305,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
   const rehearsal = selling && sellsInTestMode(store);
   // Opened as a step of a funnel of pages (lib/page-funnel.ts): counted for it,
   // and a paid step says how to go on without buying.
-  const here = await funnelHere(store, funnelMark(query.f), "product", product.id).catch(() => null);
+  // Its next link is "No thanks, continue": a conditional path after it reads that as declined (lib/funnel-branch-rules.ts).
+  const here = await funnelHere(store, funnelMark(query.f), "product", product.id, undefined, { ...visitFacts(queryReader(query), (await headers()).get("user-agent")), bought: false }).catch(() => null);
   const skip =
     here?.next && !isFree(product) ? (
       <p className="mt-4 text-center text-sm">

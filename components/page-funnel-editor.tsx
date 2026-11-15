@@ -17,6 +17,7 @@ import { funnelReachRatioMetric, funnelStepMetrics } from "@/lib/funnel-metrics"
 import type { SplitView } from "@/lib/funnel-split-results";
 import { SplitResults } from "@/components/funnel-split-results";
 import { FunnelSplitEditor } from "@/components/funnel-split-editor";
+import { branchIfWords } from "@/lib/funnel-branch-rules";
 import { type SplitDraft, checkSplitDraft, editSplitDraft, newSplitDraft, stepsForSave } from "@/lib/funnel-split-draft";
 import { DIAGNOSIS_NOTE, funnelFindings } from "@/lib/funnel-diagnosis";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
@@ -557,6 +558,17 @@ export function PageFunnelEditor({
                       Edit split test
                     </button>
                   </p>
+                ) : step.kind === "branch" ? (
+                  <div id={`pf-step-${index}`} className="min-w-0 flex-1 text-sm text-ink">
+                    <p className="font-semibold">{`Conditional path, step ${index + 1}:`}</p>
+                    <ol className="list-decimal pl-5">
+                      {step.rules.map((rule, at) => (
+                        <li key={at}>{`If ${branchIfWords(rule)}: ${titleOf(rule.to)}`}</li>
+                      ))}
+                    </ol>
+                    <p>{`Everyone else: ${titleOf(step.otherwise)}`}</p>
+                    <p className="text-xs text-ink-soft">Each visitor goes to the page of the first rule that fits them. Nothing about them is kept.</p>
+                  </div>
                 ) : (
                 <>
                 <label className="sr-only" htmlFor={`pf-step-${index}`}>{`Step ${index + 1}`}</label>

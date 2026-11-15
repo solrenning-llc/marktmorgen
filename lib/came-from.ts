@@ -42,6 +42,11 @@ function tidy(raw: string | null, max = 30): string {
   return raw.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, max);
 }
 
+/** A utm_source tag as it is counted: cleaned, and ChatGPT's own tag read as "chatgpt". */
+export const cleanSourceTag = (raw: string | null) => sourceAlias(tidy(raw));
+/** A utm_campaign tag as it is counted. */
+export const cleanCampaignTag = (raw: string | null) => tidy(raw, CAMPAIGN_TAG_MAX);
+
 /**
  * The tags on the page a checkout was opened from.
  *
@@ -61,9 +66,9 @@ export function cameFrom(referer: string | null, ownHost: string): CameFrom {
   if (ownHost && url.hostname.toLowerCase() !== ownHost.toLowerCase()) return NO_SOURCE;
   return {
     // The same word the visit was counted under (lib/source-rules.ts): ChatGPT's own tag is "chatgpt".
-    source: sourceAlias(tidy(url.searchParams.get("utm_source"))),
+    source: cleanSourceTag(url.searchParams.get("utm_source")),
     medium: tidy(url.searchParams.get("utm_medium")),
-    campaign: tidy(url.searchParams.get("utm_campaign"), CAMPAIGN_TAG_MAX),
+    campaign: cleanCampaignTag(url.searchParams.get("utm_campaign")),
     content: tidy(url.searchParams.get("utm_content"), 40),
   };
 }

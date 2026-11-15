@@ -33,6 +33,7 @@
  */
 import { SLUG_PATTERN, slugFrom } from "@/lib/site-page-rules";
 import { type LiveShare, type SplitOption, liveShares, parseSplit, pickShare, splitVersion } from "@/lib/funnel-split-rules";
+import { type BranchRule, parseBranch, readsOffer } from "@/lib/funnel-branch-rules";
 
 /** A page a visitor can land on: one of the store's own pages, or a product's page. */
 export type FunnelPlace = {
@@ -52,7 +53,15 @@ export type FunnelPlace = {
  */
 export type SplitStep = { kind: "split"; id: string; options: SplitOption[] };
 
-export type PageFunnelStep = FunnelPlace | SplitStep;
+/**
+ * A "Conditional path" step (526 [FN2]; rules in lib/funnel-branch-rules.ts):
+ * each visitor goes to the page of the first rule that matches what the visit
+ * says, else to `otherwise`. Like a split, each of its pages is in the funnel
+ * once, so the page a visitor is on says which way they went.
+ */
+export type BranchStep = { kind: "branch"; id: string; rules: BranchRule[]; otherwise: FunnelPlace };
+
+export type PageFunnelStep = FunnelPlace | SplitStep | BranchStep;
 
 export type PageFunnel = {
   id: string;
@@ -74,12 +83,16 @@ export const MAX_FUNNEL_NAME = 60;
 export const MAX_FUNNEL_SLUG = 40;
 export const FUNNEL_ID = /^[a-z0-9]{10}$/;
 const STEP_ID = /^[A-Za-z0-9_-]{1,40}$/;
-/** A split step's id: ten letters and digits, like a funnel's. */
+/** A split step's id: ten letters and digits, like a funnel's. A branch's is the same. */
 export const SPLIT_ID = FUNNEL_ID;
 
-/** The pages a step can land a visitor on: itself, or a split's destinations. */
+/** The pages a step can land a visitor on: itself, a split's destinations, or a branch's (its default last). */
 export const stepPlaces = (step: PageFunnelStep): FunnelPlace[] =>
-  step.kind === "split" ? step.options.map(({ kind, id }) => ({ kind, id })) : [{ kind: step.kind, id: step.id }];
+  step.kind === "split"
+    ? step.options.map(({ kind, id }) => ({ kind, id }))
+    : step.kind === "branch"
+      ? [...step.rules.map((rule) => rule.to), step.otherwise].map(({ kind, id }) => ({ kind, id }))
+      : [{ kind: step.kind, id: step.id }];
 
 /** Every page a funnel can land a visitor on, in order: each counts against MAX_FUNNEL_PAGES. */
 export const funnelPlaces = (funnel: Pick<PageFunnel, "steps">): FunnelPlace[] => funnel.steps.flatMap(stepPlaces);
@@ -138,6 +151,10 @@ export function parseSteps(raw: unknown): PageFunnelStep[] {
       const read = parseSplit(value);
       const id = typeof value.id === "string" && SPLIT_ID.test(value.id) ? value.id : "";
       if (read && id && !out.some((s) => s.kind === "split" && s.id === id)) step = { kind: "split", id, options: read.options };
+    } else if (value.kind === "branch") {
+      const read = parseBranch(value);
+      const id = typeof value.id === "string" && SPLIT_ID.test(value.id) ? value.id : "";
+      if (read && id && !out.some((s) => s.kind === "branch" && s.id === id)) step = { kind: "branch", id, rules: read.rules, otherwise: read.otherwise };
     } else {
       const kind = value.kind === "page" || value.kind === "product" ? value.kind : null;
       const id = typeof value.id === "string" && STEP_ID.test(value.id) ? value.id : "";
@@ -176,9 +193,11 @@ export function parsePageFunnels(raw: unknown): PageFunnel[] {
 
 /** Whether two lists of steps are the same pages in the same order: when they are not, the numbers start again. */
 export function sameSteps(a: readonly PageFunnelStep[], b: readonly PageFunnelStep[]): boolean {
-  // A split's other shares or destinations are another test: its numbers start again too.
+  // A split's other shares or destinations are another test, and a branch's other rules another path: their numbers start again too.
   const same = (x: PageFunnelStep, y: PageFunnelStep) =>
-    x.kind === "split" || y.kind === "split"
+    x.kind === "branch" || y.kind === "branch"
+      ? x.kind === "branch" && y.kind === "branch" && JSON.stringify([x.id, x.rules, x.otherwise]) === JSON.stringify([y.id, y.rules, y.otherwise])
+      : x.kind === "split" || y.kind === "split"
       ? x.kind === "split" && y.kind === "split" && x.id === y.id && x.options.length === y.options.length && x.options.every((o, i) => o.kind === y.options[i].kind && o.id === y.options[i].id && o.share === y.options[i].share)
       : x.kind === y.kind && x.id === y.id;
   return a.length === b.length && a.every((step, i) => same(step, b[i]));
@@ -261,7 +280,7 @@ export function readFunnelInput(
   raw: unknown,
   others: readonly PageFunnel[],
   nowSeconds: number,
-): { ok: true; funnel: PageFunnel } | { ok: false; error: "name" | "slug" | "taken" | "steps" | "split" | "full" } {
+): { ok: true; funnel: PageFunnel } | { ok: false; error: "name" | "slug" | "taken" | "steps" | "split" | "branch" | "full" } {
   if (!raw || typeof raw !== "object") return { ok: false, error: "steps" };
   const value = raw as Record<string, unknown>;
   const asked = typeof value.id === "string" && FUNNEL_ID.test(value.id) ? value.id : "";
@@ -273,11 +292,23 @@ export function readFunnelInput(
   const slugIssue = funnelSlugProblem(slug, others, existing?.id ?? "");
   if (slugIssue) return { ok: false, error: slugIssue };
   const sent = Array.isArray(value.steps) ? value.steps : [];
-  // A split test sent without an id is a new one: it is given its own.
+  // A split test or a conditional path sent without an id is a new one: it is given its own.
   const listed: unknown[] = [];
   let places = 0;
   for (const entry of sent) {
-    const split = entry && typeof entry === "object" && (entry as { kind?: unknown }).kind === "split" ? (entry as Record<string, unknown>) : null;
+    const kind = entry && typeof entry === "object" ? (entry as { kind?: unknown }).kind : undefined;
+    if (kind === "branch") {
+      const branch = entry as Record<string, unknown>;
+      const rules = parseBranch(branch);
+      if (!rules || (branch.id !== undefined && (typeof branch.id !== "string" || !SPLIT_ID.test(branch.id)))) return { ok: false, error: "branch" };
+      // "Bought" or "declined" is about the paid product step just before it: without one, it could never be known.
+      const before = listed.length ? (listed[listed.length - 1] as { kind?: unknown }) : null;
+      if (rules.rules.some(readsOffer) && before?.kind !== "product") return { ok: false, error: "branch" };
+      listed.push({ ...branch, id: typeof branch.id === "string" ? branch.id : newFunnelId() });
+      places += rules.rules.length + 1;
+      continue;
+    }
+    const split = kind === "split" ? (entry as Record<string, unknown>) : null;
     if (!split) {
       listed.push(entry);
       places += 1;

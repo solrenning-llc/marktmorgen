@@ -37,6 +37,7 @@ import { ClearCart } from "@/components/store-cart";
 import { confirmCartStock, confirmStock } from "@/lib/stock";
 import { finishPlan } from "@/lib/plans";
 import { cookies, headers } from "next/headers";
+import { visitFacts } from "@/lib/funnel-branch-rules";
 import { clientAddress } from "@/lib/request-guard";
 import { isStorePeople } from "@/lib/visit";
 import { funnelMark } from "@/lib/page-funnel";
@@ -767,7 +768,10 @@ export default async function ThanksPage({ params, searchParams }: Params) {
   // bought is handed over and every offer after paying is answered, the way on
   // to the next step. The purchase is counted for that step, once per person.
   const funnelMarkPaid = order.state === "paid" && sessionId && !ended ? funnelMark(((order.record.metadata ?? {}) as Record<string, string>).funnel) : "";
-  const funnelHereNow = funnelMarkPaid && order.state === "paid" ? await funnelHere(store, funnelMarkPaid, "product", order.product.id).catch(() => null) : null;
+  // Paid: a conditional path right after this step reads it as bought, with the tags the checkout carried to Stripe (lib/came-from.ts).
+  const paidMeta = (order.state === "paid" ? order.record.metadata ?? {} : {}) as Record<string, string>;
+  const paidFacts = { ...visitFacts({ get: (name: string) => (typeof paidMeta[name] === "string" ? paidMeta[name] : null) }, (await headers()).get("user-agent")), bought: true };
+  const funnelHereNow = funnelMarkPaid && order.state === "paid" ? await funnelHere(store, funnelMarkPaid, "product", order.product.id, undefined, paidFacts).catch(() => null) : null;
   if (funnelHereNow && store.statsId) {
     const asker = { cookies: await cookies(), headers: await headers() };
     const statsId = store.statsId;

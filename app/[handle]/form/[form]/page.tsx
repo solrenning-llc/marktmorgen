@@ -12,6 +12,8 @@ import { readListing } from "@/lib/catalog";
 import { productPath } from "@/components/store-product";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
+import { headers } from "next/headers";
+import { queryReader, visitFacts } from "@/lib/funnel-branch-rules";
 import { PlainText } from "@/components/sales-blocks";
 
 type Params = {
@@ -57,7 +59,7 @@ export default async function FormDonePage({ params, searchParams }: Params) {
   const product = outcome?.product ? await readListing(store, outcome.product).catch(() => null) : null;
   const shown = product && !product.hidden ? product : null;
   const page = store.sitePages.find((p) => p.id === pick(query.p)) ?? null;
-  const here = page ? await funnelHere(store, funnelMark(pick(query.f)), "page", page.id).catch(() => null) : null;
+  const here = page ? await funnelHere(store, funnelMark(pick(query.f)), "page", page.id, undefined, visitFacts(queryReader(query), (await headers()).get("user-agent"))).catch(() => null) : null;
 
   return (
     <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`} style={lookStyle(store.look) as React.CSSProperties}>

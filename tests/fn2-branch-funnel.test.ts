@@ -146,6 +146,10 @@ async function main(): Promise<void> {
   is("from a destination, the step after the branch", [inSpring?.index, inSpring?.next], [0, `${coursePath}?f=${funnel.id}`]);
   const tagged = await funnelHere(store, funnel.id, "page", "spring0001", undefined, { source: "news", campaign: "spring" });
   is("in a funnel that branches on a tag, the next link carries the tags along", tagged?.next, `${coursePath}?f=${funnel.id}&utm_source=news&utm_campaign=spring`);
+  const plainInput = readFunnelInput({ name: "Plain", steps: [page("landing001"), product(course.product.id)] }, [funnel], NOW);
+  if (!plainInput.ok) throw new Error("plain not read");
+  const plain = await writePageFunnel(statsId, plainInput.funnel, [funnel], ROOM);
+  is("a funnel without a branch on a tag: its next link is as it always was", (await funnelHere(store, plain.id, "page", "landing001", undefined, { source: "news", campaign: "spring", device: "phone" }))?.next, `${coursePath}?f=${plain.id}`);
 
   const go = async (query: string, agent: string | null) => {
     const headers = new Headers();

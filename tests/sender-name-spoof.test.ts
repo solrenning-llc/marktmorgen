@@ -28,7 +28,9 @@ for (const fine of [
   "Mr.Smith Woodwork", "Harbor Kitchen Support", "Help Desk Heroes", "Customer Service Academy", "Café Ñandú",
   "Wise Owl Tutoring", "Visa Consulting", "Apple Support Group", "Microsoft Excel Training", "Google Ads Masterclass",
   "Jo.Me", "Studio.Live", "Ricardo.Dev", "Support", "Billing", "Admin", "Chase Photography", "Learn With Ana",
-  "Phase Security Systems", "Phase Security", "Chase the Sun Tours", "Bank of Ana", "Ana 👩\u200D💻 Studio", "کتاب\u200Cفروشی", "Studio \u200FRTL", "Анна Иванова", "Αθηνά Studio", "Ice Cream Lab",
+  "Phase Security Systems", "Phase Security", "Chase the Sun Tours", "Bank of Ana", "Finance", "Strive", "Stride", "Revolt", "Cloud", "Tunes", "Finance Coaching", "Cloud Kitchen", "Tunes for Kids", "Strive Fitness", "Stride Running", "Revolt Records",
+  "Visa Services", "Visa Help", "Visa Support", "Discard Studio", "Polka Dot Shop", "Resent Letters Press", "Steam Cleaning Services",
+  "Ana 👩\u200D💻 Studio", "کتاب\u200Cفروشی", "Studio \u200FRTL", "Анна Иванова", "Αθηνά Studio", "Ice Cream Lab",
 ]) {
   is(`"${fine}" is a name, kept`, safeSenderName(fine, "x"), fine.normalize("NFKC"));
 }
@@ -96,6 +98,55 @@ const DISGUISES: [string, string][] = [
   ["an IPv6 address", "2001:db8::1"],
   ["a domain in capitals", "PAYPAL.COM"],
   ["a domain under a newer top-level domain", "refund.shop"],
+  ["a brand with a payment word", "Stripe Receipts"],
+  ["a brand with a payment word", "PayPal Resolution Center"],
+  ["a brand with a payment word", "Apple Invoice"],
+  ["a brand with a payment word", "Amazon Orders"],
+  ["a brand with a product number", "Microsoft 365"],
+  ["a brand with its product", "Google Workspace"],
+  ["a brand with its service", "USPS Informed Delivery"],
+  ["a brand spelled letter by letter", "P a y P a l"],
+  ["a brand spelled letter by letter with staff", "S t r i p e Billing"],
+  ["a scam title without a brand", "Security Team"],
+  ["a scam title without a brand", "Account Security"],
+  ["a scam title without a brand", "Billing Team"],
+  ["a scam title without a brand", "Billing Department"],
+  ["a scam title without a brand", "Payment Services"],
+  ["a scam title without a brand", "Verification Team"],
+  ["a scam title without a brand", "IT Department"],
+  ["a scam title without a brand", "Compliance Team"],
+  ["a scam title without a brand", "Mail Delivery Subsystem"],
+  ["a bank", "Bank of America"],
+  ["a bank", "Citi"],
+  ["a bank", "Citibank Alerts"],
+  ["a bank", "HSBC"],
+  ["a bank", "Barclays"],
+  ["a bank", "Nubank"],
+  ["a bank", "Itaú"],
+  ["a bank", "Bradesco"],
+  ["a bank", "Santander"],
+  ["a bank", "Banco do Brasil"],
+  ["a tax office", "Receita Federal"],
+  ["a platform", "Steam Support"],
+  ["a platform", "Gumroad"],
+  ["a platform", "Kajabi"],
+  ["a platform", "Patreon"],
+  ["a mail service", "Resend"],
+  ["a mail service", "Mailchimp"],
+  ["a marketplace", "Etsy"],
+  ["a marketplace", "eBay"],
+  ["a platform", "Discord"],
+  ["a platform", "TikTok"],
+  ["a platform", "Adobe"],
+  ["a store brand", "Walmart"],
+  ["two letters swapped", "Marktmogren"],
+  ["a brand with two letters swapped", "Paypla Security"],
+  ["a domain spelled out", "paypal dot com"],
+  ["a local host", "localhost"],
+  ["an IPv6 loopback", "[::1]"],
+  ["a hex address", "0x7f000001"],
+  ["a mail link", "mailto:help"],
+  ["a data link", "data:text/html,hi"],
 ];
 for (const [label, bad] of DISGUISES) {
   is(`${label}: "${bad}" is not shown`, senderNameOk(bad), false);
@@ -128,6 +179,14 @@ for (const dir of ["lib", "app"]) {
     const lines = src.split("\n").filter((l) => FROM_LINE.test(l));
     const helper = /function displayName\(name: string\): string \{\n\s+return safeSenderName\(/.test(src) || /import \{[^}]*\bdisplayName\b[^}]*\} from "@\/lib\/buyer-orders"/.test(src);
     is(`${file}: each From names the store through the helper`, lines.every((l) => /safeSenderName\(|displayName\(/.test(l)) && (helper || lines.every((l) => /safeSenderName\(/.test(l))), true);
+  }
+}
+for (const dir of ["lib", "app"]) {
+  for (const file of readdirSync(dir, { recursive: true }).map(String).filter((f) => /\.tsx?$/.test(f)).map((f) => `${dir}/${f}`)) {
+    if (RESERVED.has(file)) continue;
+    const src = readFileSync(file, "utf8");
+    // A From whose name is not quoted, or built by concatenation, would escape the quoted-template check above.
+    is(`${file}: no From with an unquoted or concatenated name`, /from: `\$\{[^`"]*\} <\$\{|from: [^,\n]*\+\s*" <"|" <" \+/.test(src), false);
   }
 }
 is("the files checked, every one not reserved", checked.sort(), ["lib/affiliates.ts", "lib/buyer-orders.ts", "lib/calls.ts", "lib/imports.ts", "lib/letter-access.ts", "lib/licence-keys.ts", "lib/mail.ts", "lib/returning-code.ts", "lib/withdrawal.ts"]);

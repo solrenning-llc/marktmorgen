@@ -4,7 +4,7 @@
  * is not recorded as done and is tried again; never "nothing to delete" or a count of 0 standing for "erased".
  *
  *   - forgetRsvpsPerson (community events): the event index and the HDEL/DEL replies;
- *   - forgetHandle (community mentions): who holds the handle, and the HDEL;
+ *   - forgetHandle (community mentions): the count of its compare-and-delete script;
  *   - forgetServer (Discord): the people and their address links (HKEYS/HVALS);
  *   - forgetImportedPerson (imported purchases): the DEL and HDEL.
  *
@@ -52,8 +52,8 @@ const store = { sid: "0123456789abcdef0123456789abcd03", listId: "0123456789abcd
 const steps: [string, (b: Batch) => boolean, () => Promise<unknown>][] = [
   ["forgetRsvpsPerson: the event index", (b) => b.length === 1 && b[0][0] === "ZRANGEBYSCORE", () => forgetRsvpsPerson(COMMUNITY, "member01", "a@example.com")],
   ["forgetRsvpsPerson: the deletes", (b) => b.some((c) => c[0] === "HDEL"), () => forgetRsvpsPerson(COMMUNITY, "member01", "a@example.com")],
-  ["forgetHandle: who holds the handle", (b) => b.length === 1 && b[0][0] === "HGET", () => forgetHandle(COMMUNITY, "ana", "member01")],
-  ["forgetHandle: the HDEL", (b) => b.length === 1 && b[0][0] === "HDEL", () => forgetHandle(COMMUNITY, "ana", "member01")],
+  // Main's forgetHandle compares and deletes in one script (lib/community-mentions.ts, FORGET_HANDLE): its reply is the count.
+  ["forgetHandle: the script's count", (b) => b.length === 1 && b[0][0] === "EVAL", () => forgetHandle(COMMUNITY, "ana", "member01")],
   ["forgetServer: the people", (b) => b.length === 1 && b[0][0] === "HKEYS", () => forgetServer("room0001", store.sid)],
   ["forgetServer: their address links", (b) => b.length === 1 && b[0][0] === "HVALS", () => forgetServer("room0001", store.sid)],
   ["forgetImportedPerson", (b) => b.length === 2 && b[0][0] === "DEL" && b[1][0] === "HDEL", () => forgetImportedPerson(STATS, "a@example.com")],
@@ -70,8 +70,6 @@ async function seed(): Promise<void> {
 
 for (const [label, pick, run] of steps) {
   for (const [shape, alter] of SHAPES) {
-    // Text is HGET's own shape: another member's id is "not theirs", rightly.
-    if (label.startsWith("forgetHandle: who") && shape.startsWith("text")) continue;
     test(`${label} read as ${shape}: throws, never a count standing for "erased"`, async () => {
       await seed();
       assert.equal(await outcome(pick, alter, run), "threw");

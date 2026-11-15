@@ -227,7 +227,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // gone with it, as its readings' counts are (it also expires in two days).
   "nl:list:try:": E,
   "nl:call:busy:": E, "nl:call:confirmed:": X(430), "nl:call:creator-reminded:": E, "nl:call:lock:": E,
-  "nl:call:moved:": X(200), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E, "nl:call:series:": E,
+  "nl:call:moved:": X(730), "nl:call:reminded:": X(430), "nl:call:remindq": I, "nl:call:room:": E, "nl:call:series:": E,
   "nl:callteam:": E, "nl:callteam:rr:": E,
   "nl:card:link:": X(21), "nl:card:open:": E, "nl:card:opens:": X(21),
   "nl:catalog:": E, "nl:catalog:move:cursor": C,

@@ -20,6 +20,8 @@ import type { Course } from "@/lib/course";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { type SesMailFixtureOptions, installSesMailFixture } from "./ses-mail-fixture";
+import { readFileSync } from "node:fs";
+import { COST_LINES, DRIP_PAGE_ROWS, DRIP_REFUSALS_PER_STORE_RUN, DRIP_REFUSED_SEND_COMMANDS, dripRunMonthlyUsd } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const sesHooks: SesMailFixtureOptions = {};
@@ -72,6 +74,15 @@ async function main(): Promise<void> {
   part("The ceilings are named and small");
   is("a course stops after a few refused sends, a store after a score", [DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE], [3, 20]);
 
+  part("The walk's worst month, a line of each plan (course-drip-run), from the same numbers as the code");
+  const source = readFileSync("lib/learn.ts", "utf8");
+  is("the registry's ceiling and page are the code's", [DRIP_REFUSALS_PER_STORE_RUN === DRIP_REFUSALS_PER_STORE, source.includes(`const DRIP_PAGE = ${DRIP_PAGE_ROWS};`)], [true, true]);
+  is("a line of every plan's worst month", COST_LINES.some((line) => line.id === "course-drip-run"), true);
+  const month = (["creator", "pro", "scale"] as const).map((tier) => Math.round(dripRunMonthlyUsd(tier) * 100) / 100);
+  // Store, Studio and Scale at their data room full of students, every product a course: well under a dollar or two,
+  // where the marks without the ceiling cost more than each plan's whole net profit.
+  is("Store, Studio and Scale a month, in dollars", month, [0.56, 0.84, 1.12]);
+
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {
     const store = await setup(8);
@@ -85,9 +96,10 @@ async function main(): Promise<void> {
     is("of 240 students due, so the marks follow the ceiling, not the students", claims() < 240, true);
     is("the store read once for the run, not once a course", loads, 1);
     // Every command of the run: two for the set and the cursor, at most one write of the cursor; for each course, its
-    // listing, its course, its blocked students and its first page of students; and each refused send's mark and
-    // its release (the script, counted as one command here).
-    const most = 3 + 8 * 4 + 2 * DRIP_REFUSALS_PER_STORE;
+    // blocked students and its first page of students (its listing is the store's inline catalog and its record the
+    // test's reader here; the cost line prices both); and for each refused send, at most DRIP_REFUSED_SEND_COMMANDS:
+    // its mark, the email figure's SET NX and INCRBY, the sender's state read and the mark's release script.
+    const most = 3 + 8 * 2 + DRIP_REFUSED_SEND_COMMANDS * DRIP_REFUSALS_PER_STORE;
     is("the run's commands stay within the formula", seen.length <= most, true);
   }
 

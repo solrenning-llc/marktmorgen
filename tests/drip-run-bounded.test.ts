@@ -220,7 +220,9 @@ async function main(): Promise<void> {
       runs.push(value === "rejected" ? {} : (value as Counts));
     }
     sesHooks.onSes = undefined;
-    is("every run answers and leaves work for the next", runs.map((run) => typeof run.pending === "number" && run.pending > 0), [true, true, true]);
+    // Work left for the next run is said either way: a course the deadline cut short is pending, and one whose sends
+    // were refused past DRIP_REFUSALS_PER_COURSE is held until the next run (the ceiling before the marks' spend).
+    is("every run answers and leaves work for the next", runs.map((run) => typeof run.pending === "number" && typeof run.held === "number" && run.pending + run.held > 0), [true, true, true]);
     is("within three runs, the course after the slow page is read", loaded.includes(B.id), true);
     is("and its student is emailed once", to(waiting), 1);
     is("nobody of the slow page is emailed while its sends fail", slow.map(to), slow.map(() => 0));

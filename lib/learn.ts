@@ -1047,7 +1047,7 @@ export async function registerDrip(store: Store, product: Listing, course: Cours
  * which starts with them; `unreadStudents` rows of a student that are not a student's record, logged, never read as
  * "nobody to email".
  */
-export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number };
+export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number; held: number };
 
 /** The cursor as kept: our own `{ m, h }`, null when there is none. A reply of another shape is unknown (rule 24). */
 function dripCursor(reply: unknown): { m: string; h: string } | null {
@@ -1081,7 +1081,15 @@ export async function sendDripEmails(
   nowSeconds = Math.floor(Date.now() / 1000),
   deadline = Date.now() + DRIP_RUN_MS,
 ): Promise<DripCounts> {
-  const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0 };
+  const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0, held: 0 };
+  // A store read once a run, not once a course: its record is read whole (lib/store-exact.ts).
+  const stores = new Map<string, Promise<Store | null>>();
+  const loadOnce = (handle: string) => {
+    if (!stores.has(handle)) stores.set(handle, load(handle));
+    return stores.get(handle)!;
+  };
+  // The sends that did not go, by store, this run (DRIP_REFUSALS_PER_STORE).
+  const refused = new Map<string, number>();
   if (!isRedisConfigured()) return counts;
   // The set in its exact shape (CX-123 rule 24): a reply of another shape is unknown, never "no course".
   const replies = repliesFor(await redisPipeline([["SMEMBERS", DRIP_SET], ["GET", DRIP_CURSOR]]), 2);
@@ -1100,7 +1108,7 @@ export async function sendDripEmails(
       break;
     }
     try {
-      const left = await dripCourse(member, from, { load, loadCourse, origin, nowSeconds, deadline, counts });
+      const left = await dripCourse(member, from, { load: loadOnce, loadCourse, origin, nowSeconds, deadline, counts, refused });
       if (left !== null) {
         // No further on the course this run began with than where it began (a page whose sends are slow and fail,
         // their marks let go): the next run begins with the course after it, and this one comes in its turn, from its
@@ -1140,10 +1148,24 @@ async function dripCourse(
     nowSeconds: number;
     deadline: number;
     counts: DripCounts;
+    refused: Map<string, number>;
   },
 ): Promise<string | null> {
   const { counts, deadline, nowSeconds } = run;
   const [courseId, handle, productId] = member.split("|");
+  // The store's sends were refused too often this run: nothing more is tried in it, not even read, until the next.
+  if ((run.refused.get(handle) ?? 0) >= DRIP_REFUSALS_PER_STORE) {
+    counts.held += 1;
+    return null;
+  }
+  let refusedHere = 0;
+  // A send that did not go (refused, or its mark not confirmed): counted against both ceilings. True once either is
+  // reached: the course stops for this run, its students waiting for the next one, inside the same window.
+  const refusedOne = () => {
+    refusedHere += 1;
+    run.refused.set(handle, (run.refused.get(handle) ?? 0) + 1);
+    return refusedHere >= DRIP_REFUSALS_PER_COURSE || (run.refused.get(handle) ?? 0) >= DRIP_REFUSALS_PER_STORE;
+  };
   const store = courseId && handle && productId ? await run.load(handle) : null;
   const product = store ? await readListingExactly(store, productId) : null;
   if (product === "unknown") throw new UnknownReplyError("a drip course's product");
@@ -1188,6 +1210,10 @@ async function dripCourse(
         if (claimed === "unknown") {
           console.error("a drip email's mark could not be confirmed; not sent this run", course.id, unit.id);
           await releaseMark(mark, value);
+          if (refusedOne()) {
+            counts.held += 1;
+            return null;
+          }
         }
         if (claimed !== "ours") continue;
         const ok = await sendDripEmail(store, product, unit, row.e, run.origin);
@@ -1195,7 +1221,14 @@ async function dripCourse(
         // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
         // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
         // 2, open): sendEmail's false is also an SES answer lost after the POST, which a later pass may send again.
-        else await releaseMark(mark, value);
+        else {
+          await releaseMark(mark, value);
+          if (refusedOne()) {
+            console.error("a drip course's sends were refused; its other students wait for the next run", course.id);
+            counts.held += 1;
+            return null;
+          }
+        }
       }
     }
     page = read.next;

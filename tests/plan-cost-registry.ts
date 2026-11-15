@@ -354,6 +354,24 @@ export function closingBuyersCost(tier: Tier, paid = true): number {
  */
 export const ORDER_COST = 2 * PER_EMAIL + ORDER_COMPUTE + ORDER_LIBRARY + ORDER_RENEWAL_STOP;
 
+/** The drip walk's worst month (line course-drip-run), at Upstash's command and transfer prices. */
+export const DRIP_RUNS_PER_MONTH = 32;
+export const DRIP_STORE_COMMANDS = 2;
+export const DRIP_COURSE_COMMANDS = 4;
+export const DRIP_PAGE_ROWS = 200;
+export const DRIP_REFUSALS_PER_STORE_RUN = 20;
+export const DRIP_REFUSED_SEND_COMMANDS = 5;
+export const DRIP_MARK_RUNS = 3;
+/** A student row as the room charges it at the least: its entry, a 32-character field, the shortest JSON row and its reserve. */
+export const DRIP_ROW_MIN_BYTES = 224;
+export function dripRunMonthlyUsd(tier: Tier): number {
+  const rows = Math.floor(DATA_ROOM_BYTES[tier] / DRIP_ROW_MIN_BYTES);
+  const perRun = DRIP_STORE_COMMANDS + DRIP_COURSE_COMMANDS * MAX_PRODUCTS + Math.ceil(rows / DRIP_PAGE_ROWS) + DRIP_REFUSALS_PER_STORE_RUN * DRIP_REFUSED_SEND_COMMANDS;
+  const commands = DRIP_RUNS_PER_MONTH * perRun + DRIP_MARK_RUNS * STORE_ALLOWANCES[tier].email;
+  const bytes = DRIP_RUNS_PER_MONTH * (DATA_ROOM_BYTES[tier] + MAX_STORE_BYTES);
+  return commands * COMMAND + bytes * DB_BYTE;
+}
+
 /** The shapes requests are costed at: wall seconds held at 2 GB, and CPU seconds. Review ceilings, not measurements. */
 export const SHAPES = {
   /** A studio read or a small write: the visit model's page (tests/traffic-cost.ts). */
@@ -1335,6 +1353,19 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [{ file: "app/[handle]/certificate/[id]/page.tsx", names: ["const load = cache(", "if (await isResting(store)) return { store, resting: true as const };", "if (found.resting) return <StoreResting store={found.store} />;"] }],
     basis: "A public page of the store: the page and its title share one load, which takes one of the store's public requests before the certificate, or the sample's listing and course, is read, and rests with the public pages. It reads no more than a product's page (the store, a listing, a course), 5 commands measured against COMMANDS.laterPage + COMMANDS.laterCount, so it is inside the visits and public-requests lines (tests/certificate-page-admission.test.ts).",
+  },
+  {
+    id: "course-drip-run",
+    feature: "The daily job's drip emails, the walk of a store's courses that tells each student when a module opens (lib/learn.ts, sendDripEmails; Claude 7's MÉDIO on #3344, 15 November 2026)",
+    monthlyUsd: (tier) => dripRunMonthlyUsd(tier),
+    sources: [
+      { file: "lib/learn.ts", names: ["DRIP_CURSOR", "DRIP_PAGE", "\"HSCAN\", studentsKey(course.id)", "claimMark(mark, 400 * 86_400, value)", "DRIP_REFUSALS_PER_COURSE", "DRIP_REFUSALS_PER_STORE", "loadOnce"] },
+      { file: "app/api/cron/courses/route.ts", names: ["sendDripEmails(", "storeForHandleExactly"] },
+      { file: "lib/catalog-rules.ts", names: ["MAX_PRODUCTS"] },
+      { file: "lib/store-data-rules.ts", names: ["DATA_ROOM_BYTES"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES"] },
+    ],
+    basis: "Each of the DRIP_RUNS_PER_MONTH daily runs of a billing month, at the plan's full use: the store read once (DRIP_STORE_COMMANDS GETs, its record at MAX_STORE_BYTES); every product a course (MAX_PRODUCTS), each with its listing, its record, its blocked students and its first page of students (DRIP_COURSE_COMMANDS); every student row the data room can hold, at the fewest bytes a row is charged (DRIP_ROW_MIN_BYTES), read DRIP_PAGE to an HSCAN page; everything the walk reads lies in the data room, so its bytes are the room and the store's record a run; the refused sends' ceiling, DRIP_REFUSALS_PER_STORE a run at DRIP_REFUSED_SEND_COMMANDS each (the mark, the email figure's two commands, the sender's state, the release); and the marks of the emails sent, each a SET NX on at most three runs of its window (sent once, then 'taken'), at most the plan's store email figure (STORE_ALLOWANCES email) a month. The emails themselves are the store-email line's. The run's own set and cursor (two reads and at most one write a run, for every store) are the company's, a scheduled job bounded by its schedule.",
   },
   {
     id: "public-requests",

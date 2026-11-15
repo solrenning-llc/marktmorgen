@@ -1217,6 +1217,10 @@ export const COST_LINES: CostLine[] = [
       // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
+      // The free copy's welcome reminder is queued only while its mark is this claim's (#4750, ZADD_IF_MARK: a script of a
+      // GET and a ZADD where one ZADD was): 7 commands with the script's own, held in tests/i4750-welcome-erased.test.ts,
+      // inside that order's own work.
+      { file: "lib/welcome-offer-send.ts", names: ["ZADD_IF_MARK", "scheduleReminder"] },
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_WRITE_CALLS"] },
     ],

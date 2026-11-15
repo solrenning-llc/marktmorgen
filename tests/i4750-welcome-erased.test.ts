@@ -73,7 +73,9 @@ async function main(): Promise<void> {
   const released = new Promise<void>((resolve) => { release = resolve; });
   let paused = false;
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (!paused && commands[0]?.[0] === "ZADD" && commands[0]?.[1] === "nl:wo:due") {
+    // The queue's write: a ZADD, or since #4750 the step that queues only while the mark is this claim's.
+    const queueWrite = (commands[0]?.[0] === "ZADD" && commands[0]?.[1] === "nl:wo:due") || (commands[0]?.[0] === "EVAL" && String(commands[0]?.[1]).startsWith("-- marktmorgen:zadd-if-mark:"));
+    if (!paused && queueWrite) {
       paused = true;
       reached();
       await released;
@@ -104,7 +106,13 @@ async function main(): Promise<void> {
   await recordLead(store, keptClaim, "Pantry Guide");
   store = (await storeForEmail(OWNER))!;
   const keptBegan = Math.floor(Date.parse(keptClaim.at) / 1000);
-  is("scheduled", await scheduleReminder(store, keptClaim, keptToken, keptBegan + HOUR), true);
+  const runOne = redis.run.bind(redis);
+  let commands = 0;
+  redis.run = ((c: (string | number)[]) => { commands += 1; return runOne(c); }) as typeof redis.run;
+  const scheduled = await scheduleReminder(store, keptClaim, keptToken, keptBegan + HOUR).finally(() => { redis.run = runOne; });
+  console.log(`  a reminder scheduled: ${commands} commands, a script's own counted`);
+  is("scheduled", scheduled, true);
+  is("in at most 7 commands, inside the free copy's order (line orders)", commands <= 7, true);
   const [flatKept] = await redis.pipeline([["ZRANGEBYSCORE", "nl:wo:due", "-inf", "+inf"]]);
   is("and queued", (flatKept as string[]).filter((m) => (JSON.parse(m) as { e?: string }).e === kept).length, 1);
   done();

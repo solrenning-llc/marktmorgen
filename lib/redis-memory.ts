@@ -137,6 +137,13 @@ export class MemoryRedis {
           for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
           return n;
         }
+        // lib/welcome-offer-send.ts ZADD_IF_MARK: a reminder queued only while its mark still holds this claim's value.
+        if (key.startsWith("-- marktmorgen:zadd-if-mark:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, queue, value, score, member] = args;
+          if (this.run(["GET", mark]) !== value) return 0;
+          this.run(["ZADD", queue, score, member]);
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

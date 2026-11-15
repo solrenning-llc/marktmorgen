@@ -102,11 +102,24 @@ export async function scheduleReminder(store: Store, claim: Claim, token: string
   // One reminder per person and store, whatever else they ask for.
   // Ours only on OK or our own value read back (CX-123 rule 24, L9): anything else schedules nothing.
   // The mark keeps the reminder's hour, its score in the queue: forgetWelcomePerson reads the queue at that second only.
-  if ((await claimMark(remindedKey(store.statsId, claim.e), Math.max(60, offer.until - nowSeconds + 86_400), `due:${when}:${claimValue()}`)) !== "ours") return false;
+  const mark = `due:${when}:${claimValue()}`;
+  if ((await claimMark(remindedKey(store.statsId, claim.e), Math.max(60, offer.until - nowSeconds + 86_400), mark)) !== "ours") return false;
   const member = JSON.stringify({ s: store.sid, i: store.statsId, h: hash(claim.e), e: claim.e, t: token });
-  await redisPipeline([["ZADD", DUE_KEY, String(when), member]]);
+  // Queued only while the mark still holds this claim's own value, in one step (#4750): an erasure deletes the mark
+  // before it reads the queue at its second, so one that ran after the claim leaves the mark gone and nothing is
+  // queued; one that runs after this finds the member at the mark's second and takes it out. Read exactly: 1 queued,
+  // 0 not (the mark gone or another's); anything else is unknown and throws.
+  const queued = repliesFor(await redisPipeline([["EVAL", ZADD_IF_MARK, 2, remindedKey(store.statsId, claim.e), DUE_KEY, mark, String(when), member]]), 1)?.[0];
+  if (queued === 0) return false;
+  if (queued !== 1) throw new UnknownReplyError("a welcome reminder queued");
   return true;
 }
+
+/** ZADD KEYS[2] ARGV[2] ARGV[3] only while KEYS[1] holds ARGV[1]: 1 when queued (added or already there), 0 when not. */
+export const ZADD_IF_MARK = `-- marktmorgen:zadd-if-mark:v1
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call("ZADD", KEYS[2], ARGV[2], ARGV[3])
+return 1`;
 
 /** "October 14, 2026, 3:00 PM UTC", in the store's language. */
 function moment(seconds: number, language: unknown): string {

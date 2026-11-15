@@ -3,7 +3,7 @@
  * No receipt reconstruction, token, buyer-thread scan, TTL refresh or write.
  */
 import type { Store } from "@/lib/store";
-import type { StripePurchaseBinding } from "@/lib/dispute-purchase-binding";
+import { CHECKOUT_SESSION_ID, type StripePurchaseBinding } from "@/lib/dispute-purchase-binding";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { takeAllowance } from "@/lib/store-allowance";
@@ -22,7 +22,7 @@ export async function readRetainedPreorderReview(store: Store, binding: StripePu
  const unavailable = { status: "unavailable" } as const;
  if (!binding || store.stripeAccountId !== binding.account || !store.sid ||
   !store.statsId || !/^[A-Za-z0-9_-]{1,128}$/.test(store.statsId) ||
-  !/^cs_[A-Za-z0-9]{1,128}$/.test(binding.purchase) || !/^[a-f0-9]{32}$/.test(binding.product) ||
+  !CHECKOUT_SESSION_ID.test(binding.purchase) || !/^[a-f0-9]{32}$/.test(binding.product) ||
   !whole(nowMs) || !isRedisConfigured()) return unavailable;
  try {
   if (!(await reservePaidResourceWindow({ ...store, statsId: store.statsId, tier: store.tier ?? "creator" }))) return unavailable;

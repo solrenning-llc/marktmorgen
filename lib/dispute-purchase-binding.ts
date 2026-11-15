@@ -12,6 +12,11 @@ function id(value: unknown, prefix: string): string | null {
   const raw = typeof value === "string" ? value : row(value)?.id;
   return typeof raw === "string" && new RegExp("^" + prefix + "_[A-Za-z0-9]{1,128}$").test(raw) ? raw : null;
 }
+/**
+ * A Checkout Session ID as Stripe issues it: cs_test_... or cs_live_... (and the bare cs_... the fixtures use).
+ * Shared by the binding and the retained pre-order read so both steps accept the same IDs (#4713).
+ */
+export const CHECKOUT_SESSION_ID = /^cs_(?:(?:test|live)_)?[A-Za-z0-9]{1,128}$/;
 function integer(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -35,7 +40,7 @@ export function bindStripeDisputePurchase(input: {
   const session = row(input.session);
   if (!dispute || !session || !id(input.account, "acct") ||
       dispute.object !== "dispute" || session.object !== "checkout.session" ||
-      !id(dispute.id, "du") || !id(session.id, "cs") ||
+      !id(dispute.id, "du") || typeof session.id !== "string" || !CHECKOUT_SESSION_ID.test(session.id) ||
       session.mode !== "payment" || session.status !== "complete" || session.payment_status !== "paid") return null;
   const metadata = row(session.metadata);
   if (!metadata || typeof metadata.store !== "string" || !input.saleHandles.has(metadata.store) ||

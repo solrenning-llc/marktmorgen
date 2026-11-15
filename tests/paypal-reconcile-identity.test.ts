@@ -167,6 +167,16 @@ async function main(): Promise<void> {
   is("the batch remains open", await fields(), ["BATCH1REC"]);
   const healthy = await settlePayPal(store);
   is("the next healthy read books the line it held, once", [healthy.paid, await paidCents(store), await fields()], [1, 4500, []]);
+
+  part("A paid receiver PayPal gives back in another letter case is the same receiver (Claude 4's MÉDIO on #4682)");
+  await seed(store);
+  next = "make";
+  is("control: a batch is made", (await payWithPayPal(store)).ok, true);
+  tamper = (body) => { for (const item of body.items) if (item.payout_item.receiver) item.payout_item.receiver = ` ${item.payout_item.receiver.toUpperCase()} `; };
+  const cased = await settlePayPal(store);
+  tamper = null;
+  is("both paid lines are booked, none left waiting", [cased.paid, cased.waiting, cased.released], [2, 0, 0]);
+  is("the book holds both amounts once, and the batch is closed", [await paidCents(store), await fields()], [4500, []]);
   done();
 }
 

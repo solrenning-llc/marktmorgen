@@ -34,6 +34,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
+import { companyPostal } from "@/lib/company-postal";
+import { offersStopUrl, offersStopped } from "@/lib/offer-stop";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, yearSaving } from "@/lib/plan";
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
@@ -56,7 +58,7 @@ function dollars(cents: number): string {
 }
 
 /** The email, plain text. */
-export function yearlyOfferEmail(input: { tier: Tier; trialing: boolean }): { subject: string; text: string } {
+export function yearlyOfferEmail(input: { tier: Tier; trialing: boolean; stopUrl?: string; postal?: string }): { subject: string; text: string } {
   const name = PLAN_NAMES[input.tier];
   const month = dollars(PLAN_PRICES[input.tier].month);
   const year = dollars(PLAN_PRICES[input.tier].year);
@@ -81,6 +83,10 @@ export function yearlyOfferEmail(input: { tier: Tier; trialing: boolean }): { su
       `Questions: reply to this email, or write to ${SUPPORT_EMAIL}.`,
       "",
       "Marktmorgen",
+      // A commercial email (CAN-SPAM, 15 U.S.C. 7704(a)(3), (a)(5)): a working way to stop offers, and the company's
+      // postal address. offerOnce sends nothing without both.
+      ...(input.stopUrl ? ["", `To get no more offers from us: ${input.stopUrl}`] : []),
+      ...(input.postal ? [`Marktmorgen · ${input.postal}`] : []),
     ].join("\n"),
   };
 }
@@ -225,6 +231,12 @@ async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "
   const subscription = store.subscriptionId;
   // While no plan is on sale the studio cannot switch one (app/api/billing/switch), so nothing is offered.
   if (!plansOnSale || !subscription || !isBillingConfigured() || !isSenderConfigured() || !store.email) return "no";
+  // A commercial email (CAN-SPAM, 15 U.S.C. 7704(a)(3), (a)(5)): never sent without the company's postal address and a
+  // working stop (lib/offer-stop.ts), nor to a creator who stopped the offers, nor while that is not known (rule 24).
+  const postal = companyPostal();
+  const stopUrl = offersStopUrl(store.sid);
+  if (!postal || !stopUrl) return "no";
+  if ((await offersStopped(store.sid)) !== false) return "no";
   const live = await readSubscription(subscription);
   if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return "no";
   // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9).
@@ -237,8 +249,17 @@ async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "
     return "unknown";
   }
   if (claimed !== "ours") return "no";
-  const { subject, text } = yearlyOfferEmail({ tier: live.tier, trialing: live.trialing });
-  const ok = await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: store.email, subject, text, replyTo: SUPPORT_EMAIL });
+  const { subject, text } = yearlyOfferEmail({ tier: live.tier, trialing: live.trialing, stopUrl, postal });
+  const ok = await sendEmail({
+    meter: { by: "company" },
+    from: NIMBUS_FROM,
+    to: store.email,
+    subject,
+    text,
+    replyTo: SUPPORT_EMAIL,
+    // A mail app's own unsubscribe, in one click (RFC 8058): app/api/store/offers takes the POST from any site (proxy.ts).
+    headers: { "List-Unsubscribe": `<${stopUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+  });
   if (!ok) {
     // Not sent is not offered: the next store pass cannot try again, because
     // the first sale is already noted, so the mark is taken back and the

@@ -970,6 +970,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:monthly:seen:@lib/stats-report.ts": company("The stores the monthly job decided for a month", "One set a month for every store with visits, kept 40 days like the claims."),
   "nl:monthly:sent:@lib/stats-report.ts": company("A monthly report sent", "The company's email to a creator."),
   "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the weekly report off", "One set for every store."),
+  "nl:offers:off@lib/offer-stop.ts": company("Creators who stopped Marktmorgen's own offers to them", "One set for every store, by store id."),
   "nl:weekly:seen:@lib/stats-report.ts": company("The stores the weekly job decided for a week", "One set a week for every store with visits, kept 9 days like the claims."),
   "nl:weekly:sent:@lib/stats-report.ts": company("A weekly report sent", "The company's email to a creator."),
   "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },

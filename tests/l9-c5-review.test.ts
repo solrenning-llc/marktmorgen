@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { inviteCode, recordInvite, creditKey } from "@/lib/creator-invites";
 import { settleInvites } from "@/lib/creator-invite-credit";
 import { INVITE_HOLD_DAYS } from "@/lib/creator-invite-rules";
@@ -239,6 +239,8 @@ test("C: an unknown first-sale claim is retried later, and the yearly offer goes
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_yearly_offer_only";
   process.env.RESEND_API_KEY = "re_test_yearly_offer_only";
+  // A commercial email carries the company's postal address and a stop (CAN-SPAM; lib/yearly-offer.ts): synthetic, and a store id
+  process.env.COMPANY_POSTAL_ADDRESS = "100 Example Street, Example City, NY 10001, United States";
   const emails: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
@@ -262,6 +264,7 @@ test("C: an unknown first-sale claim is retried later, and the yearly offer goes
   try {
     await claimHandle("c5-yearly@example.com", "cfiveyearly", "A store", "");
     await setStripeAccount("c5-yearly@example.com", "acct_1TestYearly0001");
+    await ensureStoreId("c5-yearly@example.com");
     await setSubscription("c5-yearly@example.com", { subscriptionId: "sub_c5yearly0001", active: true, tier: "creator", cycle: "month" });
     const store = (await storeForEmail("c5-yearly@example.com"))!;
     const rows = [{ created: YEAR_NOW, amount_total: 1900, payment_status: "paid", metadata: { store: store.handle } }];
@@ -283,6 +286,8 @@ test("C: an unknown once-per-subscription claim is retried at the next pass, onc
   redis.clear();
   process.env.STRIPE_SECRET_KEY = "sk_test_yearly_offer_only";
   process.env.RESEND_API_KEY = "re_test_yearly_offer_only";
+  // A commercial email carries the company's postal address and a stop (CAN-SPAM; lib/yearly-offer.ts): synthetic, and a store id
+  process.env.COMPANY_POSTAL_ADDRESS = "100 Example Street, Example City, NY 10001, United States";
   const emails: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));

@@ -22,13 +22,15 @@
  * exactly not a sale of this store (another store's, unpaid, free, of zero,
  * a tip) are skipped.
  */
-import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, noteFirstSale } from "@/lib/yearly-offer";
 import "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_r24_yearly_only";
 process.env.RESEND_API_KEY = "re_test_yearly_offer_only";
+// A commercial email carries the company's postal address and a stop (CAN-SPAM; lib/yearly-offer.ts): synthetic, and a store id
+process.env.COMPANY_POSTAL_ADDRESS = "100 Example Street, Example City, NY 10001, United States";
 
 const NOW = 1_791_700_000;
 const emails: string[] = [];
@@ -86,6 +88,7 @@ async function freshStore() {
   const email = `r24-yearly-${n}@example.com`;
   await claimHandle(email, `r24yearly${n}`, "A store", "");
   await setStripeAccount(email, "acct_1TestR24Yrly");
+  await ensureStoreId(email);
   await setSubscription(email, { subscriptionId: sub, active: true, tier: "creator", cycle: "month" });
   return (await storeForEmail(email))!;
 }

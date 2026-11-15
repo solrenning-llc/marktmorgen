@@ -2474,7 +2474,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
   const ids = log.filter((id) => DELIVERY_ID_PATTERN.test(id));
   // The endpoints told on those days, removed since or not.
   const told = new Set([...(parseConfig(rawConfig)?.endpoints ?? []).map((e) => e.id), ...rawTold.flatMap((members) => members ?? [])]);
-  await redisPipeline([
+  const deletes: (string | number)[][] = [
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
@@ -2488,7 +2488,12 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
       ["DEL", deliveryKey(id)],
       ["ZREM", QUEUE_KEY, `${statsId}|${id}`],
     ]),
-  ]);
+  ];
+  // Every deletion confirmed by a reply of its own, each DEL of one key, SREM and ZREM of one member answering 0 or 1
+  // (issue #4679): a pipeline that did not run, came back short or answered otherwise throws, and the step stays to be
+  // tried again rather than leaving a deleted store's secrets, bodies and queued deliveries behind.
+  const done = repliesFor(await redisPipeline(deletes), deletes.length);
+  if (!done || !done.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("the deletion of a deleted store's webhooks");
 }
 
 /** Keeps the handle the job looks a store up by current, from the studio. */

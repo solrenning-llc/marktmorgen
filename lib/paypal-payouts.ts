@@ -538,7 +538,10 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       out.waiting += sent.lines.length;
       continue;
     }
-    const statusOf = new Map<string, { status: string; item: string }>();
+    const statusOf = new Map<string, { status: string; item: string; receiver: string }>();
+    // Every item id and every sender item id once across all the pages read (#4656): a read that repeats either is
+    // ambiguous evidence, so the whole batch stays on its way and is read again next time, never booked on it.
+    const itemIds = new Set<string>();
     let batchStatus = "";
     try {
       for (let page = 1; page <= 10; page += 1) {
@@ -546,9 +549,13 @@ export async function settlePayPal(store: Store): Promise<Settled> {
         batchStatus = String((data.batch_header as { batch_status?: unknown } | undefined)?.batch_status ?? "");
         const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
         for (const item of items) {
-          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown };
+          const detail = (item.payout_item ?? {}) as { sender_item_id?: unknown; receiver?: unknown };
           const aff = typeof detail.sender_item_id === "string" ? detail.sender_item_id : "";
-          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: String(item.payout_item_id ?? "") });
+          const itemId = String(item.payout_item_id ?? "");
+          if (aff && statusOf.has(aff)) throw new Error("a PayPal batch read repeats a sender item id");
+          if (itemId && itemIds.has(itemId)) throw new Error("a PayPal batch read repeats a payout item id");
+          if (itemId) itemIds.add(itemId);
+          if (aff) statusOf.set(aff, { status: String(item.transaction_status ?? ""), item: itemId, receiver: typeof detail.receiver === "string" ? detail.receiver : "" });
         }
         const pages = Number(data.total_pages) || 1;
         if (page >= pages) break;
@@ -563,6 +570,13 @@ export async function settlePayPal(store: Store): Promise<Settled> {
     for (const line of sent.lines) {
       const got = statusOf.get(line.a);
       const status = batchStatus === "DENIED" || batchStatus === "CANCELED" ? "FAILED" : got?.status ?? "PENDING";
+      // Paid to the receiver it was sent to (#4657): a line that kept the receiver's print is booked only when the
+      // receiver PayPal answers has that same print. Another receiver, none, or no key to print with keeps it on
+      // its way. A line from before prints were kept is read as it always was.
+      if (status === PAID && got?.item && line.r && receiverPrint(got.receiver) !== line.r) {
+        still.push(line);
+        continue;
+      }
       if (status === PAID && got?.item) {
         // The line leaves the open batch only when the book is confirmed to hold its payout (Claude 2 on #3272,
         // finding 1): a line dropped with nothing in the book is owed again, and the next payday pays it twice.

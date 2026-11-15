@@ -160,7 +160,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   // Past the store's requests (or a count that cannot be made) the card reads nothing more.
   const resting = store && product ? await isResting(store) : false;
   // Opened by the checkout script: counted, and what it may show (lib/embed-open.ts).
-  const open: ScriptOpen | null = mode && store && !resting ? await readScriptOpen(store, mode, query) : null;
+  // Its request already taken above, so the open does not take a second one (Claude 7 on #4645).
+  const open: ScriptOpen | null = mode && store && !resting ? await readScriptOpen(store, mode, query, true) : null;
   // The card's own links, tagged as the code that opened it was.
   const tag = (url: string) => (open ? withTags(url, open.tags, { via: open.via }) : tagged(url, place));
   // As a page of its own, links stay in the tab; in a frame, they open a new one.

@@ -58,6 +58,8 @@ export type DepositFigures = {
 };
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+/** A field Stripe sent with something in it (not absent, not null): a rule, whether it reads as a number or not (#4699). */
+const set = (v: unknown) => v !== undefined && v !== null;
 
 /** Reads one promotion code row, with its coupon expanded, strictly: anything not read as expected is a rule not read. */
 export function readDepositCodeRow(row: Record<string, unknown>): DepositCode | null {
@@ -65,7 +67,9 @@ export function readDepositCodeRow(row: Record<string, unknown>): DepositCode | 
   const promotion = row.promotion as { coupon?: unknown } | null | undefined;
   const coupon = (promotion?.coupon ?? row.coupon) as Record<string, unknown> | string | null | undefined;
   if (!coupon || typeof coupon === "string") return null;
-  const restrictions = (row.restrictions ?? {}) as Record<string, unknown>;
+  // Stripe always sends restrictions: absent or not an object is a rule not read, never none (#4699).
+  const restrictionsRead = !!row.restrictions && typeof row.restrictions === "object" && !Array.isArray(row.restrictions);
+  const restrictions = (restrictionsRead ? row.restrictions : {}) as Record<string, unknown>;
   const minimumCents = restrictions.minimum_amount;
   const minimumCurrency = restrictions.minimum_amount_currency;
   const minimum =
@@ -74,13 +78,16 @@ export function readDepositCodeRow(row: Record<string, unknown>): DepositCode | 
       : null;
   const currencyOptions = restrictions.currency_options;
   const otherRules =
+    !restrictionsRead ||
+    typeof restrictions.first_time_transaction !== "boolean" ||
+    (set(row.expires_at) && num(row.expires_at) === null) ||
     (minimumCents !== undefined && minimumCents !== null && minimum === null) ||
     (currencyOptions !== undefined && currencyOptions !== null && !(typeof currencyOptions === "object" && Object.keys(currencyOptions as object).length === 0)) ||
     // Stripe sends applies_to only when asked (readDepositCode expands it): absent is a rule not read, never none.
     !("applies_to" in coupon) ||
     (coupon.applies_to !== null && coupon.applies_to !== undefined) ||
     coupon.valid === false ||
-    num(coupon.redeem_by) !== null;
+    set(coupon.redeem_by);
   let off: DepositCode["off"] = null;
   const percent = num(coupon.percent_off);
   const amount = num(coupon.amount_off);
@@ -103,8 +110,8 @@ export function readDepositCodeRow(row: Record<string, unknown>): DepositCode | 
     expiresAt: num(row.expires_at),
     // A limit on uses, its own or its coupon's, or a code for one customer only: nothing here could hold it.
     limited:
-      num(row.max_redemptions) !== null ||
-      num(coupon.max_redemptions) !== null ||
+      set(row.max_redemptions) ||
+      set(coupon.max_redemptions) ||
       (row.customer !== undefined && row.customer !== null) ||
       (row.customer_account !== undefined && row.customer_account !== null),
     firstOrder: restrictions.first_time_transaction === true,
@@ -171,7 +178,8 @@ export async function readDepositCode(account: string, typed: string): Promise<D
   if (!code || codeProblem(code)) return null;
   try {
     const page = await onAccount("GET", account, `/promotion_codes?limit=2&active=true&code=${encodeURIComponent(code)}&expand[]=data.promotion.coupon.applies_to&expand[]=data.promotion.coupon.currency_options`, undefined, CODES_API_VERSION);
-    if (!Array.isArray(page.data) || page.data.length !== 1) return null;
+    // One row on a page that says there is no other: a partial page proves nothing (#4699).
+    if (!Array.isArray(page.data) || page.data.length !== 1 || page.has_more !== false) return null;
     const row = page.data[0] as Record<string, unknown>;
     if (typeof row.code !== "string" || row.code.toUpperCase() !== code.toUpperCase()) return null;
     return readDepositCodeRow(row);

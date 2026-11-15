@@ -145,7 +145,7 @@ async function main(): Promise<void> {
 
   part("Reading it from the creator's account");
   const asked: string[] = [];
-  let answer: unknown = { data: [row()] };
+  let answer: unknown = { object: "list", has_more: false, data: [row()] };
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     asked.push(`${String(input)} ${(init?.headers as Record<string, string>)?.["Stripe-Account"] ?? ""}`);
     return new Response(JSON.stringify(answer), { status: 200, headers: { "Content-Type": "application/json" } });

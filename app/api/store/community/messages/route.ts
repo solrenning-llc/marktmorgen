@@ -111,10 +111,10 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     }
     // Taken out of the community (deleted) since this was let in: nothing written (#4672).
     if (!sent.ok && sent.reason === "out") return back(home, "out");
-    // The person written to was deleted from the community meanwhile or before: nothing written, and back to the list
-    // of conversations, where theirs is no longer (review 5bNDa on #4672). No notice says why: nobody learns of
-    // another person's deletion from a message box.
-    if (!sent.ok && sent.reason === "gone") return back(box, "");
+    // The person written to is no longer in the community (deleted, or left), meanwhile or before: nothing written, and
+    // back to the list of conversations with a neutral warning that it was not sent (review 5bNDa on #4672), never why:
+    // nobody learns of another person's deletion from a message box.
+    if (!sent.ok && sent.reason === "gone") return back(box, "dmnotsent");
     if (!sent.ok) {
       const why =
         sent.reason === "declined"

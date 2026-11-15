@@ -29,7 +29,7 @@ import { NewTab } from "@/components/new-tab";
 
 /** Notices that warn rather than confirm: drawn in the warning colour. */
 const WARN = new Set([
-  "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
+  "noemail", "dmoff", "dmbetween", "dmfull", "dmnotsent", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
 ]);

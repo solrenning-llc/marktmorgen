@@ -86,6 +86,12 @@ async function main(): Promise<void> {
   const answer = await erasedMeanwhile(id, goerKey, goer, carries("HSETNX"), () => rsvp(id, made.event, goerKey, store));
   is("the RSVP is not taken after the erasure", answer, "closed");
   is("the erased person is absent from the RSVP export", await rsvpsOf(id, goerKey), []);
+  // A record that does not read is not "closed" (rule 24): it throws, so the buyer hears it went wrong.
+  const odd = "odd@fence.example";
+  const oddKey = memberKey(odd);
+  redis.run(["HSET", `nl:cm:${id}:m`, oddKey, "{not a record"]);
+  is("a member record that does not read: the RSVP throws, never \"closed\"", await rsvp(id, made.event, oddKey, store).then((r) => r, () => "threw"), "threw");
+  is("and no place is taken for them", await rsvpsOf(id, oddKey), []);
 
   part("#4788: a notice admitted before the erasure");
   const told = "told@fence.example";

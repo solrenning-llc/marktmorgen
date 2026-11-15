@@ -730,6 +730,8 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   }
   if (mark !== "y") {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    // A record that did not read is not "closed" (rule 24): the buyer is told it went wrong, never that the event closed.
+    if (mark === "?") throw new UnknownReplyError("the member record of somebody taking a place");
     return "closed";
   }
   if (added !== 1) {

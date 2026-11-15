@@ -136,6 +136,10 @@ export async function tell(
       const marks = members.length ? filed[0] : "";
       if (typeof marks !== "string") throw new UnknownReplyError("community notices filed for members still in");
       who = stillInFromMarks(members, marks, creator);
+      // A member record that did not read is not told; said once for each, never with their record or address.
+      members.forEach((one, i) => {
+        if (marks[i] === "?") console.error("a community member record did not read; their notice was not filed", one.slice(0, 8));
+      });
       // The room taken for a list that was not filed (not in, or erased meanwhile) goes back.
       const unfiled = members.filter((one, i) => marks[i] !== "y" && grows(one)).length;
       if (unfiled) await giveData(room, [{ slot: NOTICES_SLOT, bytes: unfiled * NOTICE_BYTES }]);

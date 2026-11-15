@@ -132,6 +132,20 @@ const SET_INCR_UNKNOWN: [string, unknown][] = [
   ["a counter that never answers", "throw"],
 ];
 
+/** Replies of a window count (lib/window-count.ts: INCR, then EXPIRE NX) that are not a confirmed count. */
+const WINDOW_COUNT_UNKNOWN: [string, unknown][] = [
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a count of zero after INCR", [0, 1]],
+  ["a count that is true", [true, 1]],
+  ["a count that is not whole", [1.5, 1]],
+  ["a reply that is not a list", { x: 1 }],
+  ["a reply cut short", [1]],
+  ["an empty reply", []],
+  ["a counter that never answers", "throw"],
+];
+
 /** Replies of a pipeline whose first command is the INCR, `length` commands long. */
 const incrFirstUnknown = (length: number): [string, unknown][] => {
   const rest = Array.from({ length: length - 1 }, () => 1);
@@ -212,7 +226,7 @@ async function main(): Promise<void> {
     let n = 0;
     const ask = () => outcome(() => askPlace({ store, id, email: `place${(n += 1)}@numbergates.example`, product, base: BASE, from: FROM, ordersLink: async () => null }));
     const isTaken = (commands: Command[]) => commands.length === 3 && commands[0]?.[0] === "HEXISTS" && commands[1]?.[0] === "HLEN" && key(commands[1]).startsWith("nl:grp:");
-    const isMail = (commands: Command[]) => commands[0]?.[0] === "SET" && /^nl:grp:.+:mail$/.test(key(commands[0]));
+    const isMail = (commands: Command[]) => commands[0]?.[0] === "INCR" && /^nl:grp:.+:mail$/.test(key(commands[0]));
     const after = (from: number) => seen.slice(from).filter((c) => (c[0] === "INCR" && /:mail$/.test(key(c))) || key(c).startsWith("nl:grp:take:")).length;
     for (const [label, reply] of [
       ["a membership answered as text", ["0", 0, null]],
@@ -238,7 +252,7 @@ async function main(): Promise<void> {
       const [sent, from] = [mails.length, seen.length];
       is("places taken, a read that never answers: thrown to the route, which says unavailable; no email, nothing kept", [await ask(), mails.length - sent, after(from)], ["threw Error", 0, 0]);
     }
-    for (const [label, reply] of SET_INCR_UNKNOWN) {
+    for (const [label, reply] of WINDOW_COUNT_UNKNOWN) {
       counter = { match: isMail, reply };
       const [calls, sent, from] = [counterCalls, mails.length, seen.length];
       const got = await ask();
@@ -250,7 +264,7 @@ async function main(): Promise<void> {
     is("places taken confirmed as all of them: full, as before", await ask(), "full");
     counter = { match: isTaken, reply: [1, 2, null] };
     is("an address's own mark with nothing given is not counted against it: a new link", await ask(), "sent");
-    counter = { match: isMail, reply: [null, 10_000] };
+    counter = { match: isMail, reply: [10_000, 0] };
     is("links sent confirmed past the day's number: slow, as before", await ask(), "slow");
     counter = null;
     const sent = mails.length;

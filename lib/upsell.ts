@@ -44,8 +44,10 @@
  * not the buyer ever comes back to the thanks page.
  */
 import { admitOrders, settleAdmitted } from "@/lib/order-admission";
+import { countOrder } from "@/lib/orders";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import {
   type FunnelStep,
@@ -174,8 +176,26 @@ async function readAnswers(session: string): Promise<Map<string, UpsellRecord>> 
   return out;
 }
 
-async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<void> {
-  await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]);
+/** Writes an offer's record; true only on Redis's exact "OK" (CX-123 rule 24), so a caller can refuse to go on. */
+async function writeUpsell(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["SET", recordKey(session, slot), JSON.stringify(record), "EX", RECORD_SECONDS]]), 1);
+  return reply?.[0] === "OK";
+}
+
+/**
+ * Writes the record naming the customer before Stripe is asked: true on Redis's exact "OK", or, when that reply is
+ * unclear, only when a read-back finds exactly this write's own payload (Codex's focal review on #3834: the SET may
+ * have landed and only its reply been lost; refusing then would hold a claim that was never sent to Stripe). The
+ * payload carries this press's own time and the claim is this press's alone (SET NX), so no other write matches it.
+ * A read-back that is lost, garbled or different is unknown: false, and the press is refused, nothing is sent.
+ */
+async function writeUpsellConfirmed(session: string, slot: string, record: UpsellRecord): Promise<boolean> {
+  const key = recordKey(session, slot);
+  const payload = JSON.stringify(record);
+  const reply = repliesFor(await redisPipeline([["SET", key, payload, "EX", RECORD_SECONDS]]), 1);
+  if (reply?.[0] === "OK") return true;
+  const back = repliesFor(await redisPipeline([["GET", key]]), 1);
+  return back !== null && back[0] === payload;
 }
 
 export type TakeResult =
@@ -360,10 +380,17 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
-  // Once, however many times the button is pressed.
-  const [claimed] = await redisPipeline([
-    ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
-  ]);
+  // Once, however many times the button is pressed. Taken here only on exactly "OK"; null is an answer already
+  // written. Any other reply (none, a number, another word, more than one) does not say the claim is this press's,
+  // so it is unknown (CX-123 rule 24): the card is not charged and nothing more is written.
+  const claim = repliesFor(
+    await redisPipeline([
+      ["SET", recordKey(session, slot), JSON.stringify({ state: "pending", product: target.id, ...extra, at: Date.now() }), "NX", "EX", RECORD_SECONDS],
+    ]),
+    1,
+  );
+  const claimed = claim?.[0];
+  if (!claim || (claimed !== "OK" && claimed !== null)) throw new UnknownReplyError("an offer's claim");
   if (claimed === null) {
     const existing = await readUpsell(session, slot);
     return existing?.state === "failed" ? { kind: "failed" } : existing?.state === "declined" ? { kind: "declined" } : { kind: "done" };
@@ -387,7 +414,13 @@ export async function takeUpsell(input: {
 
   // Written down before Stripe is asked, so a lost answer can be looked for,
   // by the thanks page and by the five-minute job.
-  await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
+  // Only on an exact "OK" is Stripe asked (Claude 1 on #3834): a write that did not land would leave a bare claim,
+  // which the orphan release lets go once old, so a charge posted after it could be asked again. Unconfirmed, the
+  // press is refused here, nothing is sent, and the bare claim is released as an orphan (settleUpsells).
+  // An unclear reply is read back: the exact payload of this write found means it landed, and the press goes on.
+  if (!(await writeUpsellConfirmed(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() }))) {
+    throw new UnknownReplyError("an offer's record naming the customer before its charge");
+  }
   await watchPending(store, session, slot);
 
   const email = typeof view.customer_details?.email === "string" ? view.customer_details.email : "";
@@ -445,8 +478,9 @@ export async function takeUpsell(input: {
     if (pi.status === "succeeded") {
       await writeUpsell(session, slot, { state: "paid", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
-      await afterPaid(store, session, target, pi, email);
-      await settleAdmitted(store, admitted.hour);
+      // Its place is given back only once the offer is counted (or covered by its share): a count not confirmed
+      // keeps it held until its hours end, never given back as if counted (lib/orders.ts, countOrder).
+      if ((await afterPaid(store, session, target, pi, email)) !== "unknown") await settleAdmitted(store, admitted.hour);
       return { kind: "done" };
     }
     const next = pi.next_action as { redirect_to_url?: { url?: unknown } } | null;
@@ -476,23 +510,35 @@ export async function takeUpsell(input: {
 
 /**
  * What follows an offer being paid, wherever that is learned: the affiliate
- * the order came through is credited, the buyer gets its confirmation, and
- * the creator's phone hears of the sale (lib/sale-events.ts). None can undo
- * the payment, so none failing is passed on.
+ * the order came through is credited, the buyer gets its confirmation, it is
+ * one of the month's orders, and the creator's phone hears of the sale
+ * (lib/sale-events.ts). None can undo the payment, so none failing is passed
+ * on. Answers what counting it answered (lib/orders.ts, countOrder).
  */
-async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<void> {
+async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
-  const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
-  const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else is null, and the confirmation leaves its "Paid" line out (lib/purchase-email.ts
+  // offerConfirmationFor), never "$0" or the store's own currency.
+  const exact = Number.isSafeInteger(pi.amount) && Number(pi.amount) >= 0 && typeof pi.currency === "string" && /^[a-z]{3}$/.test(pi.currency);
+  const amountCents = exact ? Number(pi.amount) : null;
+  const currency = exact ? String(pi.currency) : null;
   // A bundle added this way: its products, from the list on its own payment.
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;
   const metadata = (pi.metadata as Record<string, string> | null) ?? null;
-  await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) =>
-    console.error("sending an offer's confirmation failed", error),
-  );
+  const sent = await confirmOffer(store, { reference, parent: session, product: target, email, amountCents, currency, items, metadata }).catch((error) => {
+    console.error("sending an offer's confirmation failed", error);
+    return "failed" as const;
+  });
+  // One of the month's orders, by its own payment, whether or not its email went: it was paid. Only an offer this
+  // store does not confirm by email ("skip") is left as before.
+  // An amount not read exactly is counted as an order no share covered (this branch, audit R48): while COMMISSION_LIVE
+  // is false no store's sales pay a share, so every order is counted whatever it paid (lib/orders.ts coveredByShare).
+  const counted = sent === "skip" ? false : await countOrder(store, `offer:${reference}`, amountCents ?? 0);
   await noteOfferSale(store, target, pi).catch((error) => console.error("telling about an offer's sale failed", error));
+  return counted;
 }
 
 /**
@@ -549,6 +595,14 @@ export async function findOfferCharge(
   throw new StripeListUnreadable("more payments than are read");
 }
 
+/**
+ * Deletes an offer's record only while it is still exactly the orphan claim that was read (ARGV[1]): a record
+ * written since — naming the customer, a payment or an answer — is never taken off.
+ */
+const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+return 0`;
+
 /** Settles one offer still waiting on an answer. Nothing is ever charged here. */
 async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
   if (record.state !== "pending" || !store.stripeAccountId) return;
@@ -567,6 +621,13 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
         return;
       }
     } else {
+      // Neither a customer nor a payment: only the claim was written (its reply lost, or the write naming the
+      // customer failed), and the charge is asked of Stripe only after that write. So it was never sent and nothing
+      // was charged: once older than a request in flight could still be, it is let go, only while it is still this
+      // very record, and the buyer can answer the offer again. Never shown as checking until it expires.
+      if (Date.now() - record.at > LOST_ANSWER_MS) {
+        await redisPipeline([["EVAL", ORPHAN_RELEASE, 1, recordKey(session, slot), JSON.stringify(record)]]);
+      }
       return;
     }
     const meta = pi.metadata as Record<string, string> | null;

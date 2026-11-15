@@ -10,7 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -24,6 +24,7 @@ import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -119,12 +120,21 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
+  // Both read exactly (rule 24): a length in another shape is never room on the list, and a place
+  // in another shape is never "not on it", which would write a confirmed place over as a new one.
+  const read = repliesFor(await redisPipeline([
     ["HGET", listKey(sid, product.id), email],
     ["HLEN", listKey(sid, product.id)],
-  ]);
+  ]), 2);
+  const existing = read?.[0];
+  const size = countOf(read?.[1]);
+  if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
   const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
+  // Only a place that is not there (null) is "not on the list". A place kept as text that does not read is unknown
+  // (#4792): written over as a new one, it would lose a confirmed place and its leave token, take data room again and
+  // send a new confirmation. It is left as it is, and nothing is sent.
+  if (existing !== null && !before) return "error";
+  if (!before && size >= MAX_WAITLIST) return "full";
 
   const leave = before?.t ?? newToken();
   const asked = Boolean(before?.c) || consent;
@@ -184,7 +194,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
   }
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
+    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
     );
   }
@@ -440,9 +450,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  let removed = 0;
+  if (productIds.length) {
+    // One reply per product, each the integer 0 or 1. Anything else is unknown (rule 24, #4383): an entry holding the
+    // address may still be there to be copied into a launch, so the erasure is never reported complete; its retry
+    // deletes what is left.
+    const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
+    if (!replies || replies.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a person's waitlist deletions");
+    removed = replies.reduce<number>((sum, n) => sum + (n as number), 0);
+  }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return removed + blanked;
 }
 
 /**

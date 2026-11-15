@@ -18,6 +18,7 @@
  */
 import type { ConsumerPlace } from "@/lib/eu-vat-supply";
 import type { VatOnTop } from "@/lib/eu-vat-amount";
+import type { ViesAnswer } from "@/lib/eu-vat-vies";
 
 export const EU_VAT_RECORD_VERSION = 1;
 
@@ -41,6 +42,8 @@ export type EuVatRecord = {
   customerName: string | null;
   location: { ip: string; billing: string; card?: string };
   adjustments: EuVatAdjustment[];
+  /** A buyer who gave a VAT number that VIES did not answer "valid" at the sale: what VIES said, kept with the sale. */
+  vies?: ViesAnswer;
 };
 
 export type EuVatSale = {
@@ -55,6 +58,8 @@ export type EuVatSale = {
   place: ConsumerPlace;
   payments: { at: number; cents: number }[];
   customerName: string | null;
+  /** The VIES answer of a business whose number was not "valid", when it gave one (lib/eu-vat-checkout.ts). */
+  vies?: ViesAnswer | null;
 };
 
 const text = (value: unknown, most = 500) => typeof value === "string" && value.trim().length > 0 && value.length <= most;
@@ -104,6 +109,74 @@ export function euVatRecord(sale: EuVatSale): EuVatRecord | null {
     customerName: sale.customerName,
     location: { ip: evidence.ip, billing: evidence.billing, ...(evidence.card !== undefined ? { card: evidence.card } : {}) },
     adjustments: [],
+    ...(sale.vies ? { vies: sale.vies } : {}),
+  };
+}
+
+/**
+ * The record of a sale reverse-charged to a business (Directive art. 196): not an OSS supply, so nothing of it is
+ * declared in the non-Union return, but the proof that the buyer was a business is kept with it: the number, VIES's
+ * whole "valid" answer at the sale (art. 18(1)(a) of the Regulation), the name and address the buyer gave, and the two
+ * items of location evidence. Whole or none, like euVatRecord.
+ */
+export type EuReverseChargeRecord = {
+  v: typeof EU_VAT_RECORD_VERSION;
+  kind: "reverse-charge";
+  sale: string;
+  store: string;
+  memberState: string;
+  service: string;
+  date: string;
+  currency: string;
+  amountCents: number;
+  vatNumber: string;
+  vies: ViesAnswer;
+  customer: { name: string; address: string };
+  location: { ip: string; billing: string; card?: string };
+  invoice: string;
+};
+
+export function euReverseChargeRecord(sale: {
+  sale: string;
+  store: string;
+  service: string;
+  at: number;
+  currency: string;
+  amountCents: number;
+  place: ConsumerPlace;
+  vatNumber: string;
+  vies: ViesAnswer;
+  customer: { name: string; address: string };
+  invoice: string;
+}): EuReverseChargeRecord | null {
+  if (!sale || typeof sale !== "object") return null;
+  if (!text(sale.sale, 255) || !text(sale.store, 64) || !text(sale.service, 200) || !text(sale.invoice, 64)) return null;
+  if (typeof sale.currency !== "string" || !/^[a-z]{3}$/i.test(sale.currency)) return null;
+  const date = dayOf(sale.at);
+  if (!date || !whole(sale.amountCents) || sale.amountCents <= 0) return null;
+  const place = sale.place;
+  if (!place || place.kind !== "eu") return null;
+  const vies = sale.vies;
+  if (!vies || vies.state !== "valid" || vies.country !== place.country) return null;
+  const prefix = place.country === "GR" ? "EL" : place.country;
+  if (sale.vatNumber !== `${prefix}${vies.number}`) return null;
+  if (!sale.customer || !text(sale.customer.name, 300) || !text(sale.customer.address, 600)) return null;
+  const evidence = place.evidence;
+  return {
+    v: EU_VAT_RECORD_VERSION,
+    kind: "reverse-charge",
+    sale: sale.sale,
+    store: sale.store,
+    memberState: place.country,
+    service: sale.service,
+    date,
+    currency: sale.currency.toUpperCase(),
+    amountCents: sale.amountCents,
+    vatNumber: sale.vatNumber,
+    vies,
+    customer: { name: sale.customer.name, address: sale.customer.address },
+    location: { ip: evidence.ip, billing: evidence.billing, ...(evidence.card !== undefined ? { card: evidence.card } : {}) },
+    invoice: sale.invoice,
   };
 }
 

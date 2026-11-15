@@ -63,7 +63,9 @@
  *   nl:hooks:q                  deliveries waiting for a try, by when
  *   nl:hooks:anchor:<statsId>   the last Stripe event read for this store
  *   nl:hooks:wait:<statsId>     the event its reading waits on, and for how many runs
+ *   nl:hooks:anchor:<statsId>:back  a read with no anchor still walking back: the oldest event read so far
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -84,6 +86,7 @@ import { keyStates } from "@/lib/api-keys";
 import { SITE_URL } from "@/lib/site-url";
 import { type BundleSlot, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { DELIVERY_MAX_BYTES, DELIVERY_UPDATE_ROOM_BYTES, DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, shortAddress } from "@/lib/webhook-limits";
+import { type FixedEndSub, stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 export const WEBHOOK_EVENTS = [
   "sale.completed",
@@ -161,6 +164,11 @@ const ANCHOR_SECONDS = 30 * 86400;
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
 
+/**
+ * A delivery not tried again because its endpoint no longer hears that kind of event. Its first try may have taken
+ * one of the month's deliveries (counted is kept), so nothing more, not nothing, is counted.
+ */
+export const NOT_HEARD_WORDS = "Not sent: this endpoint no longer hears this event. Nothing more was counted.";
 /** What the studio's log says of a message past the bound: written down, not sent. */
 export const TOO_LARGE_WORDS = `Not sent: this message would take more than ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep, the most a webhook message may take. Nothing was counted.`;
 /**
@@ -329,6 +337,8 @@ export const QUEUE_KEY = "nl:hooks:q";
 const anchorKey = (statsId: string) => `nl:hooks:anchor:${statsId}`;
 /** The event a store's Stripe reading is waiting on, and for how many runs: "<evt>|<runs>". */
 const waitKey = (statsId: string) => `nl:hooks:wait:${statsId}`;
+/** A read with no anchor that has not reached the oldest event yet: the oldest event it read, to walk on from (#4285). */
+const backKey = (statsId: string) => `nl:hooks:anchor:${statsId}:back`;
 /** The passed-over events said to one endpoint of a store on one UTC day, a sorted set by when each was first passed over; gone at the end of the next day. */
 const givenUpDayKey = (statsId: string, day: number, endpoint: string) => `nl:hooks:wait:${statsId}:day:${day}:${endpoint}`;
 /** The endpoints of a store told of passed-over events on one UTC day, at most MAX_ENDPOINTS, so removing and adding endpoints makes no more day sets. */
@@ -567,6 +577,12 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   const next = { ...delivery, attempts: delivery.attempts + 1, lastAt: now };
   if (!endpoint) {
     return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
+  }
+  // An endpoint that no longer hears this kind of event is not sent it on a scheduled try either, as by hand
+  // (resendDelivery, "not_heard"): its message (a buyer's name and email) never goes on to an address the creator
+  // stopped from hearing it, and nothing of the month is taken (webhooks/cron audit, Claude 1, 12/11/2026).
+  if (delivery.type !== "test" && !(endpoint.events as string[]).includes(delivery.type)) {
+    return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: NOT_HEARD_WORDS };
   }
   if (!store) return { ...delivery, state: "failed", next: 0, lastAt: now, lastStatus: 0, lastError: "The store could not be found." };
   // Its API key paused or revoked (owner C3-100), read now: nothing is sent, and nothing is counted.
@@ -1114,7 +1130,7 @@ export async function addEndpoint(store: Store, rawUrl: string, events: unknown,
   if (!written) return refused ?? { ok: false, reason: "unavailable", message: "The endpoint could not be added just now. Try again in a moment." };
   await redisPipeline([
     ["SADD", STORES_KEY, store.statsId],
-    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
+    ...(written.before?.endpoints.length ? [] : [["DEL", anchorKey(store.statsId)], ["DEL", backKey(store.statsId)], ["DEL", waitKey(store.statsId)]]),
   ]);
   return { ok: true, secret, view: await webhooksView(store, { log: withLog }) };
 }
@@ -1276,12 +1292,8 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
     return { ok: false, reason: "unavailable" };
   }
   if (marked !== "saved") return { ok: false, reason: "resent" };
-  const tests = repliesFor(await redisPipeline([
-    ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
-    ["INCR", testsKey(statsId)],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): the endpoint is not called on it.
-  const count = countOf(tests?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(testsKey(statsId), 60)));
   if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable" };
   const taken = await takeAllowance(store, "webhook", 1, now);
@@ -1326,12 +1338,8 @@ export async function sendTest(store: Store, id: string, now = Date.now()): Prom
   // Its API key paused or revoked (owner C3-100): refused before anything is counted or taken.
   const keyHeld = await heldNow(store, endpoint);
   if (keyHeld) return { ok: false, reason: "held", message: HELD_WORDS[keyHeld] };
-  const tests = repliesFor(await redisPipeline([
-    ["SET", testsKey(statsId), "0", "EX", 60, "NX"],
-    ["INCR", testsKey(statsId)],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): the endpoint is not called on it.
-  const count = countOf(tests?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(testsKey(statsId), 60)));
   if (count === null || count > TESTS_PER_MINUTE) return { ok: false, reason: "limited" };
   // This is new, manually requested work, not an already queued delivery.
   if (store.period?.funded === true && !await reservePaidResourceWindow(store)) return { ok: false, reason: "unavailable" };
@@ -1663,7 +1671,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       product: await product(meta.product),
       status: ended ? "ended" : "ending",
       ends_at: ended ? iso(object.ended_at) ?? iso(event.created) : iso(endsAt),
-      reason: ended && meta.ends_after ? "completed" : str(details.reason) ?? "cancellation_requested",
+      // Ended at the end that was sold; stopped before it, somebody cancelled it (lib/fixed-end-rules.ts).
+      reason: ended && meta.ends_after && !stopsBeforeSoldEnd(object as FixedEndSub) ? "completed" : str(details.reason) ?? "cancellation_requested",
       buyer: { email, customer },
     }, created);
     return true;
@@ -1761,10 +1770,13 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
   if (!ended) {
     // Only the change that sets an end. A membership with a set number of
     // payments is given its end when it is bought; that is not a cancellation.
+    // Moving that end earlier is (lib/fixed-end-rules.ts).
     const ending = object.cancel_at_period_end === true || num(object.cancel_at) > 0;
     const wasEnding = previous.cancel_at_period_end === true || num(previous.cancel_at) > 0;
     const set = "cancel_at_period_end" in previous || "cancel_at" in previous;
-    cancels = ending && !wasEnding && set && !meta.ends_after;
+    cancels = meta.ends_after
+      ? set && stopsBeforeSoldEnd(object as FixedEndSub) && !stopsBeforeSoldEnd({ ...object, ...previous } as FixedEndSub)
+      : ending && !wasEnding && set;
   }
   return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
 }
@@ -2101,28 +2113,80 @@ async function watchStore(store: Store, statsId: string, config: Config, now = D
   };
 
   if (!anchor) {
-    // The first run, or an anchor Stripe no longer has: collect bounded pages
-    // going back in time, then send them oldest first. History beyond the
-    // first-run page cap still needs a separate durable continuation.
+    // The first run, or an anchor Stripe no longer has. Stripe lists newest first, so a read with no anchor walks back
+    // in bounded pages; until it reaches the oldest event it sends nothing and sets no anchor, only keeps the oldest
+    // event it read (backKey) to walk on from next run. Sending the newest pages and anchoring on the newest event would
+    // leave the older ones, still inside Stripe's thirty days, unread for good (#4285). Once the walk reaches the
+    // oldest event, the pages of this run are sent oldest first and the anchor is set: the events newer than them,
+    // read on earlier runs of the walk, are read forward from it as on every later run.
+    const [backRaw] = await redisPipeline([["GET", backKey(statsId)]]);
+    const back = typeof backRaw === "string" && /^evt_[A-Za-z0-9]+$/.test(backRaw) ? backRaw : "";
     const pages: StripeEvent[][] = [];
-    let older = "";
+    let older = back;
+    let reachedEnd = false;
     for (let page = 0; page < FIRST_RUN_PAGES; page += 1) {
-      const list = await onAccount(
-        "GET",
-        account,
-        `/events?limit=100&${types}&created[gte]=${Math.max(config.since - 60, 0)}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
-      );
+      let list: Record<string, unknown>;
+      try {
+        list = await onAccount(
+          "GET",
+          account,
+          `/events?limit=100&${types}&created[gte]=${Math.max(config.since - 60, 0)}${older ? `&starting_after=${encodeURIComponent(older)}` : ""}`,
+        );
+      } catch (error) {
+        // A cursor Stripe no longer knows (aged out while the walk went on): let go of, and the walk starts again
+        // from the newest event; the events older than it are gone from Stripe too.
+        if (back && older === back && error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+          await redisPipeline([["DEL", backKey(statsId)]]);
+          return handled + (await watchStore(store, statsId, config, now));
+        }
+        throw error;
+      }
       const rows = stripeEventPage(list);
-      if (!rows.length) break;
+      if (!rows.length) {
+        reachedEnd = true;
+        break;
+      }
       pages.push(rows);
-      const last = str(rows[rows.length - 1].id);
-      if (list.has_more !== true || !last) break;
-      older = last;
-      if (page === FIRST_RUN_PAGES - 1) console.error("a store has more Stripe events than one first run reads; the oldest are left", store.handle);
+      const oldest = str(rows[rows.length - 1].id);
+      if (list.has_more !== true || !oldest) {
+        reachedEnd = true;
+        break;
+      }
+      older = oldest;
+    }
+    if (!reachedEnd) {
+      // More than one run reads: walk on next run from the oldest read, nothing sent and no anchor moved.
+      // Read exactly (rule 24): a write that cannot be confirmed throws, and the next run walks from the cursor it had.
+      const kept = repliesFor(await redisPipeline([["SET", backKey(statsId), older, "EX", ANCHOR_SECONDS]]), 1);
+      if (!kept || kept[0] !== "OK") throw new UnknownReplyError("a Stripe read's cursor");
+      await settle();
+      return handled;
+    }
+    if (!pages.length && back) {
+      // Nothing older than the cursor: the cursor is the oldest event, read on its own, then forward from it.
+      let event: Record<string, unknown>;
+      try {
+        event = await onAccount("GET", account, `/events/${encodeURIComponent(back)}`);
+      } catch (error) {
+        if (error instanceof StripeError && (error.status === 400 || error.status === 404)) {
+          await redisPipeline([["DEL", backKey(statsId)]]);
+          return handled + (await watchStore(store, statsId, config, now));
+        }
+        throw error;
+      }
+      const rows = stripeEventPage({ data: [event], has_more: false });
+      if (rows.length !== 1 || str(rows[0].id) !== back) throw new Error("A Stripe event did not read as itself");
+      pages.push(rows);
     }
     if (!pages.length) return 0;
     for (const rows of [...pages].reverse()) if (!(await send(rows, true))) break;
-    if (last) await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]);
+    if (last) {
+      // The anchor first, confirmed, and only then the cursor let go of (Codex P on #4362): a refused or unread anchor
+      // write keeps the cursor, so the walk is never left with neither and read again from the newest pages.
+      const anchored = repliesFor(await redisPipeline([["SET", anchorKey(statsId), last, "EX", ANCHOR_SECONDS]]), 1);
+      if (!anchored || anchored[0] !== "OK") throw new UnknownReplyError("a Stripe read's anchor");
+      await redisPipeline([["DEL", backKey(statsId)]]);
+    }
     await settle();
     return handled;
   }
@@ -2238,6 +2302,7 @@ export async function forgetStoreWebhooks(statsId: string | null): Promise<void>
     ["DEL", cfgKey(statsId)],
     ["SREM", STORES_KEY, statsId],
     ["DEL", anchorKey(statsId)],
+    ["DEL", backKey(statsId)],
     ["DEL", waitKey(statsId)],
     // Each endpoint's sets of passed-over events, today's and the two days before (an endpoint removed since: gone within two days by itself).
     ...[...told].flatMap((endpoint) => [0, 1, 2].map((back) => ["DEL", givenUpDayKey(statsId, today - back, endpoint)])),

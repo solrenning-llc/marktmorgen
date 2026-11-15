@@ -27,6 +27,7 @@
  *
  * Nothing here needs Node's own modules, so the proxy can use it as it is.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 type HeaderSource = { headers: Headers };
@@ -154,10 +155,7 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   let reply: unknown;
   try {
     const key = await limitKey(scope, who);
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     return "unknown";
   }
@@ -176,10 +174,7 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   let reply: unknown;
   try {
     const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
@@ -189,7 +184,7 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   return countWithin(reply, limit);
 }
 
-/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+/** Whether a returned windowCount reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
 function countWithin(reply: unknown, limit: number): boolean {
   try {
     const count = counterReply(reply);
@@ -242,20 +237,12 @@ export async function essentialTakeBelow(scope: string, who: string, below: numb
 }
 
 /**
- * The count of a SET NX + INCR pipeline, only in its exact shape: two
- * replies, the SET's "OK" or null, and the INCR's own whole number of at
- * least 1; null for anything else. Read by the replies' own data fields,
- * as withinEssentialLimit does, so a getter cannot answer for them.
+ * The count of a windowCount pipeline (the window-count module), only in its exact shape: two replies, the INCR's own
+ * whole number of at least 1 and the EXPIRE's 0 or 1; null for anything else. Read by the replies' own data fields,
+ * so a getter cannot answer for them.
  */
 function counterReply(reply: unknown): number | null {
-  if (!Array.isArray(reply)) return null;
-  const length = Object.getOwnPropertyDescriptor(reply, "length");
-  if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0");
-  const count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK")) return null;
-  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < 1) return null;
-  return count.value as number;
+  return windowCountOf(reply);
 }
 
 /**
@@ -278,10 +265,7 @@ export async function withinMonth(scope: string, who: string, limit: number, win
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", 32 * 86_400, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(windowCount(key, 32 * 86_400));
   } catch {
     return true;
   }

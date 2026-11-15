@@ -39,7 +39,8 @@ import { holdsProductsOrThrow } from "@/lib/community-access";
 import { TOKEN_PATTERN, learnerFrom, storeKey } from "@/lib/learn";
 import { LETTER_ID, type Letter, membersOnly } from "@/lib/letter-rules";
 import { letterWords } from "@/lib/buyer-words/letters";
-import type { Store } from "@/lib/store";
+import { type Store, ensureListId } from "@/lib/store";
+import { keepUnlessErased } from "@/lib/suppression";
 
 export const LETTER_LINK_SECONDS = 60 * 60;
 const MAX_LINK_OPENS = 10;
@@ -174,18 +175,27 @@ export async function requestLetterLink(input: { store: Store; letter: Letter; e
 
 /**
  * The link itself, for an address that holds one of the email's products; nothing for one that does not, or when
- * that cannot be known (logged). The grant's SET is read only in its exact shape (CX-123 rule 24): one reply,
- * "OK". Any other means the link may open nothing, so no email is sent and none of the store's transactional
- * allowance is taken (the meter is taken inside sendEmail); it is said in the server's log, and asking again makes
- * a new link.
+ * that cannot be known (logged). The grant is kept only while the address has no deletion print for the store, in
+ * the same step as the write (keepUnlessErased, #4772): a request that waited past the person's erasure writes
+ * nothing holding the address and sends nothing, and the form's answer was already the same for everyone. The step's
+ * reply is read in its exact shape (CX-123 rule 24): any other means the link may open nothing, so no email is sent
+ * and none of the store's transactional allowance is taken (the meter is taken inside sendEmail); it is said in the
+ * server's log, and asking again makes a new link.
  */
 async function sendLetterLink(store: Store, letter: Letter, raw: string, origin: string): Promise<void> {
   if (!(await holdsLetter(store, letter, raw))) return;
+  const listId = store.listId ?? (await ensureListId(store.email))?.listId;
+  if (!listId) {
+    console.error("a link to read an email kept for members was not sent: the store's list of deleted people could not be read");
+    return;
+  }
   const token = randomBytes(32).toString("hex");
   const grant: LetterGrant = { e: normaliseEmail(raw), k: storeKey(store), h: store.handle, l: letter.id };
-  const kept = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", LETTER_LINK_SECONDS]]), 1);
-  if (kept?.[0] !== "OK") {
-    console.error("a link to read an email kept for members was not sent: its grant was not confirmed kept", new UnknownReplyError("an emailed link's grant"));
+  try {
+    const erased = await keepUnlessErased(linkKey(token), listId, JSON.stringify(grant), LETTER_LINK_SECONDS, [grant.e]);
+    if (erased.size > 0) return;
+  } catch (error) {
+    console.error("a link to read an email kept for members was not sent: its grant was not confirmed kept", error);
     return;
   }
   const link = `${origin}/api/store/letters/open?token=${token}`;

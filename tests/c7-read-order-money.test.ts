@@ -66,6 +66,19 @@ async function main(): Promise<void> {
     is("an amount of 1e999 (Infinity) is an error", r.state, "error");
   }
 
+  part("an unreadable creation time cannot open an unlimited download window (issue #4801)");
+  {
+    const name = "cs_test_o6createdinf01";
+    rawBody[name] = JSON.stringify(paid(name, id)).replace(`"created":${NOW - 86_400}`, '"created":1e999');
+    is("created 1e999 (Infinity) is an error", (await readOrder(store, name)).state, "error");
+  }
+  is("created an hour in the future is an error", await read("cs_test_o6createdfut01", { created: NOW + 3600 }), { state: "error" });
+  is("created as text is an error", await read("cs_test_o6createdtxt01", { created: String(NOW - 86_400) }), { state: "error" });
+  is("created with a fraction of a second is an error", await read("cs_test_o6createdfra01", { created: NOW - 86_400.5 }), { state: "error" });
+  is("created before 1970 is an error", await read("cs_test_o6createdneg01", { created: -1 }), { state: "error" });
+  is("created missing is an error", await read("cs_test_o6creatednul01", { created: null }), { state: "error" });
+  is("created a minute ahead (the clocks' slack) is still a three-day window", await read("cs_test_o6createdskw01", { created: NOW + 60 }), { state: "paid", amount: 4900, currency: "usd", secondsLeft: 259_200 });
+
   part("a free checkout keeps Stripe's explicit 0 in its own currency");
   is("no_payment_required, 0 usd, is paid at 0", await read("cs_test_o6freezero0001", { payment_status: "no_payment_required", amount_total: 0 }), { state: "paid", amount: 0, currency: "usd", secondsLeft: 172_799 });
   is("no_payment_required with no amount is an error", await read("cs_test_o6freenull0001", { payment_status: "no_payment_required", amount_total: null }), { state: "error" });

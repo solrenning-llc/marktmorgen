@@ -13,11 +13,12 @@
  *   - when Stripe cannot be asked about earlier sales, nothing is noted, so
  *     the next pass asks again.
  */
-import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, createStore, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, isSale, noteFirstSale, offerYearly, yearlyOfferEmail } from "@/lib/yearly-offer";
 import { NextRequest } from "next/server";
 import { GET as stopOffersPage, POST as stopOffersRoute } from "@/app/api/store/offers/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
+import { offersStoppedForStore } from "@/lib/offer-stop";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -250,19 +251,39 @@ async function main() {
     is("one mail provider's address pressing 60 times in an hour is never told to wait", presses.every((status) => status === 200), true);
   }
 
-  part("The studio's way: signed in, the creator stops their own store's offers; never from another site");
+  part("The studio's way: signed in, the creator stops the offers of every store on the account; never from another site");
   {
     const store = await seller("stop-studio@example.com", "stopstudio", null);
+    const made = await createStore("stop-studio@example.com", "stopstudiotwo", "A second store", "");
+    if (!made.ok) throw new Error(`no second store: ${made.reason}`);
+    const second = made.store.sid;
+    const off = async (sid: string) => (await redis.pipeline([["SISMEMBER", "nl:offers:off", sid]]))[0];
     const studio = "https://marktmorgen.com/api/store/offers?via=studio";
     const cookie = `${SESSION_COOKIE}=${await openSession("stop-studio@example.com")}`;
+    const press = (headers: Record<string, string>) => stopOffersRoute(new NextRequest(studio, { method: "POST", headers: { host: "marktmorgen.com", ...headers } }));
     const signedOut = await stopOffersPage(new NextRequest(studio, { headers: { "x-forwarded-for": "198.51.100.40" } }));
     is("signed out: asked to sign in", [signedOut.status, /\/signin/.test(await signedOut.text())], [200, true]);
+    is("signed out, pressed: 401 and nothing stopped", [(await press({ origin: "https://marktmorgen.com", "x-forwarded-for": "198.51.100.44" })).status, await off(store.sid)], [401, 0]);
     const shown = await stopOffersPage(new NextRequest(studio, { headers: { cookie, "x-forwarded-for": "198.51.100.41" } }));
     is("signed in: the button", [shown.status, /Stop these offers/.test(await shown.text())], [200, true]);
-    const crossSite = await stopOffersRoute(new NextRequest(studio, { method: "POST", headers: { cookie, origin: "https://elsewhere.example", host: "marktmorgen.com", "x-forwarded-for": "198.51.100.42" } }));
-    is("from another site: refused, nothing stopped", [crossSite.status, (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0]], [403, 0]);
-    const pressed = await stopOffersRoute(new NextRequest(studio, { method: "POST", headers: { cookie, origin: "https://marktmorgen.com", host: "marktmorgen.com", "x-forwarded-for": "198.51.100.43" } }));
-    is("pressed in the studio: stopped", [pressed.status, (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0]], [200, 1]);
+    const crossSite = await press({ cookie, origin: "https://elsewhere.example", "x-forwarded-for": "198.51.100.42" });
+    is("from another site: refused, nothing stopped", [crossSite.status, await off(store.sid), await off(second)], [403, 0, 0]);
+
+    const realPipeline = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "GET" && String(commands[0][1]).startsWith("nl:auth:session:") ? [] : realPipeline(commands))) as typeof redis.pipeline;
+    const unknownSession = await press({ cookie, origin: "https://marktmorgen.com", "x-forwarded-for": "198.51.100.45" });
+    redis.pipeline = realPipeline;
+    is("a session read in an unknown shape: 503 Not changed yet, never Sign in first, nothing stopped", [unknownSession.status, /Not changed yet/.test(await unknownSession.text()), await off(store.sid)], [503, true, 0]);
+    redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === "GET" && commands[1]?.[0] === "SMEMBERS" ? [null] : realPipeline(commands))) as typeof redis.pipeline;
+    const unknownStores = await press({ cookie, origin: "https://marktmorgen.com", "x-forwarded-for": "198.51.100.46" });
+    redis.pipeline = realPipeline;
+    is("the account's stores read in an unknown shape: 503, nothing stopped", [unknownStores.status, await off(store.sid), await off(second)], [503, 0, 0]);
+
+    const pressed = await press({ cookie, origin: "https://marktmorgen.com", "x-forwarded-for": "198.51.100.43" });
+    is("pressed in the studio: every store on the account stopped", [pressed.status, await off(store.sid), await off(second)], [200, 1, 1]);
+    const later = await createStore("stop-studio@example.com", "stopstudiothree", "A third store", "");
+    if (!later.ok) throw new Error(`no third store: ${later.reason}`);
+    is("a store made later reads the account's stop", await offersStoppedForStore(later.store), true);
   }
 
   part("Without the company's postal address, nothing commercial is sent");

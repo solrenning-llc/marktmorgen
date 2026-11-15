@@ -672,11 +672,11 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   });
 }
 
-/** The daily job: every store with a batch still open. */
 /** The store the daily settling last reached; the next run starts after it. */
 const SETTLE_AFTER = "nl:pp:settle:after";
 const SETTLE_AFTER_SECONDS = 7 * 86_400;
 
+/** The daily job: every store with a batch still open. */
 export async function settleAllPayPal(deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [sids, after] = await redisPipeline([["SMEMBERS", STORES], ["GET", SETTLE_AFTER]]);

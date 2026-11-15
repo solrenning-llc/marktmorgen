@@ -86,6 +86,18 @@ async function main(): Promise<void> {
     result = await syncAssistant(unpaid, undefined, now / 1000);
     is("no stop, no cancel, the store as it was", [stopWrites, cancelAttempts, (await storeForEmail(owner))?.assistantPlan], [0, 0, plan]);
 
+    part("RED (Codex T on #4443, HIGH): a charge without its own id is unknown and cancels nothing");
+    for (const [label, charge] of [
+      ["no id at all", { disputed: true }],
+      ["an id that is not a charge's", { id: "in_notACharge01", disputed: true }],
+      ["an empty id", { id: "", disputed: true }],
+    ] as [string, Record<string, unknown>][]) {
+      await fresh();
+      rows = [{ id: "in_missing_charge_id", subscription: OWN, charge }];
+      result = await syncAssistant((await storeForEmail(owner))!, undefined, now / 1000);
+      is(`RED: a disputed charge with ${label}: no cancellation or dispute write`, [result.assistantPlan?.active, Boolean(result.assistantPlan?.disputedAt), cancelAttempts, (await storeForEmail(owner))?.assistantPlan], [true, false, 0, plan]);
+    }
+
     part("Control: a disputed invoice of this very add-on ends it and keeps it from being sold again");
     for (const [label, row] of [
       ["its id as a string", { id: "in_8", subscription: OWN, charge: { id: "ch_8", disputed: true } }],

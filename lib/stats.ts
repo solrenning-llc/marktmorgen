@@ -257,12 +257,24 @@ export async function countHeard(statsId: string, answer: string, cents: number,
  * came looking for and could not buy — an idea for the next product, or a
  * word missing from a title. Only the words, lower case, at most 40
  * characters; nothing about who searched. One command, for a search, which
- * one connection may make 30 times in ten minutes.
+ * one connection may make 30 times in ten minutes. The day's expiry goes with
+ * the count, in the same request, as with countHeard: on a day with no
+ * counted view the search may be the record's first write, and the day's
+ * first view, which otherwise writes the expiry, may never come.
  */
 export async function countSearchMiss(statsId: string, words: string[], now = Date.now()): Promise<void> {
   const term = words.join(" ").slice(0, 40).trim();
   if (!term || !isRedisConfigured()) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field: `q:${term}`, by: 1 }]);
+  const counts = countsKey(statsId, dayKey(now));
+  try {
+    await redisPipeline([
+      cappedCountCommand([{ key: counts, most: DAY_FIELDS_MAX }], [{ hash: 0, field: `q:${term}`, by: 1 }]),
+      ["EXPIRE", counts, TTL_SECONDS],
+    ]);
+  } catch (error) {
+    // Never thrown at the store's page, as before (cappedCount never throws): a count not made is a count missed.
+    console.error("counting a search that found nothing failed", error);
+  }
 }
 
 /** The store page's views and the checkouts started from one day to another, both counted: one read a day, at most 90. */

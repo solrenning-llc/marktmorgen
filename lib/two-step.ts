@@ -365,7 +365,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     (the questions the answers and the assistant missed) and "replace";
  *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
  *     "move" (an edit that changes the time, emailing everyone coming);
- *   - community: "report-delete" (a reported post or comment), and, for the
+ *   - community: "report-delete" (a reported post or comment), "held-remove"
+ *     (a member's post or comment waiting for approval, not published:
+ *     app/api/store/community/approval), and, for the
  *     creator inside their own community (app/api/store/community, chat and
  *     the lesson comments, where the owner is known by the address and not
  *     by studioAccess), "email" (an announcement emailed to every member),
@@ -390,7 +392,7 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
-  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
   orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
@@ -482,9 +484,14 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
  * whether this session is a member; an answer of another shape counts as one.
  * Three commands, only for the sessions of such an account, for as long as its
  * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
+ * The three replies are read only in their exact shape (CX-123 rule 24): a
+ * pipeline cut short, with a reply too many, a hole, a getter or a Proxy is
+ * unknown, and an unknown lock is locked, never set free by a stray zero.
  */
 async function keptListed(session: string, owner: string, now: number): Promise<number> {
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
+  const replies = repliesFor(await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]), 3);
+  if (!replies) return now + SESSION_TTL_SECONDS * 1000;
+  const [kept, member, left] = replies;
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);

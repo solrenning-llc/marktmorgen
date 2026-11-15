@@ -33,6 +33,9 @@ import {
   DEFAULT_STAGES,
   DEAL_ID,
   MAX_DEALS,
+  MAX_FIELD_OPTION,
+  MAX_FIELD_OPTIONS,
+  MAX_FIELD_VALUE,
   type Pipeline,
   type PipelineChange,
   type Stage,
@@ -45,6 +48,7 @@ import {
   parseFields,
   parseStages,
 } from "@/lib/crm-rules";
+import type { ListRead } from "@/lib/contacts";
 
 export class CrmDealReadUnavailable extends Error {
   constructor() { super("CRM deal preflight could not be confirmed"); this.name = "CrmDealReadUnavailable"; }
@@ -228,17 +232,40 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   return true;
 }
 
-/** Every value of every field, by field id and then by person: for the list's file. */
-export async function allValues(statsId: string | null, fields: CrmField[]): Promise<Record<string, Record<string, string>>> {
-  if (!statsId || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGETALL", valuesKey(statsId, f.id)]));
+/** A person's key as one argument of a read of their values (lib/person-key.ts: 32 hexadecimal characters), with its quotes and its comma. */
+export const PERSON_ARG_BYTES = 35;
+
+/**
+ * The most bytes one value of `field` comes back as in a read: its longest
+ * value (one of several is the field's choices, one a line), every character
+ * at the widest a JSON answer writes it (three bytes; a line break, two), with
+ * its quotes and its comma. Control characters are never kept (fieldValue).
+ */
+export function valueReadBytes(field: Pick<CrmField, "type">): number {
+  const longest = field.type === "several" ? MAX_FIELD_OPTIONS * (MAX_FIELD_OPTION + 1) : MAX_FIELD_VALUE;
+  return 3 * longest + 3;
+}
+
+/**
+ * The values of `persons` (their person keys, lib/person-key.ts) for each
+ * field, by field id, in the order of `persons` (null for none): for the
+ * list's file, read only for the people it holds, one HMGET a field, never
+ * the whole of a field's values, which outlive a person's leaving the list
+ * (second cost review of #3354). Each read goes through `read`, held at the
+ * most its values can weigh. Read in its exact shape (CX-123 rule 24): a
+ * value is a string or none, one for each person; any other answer throws
+ * UnknownReplyError, never a file with a value left out.
+ */
+export async function valuesOf(statsId: string, fields: CrmField[], persons: string[], read: ListRead): Promise<Record<string, (string | null)[]>> {
+  if (!fields.length || !persons.length) return Object.fromEntries(fields.map((f) => [f.id, persons.map(() => null)]));
+  const most = fields.reduce((sum, f) => sum + persons.length * valueReadBytes(f) + 2, 0);
+  const got = await read(fields.map((f) => ["HMGET", valuesKey(statsId, f.id), ...persons]), most);
+  if (!Array.isArray(got) || got.length !== fields.length) throw new UnknownReplyError("a store's fields' values");
   return Object.fromEntries(
     fields.map((f, i) => {
-      const raw = got[i];
-      const map: Record<string, string> = {};
-      if (Array.isArray(raw)) for (let k = 0; k + 1 < raw.length; k += 2) map[String(raw[k])] = String(raw[k + 1]);
-      else if (raw && typeof raw === "object") Object.assign(map, raw as Record<string, string>);
-      return [f.id, map];
+      const values: unknown = got[i];
+      if (!Array.isArray(values) || values.length !== persons.length || values.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("a store's field's values");
+      return [f.id, values.map((v: string | null) => v || null)];
     }),
   );
 }

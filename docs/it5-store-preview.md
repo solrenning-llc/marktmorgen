@@ -85,9 +85,10 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
 ## Units, tests first
 
 0. **This design** (no code).
-1. **Rules and cost:** lib/store-preview-rules.ts (pure), with the switch, the per-address and site-wide caps and the preview's worst computed from `WRITING_JOB_MICRO_USD`, the AI route's function line and the database commands.
-   - The `preview-share` line goes in tests/plan-cost-registry.ts, with a test that every plan stays positive with it, monthly and yearly.
-   - The worst stays unknown, and the switch off, until every part is priced.
+1. **Rules and cost** (built on 15 November 2026, in this branch, tests/store-preview-rules.test.ts): lib/store-preview-rules.ts (pure), with the switch, the per-address and site-wide caps and the preview's worst computed from `WRITING_JOB_MICRO_USD`, the function time and the database commands.
+   - The function time is priced from the duration the preview's own route must declare (`PREVIEW_ROUTE`, `export const maxDuration = 60`): every second at full CPU and 2 GB, plus the call, once per job. With those rates the worst is 130,454 µUSD (about US$0.13) a preview: 125,398 for the two jobs, 4,976 of function time and 80 of database. Until that route exists with that declaration, `previewWorstMicroUsd` answers null, and the test requires the switch off.
+   - The month's ceiling (`previewMonthCeiling`) takes the source of its places, (A) or (B), and chooses neither; anything malformed makes none.
+   - The `preview-share` line in tests/plan-cost-registry.ts, with a test that every plan stays positive with it, monthly and yearly, waits for the owner's choice: under (B) there is no new line.
 2. **The anonymous job:** `writeStoreSetup` is split so that its prompt, parsing and checks are one function. The studio's job keeps its store-counted wrapper; the preview gets a wrapper that reserves from the preview budget, never from a store's.
    - Tests use a stand-in model and a synthetic page only.
    - Each refusal, each cap and the never-third-job rule each get a test.

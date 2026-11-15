@@ -167,9 +167,13 @@ test("Hotmart current fixed fee, microtransactions and policy conflict stay expl
 
 test("HighLevel comparison preserves real CRM caps and does not turn unlimited accounts into free usage", () => {
  const h=COMPETITOR_PRICES.highlevel;assert.ok(h.plans.every(p=>p.platformFeeBps===null));
- assert.deepEqual(h.plans.map(p=>p.annualCents),[97000,297000,497000]);
+ // #4571 batch 6: read November 15, 2026, the pricing page pairs $4,970/year with the $297 plan and $2,970/year with
+ // the $497 one, the reverse of October 20; neither pairing is confirmed, so neither annual quote is shown as read.
+ assert.deepEqual(h.plans.map(p=>p.annualCents),[97000,null,null]);
  const page=findPage("proof","highlevel");assert.ok(page && page.seo?.title==="Marktmorgen vs HighLevel");
  const table=page.blocks.find(b=>b.kind==="table");assert.ok(table && table.kind==="table");
+ const annual=table.rows.find(r=>r[0]==="Annual subscription")![1];
+ assert.ok(annual.includes("Starter: $970/year") && annual.includes("unconfirmed") && !/Unlimited: \$[\d,]+\/year|Agency Pro: \$[\d,]+\/year/.test(annual));
  assert.ok(table.rows.find(r=>r[0]==="CRM and accounts")![2].includes(pipelineLimitWords()));
  assert.ok(table.rows.find(r=>r[0]==="Communication channels")![2].includes("no SMS, WhatsApp"));
  assert.ok(table.rows.find(r=>r[0]==="Usage charges")![1].includes("not an all-in"));

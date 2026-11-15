@@ -16,8 +16,11 @@
  * What is read is kept for ten minutes (CACHE_SECONDS), so a busy booking
  * page asks the calendar at most once in that time; only the busy times are
  * kept, never a title, a guest or a place. A calendar that fails to answer
- * blocks nothing new: the last good reading is used for up to six hours
- * (STALE_SECONDS), after that nothing, and the studio says what went wrong.
+ * keeps its last good reading for up to six hours (STALE_SECONDS); a file
+ * that cannot be read (CalendarTooComplex), or a calendar with no good
+ * reading left, closes its whole window, since its busy times are not known,
+ * and the studio says what went wrong. A failure is kept CACHE_SECONDS, as a
+ * reading is, and a refused file that has not changed is not parsed again.
  * Bookings never wait on it for more than FEED_TIMEOUT_MS.
  *
  * Out: every store gets a private address of its own,
@@ -30,7 +33,8 @@
  *   nl:cal:tok:<hash>          statsId, for the subscription address
  *   nl:cal:busy:<feed>         the last reading, ten minutes
  *   nl:cal:good:<feed>         the last good reading, six hours
- *   nl:cal:err:<feed>          the last failure, for the studio
+ *   nl:cal:err:<feed>          the last failure, for the studio { at, message,
+ *                              refused?, print?, printAt? }, six hours
  *   nl:cal:out:<statsId>       the last good copy of the subscription file,
  *                              { at, ics }, CALENDAR_COPY_SECONDS (40 days)
  *   nl:cal:pace:<statsId>:<h>  the feed's answers in hour h, an hour
@@ -43,11 +47,11 @@ import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
-import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
+import { CalendarTooComplex, type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
 import { type Listing, type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
@@ -110,7 +114,7 @@ const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 type Feed = { id: string; url: string; addedAt: string };
 /** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
 type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string };
-export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
+export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean; unreadable?: number };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
 const tokenKey = (token: string) => `nl:cal:tok:${createHash("sha256").update(`nimbus-cal:${token}`).digest("hex").slice(0, 40)}`;
@@ -159,6 +163,56 @@ function parseConfig(raw: unknown): Config | null {
   }
 }
 
+/**
+ * The window a reading covers, as one busy stretch: what a calendar answers
+ * while its busy times are not known, so no time it may hold is offered.
+ */
+function unknownWindow(now: number): [number, number][] {
+  return [[now - 86_400_000, now + LOOKAHEAD_DAYS * 86_400_000]];
+}
+
+/** What a failure kept for the studio says; `print` and `printAt` name a refused file and when it was parsed. */
+type Failure = { at: number; message: string; refused?: boolean; print?: string; printAt?: number };
+
+/** A kept failure: null when there is none, "unknown" for any other shape than the one calendarBusy writes (rule 24). */
+function failureOf(raw: unknown): Failure | null | "unknown" {
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
+  try {
+    const value = JSON.parse(raw) as Partial<Failure> | null;
+    if (!value || typeof value !== "object" || typeof value.at !== "number" || typeof value.message !== "string") return "unknown";
+    return {
+      at: value.at,
+      message: value.message,
+      ...(value.refused === true ? { refused: true } : {}),
+      ...(typeof value.print === "string" && typeof value.printAt === "number" ? { print: value.print, printAt: value.printAt } : {}),
+    };
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * A calendar file's size and hash, with the zone it is read in: a refused file that has not changed is not parsed
+ * again. A DTSTAMP line's value is left out: it names only when the file was made (calendar services stamp every
+ * export with the time), lib/ics-parse.ts never reads it, and the line itself still counts.
+ */
+function feedPrint(text: string, fallbackTz: string): string {
+  const kept = text.replace(/^DTSTAMP[;:][^\r\n]*/gim, "DTSTAMP:");
+  return `${kept.length}:${createHash("sha256").update(fallbackTz).update("\0").update(kept).digest("hex").slice(0, 32)}`;
+}
+
+/** A calendar file refused as too complex, with its print; `parsed` is false when the same file's refusal was reused. */
+export class FeedTooComplex extends CalendarTooComplex {
+  readonly print: string;
+  readonly parsed: boolean;
+  constructor(print: string, parsed: boolean) {
+    super();
+    this.print = print;
+    this.parsed = parsed;
+  }
+}
+
 function parseReading(raw: unknown): Reading | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
@@ -172,7 +226,7 @@ function parseReading(raw: unknown): Reading | null {
 
 /**
  * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
- * is not the object writeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * is not the object changeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
  * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
  */
 async function readConfig(store: Store): Promise<Config | null> {
@@ -189,11 +243,6 @@ async function readConfig(store: Store): Promise<Config | null> {
   const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
   if (!config) throw new UnknownReplyError("a store's calendar settings");
   return config;
-}
-
-async function writeConfig(store: Store, config: Config): Promise<void> {
-  if (!store.statsId) return;
-  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle, callsId: store.callsId ?? null })]]);
 }
 
 /** The zone for all-day and floating times, when a calendar names none. */
@@ -225,9 +274,11 @@ export function providerOf(url: string): string {
 
 /**
  * Fetches and reads one calendar. Throws a SafeFetchError, or an Error with a
- * sentence for the creator, when it cannot be read.
+ * sentence for the creator, when it cannot be read; a file too complex to read
+ * throws FeedTooComplex with its print. `refused`: the print of a file already
+ * refused, which is then refused again without being parsed.
  */
-export async function readFeed(url: string, fallbackTz: string, now: number, fetchOptions: FetchHooks = {}): Promise<Reading> {
+export async function readFeed(url: string, fallbackTz: string, now: number, fetchOptions: FetchHooks = {}, refused: string | null = null): Promise<Reading> {
   const answer = await safeFetch(url, {
     maxBytes: FEED_MAX_BYTES,
     timeoutMs: FEED_TIMEOUT_MS,
@@ -242,13 +293,22 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
   if (!looksLikeCalendar(text)) {
     throw new Error("That address answers with a web page, not a calendar file. Use the calendar's private iCal (.ics) address (Google calls it the secret address in iCal format).");
   }
-  const parsed = parseIcs(text, { from: now - 86_400_000, to: now + LOOKAHEAD_DAYS * 86_400_000, fallbackTz });
+  const print = feedPrint(text, fallbackTz);
+  if (refused !== null && print === refused) throw new FeedTooComplex(print, false);
+  let parsed: ReturnType<typeof parseIcs>;
+  try {
+    parsed = parseIcs(text, { from: now - 86_400_000, to: now + LOOKAHEAD_DAYS * 86_400_000, fallbackTz });
+  } catch (error) {
+    if (error instanceof CalendarTooComplex) throw new FeedTooComplex(print, true);
+    throw error;
+  }
   return {
     at: now,
     busy: parsed.busy.map((b) => [b.start, b.end]),
     events: parsed.events,
     unsupported: parsed.unsupported,
     truncated: parsed.truncated,
+    ...(parsed.unreadable ? { unreadable: parsed.unreadable } : {}),
   };
 }
 
@@ -256,36 +316,68 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
 export type FetchHooks = Pick<Parameters<typeof safeFetch>[1], "resolve" | "agent">;
 
 /**
- * The busy times from every calendar the creator added, never throwing. A
- * reading under ten minutes old is used as it is; an older one is refreshed,
- * by one request at a time per calendar.
+ * The busy times from every calendar the creator added, never throwing: a
+ * read that fails on the way (the settings, the zone of all-day times, the
+ * kept readings, a lock) closes every window rather than reading as none. A
+ * reading under CACHE_SECONDS old is used as it is; an older one is refreshed,
+ * by one request at a time per calendar. A calendar whose busy times are not
+ * known closes its whole window (unknownWindow): a file refused as too
+ * complex, a calendar with no good reading left, or a reply read in no known
+ * shape (rule 24); a calendar that stopped answering keeps its last good
+ * reading for STALE_SECONDS.
  */
 export async function calendarBusy(
   store: Store,
   now = Date.now(),
   hooks: FetchHooks = {},
 ): Promise<{ busy: Busy[]; failing: number }> {
+  const asBusy = (lists: [number, number][][]): Busy[] => lists.flat().map(([start, end]) => ({ start, end }));
   let config: Config | null;
   try {
     config = await readConfig(store);
   } catch {
-    return { busy: [], failing: 0 };
+    // Settings read in no known shape: whether calendars hold this store's times is not known.
+    return { busy: asBusy([unknownWindow(now)]), failing: 1 };
   }
   if (!config || !config.feeds.length) return { busy: [], failing: 0 };
-  const fallbackTz = await homeZone(store);
-  const cached = await redisPipeline(config.feeds.flatMap((f) => [["GET", busyKey(f.id)], ["GET", goodKey(f.id)]])).catch(() => null);
+  const feeds = config.feeds;
+  // Every calendar's window closed: what answers when a read on the way fails (rule 24), never "nothing busy".
+  const allUnknown = () => ({ busy: asBusy(feeds.map(() => unknownWindow(now))), failing: feeds.length });
+  // The zone of all-day and floating times, from the call listing: a failed read leaves those times unknown.
+  const fallbackTz = await homeZone(store).catch(() => null);
+  if (fallbackTz === null) return allUnknown();
+  // One MGET (one command) for every calendar's reading, good reading and failure, read exactly (rule 24).
+  const keys = feeds.flatMap((f) => [busyKey(f.id), goodKey(f.id), errKey(f.id)]);
+  const reply = await redisPipeline([["MGET", ...keys]]).catch(() => null);
+  const outer = repliesFor(reply, 1);
+  const cached = outer ? listSlots(outer[0]) : null;
+  if (!cached || cached.length !== keys.length) return allUnknown();
   let failing = 0;
+  // A calendar's reading that throws on the way (its lock, its release) closes every window: this never rejects.
   const lists = await Promise.all(
-    config.feeds.map(async (feed, i): Promise<[number, number][]> => {
-      const fresh = cached ? parseReading(cached[i * 2]) : null;
+    feeds.map(async (feed, i): Promise<[number, number][]> => {
+      const [busyRaw, goodRaw, errRaw] = [cached[i * 3], cached[i * 3 + 1], cached[i * 3 + 2]];
+      const fresh = parseReading(busyRaw);
       if (fresh) return fresh.busy;
-      const good = cached ? parseReading(cached[i * 2 + 1]) : null;
-      // Somebody else is reading it right now: the last good reading will do.
+      const good = goodRaw === null ? null : parseReading(goodRaw);
+      const failure = failureOf(errRaw);
+      // A reading or a good reading in no known shape: this calendar's busy times are not known, and nothing is spent.
+      if (busyRaw !== null || (goodRaw !== null && !good)) {
+        failing += 1;
+        return unknownWindow(now);
+      }
+      const closed = failure === "unknown" || failure?.refused === true || !good;
+      // Somebody else is reading it right now: the last good reading will do, unless what was last read is not known.
       // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
       const lock = claimValue();
-      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return good?.busy ?? [];
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return closed || !good ? unknownWindow(now) : good.busy;
+      // The print of a file refused within STALE_SECONDS: the same file is refused again without being parsed. A
+      // failure read in no known shape gives none, and the file is parsed (inside the priced reading).
+      const known = failure && failure !== "unknown" && failure.refused && failure.print && typeof failure.printAt === "number" && failure.printAt <= now && now - failure.printAt < STALE_SECONDS * 1000
+        ? { print: failure.print, printAt: failure.printAt }
+        : null;
       try {
-        const reading = await readFeed(feed.url, fallbackTz, now, hooks);
+        const reading = await readFeed(feed.url, fallbackTz, now, hooks, known?.print ?? null);
         const text = JSON.stringify(reading);
         await redisPipeline([
           ["SET", busyKey(feed.id), text, "EX", CACHE_SECONDS],
@@ -295,21 +387,25 @@ export async function calendarBusy(
         return reading.busy;
       } catch (error) {
         failing += 1;
+        const refused = error instanceof CalendarTooComplex;
         const message = error instanceof SafeFetchError ? problemWords(error) : error instanceof Error ? error.message : "The calendar could not be read.";
-        // The failure is remembered for the studio, and the calendar is not
-        // asked again for two minutes, so a broken one is not hammered.
+        const print = error instanceof FeedTooComplex ? { print: error.print, printAt: error.parsed ? now : known?.printAt ?? now } : {};
+        // A file that cannot be read, or a calendar with no good reading left, closes its window; one that stopped
+        // answering keeps its last good reading. Either is kept CACHE_SECONDS, as a reading is, so a calendar that
+        // fails is asked no more often than one that answers; the failure is remembered for the studio.
+        const busy = refused || !good ? unknownWindow(now) : good.busy;
         await redisPipeline([
-          ["SET", errKey(feed.id), JSON.stringify({ at: now, message: message.slice(0, 300) }), "EX", STALE_SECONDS],
-          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy: good?.busy ?? [], events: 0, unsupported: 0, truncated: false }), "EX", 120],
+          ["SET", errKey(feed.id), JSON.stringify({ at: now, message: message.slice(0, 300), ...(refused ? { refused: true } : {}), ...print }), "EX", STALE_SECONDS],
+          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy, events: 0, unsupported: 0, truncated: false }), "EX", CACHE_SECONDS],
         ]).catch(() => {});
-        return good?.busy ?? [];
+        return busy;
       } finally {
         await releaseMark(lockKey(feed.id), lock);
       }
     }),
-  );
-  const busy: Busy[] = lists.flat().map(([start, end]) => ({ start, end }));
-  return { busy, failing };
+  ).catch(() => null);
+  if (!lists) return allUnknown();
+  return { busy: asBusy(lists), failing };
 }
 
 // ---- The studio --------------------------------------------------------------
@@ -324,6 +420,10 @@ export type FeedView = {
   message: string;
   busyTimes: number;
   unsupported: number;
+  /** Repeating events whose rule is too large to read: each blocks from its first time to the end of the window. */
+  unreadable: number;
+  /** "error" with no time of the window offered: the file cannot be read, or no good reading is left. */
+  closed: boolean;
 };
 
 export type CalendarView = {
@@ -343,13 +443,15 @@ export async function calendarView(store: Store): Promise<CalendarView> {
     : [];
   const feeds = config.feeds.map((feed, i): FeedView => {
     const good = parseReading(replies[i * 2]);
-    let failure: { at: number; message: string } | null = null;
+    let failure: { at: number; message: string; refused?: unknown } | null = null;
     try {
-      failure = typeof replies[i * 2 + 1] === "string" ? (JSON.parse(replies[i * 2 + 1] as string) as { at: number; message: string }) : null;
+      failure = typeof replies[i * 2 + 1] === "string" ? (JSON.parse(replies[i * 2 + 1] as string) as { at: number; message: string; refused?: unknown }) : null;
     } catch {
       failure = null;
     }
     const failedLast = failure && (!good || failure.at >= good.at);
+    // As calendarBusy answers: a file that cannot be read, or no good reading left, closes the window.
+    const closed = Boolean(failedLast && failure && (failure.refused === true || !good));
     return {
       id: feed.id,
       provider: providerOf(feed.url),
@@ -359,6 +461,8 @@ export async function calendarView(store: Store): Promise<CalendarView> {
       message: failedLast && failure ? failure.message : "",
       busyTimes: good?.busy.length ?? 0,
       unsupported: good?.unsupported ?? 0,
+      unreadable: typeof good?.unreadable === "number" ? good.unreadable : 0,
+      closed,
     };
   });
   return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null, stoppedAt: config.stoppedAt ?? null };
@@ -370,26 +474,98 @@ export function subscribeUrl(token: string): string {
 
 export type AddFeedResult =
   | { ok: true; view: CalendarView; busyTimes: number }
-  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable"; message: string };
+  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable" | "busy"; message: string };
+
+/**
+ * A store's calendar settings written only over the exact text they were read as (ARGV[1] "1", ARGV[2] that text),
+ * or only while still absent when they were read absent (ARGV[1] "0"); ARGV[3] is what is written. 1: written; 0:
+ * changed by someone else since, nothing written (issue #3984). Billed as the script plus its GET and its SET: 3
+ * commands written, 2 not.
+ */
+export const CALENDAR_CONFIG_SWAP = `-- marktmorgen:calendar-config-swap:v1
+local now = redis.call('GET', KEYS[1])
+if ARGV[1] == '1' then
+  if now ~= ARGV[2] then return 0 end
+elseif now then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1`;
+
+/** How many times a change is read and made in all, when other changes keep writing the settings first, before "busy". */
+const CONFIG_TRIES = 3;
+/** What the studio shows when every try lost to another change: nothing was changed. */
+const CALENDAR_CHANGE_BUSY = "Your calendars were being changed somewhere else at the same moment, so nothing was changed. Try again.";
+/** Thrown by removeFeed and newFeedToken when every try lost to another change, with nothing changed: the route's "busy". */
+export class CalendarChangeBusyError extends Error {
+  constructor() {
+    super(CALENDAR_CHANGE_BUSY);
+    this.name = "CalendarChangeBusyError";
+  }
+}
+
+/**
+ * Changes a store's calendar settings without losing a change made at the same moment (issue #3984): reads them
+ * exactly (rule 24, as readConfig: an unknown read throws), asks `change` what to write from what was read, and
+ * writes it only over that exact text, or only while still absent (CALENDAR_CONFIG_SWAP). On a lost race the
+ * settings are read and the change made again, CONFIG_TRIES times in all, then "busy" with nothing written.
+ * `change` answers a null config to write nothing; its result comes back with "written" or "unchanged". Given a
+ * store, what is written names its handle and calls; given only its id (the feed's stop), exactly what `change` gave.
+ * `tries` is CONFIG_TRIES unless a writer that runs again on its own next time takes one (ensureFeedToken, stopFeedToken).
+ */
+async function changeConfig<T>(
+  store: (Store & { statsId: string }) | { statsId: string },
+  change: (config: Config | null) => { config: Config | null; result: T } | Promise<{ config: Config | null; result: T }>,
+  tries = CONFIG_TRIES,
+): Promise<{ state: "written" | "unchanged"; result: T } | { state: "busy" }> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+    const raw = reply?.[0];
+    let config: Config | null = null;
+    if (!(reply && raw === null)) {
+      let value: unknown;
+      try {
+        value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+      } catch {
+        value = undefined;
+      }
+      config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+      if (!config) throw new UnknownReplyError("a store's calendar settings");
+    }
+    const next = await change(config);
+    if (!next.config) return { state: "unchanged", result: next.result };
+    const text = JSON.stringify("handle" in store ? { ...next.config, handle: store.handle, callsId: store.callsId ?? null } : next.config);
+    const read = typeof raw === "string" ? ["1", raw] : ["0", ""];
+    const swapped = repliesFor(await redisPipeline([["EVAL", CALENDAR_CONFIG_SWAP, 1, cfgKey(store.statsId), ...read, text]]), 1);
+    if (swapped?.[0] === 1) return { state: "written", result: next.result };
+    if (swapped?.[0] !== 0) throw new UnknownReplyError("a store's calendar settings written over what was read");
+  }
+  return { state: "busy" };
+}
 
 /**
  * Adds a calendar, after reading it once: an address that cannot be read is
  * refused with the reason, so a creator never leaves the studio believing a
- * calendar is blocking times when it is not.
+ * calendar is blocking times when it is not. The remote read (up to
+ * FEED_TIMEOUT_MS) comes before the settings are read for the write, so a
+ * change made meanwhile is never written over (issue #3984).
  */
 export async function addFeed(store: Store, raw: string, now = Date.now(), hooks: FetchHooks = {}): Promise<AddFeedResult> {
-  if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
+  const statsId = store.statsId;
+  if (!statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   const text = raw.trim();
   if (text.length > MAX_FEED_URL) return { ok: false, reason: "long", message: "That address is longer than any calendar address we know of." };
+  const full: AddFeedResult = { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  const duplicate: AddFeedResult = { ok: false, reason: "duplicate", message: "That calendar is already added." };
   const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
-  if (config.feeds.length >= MAX_FEEDS) return { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  if (config.feeds.length >= MAX_FEEDS) return full;
   let url: string;
   try {
     url = checkUrl(text).toString();
   } catch (error) {
     return { ok: false, reason: "invalid", message: problemWords(error) };
   }
-  if (config.feeds.some((f) => f.url === url)) return { ok: false, reason: "duplicate", message: "That calendar is already added." };
+  if (config.feeds.some((f) => f.url === url)) return duplicate;
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable", message: "Calendar changes are temporarily unavailable. Try again later." };
   let reading: Reading;
   try {
@@ -398,7 +574,15 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
     return { ok: false, reason: "invalid", message: error instanceof Error ? error.message : "The calendar could not be read." };
   }
   const feed: Feed = { id: randomBytes(8).toString("hex"), url, addedAt: new Date(now).toISOString() };
-  await writeConfig(store, { ...config, feeds: [...config.feeds, feed] });
+  // Read again for the write: a calendar removed or added while this one was read is kept as it now is.
+  const changed = await changeConfig({ ...store, statsId }, (current): { config: Config | null; result: AddFeedResult | null } => {
+    const base = current ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    if (base.feeds.length >= MAX_FEEDS) return { config: null, result: full };
+    if (base.feeds.some((f) => f.url === url)) return { config: null, result: duplicate };
+    return { config: { ...base, feeds: [...base.feeds, feed] }, result: null };
+  });
+  if (changed.state === "busy") return { ok: false, reason: "busy", message: CALENDAR_CHANGE_BUSY };
+  if (changed.result) return changed.result;
   const saved = JSON.stringify(reading);
   await redisPipeline([
     ["SET", busyKey(feed.id), saved, "EX", CACHE_SECONDS],
@@ -407,47 +591,74 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
   return { ok: true, view: await calendarView(store), busyTimes: reading.busy.length };
 }
 
-/** Stops reading a calendar and forgets its address and everything read from it. */
+/**
+ * Stops reading a calendar and forgets its address and everything read from it, written only over the settings it
+ * read (issue #3984); CalendarChangeBusyError when other changes kept winning, with nothing changed.
+ */
 export async function removeFeed(store: Store, id: string): Promise<CalendarView> {
-  const config = await readConfig(store);
-  if (config && config.feeds.some((f) => f.id === id)) {
-    await writeConfig(store, { ...config, feeds: config.feeds.filter((f) => f.id !== id) });
-    await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
-  }
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
+  const changed = await changeConfig({ ...store, statsId }, (config) => ({
+    config: config && config.feeds.some((f) => f.id === id) ? { ...config, feeds: config.feeds.filter((f) => f.id !== id) } : null,
+    result: null,
+  }));
+  if (changed.state === "busy") throw new CalendarChangeBusyError();
+  if (changed.state === "written") await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
   return calendarView(store);
 }
 
 /**
  * Makes the store's subscription address, or a new one in place of the old,
- * which stops answering at once.
+ * which stops answering at once. Once the settings read exactly, the new
+ * address's key is written (it answers only once the settings name it:
+ * storeIdForToken), then the settings only over what was read (issue #3984),
+ * and the replaced address's key deleted after; CalendarChangeBusyError when
+ * other changes kept winning, the new key deleted again.
  */
 export async function newFeedToken(store: Store, keepStopped = false): Promise<CalendarView> {
-  const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
   const token = randomBytes(24).toString("hex");
-  const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
-  if (config.token) commands.push(["DEL", tokenKey(config.token)]);
-  await redisPipeline(commands);
+  let keyed = false;
+  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
+  const changed = await changeConfig({ ...store, statsId }, async (read) => {
+    if (!keyed) {
+      await redisPipeline([["SET", tokenKey(token), statsId]]);
+      keyed = true;
+    }
+    const { stoppedAt, ...rest } = read ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    return { config: { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() }, result: read?.token ?? null };
+  });
+  if (changed.state === "busy") {
+    await redisPipeline([["DEL", tokenKey(token)]]);
+    throw new CalendarChangeBusyError();
+  }
+  if (changed.result) await redisPipeline([["DEL", tokenKey(changed.result)]]);
   // The last copy stays, so the new address answers at once even when the day's makings are spent; only a
   // tombstone (the store's handle once led elsewhere) goes, since this store is plainly its handle's own.
-  if (store.statsId) {
-    const [kept] = await redisPipeline([["GET", outKey(store.statsId)]]);
-    if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(store.statsId)]]);
-  }
-  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
-  const { stoppedAt, ...rest } = config;
-  await writeConfig(store, { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() });
+  const [kept] = await redisPipeline([["GET", outKey(statsId)]]);
+  if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(statsId)]]);
   return calendarView(store);
 }
 
-/** Makes the subscription address the first time the studio needs one. */
+/**
+ * Makes the subscription address the first time the studio needs one. Renamed, or written before the settings named
+ * the store's calls: written again, so the feed reads its marks, only over the settings it read (review of #4007), so
+ * a calendar removed meanwhile is never restored. One try: lost to another change, the refresh is left to the next
+ * opening or making, which checks again (GET and the swap: 4 commands, lib/read-ceilings.ts).
+ */
 export async function ensureFeedToken(store: Store): Promise<void> {
-  if (!store.statsId || !isRedisConfigured()) return;
-  const config = await readConfig(store);
-  if (config?.token) {
-    // Renamed, or written before the settings named the store's calls: written again, so the feed reads its marks.
-    if (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) await writeConfig(store, config);
-    return;
-  }
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return;
+  const changed = await changeConfig(
+    { ...store, statsId },
+    (config) => ({
+      config: config?.token && (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) ? config : null,
+      result: Boolean(config?.token),
+    }),
+    1,
+  );
+  if (changed.state === "busy" || changed.result) return;
   await newFeedToken(store, true);
 }
 
@@ -724,13 +935,21 @@ export class FeedGone extends Error {}
  */
 const refusedKey = (statsId: string) => `nl:cal:refused:${statsId}`;
 
-/** The address let go for being asked too often: its token deleted, the settings told when, so the studio says so. */
+/**
+ * The address let go for being asked too often: its token deleted, the settings told when, so the studio says so;
+ * the settings written only over what was read (review of #4007), so a calendar removed meanwhile is never restored.
+ * One try (GET, the swap, DEL, DEL: 6 commands, within the one more refused answer that prices the stop): lost to
+ * another change, nothing is deleted, so the studio never names a token already gone, and the refusal count left
+ * in place stops it at the next refused answer.
+ */
 async function stopFeedToken(statsId: string, token: string, now: number): Promise<void> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  const config = parseConfig(raw);
-  const commands: (string | number)[][] = [["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]];
-  if (config && config.token === token) commands.push(["SET", cfgKey(statsId), JSON.stringify({ ...config, token: null, stoppedAt: new Date(now).toISOString() })]);
-  await redisPipeline(commands);
+  const changed = await changeConfig(
+    { statsId },
+    (config) => ({ config: config?.token === token ? { ...config, token: null, stoppedAt: new Date(now).toISOString() } : null, result: null }),
+    1,
+  );
+  if (changed.state === "busy") return;
+  await redisPipeline([["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]]);
 }
 
 async function withinPace(statsId: string, now: number, token?: string): Promise<boolean> {

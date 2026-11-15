@@ -176,7 +176,11 @@ export function checkSplitDraft(
   return { ok: true, steps: out };
 }
 
-/** The steps as the save route takes them: a new split test is sent without an id, so the server gives it one. */
+/** The steps as the save route takes them: a new split test or conditional path is sent without an id, so the server gives it one. */
 export function stepsForSave(steps: readonly PageFunnelStep[]): unknown[] {
-  return steps.map((step) => (step.kind === "split" && !step.id ? { kind: "split", options: step.options } : step));
+  return steps.map((step) => {
+    if (step.kind === "split" && !step.id) return { kind: "split", options: step.options };
+    if (step.kind === "branch" && !step.id) return { kind: "branch", rules: step.rules, otherwise: step.otherwise };
+    return step;
+  });
 }

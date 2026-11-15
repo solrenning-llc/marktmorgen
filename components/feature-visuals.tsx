@@ -180,8 +180,8 @@ function StripeVisual() {
   return (
     <Window bar="Where a $27 sale goes">
       <div className="p-5">
-        <div className="grid gap-2.5">
-          <Row icon="user" title="The buyer pays $27" sub="By card, on a Stripe checkout" />
+        <div className="grid grid-cols-1 gap-2.5">
+          <Row icon="user" title="The buyer pays $27" sub="By card, on a Stripe checkout" wrap />
           <div className="flex justify-center text-ink-mute" aria-hidden="true">
             <Icon name="chevron-down" size={18} />
           </div>
@@ -198,7 +198,7 @@ function StripeVisual() {
           <div className="flex justify-center text-ink-mute" aria-hidden="true">
             <Icon name="chevron-down" size={18} />
           </div>
-          <Row icon="receipt" title="Your bank" sub="On the payout schedule you set at Stripe" />
+          <Row icon="receipt" title="Your bank" sub="On the payout schedule you set at Stripe" wrap />
         </div>
         <p className="mt-4 flex items-center justify-between rounded-[var(--r-md)] bg-sand px-4 py-3 text-[12.5px] text-ink-soft">
           <span>Marktmorgen&apos;s fee on this sale</span>

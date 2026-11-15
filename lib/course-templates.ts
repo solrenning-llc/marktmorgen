@@ -52,7 +52,7 @@ export const COURSE_TEMPLATES: readonly CourseTemplate[] = [
   {
     id: "weekly",
     name: "Weekly course",
-    about: "Four modules, one opening each week, with the email students already get when a module opens. For a course taken over a month.",
+    about: "Four modules, one opening each week, with an email to students when a module opens, or up to seven days later when many open at once. For a course taken over a month.",
     modules: [0, 1, 2, 3].map((week) => ({ title: `Week ${week + 1}: your title here`, lessons: lessons(3, week * 3 + 1), dripDays: week * 7 })),
     certificate: false,
     funnel: null,
@@ -60,7 +60,7 @@ export const COURSE_TEMPLATES: readonly CourseTemplate[] = [
   {
     id: "challenge",
     name: "5-day challenge",
-    about: "Five short lessons, one opening each day, with an email to each student the day a lesson opens.",
+    about: "Five short lessons, one opening each day, with an email to each student when a lesson opens, or up to seven days later when many open at once.",
     modules: [0, 1, 2, 3, 4].map((day) => ({ title: `Day ${day + 1}: your title here`, lessons: [`Lesson ${day + 1}: your title here`], dripDays: day })),
     certificate: false,
     // The challenge funnel (lib/funnel-types.ts) wants a free course, and a course here is always sold, so it is not offered with it.

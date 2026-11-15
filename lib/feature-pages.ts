@@ -358,7 +358,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "sparkle" as const, title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` }] : []),
           { icon: "lock", title: "A video address that expires", body: "The player on a lesson page is signed for a few hours. Without that signature, the video and its files are refused." },
           { icon: "eye", title: "Free preview lessons", body: "Any lesson can be watched from your store before buying, so the buyer knows what they are paying for." },
-          { icon: "calendar", title: "Modules that open over time", body: "A module can open a set number of days after each student joins, and the student gets an email the day it does." },
+          { icon: "calendar", title: "Modules that open over time", body: "A module can open a set number of days after each student joins, and the student gets an email when it does, or up to seven days later when many open at once." },
           { icon: "key", title: "No password to make", body: "The course opens right away in the browser that paid. On any other device, a link is emailed to the address they paid with." },
           { icon: "list", title: "Lessons from a folder of videos", body: "Choose up to 50 videos at once in a module and each becomes a lesson of its own, named after its file and in the order of the file names: \u201c02 - First loaf.mp4\u201d becomes the lesson \u201cFirst loaf.\u201d A video that does not upload takes its lesson away again, and you are told which file and why." },
           { icon: "sparkle", title: "An outline drafted with AI, on " + AI_PLANS_WORDS, body: "Say what the course covers and who it is for, and up to 8 modules of up to 8 lesson titles come back for you to look at. Nothing is added until you press Add, and every title can be changed." },
@@ -2863,7 +2863,7 @@ const BASE_CREATOR_PAGES: TopicPage[] = [
         title: "The path from first workout to regular",
         items: [
           { step: "1", icon: "file", title: "A starter block", price: "$29", body: "The sample: four weeks that show how you coach.", href: "/platform/instant-delivery" },
-          { step: "2", icon: "book", title: "The program", price: "$79", body: "Twelve weeks as a course, each week's module opening on its day, with an email.", href: "/platform/courses" },
+          { step: "2", icon: "book", title: "The program", price: "$79", body: "Twelve weeks as a course, each week's module opening on its day, and an email about it within seven days.", href: "/platform/courses" },
           { step: "3", icon: "video", title: "A form check", price: "$45", body: "A short call, booked into your hours and paid first.", href: "/platform/calls" },
           { step: "4", icon: "repeat", title: "The club", price: "$15 a month", body: "A course that stays open while the member pays.", href: "/platform/memberships" },
         ],

@@ -168,7 +168,7 @@ export default async function StudioCoursePage({
         <p className="mt-3 max-w-2xl text-ink-soft">
           Modules hold lessons. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and any lesson can be a
           free preview on your store. A module can open a number of days after each student joins, and they get an
-          email the day it does.
+          email when it does, or up to seven days later when many open at once.
         </p>
         <div className="mt-5 flex flex-wrap items-center gap-4 text-sm font-bold">
           {/* The course opens whole only for the store's owner (lib/learn.ts); a team member would be asked to buy it. */}

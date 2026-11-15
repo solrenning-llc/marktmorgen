@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "pantry", "Pantry Shop", "");
   await ensureStatsId(OWNER);
-  await setStripeAccount(OWNER, "acct_1TestFunnelBundle1", true);
+  await setStripeAccount(OWNER, "acct_FunnelBndl01", true);
   await setSubscription(OWNER, { customerId: "cus_Owner00002", subscriptionId: "sub_Owner00002", active: true, period: paidPeriod() });
   const add = async (title: string, price: string, link = true) => {
     const result = await addProduct(OWNER, title, "", price, null);

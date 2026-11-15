@@ -312,6 +312,8 @@ export async function settlePlans(
 ): Promise<{ done: number; open: number; dropped: number; failed: number; watched: number; stuck: number; told: number; owed: number; owedTold: number; untold: number }> {
   const counts = { done: 0, open: 0, dropped: 0, failed: 0, watched: 0, stuck: 0, told: 0, owed: 0, owedTold: 0, untold: 0 };
   if (!isRedisConfigured() || !Number.isSafeInteger(limit) || limit < 1) return counts;
+  // Only the members this run settles are read, never the whole set: every plan checkout opened adds one and only
+  // this job takes them out, so a backlog is read once per run at most `limit` (c1-cost-plans-pending).
   const now = Math.floor(Date.now() / 1000);
   const read = repliesFor(
     await redisPipeline([

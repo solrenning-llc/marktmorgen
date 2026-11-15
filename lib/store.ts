@@ -66,6 +66,7 @@ import { deletePhotos } from "@/lib/store-photo";
 import { type CallSetup } from "@/lib/call-setup";
 import { type Pixels, NO_PIXELS, parsePixels } from "@/lib/pixels";
 import { type TaxSetting, NO_TAX, parseTax } from "@/lib/tax";
+import type { BuyerCurrencyMode } from "@/lib/buyer-currency";
 import { type RecoverySetting, NO_RECOVERY, parseRecovery } from "@/lib/recovery-setting";
 import { type SaveOffer, NO_SAVE, parseSaveOffer } from "@/lib/save-offer";
 import { parsePauseMonths } from "@/lib/membership-pause-rules";
@@ -536,6 +537,14 @@ export type Store = {
    * sign-in email moves anybody's booking.
    */
   callsId: string | null;
+  /**
+   * How this store's buyers may pay in their own currency (22 [E5] unit 3b,
+   * lib/buyer-currency.ts): "automatic" is (a), Stripe converts; "manual" is
+   * (b), the creator's own prices first. Absent when the creator never chose,
+   * which is (a); "unknown" when a kept value was of another shape, which keeps
+   * the store's currency. Read only behind BUYER_CURRENCY_LIVE.
+   */
+  buyerCurrency?: BuyerCurrencyMode | "unknown";
   /**
    * Where the counts of this store's visits are kept: an id of its own, so a
    * new address or a new sign-in email carries the history along.
@@ -1031,6 +1040,8 @@ function parseStore(raw: unknown): Store | null {
       renewalUnpaidSince: Number.isSafeInteger((value as { renewalUnpaidSince?: unknown }).renewalUnpaidSince) && ((value as { renewalUnpaidSince: number }).renewalUnpaidSince) > 0 ? (value as { renewalUnpaidSince: number }).renewalUnpaidSince : 0,
       // Records from before this was kept have none.
       planDisputes: parsePlanDisputes((value as { planDisputes?: unknown }).planDisputes),
+      // Records from before the choice was kept have none, which is (a); a value of another shape is unknown.
+      ...((value as { buyerCurrency?: unknown }).buyerCurrency !== undefined ? { buyerCurrency: parseBuyerCurrency((value as { buyerCurrency?: unknown }).buyerCurrency) } : {}),
       mail: parseMail(value.mail),
       domain: parseDomain(value.domain),
       // A record from before products had records of their own still
@@ -2794,6 +2805,24 @@ export async function setTax(
   tax: TaxSetting,
 ): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" }> {
   const next = await patchStore(email, () => ({ tax: parseTax(tax) }));
+  return next ? { ok: true, store: next } : { ok: false, reason: "none" };
+}
+
+/** A kept buyer-currency choice: one of the two ways, or unknown. Pure. */
+function parseBuyerCurrency(value: unknown): BuyerCurrencyMode | "unknown" {
+  return value === "automatic" || value === "manual" ? value : "unknown";
+}
+
+/**
+ * Keeps the creator's choice of how buyers may pay in their own currency
+ * (22 [E5] unit 3b): (a) "automatic" or (b) "manual", nothing else.
+ */
+export async function setBuyerCurrency(
+  email: string,
+  mode: BuyerCurrencyMode,
+): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "invalid" }> {
+  if (mode !== "automatic" && mode !== "manual") return { ok: false, reason: "invalid" };
+  const next = await patchStore(email, () => ({ buyerCurrency: mode }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }
 

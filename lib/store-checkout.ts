@@ -51,7 +51,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
-import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, heldReasons, settlementCurrencyFor, settlesIn } from "@/lib/buyer-currency";
+import { BUYER_CURRENCY_LIVE, applyBuyerCurrency, buyerCurrencyModeOf, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, heldReasons, settlementCurrencyFor, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -730,12 +730,13 @@ export async function createCheckout(
   // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
   // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
   // inTheCurrencyShown set it above. Judged here, after the share, on the
-  // session as it will be sent. The creator's choice and own prices arrive
-  // with their fields in unit 3b; until then a store is (a), automatic.
+  // session as it will be sent. The creator's choice is the store's own
+  // (buyerCurrencyModeOf: (a) when it never chose); the creator's own prices
+  // per currency arrive with their fields later in unit 3b.
   if (BUYER_CURRENCY_LIVE) {
     applyBuyerCurrency(body, buyerCurrencyPlan({
       live: BUYER_CURRENCY_LIVE,
-      mode: DEFAULT_BUYER_CURRENCY_MODE,
+      mode: buyerCurrencyModeOf(store),
       fee: hasApplicationFee(body),
       settles: settlesIn(store.currency, await settlementCurrencyFor(store)),
       manualPrices: false,

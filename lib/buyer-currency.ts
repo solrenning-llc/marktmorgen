@@ -62,6 +62,13 @@ export type BuyerCurrencyMode = "automatic" | "manual";
 /** What a store does when its creator chose nothing: (a). */
 export const DEFAULT_BUYER_CURRENCY_MODE: BuyerCurrencyMode = "automatic";
 
+/** The store's own choice: (a) when it never chose, unknown when a kept value is of another shape. Pure. */
+export function buyerCurrencyModeOf(store: Pick<Store, "buyerCurrency">): BuyerCurrencyMode | "unknown" {
+  const kept = store.buyerCurrency;
+  if (kept === undefined) return DEFAULT_BUYER_CURRENCY_MODE;
+  return kept === "automatic" || kept === "manual" ? kept : "unknown";
+}
+
 export type BuyerCurrencyWhy = "off" | "mode-unknown" | "held" | "fee" | "settlement" | "automatic" | "manual" | "manual-none";
 
 /**

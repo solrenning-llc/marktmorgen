@@ -24,7 +24,7 @@ const msg = JSON.stringify({ a: WHO, text: "Private", at: 1 });
 type Command = (string | number)[];
 const original = redis.pipeline.bind(redis);
 const outcome = (run: () => Promise<number>) => run().then((n) => `resolved ${n}`, (e: unknown) => (e instanceof Error ? e.name : "threw"));
-const inbox = (who: string) => redis.run(["ZRANGEBYSCORE", `${base}:i:${who}`, "-inf", "+inf"]);
+const inbox = (who: string) => redis.run(["ZRANGEBYSCORE", `${base}:i:${who}`, "-inf", "+inf"]) as string[];
 
 function seedPairs(): void {
   redis.clear();

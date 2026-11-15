@@ -591,22 +591,34 @@ export async function forgetDmPerson(id: string, who: string): Promise<number> {
   const mine = stringList(lists?.[0]);
   const asked = stringList(lists?.[1]);
   if (!mine || !asked) throw new UnknownReplyError(what);
-  const pairs = [...new Set([...mine, ...asked])].filter((p) => p.split(".").includes(who));
+  const pairs = [...new Set([...mine, ...asked])];
+  // Every member must be the canonical name of a pair holding exactly this person and one other (#4806): one that is
+  // not cannot be attributed, and dropping it would delete the person's lists, the only path to the conversation
+  // stored under it, while the step says done. Unknown, then: nothing is deleted and the erasure is tried again.
+  const others = pairs.map((pair) => otherIn(pair, who));
+  if (others.some((other, i) => !other || other === who || pairs[i] !== pairOf(who, other))) throw new UnknownReplyError(what);
   const commands: (string | number)[][] = [];
-  for (const pair of pairs) {
-    const other = pair.split(".").find((k) => k !== who) ?? "";
-    commands.push(["DEL", chatKey(id, pair), readKey(id, pair)]);
-    if (other) commands.push(["ZREM", inboxKey(id, other), pair], ["ZREM", askedKey(id, other), pair]);
-  }
-  // The conversations first, each deletion answered with its count; their own
-  // lists only after that, so a retry can still find every conversation.
+  pairs.forEach((pair, i) => {
+    commands.push(["DEL", chatKey(id, pair), readKey(id, pair)], ["ZREM", inboxKey(id, others[i]), pair], ["ZREM", askedKey(id, others[i]), pair]);
+  });
+  // The conversations first, each deletion answered with its count, at most what the command could delete (#4795): a
+  // DEL its keys, a ZREM its members. Their own lists only after that, so a retry can still find every conversation.
   if (commands.length) {
     const replies = repliesFor(await redisPipeline(commands), commands.length);
-    if (!replies || replies.some((reply) => replyCount(reply) === null)) throw new UnknownReplyError(what);
+    if (!replies || replies.some((reply, i) => !withinCount(reply, commands[i][0] === "DEL" ? commands[i].length - 1 : commands[i].length - 2))) {
+      throw new UnknownReplyError(what);
+    }
   }
-  const gone = repliesFor(await redisPipeline([["DEL", ...dmKeys(id, who)]]), 1);
-  if (replyCount(gone?.[0]) === null) throw new UnknownReplyError(what);
+  const own = dmKeys(id, who);
+  const gone = repliesFor(await redisPipeline([["DEL", ...own]]), 1);
+  if (!withinCount(gone?.[0], own.length)) throw new UnknownReplyError(what);
   return pairs.length;
+}
+
+/** A deletion's count read exactly: a whole number from none to the most the command could delete. */
+function withinCount(reply: unknown, most: number): boolean {
+  const count = replyCount(reply);
+  return count !== null && count >= 0 && count <= most;
 }
 
 /**

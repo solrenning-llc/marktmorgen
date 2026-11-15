@@ -49,10 +49,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // The store whose bookings the change is checked against, under its calendar lock below.
-    let store: Store | null = null;
+    // The store whose bookings the change is checked against, under its calendar lock below. Read for a removal too, so
+    // turning the call off also waits for a booking in flight to let the lock go (Codex P on #4023): never a call
+    // removed while a buyer's checkout for it opens.
+    const store: Store | null = await storeForEmail(guarded.ref);
     if (setup) {
-      store = await storeForEmail(guarded.ref);
       if (store) {
         // Other lengths than the call's own, each with its price (lib/call-lengths.ts): the call's own first, at the product's price.
         const extra = guarded.body.lengths;

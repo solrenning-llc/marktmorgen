@@ -546,12 +546,13 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
-    // The drip emails' line (course-drip-run, docs/drip-due-index.md: $0.0155, $0.0320 and $0.0691 a month) and the
-    // drip index's capped families cost two to six cents more a month than main without the line.
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less (MR, cost not lowered). The drip emails' line (course-drip-run, docs/drip-due-index.md: $0.0155, $0.0320
+    // and $0.0691 a month) and the drip index's capped families cost two to six cents more a month than main without it.
     is("11: Store, Studio and Scale keep 45.10, 313.81 and 703.21 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.81", "703.21"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 37.05, 258.68 and 579.94 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.68", "579.94"]);
+    is("11: and 37.05, 258.68 and 579.93 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.68", "579.93"]);
   } finally {
     Date.now = realNow;
   }

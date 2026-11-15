@@ -211,6 +211,14 @@ async function main(): Promise<void> {
   is("and the pass after it sends nothing more", await sendPaidOrders(store, sessions, NOW), 0);
   out.length = 0;
 
+  part("A paid order whose amount or currency does not read is never sent as a $0 purchase (#4802's siblings)");
+  sessions.push(paid("cs_test_order000000008", "noamount@example.com", { ads: meta.ads as string }, SEC - 600, { amount_total: null }));
+  sessions.push(paid("cs_test_order000000009", "nocurrency@example.com", { ads: meta.ads as string }, SEC - 600, { currency: undefined }));
+  is("the pass sends neither, to no platform", [await sendPaidOrders(store, sessions, NOW), out.length], [0, 0]);
+  sessions.push(paid("cs_test_order000000010", "halfcent@example.com", { ads: meta.ads as string }, SEC - 600, { amount_total: 49.5 }));
+  is("nor the thanks page", [await sendServerPurchase(store, "cs_test_order000000010", { ip: "", userAgent: "", url: "", cookies: {} }, NOW), out.length], ["invalid", 0]);
+  out.length = 0;
+
   part("A membership's renewals");
   const keptSub = JSON.parse(redis.run(["GET", "nl:adsrv:sub:sub_Club00000001"]) as string);
   is("what renewals go with: cookies and clicks, never an address or browser", [keptSub._fbp, keptSub.epik, "ip" in keptSub, JSON.stringify(keptSub).includes("203.0.113.9")], ["fb.1.1.1", "dj0yJnU9abc", false, false]);

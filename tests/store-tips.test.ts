@@ -85,6 +85,18 @@ async function main(): Promise<void> {
   session = { id, status: "complete", payment_status: "paid", amount_total: 900, currency: "usd", metadata: { store: "othershop", kind: "tip" } };
   is("nor is another store's", (await readTip(store, id)).state, "waiting");
   is("and an id that is not one is not even asked about", (await readTip(store, "../account")).state, "waiting");
+  // A paid gift whose amount or currency does not read is never thanked for $0 or in the store's currency (#4802's
+  // siblings, 15 November 2026): it waits, as an unconfirmed one does.
+  for (const [label, money] of [
+    ["no amount", { currency: "usd" }],
+    ["an amount that is not a whole number", { amount_total: 5.5, currency: "usd" }],
+    ["a negative amount", { amount_total: -500, currency: "usd" }],
+    ["no currency", { amount_total: 500 }],
+    ["a currency that is not a code", { amount_total: 500, currency: "dollars" }],
+  ] as [string, Record<string, unknown>][]) {
+    session = { id, status: "complete", payment_status: "paid", ...money, metadata: { store: "tipshop", kind: "tip" } };
+    is(`paid with ${label}: never thanked for an invented amount`, (await readTip(store, id)).state, "waiting");
+  }
   done();
 }
 

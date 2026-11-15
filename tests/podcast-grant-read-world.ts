@@ -29,6 +29,7 @@ export const withinEssentialLimit = unexpected;
 export const essentialLimitState = unexpected;
 export const holdsProducts = unexpected;
 export const sendEmail = unexpected;
+export const isSenderConfigured = unexpected;
 export const coursesWords = unexpected;
 export const EMAIL_PATTERN = /^[^@]+@[^@]+$/;
 export const MAX_EMAIL_LENGTH = 254;

@@ -1,5 +1,5 @@
 import { formatMoney } from "@/lib/money";
-import { DISCOUNT_NAMES, type DiscountRow } from "@/lib/discount-impact";
+import { DISCOUNT_NAMES, type DiscountElsewhere, type DiscountRow, elsewhereWords } from "@/lib/discount-impact";
 
 const count = (n: number) => n.toLocaleString("en-US");
 const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—");
@@ -7,14 +7,16 @@ const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part 
 /**
  * Full price beside each kind of discount, over the last 90 days
  * (lib/discount-impact.ts): what was sold, what was given off, how many were
- * refunded, and how many of those buyers bought again.
+ * refunded, and how many of those buyers bought again. Sales paid in another
+ * currency are said under it, each in its own money, never added in.
  */
-export function DiscountImpact({ rows, refundsRead, currency }: { rows: DiscountRow[]; refundsRead: boolean; currency: string }) {
+export function DiscountImpact({ rows, refundsRead, currency, elsewhere = [] }: { rows: DiscountRow[]; refundsRead: boolean; currency: string; elsewhere?: DiscountElsewhere[] }) {
   const money = (cents: number) => formatMoney(cents, currency);
   const given = rows.reduce((sum, row) => sum + row.off, 0);
   const discounted = rows.filter((row) => row.kind !== "full");
   const discountedSales = discounted.reduce((sum, row) => sum + row.sales, 0);
   const discountedMoney = discounted.reduce((sum, row) => sum + row.cents, 0);
+  const abroad = elsewhereWords(elsewhere);
 
   return (
     <div className="mt-6" data-discount-impact>
@@ -55,6 +57,11 @@ export function DiscountImpact({ rows, refundsRead, currency }: { rows: Discount
         membership&apos;s introductory price or a come-back offer. Bought again counts any later purchase from the same address; refunded counts
         refunds in part too. For how long members who joined with a discount stay, see Membership numbers.
       </p>
+      {abroad ? (
+        <p className="mt-2 text-xs text-ink-soft" data-discount-elsewhere>
+          {abroad}
+        </p>
+      ) : null}
     </div>
   );
 }

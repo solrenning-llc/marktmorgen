@@ -52,7 +52,7 @@ import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, SHORT_LINK_OPEN_READ, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PRODUCT_CARD_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request, SHORT_LINK_OPEN_READ } from "./plan-cost-registry";
 import { SHORT_LINK_OPEN_UNITS } from "@/lib/short-link-open-rules";
 import { MAX_FUNNEL_PAGES } from "@/lib/page-funnel";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
@@ -71,7 +71,7 @@ import { ADD_ON_ROOM_CENTS, assistantMeetsFloor, assistantMonthWorst } from "@/l
 import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { laterPageCost } from "./traffic-cost";
 import { PICTURE_REQUEST_UNITS } from "@/lib/buyer-actions";
-import { LIBRARY_WAITING_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
+import { LIBRARY_WAITING_UNITS, PRODUCT_CARD_UNITS, affiliateLoadUnits, affiliatePageUnits, listingUnits, sitemapUnits } from "@/lib/public-read-rules";
 import { MAX_POST_PAGES } from "@/lib/store-sitemap";
 import { affiliateLoadRead, affiliatePageRead, libraryCardWait, libraryWaitingRead, publicListingsRead, sitemapRead } from "./plan-cost-registry";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
@@ -273,6 +273,9 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`a community search: ${1 + searchUnits({ room: false, conversations: 0 })} requests with its page, ${1 + searchUnits({ room: true, conversations: 3 })} with the room and three conversations ($${searchRead({ room: true, conversations: 3 }).toFixed(6)})`);
   // A certificate's PDF is CERTIFICATE_PDF_UNITS public requests, all taken before it is drawn: more than its CPU, its time and its bytes cost.
   assert.ok(CERTIFICATE_PDF_UNITS * laterPageCost() >= CERTIFICATE_PDF_READ, `${CERTIFICATE_PDF_UNITS} x ${laterPageCost()} < ${CERTIFICATE_PDF_READ}`);
+  // A product's shared card is PRODUCT_CARD_UNITS public requests, all taken before its picture is read and it is drawn (reviews of #4211).
+  assert.ok(PRODUCT_CARD_UNITS * laterPageCost() >= PRODUCT_CARD_READ, `${PRODUCT_CARD_UNITS} x ${laterPageCost()} < ${PRODUCT_CARD_READ}`);
+  console.log(`a product's shared card: ${PRODUCT_CARD_UNITS} requests ($${(PRODUCT_CARD_UNITS * laterPageCost()).toFixed(6)}) against $${PRODUCT_CARD_READ.toFixed(6)} at its worst`);
   console.log(`a certificate's PDF: $${CERTIFICATE_PDF_READ.toFixed(6)} at most, counted as ${CERTIFICATE_PDF_UNITS} requests at $${laterPageCost().toFixed(6)}`);
   // A short link that opens: its link and store read, its count in the hour and its refund, taken as SHORT_LINK_OPEN_UNITS public requests (Claude 5, 7 November 2026).
   assert.ok(SHORT_LINK_OPEN_UNITS * laterPageCost() >= SHORT_LINK_OPEN_READ, `${SHORT_LINK_OPEN_UNITS} x ${laterPageCost()} < ${SHORT_LINK_OPEN_READ}`);

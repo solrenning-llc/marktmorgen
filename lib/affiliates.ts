@@ -86,6 +86,7 @@ import { orderWrite } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { affiliatePromotionFrom, readAffiliatePromotion, type AffiliatePromotion } from "@/lib/affiliate-promotion";
 import { onAccount } from "@/lib/stripe-account";
+import { hasOwnField, ownField, plainObject, readStripePage, StripeListUnreadable, type StripePage } from "@/lib/stripe-list";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { DISPUTE_TAKES } from "@/lib/retained-revenue";
 import { isSettled } from "@/lib/instant-pay";
@@ -295,6 +296,11 @@ export type PartnerEarning = {
   percent: number;
   /** Bought by the partner themselves: written down, earns nothing. */
   self: boolean;
+  /**
+   * Set when `base` is the part of some lines of an order (notePartners, `lines`): what the whole order paid before
+   * tax. A refund names no line, so it is settled against this (settleLine). Absent: `base` is the whole order.
+   */
+  whole?: number;
 };
 
 export type Payout = {
@@ -637,6 +643,8 @@ function parsePartnerEarning(raw: unknown): PartnerEarning | null {
       currency: readCurrencyCode(value.currency),
       percent: n(value.percent),
       self: value.self === true,
+      // Written by notePartners as whole cents; one that does not read is settled as if the refund were all before tax.
+      ...(value.whole !== undefined ? { whole: Number.isSafeInteger(value.whole) && (value.whole as number) >= 0 ? (value.whole as number) : Number.MAX_SAFE_INTEGER } : {}),
     };
   } catch {
     return null;
@@ -667,25 +675,31 @@ function readCurrencyCode(raw: unknown): string {
   return typeof raw === "string" && /^[a-z]{3}$/.test(raw) ? raw : "usd";
 }
 
-/** A Redis hash reply, as pairs. */
-function pairs(reply: unknown): [string, string][] {
-  const list = Array.isArray(reply) ? reply.map(String) : [];
-  const out: [string, string][] = [];
-  for (let i = 0; i + 1 < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
-}
-
 /**
  * A HGETALL reply as pairs, read exactly: one reply for the one command, a list of strings with an even count, or
  * UnknownReplyError (CX-123 rule 24). HGETALL answers an empty list for a hash with nothing in it, so a reply missing,
  * cut short or of another shape is never "nobody".
  */
 function hashPairsExact(replies: unknown, what: string): [string, string][] {
-  const list = stringList(repliesFor(replies, 1)?.[0]);
-  if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
-  const out: [string, string][] = [];
-  for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
-  return out;
+  return hashesExact(replies, 1, what)[0];
+}
+
+/**
+ * Several HGETALL replies as pairs, each read exactly as hashPairsExact reads one: one reply a command, each a list
+ * of strings with an even count, or UnknownReplyError. The book's reads (readBook, idleSweep) used to take a reply of
+ * another shape for an empty hash, so a payouts hash that did not read showed every payout ever made as owed again,
+ * and a sales hash that did not read made an affiliate look idle (rule 24 sweep of Claude 4, cloud F).
+ */
+function hashesExact(replies: unknown, count: number, what: string): [string, string][][] {
+  const all = repliesFor(replies, count);
+  if (!all) throw new UnknownReplyError(what);
+  return all.map((reply) => {
+    const list = stringList(reply);
+    if (!list || list.length % 2 !== 0) throw new UnknownReplyError(what);
+    const out: [string, string][] = [];
+    for (let i = 0; i < list.length; i += 2) out.push([list[i], list[i + 1]]);
+    return out;
+  });
 }
 
 /**
@@ -752,13 +766,75 @@ export async function readAffiliate(store: Store, id: string): Promise<Affiliate
 }
 
 /**
- * Writes a record just made, under an id nobody else has (a fresh random id, after its address was claimed with
- * HSETNX). Every change to a record already there goes through changeAffiliate instead.
+ * An affiliate's record read exactly (rule 24): null only when Redis confirms there is none; a reply of another shape,
+ * or text that does not read as a record, throws UnknownReplyError. For a caller whose "none" moves money.
  */
-async function writeNewAffiliate(store: Store, affiliate: Affiliate): Promise<void> {
-  await redisPipeline([["HSET", peopleKey(store.statsId as string), affiliate.id, JSON.stringify(affiliate)]]);
-  // Found again from their own page across every store (lib/affiliate-hub.ts).
-  await rememberAffiliate(store.sid, affiliate.email);
+async function readAffiliateExact(store: Store, id: string): Promise<Affiliate | null> {
+  if (!store.statsId || !AFFILIATE_ID_PATTERN.test(id)) throw new Error("an affiliate's record needs a store and an affiliate id");
+  const reply = repliesFor(await redisPipeline([["HGET", peopleKey(store.statsId), id]]), 1);
+  if (reply && reply[0] === null) return null;
+  const affiliate = reply ? parseAffiliate(reply[0]) : null;
+  if (!affiliate) throw new UnknownReplyError("an affiliate's record");
+  return affiliate;
+}
+
+/**
+ * An address claimed for a new affiliate and that affiliate's record, written together in one script, so an
+ * address never points at an id with no record (rules 24 and 30). Before, the address was claimed (HSETNX) and
+ * the record written after: a dropped connection in between, on the code's claim or on the record's HSET, left
+ * the address pointing at nothing, and every later attempt by that person lost the claim, read that id, found no
+ * record and was refused for good. Answers "ok" when written; the id already held when the address points at a
+ * record that is there; an address pointing at an id with no record (left by the old order of writes) is taken.
+ */
+export const AFFILIATE_CLAIM = `-- marktmorgen:affiliate-claim:v1
+local held = redis.call("HGET", KEYS[1], ARGV[1])
+if held and redis.call("HEXISTS", KEYS[2], held) == 1 then return held end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[2])
+redis.call("HSET", KEYS[2], ARGV[2], ARGV[3])
+return "ok"`;
+
+/** A code claimed for an id that lost its address's claim, given back only while it still names that id. */
+export const AFFILIATE_CODE_RELEASE = `-- marktmorgen:affiliate-code-release:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] then return redis.call("HDEL", KEYS[1], ARGV[1]) end
+return 0`;
+
+/**
+ * A code claimed for an id given back only while it still names that id AND that id has no record (Claude 7's LEVE on
+ * #3809): after an unknown reply from AFFILIATE_CLAIM, the script may have run (the record exists, and the code is
+ * the new affiliate's) or not (the code is held for nobody). Only the second is let go. Modelled by lib/redis-memory.ts.
+ */
+export const AFFILIATE_CODE_ORPHAN_RELEASE = `-- marktmorgen:affiliate-code-orphan-release:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) == ARGV[2] and redis.call("HEXISTS", KEYS[2], ARGV[2]) == 0 then
+  return redis.call("HDEL", KEYS[1], ARGV[1])
+end
+return 0`;
+
+/**
+ * A new affiliate for this address, made whole or not at all: the record `build` makes from a fresh id and its
+ * code, written with the address's claim (AFFILIATE_CLAIM). `other` when the address already belongs to a record
+ * (a second press, another link): that id, with the code claimed here given back. An unknown reply throws.
+ */
+async function makeAffiliate(store: Store, email: string, build: (id: string, code: string) => Affiliate): Promise<{ made: Affiliate } | { other: string }> {
+  const statsId = store.statsId as string;
+  const id = randomBytes(6).toString("hex");
+  const code = await claimCode(store, email, id);
+  const affiliate = build(id, code);
+  const reply = repliesFor(await redisPipeline([["EVAL", AFFILIATE_CLAIM, 2, emailsKey(statsId), peopleKey(statsId), email, id, JSON.stringify(affiliate)]]), 1)?.[0];
+  if (reply === "ok") {
+    // Found again from their own page across every store (lib/affiliate-hub.ts).
+    await rememberAffiliate(store.sid, affiliate.email);
+    return { made: affiliate };
+  }
+  if (typeof reply === "string" && AFFILIATE_ID_PATTERN.test(reply) && reply !== id) {
+    await redisPipeline([["EVAL", AFFILIATE_CODE_RELEASE, 1, codesKey(statsId), code, id]]).catch((error) => console.error("an unused affiliate code was not given back", error));
+    return { other: reply };
+  }
+  // Unknown: the claim may or may not have run. The code is given back only if its id has no record, so a code is
+  // never held for nobody and a real new affiliate never loses theirs; a failure here only logs.
+  await redisPipeline([["EVAL", AFFILIATE_CODE_ORPHAN_RELEASE, 2, codesKey(statsId), peopleKey(statsId), code, id]]).catch((error) =>
+    console.error("an affiliate code claimed for an unknown claim was not given back", error),
+  );
+  throw new UnknownReplyError("a new affiliate's claim of their address");
 }
 
 /**
@@ -1210,38 +1286,34 @@ async function recordFromLink(store: Store, grant: LinkGrant, fence: { share: Pa
   if (!affiliate) {
     // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
     if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
-    const id = randomBytes(6).toString("hex");
-    // One application per address, however many links are opened at once.
-    const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), grant.e, id]]);
-    if (Number(won) !== 1) {
-      const [other] = await redisPipeline([["HGET", emailsKey(statsId), grant.e]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+    const invited = grant.k === 1;
+    // Checked again now, because the programme or the recruiter may have changed since the email went out.
+    const recruiter = grant.r && !invited ? await readAffiliate(store, grant.r) : null;
+    const by =
+      recruiter && store.affiliates.secondTier > 0 && recruiter.status === "approved" && canonicalEmail(recruiter.email) !== canonicalEmail(grant.e)
+        ? { id: recruiter.id, percent: store.affiliates.secondTier }
+        : null;
+    // One application per address, however many links are opened at once: the address and the record together.
+    const now = Date.now();
+    const made = await makeAffiliate(store, grant.e, (id, code) => ({
+      id,
+      email: grant.e,
+      code,
+      status: invited ? "approved" : "pending",
+      appliedAt: now,
+      decidedAt: invited ? now : 0,
+      note: grant.n,
+      rate: null,
+      paypal: "",
+      share: invited ? grant.p ?? null : null,
+      cleared: null,
+      by,
+    }));
+    if ("other" in made) {
+      affiliate = await readAffiliate(store, made.other);
       if (!affiliate) return { ok: false, reason: "expired" };
     } else {
-      const code = await claimCode(store, grant.e, id);
-      const now = Date.now();
-      const invited = grant.k === 1;
-      // Checked again now, because the programme or the recruiter may have changed since the email went out.
-      const recruiter = grant.r && !invited ? await readAffiliate(store, grant.r) : null;
-      const by =
-        recruiter && store.affiliates.secondTier > 0 && recruiter.status === "approved" && canonicalEmail(recruiter.email) !== canonicalEmail(grant.e)
-          ? { id: recruiter.id, percent: store.affiliates.secondTier }
-          : null;
-      affiliate = {
-        id,
-        email: grant.e,
-        code,
-        status: invited ? "approved" : "pending",
-        appliedAt: now,
-        decidedAt: invited ? now : 0,
-        note: grant.n,
-        rate: null,
-        paypal: "",
-        share: invited ? grant.p ?? null : null,
-        cleared: null,
-        by,
-      };
-      await writeNewAffiliate(store, affiliate);
+      affiliate = made.made;
       created = true;
     }
   }
@@ -1408,7 +1480,9 @@ export async function buyerOfOrder(store: Store, sessionId: string): Promise<str
 
 export type JoinResult =
   | { ok: true; session: string; affiliate: Affiliate; created: boolean }
-  | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" };
+  | { ok: false; reason: "unavailable" | "order" | "owner" | "declined" | "full" }
+  /** Already an affiliate here: an order is no sign-in, so the caller emails their link (MM-SA-34). */
+  | { ok: false; reason: "known"; email: string; affiliate: Affiliate };
 
 /**
  * A buyer taking their own link, where the creator lets buyers join: made
@@ -1444,23 +1518,27 @@ export async function joinAsBuyer(store: Store, sessionId: string): Promise<Join
   } else {
     // Read exactly (rule 24): an unknown count throws before anything is written, never "room left".
     if ((await peopleCount(store)) >= MAX_AFFILIATES) return { ok: false, reason: "full" };
-    const id = randomBytes(6).toString("hex");
-    const [won] = await redisPipeline([["HSETNX", emailsKey(statsId), email, id]]);
-    if (Number(won) !== 1) {
+    const now = Date.now();
+    const made = await makeAffiliate(store, email, (id, code) =>
+      knownInbox
+        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
+        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null },
+    );
+    if ("other" in made) {
       // The same buyer pressing twice at once: the other press made them.
-      const [other] = await redisPipeline([["HGET", emailsKey(statsId), email]]);
-      affiliate = typeof other === "string" ? await readAffiliate(store, other) : null;
+      affiliate = await readAffiliate(store, made.other);
       if (!affiliate) return { ok: false, reason: "order" };
     } else {
-      const code = await claimCode(store, email, id);
-      const now = Date.now();
-      affiliate = knownInbox
-        ? { id, email, code, status: "pending", appliedAt: now, decidedAt: 0, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null }
-        : { id, email, code, status: "approved", appliedAt: now, decidedAt: now, note: "Joined after buying", rate: null, paypal: "", share: null, cleared: null, by: null };
-      await writeNewAffiliate(store, affiliate);
+      affiliate = made.made;
       created = true;
     }
   }
+
+  // An order's id travels in the purchase email, the thanks page's address and the ad pixels' events
+  // (MM-SA-25), and is honored here for as long as Stripe keeps the checkout: it proves who paid, not
+  // who holds the browser now. It makes a new affiliate, never a session on one that was already there,
+  // with its address, earnings and where their money is paid: that one signs in by the emailed link (MM-SA-34).
+  if (!created) return { ok: false, reason: "known", email: affiliate.email, affiliate };
 
   const session = randomBytes(32).toString("hex");
   await redisPipeline([["SET", sessionKey(session), JSON.stringify({ s: statsId, a: affiliate.id }), "EX", AFFILIATE_SESSION_SECONDS]]);
@@ -2160,20 +2238,20 @@ export async function undoRates(store: Store, before: RateBefore[], rate: number
   return { undone: done.length, left, used: done.length === 0 && held.some((one) => one.why === "used") };
 }
 
-export async function addPayout(
-  store: Store,
-  input: { aff: string; cents: number; currency: string; date: string; reference: string },
-): Promise<Payout | null> {
+type PayoutInput = { aff: string; cents: number; currency: string; date: string; reference: string };
+
+/** A payout's reference as it is written down: spaces folded, at most MAX_REFERENCE_LENGTH characters. */
+export function payoutReference(text: string): string {
+  return text.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH);
+}
+
+function payoutOf(input: PayoutInput, id: string): Payout {
+  return { id, aff: input.aff, cents: input.cents, currency: input.currency, date: input.date, reference: payoutReference(input.reference), at: Date.now() };
+}
+
+export async function addPayout(store: Store, input: PayoutInput): Promise<Payout | null> {
   if (!(await readAffiliate(store, input.aff))) return null;
-  const payout: Payout = {
-    id: randomBytes(6).toString("hex"),
-    aff: input.aff,
-    cents: input.cents,
-    currency: input.currency,
-    date: input.date,
-    reference: input.reference.replace(/\s+/g, " ").trim().slice(0, MAX_REFERENCE_LENGTH),
-    at: Date.now(),
-  };
+  const payout = payoutOf(input, randomBytes(6).toString("hex"));
   // What the creator writes down takes room in the store's data room first (DataRoomError when it does not fit).
   const json = JSON.stringify(payout);
   await needData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }]);
@@ -2183,6 +2261,60 @@ export async function addPayout(
   const reply = repliesFor(await redisPipeline([["HSET", payoutsKey(store.statsId as string), payout.id, json]]), 1);
   if (!reply || reply[0] !== 1) throw new UnknownReplyError("a payout written down");
   return payout;
+}
+
+/**
+ * The id of the payout that writes down one PayPal payout item (lib/paypal-payouts.ts, settlePayPal): the same item
+ * gives the same id, 12 hex characters like any payout's, so the creator can still remove it (removePayout).
+ */
+export function payoutIdForItem(item: string): string {
+  return createHash("sha256").update(`paypal-payout-item|${item}`).digest("hex").slice(0, 12);
+}
+
+/**
+ * Writes down a payout under an id that names what it pays (payoutIdForItem), once (Claude 2 on #3272, finding 1):
+ * HSETNX, read exactly. 1 is "written"; 0 is "held", that payout in the book already, and the room taken for this
+ * copy is given back; "gone" only when Redis confirms the affiliate has no record (Claude 5 on #3272, finding 1: a
+ * record read in another shape throws, it is never "gone"). A payout already in the book (HEXISTS, read exactly) is
+ * "held" before any room is taken, so a full data room never keeps it waiting (finding 2). Any other answer may have
+ * written it or not, so UnknownReplyError is thrown, as DataRoomError is when the store's data room is full: the
+ * caller keeps what it pays waiting and asks again, and an answer of 0 then says it was written.
+ */
+export async function addPayoutOnce(store: Store, input: PayoutInput & { id: string }): Promise<"written" | "held" | "gone"> {
+  if (!store.statsId || !/^[0-9a-f]{12}$/.test(input.id)) throw new Error("a payout written once needs a store and a 12-hex id");
+  if (!(await readAffiliateExact(store, input.aff))) return "gone";
+  const there = repliesFor(await redisPipeline([["HEXISTS", payoutsKey(store.statsId), input.id]]), 1);
+  if (there && there[0] === 1) return "held";
+  if (!there || there[0] !== 0) throw new UnknownReplyError("whether a payout is written down");
+  const payout = payoutOf(input, input.id);
+  const json = JSON.stringify(payout);
+  const room = [{ slot: PAYOUTS_SLOT, bytes: dataBytes([payout.id, json], 1) }];
+  await needData(store, room);
+  const reply = repliesFor(await redisPipeline([["HSETNX", payoutsKey(store.statsId), payout.id, json]]), 1);
+  if (reply && reply[0] === 1) return "written";
+  if (reply && reply[0] === 0) {
+    await giveData(store, room);
+    return "held";
+  }
+  throw new UnknownReplyError("a payout written down once");
+}
+
+/**
+ * The references of every payout written in the store's book, read exactly; UnknownReplyError when the reply is not
+ * a list of field and value pairs. A value that does not read as a payout is not counted in the book (readBook), so
+ * it is left out here too.
+ */
+export async function payoutReferences(store: Store): Promise<Set<string>> {
+  if (!store.statsId) throw new Error("a store's payouts need its statsId");
+  const reply = repliesFor(await redisPipeline([["HGETALL", payoutsKey(store.statsId)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the payouts written down");
+  const references = new Set<string>();
+  for (let i = 1; i < flat.length; i += 2) {
+    const payout = parsePayout(flat[i]);
+    if (payout) references.add(payout.reference);
+  }
+  return references;
 }
 
 export async function removePayout(store: Store, id: string): Promise<boolean> {
@@ -2328,30 +2460,52 @@ async function writeReferral(store: Store, referral: Referral): Promise<void> {
  */
 export async function notePartners(
   store: Store,
-  sale: { ref: string; pi: string; at: number; product: string; title: string; base: number; total: number; currency: string; buyer: string },
+  sale: {
+    ref: string; pi: string; at: number; product: string; title: string; base: number; total: number; currency: string; buyer: string;
+    /**
+     * An order of several lines (orderLines): each product and what its line was charged. A partner's base is then
+     * the part of `base` their products' lines were charged, rounded down; left out, the sale is all `product`'s.
+     */
+    lines?: { product: string; cents: number }[];
+    /**
+     * With `lines`: the order's shipping held in `base` (shippingOf), one amount for the order and no product, so it
+     * is taken out before the lines are shared and no partner on some lines earns on it. A partner on every line keeps
+     * `base` whole, as an order of one product always has.
+     */
+    shipping?: number;
+  },
   partners?: Affiliate[],
 ): Promise<void> {
   if (!store.statsId || !isRedisConfigured() || !sale.ref || !sale.product) return;
+  const lines = sale.lines ?? [{ product: sale.product, cents: 1 }];
+  const charged = lines.reduce((sum, line) => sum + line.cents, 0);
+  const goods = Math.max(0, sale.base - (sale.shipping ?? 0));
   const holders = (partners ?? (await listAffiliates(store))).filter(
-    (a) => a.status === "approved" && shareOn(a.share, sale.product) > 0,
+    (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product) > 0),
   );
   if (!holders.length) return;
-  const buyer = sale.buyer ? normaliseEmail(sale.buyer) : "";
+  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched.
+  const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
+    const theirs = lines.filter((line) => shareOn(partner.share, line.product) > 0);
+    const weight = theirs.reduce((sum, line) => sum + line.cents, 0);
+    // The whole order: every line that was charged is theirs (an order whose every line is free, only when every line is).
+    const whole = weight === charged && (charged > 0 || theirs.length === lines.length);
     const earning: PartnerEarning = {
       ref: sale.ref,
       pi: sale.pi,
       aff: partner.id,
       at: sale.at,
-      product: sale.product,
+      product: theirs[0].product,
       title: sale.title.slice(0, 200),
-      base: sale.base,
+      base: whole ? sale.base : charged > 0 ? Math.floor((goods * weight) / charged) : 0,
       total: sale.total,
       currency: readCurrencyCode(sale.currency),
-      percent: shareOn(partner.share, sale.product),
+      percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
-      self: Boolean(buyer) && normaliseEmail(partner.email) === buyer,
+      self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
+      ...(whole ? {} : { whole: sale.base }),
     };
     commands.push(["HSETNX", sharesKey(store.statsId), `${sale.ref}:${partner.id}`, JSON.stringify(earning)]);
   }
@@ -2364,9 +2518,10 @@ export async function notePartners(
  * the share it had when the buyer paid, and to every partner who shares in
  * the product. Once per order, whichever of the return page and the sweep
  * hands it over first. A refund in full on PayPal takes it back in the book
- * (readBook, through readPayPalRefundsWithCoverage).
+ * (readBook, through readPayPalRefundsWithCoverage). `remember` false: the
+ * buyer is not tied to the affiliate (rememberBuyer), the rest is credited.
  */
-export async function creditPayPalSale(store: Store, paid: Paid, title: string): Promise<void> {
+export async function creditPayPalSale(store: Store, paid: Paid, title: string, remember = true): Promise<void> {
   if (!store.statsId || !isRedisConfigured()) return;
   const sale = {
     ref: `paypal:${paid.order}`,
@@ -2380,7 +2535,8 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string):
   };
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
-    await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+    // Not for a person deleted at their own request (lib/paypal-delivery.ts): the bond names them, the referral does not.
+    if (remember) await rememberBuyer(store, paid.email, paid.via.aff, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await notePartners(store, { ...sale, buyer: paid.email });
 }
@@ -2417,7 +2573,7 @@ type SessionLike = {
   amount_total?: unknown;
   amount_subtotal?: unknown;
   currency?: unknown;
-  total_details?: { amount_tax?: unknown } | null;
+  total_details?: { amount_tax?: unknown; amount_shipping?: unknown } | null;
   payment_intent?: unknown;
   metadata?: Record<string, string> | null;
   customer_details?: { email?: unknown } | null;
@@ -2448,6 +2604,36 @@ function bumpCents(value: unknown): number {
   const cents = typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : NaN;
   if (!Number.isSafeInteger(cents)) throw new UnknownReplyError("the price of a product checked at checkout");
   return cents;
+}
+
+/**
+ * The lines of an order that holds products added at checkout or a cart: each added product at what it was
+ * charged (`<bump>_cents`, bumpCents) and the order's own product at the rest of the subtotal (`amount_subtotal`,
+ * before codes, shipping and tax, so what a code took off is shared the same way; the shipping is taken out first,
+ * shippingOf). Undefined for an order of one product. A subtotal that is not whole cents, or added prices above it, throw UnknownReplyError.
+ */
+function orderLines(meta: Record<string, string>, subtotal: unknown): { product: string; cents: number }[] | undefined {
+  const added = bumpsFromMeta(meta);
+  if (!added.length) return undefined;
+  if (typeof subtotal !== "number" || !Number.isSafeInteger(subtotal) || subtotal < 0) throw new UnknownReplyError("an order's subtotal");
+  const lines = added.map(({ key, id }) => ({ product: id, cents: bumpCents(meta[`${key}_cents`]) }));
+  const own = subtotal - lines.reduce((sum, line) => sum + line.cents, 0);
+  if (own < 0) throw new UnknownReplyError("the lines of an order");
+  return [{ product: meta.product ?? "", cents: own }, ...lines];
+}
+
+/**
+ * The shipping an order paid (`total_details.amount_shipping`), one flat amount for the order (lib/store-checkout.ts,
+ * lib/cart-shipping.ts): whole cents from 0, never above `base`, what was paid before tax. Stripe sends it on every
+ * checkout session, as a number or null; null is no shipping only on an order no shipping was asked for (no
+ * `metadata[ship]`, which every checkout that sends a shipping rate sets). Anything else, missing included, and null
+ * on a shipped order, throws UnknownReplyError: never read as no shipping, which would share it among the lines.
+ */
+function shippingOf(details: SessionLike["total_details"], base: number, shipped: boolean): number {
+  const shipping = details && typeof details === "object" ? details.amount_shipping : undefined;
+  if (shipping === null && !shipped) return 0;
+  if (typeof shipping !== "number" || !Number.isSafeInteger(shipping) || shipping < 0 || shipping > base) throw new UnknownReplyError("an order's shipping");
+  return shipping;
 }
 
 /**
@@ -2490,11 +2676,27 @@ export async function noteSession(
   // product, so how the buyer arrived is beside the point — and this is the
   // one part that has to run for a sale no affiliate brought at all, which is
   // most of them (lib/partner-share.ts).
-  await notePartners(
-    store,
-    { ref: session.id, pi, at, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer },
-    partners,
-  ).catch((error) => console.error("noting a partner's share failed", error));
+  // On an order of several lines, each partner earns on the lines of their own products (orderLines), the shipping
+  // taken out first (shippingOf); a line or a shipping amount that does not read writes no partner's share for the
+  // order, never a guessed base. A partner step that failed is thrown
+  // once the affiliate's step is done (`settle`), so the sweep keeps the order for its next run (lib/checkout-sweep.ts,
+  // failOrder) instead of losing the share; both writes are once per order (HSETNX), so the next run adds nothing twice.
+  let partnerFailure: { error: unknown } | null = null;
+  const settle = (): void => {
+    if (partnerFailure) throw partnerFailure.error;
+  };
+  try {
+    const lines = orderLines(meta, session.amount_subtotal);
+    const shipping = lines ? shippingOf(session.total_details, base, meta.ship === "yes") : undefined;
+    await notePartners(
+      store,
+      { ref: session.id, pi, at, product: meta.product ?? "", title: meta.title ?? "", base, total, currency, buyer, lines, shipping },
+      partners,
+    );
+  } catch (error) {
+    console.error("noting a partner's share failed; the order waits for the next run", error);
+    partnerFailure = { error };
+  }
 
   // Then the affiliate. The click first: a buyer who followed a link and then
   // typed a code they saw elsewhere still belongs to the affiliate whose link
@@ -2529,12 +2731,12 @@ export async function noteSession(
       found = await contactFor(store, buyer, at, session.id);
       how = "contact";
     }
-    if (!found) return;
+    if (!found) return settle();
     // A code, a bond or a contact only ever credits somebody the creator approves today.
     // An affiliate they declined or removed keeps their record — it is
     // history — and earns nothing more through either.
     const who = await readAffiliate(store, found);
-    if (who?.status !== "approved") return;
+    if (who?.status !== "approved") return settle();
     aff = found;
     own = who.rate;
   }
@@ -2593,6 +2795,7 @@ export async function noteSession(
       console.error("remembering an affiliate's buyer failed", error),
     );
   }
+  settle();
 }
 
 /** Writes down a paid offer after paying that follows an affiliate's sale. */
@@ -2737,38 +2940,143 @@ export type Book = {
 };
 
 /**
- * What has been refunded, by payment, on the creator's account, from the
- * oldest sale on the book on. Pending refunds count: the creator already
- * gave the money back.
+ * Adds one refund or dispute Stripe listed to what was taken back from its
+ * payment, in that payment's cents. False when the row cannot be counted
+ * exactly — no id, an amount that is not a whole number of cents, no
+ * currency, or a currency other than the sale's (`currencyOf`, by payment;
+ * cents of another currency added to the sale's mean nothing) — and the
+ * reading is then not complete: a refund that cannot be counted is never
+ * counted as nothing, so no commission is paid on it (rule 24). The same id
+ * listed twice counts once.
  */
-async function refundsSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+function takenBack(
+  byIntent: Map<string, number>,
+  seen: Set<string>,
+  row: Record<string, unknown>,
+  pi: string,
+  currencyOf: ReadonlyMap<string, string>,
+): boolean {
+  const { id, amount, currency } = row;
+  if (typeof id !== "string" || !id) return false;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0) return false;
+  if (typeof currency !== "string" || !currency) return false;
+  const sale = currencyOf.get(pi);
+  if (sale !== undefined && sale.toLowerCase() !== currency.toLowerCase()) return false;
+  if (seen.has(id)) return true;
+  seen.add(id);
+  byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+  return true;
+}
+
+/**
+ * Every status Stripe gives a refund and a dispute (the Refund and Dispute
+ * objects in Stripe's API reference; the same sets lib/refunds.ts reads,
+ * CX-123). A row whose status is not one of them proves nothing, so the
+ * reading is not complete (rule 24): it is never "not refunded".
+ */
+const REFUND_STATES = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
+const DISPUTE_STATES = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
+/**
+ * The refund states that give the money back: made, whether it has left the
+ * balance yet (pending) or waits on the buyer (requires_action, as
+ * lib/plan-refund-write.ts and lib/refund-reserve-rules.ts read it). Failed
+ * and canceled are the only states that give nothing back.
+ */
+const REFUND_TAKES = new Set(["pending", "requires_action", "succeeded"]);
+
+/**
+ * The payment a refund or dispute names: its id, as text or expanded; null
+ * when it says it names none, by an explicit null (a charge made without a
+ * PaymentIntent cannot be on the book, which is keyed by payment); undefined
+ * when it does not read, and when the field is missing altogether: Stripe's
+ * Refund and Dispute objects give it as a nullable field, so a row without it
+ * says nothing (rule 24; Codex G's G97-LPI on #3189).
+ */
+function paymentOf(row: Record<string, unknown>): string | null | undefined {
+  if (!hasOwnField(row, "payment_intent")) return undefined;
+  const raw = ownField(row, "payment_intent");
+  if (raw === null) return null;
+  if (typeof raw === "string") return raw || undefined;
+  if (!plainObject(raw)) return undefined;
+  const id = ownField(raw, "id");
+  return typeof id === "string" && id ? id : undefined;
+}
+
+/**
+ * What one Stripe list took back, by payment, from the oldest sale on the
+ * book on. Complete only when every page read as a list (`object` "list",
+ * `data` a list, `has_more` true or false: readStripePage), every row as a
+ * row of its kind with a status Stripe gives, every counted row's payment and
+ * amount exactly (takenBack), and the last page said there was no more. A
+ * page that says there is more without a readable last row, or a list still
+ * not finished after `pages` pages, is not complete, never "nothing more".
+ */
+async function takenSince(
+  store: Store,
+  list: "refunds" | "disputes",
+  pages: number,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
   const byIntent = new Map<string, number>();
-  if (!store.stripeAccountId) return { byIntent, complete: false };
+  const seen = new Set<string>();
+  const incomplete = { byIntent, complete: false };
+  if (!store.stripeAccountId) return incomplete;
+  const kind = list === "refunds" ? "refund" : "dispute";
+  const states = list === "refunds" ? REFUND_STATES : DISPUTE_STATES;
+  const takes: ReadonlySet<string> = list === "refunds" ? REFUND_TAKES : DISPUTE_TAKES;
+  const legible = (row: Record<string, unknown>) => {
+    const status = ownField(row, "status");
+    return ownField(row, "object") === kind && typeof status === "string" && states.has(status);
+  };
   let after = "";
-  for (let page = 0; page < REFUND_PAGES; page += 1) {
+  for (let page = 0; page < pages; page += 1) {
     const wait = stripeWait(deadline);
-    if (wait === null) return { byIntent, complete: false };
-    const listed = await onAccount(
+    if (wait === null) return incomplete;
+    const listed: unknown = await onAccount(
       "GET",
       store.stripeAccountId,
-      `/refunds?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
+      `/${list}?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
       undefined,
       undefined,
       undefined,
       wait,
     );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const refund of rows) {
-      if (refund.status !== "succeeded" && refund.status !== "pending") continue;
-      const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
-      const amount = typeof refund.amount === "number" ? refund.amount : 0;
-      if (pi) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
+    if (!plainObject(listed) || ownField(listed, "object") !== "list") return incomplete;
+    let read: StripePage;
+    try {
+      read = readStripePage(listed, legible);
+    } catch (error) {
+      if (error instanceof StripeListUnreadable) return incomplete;
+      throw error;
     }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
+    if (read.unreadable > 0) return incomplete;
+    for (const row of read.rows) {
+      if (!takes.has(row.status as string)) continue;
+      const pi = paymentOf(row);
+      if (pi === undefined) return incomplete;
+      if (pi !== null && !takenBack(byIntent, seen, row, pi, currencyOf)) return incomplete;
+    }
+    if (!read.hasMore) return { byIntent, complete: true };
+    if (!read.lastId) return incomplete;
+    after = read.lastId;
   }
-  return { byIntent, complete: false };
+  return incomplete;
+}
+
+/**
+ * What has been refunded, by payment, on the creator's account, from the
+ * oldest sale on the book on. Pending refunds, and refunds waiting on the
+ * buyer, count: the creator already gave the money back.
+ */
+function refundsSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+  return takenSince(store, "refunds", REFUND_PAGES, since, deadline, currencyOf);
 }
 
 /**
@@ -2777,41 +3085,25 @@ async function refundsSince(store: Store, since: number, deadline?: number): Pro
  * is holding or the buyer won (DISPUTE_TAKES). Read beside the refunds, so a
  * sale charged back earns its affiliate nothing, as a sale refunded does.
  */
-export async function disputesSince(store: Store, since: number, deadline?: number): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
-  const byIntent = new Map<string, number>();
-  if (!store.stripeAccountId) return { byIntent, complete: false };
-  let after = "";
-  for (let page = 0; page < DISPUTE_PAGES; page += 1) {
-    const wait = stripeWait(deadline);
-    if (wait === null) return { byIntent, complete: false };
-    const listed = await onAccount(
-      "GET",
-      store.stripeAccountId,
-      `/disputes?limit=100&created[gte]=${since}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`,
-      undefined,
-      undefined,
-      undefined,
-      wait,
-    );
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
-    for (const dispute of rows) {
-      if (typeof dispute.status !== "string" || !DISPUTE_TAKES.has(dispute.status)) continue;
-      const raw = dispute.payment_intent;
-      const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const amount = typeof dispute.amount === "number" && dispute.amount > 0 ? dispute.amount : 0;
-      if (pi && amount) byIntent.set(pi, (byIntent.get(pi) ?? 0) + amount);
-    }
-    const last = rows[rows.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") return { byIntent, complete: true };
-    after = last.id;
-  }
-  return { byIntent, complete: false };
+export function disputesSince(
+  store: Store,
+  since: number,
+  deadline: number | undefined,
+  currencyOf: ReadonlyMap<string, string>,
+): Promise<{ byIntent: Map<string, number>; complete: boolean }> {
+  return takenSince(store, "disputes", DISPUTE_PAGES, since, deadline, currencyOf);
 }
 
-/** A sale as it stands today, after any refund. */
-export function settleLine(referral: Referral, refunded: number): Line {
+/**
+ * A sale as it stands today, after any refund. `whole` is set for a partner's share of some lines of an order
+ * (PartnerEarning.whole): a refund names no line, so it may be all on theirs, and they keep only what no reading of
+ * it can take, the order's refunded part before tax off their base, never below 0; never a guessed line.
+ */
+export function settleLine(referral: Referral, refunded: number, whole?: number): Line {
   const back = Math.min(Math.max(0, refunded), referral.total);
-  const kept = referral.total > 0 ? Math.round((referral.base * (referral.total - back)) / referral.total) : 0;
+  const keptOf = (base: number) => (referral.total > 0 ? Math.round((base * (referral.total - back)) / referral.total) : 0);
+  const order = Math.min(whole ?? 0, referral.total);
+  const kept = whole === undefined || back === 0 ? keptOf(referral.base) : Math.max(0, referral.base - (order - keptOf(order)));
   const status: LineStatus = referral.self
     ? "own purchase"
     : back >= referral.total && referral.total > 0
@@ -2920,18 +3212,23 @@ export function stripeWait(deadline: number | undefined, now = Date.now()): numb
 export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
-  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", clicksKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-    ["HGETALL", sharesKey(statsId)],
-    ["HGETALL", paidClicksKey(statsId)],
-    // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
-    ["HGETALL", leadsKey(statsId)],
-  ]);
+  // Each hash read exactly: a reply that does not read throws, and nothing is shown as owed or paid on it.
+  const [people, clicks, sales, payouts, shares, paidClicks, leadsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", clicksKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+      ["HGETALL", sharesKey(statsId)],
+      ["HGETALL", paidClicksKey(statsId)],
+      // Confirmed leads (lib/affiliate-leads.ts), all of them: the caps and the budget are counted across the program.
+      ["HGETALL", leadsKey(statsId)],
+    ]),
+    7,
+    "an affiliate program's book",
+  );
   // Everybody, for the checks that compare one affiliate with the others.
-  const everyone = pairs(people)
+  const everyone = people
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const affiliates = everyone.filter((a) => !only || a.id === only);
@@ -2939,18 +3236,24 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   // those of the people who joined through their invitation link.
   const recruits = new Set(everyone.filter((a) => only && a.by?.id === only).map((a) => a.id));
   const mine = (aff: string) => !only || aff === only || recruits.has(aff);
-  const clickCount = new Map(pairs(clicks).map(([id, n]) => [id, Number(n) || 0]));
-  const paidCount = new Map(pairs(paidClicks).map(([id, n]) => [id, Number(n) || 0]));
-  const referrals = pairs(sales)
+  const clickCount = new Map(clicks.map(([id, n]) => [id, Number(n) || 0]));
+  const paidCount = new Map(paidClicks.map(([id, n]) => [id, Number(n) || 0]));
+  const referrals = sales
     .map(([, raw]) => parseReferral(raw))
     .filter((r): r is Referral => r !== null && mine(r.aff));
   // A partner's standing share of a sale reads as one more Referral, credited
   // "partner" (lib/partner-share.ts). Keeping the shape means the payouts, the
   // batches, the spreadsheet and the partner's own page all work unchanged,
   // and one sale can produce several of these alongside a commission.
-  const partnerLines: Referral[] = pairs(shares)
+  // A share of some lines of an order is settled against the whole order's base (settleLine), kept beside the line.
+  const partOf = new Map<string, number>();
+  const partnerLines: Referral[] = shares
     .map(([, raw]) => parsePartnerEarning(raw))
     .filter((e): e is PartnerEarning => e !== null && (!only || e.aff === only))
+    .map((e) => {
+      if (e.whole !== undefined) partOf.set(`${e.ref}:${e.aff}`, e.whole);
+      return e;
+    })
     .map((e) => ({
       ref: `${e.ref}:${e.aff}`,
       pi: e.pi,
@@ -2965,9 +3268,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       self: e.self,
       how: "partner" as const,
     }));
-  const paid = pairs(payouts)
-    .map(([, raw]) => parsePayout(raw))
-    .filter((p): p is Payout => p !== null && (!only || p.aff === only))
+  // Each payout row read exactly as addPayout writes it (exactPayout): a row that does not read makes the book unknown,
+  // never "not paid", so a payout already made is never shown as owed again (Revisor 1 on #3719).
+  const paid = payouts
+    .map(([, raw]) => exactPayout(raw))
+    .filter((p) => !only || p.aff === only)
     .sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.at - a.at);
 
   // Each payment of a membership or plan sold through a link, read from its invoice.
@@ -2984,7 +3289,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     }
   }
   const everything = [...referrals, ...partnerLines, ...recurringLines];
-  const leads = pairs(leadsReply)
+  const leads = leadsReply
     .map(([, raw]) => parseLead(raw))
     .filter((l): l is NonNullable<typeof l> => l !== null);
   // A booking's lead is reversed by a refund in full of its booking, read with the sales' refunds.
@@ -2993,8 +3298,19 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let refundsChecked = true;
   if (everything.length || bookings.length) {
     const since = Math.min(...[...everything, ...bookings].map((r) => r.at));
+    // Each payment's currency, so a refund or dispute in another one is never added to its cents.
+    // Two records of one payment that disagree on it leave its currency
+    // unknown ("", which no refund's currency equals): a refund on it then
+    // holds the book, rather than one record deciding.
+    const currencyOf = new Map<string, string>();
+    for (const r of [...everything, ...bookings]) {
+      if (!r.pi) continue;
+      const currency = r.currency.toLowerCase();
+      const was = currencyOf.get(r.pi);
+      currencyOf.set(r.pi, was === undefined || was === currency ? currency : "");
+    }
     try {
-      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline) : { byIntent: new Map<string, number>(), complete: true };
+      const read = store.stripeAccountId ? await refundsSince(store, since, limits.deadline, currencyOf) : { byIntent: new Map<string, number>(), complete: true };
       refunds = read.byIntent;
       refundsChecked = read.complete;
       // PayPal's refunds in full, named by the payment as the book names it. One with no capture id never meets its
@@ -3030,7 +3346,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     // is owed is not known (refundsChecked), and no payout is made on it.
     if (store.stripeAccountId) {
       try {
-        const disputed = await disputesSince(store, since, limits.deadline);
+        const disputed = await disputesSince(store, since, limits.deadline, currencyOf);
         for (const [pi, cents] of disputed.byIntent) refunds.set(pi, (refunds.get(pi) ?? 0) + cents);
         refundsChecked = refundsChecked && disputed.complete;
       } catch (error) {
@@ -3039,7 +3355,7 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       }
     }
   }
-  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0));
+  const settled = everything.map((r) => settleLine(r, r.pi ? refunds.get(r.pi) ?? 0 : 0, r.how === "partner" ? partOf.get(r.ref) : undefined));
   // Each lead as it stands: the program's caps and budget counted across every affiliate's, then only the ones asked for.
   let ends = new Map<string, number>();
   const openBookings = leads.filter((l) => l.kind === "booking" && l.state === "open" && l.ref && mine(l.aff)).slice(0, 200);
@@ -3618,13 +3934,18 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   if (days === 0 || !affiliatesOn(store) || !idleRemovalAllowed(store.affiliates)) return done;
   const statsId = store.statsId as string;
   const now = Math.floor(nowMs / 1000);
-  const [peopleReply, salesReply, leadsReply, payoutsReply] = await redisPipeline([
-    ["HGETALL", peopleKey(statsId)],
-    ["HGETALL", salesKey(statsId)],
-    ["HGETALL", leadsKey(statsId)],
-    ["HGETALL", payoutsKey(statsId)],
-  ]);
-  const everyone = pairs(peopleReply)
+  // Read exactly: a sales or payouts hash that does not read never makes an affiliate look idle (throws instead).
+  const [peopleReply, salesReply, leadsReply, payoutsReply] = hashesExact(
+    await redisPipeline([
+      ["HGETALL", peopleKey(statsId)],
+      ["HGETALL", salesKey(statsId)],
+      ["HGETALL", leadsKey(statsId)],
+      ["HGETALL", payoutsKey(statsId)],
+    ]),
+    4,
+    "an affiliate program's book",
+  );
+  const everyone = peopleReply
     .map(([, raw]) => parseAffiliate(raw))
     .filter((a): a is Affiliate => a !== null);
   const inviter = new Map(everyone.filter((a) => a.by).map((a) => [a.id, a.by as { id: string; percent: number }]));
@@ -3634,7 +3955,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
   const active = (id: string, at: number) => lastActive.set(id, Math.max(lastActive.get(id) ?? 0, at));
   const earn = (id: string, cents: number) => owedHigh.set(id, (owedHigh.get(id) ?? 0) + Math.max(0, Math.ceil(cents)));
   const salesByMonth = new Map<string, number>();
-  for (const [, raw] of pairs(salesReply)) {
+  for (const [, raw] of salesReply) {
     const sale = parseReferral(raw);
     if (!sale || sale.self) continue;
     active(sale.aff, sale.at);
@@ -3655,7 +3976,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     const aff = month.slice(0, month.indexOf(":"));
     for (const goal of store.affiliates.bonuses) if (count >= goal.sales) earn(aff, goal.cents);
   }
-  for (const [, raw] of pairs(leadsReply)) {
+  for (const [, raw] of leadsReply) {
     const lead = parseLead(raw);
     if (!lead) continue;
     active(lead.aff, lead.at);
@@ -3663,7 +3984,7 @@ export async function idleSweep(store: Store, nowMs: number = Date.now(), deadli
     if (lead.currency !== store.currency) foreign.add(lead.aff);
   }
   const paid = new Map<string, number>();
-  for (const [, raw] of pairs(payoutsReply)) {
+  for (const [, raw] of payoutsReply) {
     const payout = parsePayout(raw);
     if (payout && payout.currency === store.currency) paid.set(payout.aff, (paid.get(payout.aff) ?? 0) + payout.cents);
   }

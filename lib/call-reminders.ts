@@ -22,8 +22,10 @@
  */
 import { placeLine } from "@/lib/call-place";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { isSenderConfigured, sendEmail } from "@/lib/email";
+import { type SendOutcome, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import type { Listing, Store } from "@/lib/store";
+import { storeForHandleExactly } from "@/lib/store-exact";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { listingFinder } from "@/lib/catalog";
 import { readableTime, seatsAt, zoneName, isTimeZone } from "@/lib/call-setup";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomKind, roomOf } from "@/lib/call-rooms";
@@ -36,7 +38,7 @@ import {
   confirmBooking,
   icsLink,
   isCallProduct,
-  isConfirmed,
+  confirmationOwed,
   moveLink,
   paidCall, paidCalls,
   senderAddress,
@@ -58,12 +60,64 @@ function stillUseful(mark: "24" | "1", start: number, now: number): boolean {
   return mark === "24" ? now < start - 3600_000 : now < start;
 }
 
+/** One email, as the sender takes it. */
+type Message = Parameters<typeof sendEmailOutcome>[0];
+
 function when(mark: "24" | "1"): string {
   return mark === "24" ? "Tomorrow" : "In 1 hour";
 }
 
-async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark: "24" | "1", origin: string): Promise<boolean> {
-  if (!product || !isCallProduct(product) || !call.email) return false;
+/** Confirm the whole bounded WITHSCORES reply before processing any member. */
+function dueQueue(reply: unknown, now: number): string[] {
+  const unreadable = () => new Error("The call reminder queue could not be read.");
+  if (!Array.isArray(reply) || reply.length !== 1) throw unreadable();
+  const entry = Object.getOwnPropertyDescriptor(reply, "0");
+  if (!entry || !Object.hasOwn(entry, "value")) throw unreadable();
+  const raw: unknown = entry.value;
+  if (!Array.isArray(raw) || raw.length % 2 !== 0 || raw.length > BATCH * 2) throw unreadable();
+  const flat: string[] = [];
+  for (let i = 0; i < raw.length; i += 2) {
+    const member = Object.getOwnPropertyDescriptor(raw, String(i));
+    const score = Object.getOwnPropertyDescriptor(raw, String(i + 1));
+    if (!member || !Object.hasOwn(member, "value") || typeof member.value !== "string" ||
+      !score || !Object.hasOwn(score, "value")) throw unreadable();
+    const value: unknown = score.value;
+    if (typeof value !== "number" && (typeof value !== "string" || !/^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/i.test(value))) throw unreadable();
+    const at = Number(value);
+    if (!Number.isFinite(at) || at < 0 || at > now) throw unreadable();
+    flat.push(member.value, String(at));
+  }
+  return flat;
+}
+
+/**
+ * One reminder's send, for a job that runs every five minutes and must never
+ * write twice (rule 30, as 283 [HG2]): "none" when there is nobody to write
+ * to; "refused" also when an error came before the sender was asked, since
+ * nothing can have gone then; "uncertain" when the answer is not known,
+ * including an error thrown on the way to the sender: the email may have
+ * gone, so its mark is kept and it is not sent again.
+ */
+async function sendReminder(build: () => Promise<Message | null>, what: string): Promise<SendOutcome | "none"> {
+  let message: Message | null;
+  try {
+    message = await build();
+  } catch (error) {
+    console.error(`a call reminder (${what}) could not be written; tried again on the next run`, error);
+    return "refused";
+  }
+  if (!message) return "none";
+  try {
+    return await sendEmailOutcome(message);
+  } catch (error) {
+    console.error(`sending a call reminder (${what}) threw on the way; it may have gone, so it is not sent again`, error);
+    return "uncertain";
+  }
+}
+
+/** The buyer's reminder, written; sendReminder sends it. Null when there is nobody to write to. */
+async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark: "24" | "1", origin: string): Promise<Message | null> {
+  if (!product || !isCallProduct(product) || !call.email) return null;
   const setup = product.call;
   const tz = isTimeZone(call.buyerTz) ? call.buyerTz : setup.tz;
   // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
@@ -73,7 +127,7 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
   const b = bookingWords(store.language);
   const locale = LANGUAGES[parseLanguage(store.language)].locale;
   const isDay = mark === "24";
-  return sendEmail({ meter: { by: "order" },
+  return { meter: { by: "order" },
     from: storeSender(store),
     to: call.email,
     subject: b.reminderSubject(isDay, product.title, store.name),
@@ -91,11 +145,12 @@ async function remindBuyer(store: Store, product: Listing, call: PaidCall, mark:
       b.toCancel(store.name),
     ].join("\n"),
     replyTo: store.email,
-  });
+  };
 }
 
-async function remindCreator(store: Store, product: Listing, paid: PaidCall[], call: PaidCall, mark: "24" | "1"): Promise<boolean> {
-  if (!product || !isCallProduct(product)) return false;
+/** The creator's reminder for one time, with everyone booked into it, written; sendReminder sends it. */
+async function remindCreator(store: Store, product: Listing, paid: PaidCall[], call: PaidCall, mark: "24" | "1"): Promise<Message | null> {
+  if (!product || !isCallProduct(product)) return null;
   const setup = product.call;
   // In person (lib/call-place.ts): no link, not even a room kept from when it was online.
   const room = setup.place ? null : await roomOf(store.callsId, { product: product.id, setup, session: call.session, start: call.start, end: call.end });
@@ -103,7 +158,7 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
   const emails = people.map((c) => c.email ?? "a buyer who gave no address");
   const seats = seatsAt(setup, call.start);
   const group = setup.kind === "live" || seats > 1;
-  return sendEmail({ meter: { by: "order" },
+  return { meter: { by: "order" },
     from: `"Marktmorgen" <${senderAddress()}>`,
     to: store.email,
     subject: `${when(mark)}: ${product.title}, ${readableTime(call.start, setup.tz)}`,
@@ -129,7 +184,19 @@ async function remindCreator(store: Store, product: Listing, paid: PaidCall[], c
       "",
       "Everyone booked is also in your studio, under Upcoming calls.",
     ].join("\n"),
-  });
+  };
+}
+
+/**
+ * The store reader the mail cron gives sendCallReminders: null only when the
+ * store is confirmed gone (the address is free or was let go), since that
+ * takes its due reminders off the queue; a reply out of shape, or a record
+ * that cannot be read, throws instead, so they are kept for the next run.
+ */
+export async function storeForReminders(handle: string): Promise<Store | null> {
+  const found = await storeForHandleExactly(handle);
+  if (found === "unknown") throw new UnknownReplyError("the store for call reminders");
+  return found === "none" ? null : found;
 }
 
 /**
@@ -145,8 +212,7 @@ export async function sendCallReminders(
   const counts = { reminded: 0, confirmed: 0, dropped: 0 };
   if (!isRedisConfigured() || !isSenderConfigured()) return counts;
   const now = Date.now();
-  const [raw] = await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+  const flat = dueQueue(await redisPipeline([["ZRANGEBYSCORE", REMINDER_QUEUE, 0, now, "WITHSCORES", "LIMIT", 0, BATCH]]), now);
 
   // One read of Stripe per store, however many of its bookings are due.
   const groups = new Map<string, { member: string; score: number }[]>();
@@ -170,7 +236,19 @@ export async function sendCallReminders(
   for (const [key, members] of groups) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = key.split("|");
-    const store = await findStore(handle).catch(() => null);
+    let store: Awaited<ReturnType<typeof findStore>>;
+    try {
+      store = await findStore(handle);
+    } catch (error) {
+      // Unknown, not gone: tried again next run, and given up on only once it
+      // is hours late, as when Stripe does not answer below, so one store that
+      // cannot be read never holds the head of the queue for good.
+      console.error("reading the store for call reminders failed", error);
+      const stale = members.filter((m) => now - m.score > GIVE_UP_MS).map((m) => m.member);
+      if (stale.length) await redisPipeline([["ZREM", REMINDER_QUEUE, ...stale]]);
+      counts.dropped += stale.length;
+      continue;
+    }
     // A store switched off after notices about its content (lib/takedown.ts) still reminds: the buyer paid for this
     // call, and the reminder carries only the booking's own details (its time, its place or room, its calendar file
     // and the buyer's page to move it), nothing of the store's switched-off pages. Held in tests/suspended-store-updates-calls.test.ts.
@@ -195,14 +273,26 @@ export async function sendCallReminders(
     const bySession = new Map(paid.map((call) => [call.session, call]));
     const find = listingFinder(store);
 
-    for (const { member } of members) {
+    for (const { member, score } of members) {
       const item = parseMember(member);
       done.push(member);
       if (!item) continue;
       // A booking made long ahead in a busy account may be older than the
       // sessions paidCalls reads: it is looked up on its own before it is
       // taken for unpaid or refunded.
-      const call = bySession.get(item.session) ?? (await paidCall(store, item.session).catch(() => null)) ?? undefined;
+      let call: PaidCall | null | undefined;
+      try {
+        call = bySession.get(item.session) ?? await paidCall(store, item.session);
+      } catch (error) {
+        // Unknown, not unpaid: kept for the next run while it can still be of
+        // use, and given up on once it is hours late, as when the whole list
+        // does not answer, so a session Stripe answers 404 for on every run (one
+        // of the account the store used before) cannot hold the queue.
+        console.error("reading one paid call for reminders failed", error);
+        if (now - score > GIVE_UP_MS) counts.dropped += 1;
+        else done.pop();
+        continue;
+      }
       const product = call ? await find(call.product) : null;
       if (!call || !product || !isCallProduct(product)) {
         // Never paid, refunded out of the list, or the product is gone.
@@ -211,7 +301,8 @@ export async function sendCallReminders(
       }
       try {
         if (item.mark === "c") {
-          if (call.end > Date.now() && !(await isConfirmed(call.session))) {
+          // Owed until it is done: a confirmation a failed try left short of done is finished here too (lib/calls.ts, ConfirmStage).
+          if (call.end > Date.now() && (await confirmationOwed(call.session))) {
             await confirmBooking({
               store,
               product,
@@ -241,25 +332,34 @@ export async function sendCallReminders(
           counts.dropped += 1;
           continue;
         }
+        // Held in a const of its own, so the closures below keep it narrowed past "c".
+        const mark = item.mark;
         const [fresh, freshCreator] = await redisPipeline([
           ["SET", sentKey(call.session, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
           ["SET", creatorKey(callsId, call.product, call.start, item.mark), "1", "NX", "EX", SENT_SECONDS],
         ]);
-        // A send that did not go (the mail service down for a moment) is
-        // tried again on the next run, while the reminder is still of use.
+        // A send refused for certain (the mail service down for a moment), or
+        // stopped before the sender was asked, is tried again on the next
+        // run, while the reminder is still of use. One whose answer is not
+        // known may have gone: its mark is kept and it is never sent again,
+        // since this job runs every five minutes (rule 30, as 283 [HG2]).
         let again = false;
         if (fresh !== null) {
-          if (await remindBuyer(store, product, call, item.mark, origin)) counts.reminded += 1;
-          else if (call.email) {
+          const buyer = await sendReminder(() => remindBuyer(store, product, call, mark, origin), "buyer");
+          if (buyer === "sent") counts.reminded += 1;
+          else if (buyer === "refused") {
             await redisPipeline([["DEL", sentKey(call.session, call.start, item.mark)]]);
             again = true;
-          }
+          } else if (buyer === "uncertain") console.error("a call reminder to the buyer may have gone; its mark is kept", store.handle, call.session, item.mark);
         }
         // A booking found on its own is counted among the people booked, too.
         const booked = paid.some((c) => c.session === call.session) ? paid : [...paid, call];
-        if (freshCreator !== null && !(await remindCreator(store, product, booked, call, item.mark))) {
-          await redisPipeline([["DEL", creatorKey(callsId, call.product, call.start, item.mark)]]);
-          again = true;
+        if (freshCreator !== null) {
+          const creator = await sendReminder(() => remindCreator(store, product, booked, call, mark), "creator");
+          if (creator === "refused") {
+            await redisPipeline([["DEL", creatorKey(callsId, call.product, call.start, item.mark)]]);
+            again = true;
+          } else if (creator === "uncertain") console.error("a call reminder to the creator may have gone; its mark is kept", store.handle, call.session, item.mark);
         }
         if (again) done.pop();
       } catch (error) {

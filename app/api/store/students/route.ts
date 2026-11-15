@@ -4,7 +4,8 @@ import { studioRefusal } from "@/lib/person-tasks";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { type AccessPay, applyAccess, readAccessAsk, reviewAccess } from "@/lib/student-bulk";
 import { ACCESS_REFUSALS, MAX_STUDENT_BODY_BYTES } from "@/lib/student-bulk-rules";
-import { countStudio } from "@/lib/studio-route";
+import { countStudio, refusedJson } from "@/lib/studio-route";
+import { seesBuyerAddresses } from "@/lib/buyer-addresses";
 
 /**
  * Access to a course taken away from many students at once, or given back
@@ -31,6 +32,9 @@ const NO_STORE = { "Cache-Control": "private, no-store" };
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", MAX_STUDENT_BODY_BYTES);
   if (!guarded.ok) return guarded.response;
+  // Students are chosen and answered by their email address, orders data (ALL-160, lib/buyer-addresses.ts): a role
+  // without "orders", such as an Editor, gets the role refusal before anything is read.
+  if (!seesBuyerAddresses(guarded.role)) return refusedJson("forbidden");
   const { body, store } = guarded;
   if (body.action !== "review" && body.action !== "apply") return Response.json({ ok: false, error: "unknown" }, { status: 400 });
   const read = readAccessAsk(body);

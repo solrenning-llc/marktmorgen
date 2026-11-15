@@ -1,6 +1,6 @@
 # STN9 (item 762): AI video and series as a product — DRAFT, incomplete
 
-Status: **draft handoff, not a finished study.** Started by Claude 1 cloud V on November 15, 2026; handed to Claude 2 on the coordinator's order (C2-209, 15/11/2026 00h25 Fortaleza). Nothing here is built, priced for sale, published or available to a customer. No account was created, no term accepted, no paid call made. Every fact below was read on **2026-11-15** from the official page named next to it, by `curl` through the session proxy; nothing is from memory.
+Status: **study in progress; sections 1–2 from Claude 1 cloud V, sections 3–6 by Claude 2 (continuing Claude 1 cloud V) on 15/11/2026; five cost points still open, so the decision is "not yet".** Started by Claude 1 cloud V on November 15, 2026; handed to Claude 2 on the coordinator's order (C2-209, 15/11/2026 00h25 Fortaleza). Nothing here is built, priced for sale, published or available to a customer. No account was created, no term accepted, no paid call made. Every fact below was read on **2026-11-15** from the official page named next to it, by `curl` through the session proxy; nothing is from memory.
 
 Rules that bind the rest of the work (item 762 text): MR (positive net per unit at 100% use, worst month, monthly and annual), LC for any profit shown to the owner, unknown cost fails and is never zero, no free quota counted as zero, automatic ceiling and reserve before every spend, AX274 (captions, audio description and transcript as conditions of any future build), no change to prices, limits, commission, PLANS_ON_SALE, OPENING_REQUESTED, tax gate, art. 9a, commercial review or stripePlatformEligibilityReady. Jus IA guidance of 09/11/2026 (reported by the coordinator): no phases 2–4, no public upload without a child-abuse procedure, Terms/Privacy/credits reviewed before selling.
 
@@ -79,12 +79,98 @@ READ (European Commission AI Act Service Desk, consolidated text "as at 27 July 
 
 NOT CONFIRMED (official), to read on the official page: Omnibus act number (search: Regulation (EU) 2026/1744); YouTube, TikTok and Meta rules; Tennessee ELVIS Act; California Labor Code §927 and Civil Code §§3344, 3344.1; New York GOB §5-302; NO FAKES Act (search: introduced 9/4/2025, not law); TAKE IT DOWN Act (search: FTC enforcement since 19/5/2026, 48-hour removal, includes AI "digital forgeries"; https://www.ftc.gov/business-guidance/resources/complying-take-it-down-act); Brazil CF art. 5 X, Código Civil art. 20, LGPD arts. 5 II and 11; GDPR art. 9; Copyright Office Part 2 (29/1/2025) and Thaler v. Perlmutter (D.C. Cir. 18/3/2025); Lei 9.610/98 art. 11; 18 U.S.C. §2258A(h) (search: REPORT Act, Pub. L. 118-59, preservation 1 year), §§2258B, 1466A, 2256(8)(B); NCMEC ESP registration and hash sharing (search: https://www.missingkids.org/cybertiplinedata); **Brazil Lei 15.487/2026 rewrote ECA arts. 241-B and 241-C, art. 241-C citing "inteligência artificial" (search only; do not use the old wording)**; **EU Reg. 2021/1232 expired 3/4/2026 per a Council document of 30/6/2026 (search only)**; 16 CFR Part 465 (in force 21/10/2024) and Part 255.
 
-## 3–6. Still to do
+## 3. Worst case per plan: a prepaid video credit, priced on its own (Claude 2, continuing Claude 1 cloud V, 15/11/2026)
 
-3. Worst case per plan with credits, ceiling before each spend and reserve, with `lib/receiving-costs.ts` (fee max(Stripe 6.6% + 30¢, Paddle 5% + 50¢) on price + 27% buyer tax on top; remittance 1.5%; refund 1%; dispute ($30 + charged) × 1%) and LC taxes (IRPF 15% on profit, IOF 0.38% on what is remitted), positive net per unit with the spend-floor room (`COMMERCIAL_SPEND_FLOOR_ROOM_CENTS` month 25¢ / year 100¢ in `lib/commercial-margin.ts`). Not started; no figure is claimed. Likely shape to test: a prepaid credit add-on priced on its own (as the Store assistant add-on), not taken from current plan margins.
-4. Design of the three uses (sales video from a product page; "Series" product with episodes; first episode as a lead magnet), with AX274 conditions (captions, transcript, audio description).
-5. Risks and how to do better than Melolo and Photo AI. Melolo/Photo AI facts **not read yet** (apps.apple.com, play.google.com, trustpilot.com, photoai.com are allowed in the research environment but were only tried via WebFetch, which failed).
-6. Final one-page decision in Portuguese for the owner.
+**Shape.** Video generation cannot ride inside the current plans: every plan's margin is already sized without it, and a creator could spend any amount. The only shape that keeps MR is a **prepaid credit pack sold on its own**, like the Store assistant add-on: the creator pays first, each generation reserves its worst cost from the pack before the provider is called, and an empty pack stops generation (the no-AI path stays). Nothing from a plan subsidizes it, and commission counts as zero.
+
+**Method.** `receivingOf` from `lib/receiving-costs.ts` at `MOST_CORRECT_READING`: the dearer provider fee on the price plus the buyer's tax on top at 27%, remittance 1.5%, refund reserve 1%, dispute reserve. Then the LC taxes: IRPF 15% on the profit and IOF 0.38% on what is remitted, both rounded up. The pack must keep at least 1¢ net plus the add-on room `ADD_ON_ROOM_CENTS` (25¢, `lib/store-assistant-rules.ts`). The table gives the **most the provider may cost** for each pack price, and how many seconds of output that buys at each candidate rate. The calculation ran on this branch's tree on 15/11/2026, in a throwaway script that was not committed.
+
+| Pack price | Revenue | Fees and reserves | Most provider cost | Net at that cost (after IRPF and IOF) |
+| --- | --- | --- | --- | --- |
+| $19 | $19.00 | $2.95 | $15.73 | $0.26 |
+| $29 | $29.00 | $4.15 | $24.53 | $0.26 |
+| $49 | $49.00 | $6.60 | $42.08 | $0.26 |
+| $99 | $99.00 | $12.66 | $86.02 | $0.26 |
+
+Seconds of output that the most provider cost buys (rounded down):
+
+| Rate (source, read 15/11/2026) | $19 | $29 | $49 | $99 |
+| --- | --- | --- | --- | --- |
+| Runway `veo3.1` with audio, 40 credits/s = $0.40/s | 39 | 61 | 105 | 215 |
+| Runway `veo3.1_fast` with audio, 15 credits/s = $0.15/s | 104 | 163 | 280 | 573 |
+| Runway `gemini_omni_flash_1.2` 720p, 7 credits/s = $0.07/s | 224 | 350 | 601 | 1,228 |
+| Google Veo 3.1 Fast 1080p with audio, $0.12 per "count" | 131 | 204 | 350 | 716 |
+| Google Veo 3.1 Lite 1080p with audio, $0.08 per "count" | 196 | 306 | 526 | 1,075 |
+
+These are break-even ceilings, not proposed prices. They are the line the code may never cross. Pricing for profit (the owner's rule: the price that maximizes profit) gives fewer seconds per pack, and that choice is the owner's.
+
+**Costs that still have no bound, so the pack fails today:**
+1. **Google's unit.** The pricing page bills "per count" without saying what a count is; the Google rows hold only if a count is one second of output. Not confirmed.
+2. **Failed or refused generations.** Neither Runway's nor Google's page read says whether a blocked or failed generation is billed. Until an official page says it, every attempt is reserved and charged to the pack in full, whatever comes back.
+3. **The accessibility the build needs (AX274).** A generated video would need captions, a transcript and extended audio description before it can be published.
+   - **Captions and transcript:** the existing AI captions add-on is sold at $6 a minute a language (`lib/plan.ts`), a separate purchase. Inside the pack, the cost per output second must be added from the captions supplier's own rate.
+   - **Audio description:** a written description of what is on screen, read by a voice. The voice part is about 900 characters a minute at ElevenLabs v3, $0.08 per 1,000 characters, which is about $0.072 a minute. The text part (a model describing each scene) has no bound yet.
+4. **Hosting.** A generated video is stored and streamed like any other product video, so it must count against the plan's existing storage and video-hour limits; the build may not add a new hosting cost. This needs a test before any build.
+5. **Google's Veo has no pay-as-you-go option** ("Pay-as-you-go Not supported"; fixed quota or provisioned throughput only). Buying a fixed quota is a fixed cost that belongs to FX275 and the minimum customer base, and its price was not read. Runway is prepaid at $0.01 a credit, so it is the only path read that has a natural hard ceiling.
+
+## 4. Design of the three uses (study only; nothing is built)
+
+All three are generated **only inside the creator's studio**, by the creator, for their own store, from a prepaid pack, with a ceiling reserved before every call. Every generated video carries:
+- the provider's machine-readable marking, which must be kept, never stripped (C2PA on Veo; AI Act art. 50(2) as Marktmorgen is the provider of the generator);
+- a visible "Made with AI" label, drawn by the page and not by the model, shown from the first frame (art. 50(5); the creator is the deployer);
+- captions, a transcript and audio description before it can be published (AX274). Publishing stays disabled while any of the three is missing.
+
+1. **Sales video from the product page.** The input is the product's own published title, description and pictures, never a person's face or voice. The script is held to the product's published facts, like the Store assistant's `heldToFacts`: no figures, deals, urgency or testimonials the creator did not publish. No synthetic person speaks as a real one. The Commission's guidelines (§122) put a sales video outside the creative exception, so it gets the full deepfake notice.
+2. **"Series" product.** This is a product type whose episodes are videos the creator uploads or generates, released on a schedule. It reuses the existing course and drip mechanisms (lessons as episodes), not a new player. Buyers watch; they never generate. That keeps generation away from buyers who may be under 18 (Google's terms, 20(d)).
+3. **First episode as a lead magnet.** The first episode is free behind the existing email sign-up with consent, and the rest are paid. It uses the existing lead-magnet flow; generation cost is the creator's pack, never a free quota.
+
+Steps and decisions for the creator (target): pick the product, then "Make a video", then review the script, then generate, then review captions, transcript and description, then publish. That is 5 steps, with 2 decisions (the script and the final review).
+
+## 5. Risks, and how to do better than Melolo and Photo AI
+
+Melolo (vertical AI drama series) and Photo AI were **not read**: their pages were not reachable from this session (see the "Sources" note below). No claim about them is made here.
+
+| Risk | Where it comes from | What the design does |
+| --- | --- | --- |
+| Child safety | Generated images of minors; creators are adults, buyers may not be | No people generation by default (Google's `personGeneration`), no upload of a real person's face, provider safety filters kept on. A reporting path to NCMEC must exist before any public generation, the Jus IA condition of 09/11/2026. The law texts (18 U.S.C. §2258A and the others) are still to read. |
+| A real person's face or voice without consent | ElevenLabs' policy, AI Act art. 5 (from 02/12/2026), TAKE IT DOWN Act (not confirmed) | Voice only from the provider's stock voices or the creator's own verified clone (ElevenLabs Professional Voice Cloning is own voice only). No likeness of a real person. |
+| Copyright in the output | Copyright Office (not yet read), Lei 9.610/98 | Tell creators plainly that AI output may not be protected by copyright. Google indemnifies unmodified output; Runway's terms were not read. |
+| Provider trains on creators' content | Luma trains on output even on paid plans; ElevenLabs unless the account opts out | Luma excluded. ElevenLabs only with opt-out, which zero retention requires (Enterprise). Google does not train without permission. |
+| Provider disappears | Sora 2 shut down on 24/09/2026 with six months' notice | Stored output is the creator's file in our storage, never a link to the provider. One provider behind one interface, so a switch changes no page. |
+| Unbounded spend | Retries and failures not stated | Prepaid pack, reservation before each call, every attempt charged in full until a page says otherwise. |
+| Buyers under 18 | Google's terms, 20(d) | Generation only in the studio (18+). Whether a series watched by buyers counts as a service "likely to be accessed" by minors is an open legal question for the owner. |
+
+## 6. Para o dono: a decisão (uma página, em português)
+
+**O que é.** Vender vídeo por IA como pacote pré-pago, separado dos planos: o criador compra créditos, cada vídeo reserva o custo antes de chamar o fornecedor, e com o pacote vazio a geração para.
+
+**Número (pior caso, regra LC, IRPF 15% e IOF 0,38%).** O fornecedor pode custar no máximo isto, por pacote, sem prejuízo:
+
+| Pacote | Custo máximo do fornecedor |
+| --- | --- |
+| US$19 | US$15,73 |
+| US$29 | US$24,53 |
+| US$49 | US$42,08 |
+| US$99 | US$86,02 |
+
+Exemplo com um modelo de qualidade média e preço confirmado por segundo (Runway veo3.1_fast com áudio): o pacote de US$49 dá no máximo 280 segundos (4 min 40 s) de vídeo. Isso é o limite de não ter prejuízo, não o preço que maximiza o lucro.
+
+**Por que ainda reprova (custo desconhecido nunca é zero):**
+1. O Google não diz na página de preços que a cobrança é por segundo.
+2. Nenhum fornecedor diz se tentativa recusada ou falha é cobrada.
+3. Falta o custo da audiodescrição (o texto da descrição) e das legendas por segundo, exigidos pela acessibilidade.
+4. O Veo do Google não tem pagamento por uso: exige cota fixa, com preço não lido (custo fixo).
+5. Os termos do Runway, do Kling, do Pika e do MiniMax não foram lidos, e as leis dos EUA e do Brasil sobre abuso infantil e uso de imagem ainda estão sem o texto oficial.
+
+**O que precisa do senhor:**
+- **(a)** Decidir se quer continuar o estudo até fechar os 5 pontos acima. Já existe o ambiente "Marktmorgen research", com os 20 sites oficiais liberados, para uma sessão que comece nele.
+- **(b)** Se quiser, decidir o formato: só no estúdio, pacote pré-pago, sem rosto ou voz de pessoa real.
+
+**Sem o seu "sim", nada é construído.**
+
+## Sources this session could not reach (15/11/2026)
+
+This session's network policy refused every host outside its list (proxy answered 403). A personal environment "Marktmorgen research" was created with the 20 official hosts the remaining reads need (Google Cloud and AI Studio pricing and policies, Cornell LII, govinfo, FTC, the AI Act Service Desk, EUR-Lex, Runway, Luma, ElevenLabs, Photo AI, the App Store, Google Play, NCMEC, the Copyright Office and the Planalto). A session started on it can finish the open reads; this one could not move to it.
 
 ## Accessibility
 

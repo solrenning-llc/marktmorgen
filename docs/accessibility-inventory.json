@@ -1636,6 +1636,8 @@
     "components/store-layout-editor.tsx",
     "components/store-pages-nav.tsx",
     "components/store-pixels.tsx",
+    "components/store-preview-draft.tsx",
+    "components/store-preview-form.tsx",
     "components/store-product.tsx",
     "components/store-quotes.tsx",
     "components/store-reach.tsx",

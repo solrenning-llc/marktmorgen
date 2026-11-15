@@ -77,7 +77,7 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
 
 - **Honesty:** the same honesty and price rules as the studio's draft. The page never says "in minutes", "instantly" or any time it has not measured (219 [OP5] scope 7). It never says the preview is published, and it says clearly that nothing goes live without the creator.
 - **Accessibility:** WCAG 2.2 AAA, as every other screen.
-  - One field and one button, labelled in plain US English, with an example inside the field.
+  - One field and one button, labeled in plain US English, with an example inside the field.
   - The progress is announced in a live region; there is no fake bar.
   - The draft is read in order with headings; every control is usable by keyboard alone and has a 44 px target.
   - There is no time limit on the preview's page (2.2.3); the 24 hours concern only how long the draft is kept, and the page says so.
@@ -103,7 +103,14 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
      - A new preview counts its address's day first (its network block, keyed, never the address as typed; `nl:storepv:addr:`), so a refused address takes nothing from the site. Then the site's day (`previewDayCeiling`) and month.
      - The answers round needs an id this door opened: 16 random characters signed with the day (`deriveKey`), good that day and the next. Checking it sends nothing to the database; with no key, the door opens nothing.
      - One preview with its answers round sends at most 38 database commands, scripts counted command by command, within `PREVIEW_DB_COMMANDS` (40). That leaves 2 for unit 4 (keeping the draft and reading it back), which must recount them and raise the priced figure if they do not fit, never leave one out.
-   - **3b, the form:** the home page form, with the live progress and the draft read in order, behind the switch.
+   - **3b, the form** (built on 15 November 2026, in this branch, off; components/store-preview-form.tsx, components/store-preview-draft.tsx, lib/store-preview-words.ts, tests/store-preview-form.test.ts):
+     - The home page shows its section only inside `{STORE_PREVIEW_ON ? ... : null}`, and no other page names the form.
+     - One field, labeled, with an example inside it, and one button. The progress is said in a live region, with no bar and no promised time; when the draft arrives, the focus moves to its heading.
+     - The draft is read in order under headings: lines for under the name, products and questions buyers ask. A price is shown only where the visitor's words gave one (otherwise "No price yet: you set it"), and the draft says plainly that nothing is published.
+     - Its questions are groups of answers to press; one more draft is written with them, never a third.
+     - Every refusal is said in plain words with a way on; "full" and "address" offer the sign-up.
+     - Targets of at least 44 px, a visible focus and lines no wider than 80 characters (app/home.css).
+     - **Not yet checked:** a screen reader, a keyboard-only pass in a browser and the reading level by a tool. Those wait for the pull request that turns it on.
 4. **Keeping it:** the 24-hour token, the copy into the studio on sign-up with no second call, and deletion by the visitor and on expiry.
 5. **The privacy words** and the public help line, in the same pull request that would turn it on; turning it on is the owner's.
 

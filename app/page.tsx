@@ -16,6 +16,9 @@ import { PLANS_ON_SALE } from "@/lib/opening";
 import { feeWords } from "@/lib/fee-words";
 import { INVITE_PROGRAM_OPEN, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { DEMO_CALL, DEMO_PRODUCT } from "@/lib/demo-catalog";
+import { StorePreviewForm } from "@/components/store-preview-form";
+import { STORE_PREVIEW_ON } from "@/lib/store-preview-rules";
+import { PREVIEW_WORDS } from "@/lib/store-preview-words";
 
 /*
  * The home page, VS1 (queue item 571, the owner's approved mockup of
@@ -112,6 +115,16 @@ export default function Home() {
             <HeroClaim offer={OFFER_LINE} items={PHONE_ITEMS} />
           </div>
         </section>
+
+        {STORE_PREVIEW_ON ? (
+          <section aria-labelledby="hm-preview-title" className="hm-section">
+            <div className="hm-wrap">
+              <h2 id="hm-preview-title" className="hm-h2">{PREVIEW_WORDS.heading}</h2>
+              <p>{PREVIEW_WORDS.intro}</p>
+              <StorePreviewForm />
+            </div>
+          </section>
+        ) : null}
 
         <section aria-labelledby="hm-sell-title" className="hm-section">
           <div className="hm-wrap">

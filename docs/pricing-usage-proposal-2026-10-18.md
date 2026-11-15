@@ -19,7 +19,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $117.80 | $1,206.25 | $69 / $690 |
+| Store | $117.80 | $1,206.60 | $69 / $690 |
 | Studio | $173.20 | $1,843.20 | $449 / $4,490 |
 | Scale | $269.95 | $2,962.20 | $999 / $9,990 |
 
@@ -66,7 +66,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $349 / $3,490 | 4.2% | 60.40% | 60.02% | $210.81 | 2.85 |
+| $349 / $3,490 | 4.2% | 60.40% | 60.02% | $210.82 | 2.85 |
 | $399 / $3,990 **(recommended)** | 11.0% | 60.41% | 60.02% | $241.04 | 2.49 |
 | $499 / $4,990 | 23.7% | 60.42% | 60.03% | $301.54 | 1.99 |
 | $999 / $9,990 | 89.0% | 60.41% | 60.01% | $603.59 | 0.99 |

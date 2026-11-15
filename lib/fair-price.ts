@@ -63,7 +63,8 @@ export type FairPricing = {
   products: string[];
   /**
    * The smallest amount the store's currency charges (lib/money.ts, minCharge), set when the store is read
-   * (lib/store.ts), never kept: a product the fair price would take below it gets none (DISC-S-1).
+   * (lib/store.ts), set again from the currency on every read; a stored copy is ignored. A product the fair price
+   * would take below it gets none (DISC-S-1).
    */
   floorCents?: number;
 };

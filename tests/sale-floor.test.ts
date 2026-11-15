@@ -30,10 +30,10 @@ process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only";
 
 const OWNER = "floor-usd@example.com";
 const HANDLE = "floorshop";
-const ACCOUNT = "acct_1TestFloorShop01";
+const ACCOUNT = "acct_1TestFloorUS1";
 const OWNER_CAD = "floor-cad@example.com";
 const HANDLE_CAD = "floorshopca";
-const ACCOUNT_CAD = "acct_1TestFloorShopC1";
+const ACCOUNT_CAD = "acct_1TestFloorCA1";
 const ORIGIN = "https://marktmorgen.com";
 const SALE_COUPON = "sale_bf_15";
 const DAY = 86_400;

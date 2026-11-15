@@ -41,7 +41,8 @@ export type StoreSale = {
   coupon: string;
   /**
    * The smallest amount the store's currency charges (lib/money.ts, minCharge), set when the store is read
-   * (lib/store.ts), never kept: a product the sale would take below it is not on sale (DISC-S-1).
+   * (lib/store.ts), set again from the currency on every read; a stored copy is ignored. A product the sale would take
+   * below it is not on sale (DISC-S-1).
    */
   floorCents?: number;
 };

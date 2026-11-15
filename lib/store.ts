@@ -1039,7 +1039,7 @@ function parseStore(raw: unknown): Store | null {
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
       inbox: parseInboxSetting(value.inbox),
-      // The currency's smallest charge goes with the sale and the fair price, never kept (DISC-S-1).
+      // The currency's smallest charge goes with the sale and the fair price, set again on every read (DISC-S-1).
       sale: { ...parseSale(value.sale), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       pastSales: parsePastSales(value.pastSales),
       tiers: parseTiers(value.tiers),

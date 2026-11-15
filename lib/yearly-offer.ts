@@ -35,7 +35,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { companyPostal } from "@/lib/company-postal";
-import { offersStopUrl, offersStopped } from "@/lib/offer-stop";
+import { offersStopUrl, offersStoppedForStore } from "@/lib/offer-stop";
 import { PLAN_NAMES, PLAN_PRICES, type Tier, yearSaving } from "@/lib/plan";
 import { type Store, saleHandles } from "@/lib/store";
 import { onAccount } from "@/lib/stripe-account";
@@ -239,7 +239,7 @@ async function offerOnce(store: Store, plansOnSale: boolean): Promise<"sent" | "
   const postal = companyPostal();
   const stopUrl = offersStopUrl(store.sid);
   if (!postal || !stopUrl) return "no";
-  if ((await offersStopped(store.sid)) !== false) return "no";
+  if ((await offersStoppedForStore(store)) !== false) return "no";
   const live = await readSubscription(subscription);
   if (live.state !== "active" || live.cycle !== "month" || live.cancelsAtEnd || live.changePending) return "no";
   // Once per subscription, for good: ours only on OK or our own value read back (CX-123 rule 24, L9).

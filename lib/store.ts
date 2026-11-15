@@ -1378,6 +1378,30 @@ export async function accountStores(email: string): Promise<Store[]> {
 }
 
 /**
+ * The ids of every store an account owns, read exactly (CX-123 rule 24): its first store's id (null when it has no
+ * first store or that store has no id yet) and the ids in its set of other stores. Throws UnknownReplyError when either reply is not in its exact shape, or the
+ * first store's record belongs to another owner, so a caller never acts on a partial list. For the studio's stop of
+ * Marktmorgen's offers (app/api/store/offers, ?via=studio).
+ */
+export async function accountStoreIdsExact(email: string): Promise<{ main: string | null; others: string[] }> {
+  if (!isRedisConfigured()) throw new UnknownReplyError("an account's stores");
+  const address = email.toLowerCase();
+  const reply = repliesFor(await redisPipeline([["GET", await ownerKey(address)], ["SMEMBERS", await accountKey(address)]]), 2);
+  if (!reply) throw new UnknownReplyError("an account's stores");
+  const [first, members] = reply;
+  let main: string | null = null;
+  if (first !== null) {
+    const record = typeof first === "string" ? parseStore(first) : null;
+    if (!record || typeof record.email !== "string" || storeRef(record).toLowerCase() !== address) throw new UnknownReplyError("an account's stores");
+    if (STORE_ID_PATTERN.test(record.sid)) main = record.sid;
+  }
+  if (!Array.isArray(members) || !members.every((id) => typeof id === "string" && STORE_ID_PATTERN.test(id))) {
+    throw new UnknownReplyError("an account's stores");
+  }
+  return { main, others: (members as string[]).filter((id) => id !== main) };
+}
+
+/**
  * Gives a store its own id, if it has none yet, and returns it. Called from
  * the owner's own studio and before a store is first named anywhere by id,
  * so a store made before there could be several gets one the first time it

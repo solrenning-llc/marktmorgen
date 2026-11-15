@@ -12,6 +12,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { deriveKey } from "@/lib/secret-box";
+import { accountStoreIdsExact } from "@/lib/store";
 import { SITE_URL } from "@/lib/site-url";
 
 /** The stores whose creators stopped Marktmorgen's offers, by store id. */
@@ -48,6 +49,35 @@ export async function offersStopped(sid: string): Promise<boolean | "unknown"> {
   } catch {
     return "unknown";
   }
+}
+
+/**
+ * Whether a store's offers are stopped, the account's own way included: a stop pressed in the studio is kept on every
+ * store the account owns and on its first store, and a store made later reads its first store's (offersStoppedForStore).
+ * "unknown" when either answer is not a whole 0 or 1, or the account's first store cannot be read exactly.
+ */
+export async function offersStoppedForStore(store: { sid: string; email: string; extra?: boolean }): Promise<boolean | "unknown"> {
+  const own = await offersStopped(store.sid);
+  if (own !== false || !store.extra) return own;
+  let main: string | null;
+  try {
+    main = (await accountStoreIdsExact(store.email)).main;
+  } catch {
+    return "unknown";
+  }
+  return main ? offersStopped(main) : false;
+}
+
+/** Stops the offers for every store of an account, from the studio; throws when the write's answer is not exact. */
+export async function stopOffersForAccount(email: string): Promise<number> {
+  const { main, others } = await accountStoreIdsExact(email);
+  const sids = [...(main ? [main] : []), ...others];
+  if (!sids.length) return 0;
+  const wrote = repliesFor(await redisPipeline([["SADD", OFFERS_OFF, ...sids]]), 1);
+  if (!wrote || typeof wrote[0] !== "number" || !Number.isInteger(wrote[0]) || wrote[0] < 0 || wrote[0] > sids.length) {
+    throw new UnknownReplyError("an account's offers stop");
+  }
+  return sids.length;
 }
 
 /** Stops the offers for a store; throws when the write's answer is not exactly 0 or 1, so a stop is never said unconfirmed. */

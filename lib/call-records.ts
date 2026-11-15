@@ -124,10 +124,15 @@ export function reminderMember(callsId: string, handle: string, session: string,
 }
 
 export function parseMember(member: string) {
-  const [callsId, handle, session, mark, start] = member.split("|");
+  const fields = member.split("|");
+  // Exactly the five fields reminderMember writes, the start a whole number of milliseconds: a blank start read as 0,
+  // a negative one or an extra field was taken for a member before (Claude 7, 13 November 2026).
+  if (fields.length !== 5) return null;
+  const [callsId, handle, session, mark, start] = fields;
   if (!callsId || !handle || !session || !["c", "24", "1"].includes(mark)) return null;
+  if (!/^\d{1,16}$/.test(start)) return null;
   const at = Number(start);
-  if (!Number.isFinite(at)) return null;
+  if (!Number.isSafeInteger(at)) return null;
   return { callsId, handle, session, mark: mark as Mark, start: at };
 }
 

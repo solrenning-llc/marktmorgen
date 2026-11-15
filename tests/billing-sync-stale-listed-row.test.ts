@@ -41,6 +41,8 @@ let listed: Row = row("active");
 let detail: Row = row("active");
 /** Runs once, while Stripe is answering the list: the store changes after the page was read. */
 let duringList: (() => Promise<void>) | null = null;
+/** Runs once, while Stripe is answering the fresh read of the one subscription: the store changes after that read. */
+let duringDetail: (() => Promise<void>) | null = null;
 const calls: string[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -53,12 +55,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (change) await change();
     return Response.json(page);
   }
-  if (url.pathname === `/v1/subscriptions/${id}`) return Response.json(detail);
+  if (url.pathname === `/v1/subscriptions/${id}`) {
+    const answer = detail;
+    const change = duringDetail;
+    duringDetail = null;
+    if (change) await change();
+    return Response.json(answer);
+  }
   throw new Error(`unexpected provider path in synthetic billing sync: ${url.pathname}`);
 }) as typeof fetch;
 
 async function setup(tier: "creator" | "pro" | "scale" = "pro") {
-  redis.clear(); calls.length = 0; duringList = null;
+  redis.clear(); calls.length = 0; duringList = null; duringDetail = null;
   await claimHandle(owner, handle, "Synthetic stale row", "");
   await ensureStatsId(owner);
   await setSubscription(owner, { customerId: customer, subscriptionId: id, active: true, tier, cycle: "month", period });
@@ -95,6 +103,23 @@ async function main() {
     await syncSubscriptions(Date.now() + 10_000);
     const after = (await storeForEmail(owner))!;
     is("the store keeps the plan it now pays for", [after.subscriptionActive, after.tier], [true, "scale"]);
+  }
+
+  part("A plan ended while Stripe answers the fresh read is not given back by that read (Codex U's MÉDIO, Claude 6's probe)");
+  {
+    await setup("pro");
+    listed = row("active", "scale");
+    detail = row("active", "scale");
+    let endedAt = "";
+    duringDetail = async () => {
+      // The money-back refund or the cancel button ends the plan after Stripe read the subscription, before the sync writes.
+      await setSubscription(owner, { active: false, period: null });
+      endedAt = (await storeForEmail(owner))!.planEndedAt;
+    };
+    await syncSubscriptions(Date.now() + 10_000);
+    const after = (await storeForEmail(owner))!;
+    is("the plan ended meanwhile stays ended", after.subscriptionActive, false);
+    is("its closing clock is not restarted", [after.planEndedAt !== "", after.planEndedAt === endedAt], [true, true]);
   }
 
   part("A fresh read Stripe cannot give changes nothing");

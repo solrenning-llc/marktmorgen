@@ -555,7 +555,9 @@ async function main(): Promise<void> {
     // #3539 (takedown-held-links, C6-92): its storage line for links held after a copyright notice, with main's #4542
     // at the merge of main of 15 November 2026, recomputed from the model: Studio's monthly month keeps a cent less,
     // 313.82; Store, Scale and the yearly figures are as main has them. Still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.26"]);
+    // Merge of main into #3539 (15 November 2026, second pass): main's latest model and this PR's held-links storage
+    // line together cost Scale's monthly month one cent more: 703.25 where 703.26 was; still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.25 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.25"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's

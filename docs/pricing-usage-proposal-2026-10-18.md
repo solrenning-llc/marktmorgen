@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $118.00 | $1,209.20 | $69 / $690 |
-| Studio | $173.90 | $1,846.28 | $449 / $4,490 |
-| Scale | $270.53 | $2,965.85 | $999 / $9,990 |
+| Store | $118.00 | $1,209.30 | $69 / $690 |
+| Studio | $173.90 | $1,846.40 | $449 / $4,490 |
+| Scale | $270.53 | $2,965.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -66,10 +66,10 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $349 / $3,490 | 4.1% | 60.40% | 60.02% | $210.81 | 2.85 |
+| $349 / $3,490 | 4.1% | 60.40% | 60.02% | $210.80 | 2.85 |
 | $399 / $3,990 **(recommended)** | 11.0% | 60.40% | 60.02% | $241.03 | 2.49 |
 | $499 / $4,990 | 23.7% | 60.42% | 60.03% | $301.52 | 1.99 |
-| $999 / $9,990 | 89.0% | 60.41% | 60.01% | $603.57 | 0.99 |
+| $999 / $9,990 | 89.0% | 60.41% | 60.01% | $603.56 | 0.99 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
 

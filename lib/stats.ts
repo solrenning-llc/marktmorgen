@@ -959,6 +959,11 @@ export type SalesStats = {
   /** Who bought, for each window, and the biggest buyers of the 90 days (buyersFrom; added 12 October 2026). */
   buyers?: BuyerNumbers;
   buyerChannels?: BuyerChannels;
+  /**
+   * The refunds alone were read in full and each was matched to a sale of this store (#4726): the refund counts of
+   * refundsIn are the whole count, so an empty list is 0 refunds. False or absent: they are not known, never 0.
+   */
+  refundsComplete?: boolean;
   /** All receipts, renewals and refunds were read, and each refund was matched to this store. */
   cashflowComplete?: boolean;
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
@@ -1886,8 +1891,9 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
     );
   }
   out.paymentsComplete = !partial && (!store.stripeAccountId || Boolean(renewals && !renewals.partial));
-  out.cashflowComplete = out.paymentsComplete && !readPartial && refundRead !== null && !refundRead.partial &&
+  out.refundsComplete = refundRead !== null && !refundRead.partial && Boolean(out.refundsIn) &&
     !(out.refundsIn?.d90 ?? []).some((r) => r.source === UNRECORDED);
+  out.cashflowComplete = out.paymentsComplete && !readPartial && out.refundsComplete;
   out.levers = measureSalesLevers(read,store.currency,readPartial,now);
   out.hours = hoursOfWeek(own.filter((sale) => !sale.upsell));
   out.discounts = {
@@ -2244,6 +2250,8 @@ export type StatsData = {
   /** Who bought, for each window (SalesStats.buyers): counts and money only, no address. */
   buyers?: Record<"d7" | "d30" | "d90", BuyersWindow> | null;
   buyerChannels?: BuyerChannels | null;
+  /** The refunds were read in full (SalesStats.refundsComplete); absent on a copy from before #4726, so not known. */
+  refundsComplete?: boolean;
   cashflowComplete?: boolean;
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
@@ -2520,6 +2528,7 @@ export function studioStats(
     refundDays: sales?.refundDays ?? null,
     buyers: sales?.buyers ? { d7: sales.buyers.d7, d30: sales.buyers.d30, d90: sales.buyers.d90 } : null,
     buyerChannels: sales?.buyerChannels ?? null,
+    refundsComplete: sales?.refundsComplete ?? false,
     cashflowComplete: sales?.cashflowComplete ?? false,
     paymentsComplete: sales?.paymentsComplete,
     discounts: sales?.discounts ?? null,

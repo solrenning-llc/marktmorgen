@@ -23,6 +23,8 @@ const data = (visitors: number, checkouts: number, sales: number, refunds: numbe
     partial: false,
     totals: { d90: { visitors, views: visitors * 2, checkouts, sales, cents: sales * 2000 } },
     refunds: { d7: [], d30: [], d90: [{ source: "", refunds, cents: refunds * 2000 }] },
+    // The refunds read in full (#4726): only then do they give a rate.
+    refundsComplete: true,
     buyers: { d90: { buyers, orders: sales, cents: sales * 2000, returning, repeat: 0 } },
     ...extra,
   }) as unknown as StatsData;

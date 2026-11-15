@@ -77,7 +77,9 @@ export function sampleFrom(data: StatsData): Sample | null {
   if (!band) return null;
   const sample: Sample = { band, converted: rate(Math.min(t.sales, t.visitors), t.visitors) };
   if (t.checkouts >= MIN_CHECKOUTS) sample.paid = rate(Math.min(t.sales, t.checkouts), t.checkouts);
-  const refunds = data.refunds ? data.refunds.d90.reduce((sum, r) => sum + r.refunds, 0) : null;
+  // Only a refund reading known complete gives a rate (#4726): a partial one, or a studio copy from before the
+  // coverage was carried, has no refund rate, never 0% (rule 24). The other rates stay.
+  const refunds = data.refunds && data.refundsComplete === true ? data.refunds.d90.reduce((sum, r) => sum + r.refunds, 0) : null;
   if (refunds !== null && t.sales >= MIN_SALES) sample.refunded = rate(Math.min(refunds, t.sales), t.sales);
   const buyers = data.buyers?.d90;
   if (buyers && buyers.buyers >= MIN_BUYERS) sample.returning = rate(Math.min(buyers.returning, buyers.buyers), buyers.buyers);

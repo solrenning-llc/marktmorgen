@@ -412,10 +412,15 @@ export function ledgerMonthOf(window: AllowanceWindow): string {
  * its start: a counter made ahead for a window worked out before the period
  * that holds it was known (a scheduled email's hold) never lapses while that
  * month still runs, which would open a second allowance in it, and a give-back
- * (lib/store-allowance.ts, giveAllowanceIn) still finds it (C3-112).
+ * (lib/store-allowance.ts, giveAllowanceIn) still finds it (C3-112). Since
+ * Claude 6's review of #4561, twice that: the last month of an anchor in a
+ * period that does not renew runs on to the period's end (throughAnchor), less
+ * than a month after its own end, and its counter, made before that stretch was
+ * known, must outlive it, or the next take makes a fresh one under the same id.
  */
+export const BILLING_COUNTER_KEEP_DAYS = 2 * LONGEST_WINDOW_DAYS;
 export function keepSecondsFor(window: AllowanceWindow, now = Date.now()): number {
-  const until = window.billing ? Math.max(window.end, window.start + LONGEST_WINDOW_DAYS * 86_400_000) : window.end;
+  const until = window.billing ? Math.max(window.end, window.start + BILLING_COUNTER_KEEP_DAYS * 86_400_000) : window.end;
   return Math.max(86_400, Math.ceil((until - now) / 1000) + 86_400);
 }
 

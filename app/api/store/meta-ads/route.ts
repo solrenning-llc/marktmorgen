@@ -1,7 +1,8 @@
 import type { NextRequest } from "next/server";
 import { guardStoreWrite } from "@/lib/store-request";
 import { chooseAccount, isMetaConfigured, metaView, readMetaSpend } from "@/lib/meta-ads";
-import { readSpends } from "@/lib/ad-spend";
+import { readSpendLines } from "@/lib/ad-spend";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { costsPaused } from "@/lib/plan-standing";
 
 /**
@@ -21,9 +22,11 @@ export async function POST(request: NextRequest) {
     if (!(await chooseAccount(store.statsId, body.id))) return Response.json({ ok: false, error: "account" }, { status: 400 });
     // While the plan's costs are paused (232 [CA1] 4b3) the choice is saved and its read waits: readMetaSpend answers "paused".
     await readMetaSpend(store.statsId, store.currency).catch(() => "error");
-    const [view, spends] = await Promise.all([metaView(store.statsId, store.currency), readSpends(store.statsId)]);
-    return Response.json({ ok: true, meta: view ? { ...view, readPaused: costsPaused(store) } : view, spends }, { headers: { "Cache-Control": "no-store" } });
+    const [view, read] = await Promise.all([metaView(store.statsId, store.currency), readSpendLines(store.statsId)]);
+    // Meta's lines that cannot be read just now are said to be unread (spendsUnread), never answered as none.
+    return Response.json({ ok: true, meta: view ? { ...view, readPaused: costsPaused(store) } : view, spends: read.spends, spendsUnread: read.metaUnread }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
+    if (error instanceof UnknownReplyError) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     console.error("choosing the Meta ad account failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   }

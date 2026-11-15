@@ -4695,9 +4695,8 @@ async function countUnconfirmed(counts: Partial<Record<UnconfirmedCount, number>
 export async function unconfirmedMonth(month: string): Promise<Record<UnconfirmedCount, number> | null> {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month) || !isRedisConfigured()) return null;
   try {
-    const read = repliesFor(await redisPipeline([["HGETALL", unconfirmedMonthKey(month)]]), 1);
-    if (!read) return null;
-    const held = new Map(pairs(read[0]));
+    // Read exactly (hashPairsExact): a reply missing or of another shape throws and reads as null, never as zero counts.
+    const held = new Map(hashPairsExact(await redisPipeline([["HGETALL", unconfirmedMonthKey(month)]]), "the month's unconfirmed counts"));
     const out = {} as Record<UnconfirmedCount, number>;
     for (const name of UNCONFIRMED_COUNTS) {
       const raw = held.get(name);

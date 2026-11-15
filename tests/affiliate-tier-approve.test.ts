@@ -122,6 +122,10 @@ async function main(): Promise<void> {
   const [fields] = (await redis.pipeline([["HGETALL", `nl:aff:unc:month:${THIS_MONTH}`]])) as [string[]];
   is("only the five names and their numbers are kept: no store, no person", (fields ?? []).filter((_, i) => i % 2 === 0).sort(), ["approved", "decided", "reads", "waited"]);
   is("a month that is not one reads nothing", await monthOf("2026-13-01"), null);
+  const realPipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async () => [["waited", "3", "decided"]]) as typeof redis.pipeline;
+  is("a count list cut short reads as not known (null), never as counts with zeros", await monthOf(THIS_MONTH), null);
+  redis.pipeline = realPipeline;
 
   part("S1: what the studio and the affiliate see, in plain English");
   const root = process.cwd();

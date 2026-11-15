@@ -191,6 +191,14 @@ export async function snapshotState(store: Store, id: string): Promise<SnapshotS
     const counts = [wholeText(meta[0]), countOf(replies[1]), wholeText(replies[2]), wholeText(replies[3])];
     if (kept === undefined || short === undefined || counts.some((n) => n === null)) return null;
     const [when, bytes, triedAt, count] = counts as number[];
+    // No book is a book with none of its three fields and no part for this affiliate; a book kept says when it was
+    // worked out and both marks, each "0" or "1". Anything else (a mark missing or unknown beside a time, a time
+    // missing beside a mark or a part) is unknown, never "not kept" or "a day", so no read is paid for on it (#4741).
+    if (meta[0] === null) {
+      if (kept !== null || short !== null || bytes !== 0) return null;
+    } else if (when === 0 || (kept !== "0" && kept !== "1") || (short !== "0" && short !== "1")) {
+      return null;
+    }
     return { at: when, kept: kept === "1", freshFor: short === "1" ? BOOK_SHORT_SECONDS : BOOK_FRESH_SECONDS, sliceBytes: bytes, triedAt, tries: count };
   } catch {
     return null;

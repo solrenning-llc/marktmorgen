@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
-import { type Contact, UNSUB_TOKEN, leadsKey, mailable, readUnsubToken } from "@/lib/contacts";
+import { UNSUB_TOKEN, leadsKey, mailable, readUnsubToken, takeBackClicks } from "@/lib/contacts";
 
 /** How long a used link is remembered after the last one, in days. */
 export const CLICK_DAYS = 90;
@@ -110,16 +110,12 @@ export async function stopCounting(token: string): Promise<boolean> {
   const found = await readUnsubToken(token);
   if (!found) return false;
   const { listId, email, contact } = found;
-  const commands: (string | number)[][] = [
+  await redisPipeline([
     ["DEL", usedKey(listId, email)],
     ["DEL", keyIndex(linkKeyOf(token))],
-  ];
-  if (contact.clicks) {
-    const { clicks: _was, ...kept } = contact;
-    void _was;
-    commands.push(["HSET", leadsKey(listId), email, JSON.stringify(kept satisfies Contact)]);
-  }
-  await redisPipeline(commands);
+  ]);
+  // Written only over the row as read (lib/contacts.ts): an unsubscribe or a deletion in between is never undone.
+  if (contact.clicks) await takeBackClicks(listId, email);
   return true;
 }
 

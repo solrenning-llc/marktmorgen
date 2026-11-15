@@ -52,7 +52,7 @@ import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
 import { deleteFile } from "@/lib/file-store";
-import { noteTaskUpload } from "@/lib/assignment";
+import { isUnreadSubmission, noteTaskUpload, submissionsOf } from "@/lib/assignment";
 import { type ErasedPart, type ErasureBy, type ErasureScope, type ErasureSize, erasureUnits } from "@/lib/erasure-rules";
 import { idsOfKind } from "@/lib/catalog";
 import { dealCount } from "@/lib/crm";
@@ -145,6 +145,12 @@ export const ERASERS: Eraser[] = [
     run: async (s, files) => {
       let records = 0;
       for (const c of s.courses) {
+        // The files handed in are kept for a repeat before their records go (#4808): once deleted, nothing else leads
+        // to them. Read exactly first; a record that does not read is taken from the assignment's files hash by
+        // forgetTasksPerson itself, and kept below with the rest. Not kept: nothing is deleted and this part fails.
+        const subs = await submissionsOf(c.courseId, c.lessonIds.map((lessonId) => ({ lessonId, who: s.learner })));
+        const paths = subs.flatMap((sub) => (sub && !isUnreadSubmission(sub) && sub.file ? [sub.file.path] : []));
+        if (!(await keepFiles(s.listId as string, s.email, paths))) throw new Error("the paths of a student's files could not be kept before their records are deleted");
         const done = await forgetTasksPerson(c.courseId, c.lessonIds, s.learner, storeKey(s.store));
         records += done.records;
         files.push(...done.files);
@@ -280,6 +286,25 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
 
 /** The part an erasure names when the person's files could be neither deleted nor queued, or their kept paths read. */
 const FILES_PART = "lib/person-erasure.ts#files";
+/**
+ * How long the paths of a person's files not yet deleted are kept for a repeat (#4808): a person's own deletion is
+ * answered within a month, and a file queued for the daily cleanup goes within a day. Gone by itself past that.
+ */
+export const ERASE_FILES_KEEP_SECONDS = 30 * 86_400;
+/** Where they are kept: under the person's deletion print for the store, never the address. */
+const filesKeyOf = (listId: string, email: string) => `nl:erase:files:${listId}:${suppressionPrint(listId, email)}`;
+
+/**
+ * Keeps these paths for a repeat erasure, confirmed exactly (an SADD of at most their count and its EXPIRE set), before
+ * anything that leads to them is deleted (#4808): false when that is not confirmed, and then nothing is deleted.
+ */
+async function keepFiles(listId: string, email: string, paths: string[]): Promise<boolean> {
+  if (!paths.length) return true;
+  const key = filesKeyOf(listId, email);
+  const replies = await redisPipeline([["SADD", key, ...paths], ["EXPIRE", key, ERASE_FILES_KEEP_SECONDS]]).then((r) => repliesFor(r, 2), () => null);
+  const added = replies ? countOf(replies[0]) : null;
+  return added !== null && added <= paths.length && replies?.[1] === 1;
+}
 
 /**
  * Deletes one person from one store. `by` says which door: the team, with
@@ -343,17 +368,16 @@ export async function erasePerson(
   // job that deletes uploads nobody kept (app/api/cron/courses), each path on its own and a failed one tried again at
   // once. Any path neither deleted nor queued, or kept paths that cannot be read, say the erasure is incomplete (never
   // thrown, so the team's log says "not complete"), and the paths stay kept for the next try.
-  const pendingKey = `nl:erase:files:${scope.listId as string}:${suppressionPrint(scope.listId as string, email)}`;
+  const pendingKey = filesKeyOf(scope.listId as string, email);
   const keptReply = await redisPipeline([["SMEMBERS", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
   const kept = keptReply ? stringList(keptReply[0]) : null;
   if (!kept) failed.push(FILES_PART);
   const unique = [...new Set([...files, ...(kept ?? [])])];
   if (unique.length) {
-    if (files.length) {
-      const noted = await redisPipeline([["SADD", pendingKey, ...files]]).then((replies) => repliesFor(replies, 1), () => null);
-      const added = noted ? countOf(noted[0]) : null;
-      if (added === null || added > files.length) console.error("deleting a person: their files' paths could not be kept for a repeat");
-    }
+    // Paths found this run and not kept yet (a review's photo, a file a record did not say): kept before the file store
+    // is asked, so a repeat finds them if neither the deletion nor the queue takes them.
+    const fresh = files.filter((path) => !(kept ?? []).includes(path));
+    const keptNow = await keepFiles(scope.listId as string, email, [...new Set(fresh)]);
     let lost = 0;
     await deleteFile(unique).catch(async (error: unknown) => {
       console.error("deleting a person: their files go with the daily job instead", error);
@@ -364,13 +388,14 @@ export async function erasePerson(
       lost = again.filter((_, i) => second[i].status === "rejected").length;
     });
     if (lost) {
-      console.error(`deleting a person: ${lost} of their files could be neither deleted nor queued for deletion; kept for a repeat`);
+      console.error(`deleting a person: ${lost} of their files could be neither deleted nor queued for deletion${keptNow ? "; kept for a repeat" : ""}`);
       if (!failed.includes(FILES_PART)) failed.push(FILES_PART);
-    } else if (kept) {
-      // Every path deleted or queued: the kept ones are let go, exactly.
-      const gone = await redisPipeline([["DEL", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
+    } else {
+      // Every path deleted or queued: only those are let go (SREM), so a deletion of the same person running at the
+      // same time keeps what it added. Read exactly.
+      const gone = await redisPipeline([["SREM", pendingKey, ...unique]]).then((replies) => repliesFor(replies, 1), () => null);
       const count = gone ? countOf(gone[0]) : null;
-      if (count === null || count > 1) failed.push(FILES_PART);
+      if ((count === null || count > unique.length) && !failed.includes(FILES_PART)) failed.push(FILES_PART);
     }
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);

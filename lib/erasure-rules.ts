@@ -69,15 +69,19 @@ export type ErasureSize = {
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them.
+ * And (since #4808, 15 November 2026) the paths of the person's files kept for a repeat: one SMEMBERS, an SADD and an
+ * EXPIRE, and an SREM, four more: 554.
  */
-export const ERASE_FIXED_COMMANDS = 550;
+export const ERASE_FIXED_COMMANDS = 554;
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
 export const ERASE_FIXED_BYTES = 310_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
-  courses: [14, 70_000],
-  lessons: [1, 800],
+  // Since #4808 a course's handed-in files are kept for a repeat before their records go: each lesson's submission
+  // read once more (one command, its record's bytes again) and each course's SADD and EXPIRE.
+  courses: [16, 70_000],
+  lessons: [2, 1_600],
   deals: [0, 1_000],
   conversations: [0, 700],
   dmConversations: [3, 300],

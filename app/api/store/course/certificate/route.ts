@@ -71,12 +71,15 @@ export async function POST(request: NextRequest) {
       who,
       name,
       room: store,
+      listId: store.listId,
     });
   } catch (error) {
     // No room in the store's data room: no certificate was written (lib/store-data.ts).
     if (error instanceof DataRoomError) return new Response(DATA_FULL_BUYER_WORDS, { status: 409, headers: { "Cache-Control": "no-store" } });
     throw error;
   }
+  // Deleted from the store while this was on its way (#4783): nothing was issued, and the course page is theirs no more.
+  if (!issued.ok && issued.reason === "gone") return away(base);
   if (!issued.ok) return away(`${base}?cert=name#certificate`);
   return away(`${origin}/@${store.handle}/certificate/${issued.certificate.id}${issued.fresh ? "?issued=1" : ""}`);
 }

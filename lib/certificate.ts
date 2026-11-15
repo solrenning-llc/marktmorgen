@@ -31,6 +31,8 @@ import { type Course, lessonsInOrder } from "@/lib/course";
 import { requiredQuizLessons } from "@/lib/quiz";
 import { emailKey } from "@/lib/learn";
 import { randomLetters } from "@/lib/random-letters";
+import { HDEL_IF_EQUAL } from "@/lib/redis-reply";
+import { suppressedAmong } from "@/lib/suppression";
 
 export const CERT_ID_PATTERN = /^[a-z0-9]{16}$/;
 export const MIN_CERT_NAME = 2;
@@ -264,7 +266,7 @@ return redis.call('HDEL', KEYS[1], ARGV[1])`;
 /** How many times one press looks at the slot again when it changed between two reads. */
 const CLAIM_TRIES = 3;
 
-export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" };
+export type IssueResult = { ok: true; certificate: Certificate; fresh: boolean } | { ok: false; reason: "name" | "gone" };
 
 /**
  * Issues the certificate, or hands back the one already issued.
@@ -285,6 +287,8 @@ export async function issueCertificate(input: {
   name: unknown;
   /** The store whose data room it takes from (DataRoomError when it does not fit). */
   room: DataStore;
+  /** The store's list id, whose deletion prints say the student was erased (lib/suppression.ts); none, none read. */
+  listId?: string | null;
 }): Promise<IssueResult> {
   const name = cleanName(input.name);
   if (!name) return { ok: false, reason: "name" };
@@ -341,7 +345,43 @@ export async function issueCertificate(input: {
     return { ok: true, certificate: existing, fresh: false };
   }
   await redisPipeline([["SADD", allKey(input.course.id), id], ["SADD", byKey(input.course.id, input.who), id]]);
+  // The student's deletion print read after every write (#4783): an erasure writes it before it deletes anything, so
+  // one that completed while this press was past its checks found nothing yet, and what was just written would hold
+  // their name and address with the erasure said done. Found, or unknown, it is all taken back and nothing is issued
+  // (unknown throws, as a press whose writes could not be confirmed does). An erasure after this read finds the
+  // certificate through its lists and deletes it itself.
+  if (input.listId) {
+    let erased: boolean;
+    try {
+      erased = (await suppressedAmong(input.listId, [input.email])).size > 0;
+    } catch (error) {
+      await takeBackIssued(input.course.id, input.who, id, input.room, bytes);
+      throw error;
+    }
+    if (erased) {
+      await takeBackIssued(input.course.id, input.who, id, input.room, bytes);
+      return { ok: false, reason: "gone" };
+    }
+  }
   return { ok: true, certificate, fresh: true };
+}
+
+/**
+ * Takes back what one press wrote (#4783): its record, its places in the course's lists, and the student's slot only
+ * while it still names this record (HDEL_IF_EQUAL), so a later press's slot is kept. The record's room comes back once
+ * its deletion is confirmed. Each reply read exactly; any other throws, and an erasure run again deletes the rest
+ * through the lists it can still find.
+ */
+async function takeBackIssued(courseId: string, who: string, id: string, room: DataStore, bytes: number): Promise<void> {
+  const what = "a certificate taken back from a student erased meanwhile";
+  const [record, all, mine, slot] = exactReplies(await redisPipeline([
+    ["DEL", certKey(id)],
+    ["SREM", allKey(courseId), id],
+    ["SREM", byKey(courseId, who), id],
+    ["EVAL", HDEL_IF_EQUAL, 1, indexKey(courseId), who, id],
+  ]), 4, what);
+  for (const n of [record, all, mine, slot]) if (replyCount(n, what) > 1) throw new UnknownReply(what);
+  if (record === 1) await giveData(room, [{ slot: CERTS_SLOT(courseId), bytes }]);
 }
 
 /**

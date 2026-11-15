@@ -369,7 +369,17 @@ async function stopLink(store: Store, email: string): Promise<string | null> {
   // is taken back and null says so; the batch skips this person and sends to the rest, keeping the email reserved for
   // them spent (so the month's emails bound this path too). An erasure after this read finds the note and deletes the
   // record itself.
-  if (notes.length && store.statsId && !(await stillNoted(store.statsId, email, stopKey(token)))) {
+  let stillThere = true;
+  try {
+    stillThere = !notes.length || !store.statsId || (await stillNoted(store.statsId, email, stopKey(token)));
+  } catch (error) {
+    // Not known whether an erasure ran in between (7yUYU): the grant just written is taken back before this throws, so
+    // the batch that waits keeps nothing holding the address; the next run writes it again (the same token) or finds
+    // the person erased.
+    await orderWrite(store, [["DEL", stopKey(token)]]).catch(() => undefined);
+    throw error;
+  }
+  if (!stillThere) {
     await orderWrite(store, [["DEL", stopKey(token)]]);
     return null;
   }

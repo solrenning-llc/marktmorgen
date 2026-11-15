@@ -555,7 +555,7 @@ async function main(): Promise<void> {
     is("11: Store, Studio and Scale keep 45.12, 313.48 and 702.76 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.48", "702.76"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    // The same line (#4781): Studio's yearly month keeps 258.36 where 258.71 was, Scale's 579.50 where 579.99 was.
+    // The same line (#4781): Studio's yearly month keeps 258.35 where 258.71 was, Scale's 579.48 where 579.99 was.
     is("11: and 37.06, 258.35 and 579.48 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.35", "579.48"]);
   } finally {
     Date.now = realNow;

@@ -972,7 +972,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         intro: "Stan puts advertising pixels on its $99 plan, according to its pricing page, read on September 20, 2026.",
         items: [
           { icon: "target", title: "Meta, Google, TikTok and Pinterest", body: "Paste the pixel's ID. Your pages report every view, every checkout started, every lead and every purchase with its amount." },
-          { icon: "shield", title: "Asked first, where the law says so", body: "Visitors in the European Economic Area, the UK, Switzerland and Brazil are asked in plain words, and nothing loads unless they say yes." },
+          { icon: "shield", title: "Asked first, where the law says so", body: "Visitors in the European Economic Area, the UK, Switzerland, Brazil and Canada are asked in plain words, and nothing loads unless they say yes." },
           { icon: "eye", title: "Global Privacy Control respected", body: "Everywhere else, a browser that sends it gets no pixels." },
         ],
       },
@@ -1043,7 +1043,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "What it does not do yet",
         items: [
           "Renewals — memberships renewed and later plan payments — are shown apart from revenue, for up to the last 90 days, and by channel only for memberships sold from October 11, 2026; all of them are in your Stripe dashboard.",
-          "A channel is remembered in the buyer's browser, so one who changes device, clears cookies or is in a place where the law asks first (the EU, the UK, Switzerland, Brazil) is credited only by the tags on the page they bought from.",
+          "A channel is remembered in the buyer's browser, so one who changes device, clears cookies or is in a place where the law asks first (the EU, the UK, Switzerland, Brazil, Canada) is credited only by the tags on the page they bought from.",
           "Ad spend is what you type in; it is not read from the ad networks. Profit there is before Stripe's fee and leaves out renewals that came later.",
           "How far your pages are read is measured on one visitor in eight, chosen at random, to keep it inside what a visit costs; shares are shown once 30 are measured.",
           "Purchases are sent from the server to Meta and TikTok; Google and Pinterest are told by their pixel alone. Refunds are read for the last 90 days, and one is put under a channel when the sale it gave back is from the last 180.",
@@ -1459,7 +1459,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 18: what someone starting out asks, answered by the code (lib/affiliate-faq.ts).
           ...affiliateBeginnerQuestions(),
           { q: "Does Marktmorgen take a cut of affiliate sales?", a: feeWords().fromAffiliateSale },
-          { q: "How is a sale tied to an affiliate?", a: "Their link is your store's address with their code on the end. Following it leaves a cookie on your store's own address with the code and the time of the click, and a purchase inside your window is credited to them. Visitors in the European Economic Area, the United Kingdom, Switzerland and Brazil, whose rules require consent first, are asked in one line on the page, and the cookie is set when they allow it." },
+          { q: "How is a sale tied to an affiliate?", a: "Their link is your store's address with their code on the end. Following it leaves a cookie on your store's own address with the code and the time of the click, and a purchase inside your window is credited to them. Visitors in the European Economic Area, the United Kingdom, Switzerland, Brazil and Canada, whose rules require consent first, are asked in one line on the page, and the cookie is set when they allow it." },
           { q: "What does someone need to join?", a: "An email address they can open. They apply on your store's affiliate page, confirm with the link we email, and you approve them in your studio. If you let buyers join without applying, a buyer presses Get my link on the thanks page or follows the link in their purchase email, and joins with the address they paid with. Anyone you declined or removed stays out." },
         ],
       },

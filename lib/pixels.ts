@@ -179,13 +179,16 @@ export function pixelNames(pixels: Pixels, and = "and"): string {
 /**
  * Where a visitor has to say yes before an ad pixel may run: the European
  * Economic Area, the United Kingdom and Switzerland, whose cookie rules ask for
- * consent first, and Brazil, whose regulator reads its law the same way for
- * advertising cookies. Everywhere else the pixels run unless the browser sends
- * Global Privacy Control, which is the visitor saying no in advance.
+ * consent first; Brazil, whose regulator reads its law the same way for
+ * advertising cookies; and Canada, because Quebec's Law 25 (s. 8.1) wants
+ * tracking off by default and the visitor's country header does not say the
+ * province (finding of 15 November 2026; the official text was not re-read that
+ * day). Everywhere else the pixels run unless the browser sends Global Privacy
+ * Control, which is the visitor saying no in advance.
  */
 export const CONSENT_COUNTRIES = new Set([
   "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU",
-  "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO", "GB", "CH", "BR",
+  "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO", "GB", "CH", "BR", "CA",
   // Parts of the EU with their own ISO 3166-1 code, which a visitor's country
   // header gives instead of FR or FI: French Guiana, Guadeloupe, Martinique,
   // Réunion, Mayotte, Saint Martin and the Åland Islands.

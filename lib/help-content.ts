@@ -660,7 +660,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         q: "Can I add my Meta, Google, TikTok or Pinterest pixel?",
         a: [
           `Yes, on the ${PLAN_AT.creator} plan. Paste the pixel ID in your studio and your store's pages tell that platform about every page view, every checkout started, every lead from a free product, and every purchase with its amount, so your ads can learn who buys.`,
-          "Those platforms set cookies, so visitors in the European Economic Area, the UK, Switzerland and Brazil, and anyone whose country we cannot tell, are asked first, in plain words, and nothing loads unless they say yes. Everywhere else the pixels load unless the visitor's browser sends Global Privacy Control. The ads and what they measure are yours: say in your own privacy notice that you use them.",
+          "Those platforms set cookies, so visitors in the European Economic Area, the UK, Switzerland, Brazil and Canada, and anyone whose country we cannot tell, are asked first, in plain words, and nothing loads unless they say yes. Everywhere else the pixels load unless the visitor's browser sends Global Privacy Control. The ads and what they measure are yours: say in your own privacy notice that you use them.",
         ],
       },
       {

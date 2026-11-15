@@ -270,7 +270,7 @@ export default function PrivacyPage() {
           the platform about page views, checkouts started, requests for free
           products and purchases with their amount, on the creator&apos;s behalf
           and under that platform&apos;s own privacy policy. Visitors in the
-          European Economic Area, the United Kingdom, Switzerland or Brazil,
+          European Economic Area, the United Kingdom, Switzerland, Brazil or Canada,
           or whose country we cannot tell, are asked first and nothing loads
           unless they agree; everywhere else the
           pixels load unless the browser sends Global Privacy Control. The
@@ -1012,7 +1012,7 @@ export default function PrivacyPage() {
           of the whole page, the same visitor keeps seeing the same one. For
           each test we count how many times each version was seen and how many
           checkouts were opened from it, and nothing about who. Visitors in the
-          European Economic Area, the United Kingdom, Switzerland or Brazil, or
+          European Economic Area, the United Kingdom, Switzerland, Brazil or Canada, or
           whose country we cannot tell, get no such cookie: they see the first
           version and are not counted.
         </p>
@@ -1031,7 +1031,7 @@ export default function PrivacyPage() {
           their channels brought the sale; renewals of a membership carry them
           too. It holds nothing else, identifies nobody, is sent to no other
           store, and we keep no copy. Visitors in the European Economic Area,
-          the United Kingdom, Switzerland or Brazil, or whose country we cannot
+          the United Kingdom, Switzerland, Brazil or Canada, or whose country we cannot
           tell, and anyone whose browser sends Global Privacy Control, get no
           such cookie: their purchase is credited only by the tags on the page
           they bought from.
@@ -1097,7 +1097,7 @@ export default function PrivacyPage() {
           own limits; it may expire sooner. A purchase counts for the affiliate only
           within the window the creator set, measured from whichever of those
           two clicks that creator credits. Visitors in the European Economic Area, the United
-          Kingdom, Switzerland or Brazil, or whose country we cannot tell, are
+          Kingdom, Switzerland, Brazil or Canada, or whose country we cannot tell, are
           asked first, because the rules there require consent: the cookie is
           set only if they allow it, and their answer is kept in their browser
           for that store. To count a click once per visitor per day we keep a

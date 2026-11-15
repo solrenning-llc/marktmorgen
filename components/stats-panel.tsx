@@ -1013,7 +1013,7 @@ export function StatsPanel({
             page it was bought from; without tags, under the last place the buyer came from in the {data.attributionDays ?? 30} days before — a link
             you shared, a site, or the Instagram or TikTok app — so somebody who found you on Instagram and came back later by
             typing your address is still counted under Instagram. Where the law asks visitors first (the EU, the UK,
-            Switzerland and Brazil), or a browser asks not to be followed, only the page&apos;s tags count.
+            Switzerland, Brazil and Canada), or a browser asks not to be followed, only the page&apos;s tags count.
             {withRenewalColumn ? " A renewal counts under the channel its membership or plan was sold through." : ""}
             {withRefundColumn ? " A refund counts under the channel of the sale it gave back, on the day it was given." : ""}
             {withDisputeColumn ? " A dispute counts under the channel of the sale it takes back, on the day it was opened, before Stripe's dispute fee." : ""}

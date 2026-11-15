@@ -263,8 +263,8 @@ export default function TermsPage() {
           you or they are requires, and following that platform&apos;s own
           terms for its business tools, which you accept with that platform.
           The Services do their part: where the law asks for consent first
-          (the European Economic Area, the United Kingdom, Switzerland and
-          Brazil, and any country we cannot tell) nothing is sent unless the
+          (the European Economic Area, the United Kingdom, Switzerland, Brazil and
+          Canada, and any country we cannot tell) nothing is sent unless the
           visitor agrees; a browser that sends Global Privacy Control is never
           sent; a link at the foot of your pages changes the choice; and an
           email address is sent only hashed. Do not use these tools for a

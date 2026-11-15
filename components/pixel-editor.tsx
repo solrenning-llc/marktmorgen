@@ -199,8 +199,8 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
               a checkout started. Reddit gets page visits, purchases and leads, and nothing when a checkout starts.
             </p>
             <p className="mt-2">
-              These platforms set cookies, so visitors in the EU, Iceland, Liechtenstein, Norway, the UK, Switzerland and
-              Brazil, and visitors whose country is not known, are asked first and nothing loads unless they say yes.
+              These platforms set cookies, so visitors in the EU, Iceland, Liechtenstein, Norway, the UK, Switzerland, Brazil and
+              Canada, and visitors whose country is not known, are asked first and nothing loads unless they say yes.
               Everywhere else the pixels load unless the visitor&apos;s browser sends a Global Privacy Control signal. The ads, and what you do with what they measure, are yours: say in your own privacy
               notice that you use them.
             </p>

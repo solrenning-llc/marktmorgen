@@ -115,15 +115,17 @@ export async function POST(request: NextRequest) {
       // Its webhooks (with the bodies sent, which can hold buyers' data) and its API keys: a failure is put in a
       // durable line that the daily closing job tries again, with a ceiling of tries, and counted for the owner's
       // report (lib/store-forget-retry.ts; review of #2556), never only a log line.
-      // The store assistant's notes too: an unconfirmed forgetting goes in the same line, never counted as done.
+      // The store assistant's notes and its phone-alert devices too (#4751): an unconfirmed forgetting goes in the same
+      // line, never counted as done.
       const forgetHooksAndKeys = async () => {
         await forgetStoreWebhooks(result.store.statsId);
         await revokeAllKeys(result.store.sid);
         await forgetMemory(result.store.statsId ?? null, result.store);
+        await forgetStorePhones(result.store.statsId);
       };
       await Promise.all([
         forgetStoreFiles(result.store).catch((error: unknown) => console.error("forgetting a deleted store's files failed", error)),
-        Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
+        Promise.all([forgetStoreSync(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {

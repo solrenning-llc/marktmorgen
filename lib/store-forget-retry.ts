@@ -1,5 +1,5 @@
 /**
- * A deleted store's webhooks, API keys and assistant notes whose forgetting failed (added
+ * A deleted store's webhooks, API keys, assistant notes and phone-alert devices whose forgetting failed (added
  * 5 November 2026, review of #2556, LEVE 3 of Reviewer 1): never left to a
  * log line. The store's delete (app/api/store/stores) puts it in line, and
  * the daily closing job (app/api/cron/closing) tries it again, at most
@@ -26,7 +26,8 @@
  * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
  * 4 × MAX_ENDPOINTS) and revokeAllKeys (4 + MAX_KEYS: the list read, each key's
  * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
- * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
+ * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026) and forgetStorePhones (one DEL of its two
+ * records, lib/phone-alerts.ts; #4751, 15 November 2026), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
  * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
@@ -37,13 +38,14 @@ import { LOG_SIZE, forgetStoreWebhooks } from "@/lib/webhooks";
 import { MAX_ENDPOINTS } from "@/lib/webhook-limits";
 import { MAX_KEYS, revokeAllKeys } from "@/lib/api-keys";
 import { MEMORY_FORGET_COMMANDS, forgetMemory } from "@/lib/assistant-memory-store";
+import { forgetStorePhones } from "@/lib/phone-alerts";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
 export const FORGET_TRIES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 4;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 1 + 4;
 /** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
 export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
@@ -100,6 +102,8 @@ const forgetBoth: ForgetWork = async (statsId, sid) => {
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
+  // Its phone-alert devices (the push addresses of its owner and team): an unknown reply throws, and the line goes again (#4751).
+  await forgetStorePhones(statsId);
 };
 
 /**

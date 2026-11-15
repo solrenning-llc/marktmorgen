@@ -26,6 +26,8 @@ const MESSAGES: Record<string, string> = {
   not_found: "That address is not on the team. Reload the page.",
   unsure: "We could not check the team's activity just now, so nothing was changed. Try again in a moment.",
   repeat: "They are off the team, but some of the API keys they made may still work. Press Remove again to finish.",
+  devices: "They are off the team, but their phone alerts could not all be removed yet. Press Remove again to finish.",
+  devices_self: "You are off the team, but your phone alerts could not all be removed yet. Ask the store owner to press Remove for your address to finish.",
   signed_out: "Your session ended. Log in again.",
   server_error: "Something went wrong on our side. Try again in a moment.",
 };

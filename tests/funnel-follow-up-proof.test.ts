@@ -7,6 +7,7 @@
  * spoke of a box that is not there. Now a form is the moment only when it offers the box; otherwise the sequence
  * follows a product, as for a funnel without a form.
  */
+import { readFileSync } from "node:fs";
 import { followUpMoment } from "@/lib/funnel-ai-rules";
 import { FUNNEL_TYPES, pagesOf } from "@/lib/funnel-types";
 import { done, is, part } from "./check";
@@ -23,6 +24,20 @@ part("A form that offers the box is still the moment");
 const quiz = FUNNEL_TYPES.find((type) => type.id === "quiz")!;
 const boxed = { ...quiz, slots: quiz.slots.map((slot) => (slot.kind === "page" && slot.form ? { ...slot, form: { ...slot.form, offerList: true } } : slot)) };
 is("with the box, the form starts the sequence", followUpMoment(boxed, {})?.trigger, "form");
+
+part("An application or a quiz funnel makes its form with the box, unchecked, so its follow-up can start");
+for (const id of ["application", "quiz"]) {
+  const type = FUNNEL_TYPES.find((t) => t.id === id)!;
+  const page = pagesOf(type).find((p) => p.form && p.blocks.includes("form"))!;
+  is(`${id}: its form offers the box`, page.form?.offerList, true);
+  is(`${id}: its follow-up starts from that form, for whoever checks the box and confirms`, followUpMoment(type, {}), { trigger: "form", slot: page.key });
+}
+const picker = readFileSync("components/funnel-type-picker.tsx", "utf8");
+is("the studio starts each form with its type's box, never forced off", /offerList: page\.form!\.offerList === true/.test(picker), true);
+is("an AI draft never turns the creator's box off", /offerList: Boolean\(current\[key\]\?\.offerList\)/.test(picker), true);
+is("a follow-up from a form whose box the creator turned off is not saved", /formDrafts\[aiDraft\.sequence\.formSlot\]\?\.offerList/.test(picker), true);
+const box = readFileSync("components/sales-blocks.tsx", "utf8");
+is("control: the box on the public form starts unchecked", /<input type="checkbox" name="consent" value="yes" disabled=\{ctx\.preview\} \/>/.test(box), true);
 
 part("A free product picked is still first");
 const magnet = FUNNEL_TYPES.find((type) => type.slots.some((slot) => slot.kind === "product" && slot.wants === "free"));

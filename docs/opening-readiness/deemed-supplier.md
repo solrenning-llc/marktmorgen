@@ -8,6 +8,7 @@ A rede desta sessão recusou, em 14/11/2026, todos os sites oficiais tentados: o
 
 - **Nenhuma linha das tabelas dos EUA (seção 4) nem de "other" (seção 5) foi conferida hoje em fonte oficial.** Os valores são o conhecimento do agente até junho de 2026 e estão marcados **"a conferir na fonte oficial (URL), data de leitura pendente"**. Não são prova. Não podem entrar em `lib/` antes da conferência, nem em `lib/us-sales-tax-nexus.ts`, cujos valores continuam `null`.
 - As linhas da UE e do Reino Unido remetem a fontes **já lidas em 13/11/2026** por outra sessão, com a data de cada uma (seção 3).
+- **Atualização de 15/11/2026.** Depois de o dono liberar domínios no ambiente, foram lidas as páginas da OFAC (seção 6) e as do Stripe ([stripe-platform.md](stripe-platform.md)). A página da CRA sobre economia digital (www.canada.ca) devolveu resposta vazia em duas tentativas em 15/11/2026, então o Canadá continua a conferir. Os sites dos estados americanos e dos outros países não foram liberados.
 - A seção 8 lista as URLs a ler. O coordenador lê essas páginas, publica os trechos com data no PR, e então este documento é completado e os valores errados são corrigidos.
 
 Pela política TX (AGENTS.md), vale a interpretação juridicamente correta conferida na fonte, não a que dá mais imposto. Custo desconhecido reprova e nunca vale zero. Todo custo fixo de cadastro e de declaração pertence 100% ao Marktmorgen (FX275).
@@ -183,18 +184,23 @@ O código aceita **um único** registro `other` com **um único** tratamento. O 
 
 ## 6. Países sancionados pelos EUA (OFAC): recusar compradores
 
-A meta do dono exclui só os países sancionados pelos EUA, pela lista oficial da OFAC. **A conferir na fonte oficial, data de leitura pendente:** https://ofac.treasury.gov/sanctions-programs-and-country-information.
+A meta do dono exclui só os países sancionados pelos EUA, pela lista oficial da OFAC.
 
-| País ou região | Programa da OFAC (a conferir) | Tratamento recomendado |
+**Fonte lida em 15/11/2026:** [OFAC, Sanctions Programs and Country Information](https://ofac.treasury.gov/sanctions-programs-and-country-information), sem data editorial na página, e a página de cada programa abaixo. A página geral diz: "The sanctions can be either comprehensive or selective". Ela lista 37 programas. Programas de país ou região: Afeganistão, Bálcãs, Belarus, Birmânia, Cuba, Hong Kong, Iraque, Irã, Líbano, Líbia, Mali, Nicarágua, Coreia do Norte, Rússia (dois programas), República Centro-Africana, República Democrática do Congo, Somália, Sudão do Sul, Sudão e Darfur, Ucrânia/Rússia, Venezuela, Iêmen, e o PAARSS, ligado a Assad. Os demais programas são temáticos (terrorismo, narcóticos, cibernético, Magnitsky e outros) e funcionam **por lista de pessoas**, não por país. **Não há mais programa "Syria Sanctions" na lista.**
+
+O que as páginas dos programas **não** dizem, nas partes extraídas: se cada programa proíbe vender produtos digitais a consumidores comuns no país. Isso está nos regulamentos do 31 CFR que cada página lista, ainda **a conferir**.
+
+| País ou região | O que a página da OFAC mostra (15/11/2026) | Tratamento recomendado |
 | --- | --- | --- |
-| Cuba | Embargo amplo (CACR, 31 CFR 515) | Recusar |
-| Irã | Embargo amplo (ITSR, 31 CFR 560) | Recusar |
-| Coreia do Norte | Embargo amplo (NKSR, 31 CFR 510) | Recusar |
-| Crimeia e as chamadas DNR e LNR (Ucrânia) | Embargo regional amplo (EO 14065 e EO 13685) | Recusar; também as demais regiões ocupadas que a OFAC venha a incluir |
-| Síria | O programa geral teria sido revogado pela EO 14312, de 30/06/2025, com efeito em 01/07/2025, e com sanções restantes a pessoas listadas | Recusar até conferir na OFAC que a venda de produtos digitais a consumidores sírios é permitida |
-| Rússia | Sem embargo geral, mas com proibição de exportar vários serviços (EO 14071) e sanções amplas; Visa e Mastercard suspenderam operações | Recomendação segura: recusar, e o dono decide |
-| Belarus | Sanções por lista e setoriais | Recomendação segura: recusar, e o dono decide |
-| Venezuela | Sanções sobre o governo e setores | Vender a consumidores só depois de conferir; recusar órgãos do governo |
+| Cuba | Página do programa cita o Cuban Assets Control Regulations e também "Cuba Sanctions Regulations". Ordem nova: "14404 - Imposing Sanctions on Those Responsible for Repression in Cuba and for Threats to United States National Security and Foreign Policy (May 01, 2026)", com determinação para setores da economia cubana "(Effective November 05, 2026)" | Recusar (embargo; texto do 31 CFR 515 a conferir) |
+| Irã | Página do programa cita o Iranian Transactions and Sanctions Regulations, com determinação "Automotive and Rail Sectors of the Iranian Economy (Effective October 01, 2026)" | Recusar (31 CFR 560 a conferir) |
+| Coreia do Norte | Página do programa cita o North Korea Sanctions Regulations | Recusar (31 CFR 510 a conferir) |
+| Crimeia e as chamadas DNR e LNR (Ucrânia) | Página Ukraine-/Russia-related cita a EO 14065 ("Blocking Property Of Certain Persons And Prohibiting Certain Transactions With Respect To Continued Russian Efforts To Undermine The Sovereignty And Territorial Integrity Of Ukraine", 21/02/2022) e um aviso sobre a "Crimea Region of Ukraine" | Recusar compradores dessas regiões. Como o país do IP e o de cobrança dizem "Ucrânia", a recusa por região precisa de prova de lugar mais fina que a do #3681 (a conferir) |
+| Síria | [PAARSS](https://ofac.treasury.gov/sanctions-programs-and-country-information/paarss): "CHANGES TO OFAC'S SYRIA SANCTIONS PROGRAM AS OF JUNE 30, 2025 and AUGUST 24, 2026 OFAC no longer maintains comprehensive sanctions on Syria or blocking sanctions on the Government of Syria." "Effective July 1, 2025, E.O. 14312 revoked the following six Executive Orders that formed the foundation of the Syria sanctions program". Restam sanções por lista sobre Assad, associados e outros | **Vender**, pela meta do dono, porque não há mais sanção ampla; triagem da lista SDN como em todo país |
+| Rússia | Programas Russian Harmful Foreign Activities e Russia-related, com a EO 14024 e determinações da EO 14071 (por exemplo, "Prohibition on Petroleum Services", vigente desde 27/02/2025). Não é embargo amplo de país | Recomendação segura: recusar, até conferir se as determinações da EO 14071 alcançam o serviço vendido; o dono decide |
+| Belarus | Página cita o Belarus Sanctions Regulations, por lista e setorial | Vender, com triagem; o dono decide se prefere recusar |
+| Venezuela | Página cita o Venezuela Sanctions Regulations; licença geral "Venezuela General License 25 - Exportation of Certain Services, Software, Hardware, and Technology Incident to the Exchange of Communications over the Internet Authorized (August 05, 2019)" | Vender a consumidores, com triagem; recusar órgãos do governo da Venezuela (conferir no regulamento) |
+| Demais programas de país (Afeganistão, Bálcãs, Birmânia, Hong Kong, Iraque, Líbano, Líbia, Mali, Nicarágua, República Centro-Africana, RD do Congo, Somália, Sudão do Sul, Sudão, Iêmen) | Sanções por lista ou setoriais, pelo título de cada programa; não foram abertas em 15/11/2026 | Vender, com triagem; abrir cada página antes da abertura |
 | Pessoas listadas (lista SDN), em qualquer país | Listas da OFAC | O Stripe faz triagem; conferir o que a triagem do Stripe cobre e se o Marktmorgen precisa de triagem própria |
 
 Isso usa a regra de recusa por país de #3681 (`refuse-consumers` por país, dentro de `other`) e as duas provas de lugar (país do IP e país de cobrança). A recusa é sempre antes de qualquer cobrança.
@@ -210,7 +216,8 @@ Isso usa a regra de recusa por país de #3681 (`refuse-consumers` por país, den
 2. **Registro com contador abaixo do limite.** Nos EUA, no Canadá e nos países com limite, o 1º dia não tem registro estadual ou nacional, porque as vendas ainda estão abaixo do limite. O tipo exige `registration` não vazio quando `collect`. Escrever ali um registro que não existe seria fingir. O dono precisa decidir se o texto "abaixo do limite, contador X ligado, registro antes do aviso" basta para `collect`, ou se o tipo deve ganhar um estado próprio. **Nenhum agente grava texto de registro inexistente.**
 3. **Taxa de aplicação em cobrança direta** no Canadá, no Reino Unido e no EEE (seção 2, item 3): sem ela, `collect` não tem como receber o imposto. Prova escrita do Stripe depois de a conta da LLC existir.
 4. **Países sem limite** (Coreia do Sul, Índia, Arábia Saudita, Emirados, Turquia, México, Chile, Quênia, Vietnã e outros): em quais o dono se registra antes do 1º dia (custo e representante local desconhecidos, nunca zero, 100% FX275) e quais ficam recusados até o registro.
-5. **Rússia, Belarus e Venezuela** (seção 6): recusar ou vender, depois de conferir a OFAC.
+5. **Rússia, Belarus e Venezuela** (seção 6): recusar ou vender, depois de conferir os regulamentos da OFAC. A Síria saiu da lista de sanções amplas (PAARSS, lido em 15/11/2026).
+6. **Contas Standard para plataforma nova:** o Stripe marca Standard como tipo legado ([stripe-platform.md](stripe-platform.md), seção 3.1, releitura de 15/11/2026). Se a conta americana precisar de Accounts v2, os caminhos de cobrança de imposto desta trava mudam com ela.
 
 ## 8. URLs que precisam ser lidas (pedido ao coordenador, 14/11/2026)
 
@@ -222,7 +229,9 @@ Para cada uma: o trecho exato, a data editorial da página, se houver, e a data 
 
 **Outros países:** as URLs da última coluna da seção 5.2, começando pelos países sem limite (Coreia do Sul, Índia, Arábia Saudita, Emirados, Turquia, México, Chile, Quênia, Vietnã), porque decidem o 1º dia.
 
-**OFAC:** https://ofac.treasury.gov/sanctions-programs-and-country-information e as páginas dos programas de Cuba, Irã, Coreia do Norte, Ucrânia/Rússia (EO 14065 e EO 14071), Síria (EO 14312), Belarus e Venezuela.
+**OFAC:** páginas dos programas lidas em 15/11/2026 (seção 6). Faltam os textos dos regulamentos que dizem se a venda de produtos digitais a consumidores é proibida: 31 CFR partes 515 (Cuba), 560 (Irã), 510 (Coreia do Norte) e 589 (Ucrânia/Rússia), em https://www.ecfr.gov, mais as determinações da EO 14071 e a licença geral D-2 do Irã, se existir. Também falta a página de cada programa de país ainda não aberto.
+
+**Canadá:** www.canada.ca devolveu resposta vazia em 15/11/2026, mesmo liberado; tentar de novo ou ler de outra sessão. Os sites de Quebec, da Colúmbia Britânica, de Saskatchewan e de Manitoba (revenuquebec.ca, gov.bc.ca, saskatchewan.ca, gov.mb.ca) não estão liberados.
 
 **Stripe:** as URLs da seção 6 de [stripe-platform.md](stripe-platform.md), mais a regra de taxa de aplicação por país da conta conectada (https://docs.stripe.com/connect/direct-charges e https://docs.stripe.com/connect/platform-pricing-tools).
 

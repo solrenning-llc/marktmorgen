@@ -2,7 +2,7 @@
 
 Preparado em 14/11/2026 pelo Claude 1 cloud A, só como documento. **Não liga nada**: não muda `CURRENT_STRIPE_PLATFORM_ELIGIBILITY_REVIEW` (continua `null`), `stripePlatformEligibilityReady()` (continua `false`), `PLANS_ON_SALE`, `OPENING_REQUESTED`, preços, limites, comissão, tax gate, art. 9a nem a revisão comercial. Nenhum agente cria conta, aceita termos, paga ou contata o Stripe.
 
-**Estado das fontes.** A rede desta sessão recusou docs.stripe.com, support.stripe.com e stripe.com em 14/11/2026. Por isso, cada caminho do painel abaixo está marcado **"a conferir na fonte oficial (URL), data de leitura pendente"**. As frases que já constam do repositório vêm com a data em que foram lidas por outra sessão e com o arquivo onde estão. A lista de URLs a ler está na seção 6. O coordenador lê essas URLs e publica os trechos com data no PR, e então este documento é completado.
+**Estado das fontes.** Em 14/11/2026, a rede desta sessão recusou o Stripe. Em 15/11/2026, depois de o dono liberar `*.stripe.com`, foram lidas na versão Markdown oficial de docs.stripe.com, que não mostra data editorial: `get-started/account/activate`, `connect/charges`, `connect/direct-charges` (variante Stripe-hosted), `connect/cross-border-payouts`, `connect/platform-pricing-tools`, `connect/standard-accounts`, `connect/accounts`, `connect/account-capabilities` (Accounts v1) e `connect/dashboard`. O que não foi lido continua marcado **"a conferir na fonte oficial (URL), data de leitura pendente"**: `stripe.com/global` (o domínio raiz `stripe.com` continuou recusado pelo proxy), a página de status da conta (`get-started/account/statuses` deu 404) e os contratos. A lista está na seção 6.
 
 ## 1. O que o código exige (lido em `lib/stripe-platform-eligibility.ts`, main `3e71d00a`, 14/11/2026)
 
@@ -46,16 +46,17 @@ Cada uma das quatro regiões precisa de um registro com os mesmos campos de prov
 
 ## 2. Onde o dono encontra cada prova no painel do Stripe
 
-Caminhos de menu conforme a organização usual do painel do Stripe. **Todos estão a conferir na fonte oficial, com a data de leitura pendente.** O painel pode ter mudado; vale o que a página oficial disser no dia.
+Os endereços do painel marcados "lido em 15/11/2026" aparecem com esse caminho na documentação oficial lida nesse dia. Os outros estão a conferir. O painel pode mudar; vale o que a página oficial disser no dia da prova.
 
-| Prova | Onde olhar no painel (a conferir) | O que deve aparecer | Fonte oficial a ler |
+| Prova | Onde olhar no painel | O que deve aparecer | Fonte oficial |
 | --- | --- | --- | --- |
-| P1 país da conta | Configurações → Empresa → Detalhes da conta (`dashboard.stripe.com/settings/account`) | País: Estados Unidos. O país de uma conta não se troca depois de criada; a fonte precisa confirmar isso. | https://docs.stripe.com/get-started/account/activate — a conferir, data de leitura pendente |
-| P2 e P3 empresa e nome | Configurações → Empresa → Detalhes da empresa (business details) | Tipo de empresa: Company / LLC de sócio único; **nome legal da empresa** igual ao nome exato da LLC; EIN informado; endereço comercial real nos EUA (sem caixa postal nem escritório virtual, resposta do Stripe de 03/11/2026 em docs/stripe-platform-eligibility.md) | https://docs.stripe.com/get-started/account/activate e https://support.stripe.com/questions/how-do-i-update-my-business-information — a conferir, data de leitura pendente |
-| P4 conta ativa | Página inicial do painel (sem o aviso "Activate payments") e a página de status da conta (`dashboard.stripe.com/account/status`, se existir) | Pagamentos: ativados. Repasses: ativados. Nenhuma informação pendente ("requirements" vazio). | https://docs.stripe.com/get-started/account/activate e https://docs.stripe.com/get-started/account/statuses — a conferir, data de leitura pendente |
-| P5 plataforma Connect | Configurações → Connect (`dashboard.stripe.com/settings/connect`) → Perfil da plataforma (platform profile) concluído e aprovado | Connect ativado; perfil da plataforma preenchido; contas **Standard** permitidas | https://docs.stripe.com/connect/get-started e https://docs.stripe.com/connect/standard-accounts — a conferir, data de leitura pendente |
-| R1–R3 países dos criadores | Configurações → Connect → Opções de cadastro → Países (onboarding options, countries), se a página existir para contas Standard | Lista dos países em que a plataforma deixa um criador conectar a conta | https://docs.stripe.com/connect/accounts e https://docs.stripe.com/connect/charges — a conferir, data de leitura pendente |
-| R2 por conta real | Connect → Contas → abrir a conta de um criador de cada região | País da conta conectada; capacidade `card_payments` **ativa**; `charges_enabled` verdadeiro; uma cobrança direta de teste aparece no painel do criador | https://docs.stripe.com/connect/account-capabilities e https://docs.stripe.com/connect/direct-charges — a conferir, data de leitura pendente |
+| P1 país da conta | Verificação da empresa: `dashboard.stripe.com/account/onboarding` (lido em 15/11/2026) | País de origem da empresa: Estados Unidos. "After activating a Stripe service on a live account, you can't change the business origin country. To use a different supported country as your primary business location, create a new account." | [Activate your account](https://docs.stripe.com/get-started/account/activate), lida em 15/11/2026, sem data editorial |
+| P2 e P3 empresa e nome | A mesma verificação (`dashboard.stripe.com/account/onboarding`) para os dados da empresa; dados públicos em `dashboard.stripe.com/settings/public` (lido em 15/11/2026) | Tipo de empresa: Company / LLC de sócio único; **nome legal da empresa** igual ao nome exato da LLC; EIN informado; endereço comercial real nos EUA, sem caixa postal nem escritório virtual (resposta do Stripe de 03/11/2026, em docs/stripe-platform-eligibility.md). O nome dos campos na tela continua a conferir. | Mesma página, lida em 15/11/2026; o nome dos campos é a conferir no painel |
+| P4 conta ativa | Página inicial do painel e status da conta | Pagamentos e repasses ativados, sem informação pendente | **A conferir**: https://docs.stripe.com/get-started/account/statuses deu 404 em 15/11/2026; ler a página que a substituiu |
+| P5 plataforma Connect | Perfil da plataforma: `dashboard.stripe.com/connect/profile`; configurações de capacidades: `dashboard.stripe.com/settings/connect/capability-settings`; interface de cadastro: `dashboard.stripe.com/settings/connect/onboarding-interface` (todos lidos em 15/11/2026) | Perfil da plataforma concluído; contas conectadas com acesso ao painel completo (Standard) | [Account capabilities, Accounts v1](https://docs.stripe.com/connect/account-capabilities?accounts-namespace=v1) e [Connect dashboard](https://docs.stripe.com/connect/dashboard), lidas em 15/11/2026 |
+| R1–R3 países dos criadores | Não há, nas páginas lidas, uma lista de países de cadastro para contas Standard | — | **A conferir**; https://stripe.com/global continuou recusado pelo proxy em 15/11/2026 |
+| R2 por conta real | Connect → Contas → abrir a conta de um criador de cada região | País da conta; capacidade `card_payments` **ativa**. "Your connected accounts must have the card_payments capability active in order to use direct charges." "For an Account to have the card_payments capability, you must request both card_payments and transfers." Uma cobrança direta de teste aparece no painel do criador. | [Charge types](https://docs.stripe.com/connect/charges) e [Account capabilities, v1](https://docs.stripe.com/connect/account-capabilities?accounts-namespace=v1), lidas em 15/11/2026 |
+| Taxa de aplicação recebida | Taxas recebidas: `dashboard.stripe.com/connect/application_fees` (lido em 15/11/2026) | As taxas de aplicação de cada cobrança direta | [Create direct charges](https://docs.stripe.com/connect/direct-charges?platform=web&ui=stripe-hosted), lida em 15/11/2026 |
 | R3 confirmação escrita | E-mail do Stripe Support no fio "Re: Connect platform eligibility for international accounts", **depois** de a conta americana existir | Resposta que cite a conta da LLC e diga, região por região, que cobranças diretas para contas Standard estão disponíveis | Rota de contato: https://support.stripe.com/contact — só leitura; **nenhum agente envia mensagem** |
 | Contrato | Configurações → Jurídico / Contrato de serviços (Stripe Services Agreement e Connect Platform Agreement) | Entidade Stripe dos EUA contratante | https://stripe.com/legal/ssa e https://stripe.com/legal/connect-account — a conferir, data de leitura pendente; o dono lê e aceita, nenhum agente aceita termos |
 
@@ -73,6 +74,13 @@ Registro no ramo `claude2/eu-vat-official-sources`, arquivo `docs/eu-vat-officia
 - [Create direct charges](https://docs.stripe.com/connect/direct-charges): a única restrição de país encontrada é a do Brasil ("platforms based outside of Brazil with Brazilian connected accounts can't collect application fees through Stripe").
 - [Using Standard connected accounts](https://docs.stripe.com/connect/standard-accounts): Standard aparece como tipo v1 legado ("Deprecated feature"); para integração nova, o Stripe indica Accounts v2. **Ponto de risco para o dono:** a prova deve dizer que as cobranças diretas valem para o tipo de conta conectada que o Marktmorgen usa de fato.
 - Conclusão daquela leitura: a documentação **não afirma** região por região que uma plataforma dos EUA pode fazer cobranças diretas em contas Standard do Canadá, do Reino Unido e do EEE. Isso depende de conta real ou de resposta escrita.
+
+**Releitura em 15/11/2026** (docs.stripe.com, versão Markdown, sem data editorial). As frases acima continuam lá, e há mais três pontos:
+
+- [Charge types](https://docs.stripe.com/connect/charges): "Funds always settle in the country of the connected account." "Direct charges aren't recommended for legacy v1 Express and Custom accounts—switch to v2 accounts, or use destination charges". A frase não fala das contas Standard.
+- [Connect cross-border payouts](https://docs.stripe.com/connect/cross-border-payouts): "Platforms based in the US, UK, EEA, Canada, or Switzerland can transfer funds to connected accounts in any of those regions". Os fluxos cobertos são cobranças e transferências separadas, *top-ups* e cobranças de destino sem `on_behalf_of`; **a cobrança direta não está na lista**, porque nela o dinheiro já liquida na conta do criador.
+- [Create direct charges](https://docs.stripe.com/connect/direct-charges?platform=web&ui=stripe-hosted): a única restrição de país à taxa de aplicação continua sendo a do Brasil. [Platform pricing tools](https://docs.stripe.com/connect/platform-pricing-tools): "Your platform is permitted to charge app fees in the connected account's country", sem lista de países.
+- **Risco novo para o dono:** [Using Standard connected accounts](https://docs.stripe.com/connect/standard-accounts) e [Connect account types](https://docs.stripe.com/connect/accounts) marcam os tipos Standard, Express e Custom como "Deprecated feature": a página "applies only to platforms that already use legacy connected account types". Para plataforma nova, o Stripe indica Accounts v2. A conta americana da LLC será uma plataforma nova. O dono precisa obter do Stripe, por escrito, que ela pode conectar contas Standard (ou o equivalente em v2 com painel completo) com cobranças diretas. Se não puder, a integração muda, e isso é trabalho de engenharia com revisão própria, fora desta trava.
 
 ### 3.2 O que o Stripe respondeu por escrito (28/10/2026)
 
@@ -136,23 +144,16 @@ Como gerar o SHA-256 de um arquivo salvo (no computador do dono): `shasum -a 256
 5. Salvar os PDFs, gerar os SHA-256 e preencher o rascunho da seção 4.
 6. Pedir a um agente o PR que grava o registro em `lib/stripe-platform-eligibility.ts`, com revisão independente. Só então esta trava fica verdadeira; as outras continuam valendo.
 
-## 6. URLs que precisam ser lidas (pedido ao coordenador, 14/11/2026)
+## 6. URLs que ainda precisam ser lidas
 
-Para cada uma: o trecho exato, a data editorial da página, se houver, e a data de leitura.
+Lidas em 15/11/2026 (seções 2 e 3): activate, charges, direct-charges, cross-border-payouts, platform-pricing-tools, standard-accounts, accounts, account-capabilities (v1) e dashboard. Faltam as seguintes; para cada uma, o trecho exato, a data editorial, se houver, e a data de leitura:
 
-1. https://docs.stripe.com/get-started/account/activate — ativação, dados da empresa, país da conta.
-2. https://docs.stripe.com/get-started/account/statuses — onde aparece o status da conta e as pendências.
-3. https://support.stripe.com/questions/how-do-i-update-my-business-information — onde ficam o nome legal e o EIN.
-4. https://docs.stripe.com/connect/get-started — perfil da plataforma.
-5. https://docs.stripe.com/connect/standard-accounts — contas Standard (tipo legado) e se valem para integração nova.
-6. https://docs.stripe.com/connect/accounts — países e tipos de conta conectada.
-7. https://docs.stripe.com/connect/charges — cobrança direta e país de liquidação.
-8. https://docs.stripe.com/connect/direct-charges — cobrança direta e restrições por país.
-9. https://docs.stripe.com/connect/cross-border-payouts — a que tipos de cobrança se aplicam as restrições de região.
-10. https://docs.stripe.com/connect/account-capabilities — `card_payments`, `charges_enabled` e onde se veem no painel.
-11. https://stripe.com/global — países em que um criador pode abrir conta.
-12. https://stripe.com/legal/ssa e https://stripe.com/legal/connect-account — entidade contratante; só leitura.
-13. Se existir: a página oficial sobre a lista de países de cadastro nas configurações do Connect (onboarding options, countries).
+1. A página que substituiu https://docs.stripe.com/get-started/account/statuses, que deu 404: status da conta e pendências.
+2. https://stripe.com/global: países em que um criador pode abrir conta. O domínio raiz foi recusado pelo proxy; ler de outra sessão ou liberar `stripe.com`.
+3. https://support.stripe.com/questions/how-do-i-update-my-business-information: nome legal e EIN no painel.
+4. https://docs.stripe.com/connect/accounts-v2: se uma plataforma nova ainda pode usar contas Standard e cobranças diretas, ou qual configuração v2 equivale a elas.
+5. https://stripe.com/legal/ssa e https://stripe.com/legal/connect-account: entidade contratante. Só leitura; o dono é quem aceita.
+6. Uma página oficial sobre carta ou PDF de comprovação da conta, se existir.
 
 ## Limites
 

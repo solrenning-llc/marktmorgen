@@ -86,7 +86,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     // An answer that is not a payment: the invoice stays open, as Stripe keeps it.
     if (paidReceipt !== undefined) return json(paidReceipt);
     if (invoiceState) invoiceState.status = "paid";
-    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" });
+    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount")), currency: "usd" });
   }
   if (path.endsWith("/void")) {
     if (invoiceState?.status === "paid") return json({ error: { code: "invoice_not_voidable", message: "paid" } }, 400);

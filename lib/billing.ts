@@ -2023,6 +2023,9 @@ export type ChargeResult =
  * ever owed on a card that later fails. A declined card leaves nothing
  * behind: the invoice is voided.
  */
+/** A payment intent's id as Stripe writes one (refundCharge reads the same). */
+const PAYMENT_INTENT_ID = /^pi_[A-Za-z0-9]{8,64}$/;
+
 export async function chargeNow(input: {
   customerId: string;
   subscriptionId: string;
@@ -2078,6 +2081,15 @@ export async function chargeNow(input: {
     const paid = await onPlatform("POST", `/invoices/${encodeURIComponent(invoiceId)}/pay`, new URLSearchParams(), { ...at, idempotencyKey: `${input.idempotencyKey}:pay` });
     const intent = typeof paid.payment_intent === "string" ? paid.payment_intent : "";
     if (paid.status !== "paid" || !intent) throw new BillingError(402, "not_paid", "The invoice was not paid.");
+    // "Paid" counts only as this very invoice's, for its amount in its currency, with a payment id that reads
+    // (issue #4746): another invoice's reply, or one that does not say, is not a payment, so nothing the charge pays
+    // for (AI captions, a booking) is started on it. It falls to the invoice's own reconciliation, as an error.
+    if (
+      !plainObject(paid) || ownField(paid, "id") !== invoiceId || !PAYMENT_INTENT_ID.test(intent) ||
+      ownField(paid, "amount_paid") !== input.cents || ownField(paid, "currency") !== "usd"
+    ) {
+      throw new Error("Stripe did not confirm this invoice's own payment");
+    }
     return { ok: true, invoiceId, paymentIntent: intent };
   } catch (error) {
     const declined = error instanceof BillingError && (error.status === 402 || error.code === "card_declined" || error.code === "not_paid");

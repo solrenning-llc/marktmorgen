@@ -150,6 +150,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (action[2] === "pay") {
       if (invoice.status !== "open") return answer({ error: { type: "invalid_request_error", code: "invoice_not_open", message: "not open" } }, 400);
       invoice.status = "paid";
+      // Stripe says what it took on the invoice it paid (lib/billing.ts chargeNow reads it, issue #4746).
+      invoice.amount_paid = invoice.amount_due;
       invoice.payment_intent = `pi_Captions${invoice.id.slice(-6)}`;
       if (dieAfterPay) dead = true;
       if (payAnswerLost) return json({ error: { type: "api_error", message: "the answer was lost" } }, 500);

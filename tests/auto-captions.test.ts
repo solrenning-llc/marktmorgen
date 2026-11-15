@@ -48,6 +48,12 @@ let listAnswer: "ok" | "error" | "more" = "ok";
 const CHARGED = 12000;
 /** What the card paid on the captions invoice (less than the price when a credit balance paid part). */
 let cardPaid = CHARGED;
+/** What the creditor's credit balance paid of the next invoice /pay pays (0: the card pays it all). */
+let creditPaid = 0;
+/** The customer's balance history: what was put back on the credit balance. */
+type FakeCredit = { id: string; object: "customer_balance_transaction"; amount: number; currency: string; customer: string; metadata: Record<string, string> };
+let credits: FakeCredit[] = [];
+let creditsAnswer: "ok" | "error" = "ok";
 const FOLDER = "a".repeat(32);
 /** The captions invoice as Stripe keeps it, for its list (the one invoice id the fake makes). */
 let invoiceState: { status: string; mark: string; customer: string } | null = null;
@@ -87,12 +93,20 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (paidReceipt !== undefined) return json(paidReceipt);
     if (invoiceState) invoiceState.status = "paid";
     const charged = Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount"));
-    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: charged, amount_due: charged, amount_paid: charged, currency: "usd" });
+    return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: charged, amount_due: charged - creditPaid, amount_paid: charged - creditPaid, currency: "usd" });
   }
   if (path.endsWith("/void")) {
     if (invoiceState?.status === "paid") return json({ error: { code: "invoice_not_voidable", message: "paid" } }, 400);
     if (invoiceState) invoiceState.status = "void";
     return json({ id: "in_Captions00001", status: "void" });
+  }
+  const history = /^\/customers\/([^/]+)\/balance_transactions$/.exec(path);
+  if (history) {
+    if (creditsAnswer === "error") return json({ error: { type: "api_error", message: "down" } }, 500);
+    if (method === "GET") return json({ object: "list", has_more: false, data: credits.filter((c) => c.customer === history[1]).slice().reverse() });
+    const made: FakeCredit = { id: `cbtxn_Captions${String(credits.length + 1).padStart(6, "0")}`, object: "customer_balance_transaction", amount: Number(body.get("amount")), currency: String(body.get("currency")), customer: history[1], metadata: { nl_captions_credit: String(body.get("metadata[nl_captions_credit]")), invoice: String(body.get("metadata[invoice]")) } };
+    credits.push(made);
+    return json(made);
   }
   if (path.startsWith("/payment_intents/") && method === "GET") {
     if (listAnswer === "error") return json({ error: { type: "api_error", message: "down" } }, 500);
@@ -400,6 +414,43 @@ async function main(): Promise<void> {
   redis.run(["SET", owedKey, JSON.stringify({ langs: ["en", "es"], got: ["en"], at: 1_000, cents: CHARGED, pi: "pi_Captions000001", path: PATH, owed: { cents: 6000, key: "k-capped", since: 1, looks: 0 } }), "EX", 3600]);
   replays.set("k-capped", { id: "", object: "refund", amount: 0, currency: "usd", payment_intent: "", status: "error" });
   is("capped at 4000 with a new key, never the first key's saved answer", [await syncAutoCaptions(VIDEO, lateNow), stripe.find((s) => s.path === "POST /refunds")?.body.get("amount"), succeededCents()], ["done", "4000", 4000]);
+  cardPaid = CHARGED;
+
+  // 10. Paid in part from the credit balance (review of cb1f97590): both parts recorded, each given back to its place.
+  const backOnBalance = () => -credits.reduce((sum, c) => sum + c.amount, 0);
+  redis.run(["DEL", owedKey]);
+  await redis.pipeline([["SET", `nl:stream:v:${VIDEO}`, JSON.stringify({ id: VIDEO, path: PATH, name: "Knife skills.mp4", type: "video/mp4", bytes: 1, state: "ready", at: Date.now(), seconds: 600, width: 1920, height: 1080, settled: true })]]);
+  refunds = [];
+  replays.clear();
+  credits = [];
+  stripe = [];
+  delivered = [];
+  creditPaid = 2000;
+  cardPaid = CHARGED - 2000;
+  serviceRefuses = true;
+  const mixedRefused = await requestAutoCaptions(store, PATH, "fr", ["de"]);
+  serviceRefuses = false;
+  is("the service refusing a charge paid in part from credit: the card part to the card, the credit part to the balance, the whole price back",
+    [mixedRefused.ok ? "asked" : mixedRefused.reason, succeededCents(), backOnBalance(), succeededCents() + backOnBalance()],
+    ["refunded", CHARGED - 2000, 2000, CHARGED]);
+  creditPaid = 0;
+  // One language of two never came: half the price back, split as it was paid, no cent lost or given twice.
+  refunds = [];
+  replays.clear();
+  credits = [];
+  stripe = [];
+  redis.run(["SET", owedKey, JSON.stringify({ langs: ["en", "es"], got: ["en"], at: 1_000, cents: CHARGED, pi: "pi_Captions000001", card: CHARGED - 2000, credit: { customer: "cus_Store000001", invoice: "in_Captions00001" }, path: PATH, owed: { cents: 6000, key: "k-mixed", since: 1, looks: 0 } }), "EX", 3600]);
+  is("half back: 5000 to the card and 1000 to the balance, then done",
+    [await syncAutoCaptions(VIDEO, lateNow), succeededCents(), backOnBalance(), redis.run(["GET", owedKey])], ["done", 5000, 1000, null]);
+  // The balance history does not read: unknown, the refund stays owed (fail closed), nothing taken as given back.
+  refunds = [];
+  replays.clear();
+  credits = [];
+  creditsAnswer = "error";
+  redis.run(["SET", owedKey, JSON.stringify({ langs: ["en", "es"], got: [], at: 1_000, cents: CHARGED, pi: "pi_Captions000001", card: CHARGED - 2000, credit: { customer: "cus_Store000001", invoice: "in_Captions00001" }, path: PATH, owed: { cents: null, key: "k-mixed-all", since: 1, looks: 0 } }), "EX", 3600]);
+  is("an unreadable balance: still owed, in full", [await syncAutoCaptions(VIDEO, lateNow), redis.run(["GET", owedKey]) !== null && JSON.parse(String(redis.run(["GET", owedKey]))).owed?.cents], ["waiting", null]);
+  creditsAnswer = "ok";
+  is("once it reads: the card's 10000 and the balance's 2000, done", [await syncAutoCaptions(VIDEO, lateNow), succeededCents(), backOnBalance(), redis.run(["GET", owedKey])], ["done", CHARGED - 2000, 2000, null]);
   cardPaid = CHARGED;
 
   // 9. A refund owed for a video since deleted is still shown for the store.

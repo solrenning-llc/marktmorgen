@@ -87,14 +87,34 @@ export class MemoryRedis {
     return made;
   }
 
+  /** The sorted set at `key` for a command that writes one (ZADD, ZINCRBY): made when missing; WRONGTYPE for a key of another kind, as Redis answers, never overwritten. */
   private zset(key: string): { score: number; member: string }[] {
-    const held = this.data.get(key);
-    if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "object")) {
-      return held as { score: number; member: string }[];
+    if (!this.data.has(key)) {
+      const made: { score: number; member: string }[] = [];
+      this.data.set(key, made);
+      return made;
     }
-    const made: { score: number; member: string }[] = [];
-    this.data.set(key, made);
-    return made;
+    return this.zsetRead(key);
+  }
+
+  /**
+   * The sorted set at `key` for a command that reads it or only takes members out (ZCARD, ZSCORE, ZRANGEBYSCORE, ZREM
+   * and the like): a missing key reads as empty and is not made, as on Redis, where none of these creates a key; a key
+   * of another kind is WRONGTYPE, never read as empty nor replaced.
+   */
+  private zsetRead(key: string): { score: number; member: string }[] {
+    const held = this.data.get(key);
+    if (held === undefined) return [];
+    if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "object")) return held as { score: number; member: string }[];
+    throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+  }
+
+  /** Redis deletes a sorted set when its last member goes: an emptied one is not kept. */
+  private dropIfEmpty(key: string, z: { score: number; member: string }[]): void {
+    if (z.length === 0 && this.data.get(key) === z) {
+      this.data.delete(key);
+      this.until.delete(key);
+    }
   }
 
   /** Runs one command, the way redisPipeline runs each of its own. */
@@ -1343,7 +1363,7 @@ export class MemoryRedis {
           const most = Number(rawMost), entry = Number(rawEntry), step = Number(rawStep);
           if (![most, entry, step].every(Number.isSafeInteger) || most < 1 || entry < 0 || step < 1) return [-1, 0];
           if (root.r === null) {
-            const ids = this.zset(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
+            const ids = this.zsetRead(lesson).slice().sort((a, b) => a.score - b.score || a.member.localeCompare(b.member)).slice(0, most + 1).map(row => row.member);
             if (ids.length > most) return [-1, 0];
             for (const id of ids) {
               const value = this.run(["HGET", comments, id]);
@@ -1387,10 +1407,10 @@ export class MemoryRedis {
             const parent = c.r ?? null;
             if (c.b !== who && !(parent && tops.has(parent))) continue;
             if (held instanceof Map) held.delete(id);
-            this.zset(all).splice(0, this.zset(all).length, ...this.zset(all).filter((e) => e.member !== id));
+            { const z = this.zsetRead(all); z.splice(0, z.length, ...z.filter((e) => e.member !== id)); this.dropIfEmpty(all, z); }
             this.hash(replies).delete(id);
             const lessonKey = c.l ? lessons.get(c.l) : undefined;
-            if (lessonKey) this.zset(lessonKey).splice(0, this.zset(lessonKey).length, ...this.zset(lessonKey).filter((e) => e.member !== id));
+            if (lessonKey) { const z = this.zsetRead(lessonKey); z.splice(0, z.length, ...z.filter((e) => e.member !== id)); this.dropIfEmpty(lessonKey, z); }
             if (parent && !tops.has(parent) && rows.has(parent)) {
               const counts = this.hash(replies);
               counts.set(parent, String((Number(counts.get(parent)) || 0) - 1));
@@ -1435,7 +1455,7 @@ export class MemoryRedis {
             else if (!askedSet.has(parent) && !taken.has(parent) && this.run(["HEXISTS", comments, parent]) === 1) this.run(["HINCRBY", replies, parent, -1]);
           }
           if (tops.size) for (const k of lessonKeys) {
-            for (const id of this.zset(k).map((e) => e.member)) {
+            for (const id of this.zsetRead(k).map((e) => e.member)) {
               const raw = this.run(["HGET", comments, id]);
               if (typeof raw !== "string") continue;
               const c = decode(raw);
@@ -2097,7 +2117,7 @@ export class MemoryRedis {
       case "ZSCAN": {
         // ZSCAN key cursor [COUNT n]: everything at once, member and score, the cursor back at "0", as HSCAN does.
         const flat: string[] = [];
-        for (const e of this.zset(key)) flat.push(e.member, String(e.score));
+        for (const e of this.zsetRead(key)) flat.push(e.member, String(e.score));
         return ["0", flat];
       }
       case "LLEN":
@@ -2275,38 +2295,41 @@ export class MemoryRedis {
         return set.has("CH") ? added + changed : added;
       }
       case "ZREM": {
-        const z = this.zset(key);
+        const z = this.zsetRead(key);
         let gone = 0;
         for (const member of args) {
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) { z.splice(at, 1); gone += 1; }
         }
+        this.dropIfEmpty(key, z);
         return gone;
       }
       case "ZREMRANGEBYSCORE": {
         // Inclusive on both ends, as Redis is without "(".
-        const z = this.zset(key);
+        const z = this.zsetRead(key);
         const low = args[0] === "-inf" ? -Infinity : Number(args[0]);
         const high = args[1] === "+inf" ? Infinity : Number(args[1]);
         let gone = 0;
         for (let i = z.length - 1; i >= 0; i -= 1) {
           if (z[i].score >= low && z[i].score <= high) { z.splice(i, 1); gone += 1; }
         }
+        this.dropIfEmpty(key, z);
         return gone;
       }
       case "ZCARD":
-        return this.zset(key).length;
+        return this.zsetRead(key).length;
       case "ZSCORE": {
-        const found = this.zset(key).find((e) => e.member === args[0]);
+        const found = this.zsetRead(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
       }
       case "ZREMRANGEBYRANK": {
-        const z = this.zset(key);
+        const z = this.zsetRead(key);
         const [from, to] = [Number(args[0]), Number(args[1])];
         const start = from < 0 ? Math.max(0, z.length + from) : from;
         const end = to < 0 ? z.length + to : to;
         if (end < start) return 0;
         const gone = z.splice(start, end - start + 1);
+        this.dropIfEmpty(key, z);
         return gone.length;
       }
       case "ZCOUNT": {
@@ -2318,12 +2341,12 @@ export class MemoryRedis {
         };
         const from = edge(args[0]);
         const to = edge(args[1]);
-        return this.zset(key).filter(
+        return this.zsetRead(key).filter(
           (e) => (from.open ? e.score > from.value : e.score >= from.value) && (to.open ? e.score < to.value : e.score <= to.value),
         ).length;
       }
       case "ZRANGEBYSCORE": {
-        const z = this.zset(key);
+        const z = this.zsetRead(key);
         // "(5" means "after 5", which is how the room asks for what is new.
         const edge = (raw: string) => {
           if (raw === "-inf") return { value: -Infinity, open: false };
@@ -2357,7 +2380,7 @@ export class MemoryRedis {
         };
         const to = edge(args[0]);
         const from = edge(args[1]);
-        const page = [...this.zset(key)]
+        const page = [...this.zsetRead(key)]
           .reverse()
           .filter(
             (e) =>
@@ -2380,9 +2403,9 @@ export class MemoryRedis {
         const [firstKey, ...restKeys] = sources;
         for (const one of sources) this.live(one);
         const held = new Map<string, number>();
-        for (const entry of this.zset(firstKey ?? "")) held.set(entry.member, entry.score);
+        for (const entry of this.zsetRead(firstKey ?? "")) held.set(entry.member, entry.score);
         for (const other of restKeys) {
-          const theirs = new Map(this.zset(other).map((e) => [e.member, e.score]));
+          const theirs = new Map(this.zsetRead(other).map((e) => [e.member, e.score]));
           for (const [member, score] of [...held]) {
             const found = theirs.get(member);
             if (found === undefined) {
@@ -2419,7 +2442,7 @@ export class MemoryRedis {
         const held = new Map<string, number>();
         for (const one of sources) {
           this.live(one);
-          for (const entry of this.zset(one)) held.set(entry.member, (held.get(entry.member) ?? 0) + entry.score);
+          for (const entry of this.zsetRead(one)) held.set(entry.member, (held.get(entry.member) ?? 0) + entry.score);
         }
         const made = [...held].map(([member, score]) => ({ score, member }));
         made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
@@ -2428,12 +2451,12 @@ export class MemoryRedis {
         return made.length;
       }
       case "ZREVRANK": {
-        const z = [...this.zset(key)].reverse();
+        const z = [...this.zsetRead(key)].reverse();
         const at = z.findIndex((e) => e.member === args[0]);
         return at >= 0 ? at : null;
       }
       case "ZREVRANGE": {
-        const z = [...this.zset(key)].reverse();
+        const z = [...this.zsetRead(key)].reverse();
         const [from, to] = [Number(args[0]), Number(args[1])];
         const start = from < 0 ? Math.max(0, z.length + from) : from;
         const end = to < 0 ? z.length + to : to;

@@ -83,6 +83,11 @@ export async function readSpends(): Promise<never[]> {
   return [];
 }
 
+/** As lib/ad-spend.ts spendsForReport: every line, or `unreadAs` when the typed lines or Meta's part could not be read. */
+export async function spendsForReport(_statsId: string | null, unreadAs: never[] | null = []): Promise<never[] | null> {
+  return retry.spends === "none" ? [] : unreadAs;
+}
+
 /** The lines and whether Meta's part read: "throws" is the typed lines unread, "metaUnread" Meta's part unread. */
 export async function readSpendLines(): Promise<{ spends: never[]; metaUnread: boolean }> {
   if (retry.spends === "throws") throw new Error("synthetic ad spend read failure");

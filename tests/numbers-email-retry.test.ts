@@ -152,26 +152,19 @@ async function main(): Promise<void> {
   await run(weekly, "/api/cron/weekly");
   is("the next run posts, still no email", [retry.posts.length, owner()], [2, 0]);
 
-  part("Weekly: an ad spend that could not be read sends nothing that says 'none', and lets the week go");
-  reset();
-  retry.chat = "channel";
-  retry.spends = "throws";
-  body = await run(weekly, "/api/cron/weekly");
-  is("failed, not quiet, nothing sent or posted", [body.failed, body.quiet, body.sent, owner(), retry.posts.length], [1, 0, 0, 0, 0]);
-  is("the week's claim is let go", held("nl:weekly:sent:"), false);
-  retry.spends = "none";
-  commands.length = 0;
-  body = await run(weekly, "/api/cron/weekly");
-  is("the next run sends and posts", [body.sent, owner(), retry.posts.length], [1, 1, 1]);
-
-  part("Weekly: a Meta part of the ad spend that could not be read is unknown too: nothing sent on one part as all of it, and the week is let go");
-  reset();
-  retry.chat = "channel";
-  retry.spends = "metaUnread";
-  body = await run(weekly, "/api/cron/weekly");
-  is("Meta unread: failed, not quiet, nothing sent or posted", [body.failed, body.quiet, body.sent, owner(), retry.posts.length], [1, 0, 0, 0, 0]);
-  is("Meta unread: the week's claim is let go", held("nl:weekly:sent:"), false);
-  retry.spends = "none";
+  // Since the coordinator's decision of 15 Nov 2026 on #3297 (option A, main's design from the review of #4027): an
+  // ad spend that could not be read, typed lines or Meta's part, no longer lets the week go. The summary goes, says the
+  // spend was not read and shows no ad figure (tests/weekly-spend-unread.test.ts holds the words).
+  for (const spends of ["throws", "metaUnread"] as const) {
+    part(`Weekly: an ad spend that could not be read (${spends}) still sends the summary, never 'none', and keeps the week`);
+    reset();
+    retry.chat = "channel";
+    retry.spends = spends;
+    body = await run(weekly, "/api/cron/weekly");
+    is(`${spends}: sent and posted once, not failed`, [body.failed, body.sent, owner(), retry.posts.length], [0, 1, 1, 1]);
+    is(`${spends}: the week stays claimed, so nobody gets two`, held("nl:weekly:sent:"), true);
+    retry.spends = "none";
+  }
 
   part("Weekly: a team that could not be read sends no summary without the team's copies, and lets the week go");
   reset();

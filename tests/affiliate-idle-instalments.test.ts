@@ -98,6 +98,7 @@ async function main(): Promise<void> {
     ["no object field", { data: [], has_more: false }],
     ["data that is not a list", { object: "list", data: "none", has_more: false }],
     ["has_more that is not a boolean", { object: "list", data: [], has_more: "no" }],
+    ["more pages, but the last row has no id to go on from", { object: "list", data: [{ object: "invoice" }], has_more: true }],
   ] as const) {
     invoicesMalformed = page;
     is(`${what}: nothing done`, await idleSweep(store, ms(420)), { warned: 0, removed: 0 });

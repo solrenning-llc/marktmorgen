@@ -58,11 +58,11 @@ export async function POST(request: NextRequest) {
       }
       case "saved": {
         const next = parseInboxSetting({ ...store.inbox, saved: body.saved });
-        const saved = await setInboxSetting(store.email, { ...store.inbox, saved: next.saved });
+        const saved = await setInboxSetting(guarded.ref, { ...store.inbox, saved: next.saved });
         return saved.ok ? answer({ ok: true, inbox: saved.store.inbox }) : refuse("none", 404);
       }
       case "chat": {
-        const saved = await setInboxSetting(store.email, { ...store.inbox, chat: body.on === true });
+        const saved = await setInboxSetting(guarded.ref, { ...store.inbox, chat: body.on === true });
         return saved.ok ? answer({ ok: true, inbox: saved.store.inbox }) : refuse("none", 404);
       }
       default:

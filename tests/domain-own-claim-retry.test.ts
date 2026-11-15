@@ -109,16 +109,21 @@ async function main(): Promise<void> {
   is("the next press connects", [await connect(), held()], [{ ok: true, name: NAME }, "?mystore"]);
 
   part("(a) protection kept: another store's claim, and an address let go of");
-  for (const other of ["?otherstore", "otherstore"]) {
-    await setUp();
-    redis.run(["SET", KEY, other]);
-    is(`held by another store (${other}): taken, Vercel not asked, its key kept`, [await connect(), vercelCalls, held()], [{ ok: false, reason: "taken" }, [], other]);
-  }
+  // Another store's claim not proved yet keeps nobody out (#4108, #4248): this store connects beside it, its key kept,
+  // and the TXT record decides. A proved one is still taken, Vercel not asked.
+  await setUp();
+  redis.run(["SET", KEY, "?otherstore"]);
+  is("held by another store, not proved (?otherstore): connected beside it, its key kept", [await connect(), vercelCalls, held()], [{ ok: true, name: NAME }, [`POST /v10/projects/prj_retry/domains`], "?otherstore"]);
+  await setUp();
+  redis.run(["SET", KEY, "otherstore"]);
+  is("held by another store, proved (otherstore): taken, Vercel not asked, its key kept", [await connect(), vercelCalls, held()], [{ ok: false, reason: "taken" }, [], "otherstore"]);
   await setUp();
   await renameHandle(owner, "newstore");
   await releaseHandle(owner, "mystore");
   redis.run(["SET", KEY, "?mystore", "EX", 200_000]);
-  is("held under an address this store let go of: taken (it may be somebody else's now)", [await connect(), vercelCalls, held()], [{ ok: false, reason: "taken" }, [], "?mystore"]);
+  // It may be somebody else's now, and like any claim not proved yet it keeps nobody out (#4108): connected beside it,
+  // the key kept, never let go as this store's own.
+  is("held, not proved, under an address this store let go of: connected beside it, the key kept", [await connect(), vercelCalls, held()], [{ ok: true, name: NAME }, [`POST /v10/projects/prj_retry/domains`], "?mystore"]);
   for (const [shape, reply] of UNREADABLE) {
     await setUp();
     redis.run(["SET", KEY, "?otherstore"]);

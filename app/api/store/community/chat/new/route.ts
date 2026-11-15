@@ -1,3 +1,4 @@
+import { chatAuthor } from "@/lib/chat-author";
 import type { NextRequest } from "next/server";
 import { LOOK_BYTES, shareFor } from "@/lib/chat-pace";
 import { wholeUnits } from "@/lib/community-chat-rules";
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured()) return Response.json({ ok: false, error: "unavailable" }, { status: 503, headers: NOT_KEPT });
   try {
     const page = await room(id, since);
-    const messages = withinLook(page.messages.map(whole), page.cursor);
+    const messages = withinLook(page.messages.map((message) => whole({ ...message, a: chatAuthor(id, message.a) })), page.cursor);
     return Response.json(
       { ok: true, messages, cursor: messages.length ? messages[messages.length - 1].i : page.cursor },
       { headers: { "Cache-Control": `public, max-age=0, s-maxage=${shareFor(pace)}` } },

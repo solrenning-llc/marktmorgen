@@ -1,3 +1,4 @@
+import { chatAuthor } from "@/lib/chat-author";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
@@ -53,8 +54,10 @@ export default async function CommunityChatPage({ params }: Params) {
   const members = await readMembers(id, page.messages.map((m) => m.a).filter((a) => a !== CREATOR));
   const names: Record<string, string> = {};
   for (const message of page.messages) {
-    names[message.a] = message.a === CREATOR ? store.name : members.get(message.a)?.n || message.n || w.aMember;
+    names[chatAuthor(id, message.a)] = message.a === CREATOR ? store.name : members.get(message.a)?.n || message.n || w.aMember;
   }
+  // #4589: the page is drawn with the room's own name for each author, never the key the server keeps (lib/chat-author.ts).
+  const first = page.messages.map((message) => ({ ...message, a: chatAuthor(id, message.a) }));
   // Leave for this page to ask what is new for the next ten minutes, counted
   // toward the store's visits (lib/chat-grant.ts): at the pace of a talking
   // room only when this one is.
@@ -87,10 +90,10 @@ export default async function CommunityChatPage({ params }: Params) {
           leave={given === "resting" ? null : given}
           resting={given === "resting"}
           quiet={quiet}
-          first={page.messages}
+          first={first}
           names={names}
           cursor={page.cursor}
-          me={key}
+          me={chatAuthor(id, key)}
           canWrite={canWrite || owner}
           owner={owner}
           creatorOnly={config.chat.creatorOnly}

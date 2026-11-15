@@ -4,6 +4,7 @@ import { lockedFor } from "@/lib/two-step";
 import { limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { CREATOR, readMembers, within } from "@/lib/community";
+import { chatAuthor } from "@/lib/chat-author";
 import { communityViewer } from "@/lib/community-access";
 import { MAX_CHAT_TEXT, clearRoom, lastSaid, room, say, unsay } from "@/lib/community-chat";
 import { wholeUnits } from "@/lib/community-chat-rules";
@@ -49,8 +50,10 @@ export async function GET(request: NextRequest) {
   const members = unnamed.length ? await readMembers(id, unnamed) : new Map<string, { n?: string }>();
   const names: Record<string, string> = {};
   for (const message of page.messages) {
-    names[message.a] = message.a === CREATOR ? store.name : message.n || members.get(message.a)?.n || "A member";
+    names[chatAuthor(id, message.a)] = message.a === CREATOR ? store.name : message.n || members.get(message.a)?.n || "A member";
   }
+  // #4589: other members get the room's own name for each author, never the key the server keeps (lib/chat-author.ts).
+  const messages = page.messages.map((message) => ({ ...message, a: chatAuthor(id, message.a) }));
   // Leave to ask the shared route for the next ten minutes, when asked for.
   const want = url.searchParams.get("grant");
   let given: Awaited<ReturnType<typeof grantRoom>> = null;
@@ -61,7 +64,7 @@ export async function GET(request: NextRequest) {
     given = await grantRoom(store, id, { key: viewer.key, owner: viewer.owner }, want === "live", talking);
   }
   return Response.json(
-    { ok: true, messages: page.messages, cursor: page.cursor, names, grant: given === "resting" ? null : given, resting: given === "resting" },
+    { ok: true, messages, cursor: page.cursor, names, grant: given === "resting" ? null : given, resting: given === "resting" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -123,7 +126,7 @@ async function act(request: NextRequest): Promise<Response> {
     if (!said.ok) {
       return Response.json({ ok: false, error: said.reason, wait: said.wait }, { status: said.reason === "slow" ? 429 : said.reason === "unknown" ? 503 : 400 });
     }
-    return Response.json({ ok: true, message: said.message, name });
+    return Response.json({ ok: true, message: { ...said.message, a: chatAuthor(id, said.message.a) }, name });
   }
 
   // Taking something out, and emptying the room: the creator's alone.

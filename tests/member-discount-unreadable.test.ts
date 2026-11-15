@@ -19,6 +19,8 @@ process.env.STRIPE_SECRET_KEY = "sk_test_member_discount_only";
 const subscription = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
   status: "active",
+  // Main's harness (tests/member-discount.test.ts) now says each membership's discount evidence (no discount: []).
+  discounts: [],
   metadata: { store: "memberstore", product: "prod000001" },
   items: { data: [{ price: { unit_amount: 2900, currency: "usd", recurring: { interval: "month" } } }] },
   ...extra,

@@ -376,7 +376,7 @@ async function readRefunds(account: string, since: number, currencyOf: Map<strin
       const row = item && typeof item === "object" ? (item as Record<string, unknown>) : null;
       const id = row && typeof row.id === "string" && row.id ? row.id : "";
       const intent = row?.payment_intent;
-      if (!row || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) {
+      if (!row || row.object !== "refund" || !id || seen.has(id) || (intent !== null && (typeof intent !== "string" || !intent)) || typeof row.status !== "string" || !REFUND_STATUSES.has(row.status) || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0) {
         complete = false;
         continue;
       }

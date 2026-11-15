@@ -194,14 +194,20 @@ export function euVatAdjustment(record: EuVatRecord, change: { at: number; taxab
   if (change.taxableCents === 0 && change.vatCents === 0) return null;
   // Never before the sale it adjusts (review of 15/11/2026: it would become a correction of a later quarter).
   if (date < record.date) return null;
-  // Both move the same way, and the VAT keeps the rate's proportion of the amount: one cent either way is the
-  // rounding of two proportions (lib/eu-vat-refund.ts), anything more would declare too little or too much VAT.
+  // Both move the same way.
   if ((change.taxableCents > 0 && change.vatCents < 0) || (change.taxableCents < 0 && change.vatCents > 0)) return null;
-  const expected = Math.floor((Math.abs(change.taxableCents) * record.rateBasisPoints + 5000) / 10000);
-  if (!whole(expected) || Math.abs(Math.abs(change.vatCents) - expected) > 1) return null;
   const taxableLeft = record.taxableCents + record.adjustments.reduce((n, a) => n + a.taxableCents, 0) + change.taxableCents;
   const vatLeft = record.vatCents + record.adjustments.reduce((n, a) => n + a.vatCents, 0) + change.vatCents;
-  if (taxableLeft < 0 || vatLeft < 0) return null;
+  if (!whole(taxableLeft) || !whole(vatLeft) || taxableLeft < 0 || vatLeft < 0) return null;
+  // What is left keeps the rate's proportion, within the one cent of its rounding: checked on what is left, not on each
+  // step, as lib/eu-vat-refund.ts gives each refund back as the difference of two rounded running totals, so a step
+  // can be two cents from its own share and still be right, while VAT taken back with no value refunded cannot pile
+  // up one cent at a time (Claude 7 on #4572; the same as #4574's UK MEDIUM). Anything more would declare too little
+  // or too much VAT.
+  // The proportion is the sale's own (its VAT over its taxable amount, both already rounded), not the rate: the rate's
+  // would add the sale's own rounding and be two cents off now and then.
+  const expectedLeft = record.taxableCents > 0 ? Number((BigInt(2) * BigInt(taxableLeft) * BigInt(record.vatCents) + BigInt(record.taxableCents)) / (BigInt(2) * BigInt(record.taxableCents))) : 0;
+  if (!whole(expectedLeft) || Math.abs(vatLeft - expectedLeft) > 1) return null;
   // Nothing left to tax leaves no VAT behind.
   if (taxableLeft === 0 && vatLeft !== 0) return null;
   return { ...record, adjustments: [...record.adjustments, { date, taxableCents: change.taxableCents, vatCents: change.vatCents, reason: change.reason }] };

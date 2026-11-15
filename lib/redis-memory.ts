@@ -139,6 +139,19 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/flows.ts FLOW_QUEUED: each claim still pending becomes the 400-day mark and its run is queued, in one step.
+        if (key.startsWith("-- marktmorgen:flow-queued:v1\n") && Number(args[0]) >= 3) {
+          const keys = args.slice(1, 1 + Number(args[0])), argv = args.slice(1 + Number(args[0]));
+          let queued = 0;
+          for (let i = 2; i < keys.length; i++) {
+            if (this.run(["GET", keys[i]]) !== argv[2]) continue;
+            this.run(["SET", keys[i], "1", "EX", argv[1]]);
+            this.run(["ZADD", keys[0], argv[0], argv[i + 1]]);
+            queued += 1;
+          }
+          if (queued > 0) this.run(["HINCRBY", keys[1], "started", String(queued)]);
+          return queued;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;

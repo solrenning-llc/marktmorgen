@@ -475,6 +475,37 @@ export class MemoryRedis {
           this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
         }
         // CX-67: atomic held membership and aggregate observations.
+        // lib/broadcasts.ts BROADCAST_HEADS: each email's record without its body ("size": its length in bytes; "read": up to its bound), -1 missing, -2 no body.
+        if (key.startsWith("-- marktmorgen:broadcast-heads:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const mode = args[1 + count];
+          const bounds = args.slice(2 + count);
+          return keys.map((one, i) => {
+            const raw = this.run(["GET", one]);
+            if (raw === null || raw === undefined) return -1;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE");
+            const at = raw.indexOf('"body":"');
+            if (at < 0) return -2;
+            const start = at + 8;
+            let from = start;
+            let head: string | null = null;
+            for (;;) {
+              const quote = raw.indexOf('"', from);
+              if (quote < 0) break;
+              let slashes = 0;
+              while (raw[quote - 1 - slashes] === "\\") slashes += 1;
+              if (slashes % 2 === 0) {
+                if (quote > start) head = raw.slice(0, start) + raw.slice(quote);
+                break;
+              }
+              from = quote + 1;
+            }
+            if (head === null) return -2;
+            const bytes = new TextEncoder().encode(head);
+            return mode === "size" ? bytes.length : new TextDecoder().decode(bytes.slice(0, Number(bounds[i])));
+          });
+        }
         // lib/webhooks.ts READ_DELIVERIES: each delivery read only while it is no larger than its bound, {0} at the first larger one.
         if (key.startsWith("-- marktmorgen:webhook-deliveries-read:v1\n")) {
           const count = Number(args[0]);
@@ -989,6 +1020,19 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_REFUND_MARK: each record's refund mark written only over exactly the text read (its SHA-1).
+        if (key.startsWith("-- marktmorgen:affiliate-refund-mark:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          let n = 0;
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            if (typeof current === "string" && createHash("sha1").update(current).digest("hex") === args[i + 1]) {
+              this.run(["HSET", target, args[i], args[i + 2]]);
+              n += 1;
+            }
+          }
+          return n;
+        }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
         if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
@@ -1085,6 +1129,18 @@ export class MemoryRedis {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;
           this.run(["ZADD", queue, score, next]);
+          return 1;
+        }
+        // lib/sent-links.ts APPEND_SENT_LINK: an email's link changes written only over exactly the record read, with their expiry.
+        if (key.startsWith("-- marktmorgen:sent-link-append:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, target, expected, value, seconds] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          this.scriptCalls += 1;
+          if ((held ?? "") !== expected) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
@@ -2064,6 +2120,14 @@ export class MemoryRedis {
       }
       case "LLEN":
         return this.data.has(key) ? this.list(key).length : 0;
+      case "LPOP": {
+        // LPOP key, one at a time as lib/licence-keys.ts takes a key from its pool: nil on an empty list, which goes.
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LINDEX": {
         if (!this.data.has(key)) return null;
         const list = this.list(key);

@@ -67,7 +67,7 @@ function shop(): Store {
     previousHandles: [],
     releasedHandles: [],
     statsId: STATS,
-    stripeAccountId: "acct_1TestLockExp0001",
+    stripeAccountId: "acct_1TestLockExp01",
     currency: "usd",
     affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
   } as unknown as Store;

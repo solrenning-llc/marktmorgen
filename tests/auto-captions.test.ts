@@ -207,7 +207,16 @@ async function main(): Promise<void> {
       { status: "paid" }, { status: "paid", payment_intent: null },
       { status: "paid", payment_intent: "" }, { status: "paid", payment_intent: false },
       { status: "paid", payment_intent: 1 }, { status: "paid", payment_intent: {} },
+      // Issue #4746 (MEDIUM, money): a "paid" that is not this invoice's own, or not its amount in its currency.
+      { id: "in_OtherCaption001", status: "paid", payment_intent: "pi_OtherCaption001", amount_paid: 12000, currency: "usd" },
+      { status: "paid", payment_intent: "pi_Captions000001", amount_paid: 12000, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "not_an_intent", amount_paid: 12000, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 1, currency: "usd" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", amount_paid: 12000, currency: "eur" },
+      { id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001" },
     ]) {
+      // Each case from a clean slate: a failing one must not leave its pending record to the next.
+      redis.run(["DEL", pending]);
       stripe = [];
       bunny.length = 0;
       paidReceipt = receipt;

@@ -31,7 +31,7 @@ const bare: string[] = [];
 let lists = 0;
 for (const file of [...tsxFiles("app"), ...tsxFiles("components")]) {
   const source = readFileSync(file, "utf8");
-  for (const tag of source.matchAll(/<(ul|div|nav|ol)\b[^>]*?>/gs)) {
+  for (const tag of source.matchAll(/<(ul|div|nav|ol)\b[^>]*?>/g)) {
     const text = tag[0];
     if (!/\boverflow-x-auto\b/.test(text)) continue;
     if (tag[1] !== "ul" && !/role="group"/.test(text)) continue;
@@ -45,7 +45,7 @@ is("each one reveals the focused control", bare, []);
 part("the help center's Sections list is drawn by FocusRevealList");
 const help = readFileSync("app/help/page.tsx", "utf8");
 const nav = help.slice(help.indexOf('aria-label="Help sections"'), help.indexOf("</nav>", help.indexOf('aria-label="Help sections"')));
-is("the Sections nav uses FocusRevealList", /<FocusRevealList\b[^>]*overflow-x-auto/s.test(nav), true);
+is("the Sections nav uses FocusRevealList", /<FocusRevealList\b[^>]*overflow-x-auto/.test(nav), true);
 is("FocusRevealList passes revealFocused to its list", /onFocus=\{revealFocused\}/.test(readFileSync("components/focus-reveal-list.tsx", "utf8")), true);
 
 part("revealFocused scrolls the focused control, nearest edge only, never the list itself");

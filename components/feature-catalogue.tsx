@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
+import { revealFocused } from "@/components/reveal-focus";
 
 export type CatalogueItem = {
   slug: string;
@@ -110,7 +111,7 @@ export function FeatureCatalogue({
         ref={top}
         className="flex scroll-mt-28 flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-center sm:justify-between"
       >
-        <div className="seg max-w-full overflow-x-auto" role="group" aria-label="Filter the features">
+        <div className="seg max-w-full overflow-x-auto" role="group" aria-label="Filter the features" onFocus={revealFocused}>
           <button
             type="button"
             className="seg-item"

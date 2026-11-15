@@ -19,7 +19,9 @@ async function monthTaken(shop: { listId?: string | null }): Promise<number> {
   return keys.reduce((sum, k) => sum + Number(redis.run(["GET", k]) ?? 0), 0);
 }
 
-async function measure(n: number, erasedAt = -1): Promise<{ commands: number; sent: number; status?: string; stops: number; reserved: number }> {
+type Bend = { zscore?: "word" | "list" | "nothing"; sendFails?: boolean };
+async function measure(n: number, erasedAt = -1, bend: Bend = {}): Promise<{ commands: number; sent: number; status?: string; stops: number; reserved: number; handed: number }> {
+  let handed = 0;
   redis.clear();
   const owner = "update-owner@example.test";
   let productId = "";
@@ -29,6 +31,8 @@ async function measure(n: number, erasedAt = -1): Promise<{ commands: number; se
     const url = new URL(String(input));
     if (url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
       const batch = JSON.parse(String(init?.body));
+      if (bend.sendFails) return Response.json({ message: "synthetic refusal" }, { status: 422 });
+      handed += batch.length;
       return Response.json({ data: batch.map((_: unknown, i: number) => ({ id: `synthetic_${i}` })) });
     }
     if (url.hostname !== "api.stripe.com") throw new Error("No real provider call allowed");
@@ -62,13 +66,20 @@ async function measure(n: number, erasedAt = -1): Promise<{ commands: number; se
     // The person at erasedAt is erased between their stop link's erasure note and its grant: the erasure deleted the
     // note (and found no grant yet), as lib/erasure-index.ts forgetNoted does.
     if (c[0] === "ZADD" && String(c[3] ?? "").startsWith("nl:upd:stop:") && noted++ === erasedAt) run(["DEL", String(c[1])]);
+    // The stop link's note read again (stillNoted) answered in a shape not known.
+    if (c[0] === "ZSCORE" && String(c[2] ?? "").startsWith("nl:upd:stop:") && (bend.zscore === "word" || bend.zscore === "list")) return bend.zscore === "word" ? "maybe" : ["1"];
     return result;
   }) as typeof redis.run;
+  const pipeline = redis.pipeline;
+  if (bend.zscore === "nothing") {
+    redis.pipeline = (async (b: (string | number)[][]) => (b.length === 1 && b[0][0] === "ZSCORE" && String(b[0][2] ?? "").startsWith("nl:upd:stop:") ? [] : pipeline(b))) as typeof redis.pipeline;
+  }
   try {
     const job = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 60_000);
-    return { commands, sent: job?.sent ?? 0, status: job?.status, stops: redis.keys().filter((k) => k.startsWith("nl:upd:stop:")).length, reserved: (await monthTaken(shop)) - monthBefore };
+    return { commands, sent: job?.sent ?? 0, status: job?.status, stops: redis.keys().filter((k) => k.startsWith("nl:upd:stop:")).length, reserved: (await monthTaken(shop)) - monthBefore, handed };
   } finally {
     redis.run = run;
+    redis.pipeline = pipeline;
   }
 }
 
@@ -95,6 +106,19 @@ async function main(): Promise<void> {
   is("the other is sent in the same run, the batch not thrown back", [pair.sent, pair.status, pair.stops], [1, "sent", 1]);
   is("two emails taken, one for each", pair.reserved, 2);
   is("each under UPDATE_EMAIL_COMMANDS", pair.commands / 2 <= UPDATE_EMAIL_COMMANDS, true);
+
+  part("The note read again in a shape not known (7yUYU, MEDIUM): the batch waits, no grant kept with the address, nothing sent");
+  for (const shape of ["word", "list", "nothing"] as const) {
+    const odd = await measure(1, -1, { zscore: shape });
+    is(`${shape}: the batch waits, nothing sent`, [odd.status, odd.sent, odd.handed], ["waiting", 0, 0]);
+    is(`${shape}: the grant just written is taken back`, odd.stops, 0);
+    is(`${shape}: the month's email given back`, odd.reserved, 0);
+  }
+
+  part("One recipient erased and the batch's send failing (7yUYU, LEVE): only what was to go out comes back");
+  const failed = await measure(2, 0, { sendFails: true });
+  is("nothing sent", [failed.sent, failed.handed], [0, 0]);
+  is("the skipped person's email stays spent, the other's comes back", failed.reserved, 1);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

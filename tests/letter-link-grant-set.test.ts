@@ -15,6 +15,7 @@ import { publishLetter } from "@/lib/letters";
 import type { Letter } from "@/lib/letter-rules";
 import { readLetterGrant, requestLetterLink } from "@/lib/letter-access";
 import { allowanceUsed } from "@/lib/store-allowance";
+import { suppressCommand } from "@/lib/suppression";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -57,8 +58,10 @@ function broadcast(store: Store, id: string): Broadcast {
   return b;
 }
 const settle = () => new Promise((r) => setTimeout(r, 200));
+// The grant's write: a SET, or since #4772 the one step that keeps it only while the address was not erased.
 const isGrantSet = (commands: (string | number)[][]) =>
-  commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:letters:link:") && !String(commands[0][1]).endsWith(":opens");
+  (commands[0]?.[0] === "SET" && String(commands[0][1]).startsWith("nl:letters:link:") && !String(commands[0][1]).endsWith(":opens")) ||
+  (commands[0]?.[0] === "EVAL" && commands[0][2] === 2 && String(commands[0][3]).startsWith("nl:letters:link:"));
 const tokenOf = (text: string | undefined) => /token=([0-9a-f]{64})/.exec(text ?? "")?.[1] ?? "";
 
 async function main(): Promise<void> {
@@ -147,6 +150,32 @@ async function main(): Promise<void> {
     is("emailed once, with a token", [mails.length - mailsBefore, token.length], [1, 64]);
     is("the new link opens", (await readLetterGrant(token))?.l, letter.id);
     is("one transactional email taken", (await used()) - allowanceBefore, 1);
+  }
+
+  part("An erasure recorded just before the grant write prevents the grant and email (#4772)");
+  {
+    const erasedAddress = `member${++member}@example.com`;
+    const mailsBefore = mails.length;
+    const allowanceBefore = await used();
+    let grantKey = "";
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (isGrantSet(commands)) {
+        const command = commands[0];
+        grantKey = String(command[command[0] === "EVAL" ? 3 : 1]);
+        await real([suppressCommand(store.listId!, erasedAddress)]);
+      }
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      is("the form answers the same way for an erased address", await ask(erasedAddress), "sent");
+      await settle();
+    } finally {
+      redis.pipeline = real;
+    }
+    is("the pending grant write was reached", Boolean(grantKey), true);
+    is("the erased address has no grant", await redis.run(["GET", grantKey]), null);
+    is("no email was sent", mails.length - mailsBefore, 0);
+    is("nothing taken from the allowance", (await used()) - allowanceBefore, 0);
   }
 
   console.error = realError;

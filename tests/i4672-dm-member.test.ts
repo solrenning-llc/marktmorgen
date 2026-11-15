@@ -10,7 +10,7 @@ import { makeWorld, seedPerson } from "./erasure-world";
 import { erasePerson } from "@/lib/person-erasure";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
-import { conversationsOf, send } from "@/lib/community-dm";
+import { conversationsOf, pairOf, send } from "@/lib/community-dm";
 import { CREATOR } from "@/lib/community";
 
 globalThis.fetch = (async (input: string | URL | Request) => {
@@ -61,6 +61,32 @@ async function main(): Promise<void> {
   } finally { await finishDm(); }
   is("the pending send recreates nothing in the recipient's copy", await conversationsOf(id, benKey), []);
   is("nor the sender's", await conversationsOf(id, tessKey), []);
+
+  part("DM: a send authorised before the RECIPIENT's erasure is written after it (5bNDa, MEDIUM)");
+  const cara = normaliseEmail("cara@example.com");
+  const dan = normaliseEmail("dan@example.com");
+  await seedPerson(world, dan, null);
+  await seedPerson(world, cara, dan);
+  const caraKey = emailKey(cara);
+  const danKey = emailKey(dan);
+  is("control: before the pending send, the recipient has the conversation", (await conversationsOf(id, danKey)).length, 1);
+  const finishToErased = await pausedOn((c) => (c[0]?.[0] === "RPUSH" && String(c[0][1]).startsWith(`nl:cm:${id}:dm:`))
+    || (c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:dm-send-if-member:") && String(c[0][3]).startsWith(`nl:cm:${id}:dm:`)),
+    () => send(id, { on: true, between: true, ask: false }, caraKey, danKey, "words to someone leaving", store));
+  try {
+    is("the recipient's erasure completes", (await erasePerson(store, dan, { kind: "person" })).ok, true);
+  } finally { await finishToErased(); }
+  is("the pending send recreates nothing in the erased recipient's inbox", await conversationsOf(id, danKey), []);
+  // What is held, not which keys exist: the stand-in makes an empty key on a read, as the send's own checks do.
+  const heldFor = (who: string, other: string) => original([
+    ["ZCARD", `nl:cm:${id}:dm:i:${who}`], ["ZCARD", `nl:cm:${id}:dm:q:${who}`],
+    ["LLEN", `nl:cm:${id}:dm:${pairOf(who, other)}`], ["HLEN", `nl:cm:${id}:dm:r:${pairOf(who, other)}`],
+  ]);
+  is("nor any inbox or request line, message or read mark of the pair", await heldFor(danKey, caraKey), [0, 0, 0, 0]);
+
+  part("DM: the creator writing to a member already erased writes nothing (5bNDa, MEDIUM)");
+  await send(id, { on: true, between: true, ask: false }, CREATOR, danKey, "hello, are you there?", store).catch(() => undefined);
+  is("nothing in the erased member's inbox or requests, and no message or read mark", [await conversationsOf(id, danKey), await heldFor(danKey, CREATOR)], [[], [0, 0, 0, 0]]);
 
   part("a current member and the creator still write");
   const amy = normaliseEmail("amy@example.com");

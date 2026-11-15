@@ -88,6 +88,19 @@ async function main(): Promise<void> {
   await send(id, { on: true, between: true, ask: false }, CREATOR, danKey, "hello, are you there?", store).catch(() => undefined);
   is("nothing in the erased member's inbox or requests, and no message or read mark", [await conversationsOf(id, danKey), await heldFor(danKey, CREATOR)], [[], [0, 0, 0, 0]]);
 
+  part("an unknown reply of the write is never a message sent (rule 24)");
+  for (const shape of [[], [null], ["OK"], [3]] as unknown[][]) {
+    redis.pipeline = (async (c: Command[]) => (c[0]?.[0] === "EVAL" && String(c[0][1]).startsWith("-- marktmorgen:dm-send-if-member:") ? shape : original(c))) as typeof redis.pipeline;
+    let outcome = "";
+    try {
+      outcome = JSON.stringify(await send(id, { on: true, between: true, ask: false }, CREATOR, benKey, "unknown write", store));
+    } catch (error) {
+      outcome = (error as Error).name;
+    }
+    redis.pipeline = original;
+    is(`write answered ${JSON.stringify(shape)}: unknown`, outcome, "UnknownReplyError");
+  }
+
   part("a current member and the creator still write");
   const amy = normaliseEmail("amy@example.com");
   await seedPerson(world, amy, null);

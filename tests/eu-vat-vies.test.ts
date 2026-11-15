@@ -95,3 +95,13 @@ test("a valid answer counts only for its country, the same day, at most VIES_FRE
   assert.equal(viesValidFor({ ...valid, askedAt: "yesterday" }, "DE", at), false);
   assert.equal(viesValidFor("valid", "DE", at), false);
 });
+
+test("a clock that is not a moment never throws: the answer is unavailable and never valid", async () => {
+  const bad = new Date(Number.NaN);
+  const answer = readViesAnswer({ country: "DE", number: "100" }, 200, official.valid, bad);
+  assert.equal(answer.state, "unavailable");
+  assert.equal(viesValidFor(answer, "DE", at), false);
+  const checked = await checkVies("DE100", { fetcher: async () => ({ status: 200, text: async () => JSON.stringify(official.valid) }), now: () => bad });
+  assert.equal(checked?.state, "unavailable");
+  assert.equal(viesValidFor(readViesAnswer({ country: "DE", number: "100" }, 200, official.valid, at), "DE", bad), false);
+});

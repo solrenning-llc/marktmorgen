@@ -84,7 +84,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
-  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
+  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
   "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:recent:", "nl:recent:feed:",
@@ -112,7 +112,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:teams:state:", "nl:team:", "nl:team:invite:", "nl:team:lock:", "nl:team:log:", "nl:team:of:", "nl:tier:", "nl:tier:resume:",
   "nl:traffic:c:", "nl:traffic:day:", "nl:traffic:folders:", "nl:traffic:n:", "nl:traffic:r:", "nl:traffic:x:", "nl:trialnudge:cursor", "nl:upd:job:",
   "nl:updq", "nl:upload-budget:v2:{", "nl:upload-budget:v2:{YYYY-MM}", "nl:upsell-slots:", "nl:upsell:",
-  "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
+  "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
   "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
@@ -365,7 +365,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan-refund:next": C, "nl:plan-withdraw:": Cr(400), "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
   "nl:plans:lock": C, "nl:plans:pending": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),
-  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
+  // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
+  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
   "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the
@@ -448,7 +449,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:upload-budget:v2:{": C, "nl:upload-budget:v2:{YYYY-MM}": C,
   "nl:upsell-slots:": X(8), "nl:upsell:": X(8), "nl:upsell:pending": I,
   "nl:usage-watch:told": C,
-  "nl:vault:up:": X(1),
+  "nl:vault:fresh:": X(7), "nl:vault:up:": X(1),
   "nl:verified:": E, "nl:verified:cursor": C,
   "nl:voice:": E, "nl:voice:lock:": E,
   // A product's AI summary of its reviews (lib/review-ai-summary.ts): kept eight days, and goes with the store.

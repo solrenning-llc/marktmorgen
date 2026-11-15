@@ -16,6 +16,7 @@
  *   - docs/marktmorgen-affiliates.md is exactly what the renderer writes
  *     (node scripts/marktmorgen-affiliates.mjs), and nothing is in force.
  */
+import { DISPUTE_DAYS } from "@/lib/refund-reserve-rules";
 import { readFileSync, existsSync } from "node:fs";
 import { PLAN_PRICES, TIERS } from "@/lib/plan";
 import { POSITIVE_NET_CENTS } from "@/lib/receiving-costs";
@@ -46,6 +47,10 @@ for (const row of rows) {
   is(`${row.id}: the commission shown is the one rounded up that the net pays`, shown.includes(`${usd(Math.ceil((row.priceCents * row.maxCommissionBps) / 10_000))} |`), true);
 }
 is("a dispute after the commission was paid is named as a cost not yet covered (review of #3756)", /dispute[^.]*after[^.]*paid[^.]*unknown|unknown[^.]*dispute[^.]*after[^.]*paid/i.test(shown), true);
+// Claude 7 on #3764 (MEDIUM): a yearly plan pays ahead, so its dispute window runs from the end of the year it paid
+// for, not from the charge (lib/refund-reserve-rules.ts, DISPUTE_DAYS, Stripe's "Dispute timing").
+is("the dispute window is DISPUTE_DAYS after the later of the payment and the end of the period it paid for, with its source", shown.includes(`${DISPUTE_DAYS} days after the later of the payment and the end of the period it paid for`) && shown.includes("lib/refund-reserve-rules.ts"), true);
+is("never only 'after the charge', which would release a yearly commission about a year early", /about 120 days after the charge/.test(shown), false);
 
 part("Nothing is in force");
 is("plans are not on sale", PLANS_ON_SALE, false);

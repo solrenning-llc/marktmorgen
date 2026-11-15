@@ -111,10 +111,13 @@ export class MemoryRedis {
 
   /** Redis deletes a sorted set when its last member goes: an emptied one is not kept. */
   private dropIfEmpty(key: string, z: { score: number; member: string }[]): void {
-    if (z.length === 0 && this.data.get(key) === z) {
-      this.data.delete(key);
-      this.until.delete(key);
-    }
+    if (z.length === 0 && this.data.get(key) === z) this.forgetKey(key);
+  }
+
+  /** A key Redis no longer holds (a hash, set, list or sorted set emptied): gone with its expiry (#4274), so a key made again under the name starts with none. */
+  private forgetKey(key: string): void {
+    this.data.delete(key);
+    this.until.delete(key);
   }
 
   /** Runs one command, the way redisPipeline runs each of its own. */
@@ -2076,15 +2079,19 @@ export class MemoryRedis {
         if (!this.data.has(key)) return null;
         const list = this.list(key);
         const first = list.shift() ?? null;
-        if (!list.length) this.data.delete(key);
+        if (!list.length) this.forgetKey(key);
         return first;
       }
       case "LTRIM": {
+        // A missing key stays missing; a list trimmed to nothing is deleted with its expiry, as on Redis.
+        if (!this.data.has(key)) return "OK";
         const list = this.list(key);
         const [from, to] = [Number(args[0]), Number(args[1])];
         const start = from < 0 ? Math.max(0, list.length + from) : from;
         const end = to < 0 ? list.length + to : to;
-        this.data.set(key, list.slice(start, end + 1));
+        const kept = list.slice(start, end + 1);
+        if (kept.length) this.data.set(key, kept);
+        else this.forgetKey(key);
         return "OK";
       }
       case "LRANGE": {
@@ -2107,7 +2114,8 @@ export class MemoryRedis {
           }
           return true;
         });
-        this.data.set(key, kept);
+        if (kept.length) this.data.set(key, kept);
+        else this.forgetKey(key);
         return gone;
       }
       case "STRLEN": {
@@ -2158,6 +2166,7 @@ export class MemoryRedis {
         const hash = this.hash(key);
         let gone = 0;
         for (const field of args) if (hash.delete(field)) gone += 1;
+        if (!hash.size) this.forgetKey(key);
         return gone;
       }
       case "HGETALL": {
@@ -2222,7 +2231,7 @@ export class MemoryRedis {
         let gone = 0;
         for (const one of args) if (set.delete(one)) gone += 1;
         // As redis-server: a set left empty is no longer a key (#4263's "log out of all devices" removes its members).
-        if (!set.size) this.data.delete(key);
+        if (!set.size) this.forgetKey(key);
         return gone;
       }
       case "SISMEMBER":
@@ -2261,6 +2270,7 @@ export class MemoryRedis {
         const first = [...set][0];
         if (first === undefined) return null;
         set.delete(first);
+        if (!set.size) this.forgetKey(key);
         return first;
       }
 

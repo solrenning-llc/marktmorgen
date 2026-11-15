@@ -654,10 +654,18 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
   for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
-  const theirs = pairs.filter(([, value]) => {
-    const deal = json(value) as { email?: unknown } | null;
-    return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
-  }).map(([id]) => id);
+  // Every deal must read before any is judged (issue #4810): a value that is not a deal record, or a deal id twice,
+  // may be the person's, so it is never taken for somebody else's. The deletion throws before writing anything and
+  // says it is not finished, to be pressed again once the record is put right.
+  if (new Set(pairs.map(([id]) => id)).size !== pairs.length) throw new UnknownReplyError("a store's deals");
+  const read = pairs.map(([id, value]) => {
+    const deal = json(value);
+    if (!deal || typeof deal !== "object" || Array.isArray(deal)) throw new UnknownReplyError("a store's deal");
+    const mail = (deal as { email?: unknown }).email;
+    if (mail !== undefined && mail !== null && typeof mail !== "string") throw new UnknownReplyError("a store's deal");
+    return [id, typeof mail === "string" ? mail : ""] as const;
+  });
+  const theirs = read.filter(([, mail]) => mail.trim().toLowerCase() === address).map(([id]) => id);
   // Each value taken out in one script that answers what it deleted, each deal
   // deleted on its own: what goes back to the store's data room is exactly
   // what was removed, even with a change of the same value at the same time.

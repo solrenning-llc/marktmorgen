@@ -189,7 +189,7 @@ function MetaAds({
       {meta.connected && canConnect ? (
         <form method="post" action={`/api/integrations/meta/disconnect${pin}`} className="mt-2">
           <button type="submit" className="btn btn-ghost btn-sm">Disconnect Meta ads</button>
-          <span className="ml-2 text-xs text-ink-soft">Gives the permission back to Meta and deletes what was read.</span>
+          <span className="ml-2 text-xs text-ink-soft">Deletes what was read. Gives the permission back to Meta only when we can confirm no other store uses this Meta login.</span>
         </form>
       ) : null}
     </section>

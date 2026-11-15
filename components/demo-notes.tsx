@@ -10,23 +10,28 @@ import { TEST_CARD } from "@/lib/house-store";
  * card form — that no real money moves here, and which card to type.
  */
 
-/** Across the top of every page of the demo store. */
+/**
+ * Across the top of every page of the demo store. In a named landmark, so a screen reader that moves by landmarks
+ * still meets the notice that no real money moves (274 [AX1], tests/demo-strip-landmark.test.ts).
+ */
 export function DemoStrip() {
   return (
-    <p
-      data-demo-strip=""
-      className="flex flex-col items-center justify-center gap-0.5 bg-night px-4 py-2.5 text-center text-[0.8125rem] leading-5 text-white/80 sm:flex-row sm:gap-2"
-    >
-      <span className="flex items-center gap-2 whitespace-nowrap">
-        <span className="rounded-[5px] bg-white/12 px-1.5 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-white">
-          Demo
+    <aside aria-label="Demo store">
+      <p
+        data-demo-strip=""
+        className="flex flex-col items-center justify-center gap-0.5 bg-night px-4 py-2.5 text-center text-[0.8125rem] leading-5 text-white/80 sm:flex-row sm:gap-2"
+      >
+        <span className="flex items-center gap-2 whitespace-nowrap">
+          <span className="rounded-[5px] bg-white/12 px-1.5 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-white">
+            Demo
+          </span>
+          Stripe test mode: no real money moves.
         </span>
-        Stripe test mode: no real money moves.
-      </span>
-      <span>
-        Pay with <span className="font-mono font-semibold text-white">{TEST_CARD}</span>, any future date, any CVC.
-      </span>
-    </p>
+        <span>
+          Pay with <span className="font-mono font-semibold text-white">{TEST_CARD}</span>, any future date, any CVC.
+        </span>
+      </p>
+    </aside>
   );
 }
 

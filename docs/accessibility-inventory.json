@@ -979,6 +979,12 @@
       "parameters": []
     },
     {
+      "source": "app/start-here/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/start-here",
+      "parameters": []
+    },
+    {
       "source": "app/status/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/status",
@@ -1648,6 +1654,7 @@
     "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
+    "components/start-quiz.tsx",
     "components/stats-panel.tsx",
     "components/step-count.tsx",
     "components/sticky-buy.tsx",
@@ -1729,6 +1736,7 @@
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/withdrawal-where.tsx",
+    "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],
@@ -2165,6 +2173,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 148
+    "pageTemplates": 149
   }
 }

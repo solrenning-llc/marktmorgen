@@ -1191,7 +1191,11 @@ export async function sendDueSteps(
   const counts = { sent: 0, dropped: 0, later: 0 };
   if (!isRedisConfigured()) return counts;
   const stores = new Map<string, Store | null>();
-  const flowsFor = new Map<string, Flow[]>();
+  // Each store's workflows, read once a job, with the second they were read (taken just before the read). Every run
+  // this job moves on is stamped with that second, not the moment it is written: the stamp then says which list chose
+  // the step they are queued for, so a save that changes places later in the same job (Flow.layoutAt) is after it, and
+  // the next job holds them instead of sending the step now at that position (#4539, comment 6900339629).
+  const flowsFor = new Map<string, { flows: Flow[]; readAt: number }>();
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
@@ -1267,8 +1271,13 @@ export async function sendDueSteps(
       counts.dropped += emails.length;
       return;
     }
-    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
-    const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
+    if (!flowsFor.has(listId)) {
+      const readAt = Math.floor(Date.now() / 1000);
+      // An unreadable list throws, nothing is kept, and the batch goes back in the queue (CX-123 rule 24).
+      flowsFor.set(listId, { flows: await readFlowsExact(listId), readAt });
+    }
+    const { flows: listed, readAt: chosenAt } = flowsFor.get(listId)!;
+    const flow = listed.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {
       counts.dropped += emails.length;
@@ -1342,7 +1351,8 @@ export async function sendDueSteps(
     // Queued before the steps changed places: the place they hold may now be another step. Held for the creator.
     // Seconds on both sides: a run last moved in the very second of the save is taken as after it (somebody started
     // right after a save must not be held); a step queued in that same second just before the save is the only one
-    // this can miss.
+    // this can miss. The sender stamps a run with the second its list was read (chosenAt), not when it writes, so a
+    // save later in the same job, while this list is still the one in use, is after the stamp: it is held next time.
     const stale: string[] = [];
     emails.forEach((email, i) => {
       if (!held.has(email)) return;
@@ -1382,10 +1392,10 @@ export async function sendDueSteps(
     if (left + onward.length) tallies.push(["HINCRBY", statsKey(flow.id), "skipped", left + onward.length]);
     const skippedOut = await queueHeld(moved, tallies);
     counts.dropped += skippedOut.size;
-    await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), now).catch((error) => console.error("writing workflow history failed", error));
+    await noteRuns(flow.id, notes.filter((n) => !skippedOut.has(n.email)), chosenAt).catch((error) => console.error("writing workflow history failed", error));
     if (stale.length) {
       counts.dropped += stale.length;
-      await holdRuns(listId, flow.id, index, step.id, stale, LAYOUT_HOLD_NOTE(index), now);
+      await holdRuns(listId, flow.id, index, step.id, stale, LAYOUT_HOLD_NOTE(index), chosenAt);
     }
     if (!still.length) return;
     const mine = still;
@@ -1394,7 +1404,7 @@ export async function sendDueSteps(
     // Whoever already has an attempt open here is held, never tried again.
     let claim: { claimed: string[]; open: string[] };
     try {
-      claim = await claimAttempts(flow.id, mine, index, step.id, kind, now);
+      claim = await claimAttempts(flow.id, mine, index, step.id, kind, chosenAt);
     } catch {
       // Nothing was attempted: back in the queue, as before history existed, unless taken out meanwhile.
       const out = await queueHeld(mine.map((email) => ["ZADD", QUEUE, now + 600, `${group}|${email}`]));
@@ -1403,7 +1413,7 @@ export async function sendDueSteps(
       return;
     }
     if (claim.open.length) {
-      await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), now).catch(() => {});
+      await settleAttempts(listId, flow.id, index, step.id, kind, claim.open.map((email) => ({ email, state: "uncertain", note: "An earlier attempt at this step has no confirmed outcome, so it was not tried again.", to: index })), chosenAt).catch(() => {});
     }
     const going = claim.claimed;
     if (!going.length) return;
@@ -1420,7 +1430,7 @@ export async function sendDueSteps(
       // A step that acts instead of writing: done for everyone it is for, then
       // on to where it leads, its wait counted from now.
       if (step.action) {
-        const outcomes = await act(store, flowsFor.get(listId) ?? [], step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
+        const outcomes = await act(store, listed, step.action, going, { flow, step, index }).catch((): Acted[] => each(going, "uncertain", "The outcome of this action could not be confirmed."));
         // Anybody act did not answer for has no known outcome.
         const answered = new Set(outcomes.map((o) => o.email));
         const all = [...outcomes, ...each(going.filter((e) => !answered.has(e)), "uncertain", "The outcome of this action could not be confirmed.")];
@@ -1431,7 +1441,7 @@ export async function sendDueSteps(
         const out = await queueHeld([...queueNext(onwards), ...waiting.queue], confirmed.length ? [["HINCRBY", statsKey(flow.id), "acted", confirmed.length]] : []);
         const stay = new Set(going.filter((email) => !out.has(email)));
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, [...settled(all.filter((o) => o.state !== "deferred"), stay), ...endedIfTakenOut(waiting.outcomes, stay)], chosenAt);
         return;
       }
 
@@ -1439,7 +1449,7 @@ export async function sendDueSteps(
       const result = await sendTo(store, going, step.subject, step.body, key, { medium: "sequence", campaign: stepCampaign(flow.id, step.id) }).catch(() => null);
       if (!result) {
         queued = true;
-        await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index })), now);
+        await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "Sending was interrupted; whether this email went out could not be confirmed.", to: index })), chosenAt);
         return;
       }
       const uncertain = new Set(result.uncertain ?? []);
@@ -1501,13 +1511,13 @@ export async function sendDueSteps(
         counts.dropped += waiting.outcomes.length - later;
       }
       queued = true;
-      await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
+      await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, chosenAt);
     } catch (error) {
       // Something after the attempt could not be confirmed. The attempts stay
       // open, so nothing is repeated by itself; when nothing was queued after
       // them either, the runs are held here for the creator to see.
       console.error("finishing a workflow step failed", error);
-      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index })), now).catch(() => {});
+      if (!queued) await settleAttempts(listId, flow.id, index, step.id, kind, going.map((email) => ({ email, state: "uncertain", note: "What happened at this step could not be confirmed.", to: index })), chosenAt).catch(() => {});
     }
   }
 }

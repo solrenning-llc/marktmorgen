@@ -485,7 +485,9 @@ export const forgetHeldCommand = (listId: string): (string | number)[] => ["DEL"
 /**
  * When this person's run last moved (its `updatedAt`), read with the step's other reads (lib/flows.ts, sendGroup):
  * every write that queues their next step writes it in the same moment, so it says when the step they are queued
- * for was chosen. Read only for a workflow whose steps changed places (Flow.layoutAt).
+ * for was chosen. The sender writes the second it read the workflow's steps, not the second it writes (one list
+ * serves a whole job), so a save made while that job runs is after the stamp. Read only for a workflow whose steps
+ * changed places (Flow.layoutAt).
  */
 export const runStampCommand = (flowId: string, email: string): (string | number)[] => ["HGET", runKey(flowId, personOf(email)), "updatedAt"];
 

@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 18.0% | 60.24% | 60.05% | $77.72 | 0.49 |
+| $129 / $1,290 **(recommended)** | 17.9% | 60.24% | 60.05% | $77.72 | 0.49 |
 | $149 / $1,490 | 70.6% | 60.26% | 60.04% | $89.79 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.42% | 60.21% | $102.12 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.91% | 60.73% | $121.23 | 0.32 |
@@ -69,7 +69,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $349 / $3,490 | 3.7% | 60.41% | 60.03% | $210.85 | 2.85 |
 | $399 / $3,990 **(recommended)** | 10.2% | 60.40% | 60.01% | $241.03 | 2.49 |
 | $499 / $4,990 | 23.3% | 60.41% | 60.01% | $301.45 | 1.99 |
-| $999 / $9,990 | 88.7% | 60.41% | 60.01% | $603.55 | 0.99 |
+| $999 / $9,990 | 88.7% | 60.41% | 60.00% | $603.55 | 0.99 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
 
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$129 / $1,290** | **$249 / $2,490** | **$399 / $3,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **610** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,000** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **600** · 3,400 · 3,000 | **1,500** · 10,000 · 10,000 | **4,000** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **35** · 200 · 200 | **70** · 450 · 450 | **150** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **1,000** · 7,000 · 5,000 | **1,000** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **6 + 39** · 40 + 250 · 40 + 250 | **8 + 40** · 80 + 400 · 80 + 400 |

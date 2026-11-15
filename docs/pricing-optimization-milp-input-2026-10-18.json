@@ -337,9 +337,9 @@
     "ai": 0,
     "video": 69,
     "storage": 152,
-    "orders": 504,
-    "store-email": 81,
-    "transactional-email": 165,
+    "orders": 505,
+    "store-email": 82,
+    "transactional-email": 166,
     "list-email": 0,
     "visits": 1076
    }
@@ -2250,9 +2250,9 @@
     "ai": 4024,
     "video": 553,
     "storage": 1217,
-    "orders": 1135,
+    "orders": 1136,
     "store-email": 327,
-    "transactional-email": 441,
+    "transactional-email": 442,
     "list-email": 7560,
     "visits": 3165
    }
@@ -6470,14 +6470,14 @@
     "visits": 1055
    },
    "coefYear": {
-    "ai": 7642,
+    "ai": 7643,
     "video": 1106,
-    "storage": 2434,
+    "storage": 2435,
     "orders": 3785,
-    "store-email": 871,
+    "store-email": 872,
     "transactional-email": 1104,
     "list-email": 10800,
-    "visits": 12660
+    "visits": 12661
    }
   }
  }

@@ -2102,6 +2102,26 @@ export async function confirmBooking(input: {
   }
   // Moved before it was done ("moved"): what a booking does besides its two emails, which the move's stand in for.
   if (stage === "sending" || stage === "moved") {
+    // The creator's webhooks are told first, and a failure is thrown, not only logged (issue #3937): emitEvent throws
+    // so its caller tries again when it could not record the event (its own once-only mark unknown, or its deliveries
+    // not written). Thrown here, the mark stays at this stage, which is owed (CONFIRM_OWED), so the mail job,
+    // catchUpBookings and the thanks page resume it, and nothing below has run yet: the team's round robin
+    // (confirmTeam's HINCRBY) is never counted twice by a resumed try. The event's id is made from the session
+    // (lib/webhooks.ts), so it is recorded once however often this is tried. Known edge (review of #4099, LOW): an event
+    // that keeps failing until the call's end is never confirmed, since the retries look only at calls not yet ended.
+    try {
+      await emitEvent(store, "call.booked", session, {
+        checkout_session: session,
+        product: { id: product.id, title: product.title },
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
+        kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
+        buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
+        answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
+      });
+    } catch (error) {
+      throw new Error("queueing the call.booked webhook failed; confirmed later", { cause: error });
+    }
     // Booked: the orders it was admitted as are the window's (lib/orders.ts), once each by its reference, however
     // often this is tried, by the checkout.
     for (let unit = 1; unit <= CALL_ORDER_UNITS; unit += 1) await countOrder(store, `call:${session}:${unit}`, input.amountCents ?? 0);
@@ -2124,16 +2144,6 @@ export async function confirmBooking(input: {
         console.error("planning call reminders failed", error),
       );
     }
-    // Once per checkout however often it is noticed: its event id is made from the session (lib/webhooks.ts).
-    await emitEvent(store, "call.booked", session, {
-      checkout_session: session,
-      product: { id: product.id, title: product.title },
-      start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(),
-      kind: product.call.kind === "live" ? "live_session" : product.call.seats > 1 ? "group_call" : "call",
-      buyer: { email: buyerEmail, name: input.buyerName ?? null, timezone: input.buyerTz },
-      answers: (input.answers ?? []).map((answer) => ({ question: answer.label, answer: answer.value })),
-    }).catch((error) => console.error("queueing the call.booked webhook failed", error));
     // The creator's phone, when a device of theirs asked for bookings
     // (lib/phone-alerts.ts): what, when in their own time zone, and what was paid, once per `seed`.
     // In the currency it was paid in: the store's own, unless the store changed its currency since.

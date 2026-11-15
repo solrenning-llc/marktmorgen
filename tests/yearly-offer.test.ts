@@ -13,16 +13,21 @@
  *   - when Stripe cannot be asked about earlier sales, nothing is noted, so
  *     the next pass asks again.
  */
-import { claimHandle, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, isSale, noteFirstSale, offerYearly, yearlyOfferEmail } from "@/lib/yearly-offer";
+import { NextRequest } from "next/server";
+import { POST as stopOffersRoute } from "@/app/api/store/offers/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_offer_only";
 process.env.RESEND_API_KEY = "re_test_yearly_offer_only";
+// The company's postal address, which a commercial email carries (lib/company-postal.ts); synthetic.
+const POSTAL = "100 Example Street, Example City, NY 10001, United States";
+process.env.COMPANY_POSTAL_ADDRESS = POSTAL;
 
 const NOW = 1_791_700_000;
-const emails: { to: string; subject: string; text: string }[] = [];
+const emails: { to: string; subject: string; text: string; headers?: Record<string, string> }[] = [];
 let earlier: Record<string, unknown>[] = [];
 let stripeDown = false;
 const subs: Record<string, Record<string, unknown>> = {};
@@ -62,7 +67,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (url.hostname === "api.resend.com") {
     const body = JSON.parse(String(init?.body ?? "{}"));
-    emails.push({ to: Array.isArray(body.to) ? body.to[0] : body.to, subject: body.subject, text: body.text });
+    emails.push({ to: Array.isArray(body.to) ? body.to[0] : body.to, subject: body.subject, text: body.text, headers: body.headers });
     return new Response(JSON.stringify({ id: "re_1" }), { status: 200 });
   }
   return new Response("{}", { status: 404 });
@@ -90,6 +95,8 @@ async function withOddWrite<T>(prefix: string, reply: unknown, run: () => Promis
 async function seller(email: string, handle: string, sub: string | null) {
   await claimHandle(email, handle, "A store", "");
   await setStripeAccount(email, "acct_1TestYearly0001");
+  // A store id: the offers' stop is kept by it (lib/offer-stop.ts).
+  await ensureStoreId(email);
   if (sub) await setSubscription(email, { subscriptionId: sub, active: true, tier: "creator", cycle: "month" });
   return (await storeForEmail(email))!;
 }
@@ -188,6 +195,39 @@ async function main() {
     is("a mark answered oddly that did not land sends nothing", await withOddWrite("nl:yearly-offer:", [undefined], () => offerYearly(store, true)), false);
     is("no email on it", emails.length - before, 0);
     is("the next whole answer sends it, once", [await offerYearly(store, true), await offerYearly(store, true), emails.length - before], [true, false, 1]);
+  }
+
+  part("A commercial email: a way to stop it and the company's postal address (CAN-SPAM, 15 U.S.C. 7704(a)(3), (a)(5))");
+  {
+    subs.sub_canspam0001 = subscription("sub_canspam0001", "month");
+    const store = await seller("canspam@example.com", "canspamstore", "sub_canspam0001");
+    const before = emails.length;
+    is("sent", await offerYearly(store, true), true);
+    const mail = emails[before];
+    const stop = mail?.text.match(/https:\/\/\S+\/api\/store\/offers\?s=[0-9a-f]{32}&t=[A-Za-z0-9_-]+/)?.[0] ?? "";
+    is("it carries a link that stops the offers", stop !== "", true);
+    is("and the company's postal address", mail?.text.includes(POSTAL), true);
+    is("a mail app can stop it in one click (RFC 8058)", [mail?.headers?.["List-Unsubscribe"], mail?.headers?.["List-Unsubscribe-Post"]], [`<${stop}>`, "List-Unsubscribe=One-Click"]);
+
+    part("Stopped in one click, no offer is sent again");
+    const pressed = await stopOffersRoute(new NextRequest(stop, { method: "POST", body: "List-Unsubscribe=One-Click", headers: { "Content-Type": "application/x-www-form-urlencoded" } }));
+    is("the one-click POST stops it", pressed.status, 200);
+    subs.sub_canspam0002 = subscription("sub_canspam0002", "month");
+    await setSubscription("canspam@example.com", { subscriptionId: "sub_canspam0002", active: true, tier: "creator", cycle: "month" });
+    const again = (await storeForEmail("canspam@example.com"))!;
+    const after = emails.length;
+    is("a new subscription of a stopped store is offered nothing", [await offerYearly(again, true), emails.length - after], [false, 0]);
+  }
+
+  part("Without the company's postal address, nothing commercial is sent");
+  {
+    delete process.env.COMPANY_POSTAL_ADDRESS;
+    subs.sub_nopostal001 = subscription("sub_nopostal001", "month");
+    const store = await seller("nopostal@example.com", "nopostalstore", "sub_nopostal001");
+    const before = emails.length;
+    is("no address, no offer", [await offerYearly(store, true), emails.length - before], [false, 0]);
+    process.env.COMPANY_POSTAL_ADDRESS = POSTAL;
+    is("once there is one, the offer goes, once", [await offerYearly(store, true), emails.length - before], [true, 1]);
   }
 
   done();

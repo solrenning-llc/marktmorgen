@@ -1330,7 +1330,10 @@ a.chip {
    bar rather than by colour alone. */
 
 .toc-link {
-  display: block;
+  /* A 44 px tall target for each entry of a page index (2.5.5 AAA, tests/legal-pages-accessibility.test.ts). */
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);
@@ -1969,6 +1972,11 @@ a.chip {
      break on its own. On a 320px screen one of them is enough to push the
      whole page sideways, so they break wherever they must. */
   overflow-wrap: anywhere;
+}
+/* No block of a legal page's text is wider than 80 characters, at any width or with text spacing (1.4.8 AAA,
+   tests/legal-pages-accessibility.test.ts). */
+.legal-body :where(p, li, dd, blockquote) {
+  max-width: 46ch;
 }
 .legal-body a {
   color: var(--violet-deep);
@@ -2697,6 +2705,9 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 .st-title-link {
   color: inherit;
   text-decoration: none;
+  /* A creator's title or name with one long word (a German compound, a run-together name) wraps inside its
+     card instead of running past it and being cut off on a phone (WCAG 1.4.10). */
+  overflow-wrap: anywhere;
   background-image: linear-gradient(currentColor, currentColor);
   background-size: 0% 2px;
   background-position: 0 100%;
@@ -2705,6 +2716,13 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 }
 .st-title-link:hover {
   background-size: 100% 2px;
+}
+/* The embedded card's title: its click area covers the block of the title and the store's name, at least 44 px tall
+   (2.5.5 AAA, tests/embed-title-target.test.ts); the two-line clamp and the focus ring on the words stay. */
+.em-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 .st-title-link:focus-visible,
 .st-cover-link:focus-visible,
@@ -5129,6 +5147,19 @@ fieldset:disabled .cm-poll-row {
   gap: 0.5rem;
   max-width: calc(100vw - 1.5rem);
 }
+/*
+ * WCAG 2.4.12 (Focus Not Obscured, Enhanced): on a phone the cart's button
+ * sits over the top of the page, where nothing scrolls a link out from under
+ * it (the store's line of news, the store's name on a product's page). Once
+ * the button is there, the page starts below it: 0.75rem from the top, 44px
+ * tall, and 0.5rem of room. Lower down, html's scroll-padding-top (5.5rem)
+ * already keeps what has the focus clear of it.
+ */
+@media (max-width: 639.98px) {
+  body:has(#cart .st-cart-open) .st-page {
+    padding-top: calc(44px + 1.25rem + env(safe-area-inset-top));
+  }
+}
 .st-cart-open {
   min-height: 44px;
   gap: 0.5rem;
@@ -5251,3 +5282,37 @@ html:has([data-product-editor]) {
   }
 }
 /* end 654 [WG14] */
+
+/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */
+/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --paper: #10151d;
+  --sand: #161c26;
+  --sand-deep: #1e2531;
+  --line: #2a3240;
+  --line-strong: #3b4453;
+  --line-off: #7d8797;
+  --ink: #f4f2ed;
+  --ink-soft: #dad7d0;
+  --ink-mute: #c9c5bc;
+  --lilac: #1d1f3a;
+  --lilac-deep: #262a4d;
+  --action-bg: #b9b7f5;
+  --action-on: #10151d;
+  --action-border: #b9b7f5;
+  --link: #c3c1f7;
+  --focus-ring: #c3c1f7;
+  --accent-large: #9a97e0;
+  --mint-soft: #0f2a22;
+  --mint-text: #8fe8c6;
+  --mint: #4fd1a3;
+  --danger-soft: #331614;
+  --danger-text: #ffb4ab;
+  --danger: #ff7b6e;
+  --amber-soft: #2e2210;
+  --amber: #ffcf8a;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+/* end dark tokens */

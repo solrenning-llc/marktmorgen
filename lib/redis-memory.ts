@@ -2417,7 +2417,9 @@ export class MemoryRedis {
         }
         const made = [...held].map(([member, score]) => ({ score, member }));
         made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        // An empty result deletes the destination, as on Redis; otherwise it is written with no expiry.
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         // Redis answers with how many are in the set it just made, which is
         // what the search reads its total from.
@@ -2446,7 +2448,9 @@ export class MemoryRedis {
         }
         const made = [...held].map(([member, score]) => ({ score, member }));
         made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));
-        this.data.set(key, made);
+        // An empty result deletes the destination, as on Redis; otherwise it is written with no expiry.
+        if (made.length) this.data.set(key, made);
+        else this.data.delete(key);
         this.until.delete(key);
         return made.length;
       }

@@ -190,9 +190,17 @@ export async function openCommunityDoor(path: string, author: string, now = Date
 export async function takeCommunityUpload(path: string, author: string): Promise<boolean> {
   const [held] = await redisPipeline([["GETDEL", uploadKey(path)]]);
   if (held === author) {
-    // In a post now: no longer a door to sweep.
-    await redisPipeline([["ZREM", DOORS_KEY, path]]).catch(() => null);
-    return true;
+    // In a post now: no longer a door to sweep. Read exactly (CX-123 rule 24): a removal that is not confirmed may
+    // leave the path listed, and the sweep would then delete the picture from under the post. So it is not taken:
+    // the door is noted again and the path listed again, and the member's next try takes it.
+    const answered = await redisPipeline([["ZREM", DOORS_KEY, path]]).then((replies) => repliesFor(replies, 1), () => null);
+    const removed = answered ? countOf(answered[0]) : null;
+    if (removed === 0 || removed === 1) return true;
+    await redisPipeline([
+      ["SET", uploadKey(path), author, "NX", "EX", UPLOAD_TTL_SECONDS],
+      ["ZADD", DOORS_KEY, "NX", Math.floor(Date.now() / 1000), path],
+    ]).catch(() => console.error("could not note again a community picture whose removal from the doors' list is unknown"));
+    return false;
   }
   if (typeof held === "string" && held) {
     await redisPipeline([["SET", uploadKey(path), held, "NX", "EX", UPLOAD_TTL_SECONDS]]).catch(() => null);
@@ -200,10 +208,20 @@ export async function takeCommunityUpload(path: string, author: string): Promise
   return false;
 }
 
-/** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */
+/**
+ * Deletes a picture a post no longer needs, and gives its place back. Never throws. A delete that fails (a timeout of
+ * the file store) is not lost: the path is listed for the daily sweep (sweepCommunityUploads), already past its day,
+ * which deletes it and gives its place back once. Every caller has taken the path off that list before
+ * (takeCommunityUpload), and its door is spent, so nobody can put it in a post again.
+ */
 export async function dropCommunityImage(path: string | undefined | null): Promise<void> {
   if (!path) return;
-  await removeCommunityImage(path);
+  // With nothing else naming it, false means only that the delete failed.
+  if (await removeCommunityImage(path)) return;
+  console.error("a community picture whose delete failed is listed for the daily sweep");
+  await redisPipeline([["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
+    console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
+  );
 }
 
 /**

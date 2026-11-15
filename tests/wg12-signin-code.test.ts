@@ -155,18 +155,20 @@ async function main(): Promise<void> {
 
   part("An unknown count of tries refuses and opens nothing");
   const gus = await ask("gus@wg12.example");
-  // The pipeline that counts a try: the hour's and the day's counts for the address, the request's, the record's time, the newest code.
+  // The pipeline that counts a try: the hour's and the day's counts for the address, each with its EXPIRE NX
+  // (lib/window-count.ts), the request's, the record's time, the newest code.
   for (const [label, reply] of [
-    ["the hour's count null", ["OK", null, "OK", 1, 1, 900, null]],
-    ["the hour's count text", ["OK", "1", "OK", 1, 1, 900, null]],
-    ["the day's count null", ["OK", 1, "OK", null, 1, 900, null]],
-    ["the day's count negative", ["OK", 1, "OK", -1, 1, 900, null]],
-    ["the request's count negative", ["OK", 1, "OK", 1, -1, 900, null]],
-    ["the record's time text", ["OK", 1, "OK", 1, 1, "900", null]],
-    ["a short reply", ["OK", 1]],
+    ["the hour's count null", [null, 1, 1, 1, 1, 900, null]],
+    ["the hour's count text", ["1", 1, 1, 1, 1, 900, null]],
+    ["the hour's EXPIRE answered false", [1, false, 1, 1, 1, 900, null]],
+    ["the day's count null", [1, 1, null, 1, 1, 900, null]],
+    ["the day's count negative", [1, 1, -1, 1, 1, 900, null]],
+    ["the request's count negative", [1, 1, 1, 1, -1, 900, null]],
+    ["the record's time text", [1, 1, 1, 1, 1, "900", null]],
+    ["a short reply", [1, 1]],
     ["not a list", { result: 1 }],
   ] as [string, unknown][]) {
-    rule = { when: (c) => c.length === 7 && c[1]?.[0] === "INCR" && c[4]?.[0] === "HINCRBY", reply };
+    rule = { when: (c) => c.length === 7 && c[0]?.[0] === "INCR" && c[4]?.[0] === "HINCRBY", reply };
     const refused = await send(gus.request, gus.code);
     rule = null;
     is(`the tries answered as ${label}: server_error, no session`, [refused.status, refused.error, refused.session], [503, "server_error", ""]);

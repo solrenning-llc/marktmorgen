@@ -151,7 +151,12 @@ async function closingStore(handle: string, day: number, amount = 6_900) {
   await setSubscription(email, { customerId: customer, subscriptionId: `sub_${handle}old001`, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   await setSubscription(email, { active: false });
   world.customers.set(customer, email);
-  await redisPipeline([["ZADD", FINAL_INDEX, day - 30 * DAY, storeRef((await storeForEmail(email))!)]]);
+  const ref = storeRef((await storeForEmail(email))!);
+  await redisPipeline([["ZADD", FINAL_INDEX, day - 30 * DAY, ref]]);
+  // What its closing day wrote with it (closingDay): a final store with no such state is held as lost
+  // (tests/closing-final-state-lost.test.ts), not walked as here.
+  const stateKey = `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`;
+  await redisPipeline([["SET", stateKey, JSON.stringify({ of: day - 30 * DAY, day, renewals: day })]]);
   await markShut((await storeForEmail(email))!, day);
   const id = `sub_${handle}late01`;
   world.subs.set(id, { id, status: "active", customer, metadata: { store: handle, tier: "creator" }, created: S(day) - 3_600 });

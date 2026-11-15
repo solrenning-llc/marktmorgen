@@ -11,7 +11,7 @@
  *   nl:grp:pi:<payment>      string  the purchase a payment paid for, so a refund finds it
  *   nl:grp:<store>:any       string  present once the store has sold one
  *   nl:grp:<store>:refunds   string  how far the refunds were read for these
- *   nl:grp:<store>:seen      set     refunds already handled
+ *   nl:grp:<store>:seen      set     refunds already handled, thirty days from the last
  *
  * A place is handed over the way a gift is (lib/gifts.ts): written down under
  * the address that took it (lib/imported-purchases.ts), so every door that
@@ -37,6 +37,7 @@
  * the store's access emails (lib/store-allowance-rules.ts), counted before
  * they go.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { countOrder } from "@/lib/orders";
 import { ADMITTED_FIELD, OPEN_HOURS, admitOrders, settleAdmitted } from "@/lib/order-admission";
@@ -105,6 +106,10 @@ export const groupKeys = (id: string, pi: string): string[] => [...(id ? [groupK
 const anyKey = (sid: string) => `nl:grp:${sid}:any`;
 const anchorKey = (sid: string) => `nl:grp:${sid}:refunds`;
 const seenKey = (sid: string) => `nl:grp:${sid}:seen`;
+/** The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts): each mark
+ * gives the set its expiry again. Past it a row is only read again, and handling it again changes nothing (the record
+ * it took back is marked revoked and kept on its own). */
+const SEEN_KEEP_SECONDS = 30 * 86_400;
 /** Pages of a hundred refunds read in one run; a pass longer than that goes on from where it stopped in the next. */
 const REFUND_PAGES = 10;
 /** Where a pass over the refunds stands, kept between runs (revokeRefundedGroups). */
@@ -321,14 +326,6 @@ function parseMember(raw: unknown): Member | null {
   }
 }
 
-/** What a SET ... NX then INCR answered: the count, a whole number from one up, or null when the reply is not exactly that. */
-function incremented(replies: unknown): number | null {
-  const two = repliesFor(replies, 2);
-  if (!two || (two[0] !== "OK" && two[0] !== null)) return null;
-  const count = countOf(two[1]);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /** A 0 or a 1 (HEXISTS, HSETNX), or null for anything else. */
 function bit(reply: unknown): 0 | 1 | null {
   const n = countOf(reply);
@@ -428,12 +425,7 @@ export async function askPlace(input: {
   // and far short of a way to fill inboxes. The day is put on the count in
   // the same pipeline, before it is counted, so a count whose answer is lost
   // still ends with its day.
-  const sentCount = incremented(
-    await redisPipeline([
-      ["SET", mailKey(group.id), "0", "EX", 86_400, "NX"],
-      ["INCR", mailKey(group.id)],
-    ]),
-  );
+  const sentCount = windowCountOf(await redisPipeline(windowCount(mailKey(group.id), 86_400)));
   if (sentCount === null) return "unavailable";
   if (sentCount > group.people * 3 + 10) return "slow";
   // The email is one of the store's access emails, taken as it is sent
@@ -903,7 +895,8 @@ export async function revokeRefundedGroups(
       }
     }
     // Marked handled only now, once everything it takes back was written.
-    return oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+    const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+    return !!marked && oneWrite(marked[0]) && marked[1] === 1;
   };
 
   /** One page of refunds: its rows read in their exact shape, or null when the page itself could not be read. */

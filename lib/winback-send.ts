@@ -436,9 +436,10 @@ export async function openWinBack(
 export async function forgetWinbackPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
   // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
-  // A count above the keys sent does not match the DEL that ran (#4790): unknown too.
+  // A count above the distinct keys sent does not match the DEL that ran (#4790): unknown too. DEL removes at most one
+  // per distinct key, so a product named twice still allows only one (as lib/discord-access.ts).
   const keys = productIds.map((p) => onceKey(statsId, email, p));
   const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
-  if (gone === null || gone > keys.length) throw new UnknownReplyError("the come-back marks forgotten");
+  if (gone === null || gone > new Set(keys).size) throw new UnknownReplyError("the come-back marks forgotten");
   return gone;
 }

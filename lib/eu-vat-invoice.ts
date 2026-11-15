@@ -99,8 +99,11 @@ const whole = (value: unknown): value is number => typeof value === "number" && 
 const dayOf = (seconds: unknown): string | null =>
   whole(seconds) && seconds > 0 && seconds <= 8_640_000_000_000 ? new Date(seconds * 1000).toISOString().slice(0, 10) : null;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const realDay = (value: unknown): value is string =>
-  typeof value === "string" && DAY.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
+const realDay = (value: unknown): value is string => {
+  if (typeof value !== "string" || !DAY.test(value)) return false;
+  const time = Date.parse(`${value}T00:00:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
+};
 /** An ECB reference rate as it is published: a positive decimal with at most six decimals. */
 const RATE = /^(0|[1-9]\d{0,6})(\.\d{1,6})?$/;
 

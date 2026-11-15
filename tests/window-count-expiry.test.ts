@@ -12,6 +12,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { essentialLimitState, withinLimit, withinMonth } from "@/lib/request-guard";
+import { takeMoveRoom } from "@/lib/auth";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -46,6 +47,20 @@ async function main(): Promise<void> {
     // The window goes by; the next uses start a fresh window, never a count that only grows.
     advance(61_000);
     is("after it, uses are counted again from one", [await count(), await count(), await count()], [true, true, true]);
+  }
+
+  // Review of #2271 (Claude 4 cloud AI, MEDIUM): the month's room for sign-in address moves (lib/auth.ts, countMove)
+  // counted with the same SET NX EX + INCR pair, so a key that expired between them refused every move for good.
+  part("takeMoveRoom: the month's move counts expire between the two commands");
+  {
+    redis.clear();
+    const moveKeys = () => (redis.run(["SCAN", "0", "MATCH", "nl:auth:move-room:*", "COUNT", 10_000]) as [string, string[]])[1];
+    const store = { id: "synthetic-move-store", paid: true };
+    is("the first move is within", await takeMoveRoom(store), "within");
+    expireBetween = true;
+    await takeMoveRoom(store);
+    is("no move count is left without an expiry", moveKeys().filter((k) => redis.run(["TTL", k]) === -1), []);
+    is("and a move is still counted within afterwards", await takeMoveRoom(store), "within");
   }
 
   part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");

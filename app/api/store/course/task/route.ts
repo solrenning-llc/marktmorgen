@@ -22,6 +22,7 @@ import {
   taskFolder,
 } from "@/lib/assignment-rules";
 import { deleteFile, headFile } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { plain, serveFile } from "@/lib/serve-file";
 import { essentialLimitState, fromAnotherSite, limited } from "@/lib/request-guard";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -141,12 +142,10 @@ export async function POST(request: NextRequest) {
       if (taken && file) await releaseTaskHold(file.path);
       // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the
       // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
-      // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).
+      // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24). Its hold was let go when it
+      // was first kept, so a delete that fails hands it to the daily job (lib/file-drop.ts), never leaves it for good.
       if (done.replaced) {
-        const gone = await deleteFile(done.replaced.path).then(
-          () => true,
-          (error: unknown) => (console.error("could not delete a replaced assignment file: its room stays counted", error), false),
-        );
+        const gone = await deleteOrSweep(done.replaced.path, "a replaced assignment file (its room stays counted)");
         if (gone && done.freedBytes) await releaseBytes(room, done.freedBytes).catch(() => {});
       }
       return null;

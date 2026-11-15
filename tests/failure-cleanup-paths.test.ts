@@ -199,7 +199,7 @@ async function main(): Promise<void> {
     'course deleteOrSweep(file.pathname, "a lesson file")': "lesson files the course no longer holds, after it was written",
     "course/task deleteFile(path)": "a student's upload taken once through the door (takeTaskUpload)",
     "course/task deleteFile(file.path)": "the same taken upload, when the work could not be kept",
-    "course/task deleteFile(done.replaced.path)": "the file the handed-in work held, after it was replaced",
+    'course/task deleteOrSweep(done.replaced.path, "a replaced assignment file (its room stays counted)")': "the file the handed-in work held, after it was replaced",
     "lib/takedown.ts del(done.removed.path)": "the own picture of the link the takedown removed, read from the record it wrote; link-image attach admits only a fresh or own name",
     "lib/review-photo.ts del(photo.path)": "a review's photo, read from the review record, or the one this request stored under a fresh name",
   };

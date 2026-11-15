@@ -118,8 +118,8 @@ async function main(): Promise<void> {
     const old = "old@example.com";
     await touchStudent(COURSE.id, due, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
     await touchStudent(COURSE.id, later, NOW, store, { course: COURSE, productId: PRODUCT.id });
-    // A pair whose module opened four days ago, written as an older run would have left it.
-    await original([["HSET", `nl:course:${COURSE.id}:students`, emailKey(old), JSON.stringify({ e: old, s: NOW - 5 * DAY, l: NOW })], ["ZADD", dueKey(store), NOW - 4 * DAY, member(COURSE, old, "module000002")]]);
+    // A pair whose module opened eight days ago, past the seven-day window, written as an older run would have left it.
+    await original([["HSET", `nl:course:${COURSE.id}:students`, emailKey(old), JSON.stringify({ e: old, s: NOW - 9 * DAY, l: NOW })], ["ZADD", dueKey(store), NOW - 8 * DAY, member(COURSE, old, "module000002")]]);
     seen.length = 0;
     const first = await quietly(() => run(store));
     is("the due student emailed once", [to(due), first.sent], [1, 1]);
@@ -149,6 +149,22 @@ async function main(): Promise<void> {
     is("and the module's email goes on the day it opens, once", to(started), 1);
     const route = readFileSync("app/api/store/course/start/route.ts", "utf8");
     is("the start route reads the card and hands it to touchStudent", /dripCardFor\(course\.id\)/.test(route) && /touchStudent\(course\.id, order\.email, order\.created, store, [^)]*card/.test(route), true);
+  }
+
+  part("The window is seven days (three until 15 November 2026): a pair five or six and a half days old is emailed once, not dropped");
+  {
+    const store = await setup();
+    const five = "five@example.com";
+    const six = "six@example.com";
+    // Pairs a three-day window dropped unsent: the seven-day window emails them, later than a fresh pair, once.
+    await touchStudent(COURSE.id, five, NOW - 6 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, six, NOW - 7.5 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    is("both pairs in the index", [(await entries(store)).includes(member(COURSE, five, "module000002")), (await entries(store)).includes(member(COURSE, six, "module000002"))], [true, true]);
+    const first = await quietly(() => run(store));
+    is("both emailed, once each", [to(five), to(six), first.sent], [1, 1, 2]);
+    await quietly(() => run(store, NOW + DAY));
+    is("a day on, neither emailed again", [to(five), to(six)], [1, 1]);
+    is("the window's constants: seven days, seven runs", learn.DRIP_WINDOW_RUNS, 7);
   }
 
   part("A pair indexed late, its module opened inside the window, is still emailed once; access never waits for the index (Claude 4 on the index, (a))");
@@ -185,11 +201,11 @@ async function main(): Promise<void> {
     const store = await setup();
     const email = "moved@example.com";
     await registerDrip(store, PRODUCT as never, COURSE);
-    // Began five days ago: the second module opened four days ago, past its window, so it is not even indexed.
-    await touchStudent(COURSE.id, email, NOW - 5 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    // Began nine days ago: the second module opened eight days ago, past its seven-day window, so it is not even indexed.
+    await touchStudent(COURSE.id, email, NOW - 9 * DAY, store, { course: COURSE, productId: PRODUCT.id });
     await quietly(() => run(store));
     is("nothing pending once the course is walked, nothing sent", [(await original([["SCARD", pendingKey(store)]]))[0], to(email)], [0, 0]);
-    const changed = courseOf(COURSE.id, [{ id: "module000002", dripDays: 4 }, { id: "module000003", dripDays: 30 }]);
+    const changed = courseOf(COURSE.id, [{ id: "module000002", dripDays: 8 }, { id: "module000003", dripDays: 30 }]);
     await registerDrip(store, PRODUCT as never, changed);
     is("a changed schedule: the course pending", (await original([["SISMEMBER", pendingKey(store), `${COURSE.id}|${store.handle}|${PRODUCT.id}`]]))[0], 1);
     const counts = await quietly(() => run(store, NOW, async (id) => (id === COURSE.id ? changed : null)));
@@ -300,7 +316,8 @@ async function main(): Promise<void> {
     const counts = await quietly(() => run(store));
     sesHooks.onSes = undefined;
     const entriesPerRun = typeof L.dripIndexEntriesPerRun === "function" ? (L.dripIndexEntriesPerRun as (s: Store) => number)(store) : Number.NaN;
-    is("the Store plan reads a third of its email figure a run", entriesPerRun, Math.ceil(STORE_ALLOWANCES.creator.email / 3));
+    is("the Store plan reads a seventh of its email figure a run", entriesPerRun, Math.ceil(STORE_ALLOWANCES.creator.email / 7));
+    is("the window's seven runs still hold the whole email figure, so none is left for want of a run", entriesPerRun * learn.DRIP_WINDOW_RUNS >= STORE_ALLOWANCES.creator.email, true);
     is("nothing sent; the marks stop at the store's ceiling", [counts.sent, claims() <= learn.DRIP_REFUSALS_PER_STORE], [0, true]);
     const most = typeof R.dripRunCommandsPerStore === "function" ? (R.dripRunCommandsPerStore as (e: number) => number)(entriesPerRun) + (R.DRIP_RUN_FIXED_COMMANDS as number) : -1;
     is(`the run's commands (${seen.length}) within the formula (${most})`, seen.length <= most, true);
@@ -310,13 +327,12 @@ async function main(): Promise<void> {
   {
     const monthly = R.dripRunMonthlyUsd as (tier: "creator" | "pro" | "scale") => number;
     const line = (["creator", "pro", "scale"] as const).map((tier) => Math.round(monthly(tier) * 1e4) / 1e4);
-    // Store, Studio and Scale a month, in dollars (docs/margin-alignment-2026-10-18.md): the Store line under the
-    // US$0.0154 a refunded Store first year has under US$65 on main without it (64.9846 at the merge of 15 November
-    // 2026; it was US$0.0245 before main's later costs, so the page budget went from 10 to 8: it leaves
-    // US$0.0006 under the ceiling (64.9994) and still walks a store's eight pending courses within the window,
-    // tests/drip-run-ceiling.test.ts).
-    is("Store, Studio and Scale a month, in dollars", line, [0.0145, 0.0311, 0.0682]);
-    is("the Store line under the room of US$0.0154", line[0] < 0.0154, true);
+    // Store, Studio and Scale a month, in dollars (docs/margin-alignment-2026-10-18.md). With the window of three days
+    // they were 0.0145, 0.0311 and 0.0682, and the merge of main of 15 November 2026 took a refunded Store first year
+    // to US$65.0003, over its ceiling. A window of seven days reads a seventh of the email figure a run, not a third:
+    // 0.0114, 0.0185 and 0.0345, and a refunded Store first year of US$64.9972 (email-logo-region, read-ceilings).
+    is("Store, Studio and Scale a month, in dollars", line, [0.0114, 0.0185, 0.0345]);
+    is("the Store line at least US$0.003 below the three-day window's", line[0] <= 0.0145 - 0.003, true);
     is("the registry's ceilings are the code's", [R.DRIP_REFUSALS_PER_STORE_RUN, R.DRIP_INDEX_PAGES_RUN], [learn.DRIP_REFUSALS_PER_STORE, L.DRIP_INDEX_PAGES_PER_RUN]);
   }
 }

@@ -1099,13 +1099,18 @@ const CARD_SLOT = (courseId: string) => `dc:${courseId}`;
 const DRIP_PAGE = 200;
 /** How long a run goes on when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
 const DRIP_RUN_MS = 40_000;
-/** A pair's window: a module that opened more than three days ago is never emailed about, so a new module does not email about months gone by. */
-const DRIP_WINDOW_SECONDS = 3 * 86_400;
+/**
+ * A pair's window: a module that opened more than seven days ago is never emailed about, so a new module does not email
+ * about months gone by. Seven days, three until 15 November 2026: a run reads a seventh of the store's email figure
+ * (dripIndexEntriesPerRun), so the window still holds the whole figure, and a refunded Store first year stays under its
+ * US$65 ceiling with room (the coordinator's money unit on #3344). An email can come later than before, never lost.
+ */
+const DRIP_WINDOW_SECONDS = 7 * 86_400;
 /**
  * The ceiling on a run's marks before they are spent (the MR rule; found under Claude 7's MÉDIO on #3344): a mark is a
  * SET NX for each pair due, and a send that does not go lets it go. A run stops trying a course's pairs after
  * DRIP_REFUSALS_PER_COURSE sends that did not go, and a store's after DRIP_REFUSALS_PER_STORE, until the next run: the
- * rest wait in the index inside the same three-day window, never sent twice.
+ * rest wait in the index inside the same seven-day window, never sent twice.
  */
 export const DRIP_REFUSALS_PER_COURSE = 3;
 /**
@@ -1125,11 +1130,11 @@ export const DRIP_INDEX_PAGES_PER_RUN = 8;
 /** The pairs a store's walk writes a run before it stops at the next page (a page itself is written whole). */
 export const DRIP_INDEX_PAIRS_PER_RUN = 4_000;
 /** The runs inside a pair's window: what a store's email figure is spread over (dripIndexEntriesPerRun). */
-export const DRIP_WINDOW_RUNS = 3;
+export const DRIP_WINDOW_RUNS = 7;
 
 /**
- * The pairs due that a store's run reads at most: a third of the store's email figure a month (lib/store-allowance-
- * rules.ts), so a whole month's emails fit inside one pair's three-day window. Each costs its row, its blocked check
+ * The pairs due that a store's run reads at most: a seventh of the store's email figure a month (lib/store-allowance-
+ * rules.ts), so a whole month's emails fit inside one pair's seven-day window (a third of it and a three-day window until 15 November 2026). Each costs its row, its blocked check
  * and its mark (tests/plan-cost-registry.ts, course-drip-run); what is due past it waits for the next run.
  */
 export function dripIndexEntriesPerRun(store: Parameters<typeof allowanceFor>[0], nowSeconds = Date.now() / 1000): number {
@@ -1270,7 +1275,7 @@ function dripCursor(reply: unknown): string | null {
 
 /**
  * Tells each student when a module opens for them. Once per student and module, and only for modules that opened in
- * the last three days.
+ * the last seven days (three until 15 November 2026).
  *
  * From each store's index (docs/drip-due-index.md): the run reads only the pairs due now, at most
  * dripIndexEntriesPerRun(store) a store, so its cost follows the store's email figure, never its courses or students.

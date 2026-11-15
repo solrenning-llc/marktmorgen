@@ -88,7 +88,7 @@ async function main(): Promise<void> {
   const month = (["creator", "pro", "scale"] as const).map((tier) => Math.round(dripRunMonthlyUsd(tier) * 100) / 100);
   // Store, Studio and Scale at full use: with the index (docs/drip-due-index.md) a few cents, where the marks without
   // the ceiling cost more than each plan's whole net profit and the walk of every course 31 to 87 cents.
-  is("Store, Studio and Scale a month, in dollars", month, [0.01, 0.03, 0.07]);
+  is("Store, Studio and Scale a month, in dollars", month, [0.01, 0.02, 0.03]);
 
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {
@@ -114,7 +114,10 @@ async function main(): Promise<void> {
     const store = await setup(2);
     seen.length = 0;
     const run = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
-    is("sixty students, sixty emails, sixty marks", [run.sent, claims()], [60, 60]);
+    // A run reads a seventh of the Studio email figure (43 pairs); the rest wait in the index for the next run.
+    is("the first run: as many as a run reads", run.sent, dripEntriesPerRun("pro"));
+    const second = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW + 86_400, Date.now() + 60_000));
+    is("the next day's run: the rest; sixty students, sixty emails, sixty marks, none lost", [run.sent + second.sent, claims()], [60, 60]);
     const again = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
     is("the next run: none sent again", again.sent, 0);
   }
@@ -123,9 +126,11 @@ async function main(): Promise<void> {
   {
     const store = await setup(2);
     sesHooks.onSes = (message) => (message.to.some((address) => address.startsWith("student-0-")) ? new Response(JSON.stringify({ message: "synthetic: refused" }), { status: 400, headers: { "content-type": "application/json" } }) : undefined);
-    const run = await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, Date.now() + 60_000));
+    // Over the window's runs (a seventh of the email figure a run): the refused course stops at its ceiling, the other goes.
+    let sent = 0;
+    for (let n = 0; n < 7; n += 1) sent += (await quietly(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW + n * 86_400, Date.now() + 60_000))).sent;
     sesHooks.onSes = undefined;
-    is("the other course's thirty are emailed", run.sent, 30);
+    is("the other course's thirty are emailed", sent, 30);
   }
 
   part("Courses read a hundred at a command (readCoursesEach), never a GET each");
@@ -135,13 +140,14 @@ async function main(): Promise<void> {
     seen.length = 0;
     const each = async () => { throw new Error("one at a time is not used"); };
     const run = await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
-    // A run reads at most a third of the store's email figure of pairs due (dripIndexEntriesPerRun): the rest wait in
-    // the index for the next runs, inside the same three-day window.
+    // A run reads at most a seventh of the store's email figure of pairs due (dripIndexEntriesPerRun): the rest wait in
+    // the index for the next runs, inside the same seven-day window (three days and a third until 15 November 2026).
     is("the first run emails as many as a run reads", run.sent, dripEntriesPerRun("pro"));
     is("eight courses' outlines, one MGET, no GET of a course", [seen.filter((c) => c[0] === "MGET" && String(c[1]).startsWith("nl:course:")).length, seen.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:course:")).length], [1, 0]);
     let sent = run.sent;
-    for (let n = 0; n < 2; n += 1) sent += (await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)))).sent;
-    is("everyone due emailed within the window's three runs, once", sent, 240);
+    // One run a day over the window: 240 due, 43 a run, all sent by the sixth day, inside the seven; none lost, none twice.
+    for (let n = 1; n < 7; n += 1) sent += (await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW + n * 86_400, Date.now() + 60_000, (ids) => readCoursesEach(ids)))).sent;
+    is("everyone due emailed within the window's seven runs, once", [sent, claims()], [240, 240]);
   }
 
   // Since the drip index (docs/drip-due-index.md), a course of the old set is moved to its store's pending set and its

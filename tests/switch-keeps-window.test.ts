@@ -550,10 +550,11 @@ async function main(): Promise<void> {
     // cent less (MR, cost not lowered). #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped
     // courses and probes each, so the erasure line costs a little more. The drip emails' line (course-drip-run,
     // docs/drip-due-index.md) and the drip index's capped families cost two to six cents more a month than main without
-    // it. Merge of main into #3344 (15 November 2026): all together, as the model computes them.
-    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.20 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.20"]);
+    // it. Merge of main into #3344 (15 November 2026): all together, as the model computes them, with the drip window
+    // of seven days (a run reads a seventh of the email figure, not a third), which costs a cent or three less than three.
+    is("11: Store, Studio and Scale keep 45.10, 313.81 and 703.23 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.81", "703.23"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again.
-    is("11: and 37.04, 258.67 and 579.93 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.93"]);
+    is("11: and 37.04, 258.68 and 579.95 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.95"]);
   } finally {
     Date.now = realNow;
   }

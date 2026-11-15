@@ -377,7 +377,7 @@ export const DRIP_INDEX_PAGES_RUN = 8;
 /** The pairs a walk writes a run before it stops at the next page: lib/learn.ts DRIP_INDEX_PAIRS_PER_RUN. */
 export const DRIP_INDEX_PAIRS_RUN = 4_000;
 /** The runs a pair's window lasts, over which a store's email figure is read: lib/learn.ts DRIP_WINDOW_RUNS. */
-export const DRIP_WINDOW_RUNS_RUN = 3;
+export const DRIP_WINDOW_RUNS_RUN = 7;
 /** A pair read: its student's row (HGET), its blocked check (SISMEMBER) and its mark (SET NX). */
 export const DRIP_ENTRY_COMMANDS = 3;
 /** Records read a hundred at a command (MGET): the cards, and the listings held outside the store's record. */
@@ -395,7 +395,7 @@ export const DRIP_PAIR_BYTES = 32 + 1 + 32 + 1 + 12 + 24;
 export const DRIP_CARD_MAX_BYTES = 256 + MAX_MODULES * (12 + 3 * MAX_ITEM_TITLE + 48);
 /** A member of a store's pending set: a course id, the store's address and a product id, at their longest. */
 export const DRIP_PENDING_MEMBER_BYTES = 128;
-/** The pairs a store's run reads, a third of its email figure (lib/learn.ts, dripIndexEntriesPerRun). */
+/** The pairs a store's run reads, a seventh of its email figure (lib/learn.ts, dripIndexEntriesPerRun). */
 export function dripEntriesPerRun(tier: Tier): number {
   return Math.ceil(STORE_ALLOWANCES[tier].email / DRIP_WINDOW_RUNS_RUN);
 }
@@ -1503,7 +1503,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES"] },
       { file: "lib/api-read-rules.ts", names: ["LISTING_BYTES"] },
     ],
-    basis: "Each of the DRIP_RUNS_PER_MONTH daily runs of a billing month, at the plan's full use, for one store: the store read once (DRIP_STORE_COMMANDS, its record at MAX_STORE_BYTES); its fixed commands (DRIP_STORE_FIXED_COMMANDS: its pending set, read whole at MAX_PRODUCTS members, and the window's ZREMRANGEBYSCORE, ZRANGEBYSCORE and ZCARD); the walk of its pending courses into its index, DRIP_INDEX_PAGES_PER_RUN pages a run (DRIP_WALK_FIXED_COMMANDS, then DRIP_WALK_PAGE_COMMANDS a page; each page a card at DRIP_CARD_MAX_BYTES and twice DRIP_PAGE rows at DRIP_ROW_MAX_BYTES, HSCAN's COUNT being a hint), writing DRIP_INDEX_PAIRS_PER_RUN pairs and at most one page more (twice DRIP_PAGE rows, MAX_MODULES pairs each); and the pairs due read, a third of the plan's store email figure (STORE_ALLOWANCES email, dripIndexEntriesPerRun), each its row, its blocked check and its mark (DRIP_ENTRY_COMMANDS), its card and its listing read DRIP_BATCH at an MGET (at DRIP_CARD_MAX_BYTES and LISTING_BYTES), and one ZREM and one ZADD of the pairs handled; and the refused sends' ceiling, DRIP_REFUSALS_PER_STORE a run at DRIP_REFUSED_SEND_COMMANDS each (the mark's read-back or release, the email figure's two commands, the sender's state). The emails themselves are the store-email line's; the run's own sets and cursor (DRIP_RUN_FIXED_COMMANDS a run, for every store) are the company's, a scheduled job bounded by its schedule. Nothing of it grows with the store's courses or students.",
+    basis: "Each of the DRIP_RUNS_PER_MONTH daily runs of a billing month, at the plan's full use, for one store: the store read once (DRIP_STORE_COMMANDS, its record at MAX_STORE_BYTES); its fixed commands (DRIP_STORE_FIXED_COMMANDS: its pending set, read whole at MAX_PRODUCTS members, and the window's ZREMRANGEBYSCORE, ZRANGEBYSCORE and ZCARD); the walk of its pending courses into its index, DRIP_INDEX_PAGES_PER_RUN pages a run (DRIP_WALK_FIXED_COMMANDS, then DRIP_WALK_PAGE_COMMANDS a page; each page a card at DRIP_CARD_MAX_BYTES and twice DRIP_PAGE rows at DRIP_ROW_MAX_BYTES, HSCAN's COUNT being a hint), writing DRIP_INDEX_PAIRS_PER_RUN pairs and at most one page more (twice DRIP_PAGE rows, MAX_MODULES pairs each); and the pairs due read, a seventh of the plan's store email figure (a third until 15 November 2026, with the three-day window) (STORE_ALLOWANCES email, dripIndexEntriesPerRun), each its row, its blocked check and its mark (DRIP_ENTRY_COMMANDS), its card and its listing read DRIP_BATCH at an MGET (at DRIP_CARD_MAX_BYTES and LISTING_BYTES), and one ZREM and one ZADD of the pairs handled; and the refused sends' ceiling, DRIP_REFUSALS_PER_STORE a run at DRIP_REFUSED_SEND_COMMANDS each (the mark's read-back or release, the email figure's two commands, the sender's state). The emails themselves are the store-email line's; the run's own sets and cursor (DRIP_RUN_FIXED_COMMANDS a run, for every store) are the company's, a scheduled job bounded by its schedule. Nothing of it grows with the store's courses or students.",
   },
   {
     id: "public-requests",

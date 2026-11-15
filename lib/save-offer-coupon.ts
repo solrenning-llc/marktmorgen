@@ -44,5 +44,16 @@ export async function makeSaveCoupon(
   );
   const id = typeof made.id === "string" ? made.id : "";
   if (!COUPON_PATTERN.test(id)) throw new Error("Stripe returned no coupon");
+  // Kept only when Stripe's answer is the coupon asked for (#4697): a coupon with another percent, an amount off, another
+  // duration or number of months, or one that is not valid would be announced as the offer the creator chose.
+  if (!isAskedCoupon(made, percent, months)) throw new Error("Stripe returned a coupon with other terms");
   return id;
+}
+
+/** Whether Stripe's answer is a valid coupon of exactly `percent`% off for `months` payments, as made above. */
+function isAskedCoupon(made: Record<string, unknown>, percent: number, months: number): boolean {
+  if (made.object !== "coupon" || made.valid !== true || made.deleted === true) return false;
+  if (made.percent_off !== percent || (made.amount_off !== undefined && made.amount_off !== null)) return false;
+  if (months === 1) return made.duration === "once" && (made.duration_in_months === undefined || made.duration_in_months === null);
+  return made.duration === "repeating" && made.duration_in_months === months;
 }

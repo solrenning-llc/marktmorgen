@@ -6,10 +6,18 @@
  * held it twice. A follow-up to a request already waiting, and a message in a
  * conversation, go through as before: the cost of a stranger is in the opening.
  */
-import { inbox, parseDmSetting, requestCount, send, thread } from "@/lib/community-dm";
+import { inbox, parseDmSetting, requestCount, send as sendDm, thread } from "@/lib/community-dm";
+import { store as memberStub } from "./redis-stub";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+
+/** send, its sender a member of the community: a message is written only while its sender's record is there (#4672). */
+const send = (...args: Parameters<typeof sendDm>) => {
+  memberStub.run(["HSET", `nl:cm:${args[0]}:m`, args[2], "{}"]);
+  return sendDm(...args);
+};
+
 
 const setting = parseDmSetting({ on: true, between: true, ask: true });
 

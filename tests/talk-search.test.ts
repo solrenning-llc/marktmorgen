@@ -10,10 +10,18 @@
  */
 import { holdsAll, queryWords } from "@/lib/community-search";
 import { say, searchRoom, NO_CHAT } from "@/lib/community-chat";
-import { accept, pairOf, searchMessages, send } from "@/lib/community-dm";
+import { accept, pairOf, searchMessages, send as sendDm } from "@/lib/community-dm";
+import { store as memberStub } from "./redis-stub";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+
+/** send, its sender a member of the community: a message is written only while its sender's record is there (#4672). */
+const send = (...args: Parameters<typeof sendDm>) => {
+  memberStub.run(["HSET", `nl:cm:${args[0]}:m`, args[2], "{}"]);
+  return sendDm(...args);
+};
+
 
 const CM = "cm1";
 const room = { ...NO_CHAT, on: true };

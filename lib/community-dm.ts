@@ -74,6 +74,25 @@ const inboxKey = (id: string, who: string) => `${base(id)}:dm:i:${who}`;
 const askedKey = (id: string, who: string) => `${base(id)}:dm:q:${who}`;
 const shutKey = (id: string, who: string) => `${base(id)}:dm:x:${who}`;
 const readKey = (id: string, pair: string) => `${base(id)}:dm:r:${pair}`;
+/** The community's member records (lib/community.ts, membersKey), read here only to admit a message. */
+const membersKey = (id: string) => `${base(id)}:m`;
+
+/**
+ * A private message's final write made only while its sender is still in (#4672): KEYS[1] the conversation, KEYS[2]
+ * the sender's inbox, KEYS[3] the recipient's request list or inbox, KEYS[4] the read marks, KEYS[5] the community's
+ * member records; ARGV[1] the sender's field there, ARGV[2] the message, ARGV[3] the most messages kept, ARGV[4] its
+ * time, ARGV[5] the pair, ARGV[6] "ask" for a request (ZADD NX) or "inbox", ARGV[7] "any" for the creator, who has
+ * no member record. 1 when written, 0 when the sender's record is gone: an erasure deletes it before the
+ * conversations (lib/community-erasure.ts), so a message it overtook recreates none of them.
+ */
+export const DM_SEND_IF_MEMBER = `-- marktmorgen:dm-send-if-member:v1
+if ARGV[7] ~= "any" and redis.call("HEXISTS", KEYS[5], ARGV[1]) == 0 then return 0 end
+redis.call("RPUSH", KEYS[1], ARGV[2])
+redis.call("LTRIM", KEYS[1], -tonumber(ARGV[3]), -1)
+redis.call("ZADD", KEYS[2], ARGV[4], ARGV[5])
+if ARGV[6] == "ask" then redis.call("ZADD", KEYS[3], "NX", ARGV[4], ARGV[5]) else redis.call("ZADD", KEYS[3], ARGV[4], ARGV[5]) end
+redis.call("HSET", KEYS[4], ARGV[1], ARGV[4])
+return 1`;
 
 export const MAX_MESSAGE_TEXT = 2_000;
 /** How many messages one conversation keeps. Older ones fall off the end. */
@@ -161,7 +180,7 @@ function parseMessage(raw: unknown): Message | null {
 
 export type SendResult =
   | { ok: true; asked: boolean }
-  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" };
+  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" | "out" };
 
 /**
  * Whether these two may exchange messages at all, before anything is written.
@@ -270,17 +289,18 @@ export async function send(
     }
   }
 
-  await redisPipeline([
-    ["RPUSH", chatKey(id, pair), JSON.stringify(message)],
-    ["LTRIM", chatKey(id, pair), -MAX_MESSAGES, -1],
-    ["ZADD", inboxKey(id, from), message.at, pair],
-    // NX: a request already in the list keeps its first place, and one a trim
-    // took out while this was on its way is put back, so what is stored stays
-    // in the recipient's list for their copy and their erasure (rule 30).
-    ...(asking ? [["ZADD", askedKey(id, to), "NX", message.at, pair]] : [["ZADD", inboxKey(id, to), message.at, pair]]),
-    // The sender has read what they just wrote.
-    ["HSET", readKey(id, pair), from, message.at],
-  ]);
+  // The message, both lines and the sender's read mark (they have read what they just wrote), only while the sender is
+  // still in, in one step (#4672). For a request, NX: one already in the list keeps its first place, and one a trim took
+  // out while this was on its way is put back, so what is stored stays in the recipient's list for their copy and their
+  // erasure (rule 30). A sender erased meanwhile writes nothing, and the room taken for it comes back.
+  const wrote = repliesFor(await redisPipeline([
+    ["EVAL", DM_SEND_IF_MEMBER, 5, chatKey(id, pair), inboxKey(id, from), asking ? askedKey(id, to) : inboxKey(id, to), readKey(id, pair), membersKey(id),
+      from, JSON.stringify(message), MAX_MESSAGES, message.at, pair, asking ? "ask" : "inbox", from === CREATOR ? "any" : "member"],
+  ]), 1)?.[0];
+  if (wrote === 0) {
+    await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: taken }]);
+    return { ok: false, reason: "out" };
+  }
   if (asking && (await acceptedMeanwhile(id, to, pair))) return { ok: true, asked: false };
   return { ok: true, asked: asking };
 }

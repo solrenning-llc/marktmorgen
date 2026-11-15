@@ -346,6 +346,17 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/community-dm.ts DM_SEND_IF_MEMBER: a private message's final write only while its sender's record is there.
+        if (key.startsWith("-- marktmorgen:dm-send-if-member:v1\n") && args[0] === "5" && args.length === 13) {
+          const [, chat, fromInbox, toList, read, members, from, message, most, at, pair, how, any] = args;
+          if (any !== "any" && this.run(["HEXISTS", members, from]) === 0) return 0;
+          this.run(["RPUSH", chat, message]);
+          this.run(["LTRIM", chat, -Number(most), -1]);
+          this.run(["ZADD", fromInbox, at, pair]);
+          this.run(how === "ask" ? ["ZADD", toList, "NX", at, pair] : ["ZADD", toList, at, pair]);
+          this.run(["HSET", read, from, at]);
+          return 1;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

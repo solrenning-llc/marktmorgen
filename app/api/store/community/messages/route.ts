@@ -109,6 +109,8 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
       throw error;
     }
+    // Taken out of the community (deleted) since this was let in: nothing written (#4672).
+    if (!sent.ok && sent.reason === "out") return back(home, "out");
     if (!sent.ok) {
       const why =
         sent.reason === "declined"

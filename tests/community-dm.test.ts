@@ -7,10 +7,18 @@
  * the writes, not in any one function, and it is the part of private
  * messages that no other platform we compared against has.
  */
-import { accept, decline, inbox, parseDmSetting, requestCount, send, thread } from "@/lib/community-dm";
+import { accept, decline, inbox, parseDmSetting, requestCount, send as sendDm, thread } from "@/lib/community-dm";
+import { store as memberStub } from "./redis-stub";
 import { CREATOR } from "@/lib/community";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+
+/** send, its sender a member of the community: a message is written only while its sender's record is there (#4672). */
+const send = (...args: Parameters<typeof sendDm>) => {
+  memberStub.run(["HSET", `nl:cm:${args[0]}:m`, args[2], "{}"]);
+  return sendDm(...args);
+};
+
 
 const ID = "cm1";
 const ANA = "a1a1a1a1a1a1";

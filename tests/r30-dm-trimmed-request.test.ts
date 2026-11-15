@@ -25,11 +25,19 @@
  *     still stored stays reachable from the recipient's lists, so a retry, the
  *     copy and the erasure still find it.
  */
-import { MAX_REQUESTS, accept, conversationsOf, forgetDmPerson, inbox, parseDmSetting, requestCount, send } from "@/lib/community-dm";
+import { MAX_REQUESTS, accept, conversationsOf, forgetDmPerson, inbox, parseDmSetting, requestCount, send as sendDm } from "@/lib/community-dm";
+import { store as memberStub } from "./redis-stub";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+
+/** send, its sender a member of the community: a message is written only while its sender's record is there (#4672). */
+const send = (...args: Parameters<typeof sendDm>) => {
+  memberStub.run(["HSET", `nl:cm:${args[0]}:m`, args[2], "{}"]);
+  return sendDm(...args);
+};
+
 
 type Command = (string | number)[];
 

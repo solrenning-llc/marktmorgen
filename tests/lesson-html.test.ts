@@ -2,6 +2,7 @@
  * 103 [E2-LESSON-MEDIA], unit 2: an explicit HTML preview in a lesson is
  * sanitized and drawn in a sandbox; ordinary HTML code remains code.
  */
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LessonText } from "@/components/lesson-text";
@@ -23,7 +24,7 @@ const preview = [
 part("Explicit preview");
 is("the explicit language becomes a separate HTML-preview block", lessonBlocks(preview).map((block) => block.kind), ["html"]);
 
-const html = renderToStaticMarkup(createElement(LessonText, { text: preview, htmlPreviewLabel: "HTML preview" }));
+const html = renderToStaticMarkup(createElement(LessonText, { text: preview, htmlPreviewLabel: "HTML preview", lang: "en-US" }));
 is("drawn in a named sandbox, without script permission or referrer data", [
   html.includes('<iframe title="HTML preview"'),
   html.includes('sandbox=""'),
@@ -53,19 +54,34 @@ is("malformed tags cannot smuggle an attribute or active tag into the result", [
   sanitizeLessonHtml("plain < unfinished"),
 ], ['<h2>" onclick="run()"&gt;title</h2>', '<a href="https://example.com/">link</a>', "plain &lt; unfinished"]);
 is("the complete document has only fixed product CSS and a no-referrer policy", [
-  lessonHtmlDocument("<p>Text</p>").includes("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"),
-  lessonHtmlDocument("<p>Text</p>").includes('<meta name="referrer" content="no-referrer">'),
-  lessonHtmlDocument("<p>Text</p>").includes("<style>html{color-scheme:light dark}"),
-  lessonHtmlDocument('<style>@import "https://tracker.example"</style>').match(/<style>/g)?.length,
-  lessonHtmlDocument('<style>@import "https://tracker.example"</style>').includes('&lt;style&gt;@import "https://tracker.example"&lt;/style&gt;'),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes("default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes('<meta name="referrer" content="no-referrer">'),
+  lessonHtmlDocument("<p>Text</p>", "en-US").includes("<style>html{color-scheme:light dark}"),
+  lessonHtmlDocument('<style>@import "https://tracker.example"</style>', "en-US").match(/<style>/g)?.length,
+  lessonHtmlDocument('<style>@import "https://tracker.example"</style>', "en-US").includes('&lt;style&gt;@import "https://tracker.example"&lt;/style&gt;'),
 ], [true, true, true, 1, true]);
 
 part("Existing code");
-const ordinary = renderToStaticMarkup(createElement(LessonText, { text: `${F}html\n<h2>Code only</h2>\n${F}` }));
+const ordinary = renderToStaticMarkup(createElement(LessonText, { text: `${F}html\n<h2>Code only</h2>\n${F}`, lang: "en-US" }));
 is("the existing html language stays literal code, so old lessons do not change", [ordinary.includes("<iframe"), ordinary.includes("&lt;h2&gt;Code only&lt;/h2&gt;")], [false, true]);
 is("an unclosed or empty explicit block follows the existing safe fence rules", [
   lessonBlocks(`${F}html-preview\n<p>unclosed</p>`).some((block) => block.kind === "html"),
   lessonBlocks(`${F}html-preview\n\n${F}`).length,
 ], [false, 0]);
+
+part("The framed document is in the store's language (#4158, WCAG 3.1.1 and 3.1.2)");
+is("the document names the language it is given on its html element", lessonHtmlDocument("<p>Hallo</p>", "de-DE").startsWith('<!doctype html><html lang="de-DE"><head>'), true);
+is("a language that is not a plain tag is never written into the document", [
+  lessonHtmlDocument("<p>Text</p>", 'en" onload="steal()').includes("onload"),
+  lessonHtmlDocument("<p>Text</p>", "").startsWith("<!doctype html><html><head>"),
+], [false, true]);
+const german = renderToStaticMarkup(createElement(LessonText, { text: `${F}html-preview\n<p>Hallo</p>\n${F}`, lang: "de-DE" }));
+is("a lesson's HTML block is framed in the language the lesson text is given", german.includes("&lt;html lang=&quot;de-DE&quot;&gt;"), true);
+const lessonPage = readFileSync("app/[handle]/course/[product]/[lesson]/page.tsx", "utf8");
+is("the buyer's lesson page gives the lesson text the language it marks the page with", [
+  lessonPage.includes("lang={said.lang.locale}"),
+  /<LessonText text=\{body\} codeLabel=\{w\.codeBlock\} lang=\{said\.lang\.locale\} \/>/.test(lessonPage),
+], [true, true]);
+is("the studio's preview gives it the language it marks the preview with", /<LessonText text=\{now\} lang=\{locale\} \/>/.test(readFileSync("components/course-editor.tsx", "utf8")), true);
 
 done();

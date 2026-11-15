@@ -60,7 +60,7 @@ export default function BuyerHelpPage() {
               <h2 id={`${item.id}-q`} className="t-section">{item.q}</h2>
               <div className="mt-3 space-y-3">
                 {item.a.map((paragraph) => (
-                  <p key={paragraph} className="max-w-[70ch] leading-relaxed text-ink-soft">{paragraph}</p>
+                  <p key={paragraph} className="max-w-[46ch] leading-relaxed text-ink-soft">{paragraph}</p>
                 ))}
               </div>
             </section>

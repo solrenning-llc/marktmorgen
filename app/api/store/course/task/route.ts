@@ -9,7 +9,7 @@ import { readCourse, findLesson } from "@/lib/course";
 import { readListing } from "@/lib/catalog";
 import { jsonAccess } from "@/lib/studio-route";
 import { studentOnTask } from "@/lib/assignment-access";
-import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
+import { HandInChangedError, handIn, oneHandInAtATime, releaseBytes, releaseTaskHold, submissionOf, takeRoom, takeTaskUpload, undoTakeRoom } from "@/lib/assignment";
 import { LockBusyError } from "@/lib/redis-lock";
 import { tellCreatorOfWork } from "@/lib/assignment-notify";
 import {
@@ -98,6 +98,8 @@ export async function POST(request: NextRequest) {
           // step only one request can win, and nothing is kept, counted or deleted
           // for this file before it.
           if (!(await takeTaskUpload(path))) return no("invalid");
+          // Taken, the name is held: the same hold covers every way out below that keeps no work, and the sweep
+          // deletes a file left behind a day on (lib/assignment.ts, takeTaskUpload).
           const extension = taskExtension(found.contentType);
           if (!extension || !path.endsWith(`.${extension}`)) {
             await deleteFile(path).catch(() => {});
@@ -145,6 +147,8 @@ export async function POST(request: NextRequest) {
       });
       // Work that needs no reading is done at once, and may finish the course (lib/course-finish.ts).
       if (done.state === "approved") await noteIfFinished(store, product.id, course.id, email);
+      // The new file is the work's now: its hold for the sweep is let go (lib/assignment.ts, takeTaskUpload).
+      if (taken && file) await releaseTaskHold(file.path);
       // The file it replaced is no longer anybody's work. Its bytes come back only when this hand-in took it out of the
       // files' hash (lib/assignment.ts, freedBytes) and only once it is gone: a file whose delete failed is still kept
       // in storage, so its bytes stay counted, which only refuses sooner (CX-123 rule 24).

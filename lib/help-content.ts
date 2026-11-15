@@ -1,3 +1,4 @@
+import { contactCeilingWords } from "@/lib/contact-ceiling";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { LOCKED_LIST, LOCKED_LIST_START } from "@/lib/locked-words";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
@@ -440,7 +441,7 @@ export const HELP_SECTIONS: HelpSection[] = [
         a: [
           "Yes. Set a product's price to 0 and it becomes free: a visitor types their email, we send them a link to it, and when they use that link their address joins your list. Because the link has to be opened from their own inbox, every address on the list is real \u2014 no typos, and nobody signed up by someone else.",
           "Under the email field there is a box, empty until the visitor checks it, that says they want to hear from you. Your list keeps the two apart: you can download everyone who asked for something, or only the people who checked the box, as a CSV file that email tools can import. It is yours to take at any time, with nothing to ask for.",
-          "Free products are handed out while your subscription or trial is on, and they do not need Stripe, because no money moves. A list holds up to 100,000 addresses.",
+          `Free products are handed out while your subscription or trial is on, and they do not need Stripe, because no money moves. A list holds ${contactCeilingWords("addresses")}.`,
         ],
       },
       {

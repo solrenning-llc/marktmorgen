@@ -4,7 +4,7 @@ import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { MAX_OPTIONS } from "@/lib/product-option";
 import { Suspense } from "react";
 import { Icon } from "@/components/icons";
-import { listSizeWords } from "@/lib/contact-rules";
+import { contactCeilingWords } from "@/lib/contact-ceiling";
 import { PAID_STORAGE_BYTES } from "@/lib/storage-rules";
 import { DATA_ROOM_BYTES, dataWords } from "@/lib/store-data-rules";
 import { currentUploadBudgetPolicy, isUploadBudgetConfigured, uploadAllowanceWords } from "@/lib/upload-budget-policy";
@@ -127,7 +127,7 @@ function proGroups(domains: boolean): PlanGroup[] {
       icon: "mail",
       title: "Write to your own list from here",
       // The monthly emails are a figure under the price; this says what they are for, without the number again.
-      body: `A list of up to ${listSizeWords()} people, and the price does not move as it fills. One-off emails and sequences that send themselves after someone joins or buys, from your name, with replies coming to you.`,
+      body: `A list of ${contactCeilingWords()}, and the price does not move as it fills. One-off emails and sequences that send themselves after someone joins or buys, from your name, with replies coming to you.`,
     },
     domains
       ? {

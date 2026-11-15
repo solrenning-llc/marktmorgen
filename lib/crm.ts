@@ -161,6 +161,54 @@ const json = (raw: unknown): unknown => {
 };
 
 /**
+ * Whether a stored deal value names `address`, for a person's erasure and their copy (issue #4810 and its review):
+ * "yes", "no", or "unknown". A value that reads as a deal record answers by its email, exactly. One that does not read
+ * is theirs when its text holds the address as a whole address (not inside a longer one), not theirs when it does
+ * not, and unknown only when it holds a JSON escape (a backslash) that could spell the address another way. So one
+ * damaged deal of somebody else's never stops every erasure in the store, and one of theirs is never left out.
+ */
+export function dealNames(raw: string, address: string): "yes" | "no" | "unknown" {
+  const wanted = address.trim().toLowerCase();
+  if (!wanted) return "no";
+  const deal = json(raw);
+  if (deal && typeof deal === "object" && !Array.isArray(deal)) {
+    const mail = (deal as { email?: unknown }).email;
+    if (mail === undefined || mail === null) return "no";
+    if (typeof mail === "string") return mail.trim().toLowerCase() === wanted ? "yes" : "no";
+  }
+  const text = raw.toLowerCase();
+  const escaped = wanted.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  if (new RegExp(`(?<![a-z0-9._%+-])${escaped}(?![a-z0-9_-]|\\.[a-z0-9])`).test(text)) return "yes";
+  return text.includes("\\") ? "unknown" : "no";
+}
+
+/**
+ * The person's deals for the copy of their data (art. 15): read exactly, never filtered in silence. A deal that is
+ * theirs, or may be (dealNames "yes" or "unknown"), and does not read as a deal, throws UnknownReplyError, so the copy
+ * fails rather than come out complete without it. A deal of theirs in a stage the store has since removed is answered
+ * with its stage left empty: the copy shows it with no stage.
+ */
+export async function dealsOfPerson(statsId: string | null, email: string, stages: readonly Stage[]): Promise<Deal[]> {
+  if (!statsId || !isRedisConfigured()) return [];
+  const values = stringList(repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0]);
+  if (!values) throw new UnknownReplyError("a store's deals");
+  const out: Deal[] = [];
+  for (const raw of values) {
+    const names = dealNames(raw, email);
+    if (names === "no") continue;
+    const record = json(raw);
+    if (names === "unknown" || !record || typeof record !== "object" || Array.isArray(record)) throw new UnknownReplyError("a deal of the person's");
+    const stage = (record as { stage?: unknown }).stage;
+    // A stage the store removed is still this deal's: read with it, so the deal is not dropped for it.
+    const known = typeof stage === "string" && !stages.some((s) => s.id === stage) ? [...stages, { id: stage, name: "", kind: "open" as const }] : stages;
+    const deal = parseDeal(record, known);
+    if (!deal) throw new UnknownReplyError("a deal of the person's");
+    out.push(known === stages ? deal : { ...deal, stage: "" });
+  }
+  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/**
  * The store's fields exactly as saved: none only when none were ever saved. A reply in an unknown shape, or a record
  * that does not read whole, throws CrmSchemaReadUnavailable, never "no fields" (CX-123 rules 24 and 30): a person's
  * deletion, copy or list file read from it would otherwise leave out every answer kept for them.
@@ -654,18 +702,16 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
   for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
-  // Every deal must read before any is judged (issue #4810): a value that is not a deal record, or a deal id twice,
-  // may be the person's, so it is never taken for somebody else's. The deletion throws before writing anything and
-  // says it is not finished, to be pressed again once the record is put right.
+  // Each deal judged on its own (issue #4810 and its review, dealNames): a readable one by its address, an unreadable
+  // one by whether its text holds the address. Only a deal that cannot be decided (an escape that could spell it), or
+  // a deal id twice, stops the deletion: it throws before writing anything and says it is not finished. A damaged
+  // deal of somebody else's never stops it, and one of the person's is deleted with theirs.
   if (new Set(pairs.map(([id]) => id)).size !== pairs.length) throw new UnknownReplyError("a store's deals");
-  const read = pairs.map(([id, value]) => {
-    const deal = json(value);
-    if (!deal || typeof deal !== "object" || Array.isArray(deal)) throw new UnknownReplyError("a store's deal");
-    const mail = (deal as { email?: unknown }).email;
-    if (mail !== undefined && mail !== null && typeof mail !== "string") throw new UnknownReplyError("a store's deal");
-    return [id, typeof mail === "string" ? mail : ""] as const;
+  const theirs = pairs.flatMap(([id, value]) => {
+    const names = dealNames(value, address);
+    if (names === "unknown") throw new UnknownReplyError("a store's deal");
+    return names === "yes" ? [id] : [];
   });
-  const theirs = read.filter(([, mail]) => mail.trim().toLowerCase() === address).map(([id]) => id);
   // Each value taken out in one script that answers what it deleted, each deal
   // deleted on its own: what goes back to the store's data room is exactly
   // what was removed, even with a change of the same value at the same time.

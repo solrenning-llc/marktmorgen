@@ -95,6 +95,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const rows = [...invoices.values()].filter((i) => (i.created as number) >= since && (!status || i.status === status)).reverse();
     return list(rows);
   }
+  if (method === "GET" && path === "/invoice_payments") {
+    // Each paid invoice's payment, as Stripe lists invoice payments: filtered by the payment when asked, the invoice
+    // expanded when asked (expand[]=data.invoice), else by creation date.
+    const intent = url.searchParams.get("payment[payment_intent]");
+    const expand = url.searchParams.getAll("expand[]").includes("data.invoice");
+    const rows = [...invoices.values()]
+      .filter((i) => i.status === "paid" && (intent ? intentOf(i) === intent : (i.created as number) >= since))
+      .map((i) => ({ object: "invoice_payment", id: `inpay_${String(i.id).slice(3)}`, status: "paid", created: i.created, invoice: expand ? i : i.id, payment: { type: "payment_intent", payment_intent: intentOf(i) } }));
+    return list(rows);
+  }
   if (method === "GET" && path === "/subscriptions") {
     return list(url.searchParams.get("status") === "past_due" ? pastDue : []);
   }

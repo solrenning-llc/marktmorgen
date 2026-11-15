@@ -1546,6 +1546,40 @@ export async function readInvoicePayments(store: Store, since: number, pages: nu
 }
 
 /**
+ * Payments whose invoice one reading of a store's numbers may look up one by one (GET /v1/invoice_payments filtered by
+ * the payment, the invoice expanded): a refund or dispute of a membership payment older than the invoices the reading
+ * reads otherwise could not be confirmed as the store's (#4549). Past it, the rest stay unconfirmed and the kept total
+ * reads unknown, never reduced on a guess.
+ */
+export const OLD_PAYMENT_LOOKUPS_PER_READING = 10;
+
+/**
+ * Whether a payment paid one of this store's membership or payment plan invoices, by its own invoice payment
+ * (GET /v1/invoice_payments?payment[type]=payment_intent&payment[payment_intent]=, the invoice expanded): read exactly
+ * (CX-123 rule 24). True only when Stripe lists exactly that payment, paid, on a paid invoice of a subscription this
+ * store opened (its checkout's or a later one, its metadata naming one of the store's handles). Anything else,
+ * an answer in another shape included, is false: the refund or dispute stays unconfirmed.
+ */
+export async function paymentOfStoreInvoice(store: Store, paymentIntent: string): Promise<boolean> {
+  if (!store.stripeAccountId || !/^pi_[A-Za-z0-9]{6,200}$/.test(paymentIntent)) return false;
+  const listed = (await onAccount(
+    "GET",
+    store.stripeAccountId,
+    `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": paymentIntent, limit: "1", "expand[]": "data.invoice" })}`,
+  )) as { object?: unknown; data?: unknown; has_more?: unknown } | null;
+  if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length !== 1 || typeof listed.has_more !== "boolean") return false;
+  const row = listed.data[0] as Record<string, unknown> | null;
+  if (!row || typeof row !== "object" || row.status !== "paid") return false;
+  const payment = row.payment as { type?: unknown; payment_intent?: unknown } | null | undefined;
+  if (!payment || payment.type !== "payment_intent" || payment.payment_intent !== paymentIntent) return false;
+  const invoice = row.invoice as Record<string, unknown> | null | undefined;
+  if (!invoice || typeof invoice !== "object" || typeof invoice.id !== "string" || !/^in_/.test(invoice.id)) return false;
+  const opened = invoice.status === "paid" && invoice.billing_reason === "subscription_create";
+  if (!opened && !paidAfterCheckout(invoice)) return false;
+  return saleHandles(store).has(invoiceMeta(invoice).store ?? "");
+}
+
+/**
  * The paid renewals of this store since `since` (seconds), each with the
  * buyer's address as the invoice has it: the same invoices renewalEntries
  * counts (paidAfterCheckout, this store's handles),
@@ -1976,6 +2010,18 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
           if (sale) byPayment.set(intent, sale);
           else renewalPayments.add(intent);
         }
+      }
+    }
+    // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own
+    // invoice payment, at most OLD_PAYMENT_LOOKUPS_PER_READING a reading (#4549); a lookup that fails proves nothing.
+    if (store.stripeAccountId) {
+      const unknownPayments = [...new Set(adjustments.map((row) => row.paymentIntent).filter((pi) => pi && !known(pi)))];
+      for (const pi of unknownPayments.slice(0, OLD_PAYMENT_LOOKUPS_PER_READING)) {
+        const ours = await paymentOfStoreInvoice(store, pi).catch((error) => {
+          console.error("reading a refunded payment's invoice failed", error);
+          return false;
+        });
+        if (ours) renewalPayments.add(pi);
       }
     }
     const adjustment = (row: { created: number; cents: number; currency: string; paymentIntent: string }): Entry => {

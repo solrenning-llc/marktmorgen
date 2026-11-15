@@ -128,10 +128,11 @@ export type Standing = { key: string; points: number };
 
 /**
  * The board as members see it: a member the creator removed is left off, the others in their order (Claude 7,
- * 13 November 2026). A member whose record was not found is still shown, unnamed, as before.
+ * 13 November 2026). Only a member read as not removed is shown: a record not found, or not read, could be a removed
+ * member's, so it is left off too (rule 24; Claude 1 cloud R on #4546).
  */
 export function boardShown<T extends { key: string }>(top: T[], members: Map<string, { removed: boolean }>): T[] {
-  return top.filter((s) => members.get(s.key)?.removed !== true);
+  return top.filter((s) => members.get(s.key)?.removed === false);
 }
 
 /**

@@ -16,6 +16,11 @@ export const FREE_TOOLS: readonly FreeTool[] = [
     title: "What is left of a sale",
     sentence: "Type a price and your own fees to see what one sale leaves you, before taxes.",
   },
+  {
+    slug: "qr-code-for-a-link",
+    title: "QR code for a link",
+    sentence: "Type a web address to make a QR code you can download and print, made in your browser.",
+  },
 ];
 
 /**
@@ -61,15 +66,16 @@ export function takeHome({ priceCents, percentBps, fixedCents, otherCents }: { p
 
 /**
  * What one visit to a tool page costs to serve, never zero (244 [SP1] (6)): the bytes and requests of a first visit
- * with nothing cached, measured on a production build in Chromium on 15 November 2026, five seconds after the page
- * settled so the menu's and footer's link prefetches are in it. The dearer of the two pages is used for both: the hub
- * (/platform/free-tools) took 26 requests and 559,744 bytes; the tool page took 18 to 24 requests and about 437,674
- * bytes. Priced at Vercel's on-demand rates for Fast Data Transfer and CDN requests as its pricing page printed them
- * that day. A plan's included allowance is not counted as free.
+ * with nothing cached, measured on production builds in Chromium on 15 November 2026, five seconds after the page
+ * settled so the menu's and footer's link prefetches are in it. The dearest page and run are used for every tool
+ * page: the hub (/platform/free-tools) took up to 31 requests and 621,508 bytes; the sale tool 18 to 24 requests
+ * and up to 467,703 bytes; the QR code tool 26 requests and 593,303 bytes. Priced at Vercel's on-demand rates for
+ * Fast Data Transfer and CDN requests as its pricing page printed them that day. A plan's included allowance is not
+ * counted as free. Not a plan's cost: a company cost (tests/plan-cost-registry.ts, NOT_A_COST.TOOL_PAGE_COST).
  */
 export const TOOL_PAGE_COST = {
-  bytes: 559_744,
-  requests: 26,
+  bytes: 621_508,
+  requests: 31,
   perGbUsd: 0.15,
   perMillionRequestsUsd: 2,
   source: "https://vercel.com/docs/pricing/networking",

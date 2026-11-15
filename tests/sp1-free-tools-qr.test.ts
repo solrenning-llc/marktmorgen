@@ -17,7 +17,8 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import QRCode from "qrcode";
-import { FREE_TOOLS, FREE_TOOLS_PATH, qrForLink, readLink } from "@/lib/free-tools";
+import { FREE_TOOLS, FREE_TOOLS_PATH } from "@/lib/free-tools";
+import { qrForLink, readLink } from "@/lib/free-tool-qr";
 import { QrTool } from "@/components/free-tool-qr";
 import { FreeToolsHub } from "@/components/free-tools-hub";
 import { done, is, part } from "./check";
@@ -49,7 +50,7 @@ is("says nothing leaves the page", /nothing you type leaves this page/i.test(htm
 const source = readFileSync("components/free-tool-qr.tsx", "utf8");
 is("the picture says where it opens", source.includes("alt={`QR code that opens ${") , true);
 is("the download is the drawing itself, named", source.includes("download={made.fileName}") && source.includes("data:image/svg+xml"), true);
-for (const file of ["components/free-tool-qr.tsx", "lib/free-tools.ts"]) {
+for (const file of ["components/free-tool-qr.tsx", "lib/free-tool-qr.ts"]) {
   is(`${file}: no fetch, beacon, socket, worker or storage`, /\bfetch\(|sendBeacon|XMLHttpRequest|WebSocket|EventSource|new Worker|localStorage|sessionStorage|indexedDB|document\.cookie/.test(readFileSync(file, "utf8")), false);
 }
 const tool = FREE_TOOLS.find((t) => t.slug === "qr-code-for-a-link");

@@ -20,11 +20,11 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf as replyCount, repliesFor, stringList } from "@/lib/redis-reply";
 import { STORE_ID_PATTERN, storeIdExists } from "@/lib/store";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes, dataBytesOfLength, utf8Length } from "@/lib/store-data-rules";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DueTask, MAX_PERSON_TASKS, MAX_STORE_TASKS, type PersonTask, type TaskResult, parseTasks } from "@/lib/person-tasks";
 import {
   type CrmField,
@@ -33,6 +33,9 @@ import {
   DEFAULT_STAGES,
   DEAL_ID,
   MAX_DEALS,
+  MAX_FIELD_OPTION,
+  MAX_FIELD_OPTIONS,
+  MAX_FIELD_VALUE,
   type Pipeline,
   type PipelineChange,
   type Stage,
@@ -45,6 +48,7 @@ import {
   parseFields,
   parseStages,
 } from "@/lib/crm-rules";
+import type { ListRead } from "@/lib/contacts";
 
 export class CrmDealReadUnavailable extends Error {
   constructor() { super("CRM deal preflight could not be confirmed"); this.name = "CrmDealReadUnavailable"; }
@@ -156,10 +160,14 @@ const json = (raw: unknown): unknown => {
   }
 };
 
+/**
+ * The store's fields exactly as saved: none only when none were ever saved. A reply in an unknown shape, or a record
+ * that does not read whole, throws CrmSchemaReadUnavailable, never "no fields" (CX-123 rules 24 and 30): a person's
+ * deletion, copy or list file read from it would otherwise leave out every answer kept for them.
+ */
 export async function readFields(statsId: string | null): Promise<CrmField[]> {
-  if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", fieldsKey(statsId)]]);
-  return parseFields(json(raw));
+  // One reading, the same as readFieldsWhole's (merge of #2901 with main): a single exact read of the record.
+  return readFieldsWhole(statsId);
 }
 
 /**
@@ -203,10 +211,11 @@ export async function writeFields(statsId: string, fields: CrmField[], keepAll =
   return fields;
 }
 
-/** One person's values, by field id. */
+/** One person's values, by field id. A reply in an unknown shape throws UnknownReplyError, never "no value". */
 export async function readValues(statsId: string | null, person: string, fields: CrmField[]): Promise<Record<string, string>> {
   if (!statsId || !PERSON.test(person) || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGET", valuesKey(statsId, f.id), person]));
+  const got = repliesFor(await redisPipeline(fields.map((f) => ["HGET", valuesKey(statsId, f.id), person])), fields.length);
+  if (!got || !got.every((value) => value === null || typeof value === "string")) throw new UnknownReplyError("a person's CRM values");
   return Object.fromEntries(fields.flatMap((f, i) => (typeof got[i] === "string" && got[i] ? [[f.id, got[i] as string]] : [])));
 }
 
@@ -228,17 +237,40 @@ export async function setValue(statsId: string, person: string, field: CrmField,
   return true;
 }
 
-/** Every value of every field, by field id and then by person: for the list's file. */
-export async function allValues(statsId: string | null, fields: CrmField[]): Promise<Record<string, Record<string, string>>> {
-  if (!statsId || !fields.length || !isRedisConfigured()) return {};
-  const got = await redisPipeline(fields.map((f) => ["HGETALL", valuesKey(statsId, f.id)]));
+/** A person's key as one argument of a read of their values (lib/person-key.ts: 32 hexadecimal characters), with its quotes and its comma. */
+export const PERSON_ARG_BYTES = 35;
+
+/**
+ * The most bytes one value of `field` comes back as in a read: its longest
+ * value (one of several is the field's choices, one a line), every character
+ * at the widest a JSON answer writes it (three bytes; a line break, two), with
+ * its quotes and its comma. Control characters are never kept (fieldValue).
+ */
+export function valueReadBytes(field: Pick<CrmField, "type">): number {
+  const longest = field.type === "several" ? MAX_FIELD_OPTIONS * (MAX_FIELD_OPTION + 1) : MAX_FIELD_VALUE;
+  return 3 * longest + 3;
+}
+
+/**
+ * The values of `persons` (their person keys, lib/person-key.ts) for each
+ * field, by field id, in the order of `persons` (null for none): for the
+ * list's file, read only for the people it holds, one HMGET a field, never
+ * the whole of a field's values, which outlive a person's leaving the list
+ * (second cost review of #3354). Each read goes through `read`, held at the
+ * most its values can weigh. Read in its exact shape (CX-123 rule 24): a
+ * value is a string or none, one for each person; any other answer throws
+ * UnknownReplyError, never a file with a value left out.
+ */
+export async function valuesOf(statsId: string, fields: CrmField[], persons: string[], read: ListRead): Promise<Record<string, (string | null)[]>> {
+  if (!fields.length || !persons.length) return Object.fromEntries(fields.map((f) => [f.id, persons.map(() => null)]));
+  const most = fields.reduce((sum, f) => sum + persons.length * valueReadBytes(f) + 2, 0);
+  const got = await read(fields.map((f) => ["HMGET", valuesKey(statsId, f.id), ...persons]), most);
+  if (!Array.isArray(got) || got.length !== fields.length) throw new UnknownReplyError("a store's fields' values");
   return Object.fromEntries(
     fields.map((f, i) => {
-      const raw = got[i];
-      const map: Record<string, string> = {};
-      if (Array.isArray(raw)) for (let k = 0; k + 1 < raw.length; k += 2) map[String(raw[k])] = String(raw[k + 1]);
-      else if (raw && typeof raw === "object") Object.assign(map, raw as Record<string, string>);
-      return [f.id, map];
+      const values: unknown = got[i];
+      if (!Array.isArray(values) || values.length !== persons.length || values.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("a store's field's values");
+      return [f.id, values.map((v: string | null) => v || null)];
     }),
   );
 }
@@ -408,8 +440,11 @@ export async function writeStages(statsId: string, stages: Stage[], room: DataSt
 /** Every deal, newest change first. `stages` reads a deal in a stage the store still has. */
 export async function readDeals(statsId: string | null, stages: readonly Stage[]): Promise<Deal[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HVALS", dealsKey(statsId)]]);
-  return (Array.isArray(raw) ? raw : [])
+  // Rule 24: "no deals" only for an empty list; any other reply is unknown,
+  // never a board with no deals (a workflow would make a second one).
+  const raw = repliesFor(await redisPipeline([["HVALS", dealsKey(statsId)]]), 1)?.[0];
+  if (!Array.isArray(raw) || !raw.every((value) => typeof value === "string")) throw new CrmDealReadUnavailable();
+  return raw
     .map((value) => parseDeal(json(value), stages))
     .filter((d): d is Deal => d !== null)
     .sort((a, b) => b.updatedAt - a.updatedAt);
@@ -578,12 +613,23 @@ export async function dropDeal(statsId: string, id: string, room: DataStore): Pr
  * still taken after the wait throws (LockBusyError), with everything already
  * deleted once. A change that reaches the lock after the store is gone finds
  * no store and writes nothing (changePersonTasks).
+ *
+ * A fields read in an unknown shape (CrmSchemaReadUnavailable) never keeps
+ * the rest: the deals, which name buyers, the stages, pipelines and tasks go
+ * all the same. Only the fields record stays, with the answers kept under
+ * it, so a later try can still find their keys; and the error is thrown
+ * after, so the caller knows they are still kept (Claude 6 on #2901).
  */
 export async function forgetCrm(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const fields = await readFields(statsId);
-  await redisPipeline([["DEL", fieldsKey(statsId), stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))]]);
+  const fields = await readFields(statsId).catch((error: unknown) => {
+    if (error instanceof CrmSchemaReadUnavailable) return null;
+    throw error;
+  });
+  const answers = fields ? [fieldsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))] : [];
+  await redisPipeline([["DEL", stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers]]);
   await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
+  if (!fields) throw new CrmSchemaReadUnavailable();
 }
 
 /** One person's value of a field deleted, answered with what it was (null when there was none). */
@@ -602,10 +648,12 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
   if (!statsId || !PERSON.test(person) || !isRedisConfigured()) return 0;
   const fields = await readFields(statsId);
   const address = email.trim().toLowerCase();
-  const [raw] = await redisPipeline([["HGETALL", dealsKey(statsId)]]);
+  // Every deal, exactly as a flat list of pairs: a reply in another shape is unknown and the deletion fails and says
+  // so, never "done" with the person's deals kept (CX-123 rules 24 and 30).
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", dealsKey(statsId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a store's deals");
   const pairs: [string, string][] = [];
-  if (Array.isArray(raw)) for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), String(raw[i + 1])]);
-  else if (raw && typeof raw === "object") for (const [k, v] of Object.entries(raw as Record<string, string>)) pairs.push([k, String(v)]);
+  for (let i = 0; i < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
   const theirs = pairs.filter(([, value]) => {
     const deal = json(value) as { email?: unknown } | null;
     return typeof deal?.email === "string" && deal.email.trim().toLowerCase() === address;
@@ -617,16 +665,30 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     ...fields.map((f) => ["EVAL", TAKE_CRM_VALUE, 1, valuesKey(statsId, f.id), person]),
     ...theirs.map((id) => ["HDEL", dealsKey(statsId), id]),
   ];
-  const replies = commands.length ? await redisPipeline(commands) : [];
+  // Each reply read exactly (CX-123 rules 24 and 30): a value's script answers the value it deleted or nil, a deal's
+  // HDEL 1 or 0. Any other reply, or a reply list of another length, is unknown, never "nothing was there": what did
+  // read is given back below, and the deletion then throws UnknownReplyError, so the erasure says it did not finish
+  // and is pressed again, never confirmed with the person's answers or deals possibly kept.
+  const replies = commands.length ? repliesFor(await redisPipeline(commands), commands.length) : [];
+  if (!replies) throw new UnknownReplyError("a person's CRM deletion");
+  let unknown = false;
   let records = 0;
   let valuesFreed = 0;
   fields.forEach((_, i) => {
     const taken = replies[i];
-    if (typeof taken !== "string") return;
+    if (taken === null) return;
+    if (typeof taken !== "string") {
+      unknown = true;
+      return;
+    }
     records += 1;
     if (taken) valuesFreed += dataBytes([person, taken], 1);
   });
-  const dealsGone = theirs.filter((_, i) => replies[fields.length + i] === 1);
+  const dealsGone = theirs.filter((_, i) => {
+    const gone = replyCount(replies[fields.length + i]);
+    if (gone === null || gone > 1) unknown = true;
+    return gone === 1;
+  });
   records += dealsGone.length;
   if (room && (valuesFreed > 0 || dealsGone.length)) {
     await giveData(room, [
@@ -656,6 +718,8 @@ export async function forgetCrmPerson(statsId: string | null, person: string, em
     if (freed > 0 && room) await giveData(room, [{ slot: TASKS_SLOT, bytes: freed }]);
     return taken[0] ? 1 : 0;
   });
+  // Their tasks went above all the same; a reply of the values or deals that did not read leaves the deletion unconfirmed.
+  if (unknown) throw new UnknownReplyError("a person's CRM deletion");
   return records;
 }
 
@@ -801,8 +865,12 @@ export async function readPersonTasks(statsId: string | null, person: string): P
  */
 export async function taskPeople(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [fields, counted] = await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]);
-  return Math.max(0, (Number(fields) || 0) - (counted === 1 ? 1 : 0));
+  // Rule 24: HLEN and HEXISTS as Redis answered them, or unknown; never "nobody has tasks".
+  const replies = repliesFor(await redisPipeline([["HLEN", tasksKey(statsId)], ["HEXISTS", tasksKey(statsId), TASK_COUNT_FIELD]]), 2);
+  const fields = replyCount(replies?.[0]);
+  const counted = replies?.[1];
+  if (fields === null || (counted !== 0 && counted !== 1)) throw new TasksUnreadable("the store's task count reply");
+  return Math.max(0, fields - counted);
 }
 
 /**
@@ -905,7 +973,11 @@ async function changeOnce(statsId: string, person: string, room: DataStore, chan
   if (added > 0 && count === null) {
     // No count yet: none is needed for a store with no tasks; one that has
     // some has every task read, once, paid for first.
-    const people = Math.max(0, (Number(fields) || 0) - (kept === null || kept === undefined ? 0 : 1));
+    // Rule 24: a reply that is not a whole count is unknown, never a store with
+    // no tasks, which would start the count over from this change alone.
+    const fieldCount = replyCount(fields);
+    if (fieldCount === null) throw new TasksUnreadable("the store's task count reply");
+    const people = Math.max(0, fieldCount - (kept === null || kept === undefined ? 0 : 1));
     if (people > 0) {
       const units = tasksRecountUnits(people);
       if (units > paid) return { units };

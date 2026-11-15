@@ -1002,14 +1002,17 @@ export function searchWords(text: string): string[] {
 
 /** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
 const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
 
 /**
  * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
  * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
  */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
   const text = `${listing.title} ${listing.summary}`;
-  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text))])];
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
   return [searchWords(query), searchWords(unhyphened(query))].some(
     (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
   );

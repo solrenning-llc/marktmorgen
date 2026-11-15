@@ -118,7 +118,7 @@ export function feeWords(live = COMMISSION_PLANS_PUBLISHED) {
       /** PayPal, on the comparison with Stan. */
       paypal: "Yes, on every plan. The buyer pays into your own PayPal account and we take nothing",
       /** The comparison with Stan: where the two charge alike. */
-      sameAsStan: { title: "Where we charge differently", body: `Stan charges $29 or $99 a month (its pricing page, updated July 22, 2026, read October 18, 2026) and nothing from a sale. We charge ${dollars(p.creator.month)}, ${dollars(p.pro.month)} or ${dollars(p.scale.month)} a month, or ${dollars(p.creator.year)}, ${dollars(p.pro.year)} or ${dollars(p.scale.year)} a year, and nothing from a sale either, for the limits printed on each plan. Both have a 14-day free trial.` },
+      sameAsStan: { title: "Where we charge differently", body: `Stan charges $29 or $99 a month (its pricing page, updated July 22, 2026, read November 15, 2026) and nothing from a sale. We charge ${dollars(p.creator.month)}, ${dollars(p.pro.month)} or ${dollars(p.scale.month)} a month, or ${dollars(p.creator.year)}, ${dollars(p.pro.year)} or ${dollars(p.scale.year)} a year, and nothing from a sale either, for the limits printed on each plan. Both have a 14-day free trial.` },
       /** The $27 file, on Gumroad and here. */
       gumroad: {
         ours: `We take nothing. Stripe charges you its own published rate on your own account — about $${card.toFixed(2)} on $27 — so you keep $${kept}, and you pay us a fixed monthly price.`,

@@ -177,8 +177,9 @@ export default async function OrdersPage({ params, searchParams }: Params) {
   // them a batch at a time (components/older-purchases.tsx), from where `older.cursor` says.
   let older: ReturnType<typeof olderOf> = { cursor: null, count: 0, added: false };
   let discordProducts: Set<string> | null = null;
-  // What the purchases need besides themselves: podcast feeds, license keys and what can be reviewed (lib/purchase-cards.ts).
-  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set() };
+  // What the purchases need besides themselves: podcast feeds, license keys, what can be reviewed and how far the buyer is
+  // in each course (lib/purchase-cards.ts).
+  let extras: Extras = { feeds: new Map(), keys: new Map(), reviewing: new Set(), progress: new Map() };
   if (email && meter) {
     try {
       // Waited on ORDERS_READ_MS at the most (lib/buyer-orders.ts, withinOpening): past it nothing more is read and the
@@ -372,7 +373,7 @@ function Frame({ store, children }: { store: Store; children: React.ReactNode })
         </div>
 
         <div className="mt-8 text-center">
-          <p className="st-muted mx-auto mb-4 max-w-xl text-sm" data-while-open>
+          <p className="st-muted mx-auto mb-4 max-w-[50ch] text-sm" data-while-open>
             {words.whileOpen}
           </p>
           {/* Alone on their line, so at least 44 px high (WCAG 2.5.5), as "Back to your purchases" is. */}

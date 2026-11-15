@@ -19,7 +19,7 @@ import { CLOSING_DAYS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, KEEP_NOTHING_FROM
 import { RELEASE_QUARANTINE_DAYS } from "@/lib/store";
 import { CALL_ORDER_UNITS, ORDERS_INCLUDED, TRIAL_ORDERS } from "@/lib/order-rules";
 import { API_SALES_UNITS, API_WRITE_UNITS, allowanceListWords } from "@/lib/store-allowance-rules";
-import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { STUDIO_PAGE_UNITS, STUDIO_SEARCH_UNITS } from "@/lib/studio-allowance-rules";
 import { FREE_POOL_BASE_STORES, PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { BUYER_RESERVE_BPS, EXTRA_REQUESTS, REQUESTS_PER_VISIT, ROOM_IDLE_PARTS, ROOM_LIVE_PARTS, SETUP_VISITS, TRIAL_VISITS, VISITS_INCLUDED, countWords, partsWords } from "@/lib/traffic-rules";
 import { ROOM_GRANT_MINUTES } from "@/lib/chat-pace";
@@ -28,6 +28,7 @@ import { NON_PAYING_DATA_ROOM_BYTES, dataRoomListWords, dataWords } from "@/lib/
 import { INVITE_PROGRAM_OPEN, INVITE_PAUSE_NOTICE, INVITE_BONUS_CENTS, INVITE_HOLD_DAYS, INVITE_SHARE_PERCENT } from "@/lib/creator-invite-rules";
 import { feeWords, planPriceWords } from "@/lib/fee-words";
 import { TASK_ROOM_BYTES } from "@/lib/assignment-rules";
+import { HELD_DAYS } from "@/lib/community-approval-rules";
 import { COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { ASSISTANT_KEEP_SECONDS, ASSISTANT_MESSAGES_MONTHLY, ASSISTANT_NAME, ASSISTANT_PRICE_CENTS } from "@/lib/store-assistant-rules";
 
@@ -40,7 +41,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   const domains = isDomainsConfigured();
   return (
-    <LegalPage title="Terms of Service" lastUpdated="November 4, 2026">
+    <LegalPage title="Terms of Service" lastUpdated="November 9, 2026">
       <p>
         These Terms of Service (“Terms”) govern your access to and use of the
         websites, products, and subscription services operated by Solrenning
@@ -162,7 +163,11 @@ export default function TermsPage() {
           lead, its amount, hold, caps and budget are yours to set, approving
           or reversing each lead is your decision, and you must not use it to
           pay for sign-ups or bookings that people did not make themselves. If you run a community, what is posted in it is
-          yours to moderate, and the rules in section 4 apply to it.
+          yours to moderate, and the rules in section 4 apply to it. You may
+          choose to approve posts and comments before they are published; what
+          is waiting for approval is seen only by its author and you, its author
+          is told when you do not publish it, and it is not published if you do
+          not answer within {HELD_DAYS} days.
         </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}
@@ -439,8 +444,11 @@ export default function TermsPage() {
           the calendar month: it begins on the day your plan renews and ends
           when the next payment&apos;s month begins, so each payment buys one
           month of every figure. A yearly plan&apos;s figures are monthly too,
-          each month beginning on the day of the month your year began. A free
-          trial&apos;s figures are counted for the trial as a whole, and a
+          each month beginning on the day of the month your year began. If you
+          switch between monthly and yearly, your billing month keeps the day
+          it had before the switch. If your plan stops because a renewal was
+          not paid and you then pay a later one, it can go back to the day your plan
+          renews. A free trial&apos;s figures are counted for the trial as a whole, and a
           store with no plan, before one starts or after one ends, counts them
           by calendar month (UTC). Until we have read your plan&apos;s billing
           month from our payment processor (when you next open your studio, or
@@ -454,7 +462,8 @@ export default function TermsPage() {
           {allowanceListWords("pro")}; and on {PLAN_TITLES.scale},{" "}
           {allowanceListWords("scale")}. A studio request is any page of your
           studio you open (each counts as {STUDIO_PAGE_UNITS}), any save, and
-          the studio&apos;s own refreshing; an API request is one made with
+          the studio&apos;s own refreshing, and a search in the studio counts as{" "}
+          {STUDIO_SEARCH_UNITS}; an API request is one made with
           one of your store&apos;s keys (a contact added or a product given
           counts as {API_WRITE_UNITS}, and a page of sales read counts as{" "}
           {API_SALES_UNITS}); store emails are the emails your

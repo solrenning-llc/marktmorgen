@@ -182,6 +182,15 @@ export const BOOK_INVOICES = 1_000;
 /** A product's listing, read for its title. */
 export const LISTING_BYTES = 16_384;
 
+/**
+ * A refund kept on a sale's, a share's or a lead's record when it was read on its own account (lib/affiliates.ts,
+ * AFFILIATE_REFUND_MARK): at most this many records in one reading of the book (the rest at the next), in one script
+ * per hash, all in one pipeline; and what one record's mark sends at the most (the record's whole new text, its field
+ * and the SHA-1 of the text read).
+ */
+export const REFUND_MARKS_PER_READ = 200;
+export const REFUND_MARK_BYTES = 2_048;
+
 /** What one reading of the affiliate program does (lib/affiliates.ts, readBook), counted from its sizes and the Stripe pages it may wait on. */
 export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   if (!s.kept) return { ...NONE };
@@ -190,14 +199,16 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
   const moves = Math.min(s.leads, BOOK_MOVES);
   const stripe = s.stripe && s.people > 0;
   const products = stripe ? Math.min(s.products, BOOK_INVOICES) : 0;
+  // Up to REFUND_MARKS_PER_READ records could have their refund kept, one script for each of the three hashes: one trip.
+  const marks = s.stripe && any ? 3 : 0;
   return {
     // Counting it (seven counts and the PayPal refunds'), reading the seven records, then each read below; the moves a hundred at an MGET.
-    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES,
+    commands: 8 + 7 + (any ? 1 + paypal : 0) + moveReads(moves) + products + marks,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,
-    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0),
+    roundTrips: 2 + (any ? 1 + paypal : 0) + (moves ? 1 : 0) + (products ? 1 : 0) + (marks ? 1 : 0),
   };
 }
 
@@ -393,19 +404,33 @@ export const MAIL_REVENUE_BYTES = 64_000;
 
 /**
  * What get_emails reads, sized first: its broadcasts and its sequences
- * measured by their bytes (one LRANGE and a STRLEN each), then the list's
+ * measured by their bytes (one LRANGE and a STRLEN), then the list's
  * counts, the records, each sequence's counts at the most and what they sold
  * at the size it is kept at (`revenueBytes`, measured: 0 when it is not kept),
- * and every one told back.
+ * and every one told back. Each broadcast's size is not in it: asking those
+ * is taken before it is sent (emailsSizesWork).
  */
 export function emailsWork(s: { broadcasts: number; broadcastBytes: number; flowBytes: number; revenueBytes: number }): ReadWork {
   return {
-    commands: 2 + s.broadcasts + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
+    commands: 2 + 3 + 1 + 1 + s.broadcasts + MAX_FLOWS + 1,
     bytes: s.broadcastBytes + s.flowBytes + MAX_FLOWS * FLOW_STATS_BYTES + s.revenueBytes,
     sent: (s.broadcasts + MAX_FLOWS) * EMAIL_SENT_BYTES,
     stripePages: 0,
     roundTrips: 2 + 4,
   };
+}
+/** get_emails' read through lib/broadcasts.ts BROADCAST_HEADS (its emails without their bodies), beside the GETs inside it that emailsWork counts. */
+export const EMAILS_HEADS_WORK: ReadWork = { commands: 1, bytes: 0, sent: 0, stripePages: 0, roundTrips: 0 };
+/**
+ * Asking get_emails' `broadcasts` emails' sizes without their bodies
+ * (lib/broadcasts.ts, BROADCAST_HEADS "size": the script and a GET inside it
+ * for each, `bytes` both ways as broadcastSizesBytes says, one trip): taken
+ * before the script is sent, apart from what is set aside after it (Codex J
+ * 5811457165 on #3034: thirty sizes were asked inside the door's one
+ * request). Nothing when there is no broadcast.
+ */
+export function emailsSizesWork(broadcasts: number, bytes: number): ReadWork {
+  return broadcasts > 0 ? { commands: 1 + broadcasts, bytes, sent: 0, stripePages: 0, roundTrips: 1 } : { ...NONE };
 }
 /** What get_emails looks up before it sets aside: whether what they sold is kept and how big (STRLEN), and the PayPal sales and refunds it would read (two ZCARD), side by side. */
 export const EMAILS_PROBE_WORK: ReadWork = { commands: 3, bytes: 0, sent: 0, stripePages: 0, roundTrips: 1 };
@@ -463,11 +488,13 @@ export const EVENTS_MOST: EventsSize = {
 /**
  * What the recent events do: the store's log read (LRANGE), each delivery in
  * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
- * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
- * and the messages of the type asked for sent. Without an argument, its most.
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH),
+ * the store's deletion marks read for the people in them (one HMGET, since 14
+ * November 2026: lib/webhooks.ts, recentMessagesOf), and the messages of the
+ * type asked for sent. Without an argument, its most.
  */
 export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
-  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+  return { commands: s.deliveries > 0 ? 3 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 4 : 1 };
 }
 
 /**
@@ -613,3 +640,63 @@ export function proposeWork(bookBytes: number, kindMaxBytes: number): ReadWork {
     roundTrips: 8,
   };
 }
+
+// ---------------------------------------------------------------- bundle choices and imports (MCP read tools, 631 [AA1] (a))
+
+/** A product's cached card (its title, price and whether it has a page), as kept for searching: a review ceiling, settled at what was read. */
+export const CARD_READ_BYTES = 1_024;
+/** Names list_bundle_choices looks through for a search in one call (lib/bundle-choices.ts, SEARCH_STRETCH, one HMGET). */
+export const BUNDLE_SEARCH_STRETCH = 100;
+/** Listings one page of list_bundle_choices reads at the most (lib/bundle-choices.ts, PICKER_PAGE). */
+export const BUNDLE_PAGE_LISTINGS = 20;
+
+/**
+ * list_bundle_choices (lib/bundle-choices.ts, bundleChoicesPage): with a
+ * search, the cached cards of a stretch of products in one HMGET; then the
+ * listings of the page, in one go; and the page sent, a product each and the
+ * note. Set aside at its most (BUNDLE_CHOICES_MOST) before anything is read
+ * and settled at this for what was read, or at what was really read and sent
+ * where that came to more (lib/mcp-tools.ts, bundleChoicesTool).
+ */
+export function bundleChoicesWork(cards: number, listings: number): ReadWork {
+  const c = Math.max(cards, 0);
+  const l = Math.max(listings, 0);
+  return {
+    commands: (c > 0 ? 1 : 0) + l,
+    bytes: c * CARD_READ_BYTES + l * LISTING_BYTES,
+    sent: l * PRODUCT_SENT_BYTES + 2 * TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: (c > 0 ? 1 : 0) + (l > 0 ? 1 : 0),
+  };
+}
+/** list_bundle_choices at its most: a whole stretch of cards and a whole page of listings (Codex G2 on #1933: twenty listings read on the door's one request). */
+export const BUNDLE_CHOICES_MOST: ReadWork = bundleChoicesWork(BUNDLE_SEARCH_STRETCH, BUNDLE_PAGE_LISTINGS);
+
+/** Imports a store's history keeps, all of which get_imports reads (lib/imports.ts, IMPORTS_LIST_SIZE). */
+export const IMPORTS_READ = 10;
+/** An entry of the imports' index: an import's id (24 hexadecimal characters, lib/imports.ts IMPORT_ID_PATTERN), with room. */
+export const IMPORT_ID_BYTES = 64;
+/** An import's record (lib/imports.ts), read whole: its counts, kind, source, file name, tags and where it is: a review ceiling, settled at what was read. */
+export const IMPORT_JOB_BYTES = 16_384;
+/** An import as get_imports sends it: counts only. */
+export const IMPORT_SENT_BYTES = 1_024;
+
+/**
+ * get_imports (lib/imports.ts, storeImportsRead): the index (one LRANGE),
+ * then each import it names (a GET each, in one go), each sent as counts.
+ * Set aside at its most (IMPORTS_MOST) before the index is read and settled
+ * at this for the imports it named, or at what was really read and sent
+ * where that came to more (lib/mcp-tools.ts, importsTool).
+ */
+export function importsWork(imports: number): ReadWork {
+  const n = Math.max(imports, 0);
+  return {
+    commands: 1 + n,
+    bytes: n * (IMPORT_ID_BYTES + IMPORT_JOB_BYTES),
+    sent: n * IMPORT_SENT_BYTES + TOOL_NOTE_BYTES,
+    stripePages: 0,
+    roundTrips: n > 0 ? 2 : 1,
+  };
+}
+/** get_imports at its most: every import the history keeps. */
+export const IMPORTS_MOST: ReadWork = importsWork(IMPORTS_READ);

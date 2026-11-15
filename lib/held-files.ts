@@ -1,6 +1,6 @@
 /**
  * Files kept for a child-safety report (C1-20261109-1546-TODOS-70, unit 3b;
- * procedure in docs/incident-response.md section 8).
+ * procedure in docs/incident-response.md section 9).
  *
  * When a report takes a product off the store (lib/child-safety.ts), every
  * file it hands over is marked here for HELD_FILE_SECONDS: its file, its

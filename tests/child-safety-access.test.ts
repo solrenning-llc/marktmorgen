@@ -280,8 +280,11 @@ async function main(): Promise<void> {
   is("named under a product that is not held", await describe({ product: freeId, path: heldPicture }), [409, "on_hold", "nothing read"]);
   is("a picture on its sales page, named under another product", await describe({ product: freeId, path: heldPagePicture }), [409, "on_hold", "nothing read"]);
   is("named under a page of the store's own", await describe({ page: siteId, path: heldPicture }), [409, "on_hold", "nothing read"]);
-  is("a picture that is not a held product's still goes to the file store (nothing there here)", await describe({ product: freeId, path: freePicture }), [400, "invalid", "file store"]);
-  is("as from a page of the store's own", await describe({ page: siteId, path: freePicture }), [400, "invalid", "file store"]);
+  // A picture that is not a held product's gets past the hold: refused for no hold. Since main's #2975 the month's job
+  // is taken before the file store is read (lib/ai.ts, describePicture), and no AI provider is set up here, so the ask
+  // stops there ("off") with nothing read; before it, it reached the file store (nothing there here, "invalid").
+  is("a picture that is not a held product's gets past the hold (no AI set up here, so nothing is read)", await describe({ product: freeId, path: freePicture }), [400, "off", "nothing read"]);
+  is("as from a page of the store's own", await describe({ page: siteId, path: freePicture }), [400, "off", "nothing read"]);
 
   part("A hold whose taking off the store did not go through: still read by nobody but the owner");
   if (!(await setProductHidden(OWNER, pdfId, false)).ok) throw new Error("not shown again");

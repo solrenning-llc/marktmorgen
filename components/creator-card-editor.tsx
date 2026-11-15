@@ -62,11 +62,9 @@ export function confirmedRemoval(answer: { card: CreatorCard; removed: unknown }
   return answer.removed !== false && !answer.card.on && TEXT_FIELDS.every((key) => answer.card[key] === "");
 }
 
-/**
- * `language` (the store's), not the card's words: those carry a function (`store`), and a function cannot be passed
- * from the server page to this client component, which made /studio/card answer 500 (VR sweep, 12/11/2026).
- */
 export function CreatorCardEditor({ initial, held, handle, storeName, language, address, look }: { initial: CreatorCard; held?: boolean; handle: string; storeName: string; language: LanguageCode; address: string; look: { className: string; style: React.CSSProperties; lang: string } }) {
+  // Read here, in the browser, from the store's language: the card's words hold a function (its store line), which a
+  // server page cannot hand to this client component (tests/creator-card-serializable.test.ts).
   const words = contactWords(language).card;
   const [card, setCard] = useState(initial);
   // Delete is offered for every kept card, also one off with no name but an email or a note, and one empty in every

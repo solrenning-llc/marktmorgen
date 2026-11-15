@@ -5,10 +5,12 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { type Listing, readListingExactly } from "@/lib/catalog";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { readPodcast } from "@/lib/podcast";
+import { readPodcastSized } from "@/lib/podcast";
 import { EPISODE_ID } from "@/lib/podcast-rules";
 import { PUBLIC_CATEGORIES, type PublicCategory } from "@/lib/podcast-public-feed";
-import { type PublicShowSettings, audioRefusal, dropPublicShow, readPublicShow, settingsOf, writePublicShow } from "@/lib/podcast-public-show";
+import { PODCAST_RECORD_MOST, PUBLIC_SHOW_MAX_BYTES, type PublicShowSettings, audioRefusal, dropPublicShow, readPublicShowSized, settingsOf, writePublicShow } from "@/lib/podcast-public-show";
+import { IncludedBytes, PAGE_INCLUDED_BYTES } from "@/lib/sent-bytes";
+import { holdStudio, refusedJson } from "@/lib/studio-route";
 import { SITE_URL } from "@/lib/site-url";
 
 /**
@@ -33,7 +35,10 @@ const fail = (error: string, status = 400) => Response.json({ ok: false, error }
 
 type Feed = { on: boolean; category: PublicCategory | null; explicit: boolean | null; episodes: Record<string, string>; address: string };
 
-function answer(store: Store, product: Listing, settings: PublicShowSettings | null): Response {
+/** Bytes a request has moved so far: read from Redis, written to it and sent to the browser. */
+type Moved = { bytes: number };
+
+function answer(store: Store, product: Listing, settings: PublicShowSettings | null, moved: Moved): Response {
   const feed: Feed = {
     on: settings !== null,
     category: settings?.category ?? null,
@@ -41,12 +46,39 @@ function answer(store: Store, product: Listing, settings: PublicShowSettings | n
     episodes: settings?.episodes ?? {},
     address: `${SITE_URL}/api/store/podcast/public/${store.handle}/${product.id}.xml`,
   };
-  return Response.json({ ok: true, feed });
+  const body = JSON.stringify({ ok: true, feed });
+  moved.bytes += Buffer.byteLength(body, "utf8");
+  return new Response(body, { headers: { "Content-Type": "application/json" } });
 }
+
+/**
+ * What one request may move at its worst (Claude 7's cost MEDIUM on #3544): the settings record read, written back
+ * and sent (each at most PUBLIC_SHOW_MAX_BYTES) and, for a change, the podcast read (PODCAST_RECORD_MOST). The
+ * studio requests for it are taken before anything is read, one each PAGE_INCLUDED_BYTES (what one studio request is
+ * priced at, UNIT_COST.studio), on top of the guard's own; what the request did not move, measured from the bytes
+ * Redis answered and the answer sent, is given back at its end. A request stopped part way gives nothing back.
+ */
+export const PUBLIC_SETTINGS_WORST_BYTES = { read: 2 * PUBLIC_SHOW_MAX_BYTES, off: PUBLIC_SHOW_MAX_BYTES, change: 3 * PUBLIC_SHOW_MAX_BYTES + PODCAST_RECORD_MOST } as const;
+/** Studio requests `bytes` costs beyond the request's own (lib/sent-bytes.ts, IncludedBytes). */
+const unitsFor = (bytes: number) => new IncludedBytes().take(bytes, PAGE_INCLUDED_BYTES).units;
 
 /** What a full data room says, or a record too large to be one. */
 function refused(write: { reason: "full" | "too_big"; message?: string }): Response {
   return Response.json({ ok: false, error: write.reason, ...(write.message ? { message: write.message } : {}) }, { status: 409 });
+}
+
+/**
+ * Runs `work` with the studio requests for `worstBytes` taken first, refused before anything is read when they are not
+ * there; then gives back what was not moved. A `work` that throws keeps all it took (its measure is not trusted).
+ */
+async function paid(store: Store, worstBytes: number, work: (moved: Moved) => Promise<Response>): Promise<Response> {
+  const most = unitsFor(worstBytes);
+  const held = await holdStudio(store, most);
+  if (!held.ok) return refusedJson("used", held.message);
+  const moved: Moved = { bytes: 0 };
+  const response = await work(moved);
+  await held.give(most - unitsFor(moved.bytes));
+  return response;
 }
 
 export async function POST(request: NextRequest) {
@@ -68,10 +100,13 @@ export async function POST(request: NextRequest) {
     const podcastId = product.podcast.id;
 
     if (action === "read") {
-      const show = await readPublicShow(podcastId);
-      const settings = show ? settingsOf(show) : null;
-      if (show && !settings) return fail("unavailable", 503);
-      return answer(store, product, settings);
+      return await paid(store, PUBLIC_SETTINGS_WORST_BYTES.read, async (moved) => {
+        const { show, bytes } = await readPublicShowSized(podcastId);
+        moved.bytes += bytes;
+        const settings = show ? settingsOf(show) : null;
+        if (show && !settings) return fail("unavailable", 503);
+        return answer(store, product, settings, moved);
+      });
     }
 
     // What was asked is checked before anything is locked or read.
@@ -98,7 +133,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return await withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
+    return await paid(store, action === "off" ? PUBLIC_SETTINGS_WORST_BYTES.off : PUBLIC_SETTINGS_WORST_BYTES.change, (moved) => withLock(`nl:pod:${podcastId}:lock`, 60, 15_000, async () => {
       // Read again under the lock: a product removed, turned into another podcast or made a draft while this waited
       // is not written for.
       const now = store.sid ? await storeForIdExactly(store.sid) : "unknown";
@@ -107,16 +142,18 @@ export async function POST(request: NextRequest) {
       const still = await readListingExactly(now, id);
       if (still === "unknown") return fail("unavailable", 503);
       if (!still || still.podcast?.id !== podcastId) return fail("unknown", 404);
-      const show = await readPublicShow(podcastId);
+      const { show, bytes: showBytes } = await readPublicShowSized(podcastId);
+      moved.bytes += showBytes;
       const current = show ? settingsOf(show) : null;
       if (show && !current) throw new UnknownReplyError("a podcast's public settings");
 
       if (action === "off") {
         if (show) await dropPublicShow(now, podcastId);
-        return answer(now, still, null);
+        return answer(now, still, null, moved);
       }
       if (still.hidden) return fail("private", 409);
-      const podcast = await readPodcast(podcastId);
+      const { podcast, bytes: podcastBytes } = await readPodcastSized(podcastId);
+      moved.bytes += podcastBytes;
       const episodes = new Set((podcast?.episodes ?? []).map((e) => e.id));
       // Only episodes the podcast still has stay in it: one deleted since is let go.
       const kept: Record<string, string> = {};
@@ -131,12 +168,14 @@ export async function POST(request: NextRequest) {
         if (makePublic) kept[episode] = audio;
         else delete kept[episode];
         next = { ...current, episodes: kept };
-        if (JSON.stringify(next.episodes) === JSON.stringify(current.episodes)) return answer(now, still, current);
+        if (JSON.stringify(next.episodes) === JSON.stringify(current.episodes)) return answer(now, still, current, moved);
       }
+      // Written at its full size: counted before the write, so a write that fails part way is paid for too.
+      moved.bytes += Buffer.byteLength(JSON.stringify(next), "utf8");
       const written = await writePublicShow(now, podcastId, next, show);
       if (!written.ok) return refused(written);
-      return answer(now, still, next);
-    });
+      return answer(now, still, next, moved);
+    }));
   } catch (error) {
     if (error instanceof LockBusyError) return fail("busy", 409);
     if (!(error instanceof UnknownReplyError)) console.error("changing a podcast's public feed failed", error);

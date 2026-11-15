@@ -129,15 +129,20 @@ export function parsePublicShow(raw: string): PublicShow | null {
  * several, not text, text that is not a record of them, over PUBLIC_SHOW_MAX_BYTES) throws UnknownReplyError.
  */
 export async function readPublicShow(podcastId: string): Promise<PublicShow | null> {
-  if (!PODCAST_ID.test(podcastId)) return null;
+  return (await readPublicShowSized(podcastId)).show;
+}
+
+/** readPublicShow, with the bytes the record was read as (0 when there is none), for a caller that pays for what it moves. */
+export async function readPublicShowSized(podcastId: string): Promise<{ show: PublicShow | null; bytes: number }> {
+  if (!PODCAST_ID.test(podcastId)) return { show: null, bytes: 0 };
   if (!isRedisConfigured()) throw new UnknownReplyError("a podcast's public settings (no database)");
   const replies = repliesFor(await redisPipeline([["GET", showKey(podcastId)]]), 1);
   if (!replies) throw new UnknownReplyError("a podcast's public settings");
   const raw = replies[0];
-  if (raw === null) return null;
+  if (raw === null) return { show: null, bytes: 0 };
   const show = typeof raw === "string" ? parsePublicShow(raw) : null;
   if (!show) throw new UnknownReplyError("a podcast's public settings");
-  return show;
+  return { show, bytes: Buffer.byteLength(raw as string, "utf8") };
 }
 
 /** A published audio address: https, a host, no credentials, not too long, and nothing that could name a buyer. */

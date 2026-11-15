@@ -183,6 +183,7 @@ export function PodcastPublicFeed({ productId, episodes }: { productId: string; 
               <div className="notice notice-warn" id={`${id}-warning`}>
                 <p className="font-semibold">This feed is public.</p>
                 <p className="mt-1">Anyone can find it, follow it and play every episode you add to it, for free. Podcast apps and directories may list it.</p>
+                <p className="mt-1">If you take an episode out or turn the feed off later, it can take up to 5 minutes to stop, and apps may keep copies they already got.</p>
                 <label className="mt-3 flex min-h-11 items-center gap-2">
                   <input type="checkbox" className="h-5 w-5" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} aria-describedby={`${id}-warning`} />
                   I understand that this feed is public.
@@ -223,7 +224,7 @@ export function PodcastPublicFeed({ productId, episodes }: { productId: string; 
                               className="mt-2 inline-flex min-h-11 items-center text-sm font-semibold text-ink-soft underline underline-offset-4 hover:text-violet-deep"
                               disabled={busy}
                               onClick={() =>
-                                audio ? void run({ action: "episode", episode: episode.id, public: false }, "Taken out of the public feed. It is for buyers only again.") : setAdding(episode.id)
+                                audio ? void run({ action: "episode", episode: episode.id, public: false }, "Taken out of the public feed. Within 5 minutes it is for buyers only again. Podcast apps that already got it may keep their copy.") : setAdding(episode.id)
                               }
                             >
                               {audio ? "Take it out of the public feed" : "Add it to the public feed"}
@@ -242,7 +243,7 @@ export function PodcastPublicFeed({ productId, episodes }: { productId: string; 
                 onClick={async () => {
                   if (!confirmingOff) return setConfirmingOff(true);
                   setConfirmingOff(false);
-                  if (await run({ action: "off" }, "The public feed is off.")) setUnderstood(false);
+                  if (await run({ action: "off" }, "The public feed is off. It stops within 5 minutes. Podcast apps that already got it may keep their copy.")) setUnderstood(false);
                 }}
               >
                 {confirmingOff ? "Press again to turn it off and forget which episodes were in it" : "Turn off the public feed"}

@@ -835,7 +835,9 @@ async function main(): Promise<void> {
     replyHook = null;
     is("M2: a funnel step's count that failed or answered in another shape is unknown, never false", [failed, odd], [null, null]);
     const keptA = Number(redis.run(["GET", joySignals]) ?? 0);
-    replyHook = (list) => (list[0]?.[0] === "SET" && String(list[0][1]).startsWith("nl:rl:aff:click:") ? ["OK", "many"] : null);
+    // The window's count is INCR then EXPIRE NX since main's lib/window-count.ts (9bad368379): the count's own reply
+    // answers in another shape here, as the SET + INCR pair's did before.
+    replyHook = (list) => (list[0]?.[0] === "INCR" && String(list[0][1]).startsWith("nl:rl:aff:click:") ? ["many", 1] : null);
     await signal(clicks.a, `192.0.2.${clickIp++}`);
     replyHook = null;
     is("M2: an affiliate's visit whose address count answered in another shape keeps its place and is written down", [Number(redis.run(["GET", joySignals]) ?? 0) - keptA, (await countGap(joyNow, "clicks")) !== null], [1, true]);

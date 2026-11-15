@@ -36,7 +36,8 @@ export function StudioHeader({
   return (
     <header className="sticky top-0 z-40 border-b border-line bg-white/90 backdrop-blur-xl">
       <div className="container-page flex h-16 items-center justify-between gap-2 sm:gap-3">
-        <Link href="/" className="shrink-0 rounded-[10px]" aria-label="Marktmorgen, home">
+        {/* A 44 x 44 target (2.5.5 AAA): the full logo was 40 px tall, the mark alone on a phone 32 x 32 (tests/studio-header-targets.test.ts). */}
+        <Link href="/" className="inline-flex min-h-11 min-w-11 shrink-0 items-center rounded-[10px]" aria-label="Marktmorgen, home">
           <span className="hidden sm:inline">
             <Logo />
           </span>

@@ -504,7 +504,16 @@ const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
 
 /** Commands answering 1 when this learner (emailKey) has a student row or lessons done in a course: a dropped one's probe (lib/person-erasure.ts). */
-export const learnerProbes = (courseId: string, learner: string): (string | number)[][] => [["HEXISTS", studentsKey(courseId), learner], ["EXISTS", `nl:course:${courseId}:done:${learner}`]];
+/**
+ * The commands that tell whether a person has a record in a course this module keeps: their student row, the lessons
+ * they marked done, and their place on the list of people taken off it (setBlocked), which an address can be on
+ * without ever having been a student (Claude 6 on #4563).
+ */
+export const learnerProbes = (courseId: string, learner: string): (string | number)[][] => [
+  ["HEXISTS", studentsKey(courseId), learner],
+  ["EXISTS", `nl:course:${courseId}:done:${learner}`],
+  ["SISMEMBER", blockedKey(courseId), learner],
+];
 
 type StudentRow = { e: string; s: number; l: number };
 
@@ -1129,8 +1138,9 @@ async function sendDripEmail(store: Store, product: Listing, unit: CourseModule,
  * Deletes one person from this store's courses (lib/person-erasure.ts): the
  * courses written down for them on a thanks page, Stripe's answer kept for
  * ten minutes, each course's record of when they began and came back, the
- * lessons they marked done, the drip emails sent them, and every browser
- * pass let in with their address. What they paid for stays on the
+ * lessons they marked done, the drip emails sent them, their place on
+ * each course's list of people taken off it, and every browser pass let in
+ * with their address. What they paid for stays on the
  * creator's Stripe account, so a buyer who comes back proves it again by
  * the emailed link, as on any new device.
  */
@@ -1152,11 +1162,18 @@ export async function forgetLearnerPerson(
     ...passes.map((hash) => `nl:learn:pass:${hash}`),
     ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
   ];
-  const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
+  // And each course's list of people taken off it (setBlocked): the hashed address stayed there after the deletion was
+  // answered done (Claude 6 on #4563). Taking it off lets a buyer who comes back and proves a purchase in again; the
+  // creator can take them off again, as anyone new.
+  const commands: (string | number)[][] = [
+    ["DEL", ...keys],
+    ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)]),
+    ...courses.map((c) => ["SREM", blockedKey(c.courseId), emailKey(email)]),
+  ];
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  // One whole count for each DEL and HDEL (CX-123 rule 24): never 0 removed on another shape; thrown, so the
-  // erasure says this part did not finish (lib/person-erasure.ts).
+  // One whole count for each DEL and HDEL, and a 0 or a 1 for each one-member HDEL and SREM (CX-123 rule 24): never 0
+  // removed on another shape; thrown, so the erasure says this part did not finish (lib/person-erasure.ts).
   const counts = replies?.map(countOf);
-  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");
+  if (!counts || counts.some((n, i) => n === null || (i > 0 && n > 1))) throw new UnknownReplyError("the deletion of a person's course records");
   return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }

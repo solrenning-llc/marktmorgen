@@ -86,7 +86,9 @@ export const ERASE_FIXED_BYTES = 310_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],
-  courses: [14, 70_000],
+  // A course's own commands; one more since Claude 6 on #4563: the SREM that takes the person off its list of people
+  // taken off it (lib/learn.ts forgetLearnerPerson), 14 before.
+  courses: [15, 70_000],
   lessons: [1, 800],
   deals: [0, 1_000],
   conversations: [0, 700],
@@ -94,10 +96,11 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
-  // Six probes a dropped course (lib/removed-courses.ts DROPPED_PROBES: student row, lessons done, passes, certificate,
-  // start and finish marks), their key names and replies, and its entry in the list read whole (its id and its
-  // product's, 160 bytes at most): 6 x 160 + 160 = 1,120, counted at 1,200 (#4542 review).
-  droppedCourses: [6, 1_200],
+  // Seven probes a dropped course (lib/removed-courses.ts DROPPED_PROBES: student row, lessons done, the list of people
+  // taken off it, passes, certificate, start and finish marks), their key names and replies, and its entry in the list
+  // read whole (its id and its product's, 160 bytes at most): 7 x 160 + 160 = 1,280, counted at 1,300 (#4542 review;
+  // the taken-off list since Claude 6 on #4563, six probes and 1,200 before).
+  droppedCourses: [7, 1_300],
   // One GET of a dropped course's lessons and modules, read only where the person has a record:
   // REMOVED_COURSE_RECORD_BYTES (lib/removed-courses.ts, 15,442) at most, counted at 16,000; held by
   // tests/erasure-dropped-list-budget.test.ts.

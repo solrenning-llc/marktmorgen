@@ -462,17 +462,29 @@ void (async () => {
     rule = { when: passes, reply };
     is(`forgetLearnerPerson, passes read as ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
   }
-  const removal = (commands: (string | number)[][]) => commands[0]?.[0] === "DEL" && commands.length === 2 && commands[1]?.[0] === "HDEL";
+  // One DEL, then each course's HDEL of the student row and SREM from its list of people taken off it (Claude 6 on #4563).
+  const removal = (commands: (string | number)[][]) => commands[0]?.[0] === "DEL" && commands.length === 3 && commands[1]?.[0] === "HDEL" && commands[2]?.[0] === "SREM";
   for (const [label, bad] of BAD_COUNTS) {
-    rule = { when: removal, reply: [bad, 1] };
+    rule = { when: removal, reply: [bad, 1, 0] };
     is(`forgetLearnerPerson, a DEL that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
-    rule = { when: removal, reply: [2, bad] };
+    rule = { when: removal, reply: [2, bad, 0] };
     is(`forgetLearnerPerson, an HDEL that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
+    rule = { when: removal, reply: [2, 1, bad] };
+    is(`forgetLearnerPerson, the taken-off list's SREM that is ${label}: did not finish`, await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
   }
+  // One member each: an HDEL or SREM answering more than one is not its shape.
+  rule = { when: removal, reply: [2, 2, 0] };
+  is("forgetLearnerPerson, an HDEL of one field answering 2: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
+  rule = { when: removal, reply: [2, 1, 2] };
+  is("forgetLearnerPerson, an SREM of one member answering 2: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
+  rule = { when: removal, reply: [2, 1] };
+  is("forgetLearnerPerson, a reply missing the SREM: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
   rule = { when: removal, reply: [2] };
   is("forgetLearnerPerson, a reply missing the HDEL: did not finish", await outcome(() => forgetLearnerPerson(store, "buyer@sg2-l3.example", courses)), "rejected: UnknownReplyError");
-  rule = { when: removal, reply: [3, 1] };
+  rule = { when: removal, reply: [3, 1, 0] };
   is("forgetLearnerPerson: three keys and one row are four records", await forgetLearnerPerson(store, "buyer@sg2-l3.example", courses), 4);
+  rule = { when: removal, reply: [3, 1, 1] };
+  is("forgetLearnerPerson: and a place on the taken-off list is a fifth", await forgetLearnerPerson(store, "buyer@sg2-l3.example", courses), 5);
   rule = null;
   const real = await forgetLearnerPerson(store, "nobody@sg2-l3.example", courses);
   // The in-memory stand-in keeps an empty set after SMEMBERS, so the real path may count it: only its shape is checked.

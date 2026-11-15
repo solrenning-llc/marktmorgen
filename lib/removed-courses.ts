@@ -15,7 +15,8 @@
  * Read and written exactly (rule 24): an unknown reply throws, never "none".
  *
  * An erasure takes only the dropped courses where the person has a record (lib/person-erasure.ts droppedCoursesOf: their
- * student row, the lessons they finished, the quizzes they passed, their certificate or their start and finish marks,
+ * student row, the lessons they finished, their place on its list of people taken off it, the quizzes they passed,
+ * their certificate or their start and finish marks,
  * DROPPED_PROBES commands a
  * course, each asked of the module that keeps it), so a store
  * with many dropped courses never makes one person's erasure cost what all of them would, and never pushes a deletion
@@ -146,5 +147,5 @@ export async function removedCourses(statsId: string | null | undefined): Promis
 }
 
 /** The commands an erasure sends for each dropped course, to learn whether the person has a record in it. */
-export const DROPPED_PROBES = 6;
+export const DROPPED_PROBES = 7;
 

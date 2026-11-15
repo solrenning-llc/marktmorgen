@@ -661,7 +661,8 @@ export default function PrivacyPage() {
           opened the course and which lessons they marked done; the creator
           sees this in their studio, and we email the student when a module
           opens for them. A student taken off a course by its creator is kept
-          on a list so the course stays closed to them. To check who bought a
+          on a list so the course stays closed to them. Deleting a
+          person&apos;s data takes them off that list too. To check who bought a
           course, we ask the creator&apos;s own Stripe account by email address.
         </p>
         <p id="lesson-places">

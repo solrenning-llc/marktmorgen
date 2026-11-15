@@ -119,8 +119,13 @@ type Pending = {
   /** The payment it was charged with, for a refund; empty when the credit balance paid it. */
   pi: string;
   path: string;
-  /** Paid from the credit balance: refunds go back to it. */
+  /** Paid from the credit balance (wholly, or in part with `card`): what is owed back of that part goes back to it. */
   credit?: Credit;
+  /**
+   * Paid in part from the credit balance: what the card paid (`pi`); the rest of `cents` came from `credit`. A refund
+   * is split between the two as they were paid (splitBack), each to its own place.
+   */
+  card?: number;
   /** A refund asked for and not yet confirmed by Stripe. */
   owed?: Owed;
 };
@@ -156,6 +161,8 @@ function parsePending(raw: unknown): Pending | null {
       path: value.path,
       // One that does not read is kept, never dropped: a refund to it is then not confirmed, so it is owed and shown.
       ...(value.credit !== undefined ? { credit: readCredit(value.credit) } : {}),
+      // A card part that does not read is kept as none above the price, so no refund ever takes it for the whole.
+      ...(value.card !== undefined ? { card: Number.isSafeInteger(value.card) && (value.card as number) > 0 && (value.card as number) < value.cents ? (value.card as number) : 0 } : {}),
       ...(value.owed !== undefined ? { owed: parseOwed(value.owed) ?? { cents: null, key: `nl-captions:unreadable:${value.at}:refund`, since: value.at, looks: REFUND_LOOKS_MAX, stuck: true as const } } : {}),
     };
   } catch {
@@ -224,8 +231,14 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
   });
   let pi = "";
   let credit: Credit | undefined;
+  let card: number | undefined;
   if (charged.ok) {
     pi = charged.paymentIntent;
+    // Paid in part from the credit balance: both parts kept, so each is given back to its own place.
+    if (charged.cardCents < cents) {
+      credit = { customer: store.stripeCustomerId, invoice: charged.invoiceId };
+      card = charged.cardCents;
+    }
   } else {
     // No card: no invoice was made. Otherwise Stripe's invoice says what happened, never the error alone.
     const found = charged.reason === "card" ? "none" : await orderCharge(record.id, order, false);
@@ -234,12 +247,17 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
       return { ok: false, reason: charged.reason === "error" ? "unavailable" : charged.reason };
     }
     if (found === "unknown") return { ok: false, reason: "checking" };
-    if ("pi" in found) pi = found.pi;
-    else credit = { customer: store.stripeCustomerId, invoice: found.credit };
+    if ("pi" in found) {
+      pi = found.pi;
+      if (found.card !== undefined && found.credit) {
+        credit = { customer: store.stripeCustomerId, invoice: found.credit };
+        card = found.card;
+      }
+    } else credit = { customer: store.stripeCustomerId, invoice: found.credit };
   }
 
   // Charged: recorded with its payment before anything else, and queued, so a refund is never lost.
-  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi, path: pathname, ...(credit ? { credit } : {}) };
+  const pending: Pending = { langs: asked.languages, got: [], at: now, cents, pi, path: pathname, ...(credit ? { credit } : {}), ...(card !== undefined ? { card } : {}) };
   const written = JSON.stringify(pending);
   const wrote = repliesFor(await redisPipeline([
     ["SET", key, written, "EX", KEEP_SECONDS],
@@ -267,7 +285,7 @@ export async function requestAutoCaptions(store: Store, pathname: string, spoken
     const refundKey = `nl-${sign}:refund`;
     if (await giveBack(pending, null, refundKey)) {
       await redisPipeline([["DEL", key]]);
-      return { ok: false, reason: credit ? "credited" : "refunded" };
+      return { ok: false, reason: credit && !pi ? "credited" : "refunded" };
     }
     await owe(record.id, pending, null, refundKey, now);
     return { ok: false, reason: "refund_pending" };
@@ -302,7 +320,7 @@ async function heldBy(id: string, now: number): Promise<AutoAnswer> {
  * void), "unknown" otherwise. Only `final` (the order is ORDER_SETTLE_MS old)
  * takes an invoice not listed, or a draft, for none, and voids one left open.
  */
-async function orderCharge(id: string, order: Order, final: boolean): Promise<{ pi: string } | { credit: string } | "none" | "unknown"> {
+async function orderCharge(id: string, order: Order, final: boolean): Promise<{ pi: string; card?: number; credit?: string } | { credit: string } | "none" | "unknown"> {
   const sign = orderSign(id, order);
   try {
     const query = new URLSearchParams({
@@ -326,7 +344,15 @@ async function orderCharge(id: string, order: Order, final: boolean): Promise<{ 
     if (invoice.customer !== order.customer || invoice.currency !== "usd") return "unknown";
     if (invoice.status === "paid") {
       const pi = invoice.payment_intent;
-      if (typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi)) return { pi };
+      if (typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi)) {
+        // Paid in part from the credit balance: the card paid all that was left due, the balance the rest of the price.
+        const paidByCard = invoice.amount_paid;
+        if (invoice.total === order.cents && typeof paidByCard === "number" && Number.isSafeInteger(paidByCard) && paidByCard > 0 && paidByCard < order.cents &&
+          paidByCard === invoice.amount_due && typeof invoice.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(invoice.id)) {
+          return { pi, card: paidByCard, credit: invoice.id };
+        }
+        return { pi };
+      }
       // Paid wholly from the credit balance (Claude 2 and Claude 6 on #3286): Stripe marks such an invoice paid when it
       // is finalized, with no payment, nothing due and nothing paid by card, for the whole price. Only exactly that.
       if (pi === null && invoice.amount_due === 0 && invoice.amount_paid === 0 && invoice.total === order.cents && typeof invoice.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(invoice.id)) {
@@ -363,7 +389,9 @@ async function settleOrder(id: string, raw: string, order: Order, now: number): 
     return "gone";
   }
   if (found !== "unknown") {
-    const paid = "pi" in found ? { pi: found.pi } : { pi: "", credit: { customer: order.customer, invoice: found.credit } };
+    const paid = "pi" in found
+      ? { pi: found.pi, ...(found.card !== undefined && found.credit ? { card: found.card, credit: { customer: order.customer, invoice: found.credit } } : {}) }
+      : { pi: "", credit: { customer: order.customer, invoice: found.credit } };
     const pending: Pending = { langs: order.langs, got: [], at: order.at, cents: order.cents, path: order.path, ...paid };
     await owe(id, pending, null, `nl-${orderSign(id, order)}:refund`, now);
     return "refund";
@@ -482,8 +510,34 @@ async function swapRecord(id: string, from: string, to: string, seconds = REFUND
   }
 }
 
+/** Paid in part by card and in part from the credit balance (both recorded). */
+function mixed(pending: Pending): pending is Pending & { credit: Credit; card: number } {
+  return Boolean(pending.credit) && Boolean(pending.pi) && pending.card !== undefined;
+}
+
+/**
+ * How `cents` owed back (null: all of it) of a charge paid in part from the credit balance splits between the card and
+ * the balance, as they paid it: the card's share rounded down, the rest to the balance, so the two always add up to
+ * what is owed and neither ever exceeds what it paid. A card part that does not read (0) sends nothing to the card and
+ * caps the balance at its own part, so the rest stays owed.
+ */
+function splitBack(pending: Pending & { card: number }, cents: number | null): { card: number; credit: number } {
+  const creditPaid = pending.cents - pending.card;
+  if (pending.card <= 0) return { card: 0, credit: Math.min(cents ?? pending.cents, creditPaid) };
+  if (cents === null) return { card: pending.card, credit: creditPaid };
+  const card = Math.floor((cents * pending.card) / pending.cents);
+  return { card, credit: cents - card };
+}
+
 /** Gives back `cents` (null: all of it) of a charge: to the card it was paid with, or to the credit balance that paid it. True only when confirmed. */
 async function giveBack(pending: Pending, cents: number | null, key: string): Promise<boolean> {
+  if (mixed(pending)) {
+    // Each part to its own place, both confirmed (review of cb1f97590); each is safe to ask again under the same key.
+    const share = splitBack(pending, cents);
+    const toCard = share.card === 0 || (await refundCharge(pending.pi, cents === null ? null : share.card, key));
+    const toBalance = share.credit === 0 || (await creditBack(pending.credit, share.credit, pending.cents - pending.card, key));
+    return toCard && toBalance && (pending.card > 0 || share.credit === (cents ?? pending.cents));
+  }
   return pending.credit ? creditBack(pending.credit, cents ?? pending.cents, pending.cents, key) : refundCharge(pending.pi, cents, key);
 }
 
@@ -623,7 +677,7 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     await closeOwed(id, pending, now);
     return "done";
   }
-  if (await (pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
+  if (await (mixed(pending) ? mixedSettled(id, pending, owed) : pending.credit ? creditBack(pending.credit, owed.cents ?? pending.cents, pending.cents, owed.key) : cardRefundSettled(id, pending, owed))) {
     await closeOwed(id, pending, now);
     return "done";
   }
@@ -643,6 +697,14 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
     ["ZADD", QUEUE, now + Math.min(REFUND_LOOK_MAX_MS, LOOK_AGAIN_MS * 2 ** Math.min(looks, 10)), id],
   ]);
   return "waiting";
+}
+
+/** A refund owed of a charge paid in part from the credit balance: the card's share as Stripe lists it, the balance's by its history. */
+async function mixedSettled(id: string, pending: Pending & { credit: Credit; card: number }, owed: Owed): Promise<boolean> {
+  const share = splitBack(pending, owed.cents);
+  const toCard = share.card === 0 || (await cardRefundSettled(id, { ...pending, cents: pending.card }, { ...owed, cents: owed.cents === null ? null : share.card }));
+  const toBalance = share.credit === 0 || (await creditBack(pending.credit, share.credit, pending.cents - pending.card, owed.key));
+  return toCard && toBalance && (pending.card > 0 || share.credit === (owed.cents ?? pending.cents));
 }
 
 /** A refund to the card, as Stripe lists the payment's refunds: true once enough is returned. */

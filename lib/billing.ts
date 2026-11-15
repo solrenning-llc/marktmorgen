@@ -2012,7 +2012,8 @@ export async function addToNextInvoice(input: {
 const CHARGE_VERSION = "2024-06-20";
 
 export type ChargeResult =
-  | { ok: true; invoiceId: string; paymentIntent: string }
+  /** `cardCents`: what the card paid; less than the price when the customer's credit balance paid the rest. */
+  | { ok: true; invoiceId: string; paymentIntent: string; cardCents: number }
   | { ok: false; reason: "card" | "declined" | "error" };
 
 /**
@@ -2094,7 +2095,7 @@ export async function chargeNow(input: {
     ) {
       throw new Error("Stripe did not confirm this invoice's own payment");
     }
-    return { ok: true, invoiceId, paymentIntent: intent };
+    return { ok: true, invoiceId, paymentIntent: intent, cardCents: due };
   } catch (error) {
     const declined = error instanceof BillingError && (error.status === 402 || error.code === "card_declined" || error.code === "not_paid");
     if (!declined) console.error("charging a creator now failed", error);

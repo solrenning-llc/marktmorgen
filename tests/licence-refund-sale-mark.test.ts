@@ -179,15 +179,17 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("no key given, the refund read, the pool as it was", [poolRaced, atPoolSale.result(), await seenOf(poolRace.refundId), (await real([["LLEN", pool]]))[0]], [null, 0, 1, before]);
 
-  part("3. MEDIUM: the refund job runs between settle's two writes (the sale's key, then its record)");
+  part("3. MEDIUM: the refund job runs at settle's record write, which is now the same script as the sale's key (#3843)");
+  // Since #3843 settle writes the sale's key, its record and the end of its waiting place in one script
+  // (orderWriteIfNew), so there is no moment between the key and its record: the job that runs at the record's write
+  // runs before the key too, and this is the race of part 2.
   const between = refundedSale("05", app);
   const atRecord = interleave(writesRecord(between.reference));
   const split = await give(app, between.reference);
   redis.pipeline = real;
-  const splitKey = (split as { key?: string }).key ?? "";
-  is("the refund job found the key without its record: unsure, the refund stays unread", [atRecord.result(), await seenOf(between.refundId)], [0, 0]);
-  is("the next run revokes the record written meanwhile and reads the refund", [await run(), await seenOf(between.refundId), await checkKey(store, app, splitKey)], [1, 1, "revoked"]);
-  is("the buyer's key shows revoked", await give(app, between.reference), { state: "issued", key: splitKey, revoked: true });
+  is("the record's write is the key's write: the job ran before both, found no key and read the refund", [atRecord.result(), await seenOf(between.refundId)], [0, 1]);
+  is("settle loses to the mark: no key is given, and no record is left without its key", [split, isMark(await saleKeyOf(app, between.reference))], [null, true]);
+  is("asked again, still no key", await give(app, between.reference), null);
 
   part("4. Rule 24: the mark's write answered in an unknown shape is not \"no key\"");
   const odd = refundedSale("06", app);

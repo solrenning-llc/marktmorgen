@@ -41,7 +41,7 @@ import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
 import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
 const RETRY_MS = 86_400_000;
@@ -222,7 +222,13 @@ const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expir
  */
 export async function openRequestCheckout(store: Store, id: string, origin: string, now = Date.now()): Promise<{ ok: true; url: string } | { ok: false; reason: CheckoutRefusal; error?: unknown }> {
   if (!requestsOpen(store) || !store.stripeAccountId) return { ok: false, reason: "closed" };
-  const request = await requestOf(store, id);
+  // A record that does not read (a line that does not read, or lines that do not add up to the total; issue #4777) is
+  // never payable: nothing is opened, and the page says it could not be opened, never that the request is gone.
+  const request = await requestOf(store, id).catch((error: unknown) => {
+    if (error instanceof UnknownReplyError) return "unknown" as const;
+    throw error;
+  });
+  if (request === "unknown") return { ok: false, reason: "error" };
   if (!request || statusOf(request, now) !== "open") return { ok: false, reason: "gone" };
   const held = await holdForCheckout(request.id);
   if (!held) return { ok: false, reason: "busy" };

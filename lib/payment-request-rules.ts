@@ -291,14 +291,17 @@ export function parseRequest(raw: unknown): PaymentRequest | null {
   const str = (x: unknown, max = 300) => (typeof x === "string" ? x.slice(0, max) : "");
   const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
   if (typeof v.id !== "string" || !ID_PATTERN.test(v.id) || typeof v.sid !== "string" || !v.sid) return null;
-  const lines = Array.isArray(v.lines)
-    ? v.lines.flatMap((l): RequestLine[] => {
-        const row = l && typeof l === "object" ? (l as Record<string, unknown>) : null;
-        return row && typeof row.text === "string" && Number.isSafeInteger(row.quantity) && Number.isSafeInteger(row.cents)
-          ? [{ text: row.text.slice(0, MAX_LINE_TEXT), quantity: row.quantity as number, cents: row.cents as number }]
-          : [];
-      }).slice(0, MAX_LINES)
-    : [];
+  // Every stored line read whole, and their sum exactly the stored total, or the record is not a request (issue #4777):
+  // a line dropped while the total is kept left the page payable at a total its lines and its checkout did not make.
+  // Callers read a null as unknown (readRequest and the rest throw), never as a request with fewer lines.
+  if (!Array.isArray(v.lines) || v.lines.length > MAX_LINES) return null;
+  const lines: RequestLine[] = [];
+  for (const l of v.lines as unknown[]) {
+    const row = l && typeof l === "object" ? (l as Record<string, unknown>) : null;
+    if (!row || typeof row.text !== "string" || !Number.isSafeInteger(row.quantity) || !Number.isSafeInteger(row.cents)) return null;
+    lines.push({ text: row.text.slice(0, MAX_LINE_TEXT), quantity: row.quantity as number, cents: row.cents as number });
+  }
+  if (!Number.isSafeInteger(v.total) || linesTotal(lines) !== v.total) return null;
   const state = v.state === "paid" || v.state === "canceled" || v.state === "refunded" ? v.state : "open";
   return {
     id: v.id,

@@ -185,11 +185,11 @@ export const PAGES: TopicPage[] = [
     highlight: "Hotmart",
     intro: "A Hotmart alternative where a creator's store charges through their own Stripe account. Compare the distribution tools, payment model and current fee policy before moving.",
     seo: { title: "Marktmorgen vs Hotmart", description: "A Hotmart alternative where a creator's store uses their own Stripe account. Compare current USD fee bands, payment models and distribution tools. Marktmorgen paid plans remain closed." },
-    badge: { label: "Sources read October 20, 2026", tone: "proof" },
+    badge: { label: "Sources read November 15, 2026", tone: "proof" },
     accent: "#6d4aff",
     blocks: [
       { kind: "lead", text: "Hotmart combines product delivery with its own payment system and affiliate tools. Marktmorgen uses a creator's connected Stripe account. Neither arrangement removes every creator or platform tax obligation, and the payment policy matters more than an old fee headline." },
-      { kind: "table", title: "Subscriptions, USD fees and payment models", head: ["Compare", "Hotmart", "Marktmorgen"], note: "USD. Official sources read October 20, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total.", rows: [
+      { kind: "table", title: "Subscriptions, USD fees and payment models", head: ["Compare", "Hotmart", "Marktmorgen"], note: "USD. Official sources read November 15, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total.", rows: [
         ["Subscription", "No monthly or annual subscription fee.", TIERS.map(t => PLAN_TITLES[t] + ": " + publishedPriceWords(t, "month") + " or " + publishedPriceWords(t, "year")).join("; ")],
         ["Platform fee", COMPETITOR_PRICES.hotmart.feeScope, TIERS.map(t => PLAN_TITLES[t] + ": " + commissionBps(t) / 100 + "% of each sale").join("; ") + ". Your Stripe processing fees are separate."],
         ["Current fee policy", COMPETITOR_PRICES.hotmart.policyScope, "The published subscription and visible limits remain the terms for a prepared store; paid selling remains closed."],
@@ -211,13 +211,13 @@ export const PAGES: TopicPage[] = [
         "Hotmart has no monthly subscription fee. Marktmorgen uses subscriptions with published limits.",
         "Hotmart sells paid products today. Marktmorgen's paid plans remain closed.",
       ] },
-      { kind: "features", title: "Official sources and scope", intro: "Read October 20, 2026. No tax exemption or net-margin certification is inferred from the payment model.", items: [
+      { kind: "features", title: "Official sources and scope", intro: "Read November 15, 2026. No tax exemption or net-margin certification is inferred from the payment model.", items: [
         { icon: "list", title: COMPETITOR_PRICES.hotmart.plans[0].source.label, body: "Subscription model, product delivery, affiliate tools and buyer app.", href: COMPETITOR_PRICES.hotmart.plans[0].source.url },
         { icon: "scale", title: COMPETITOR_PRICES.hotmart.plans[0].feeSource.label, body: "Current fixed fee, microtransaction bands and conditional tax responsibilities.", href: COMPETITOR_PRICES.hotmart.plans[0].feeSource.url },
         { icon: "calculator", title: COMPETITOR_PRICES.hotmart.feeDetails.source.label, body: "USD bands, conflicting older sentence and the Player fee change.", href: COMPETITOR_PRICES.hotmart.feeDetails.source.url },
-        { icon: "bank", title: "Hotmart withdrawal availability", body: "Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read October 20, 2026.", href: "https://suportehotmart.zendesk.com/hc/en-us/articles/360028608652-When-can-I-withdraw-my-commissions-and-what-can-prevent-receipt" },
-        { icon: "list", title: "Hotmart Club customization", body: "Official Club page describes visual identity and domain customization. Read October 20, 2026; not used as a fee source.", href: "https://solutions.hotmart.com/update-your-members-area" },
-        { icon: "bank", title: "Stripe payout documentation", body: "Available balance, settlement, payout schedules, bank delays and account conditions. Read October 20, 2026; no faster-payout guarantee.", href: "https://docs.stripe.com/payouts" },
+        { icon: "bank", title: "Hotmart withdrawal availability", body: "Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read November 15, 2026.", href: "https://suportehotmart.zendesk.com/hc/en-us/articles/360028608652-When-can-I-withdraw-my-commissions-and-what-can-prevent-receipt" },
+        { icon: "list", title: "Hotmart Club customization", body: "Official Club page describes visual identity and domain customization. Read November 15, 2026; not used as a fee source.", href: "https://solutions.hotmart.com/update-your-members-area" },
+        { icon: "bank", title: "Stripe payout documentation", body: "Available balance, settlement, payout schedules, bank delays and account conditions. Read November 15, 2026; no faster-payout guarantee.", href: "https://docs.stripe.com/payouts" },
         { icon: "scale", title: "All published comparisons", body: "Read other comparisons and their own dated sources.", href: "/proof/comparisons" },
       ] },
     ],

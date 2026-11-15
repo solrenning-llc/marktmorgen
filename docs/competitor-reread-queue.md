@@ -22,67 +22,69 @@ Lista gerada em 15/11/2026 a partir do main `3e71d00ac` com os lotes 1 a 6 aplic
 
 **Lote 6, /proof/beacons, lida em 15/11/2026 por Claude 2 (nuvem E, continuando Claude 1 cloud).** A página de preços (beacons.ai/pricing) segue bloqueada pela Cloudflare ("Attention Required"), então a página passou a citar só a central de ajuda da Beacons, baixada inteira no dia (174 artigos das 14 categorias). Confirmadas: 9% nos planos grátis e de US$10, 0% a partir do de US$30 (artigos "Beacons Products Transaction Fees" e "Store Overview"); planos de US$0, US$10, US$30 e US$100 ("Beacons Pricing Plans"); Stripe a 2,9% + US$0,30 por cima; dinheiro direto na conta Stripe ou PayPal do vendedor, na hora da venda ("When will I receive my payout from Product/Store Sales?"); assinaturas só a partir de US$30. **Divergiam da central, e o site foi corrigido, com teste RED antes:** (1) order bumps: a página dizia "em todos os planos, inclusive o grátis"; "Beacons Pricing Plans" e "Beacons Pro Page" os põem no Creator Plus (US$30), e o artigo de order bumps diz que valem só para produtos digitais; (2) cursos: a página dizia "só um, sem hospedagem de vídeo, abaixo de US$30"; a central põe cursos com vários módulos e vídeo hospedado no Creator Plus e, em "How to Create Courses on Beacons", ensina a vender um curso como arquivos, com vídeos no Vimeo ou YouTube, sem limite de quantidade nem plano; (3) "rede de afiliados de 12.000 marcas": nenhum dos 174 artigos fala nisso; a central só descreve links de afiliado com marca ("Brand Commission Affiliate"), e a frase passou a dizer isso.
 
+**Lote 6, /proof/hotmart, lida em 15/11/2026 por Claude 2 (nuvem E, continuando Claude 1 cloud), depois de o dono liberar solutions.hotmart.com.** Confirmadas, só com a data trocada: Hotmart Club com domínio, logo, cores, banners e "mais de 20 opções" de identidade visual (solutions.hotmart.com/update-your-members-area); saque fora do real a partir de 15 dias corridos depois da venda, considerando a garantia, e real no cartão a partir de 30 dias (artigo 360028608652); app do comprador com aulas offline, ferramentas de afiliados e nenhuma mensalidade (hotmart.com/en/pricing); taxas e política já conferidas no restante do lote 6; e a documentação de saques do Stripe (docs.stripe.com/payouts: calendário de saques, prazo de liquidação, primeiro saque em 7 a 14 dias conforme o risco, tempo extra do banco).
+
 **Como reler (VR/7):** abrir a página oficial no dia; se ela ainda sustenta o fato, trocar só a data da leitura; se mudou, reescrever o fato com o que a página diz agora, ou retirá-lo; nunca inventar conteúdo, nunca afrouxar o teste nem mudar `REVIEW_DAYS`. Lotes de cerca de 15 linhas, na ordem desta lista, cada um provado com o teste rodando com o relógio em 30/06/2027. Esta lista não muda preço, limite, comissão, trava nem flag.
 
 ## Vencimentos por dia
 
 | vence | linhas |
 |---|---|
-| 2027-01-18 | 46 |
+| 2027-01-18 | 40 |
 | 2027-02-03 | 1 |
-| 2027-02-13 | 166 |
+| 2027-02-13 | 172 |
 
 ## Linhas, do vencimento mais próximo
 
 | # | vence | lido em | página ou registro | fato (texto como está hoje) | fonte |
 |---|---|---|---|---|---|
-| 1 | 2027-01-18 | 2026-10-20 | /proof/hotmart | Sources read October 20, 2026 | citada no próprio texto |
-| 2 | 2027-01-18 | 2026-10-20 | /proof/hotmart | USD. Official sources read October 20, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total. | citada no próprio texto |
-| 3 | 2027-01-18 | 2026-10-20 | /proof/hotmart | Read October 20, 2026. No tax exemption or net-margin certification is inferred from the payment model. | citada no próprio texto |
-| 4 | 2027-01-18 | 2026-10-20 | /proof/hotmart | Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read October 20, 2026. | citada no próprio texto |
-| 5 | 2027-01-18 | 2026-10-20 | /proof/hotmart | Official Club page describes visual identity and domain customization. Read October 20, 2026; not used as a fee source. | citada no próprio texto |
-| 6 | 2027-01-18 | 2026-10-20 | /proof/hotmart | Available balance, settlement, payout schedules, bank delays and account conditions. Read October 20, 2026; no faster-payout guarantee. | citada no próprio texto |
-| 7 | 2027-01-18 | 2026-10-20 | /proof/kit | Sources read October 20, 2026 | citada no próprio texto |
-| 8 | 2027-01-18 | 2026-10-20 | /proof/kit | USD. Sources read October 20, 2026. Subscriber capacity and monthly sends measure different things; the rows are not equivalent allowances. Processing and taxes still matter. | citada no próprio texto |
-| 9 | 2027-01-18 | 2026-10-20 | /proof/kit | Read October 20, 2026. No audience growth, sponsorship income or renewal discount is promised. | citada no próprio texto |
-| 10 | 2027-01-18 | 2026-10-20 | /proof/patreon | Sources read October 20, 2026 | citada no próprio texto |
-| 11 | 2027-01-18 | 2026-10-20 | /proof/patreon | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 12 | 2027-01-18 | 2026-10-20 | /proof/patreon | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 13 | 2027-01-18 | 2026-10-20 | /proof/patreon | Sources read October 20, 2026 | citada no próprio texto |
-| 14 | 2027-01-18 | 2026-10-20 | /proof/patreon | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 15 | 2027-01-18 | 2026-10-20 | /proof/patreon | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 16 | 2027-01-18 | 2026-10-20 | /proof/substack | Sources read October 20, 2026 | citada no próprio texto |
-| 17 | 2027-01-18 | 2026-10-20 | /proof/substack | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 18 | 2027-01-18 | 2026-10-20 | /proof/substack | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 19 | 2027-01-18 | 2026-10-20 | /proof/substack | Sources read October 20, 2026 | citada no próprio texto |
-| 20 | 2027-01-18 | 2026-10-20 | /proof/substack | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 21 | 2027-01-18 | 2026-10-20 | /proof/substack | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 22 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Sources read October 20, 2026 | citada no próprio texto |
-| 23 | 2027-01-18 | 2026-10-20 | /proof/thinkific | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 24 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 25 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Sources read October 20, 2026 | citada no próprio texto |
-| 26 | 2027-01-18 | 2026-10-20 | /proof/thinkific | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
-| 27 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
-| 28 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.discovery.source | Kit creator recommendations | <https://kit.com/features/recommendations> |
-| 29 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[0].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
-| 30 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[1].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
-| 31 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[2].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
-| 32 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.sponsorship.source | Kit newsletter sponsorships | <https://kit.com/features/newsletter-sponsorships> |
-| 33 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.trial.source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
-| 34 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].feeSource | Patreon standard and legacy fee rules | <https://support.patreon.com/hc/en-us/articles/11111747095181-Creator-fees-overview> |
-| 35 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
-| 36 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.trial.source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
-| 37 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.discovery.source | Substack reader app and discovery feed | <https://support.substack.com/hc/en-us/articles/19291693034004-Getting-started-on-the-Substack-app> |
-| 38 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.plans[0].source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
-| 39 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.trial.source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
-| 40 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 41 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 42 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 43 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 44 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
-| 45 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 46 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.trial.source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
-| 47 | 2027-02-03 | 2026-11-05 | /blog/skool-alternatives-community-platforms | Sources read November 5, 2026. Plans, limits and rules for moving may differ. These sources do not predict earnings, audience growth or search rankings. | citada no próprio texto |
+| 1 | 2027-01-18 | 2026-10-20 | /proof/kit | Sources read October 20, 2026 | citada no próprio texto |
+| 2 | 2027-01-18 | 2026-10-20 | /proof/kit | USD. Sources read October 20, 2026. Subscriber capacity and monthly sends measure different things; the rows are not equivalent allowances. Processing and taxes still matter. | citada no próprio texto |
+| 3 | 2027-01-18 | 2026-10-20 | /proof/kit | Read October 20, 2026. No audience growth, sponsorship income or renewal discount is promised. | citada no próprio texto |
+| 4 | 2027-01-18 | 2026-10-20 | /proof/patreon | Sources read October 20, 2026 | citada no próprio texto |
+| 5 | 2027-01-18 | 2026-10-20 | /proof/patreon | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 6 | 2027-01-18 | 2026-10-20 | /proof/patreon | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 7 | 2027-01-18 | 2026-10-20 | /proof/patreon | Sources read October 20, 2026 | citada no próprio texto |
+| 8 | 2027-01-18 | 2026-10-20 | /proof/patreon | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 9 | 2027-01-18 | 2026-10-20 | /proof/patreon | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 10 | 2027-01-18 | 2026-10-20 | /proof/substack | Sources read October 20, 2026 | citada no próprio texto |
+| 11 | 2027-01-18 | 2026-10-20 | /proof/substack | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 12 | 2027-01-18 | 2026-10-20 | /proof/substack | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 13 | 2027-01-18 | 2026-10-20 | /proof/substack | Sources read October 20, 2026 | citada no próprio texto |
+| 14 | 2027-01-18 | 2026-10-20 | /proof/substack | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 15 | 2027-01-18 | 2026-10-20 | /proof/substack | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 16 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Sources read October 20, 2026 | citada no próprio texto |
+| 17 | 2027-01-18 | 2026-10-20 | /proof/thinkific | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 18 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 19 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Sources read October 20, 2026 | citada no próprio texto |
+| 20 | 2027-01-18 | 2026-10-20 | /proof/thinkific | USD. Sources read October 20, 2026. Unknown quotes are not zero. Annual-billing equivalents are not monthly purchase options or verified annual invoices. Processing, optional services and applicable taxes may add costs. | citada no próprio texto |
+| 21 | 2027-01-18 | 2026-10-20 | /proof/thinkific | Read October 20, 2026. No traffic, earnings, cost savings, worldwide tax exemption or net-margin result is promised. | citada no próprio texto |
+| 22 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.discovery.source | Kit creator recommendations | <https://kit.com/features/recommendations> |
+| 23 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[0].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
+| 24 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[1].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
+| 25 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.plans[2].source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
+| 26 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.sponsorship.source | Kit newsletter sponsorships | <https://kit.com/features/newsletter-sponsorships> |
+| 27 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.kit.trial.source | Kit prices and inclusive commerce fees | <https://kit.com/pricing> |
+| 28 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].feeSource | Patreon standard and legacy fee rules | <https://support.patreon.com/hc/en-us/articles/11111747095181-Creator-fees-overview> |
+| 29 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.plans[0].source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
+| 30 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.patreon.trial.source | Patreon standard plan and publishing | <https://www.patreon.com/pricing> |
+| 31 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.discovery.source | Substack reader app and discovery feed | <https://support.substack.com/hc/en-us/articles/19291693034004-Getting-started-on-the-Substack-app> |
+| 32 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.plans[0].source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
+| 33 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.substack.trial.source | Substack publishing, subscription and Stripe fees | <https://support.substack.com/hc/en-us/articles/360037607131-How-much-does-Substack-cost> |
+| 34 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 35 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[0].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 36 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 37 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[1].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 38 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].feeSource | Thinkific conditional third-party gateway fees | <https://support.thinkific.com/hc/en-us/articles/22383950439575-Third-Party-Payment-Gateway-Fee-FAQ> |
+| 39 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.plans[2].source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 40 | 2027-01-18 | 2026-10-20 | `lib/competitor-prices.ts` COMPETITOR_PRICES.thinkific.trial.source | Thinkific prices, course limits and trial | <https://www.thinkific.com/pricing/> |
+| 41 | 2027-02-03 | 2026-11-05 | /blog/skool-alternatives-community-platforms | Sources read November 5, 2026. Plans, limits and rules for moving may differ. These sources do not predict earnings, audience growth or search rankings. | citada no próprio texto |
+| 42 | 2027-02-13 | 2026-11-15 | /proof/hotmart | Sources read November 15, 2026 | citada no próprio texto |
+| 43 | 2027-02-13 | 2026-11-15 | /proof/hotmart | USD. Official sources read November 15, 2026. Fee bands below assume purchase and commission currencies are both USD. Taxes, card and withdrawal charges can add to the total. | citada no próprio texto |
+| 44 | 2027-02-13 | 2026-11-15 | /proof/hotmart | Read November 15, 2026. No tax exemption or net-margin certification is inferred from the payment model. | citada no próprio texto |
+| 45 | 2027-02-13 | 2026-11-15 | /proof/hotmart | Non-BRL withdrawal timing, guarantee periods, BRL method differences and conditions that can prevent receipt. Read November 15, 2026. | citada no próprio texto |
+| 46 | 2027-02-13 | 2026-11-15 | /proof/hotmart | Official Club page describes visual identity and domain customization. Read November 15, 2026; not used as a fee source. | citada no próprio texto |
+| 47 | 2027-02-13 | 2026-11-15 | /proof/hotmart | Available balance, settlement, payout schedules, bank delays and account conditions. Read November 15, 2026; no faster-payout guarantee. | citada no próprio texto |
 | 48 | 2027-02-13 | 2026-11-15 | /proof/beacons | Sources: Beacons' help center articles 'Beacons Pricing Plans', 'Beacons Pro Page', 'Beacons Products Transaction Fees', 'When will I receive my payout from Product/Store Sales?', 'Order Bumps: Boost Your Sales with Beacons' and 'How to Create Courses on Beacons', read on November 15, 2026. Their pricing page (beacons.ai/pricing) showed a Cloudflare block that day and was not read. | citada no próprio texto |
 | 49 | 2027-02-13 | 2026-11-15 | /blog/what-selling-on-gumroad-costs | Every figure here is from Gumroad's own pages, read on November 15, 2026: their pricing page for 10% plus 50 cents, 30% on Discover and the merchant-of-record change of January 1, 2025; “Gumro … | citada no próprio texto |
 | 50 | 2027-02-13 | 2026-11-15 | /platform/outreach | Stan has no tool for writing to a sponsor, and Beacons writes a pitch without finding who to send it to or checking where it may be sent (both read on November 15, 2026). Here the contact, the rules of each country and the email are one tool, inside the plan you already pay for. | citada no próprio texto |

@@ -103,6 +103,44 @@ const SOURCE_OFF: Record<BackupFilesSource, string | null> = {
   bunny: "bunny_zone_and_original_unconfirmed",
 };
 
+/** The route's maxDuration (app/api/backup/files/route.ts), the longest an admitted page can hold the function. */
+export const BACKUP_FILES_ROUTE_SECONDS = 10;
+
+/**
+ * What one admitted page can cost, in whole micro-dollars, at the dearest prices read in docs/backup-costs-2026-11-08.md
+ * section 2, no free quota (Claude 7's MÉDIO on #3313): the function call ($0.60 a million), held the whole
+ * BACKUP_FILES_ROUTE_SECONDS at 2 GB with every second on CPU in the dearest region (gru1: $0.221 a CPU-hour, $0.0183 a
+ * GB-hour); its answer at BACKUP_FILES_PAGE_BYTES as Fast Origin Transfer ($0.43 a GB); the day's count, two Upstash
+ * commands ($2.00 a million; its few bytes are under a micro-dollar, inside the rounding); one listing and one Blob
+ * signing token, each as a Blob Advanced Operation ($7.00 a million), the dearer of the two sources on (an R2
+ * ListObjectsV2 is a $4.50 Class A, and R2 signs locally).
+ */
+export const BACKUP_FILES_PAGE_MICRO_USD = Math.ceil(
+  0.6 + (221_000 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (18_300 * 2 * BACKUP_FILES_ROUTE_SECONDS) / 3600 + (BACKUP_FILES_PAGE_BYTES / 1e9) * 430_000 + 2 * 2 + 7 + 7,
+);
+/** R2 bills operations in blocks of a million, rounded up: one more block a month for the source that lists on R2. */
+const R2_BLOCK_MICRO_USD = 4_500_000;
+/** UTC days a billing month can touch (as lib/backup-cost.ts BACKUP_DAYS_PER_MONTH). */
+const ROUTE_DAYS_PER_MONTH = 32;
+/** Room over the priced month, as the backup's other lines carry (docs/backup-costs-2026-11-08.md). */
+const ROOM = 1.1;
+
+/**
+ * The route's worst month in micro-dollars, a company cost (the company's backup, 100% Marktmorgen under FX275): the
+ * review's maxPagesPerDay, which takeDayPage counts before any provider call, for each source that is on, every UTC day
+ * of the month, plus R2's rounding block, with room. No review: 0, since the route answers 404 before any command.
+ * Null (unknown, never zero) for a review that is not a whole page count, or when Bunny Stream, whose listing price is
+ * not read, is turned on.
+ */
+export function backupFilesRouteWorstMonth(review: BackupFilesRouteReview | null): number | null {
+  if (review === null) return 0;
+  if (!Number.isSafeInteger(review.maxPagesPerDay) || review.maxPagesPerDay < 1) return null;
+  if (SOURCE_OFF.bunny === null) return null;
+  const on = (["blob", "r2"] as const).filter((source) => SOURCE_OFF[source] === null).length;
+  const pages = on * review.maxPagesPerDay * ROUTE_DAYS_PER_MONTH;
+  return Math.ceil((pages * BACKUP_FILES_PAGE_MICRO_USD + (SOURCE_OFF.r2 === null ? R2_BLOCK_MICRO_USD : 0)) * ROOM);
+}
+
 /** Why a source is not listed now, or null when it is: never-listed sources, and R2 while its own read-only key is not set. */
 export function backupFilesSourceOff(source: BackupFilesSource, env: Record<string, string | undefined> = process.env): string | null {
   if (SOURCE_OFF[source]) return SOURCE_OFF[source];

@@ -78,7 +78,7 @@ const call = item("call", 9000, { file: null, call: { minutes: 30 } as unknown a
 const open = { fromPackage: false, deposit: false, series: false, move: false };
 const addOns = activeCallAddOns([call, bread, starter, set2b()] as Listing[], call as Listing, open);
 is("only the first of the two add-ons is offered", addOns.map((offer) => offer.target.id), ["bread"]);
-is("both ticked: one copy of Bread is charged, never two", chosenCallAddOns(addOns, ["bread", "set"]).map((line) => line.productId), ["bread"]);
+is("both checked: one copy of Bread is charged, never two", chosenCallAddOns(addOns, ["bread", "set"]).map((line) => line.productId), ["bread"]);
 
 part("The studio's sentence for it reads as a sentence, named or not");
 const words = [bumpPauseWords("inBundle", "Bread"), bumpPauseWords("inBundle", "")];

@@ -38,10 +38,19 @@ export type ResendPost = {
   usageCredential: string; body: string; idempotencyKey?: string; recipients: number;
   beforePost?: () => Promise<boolean>;
 };
+/** `posted: false` on "unknown": this call made no provider request (it
+ * stopped before the POST: the usage read, a reservation or dispatch reply,
+ * the caller's last step or the deadline). It says nothing of another call
+ * that shares the same attempt (the same path, body and idempotency key):
+ * a caller that repeats one across calls must not read it as "not sent".
+ */
 export type ResendPostResult =
   | { kind: "response"; response: Response }
   | { kind: "accepted_receipt" }
-  | { kind: "blocked" | "unknown" };
+  | { kind: "blocked" }
+  | { kind: "unknown"; posted?: false };
+/** Stopped before this call's POST (ResendPostResult). */
+const notPosted = (): ResendPostResult => ({ kind: "unknown", posted: false });
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 const HASH = /^[a-f0-9]{64}$/;
 // The existing inbound producer permits 15 MB BEFORE base64, plus two
@@ -147,12 +156,12 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
       return data(await json(response));
     });
     const monthly = data(data(body?.emails)?.monthly);
-    if (body?.object !== "usage" || !monthly) return { kind: "unknown" };
+    if (body?.object !== "usage" || !monthly) return notPosted();
     usage = { source: "resend_usage_api", accountId: review.accountId, observedAtMs: Date.now(), monthly: {
       used: monthly.used as number, sent: monthly.sent as number, received: monthly.received as number,
       limit: monthly.limit as number, resetsAt: monthly.resets_at as string,
     } };
-  } catch { return { kind: "unknown" }; }
+  } catch { return notPosted(); }
   const under = r.idempotencyKey?.trim() ? r.idempotencyKey : `nimbus-call:${randomBytes(16).toString("hex")}`;
   const attemptId = hash(JSON.stringify([r.path, r.body, under ?? null]));
   const payloadFingerprint = hash(r.body);
@@ -160,14 +169,14 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
   if (reserve.status !== "reserved" && reserve.status !== "already_reserved") {
     const receipt = await readAcceptedResendFallbackReceipt({ accountId: review.accountId, attemptId, payloadFingerprint, recipients: r.recipients }, sdk);
     if (receipt.status === "accepted") return { kind: "accepted_receipt" };
-    return { kind: reserve.status === "denied" ? "blocked" : "unknown" };
+    return reserve.status === "denied" ? { kind: "blocked" } : notPosted();
   }
   // Only this invocation's acknowledged exclusive dispatch may debit a
   // caller's allowance. A shared reserved claim is not that capability.
   const dispatch = await markResendFallbackDispatched(reserve.claim, sdk);
   if (dispatch.status !== "dispatch") {
     await cancelResendFallbackReserved(reserve.claim, sdk);
-    return { kind: "unknown" };
+    return notPosted();
   }
   if (r.beforePost) {
     let ready = false;
@@ -175,7 +184,7 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
     // The callback cannot have started this guard's provider request. Settle
     // only our own dispatch, never cancel a shared reservation or refund an
     // unknown caller debit. An unconfirmed settlement still reports unknown.
-    if (ready !== true) { await settleResendFallback(dispatch.claim, "confirmed_not_accepted", sdk); return { kind: "unknown" }; }
+    if (ready !== true) { await settleResendFallback(dispatch.claim, "confirmed_not_accepted", sdk); return notPosted(); }
   }
   try {
     const result = await timed(RESEND_TIMEOUT_MS, async signal => {
@@ -190,7 +199,8 @@ export async function guardedResendPost(request: ResendPost, runtime: ResendTran
       if (!response.ok) await response.body?.cancel();
       return { response, ok: response.ok && accepted(proof, r.path, r.recipients) };
     });
-    if (!result) { await settleResendFallback(dispatch.claim, "confirmed_not_accepted", sdk); return { kind: "unknown" }; }
+    // Null only from the clock check above, before the fetch: no POST was made.
+    if (!result) { await settleResendFallback(dispatch.claim, "confirmed_not_accepted", sdk); return notPosted(); }
     const outcome = result.ok ? "accepted" : notAccepted(result.response.status) ? "confirmed_not_accepted" : "unknown";
     let settled = await settleResendFallback(dispatch.claim, outcome, sdk);
     // A repeat of the same owned settlement reconciles a lost Redis ACK;

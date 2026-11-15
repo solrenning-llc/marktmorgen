@@ -188,6 +188,10 @@ async function main(): Promise<void> {
     id: "sub_Running000001",
     status: "active",
     metadata: meta,
+    // As Stripe answers a running membership: not ending, no end day, no pause (CX-123 rule 24 reads these exactly).
+    cancel_at_period_end: false,
+    cancel_at: null,
+    pause_collection: null,
     customer: { id: "cus_Member000001", email: "cy@example.com", invoice_settings: { default_payment_method: null } },
     items: { data: [{ current_period_end: payAt }] },
     default_payment_method: { id: "pm_OldCard0000001", type: "card", card: { brand: "visa", last4: "4242", exp_month: lastMonth.getUTCMonth() + 1, exp_year: lastMonth.getUTCFullYear() } },
@@ -257,6 +261,17 @@ async function main(): Promise<void> {
   state.sessions.set(sessionId, saved);
   const mark = posts.length;
   is("control: its own page and membership still set the card", [await finishCardUpdate(store, sessionId), touched(mark)], ["updated", ["/subscriptions/sub_Running000001"]]);
+
+  part("Rule 24: a membership whose status Stripe has no name for is unknown, never \"not ended\"");
+  for (const [label, status] of [["a status Stripe never named", "a_status_stripe_never_named"], ["a status that is a number", 7], ["no status", undefined]] as const) {
+    const row: Record<string, unknown> = { ...running, customer: "cus_Member000001", latest_invoice: null, status };
+    if (status === undefined) delete row.status;
+    state.subs.set("sub_Running000001", row);
+    const before = posts.length;
+    is(`${label}: the page does not show it`, await cardView(store, grant!), null);
+    is(`${label}: no card is set from it`, [await finishCardUpdate(store, sessionId), touched(before)], ["error", []]);
+  }
+  state.subs.set("sub_Running000001", { ...running, customer: "cus_Member000001", latest_invoice: null });
 
   part("What came back");
   const nowS = Math.floor(Date.now() / 1000);

@@ -93,8 +93,10 @@ export function cannotPause(sub: PauseSub, allowedMonths: number, nowSeconds = M
   const recurring = sub.items?.data?.[0]?.price?.recurring;
   if (recurring?.interval !== "month" || (recurring.interval_count ?? 1) !== 1) return "interval";
   if (sub.status !== "active") return "state";
-  if (sub.cancel_at_period_end === true || (typeof sub.cancel_at === "number" && sub.cancel_at > 0)) return "ending";
+  // Sold to end after a set number of payments: never paused, and its cancel_at is the end that was sold,
+  // not a cancellation (lib/fixed-end-rules.ts), so this is said before "ending".
   if (sub.metadata?.ends_after) return "fixed";
+  if (sub.cancel_at_period_end === true || (typeof sub.cancel_at === "number" && sub.cancel_at > 0)) return "ending";
   if (sub.pause_collection) return "paused";
   const last = seconds(sub.metadata?.paused_at);
   if (last && nowSeconds - last < PAUSE_EVERY_DAYS * 86_400) return "recent";

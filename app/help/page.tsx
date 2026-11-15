@@ -91,7 +91,7 @@ export default function HelpPage() {
                       </summary>
                       <div className="space-y-3 px-5 pb-6 sm:px-6">
                         {item.a.map((paragraph) => (
-                          <p key={paragraph} className="leading-relaxed text-ink-soft">
+                          <p key={paragraph} className="leading-relaxed text-ink-soft wrap-anywhere">
                             {paragraph}
                           </p>
                         ))}

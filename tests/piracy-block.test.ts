@@ -76,7 +76,7 @@ is("the Terms' reason and the fix", [/someone else/.test(refused?.why ?? ""), /T
 const said = fastMoneyMessage(refused, "publish");
 is("the message names it, never fast money", [/someone else/.test(said), /fast or easy money/.test(said)], [true, false]);
 is("a sales page is refused the same way", fastMoneyOnPage(["Welcome", "Get the keygen here"])?.field, "page");
-is("the three prohibitions block, and only they do", [...BLOCKING_KINDS].sort(), ["fast_money", "infringing", "sexual_content"]);
+is("the Terms' prohibitions block, and only they do", [...BLOCKING_KINDS].sort(), ["fast_money", "infringing", "sexual_content", "unlawful"]);
 is("the studio names it", blockingWhat(["infringing"]), "Pirated or counterfeit goods");
 is("the studio names two at once", blockingWhat(["infringing", "fast_money"]), "A promise of fast or easy money and pirated or counterfeit goods");
 is("the studio names all three", blockingWhat(["sexual_content", "infringing", "fast_money"]), "A promise of fast or easy money, sexual content and pirated or counterfeit goods");

@@ -26,7 +26,10 @@
  *     words that only may be adult content are a warning to reread;
  *   - pirated or counterfeit goods, which the same list forbids as "anything
  *     that infringes someone else's rights" (568 [GD2] (b), unit 2): plain
- *     offers block; words that only may be someone else's goods warn.
+ *     offers block; words that only may be someone else's goods warn;
+ *   - what is unlawful to sell wherever a buyer is, the list's first entry
+ *     (568 [GD2] (b), unit 3): fake documents, stolen data, hard drugs for
+ *     sale block; goods whose legality depends on the place warn.
  * A sentence that says the opposite is never warned, because the fix would
  * tell the creator to delete a protective sentence: a negation in the same
  * clause before the words ("No resale rights", "we do not guarantee any
@@ -47,19 +50,19 @@ export const MAX_WARNINGS = 30;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights" | "sexual_content" | "adult_content" | "infringing" | "maybe_infringing";
+export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights" | "sexual_content" | "adult_content" | "infringing" | "maybe_infringing" | "unlawful" | "maybe_unlawful";
 
 /**
  * The kinds that stop a product from being published, not only warn (567 [GD1] (d)): what the Terms already forbid.
  * "What you may not sell" (app/terms/page.tsx) includes "anything that promises fast or easy money, or income for
- * little effort", "sexual content" and "anything that infringes someone else's rights" (568 [GD2] (b)). Every other
- * kind is a warning the creator may act on or not.
+ * little effort", "sexual content", "anything that infringes someone else's rights" and "Anything unlawful" (568
+ * [GD2] (b)). Every other kind is a warning the creator may act on or not.
  */
-export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content", "infringing"]);
+export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content", "infringing", "unlawful"]);
 
 /** What keeps a product off the store, in words for the start of a sentence; "" when nothing blocks. */
 export function blockingWhat(kinds: readonly TermsWarningKind[]): string {
-  const named = ([["fast_money", "a promise of fast or easy money"], ["sexual_content", "sexual content"], ["infringing", "pirated or counterfeit goods"]] as const)
+  const named = ([["fast_money", "a promise of fast or easy money"], ["sexual_content", "sexual content"], ["infringing", "pirated or counterfeit goods"], ["unlawful", "something unlawful to sell"]] as const)
     .filter(([kind]) => kinds.includes(kind))
     .map(([, words]) => words);
   const said = named.length > 2 ? `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}` : named.join(" and ");
@@ -202,7 +205,7 @@ const SLANG_BEFORE = /\b(?:food|earth|cabin|ruin|book|plant|travel|interior|desi
  * sexual content") or right after them ("porn is not allowed"). Narrower than `negated`, because here a negation lets
  * words through a block: a "no" further back in the clause ("No paywall, porn clips") does not count.
  */
-const NEAR_NEGATION_BEFORE = /\b(?:no|not|never|without|nothing|zero|free of)\s+(?:(?:any|such|explicit|sexual|graphic|adult)\s+){0,2}$/i;
+const NEAR_NEGATION_BEFORE = /\b(?:no|not|never|without|nothing|zero|free of)\s+(?:(?:any|such|explicit|sexual|graphic|adult|sell|sells|offer|offers|carry|carries|allow|allows)\s+){0,2}$/i;
 function nearNegated(text: string, index: number, length: number): boolean {
   return NEAR_NEGATION_BEFORE.test(text.slice(Math.max(0, index - 60), index)) || NEGATED_AFTER.test(text.slice(index + length, index + length + 60));
 }
@@ -266,6 +269,39 @@ const INFRINGING_FIX =
 const MAYBE_INFRINGING_WHY =
   "This may be someone else's goods or work. The Terms do not allow selling anything that infringes someone else's rights; if this is yours to sell, it is fine.";
 const MAYBE_INFRINGING_FIX = "Reread it: say what is yours in the product, or the license that lets you sell it.";
+
+/**
+ * Words that plainly offer what is unlawful to sell wherever a buyer is (568 [GD2] (b), unit 3; the Terms' "Anything
+ * unlawful"): fake identity documents and diplomas, stolen cards, data or accounts, and hard drugs offered for sale.
+ * They block unless the sentence is plainly about protecting against them (unlawfulExcused), and then they warn.
+ */
+const DRIVERS = String.raw`driver(?:'|’)?s?\s+licen[cs]es?`;
+const UNLAWFUL: readonly RegExp[] = [
+  new RegExp(String.raw`\bfake\s+(?:ids?|passports?|${DRIVERS}|diplomas?|degrees?|transcripts?|doctor(?:'|’)?s?\s+notes?|visas?|social\s+security\s+cards?)\b`, "gi"),
+  new RegExp(String.raw`\b(?:novelty|scannable)\s+(?:ids?|${DRIVERS})\b`, "gi"),
+  /\bcc\s+dumps\b|\bfullz\b|\bcarding\s+(?:methods?|tutorials?|guides?|courses?|tools?)\b/gi,
+  /\bstolen\s+(?:credit\s+cards?|debit\s+cards?|cards?|accounts?|data|passwords?|logins?|identities)\b/gi,
+  /\bhacked\s+(?:[\w-]+\s+)?accounts?\b/gi,
+  /\b(?:buy|order|sell|selling|get)\s+(?:cocaine|heroin|meth(?:amphetamine)?|mdma|fentanyl|lsd|crack\s+cocaine)\b/gi,
+];
+/** Words before it that make the sentence about protecting against it. */
+const UNLAWFUL_ABOUT_BEFORE = /\b(?:spot|spotting|detect|detecting|identify|identifying|recogni[sz]e|tell|avoid|avoiding|protect|protecting|prevent|preventing|report|reporting|fight|fighting|stop|stopping|beware|why|what to do|risks? of|dangers? of|laws?|legal|history of|training)\b/i;
+
+function unlawfulExcused(text: string, index: number): boolean {
+  const clause = text.slice(Math.max(0, index - 80), index).split(/[.!?;\n]/).pop() ?? "";
+  return UNLAWFUL_ABOUT_BEFORE.test(clause);
+}
+
+/** Goods whose sale is lawful in some places and not in others: a warning to check, never a block. */
+const MAYBE_UNLAWFUL = /\b(?:cannabis|marijuana|cbd|thc|kratom|psilocybin|magic\s+mushrooms|steroids|firearms?|ammunition|ammo)\b/gi;
+
+const UNLAWFUL_WHY =
+  "This offers something unlawful to sell. The Terms do not allow selling anything unlawful, so the product cannot be published with it.";
+const UNLAWFUL_FIX =
+  "Remove these words. If the product is about protecting people from this, for example a training to spot fake IDs, say so plainly in the same sentence.";
+const MAYBE_UNLAWFUL_WHY =
+  "Whether this may be sold depends on where you and your buyers are. The Terms do not allow selling anything unlawful.";
+const MAYBE_UNLAWFUL_FIX = "Check that selling it is lawful where you sell it, or describe the product so that it plainly sells only what is.";
 
 /** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
 const W = String.raw`[\s-]+`;
@@ -508,6 +544,20 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     const at = m.index ?? 0;
     if (infringing.some(([from, to]) => at >= from && at < to) || nearNegated(text, at, m[0].length)) continue;
     add("maybe_infringing", at, m[0].length, MAYBE_INFRINGING_WHY, MAYBE_INFRINGING_FIX);
+  }
+
+  for (const pattern of UNLAWFUL) {
+    for (const m of text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      if (nearNegated(text, at, m[0].length)) continue;
+      if (unlawfulExcused(text, at)) add("maybe_unlawful", at, m[0].length, MAYBE_UNLAWFUL_WHY, MAYBE_UNLAWFUL_FIX);
+      else add("unlawful", at, m[0].length, UNLAWFUL_WHY, UNLAWFUL_FIX);
+    }
+  }
+  for (const m of text.matchAll(MAYBE_UNLAWFUL)) {
+    const at = m.index ?? 0;
+    if (nearNegated(text, at, m[0].length)) continue;
+    add("maybe_unlawful", at, m[0].length, MAYBE_UNLAWFUL_WHY, MAYBE_UNLAWFUL_FIX);
   }
 
   if (!input.resaleLicense) {

@@ -11,8 +11,8 @@
  *
  *   - a promise of fast or easy money, or of earnings, income or results, is
  *     refused, not only warned;
- *   - sexual content and pirated or counterfeit goods, which the Terms forbid
- *     (568 [GD2] (b)), are refused;
+ *   - sexual content, pirated or counterfeit goods and what is unlawful to
+ *     sell, which the Terms forbid (568 [GD2] (b)), are refused;
  *   - urgency or scarcity is refused unless the store really has the deadline
  *     (a sale with an end) or the stock limit behind it;
  *   - a price in the ad that is not the product's price is refused;
@@ -61,7 +61,7 @@ export const AD_NOT_CHECKED: readonly string[] = [
   "Words in a language other than English: the honesty rules here read English words only",
 ];
 
-const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content", "infringing", "earnings_claim", "false_urgency", "price_mismatch"]);
+const REFUSED: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content", "infringing", "unlawful", "earnings_claim", "false_urgency", "price_mismatch"]);
 
 // Quoted words followed by who said them ("…" — Ana; "…", said Ben): bounded, with no nested repetition.
 const QUOTE = /["“]([^"”]{8,400})["”],? ?(?:[-–—] ?|said |says )[A-Z]/gu;

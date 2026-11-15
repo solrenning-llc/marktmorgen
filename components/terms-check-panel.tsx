@@ -16,6 +16,8 @@ const TITLES: Record<TermsWarningKind, string> = {
   adult_content: "May read as adult content",
   infringing: "Pirated or counterfeit goods: not allowed by the Terms",
   maybe_infringing: "May be someone else's goods or work",
+  unlawful: "Unlawful to sell: not allowed by the Terms",
+  maybe_unlawful: "Lawful to sell only in some places",
 };
 
 export const countWords = (n: number) => (n === 1 ? "One thing to check" : `${n} things to check`);

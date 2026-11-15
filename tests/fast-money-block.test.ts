@@ -65,7 +65,7 @@ is("found in the summary", refused?.field, "summary");
 is("with the passage, the reason from the Terms and the fix", [refused?.excerpt.includes("easy money"), /fast or easy money/.test(refused?.why ?? ""), (refused?.fix ?? "").length > 20], [true, true, true]);
 is("nothing to refuse in plain product words", fastMoneyRefusal({ title: "Bread basics", summary: "Ten loaves, step by step.", about: "Flour, water, salt." }), null);
 is("the description is read too", fastMoneyRefusal({ title: "Guide", summary: "", about: "Get quick cash with this." })?.field, "about");
-is("only the Terms' own prohibitions block (fast money; sexual content and pirated or counterfeit goods since 568 [GD2] (b)); every other kind stays a warning", [...BLOCKING_KINDS], ["fast_money", "sexual_content", "infringing"]);
+is("only the Terms' own prohibitions block (fast money; sexual content, pirated or counterfeit goods and what is unlawful to sell since 568 [GD2] (b)); every other kind stays a warning", [...BLOCKING_KINDS], ["fast_money", "sexual_content", "infringing", "unlawful"]);
 is("an earnings claim alone does not block", fastMoneyRefusal({ title: "Course", summary: "Build a six-figure business.", about: "" }), null);
 
 part("The product route stops it before publishing or saving a published product");

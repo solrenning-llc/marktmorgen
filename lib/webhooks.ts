@@ -597,6 +597,9 @@ export function addressesIn(body: string): string[] {
   return [...found];
 }
 
+/** The notices made at the time of the purchase they tell of, so a deletion before them is one the buyer came back from. */
+const PURCHASE_NOTICES = ["sale.completed", "membership.started"] as const satisfies readonly WebhookEvent[];
+
 /**
  * Whether a person named in a delivery's message was deleted from the store since the message was made
  * (lib/suppression.ts), read now, before anything is sent: lib/person-data.ts says a webhook's message is never acted
@@ -605,12 +608,16 @@ export function addressesIn(body: string): string[] {
  * message with no address, or a store with no list (its deletion marks are kept under its list), names nobody
  * deleted, and reads nothing.
  *
- * A print keeps the second of the deletion (ERASED_PRINT). Only a message made before it, or in the same second, is
- * held, as lib/paypal-delivery.ts KEEP_RECEIPT reads it: a person deleted and back since (a new purchase) is told
- * of what they did after it. A print or a message time that does not read as a second is unknown (rule 24): it
- * throws UnknownReplyError, so the message is held and tried again, never sent on a guess.
+ * A print keeps the second of the deletion (ERASED_PRINT). A purchase's own notice (PURCHASE_NOTICES) is made at the
+ * purchase's own time (Stripe's event.created, PayPal's paid.at), so one made after the deletion is a new purchase by
+ * a person who came back, and is sent; one made before it, in the same second or the second before (two clocks,
+ * Claude 4's LEVE on #4555), is held, as lib/paypal-delivery.ts KEEP_RECEIPT reads it. Every other notice (a refund,
+ * a dispute, a membership change, a call) is made when it happens and may be about something from before the
+ * deletion, so any print holds it, whatever its time (Claude 2 cloud H on #4555). A print or a message time that
+ * does not read as a second is unknown (rule 24): it throws UnknownReplyError, so the message is held and tried
+ * again, never sent on a guess.
  */
-async function namesErased(store: Pick<Store, "listId">, body: string, createdAt: number): Promise<boolean> {
+async function namesErased(store: Pick<Store, "listId">, body: string, type: string, createdAt: number): Promise<boolean> {
   const addresses = addressesIn(body);
   if (!store.listId || addresses.length === 0) return false;
   // More than the check reads is not read as "not deleted": the message is held as unknown.
@@ -618,11 +625,13 @@ async function namesErased(store: Pick<Store, "listId">, body: string, createdAt
   if (typeof createdAt !== "number" || !Number.isFinite(createdAt) || createdAt < 0) throw new UnknownReplyError("when a webhook message was made");
   const madeSecond = Math.floor(createdAt / 1000);
   const [reply] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
+  const purchase = (PURCHASE_NOTICES as readonly string[]).includes(type);
   return wholeErasedReply(reply, addresses.length).some((print) => {
     if (print === null) return false;
+    if (!purchase) return true;
     const at = typeof print === "number" ? print : /^\d{1,15}$/.test(print) ? Number(print) : NaN;
     if (!Number.isSafeInteger(at)) throw new UnknownReplyError("when a person was deleted from the store");
-    return at >= madeSecond;
+    return at >= madeSecond - 1;
   });
 }
 
@@ -666,7 +675,7 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   if (store !== "taken" && delivery.type !== "test") {
     let erased: boolean;
     try {
-      erased = await namesErased(store, delivery.body, delivery.createdAt);
+      erased = await namesErased(store, delivery.body, delivery.type, delivery.createdAt);
     } catch (error) {
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("WEBHOOK DELETION MARKS UNREAD: the delivery is held, not sent", delivery.statsId, delivery.id, next.attempts);
@@ -1350,7 +1359,7 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Never sent again by hand about a person deleted from the store since (namesErased); a mark that cannot be read
   // is unknown, never "not deleted": nothing is marked, taken or sent.
   try {
-    if (await namesErased(store, before.body, before.createdAt)) return { ok: false, reason: "missing" };
+    if (await namesErased(store, before.body, before.type, before.createdAt)) return { ok: false, reason: "missing" };
   } catch (error) {
     if (!(error instanceof UnknownReplyError)) throw error;
     return { ok: false, reason: "unavailable" };

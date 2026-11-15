@@ -155,6 +155,16 @@ async function main(): Promise<void> {
   await nextTry(RETRY_MINUTES[0]);
   is("a mark from before the sale lets it go at the next try", sentTo(odd), 1);
 
+  part("A refund made after a deletion, about an older purchase, is never sent with the deleted address (Claude 2 cloud H on #4555)");
+  const refunds = await addEndpoint(store, "https://hooks.example.com/refunds", ["refund.issued"]);
+  if (!refunds.ok) throw new Error("not added");
+  await erasePerson(store, "old@example.com", { kind: "person" });
+  store = (await storeForEmail("hk-owner@example.com"))!;
+  const refundAt = when + 5000;
+  await emitEvent(store, "refund.issued", "ch_hk_old|4900", { amount_cents: 4900, buyer: { email: "old@example.com", name: null } }, refundAt);
+  await deliverDue(refundAt + 60_000, refundAt);
+  is("the refund notice is not sent", sentTo("old@example.com"), 0);
+
   server.close();
   done();
 }

@@ -1882,9 +1882,14 @@ export class MemoryRedis {
         return held;
       }
       case "DEL": {
-        // DEL takes several keys.
+        // DEL takes several keys. An empty list, set, sorted set or hash does not exist in Redis (it goes with its last
+        // member), so one this stand-in left behind on a read is removed here without being counted, as Redis answers.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        for (const one of [key, ...args]) {
+          const held = this.data.get(one);
+          const empty = (Array.isArray(held) && held.length === 0) || ((held instanceof Set || held instanceof Map) && held.size === 0);
+          if (this.data.delete(one) && !empty) gone += 1;
+        }
         return gone;
       }
       case "EXISTS":

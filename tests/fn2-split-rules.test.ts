@@ -41,7 +41,7 @@ is("nothing readable", [parseSplit(undefined), parseSplit("split"), parseSplit({
 part("Shares: whole percents that add up to 100, or equal");
 is("the creator's own", parseSplit({ options: [page("pageA", 70), product("prodB", 30)] })?.options.map((o) => o.share), [70, 30]);
 is("not adding up to 100", parseSplit({ options: [page("pageA", 70), product("prodB", 20)] }), null);
-is("a fraction, zero, a hundred or text", [parseSplit({ options: [page("pageA", 50.5), product("prodB", 49.5)] }), parseSplit({ options: [page("pageA", 0), product("prodB", 100)] }), parseSplit({ options: [page("pageA", "50"), product("prodB", 50)] })], [null, null, null]);
+is("a fraction, zero, a hundred or text", [parseSplit({ options: [page("pageA", 50.5), product("prodB", 49.5)] }), parseSplit({ options: [page("pageA", 0), product("prodB", 100)] }), parseSplit({ options: [page("pageA", "50" as unknown as number), product("prodB", 50)] })], [null, null, null]);
 is("some given and some not", parseSplit({ options: [page("pageA", 60), product("prodB")] }), null);
 is("equal for two, three and four, adding up to 100", [equalShares(2), equalShares(3), equalShares(4)], [[50, 50], [34, 33, 33], [25, 25, 25, 25]]);
 is("four with equal shares", parseSplit({ options: ["a1", "b1", "c1", "d1"].map((id) => page(id)) })?.options.map((o) => o.share), [25, 25, 25, 25]);
@@ -63,7 +63,7 @@ is("at its share, the next", pickShare(live, 0.5)?.id, "pageB");
 is("the top end goes to the last", pickShare(live, 0.9999)?.id, "pageC");
 is("a draw outside [0, 1) or not a number is never taken", [pickShare(live, 1), pickShare(live, -0.1), pickShare(live, Number.NaN), pickShare(live, "0.2" as never)], [null, null, null, null]);
 is("nothing live: nothing drawn", pickShare([], 0.3), null);
-let counts = [0, 0, 0];
+const counts = [0, 0, 0];
 for (let i = 0; i < 10_000; i += 1) counts[["pageA", "pageB", "pageC"].indexOf(pickShare(live, i / 10_000)!.id)] += 1;
 is("an even spread of draws lands in the chosen shares", counts, [5_000, 3_000, 2_000]);
 is("the draw takes no person, cookie or address", pickShare.length, 2);

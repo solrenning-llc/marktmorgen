@@ -22,12 +22,15 @@ import {
   MAX_FUNNEL_SLUG,
   MAX_PAGE_FUNNELS,
   type PageFunnel,
+  type FunnelPlace,
   type PageFunnelStep,
+  funnelPlaces,
   funnelSlugFrom,
+  stepPlaces,
 } from "@/lib/page-funnel";
 
 /** A page or product that can be a step, as the studio lists it. */
-export type StepChoice = { kind: PageFunnelStep["kind"]; id: string; title: string; note: string };
+export type StepChoice = { kind: FunnelPlace["kind"]; id: string; title: string; note: string };
 
 /** One saved funnel, with its steps as the store stands and how many people each reached. */
 export type SavedFunnel = {
@@ -42,7 +45,8 @@ const MESSAGES: Record<string, string> = {
   name: "Give the funnel a name. Only you see it.",
   slug: "The address can have only lowercase letters, numbers and dashes.",
   taken: "Another funnel of this store already has that address.",
-  steps: "A funnel needs at least one step, each page or product once.",
+  steps: `A funnel needs at least one step, each page or product once, ${MAX_FUNNEL_PAGES} pages at most (each page of a split test counts).`,
+  split: "A split test needs two to four different pages or products, with shares in whole percents that add up to 100.",
   full: `A store can have ${MAX_PAGE_FUNNELS} funnels. Remove one to add another.`,
   page: "One of the pages was deleted. Choose another.",
   gone: "One of the products was deleted. Choose another.",
@@ -53,6 +57,8 @@ const MESSAGES: Record<string, string> = {
 };
 
 const key = (step: Pick<PageFunnelStep, "kind" | "id">) => `${step.kind}:${step.id}`;
+/** Every page a draft's steps land on, a split test's included: what counts against the funnel's pages. */
+const placeCount = (steps: PageFunnelStep[]) => funnelPlaces({ steps }).length;
 
 /**
  * The studio's funnels of pages (lib/page-funnel.ts): each with its address,
@@ -90,7 +96,7 @@ export function PageFunnelEditor({
 
   const pages = choices.filter((c) => c.kind === "page");
   const products = choices.filter((c) => c.kind === "product");
-  const titleOf = (step: PageFunnelStep) => choices.find((c) => key(c) === key(step))?.title ?? "No longer available";
+  const titleOf = (step: FunnelPlace) => choices.find((c) => key(c) === key(step))?.title ?? "No longer available";
 
   function start(funnel: PageFunnel | null) {
     if (flight.current || recovery.current) return;
@@ -166,8 +172,8 @@ export function PageFunnelEditor({
   function addStep() {
     if (flight.current || recovery.current) return;
     setDraft((d) => {
-      if (!d || d.steps.length >= MAX_FUNNEL_PAGES) return d;
-      const used = new Set(d.steps.map(key));
+      if (!d || placeCount(d.steps) >= MAX_FUNNEL_PAGES) return d;
+      const used = new Set(d.steps.flatMap(stepPlaces).map(key));
       const pick = choices.find((c) => !used.has(key(c)));
       return pick ? { ...d, steps: [...d.steps, { kind: pick.kind, id: pick.id }] } : d;
     });
@@ -213,7 +219,8 @@ export function PageFunnelEditor({
   function save() {
     if (flight.current || recovery.current) return;
     if (!draft) return;
-    const repeated = new Set(draft.steps.map(key)).size !== draft.steps.length;
+    const places = draft.steps.flatMap(stepPlaces).map(key);
+    const repeated = new Set(places).size !== places.length;
     if (repeated) {
       setError("Each page or product can be one step of a funnel, once.");
       return;
@@ -494,6 +501,14 @@ export function PageFunnelEditor({
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-brand text-[0.8125rem] font-bold text-white">
                   {index + 1}
                 </span>
+                {step.kind === "split" ? (
+                  <p id={`pf-step-${index}`} className="min-w-0 flex-1 text-sm text-ink">
+                    <span className="font-semibold">{`Split test, step ${index + 1}: `}</span>
+                    {step.options.map((option) => `${titleOf(option)} gets ${option.share}%`).join("; ")}
+                    <span className="block text-xs text-ink-soft">Each visitor is sent to one of these pages, by these shares. To change it, remove this step.</span>
+                  </p>
+                ) : (
+                <>
                 <label className="sr-only" htmlFor={`pf-step-${index}`}>{`Step ${index + 1}`}</label>
                 <select id={`pf-step-${index}`} value={key(step)} onChange={(e) => setStep(index, e.target.value)} className="field min-w-0 flex-1">
                   {choices.some((c) => key(c) === key(step)) ? null : <option value={key(step)}>{titleOf(step)}</option>}
@@ -512,6 +527,8 @@ export function PageFunnelEditor({
                     </optgroup>
                   ) : null}
                 </select>
+                </>
+                )}
                 <button
                   type="button"
                   onClick={() => move(index, -1)}
@@ -541,14 +558,14 @@ export function PageFunnelEditor({
               </li>
             ))}
           </ol>
-          {draft.steps.length < MAX_FUNNEL_PAGES && draft.steps.length < choices.length ? (
+          {placeCount(draft.steps) < MAX_FUNNEL_PAGES && placeCount(draft.steps) < choices.length ? (
             <button
               type="button"
               onClick={addStep}
               className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-sm font-bold text-ink-soft transition-colors hover:border-violet-brand hover:text-violet-deep"
             >
               <Icon name="plus" size={18} />
-              {`Add a step (${draft.steps.length} of ${MAX_FUNNEL_PAGES})`}
+              {`Add a step (${placeCount(draft.steps)} of ${MAX_FUNNEL_PAGES} pages)`}
             </button>
           ) : null}
 

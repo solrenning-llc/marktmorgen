@@ -9,7 +9,7 @@ export type FunnelMutationResult =
   | { state: "rejected"; error: string }
   | { state: "uncertain" };
 
-const REFUSALS = new Set(["name", "slug", "taken", "steps", "full", "page", "gone", "call", "unknown", "role", "locked", "store_gone", "forbidden", "slow_down"]);
+const REFUSALS = new Set(["name", "slug", "taken", "steps", "split", "full", "page", "gone", "call", "unknown", "role", "locked", "store_gone", "forbidden", "slow_down"]);
 
 /** A failed transport or incomplete acknowledgement must never invite a blind repeat. */
 export function readFunnelMutationResult(status: number, raw: unknown, request: FunnelMutation): FunnelMutationResult {
@@ -29,6 +29,13 @@ export function readFunnelMutationResult(status: number, raw: unknown, request: 
   if (!kept || !expected.ok || typeof supplied.on !== "boolean" || !Number.isSafeInteger(supplied.since) || (supplied.since as number) <= 0) return uncertain;
   if (request.funnel.id && kept.id !== request.funnel.id) return uncertain;
   if (!Array.isArray(supplied.steps) || supplied.steps.length !== kept.steps.length) return uncertain;
-  if (kept.name !== expected.funnel.name || kept.slug !== expected.funnel.slug || kept.on !== expected.funnel.on || !sameSteps(kept.steps, expected.funnel.steps)) return uncertain;
+  // A split test sent without an id is given one by the server: only that id is taken from the answer.
+  const sent = request.funnel.steps as unknown[];
+  const steps = expected.funnel.steps.map((step, i) => {
+    const asked = sent[i] as { id?: unknown } | undefined;
+    const answer = kept.steps[i];
+    return step.kind === "split" && answer?.kind === "split" && asked?.id === undefined ? { ...step, id: answer.id } : step;
+  });
+  if (kept.name !== expected.funnel.name || kept.slug !== expected.funnel.slug || kept.on !== expected.funnel.on || !sameSteps(kept.steps, steps)) return uncertain;
   return { state: "confirmed" };
 }

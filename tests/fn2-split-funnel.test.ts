@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   redis.clear();
 
   part("Reading a funnel with a split");
-  const read = parseSteps([page("landing01"), split("splitaaaaa", [page("versiona1"), page("versionb1", undefined)]), product("course001")]);
+  const read = parseSteps([page("landing01"), split("splitaaaaa", [page("versiona1"), page("versionb1")]), product("course001")]);
   is("a split step is kept, its shares equal by default", read, [
     page("landing01"),
     { kind: "split", id: "splitaaaaa", options: [{ kind: "page", id: "versiona1", share: 50 }, { kind: "page", id: "versionb1", share: 50 }] },
@@ -149,6 +149,24 @@ async function main(): Promise<void> {
   is("a split naming a page the store does not have is refused", (await save([split(undefined, [page("landing001"), page("nopage0001")])])).error, "page");
   const saved = await save([split(undefined, [page("landing001"), product(course.product.id)])]);
   is("a good split is kept", [saved.ok, saved.funnel?.steps?.[0]?.kind, saved.funnel?.steps?.[0]?.options?.length], [true, "split", 2]);
+
+  part("Carried elsewhere");
+  const { buildBundle, leftOutWords } = await import("@/lib/funnel-bundle");
+  const { copiedFunnel, emptyBlocksLeft } = await import("@/lib/store-copy-rules");
+  const { readFunnelMutationResult } = await import("@/lib/funnel-mutation-response");
+  const built = buildBundle({ name: "Launch", steps: funnel.steps, pages: new Map(), forms: new Map(), products: new Map() }, "own");
+  is("a file leaves a split test out and says so in plain words", [built.left.splits, built.bundle.steps.some((s) => s.ref === "versiona01"), leftOutWords(built.left).some((w) => w.startsWith("1 split test is left out"))], [1, false, true]);
+  const both = emptyBlocksLeft();
+  const copied = copiedFunnel(funnel, "copyfunnel", "launch", (id) => `n-${id}`.slice(0, 40), (id) => `n-${id}`.slice(0, 40), NOW, both);
+  is("a store copy keeps a split whose pages were all copied, with their copies and shares", [copied.steps[1], both.refs], [{ kind: "split", id: (funnel.steps[1] as { id: string }).id, options: [{ kind: "page", id: "n-versiona01", share: 60 }, { kind: "product", id: `n-${offer.product.id}`, share: 40 }] }, 0]);
+  const some = emptyBlocksLeft();
+  const partial = copiedFunnel(funnel, "copyfunnel", "launch", (id) => (id === "versiona01" ? "" : `n-${id}`), (id) => `n-${id}`, NOW, some);
+  is("and leaves out, counted, a split with a page not copied", [partial.steps.map((s) => s.kind), some.refs], [["page", "product"], 1]);
+  const request = { funnel: { name: "Third", slug: "third", on: true, steps: [{ kind: "split", options: [page("a1"), page("b1")] }] as unknown as PageFunnelStep[] } };
+  const answer = (id: string) => ({ ok: true, funnel: { id: "thirdfunnl", name: "Third", slug: "third", on: true, since: NOW, steps: [{ kind: "split", id, options: [{ kind: "page", id: "a1", share: 50 }, { kind: "page", id: "b1", share: 50 }] }] } });
+  is("the editor confirms a save where the server gave a new split its id", readFunnelMutationResult(200, answer("serverid01"), request).state, "confirmed");
+  is("and refuses a split it did not send", readFunnelMutationResult(200, { ...answer("serverid01"), funnel: { ...answer("serverid01").funnel, steps: [{ kind: "split", id: "serverid01", options: [{ kind: "page", id: "a1", share: 60 }, { kind: "page", id: "b1", share: 40 }] }] } }, request).state, "uncertain");
+  is("a refused split reaches the editor as a refusal", readFunnelMutationResult(400, { ok: false, error: "split" }, request), { state: "rejected", error: "split" });
 
   part("The editor's words");
   const editor = readFileSync("components/page-funnel-editor.tsx", "utf8");

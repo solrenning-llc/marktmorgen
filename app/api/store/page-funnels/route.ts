@@ -2,7 +2,7 @@ import { SENSITIVE_WHY, sensitiveFieldOf } from "@/lib/form-sensitive";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { idsOfKind, readListings } from "@/lib/catalog";
-import { FUNNEL_ID, MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, MAX_PAGE_FUNNELS, type PageFunnelStep, funnelSlugFrom, funnelSlugProblem, newFunnelId, productStepProblem, readFunnelInput } from "@/lib/page-funnel";
+import { FUNNEL_ID, MAX_FUNNEL_NAME, MAX_PAGE_FUNNELS, type PageFunnelStep, funnelPlaces, funnelSlugFrom, funnelSlugProblem, newFunnelId, productStepProblem, readFunnelInput } from "@/lib/page-funnel";
 import { dropPageFunnel, readPageFunnels, writePageFunnel } from "@/lib/page-funnel-store";
 import { randomBytes } from "node:crypto";
 import { can } from "@/lib/team-roles";
@@ -22,7 +22,9 @@ import { canAddForms, writeForm } from "@/lib/form-store";
  * Saves or removes one funnel of pages (lib/page-funnel.ts).
  *
  * `{ funnel: { id?, name, slug?, on, steps: [{ kind: "page" | "product", id }] } }`
- * saves it; `{ action: "remove", id }` removes it. Every step has to be a page
+ * saves it; a step may also be a split test, `{ kind: "split", id?, options:
+ * [{ kind, id, share? }] }` (lib/funnel-split-rules.ts), each destination
+ * checked as a step is; `{ action: "remove", id }` removes it. Every step has to be a page
  * the store has, or a product of the store that has a page of its own and is
  * bought from it; a draft may be a step, and is passed over until it is out.
  *
@@ -166,10 +168,11 @@ export async function POST(request: NextRequest) {
     if (!read.ok) return Response.json({ ok: false, error: read.error }, { status: 400 });
     const { funnel } = read;
 
-    // Each step is a page or a product this store has, as it stands now.
-    const productIds = funnel.steps.filter((s) => s.kind === "product").map((s) => s.id);
+    // Each step, and each split's destination, is a page or a product this store has, as it stands now.
+    const places = funnelPlaces(funnel);
+    const productIds = places.filter((s) => s.kind === "product").map((s) => s.id);
     const products = productIds.length ? await readListings(store, productIds) : [];
-    for (const step of funnel.steps.slice(0, MAX_FUNNEL_PAGES)) {
+    for (const step of places) {
       if (step.kind === "page" && !store.sitePages.some((p) => p.id === step.id)) {
         return Response.json({ ok: false, error: "page" }, { status: 400 });
       }

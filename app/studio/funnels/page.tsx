@@ -141,7 +141,7 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
         pageIssues: funnelPageIssues(store, pageReviews.get(funnel.id) ?? [], states),
         steps: (states ?? funnel.steps.map(step => ({
           step,
-          title: choices.find(choice => choice.kind === step.kind && choice.id === step.id)?.title ?? "Saved step",
+          title: step.kind === "split" ? "Split test" : choices.find(choice => choice.kind === step.kind && choice.id === step.id)?.title ?? "Saved step",
           open: false,
           why: "Step availability could not be checked. Reload before preparing this funnel.",
           free: step.kind === "product" && free.has(step.id),

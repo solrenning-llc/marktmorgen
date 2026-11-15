@@ -25,14 +25,18 @@ import { readListings } from "@/lib/catalog";
 import { pageOut } from "@/lib/site-page-rules";
 import { productSegment } from "@/lib/product-slug";
 import {
+  type FunnelPlace,
   MAX_FUNNEL_PAGES,
   MAX_PAGE_FUNNELS,
   type PageFunnel,
   type PageFunnelStep,
   STEP_WHY,
+  funnelPlaces,
   nextOpen,
   parsePageFunnels,
   productStepProblem,
+  splitPick,
+  stepIndex,
   withMark,
 } from "@/lib/page-funnel";
 
@@ -182,24 +186,30 @@ export async function dropPageFunnel(statsId: string, id: string, room: DataStor
 export type StepState = {
   step: PageFunnelStep;
   title: string;
-  /** Its own address, without the funnel's mark. */
+  /** Its own address, without the funnel's mark; a split has none of its own (stepTarget draws one). */
   path: string | null;
   /** A product's step: free (an email asked for) or paid. */
   free: boolean;
+  /** A split: while one of its destinations can be shown. */
   open: boolean;
   /** Said to the creator when it is not open. */
   why: string;
+  /** A split's destinations, each as the store stands, in its order (versions a–d). */
+  options?: StepState[];
   /** Studio-only opt-in; never serialized by the public navigation callers. */
   reviewProduct?: Listing;
 };
 
+/** Said to the creator when none of a split's destinations can be shown. */
+export const SPLIT_CLOSED_WHY = "None of this split test's pages can be shown right now. Visitors go on to the next step.";
+
 /**
  * Every step of a funnel as the store stands, read with one look at the
- * catalog for the products it names: what the studio shows, and what a page
- * needs to know where "next" is.
+ * catalog for the products it names (a split's included): what the studio
+ * shows, and what a page needs to know where "next" is.
  */
 export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">, options: { strictProducts?: boolean; includeReviewProduct?: boolean } = {}): Promise<StepState[]> {
-  const productIds = funnel.steps.filter((s) => s.kind === "product").map((s) => s.id);
+  const productIds = funnelPlaces(funnel).filter((s) => s.kind === "product").map((s) => s.id);
   const listings: Listing[] = productIds.length
     ? options.strictProducts ? await readListings(store, productIds) : await readListings(store, productIds).catch(() => [])
     : [];
@@ -209,7 +219,7 @@ export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">
     if (productIds.some(id => existing.has(id) && !loaded.has(id))) throw new Error("Funnel product availability could not be checked");
   }
   const now = Math.floor(Date.now() / 1000);
-  return funnel.steps.map((step) => {
+  const placeState = (step: FunnelPlace): StepState => {
     if (step.kind === "page") {
       const page = store.sitePages.find((p) => p.id === step.id) ?? null;
       if (!page) return { step, title: "A deleted page", path: null, free: false, open: false, why: STEP_WHY["page-gone"] };
@@ -227,37 +237,73 @@ export async function stepStates(store: Store, funnel: Pick<PageFunnel, "steps">
       why: problem ? STEP_WHY[problem] : "",
       ...(options.includeReviewProduct && product ? { reviewProduct: product } : {}),
     };
+  };
+  return funnel.steps.map((step) => {
+    if (step.kind !== "split") return placeState(step);
+    const each = step.options.map((option) => placeState({ kind: option.kind, id: option.id }));
+    const open = each.some((state) => state.open && state.path !== null);
+    return { step, title: `Split test: ${each.map((state) => state.title).join(" / ")}`, path: null, free: false, open, why: open ? "" : SPLIT_CLOSED_WHY, options: each };
   });
 }
 
+/** A number in [0, 1) from a secure source, fresh for each visit: nothing about the person, no cookie. */
+export function visitDraw(): number {
+  const one = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(one);
+  return one[0] / 2 ** 32;
+}
+
+/**
+ * Where a step sends a visitor, without the funnel's mark: its own address,
+ * or for a split the address of one destination that can be shown, drawn by
+ * its shares (splitPick). Null when it cannot be shown.
+ */
+export function stepTarget(state: StepState, draw: number = visitDraw()): string | null {
+  if (state.step.kind !== "split") return state.open ? state.path : null;
+  const each = state.options ?? [];
+  const at = (place: FunnelPlace) => each.find((s) => s.step.kind === place.kind && s.step.id === place.id) ?? null;
+  const picked = splitPick(state.step, (place) => {
+    const found = at(place);
+    return Boolean(found?.open && found.path);
+  }, draw);
+  return picked ? at(picked)?.path ?? null : null;
+}
+
+/** Whether a page of the funnel can be shown, from the states of its steps (a split's destinations included). */
+const placeOpenIn = (states: readonly StepState[]) => (place: FunnelPlace) =>
+  states.some((state) => [state, ...(state.options ?? [])].some((s) => s.step.kind === place.kind && s.step.id === place.id && s.open && s.path !== null));
+
 /** Where a visitor goes after step `from` of this funnel: the next step that can be shown, with the funnel's mark, or null at the end. */
-export function nextHref(funnel: PageFunnel, states: StepState[], from: number): string | null {
-  const at = nextOpen(funnel, from, (step) => states.find((s) => s.step === step)?.open ?? false);
-  const path = at >= 0 ? states[at]?.path : null;
+export function nextHref(funnel: PageFunnel, states: StepState[], from: number, draw: number = visitDraw()): string | null {
+  const at = nextOpen(funnel, from, placeOpenIn(states));
+  const path = at >= 0 && states[at] ? stepTarget(states[at], draw) : null;
   return path ? withMark(path, funnel.id) : null;
 }
 
 /**
  * The funnel a page was opened in, and where in it the page is, from the mark
  * in its address: only a funnel that is on, and only when this page or product
- * is one of its steps. Anything else is a page opened on its own.
+ * is one of its steps or one of a split's destinations (then it is at the
+ * split's place). Anything else is a page opened on its own. A split next is
+ * drawn afresh for this visit (`draw`, injected only by tests).
  */
 export async function funnelHere(
   store: Store,
   mark: string,
-  kind: PageFunnelStep["kind"],
+  kind: FunnelPlace["kind"],
   id: string,
+  draw: () => number = visitDraw,
 ): Promise<{ funnel: PageFunnel; index: number; next: string | null } | null> {
   if (!mark) return null;
   const funnel = await readPageFunnel(store.statsId, mark).catch(() => null);
   if (!funnel || !funnel.on) return null;
-  const index = funnel.steps.findIndex((step) => step.kind === kind && step.id === id);
+  const index = stepIndex(funnel, kind, id);
   if (index < 0) return null;
   // Only what comes after this step is looked at.
-  const states = await stepStates(store, { steps: funnel.steps.slice(index + 1) });
-  const offset = index + 1;
-  const at = nextOpen({ steps: funnel.steps.slice(offset) }, -1, (step) => states.find((s) => s.step === step)?.open ?? false);
-  const path = at >= 0 ? states[at]?.path : null;
+  const rest = funnel.steps.slice(index + 1);
+  const states = await stepStates(store, { steps: rest });
+  const at = nextOpen({ steps: rest }, -1, placeOpenIn(states));
+  const path = at >= 0 ? stepTarget(states[at], draw()) : null;
   return { funnel, index, next: path ? withMark(path, funnel.id) : null };
 }
 

@@ -8,9 +8,9 @@ import { readMembers } from "@/lib/community";
 import { communityVisitor } from "@/lib/community-page";
 import { type Notice, markSeen, noticesFor } from "@/lib/community-notify";
 import { requestCount } from "@/lib/community-dm";
-import { canPush, deviceCount, publicKey } from "@/lib/community-push";
+import { canPush, devicesShown, publicKey } from "@/lib/community-push";
 import { CommunityPushToggle } from "@/components/community-push-toggle";
-import { CommunityBar, Face, authorName, storeWhen } from "@/components/community-parts";
+import { CommunityBar, Face, authorName, communityNotices, storeWhen } from "@/components/community-parts";
 import { communityWords } from "@/lib/buyer-words/community";
 import { LANGUAGES } from "@/lib/store-language";
 import { EmptyState } from "@/components/empty-state";
@@ -54,7 +54,11 @@ export default async function NotificationsPage({ params }: Params) {
   const { notices } = await noticesFor(id, key);
   const members = await readMembers(id, notices.map((n) => n.by));
   const waiting = config.dm.on ? await requestCount(id, key) : 0;
-  const devices = canPush() ? await deviceCount(id, key) : 0;
+  // Somebody let in while the community is full has no member record, so no notice reaches them
+  // (lib/community-push.ts stillMembers): the page says so instead of offering a switch that would tell them nothing.
+  const recorded = viewer.owner || Boolean(viewer.member);
+  // Shown as unknown (null) when it does not read, never as 0 and never as an error page.
+  const devices = canPush() && recorded ? await devicesShown(id, key) : 0;
   // Read is read. Done after the list is built, so this visit still shows
   // what was new when they arrived.
   await markSeen(id, key, store);
@@ -71,7 +75,11 @@ export default async function NotificationsPage({ params }: Params) {
           {w.whatHappenedNote}
         </p>
 
-        <CommunityPushToggle handle={store.handle} publicKey={publicKey()} devices={devices} words={w.push} />
+        {recorded ? (
+          <CommunityPushToggle handle={store.handle} publicKey={publicKey()} devices={devices} words={w.push} />
+        ) : (
+          <p className="cm-flash cm-flash-warn mt-6">{communityNotices(store.language).full.text}</p>
+        )}
 
         {notices.length === 0 ? (
           <EmptyState

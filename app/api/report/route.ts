@@ -5,6 +5,7 @@ import { handleIn, readReport } from "@/lib/takedown-rules";
 import { fileReport } from "@/lib/takedown";
 import { type HoldOutcome, alertOwner, holdReported } from "@/lib/child-safety";
 import { storeForHandle } from "@/lib/store";
+import { shareAddress } from "@/lib/traffic-rules";
 
 /**
  * A notice about content on a store (app/report, lib/takedown.ts): the
@@ -28,15 +29,22 @@ export async function POST(request: NextRequest) {
   const read = readReport(body);
   if (!read.ok) return Response.json({ ok: false, error: "problem", problem: read.problem }, { status: 400 });
   try {
-    const result = await fileReport(read.report, clientAddress(request), linkOrigin(request));
+    // Counted per network, not per exact address: one machine holds a whole IPv6 /64, so its five an hour
+    // would be endless notices, support emails and kept records (MM-SA-36). IPv6 is counted by its /48, as
+    // a shared link's views are (lib/traffic-rules.ts); an IPv4 address stays itself.
+    const ip = clientAddress(request);
+    const result = await fileReport(read.report, shareAddress(ip) || ip, linkOrigin(request));
     if (result !== "limited" && (read.report.kind === "child_safety" || read.report.kind === "intimate_image")) {
       const handle = handleIn(read.report.url);
       // A store that cannot be read is said as such, never as an address that names nothing.
       const store = read.report.kind === "child_safety" && handle ? await storeForHandle(handle).catch(() => undefined) : null;
       const outcome: HoldOutcome =
         read.report.kind !== "child_safety" ? "not_held" : store === undefined ? "unknown" : store ? await holdReported(read.report, store) : "no_product";
+      // The owner must be told by the urgent email: the notice email alone names neither kind nor the 48-hour clock.
+      // Certainly refused: the reporter is asked to try again (503), never told it was received (Claude 1 on #3587); a
+      // retry costs one more notice email, the hold is idempotent and the urgent email keyed per request a day.
       // The store already read names the product in the urgent email; one not read (or not readable) is read there.
-      await alertOwner(read.report, outcome, Date.now(), result === "sent", store || undefined);
+      if (!(await alertOwner(read.report, outcome, Date.now(), result === "sent", store || undefined))) return Response.json({ ok: false, error: "error" }, { status: 503 });
     }
     if (result === "sent") return Response.json({ ok: true });
     return Response.json({ ok: false, error: result }, { status: result === "limited" ? 429 : 503 });

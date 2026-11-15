@@ -912,6 +912,28 @@ export const PAYPAL_REFUND_WATCH = {
   daysWatchedAtMost: 400,
 } as const;
 /**
+ * The refund kept for good by the same watch (lib/paypal-sales.ts, watchPayPal, backKey; #3464, Claude 7's MÉDIO):
+ * each look at an order PayPal says is refunded in full writes it to nl:ppsell:back:<stats> with one ORDER_WRITE
+ * script (lib/order-data.ts, orderWrite) carrying one HSETNX, charged to the store's room:
+ * - scriptsPerRefundLook / writesPerScript: one script, one write;
+ * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (EXISTS, TYPE,
+ *   HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET): 11;
+ * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
+ *   tells nothing, so its worst is one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
+ *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
+ * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
+ * tests/affiliate-refund-lifetime.test.ts.
+ */
+export const PAYPAL_REFUND_KEPT = {
+  scriptsPerRefundLook: 1,
+  writesPerScript: 1,
+  commandsPerScriptAtMost: 11,
+  retryWritesPerFailedLook: 1,
+  looksPerDayAtMost: 24,
+  daysAtMost: 400,
+} as const;
+/**
  * The other half of the same function, the sweep of the store's pending PayPal orders (lib/paypal-sales.ts, watchPayPal,
  * pendingKey; Claude 6's second money review of #3392, LEVE 6), run by the same five-minute job:
  * - listReadsPerStoreRun: one ZRANGEBYSCORE of the store's pending list a run;
@@ -937,7 +959,7 @@ export const PAYPAL_PENDING_SWEEP = {
  * five-minute job's watch of PayPal refunds, watchPayPal in lib/paypal-sales.ts): before the event, the person's
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
  * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
- * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH above.
+ * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH and PAYPAL_REFUND_KEPT above.
  */
 export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
 /**

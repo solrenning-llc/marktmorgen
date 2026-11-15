@@ -18,6 +18,7 @@ import { readDraftAudience, type DraftAudience } from "@/lib/mail-draft-audience
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { MAX_MAIL_BODY, MAX_SUBJECT } from "@/lib/mail";
 import type { Store } from "@/lib/store";
 import { hasProduct } from "@/lib/catalog";
@@ -199,7 +200,7 @@ async function saveDraftUnlocked(
 /** Throws a draft away. True when there was one to throw away. */
 export async function removeDraft(store: Store, id: string, expectedSavedAt?: unknown): Promise<boolean> {
   if (!store.listId || !DRAFT_ID.test(id)) return false;
-  let acquired = false;
+  let acquired: string | null = null;
   try {
     acquired = await claimDraftLock(store.listId, id);
     if (!acquired) throw new DraftRemovalUnconfirmed();
@@ -219,7 +220,7 @@ export async function removeDraft(store: Store, id: string, expectedSavedAt?: un
     if (error instanceof DraftRemovalConflict) throw error;
     throw new DraftRemovalUnconfirmed();
   }
-  finally { if (acquired) await releaseDraftLock(store.listId, id); }
+  finally { if (acquired) await releaseDraftLock(store.listId, id, acquired); }
 }
 
 /** Cleanup cannot undo a confirmed campaign; a lost reply must not invite resending it. */
@@ -230,22 +231,28 @@ export async function finishBroadcastDraft(store: Store, id: string, expectedSav
 }
 
 const draftLockKey = (listId: string, id: string) => draftsKey(listId) + ":lock:" + id;
-async function claimDraftLock(listId: string, id: string): Promise<boolean> {
-  const response = await redisPipeline([["SET", draftLockKey(listId, id), "1", "NX", "EX", 90]]);
-  if (!Array.isArray(response) || response.length !== 1 || (response[0] !== "OK" && response[0] !== null)) throw new DraftReadUnavailable();
-  return response[0] === "OK";
+/**
+ * The lease holds a value only this claim writes (lib/claim-mark.ts) and is let go only while it still holds it:
+ * a slow save or delete whose 90 seconds ran out never deletes the lease another tab took since (rule 24). Our
+ * value when ours, null when another holds it; an unknown claim is never ours and throws.
+ */
+async function claimDraftLock(listId: string, id: string): Promise<string | null> {
+  const value = claimValue();
+  const claimed = await claimMark(draftLockKey(listId, id), 90, value);
+  if (claimed === "unknown") throw new DraftReadUnavailable();
+  return claimed === "ours" ? value : null;
 }
-async function releaseDraftLock(listId: string, id: string): Promise<void> {
-  await redisPipeline([["DEL", draftLockKey(listId, id)]]).catch(() => {});
+async function releaseDraftLock(listId: string, id: string, value: string): Promise<void> {
+  await releaseMark(draftLockKey(listId, id), value);
 }
 /** Existing drafts are read, version-checked and written under the same lease as deletion. */
 export async function saveDraft(store: Store, who: string, input: { id?: string; subject: string; body: string; productId: string; audience?: unknown; subjectTest?: unknown; expectedSavedAt?: unknown }): Promise<DraftResult> {
   if (!store.listId) return { ok: false, reason: "list" };
   if (!input.id) return saveDraftUnlocked(store, who, input);
   if (!DRAFT_ID.test(input.id)) return { ok: false, reason: "unknown" };
-  let acquired: boolean;
+  let acquired: string | null;
   try { acquired = await claimDraftLock(store.listId, input.id); } catch { throw new DraftReadUnavailable(); }
   if (!acquired) return { ok: false, reason: "draft_busy" };
   try { return await saveDraftUnlocked(store, who, input); }
-  finally { await releaseDraftLock(store.listId, input.id); }
+  finally { await releaseDraftLock(store.listId, input.id, acquired); }
 }

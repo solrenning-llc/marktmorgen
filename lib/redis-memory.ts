@@ -1002,6 +1002,19 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/affiliates.ts AFFILIATE_REFUND_MARK: each record's refund mark written only over exactly the text read (its SHA-1).
+        if (key.startsWith("-- marktmorgen:affiliate-refund-mark:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          let n = 0;
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            if (typeof current === "string" && createHash("sha1").update(current).digest("hex") === args[i + 1]) {
+              this.run(["HSET", target, args[i], args[i + 2]]);
+              n += 1;
+            }
+          }
+          return n;
+        }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
         if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
@@ -2103,6 +2116,14 @@ export class MemoryRedis {
       }
       case "LLEN":
         return this.data.has(key) ? this.list(key).length : 0;
+      case "LPOP": {
+        // LPOP key, one at a time as lib/licence-keys.ts takes a key from its pool: nil on an empty list, which goes.
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LINDEX": {
         if (!this.data.has(key)) return null;
         const list = this.list(key);

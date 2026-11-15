@@ -580,9 +580,35 @@ const ERASED_UNREAD_WORDS = {
 
 /** The most addresses one message is checked for; a message holds a handful (a buyer, an affiliate), DELIVERY_MAX_BYTES bounds the rest. */
 const ERASED_CHECK_MAX = 50;
-const ADDRESS_LIKE = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/;
+/**
+ * An address anywhere in a text: alone, inside a sentence or as "Name <address>" (Claude 4 on #4555, LEVE). The local
+ * part keeps an apostrophe or a backtick, and a domain label is any letter or digit, accented and punycode ones too, as
+ * erasePerson and Stripe accept them (Claude 1 cloud R on #4562).
+ */
+const ADDRESS_IN_TEXT = /[^\s@<>()[\]{}",;:]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63})*\.[\p{L}\p{N}-]{2,63}/giu;
+/** A character an address's local part plainly holds; what stands before the last one outside them may be glued text. */
+const OUTSIDE_PLAIN_LOCAL = /[^\p{L}\p{N}._%+'`-]/u;
 
-/** Every email address written anywhere in a delivery's message, lowercased, each once. */
+/**
+ * Every address one match may be (Claude 2 on #4562): the match itself, without leading quotes, and what follows the last
+ * character outside a plain local part (an emoji, a link's "=" or a slash glued before it). One more is asked about,
+ * never one fewer: an extra print only adds an HMGET field.
+ */
+function addressReadings(match: string): string[] {
+  const at = match.lastIndexOf("@");
+  const local = match.slice(0, at);
+  const domain = match.slice(at);
+  const out = [local, local.replace(/^['`]+/, "")];
+  for (let i = local.length - 1; i >= 0; i -= 1) {
+    if (OUTSIDE_PLAIN_LOCAL.test(local[i])) {
+      out.push(local.slice(i + 1));
+      break;
+    }
+  }
+  return out.map((part) => part.replace(/^[.]+/, "")).filter((part) => part.length > 0).map((part) => `${part}${domain}`.toLowerCase());
+}
+
+/** Every email address written anywhere in a delivery's message, values and keys, lowercased, each once. */
 export function addressesIn(body: string): string[] {
   let value: unknown;
   try {
@@ -594,10 +620,19 @@ export function addressesIn(body: string): string[] {
   const walk = (v: unknown, depth: number): void => {
     if (depth > 12) return;
     if (typeof v === "string") {
-      const text = v.trim().toLowerCase();
-      if (text.length <= 254 && ADDRESS_LIKE.test(text)) found.add(text);
+      // The whole text first, when it is only an address (Claude 1 cloud R on #4562): as the anchored check before it.
+      const whole = v.trim().toLowerCase();
+      if (whole.length <= 254 && /^[^\s@]{1,64}@[^\s@]{1,190}$/u.test(whole) && whole.includes(".", whole.indexOf("@"))) found.add(whole);
+      for (const match of v.matchAll(ADDRESS_IN_TEXT)) {
+        for (const address of addressReadings(match[0])) if (address.length <= 254) found.add(address);
+      }
     } else if (Array.isArray(v)) v.forEach((item) => walk(item, depth + 1));
-    else if (v && typeof v === "object") Object.values(v).forEach((item) => walk(item, depth + 1));
+    else if (v && typeof v === "object") {
+      for (const [key, item] of Object.entries(v)) {
+        walk(key, depth + 1);
+        walk(item, depth + 1);
+      }
+    }
   };
   walk(value, 0);
   return [...found];
@@ -1141,7 +1176,24 @@ export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: st
       continue;
     }
   }
-  return { messages, readBytes };
+  // Never handed back about a person deleted from the store since (lib/person-data.ts: a webhook's message is never
+  // acted on for a deleted address; Claude 7's webhook hunt, 14 November 2026): one HMGET of the store's prints for
+  // every address in the messages read, read whole (eventsWork prices it). Marks that cannot be read are never "not
+  // deleted": the reading is unreadable, never a history without the check.
+  const addresses = [...new Set(messages.flatMap((message) => addressesIn(JSON.stringify(message))))];
+  if (!store.listId || addresses.length === 0) return { messages, readBytes };
+  if (addresses.length > ERASED_CHECK_MAX * RECENT_MESSAGES_MAX) throw new DeliveriesUnreadable();
+  const [marks] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
+  let prints: (string | number | null)[];
+  try {
+    prints = wholeErasedReply(marks, addresses.length);
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    throw new DeliveriesUnreadable();
+  }
+  const deleted = new Set(addresses.filter((_, i) => prints[i] !== null));
+  const kept = deleted.size === 0 ? messages : messages.filter((message) => !addressesIn(JSON.stringify(message)).some((address) => deleted.has(address)));
+  return { messages: kept, readBytes: readBytes + Buffer.byteLength(JSON.stringify(prints)) };
 }
 
 /**
@@ -1537,6 +1589,22 @@ class OutOfLookups extends Error {}
 class StripeShapeError extends Error {}
 
 /**
+ * What a Stripe event says was paid, refunded or disputed, in its exact shape:
+ * whole cents from 0, and its money as three lower-case letters. Anything else,
+ * missing included, throws StripeShapeError (rule 24): the event waits as one
+ * our code does not know and is never sent as $0 or in dollars, which its
+ * once-only mark would keep for good.
+ */
+function paidCents(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new StripeShapeError(`Stripe gave ${what} in an unknown shape`);
+  return value;
+}
+function paidMoney(value: unknown, what: string): string {
+  if (typeof value !== "string" || !/^[a-z]{3}$/.test(value)) throw new StripeShapeError(`Stripe gave ${what} in an unknown shape`);
+  return value;
+}
+
+/**
  * Why an event could not be done with in this visit: "spent", the visit's
  * lookups ran out (not a failure, never a reason to give up); "refused",
  * Stripe will answer the same way again (STRIPE_REFUSED_RUNS); "passing",
@@ -1643,6 +1711,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     if (!handles.has(meta.store ?? "") || !isSettled(object)) return true;
     const session = str(object.id);
     if (!session) return true;
+    // Read before anything is sent: an amount or a money that does not read waits, never a sale of $0 or in dollars.
+    const amount = paidCents(object.amount_total, "a checkout's amount");
+    const currency = paidMoney(object.currency, "a checkout's money");
     const details = (object.customer_details ?? {}) as { email?: unknown; name?: unknown };
     const buyer = { email: str(details.email) ?? str(object.customer_email), name: str(details.name) };
     const membership = object.mode === "subscription" && meta.kind !== "plan";
@@ -1666,9 +1737,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         const ticked = await Promise.all(bumpsFromMeta(meta).map(async ({ key, id }) => ({ ...(await product(id)), bundle_items: await inside(`${key}_bundle`) })));
         return { order_bump: ticked[0] ?? null, order_bumps: ticked };
       })()),
-      amount_cents: num(object.amount_total),
+      amount_cents: amount,
       discount_cents: num(totals.amount_discount),
-      currency: str(object.currency) ?? "usd",
+      currency,
       buyer,
       paid_at: iso(event.created),
       // Where the sale came from, as the checkout wrote it on the order: the
@@ -1681,8 +1752,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         subscription: str(object.subscription),
         checkout_session: session,
         product: await product(meta.product),
-        amount_cents: num(object.amount_total),
-        currency: str(object.currency) ?? "usd",
+        amount_cents: amount,
+        currency,
         trial_days: Number(meta.trial_days) || 0,
         payments: Number(meta.ends_after) || null,
         buyer,
@@ -1695,6 +1766,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     if (meta.kind !== "upsell" || !handles.has(meta.store ?? "")) return true;
     const intent = str(object.id);
     if (!intent) return true;
+    const amount = paidCents(object.amount, "a one-click offer's amount");
+    const currency = paidMoney(object.currency, "a one-click offer's money");
     await emitEvent(store, "sale.completed", intent, {
       payment_intent: intent,
       kind: "upsell",
@@ -1708,9 +1781,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         id: meta.step_id || meta.step || null,
         number: Number(meta.step_number) || (meta.step ? null : 1),
       },
-      amount_cents: num(object.amount),
+      amount_cents: amount,
       discount_cents: 0,
-      currency: str(object.currency) ?? "usd",
+      currency,
       buyer: { email: str(object.receipt_email), name: null },
       paid_at: iso(event.created),
     }, created);
@@ -1794,7 +1867,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     }
     if (!handles.has(meta.store ?? "")) return true;
     lookups.confirmed = str(event.id) ?? undefined;
-    const total = num(object.amount_refunded);
+    const total = paidCents(object.amount_refunded, "a refund's amount");
+    const charged = paidCents(object.amount, "a refunded charge's amount");
+    const currency = paidMoney(object.currency, "a refund's money");
     const before = num(previous.amount_refunded);
     const billing = (object.billing_details ?? {}) as { email?: unknown; name?: unknown };
     await emitEvent(store, "refund.issued", `${charge}|${total}`, {
@@ -1803,9 +1878,9 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       product: await product(meta.product),
       amount_refunded_cents: Math.max(0, total - before),
       total_refunded_cents: total,
-      amount_cents: num(object.amount),
+      amount_cents: charged,
       fully_refunded: object.refunded === true,
-      currency: str(object.currency) ?? "usd",
+      currency,
       buyer: { email: str(billing.email) ?? str(object.receipt_email), name: str(billing.name) },
       refunded_at: iso(event.created),
     }, created);
@@ -1827,6 +1902,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     meta = found;
     if (!handles.has(meta.store ?? "")) return true;
     lookups.confirmed = str(event.id) ?? undefined;
+    const amount = paidCents(object.amount, "a dispute's amount");
+    const currency = paidMoney(object.currency, "a dispute's money");
     const evidence = (object.evidence_details ?? {}) as { due_by?: unknown };
     await emitEvent(store, "dispute.opened", dispute, {
       dispute,
@@ -1834,8 +1911,8 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       payment_intent: intent,
       product: await product(meta.product),
       option: meta.option ?? null,
-      amount_cents: num(object.amount),
-      currency: str(object.currency) ?? "usd",
+      amount_cents: amount,
+      currency,
       reason: str(object.reason),
       status: str(object.status),
       evidence_due_by: iso(evidence.due_by),

@@ -120,7 +120,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
   }
   // Lessons a quiz that has to be passed still holds shut, for this student: passes that do not read hold them, as a gate.
   const held = studying ? heldBack(course, passed ?? new Set()) : new Map<string, string>();
-  const finished = studying && done !== null && passed !== null && hasFinished(course, done, passed);
+  const finished = studying && done !== null && hasFinished(course, done, passed ?? new Set()) && passed !== null;
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
   // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own

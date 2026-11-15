@@ -23,6 +23,7 @@
  *     the creator.
  */
 import { autoCaptionCents, CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, readAutoAsk } from "@/lib/auto-captions-rules";
+import { MOST_CORRECT_READING, receivingOf } from "@/lib/receiving-costs";
 import { autoRefundsOwed, autoWriting, CAPTIONS_STUCK_COUNT_COMMANDS, captionRefundsStuckMonth, REFUND_LOOKS_MAX, requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { streamCaptions } from "@/lib/stream";
 import { streamPath } from "@/lib/stream-rules";
@@ -158,10 +159,16 @@ async function main(): Promise<void> {
   part("The price");
   is("six dollars a minute for each language, minutes rounded up", [autoCaptionCents(600, 1), autoCaptionCents(601, 2), autoCaptionCents(90 * 60, 3)], [6000, 13200, 162000]);
   is("never under the minimum; nothing for a video with no length", [autoCaptionCents(30, 1), autoCaptionCents(0, 1)], [MIN_CENTS, 0]);
-  // At its dearest: ten cents a language, a dime more if the spoken one is counted apart, and the card's 2.9% and 30 cents;
-  // and the month's count of a refund gone stuck (CAPTIONS_STUCK_COUNT_COMMANDS Redis commands, at Upstash's $2 a million).
-  const worst = (minutes: number, languages: number) => minutes * (languages + 1) * 10 + autoCaptionCents(minutes * 60, languages) * 0.029 + 30 + CAPTIONS_STUCK_COUNT_COMMANDS * (2 / 1_000_000) * 100;
-  is("it pays for itself at its dearest, at every length from one minute to four hours, one language or three", Array.from({ length: 240 }, (_, i) => i + 1).every((m) => [1, 2, 3].every((n) => autoCaptionCents(m * 60, n) > worst(m, n))), true);
+  // At its dearest: ten cents a minute for each language and a dime more if the spoken one is counted apart (the
+  // supplier's price, an assumption of this test, not checked against a dated source here); receiving it at the
+  // dearest provider's fee, with remittance and the refund and dispute reserves, from lib/receiving-costs.ts (the only
+  // fee model, owner's rule); and the month's count of a refund gone stuck (CAPTIONS_STUCK_COUNT_COMMANDS Redis
+  // commands, at Upstash's $2 a million). What is kept (revenueCents) must exceed it at every point.
+  const keptOverWorst = (minutes: number, languages: number) => {
+    const received = receivingOf(autoCaptionCents(minutes * 60, languages), MOST_CORRECT_READING, true);
+    return received.revenueCents - (minutes * (languages + 1) * 10 + received.totalCents + CAPTIONS_STUCK_COUNT_COMMANDS * (2 / 1_000_000) * 100);
+  };
+  is("it pays for itself at its dearest, at every length from one minute to four hours, one language or three", Array.from({ length: 240 }, (_, i) => i + 1).every((m) => [1, 2, 3].every((n) => keptOverWorst(m, n) > 0)), true);
   is("languages: the spoken one first, each once, three at most, none it cannot do", [
     readAutoAsk("en", ["es", "en", "xx"])?.languages,
     readAutoAsk("en", ["es", "fr", "de"]),
@@ -373,7 +380,19 @@ async function main(): Promise<void> {
   listAnswer = "error";
   const stuckMonth = new Date().toISOString().slice(0, 7);
   const stuckCountBefore = await captionRefundsStuckMonth(stuckMonth);
-  for (let i = 0; i < REFUND_LOOKS_MAX; i += 1) await syncAutoCaptions(VIDEO, lateNow + 2 + i);
+  // The commands the count really adds (review of 97bcbd754): every command on the month's key in the look that marks it.
+  const countingFrom = redis.pipeline.bind(redis);
+  let countCommands = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    countCommands += commands.filter((c) => String(c[1]).startsWith("nl:captions:stuck:month:")).length;
+    return countingFrom(commands);
+  }) as typeof redis.pipeline;
+  try {
+    for (let i = 0; i < REFUND_LOOKS_MAX; i += 1) await syncAutoCaptions(VIDEO, lateNow + 2 + i);
+  } finally {
+    redis.pipeline = countingFrom;
+  }
+  is("the count adds exactly CAPTIONS_STUCK_COUNT_COMMANDS commands, once", countCommands, CAPTIONS_STUCK_COUNT_COMMANDS);
   const stuckBefore = stripe.length;
   // Counted for the owner's monthly report (coordinator, 15 November 2026): numbers only, no store, video or person.
   const stuckCountAfter = await captionRefundsStuckMonth(stuckMonth);

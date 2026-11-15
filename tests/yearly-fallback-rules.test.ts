@@ -13,6 +13,8 @@ const NOW = Date.UTC(2026, 10, 4) / 1000;
 const product = { id: "p1", priceCents: 2000, recurring: { interval: "month", trialDays: 0, payments: 0 }, options: [], pwyw: false, yearly: { cents: 20000 } };
 const sub: FallbackSub = {
   status: "past_due",
+  // Stripe always answers a subscription with its discount list; an empty one is a confirmed none (#4711).
+  discounts: [],
   collection_method: "charge_automatically",
   metadata: { store: "lena" },
   default_payment_method: { id: "pm_1", type: "card" },

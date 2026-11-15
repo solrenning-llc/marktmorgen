@@ -63,7 +63,7 @@ export const canSellProduct = () => true;
 export const normaliseEmail = (email: string) => email.trim().toLowerCase();
 export async function runningMembers() {
   return { complete: true, rows: [{
-    id: "sub_SyntheticYearlyU", status: "active", start_date: NOW / 1000 - 90 * 86_400,
+    id: "sub_SyntheticYearlyU", status: "active", discounts: [], start_date: NOW / 1000 - 90 * 86_400,
     customer: { id: "cus_SyntheticYearlyU", email: "member@example.test" },
     metadata: { product: product.id },
     items: { data: [{ quantity: 1, price: { unit_amount: 2000, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] },

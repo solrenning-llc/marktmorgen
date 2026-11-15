@@ -68,10 +68,14 @@ export function affiliateMonthsLeft(meta: Record<string, string> | null | undefi
   return nowSeconds < end;
 }
 
-/** Whether the membership carries a discount of any kind. */
+/**
+ * Whether the membership carries a discount of any kind, or might: a discount list that is missing or does not read
+ * as a list is never taken as none, so a saving a discount in force could undo is never offered (#4711). The legacy
+ * `discount` field can only confirm one.
+ */
 export function discounted(sub: YearlySub): boolean {
   if (sub.discount && typeof sub.discount === "object") return true;
-  return Array.isArray(sub.discounts) && sub.discounts.length > 0;
+  return !Array.isArray(sub.discounts) || sub.discounts.length > 0;
 }
 
 /**

@@ -115,6 +115,7 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   paused: "Shown only when the studio's requests for the period are used up, never something to open.",
   disputes: "The review of one disputed purchase, which opens only from that purchase in Payment requests.",
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
+  students: "Needs both Products and Orders, and an action asks for one permission: an Editor would be shown an action the screen refuses.",
 };
 
 /** Words that say nothing about what to do, left out of a search. */

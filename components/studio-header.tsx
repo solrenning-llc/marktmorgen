@@ -5,7 +5,8 @@ import type { Store } from "@/lib/store";
 import { MAX_STORES_PER_ACCOUNT } from "@/lib/store";
 import { type Role, ROLE_NAMES, can } from "@/lib/team-roles";
 import { StudioSearch } from "@/components/studio-search";
-import { offeredActions } from "@/lib/studio-actions-offered";
+import { ScreenHelp } from "@/components/screen-help";
+import { type DrawnStore, offeredActions } from "@/lib/studio-actions-offered";
 
 type Entry = { store: Pick<Store, "sid" | "name" | "handle">; role: Role };
 
@@ -31,7 +32,7 @@ export function StudioHeader({
   owned,
   action,
 }: {
-  current: Store;
+  current: DrawnStore;
   role: Role;
   stores: Entry[];
   /** How many stores this person owns, for the "New store" line. */
@@ -148,6 +149,7 @@ export function StudioHeader({
       </div>
     </header>
     <StudioSearch sid={current.sid} buyers={can(role, "orders")} actions={offeredActions(current, role)} />
+    <div className="border-b border-line bg-white"><div className="container-page flex flex-wrap items-start gap-2 py-2"><ScreenHelp checkup={can(role, "settings") ? "/studio/checkup?store=" + encodeURIComponent(current.sid) : null} /></div></div>
     </>
   );
 }

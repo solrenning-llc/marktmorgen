@@ -24,20 +24,27 @@ import { isBillingConfigured } from "@/lib/billing";
 import type { OfferedAction } from "@/lib/studio-search-actions";
 import { offeredFor } from "@/lib/studio-actions-gallery";
 
+/** A store as the studio header may hold it: its name and address always, the rest when it was read. */
+export type DrawnStore = Pick<Store, "sid" | "name" | "handle"> & Partial<Store>;
+
 /** The gallery's context for `role` on `store`; null for a role that is not one of the studio's. */
-export function studioGalleryContext(store: Store, role: Role): GalleryContext | null {
+export function studioGalleryContext(store: DrawnStore, role: Role): GalleryContext | null {
   if (typeof role !== "string" || !Object.hasOwn(ROLE_PERMISSIONS, role)) return null;
   const may = (permission: Permission) => can(role, permission);
+  // A store drawn without its products (a header given only its name and address) offers nothing that depends on
+  // them: never "no products" as a fact, only no action that needs them.
+  const listed = Array.isArray(store.catalog?.items);
+  const read = store as Store;
   return {
     may,
     has: {
       discord: isDiscordConfigured(),
-      meet: configuredProviders().length > 0 && offeredProviders(store).length > 0,
-      memberships: sellsMemberships(store),
-      calls: idsOfKind(store, "call").length > 0,
+      meet: listed && configuredProviders().length > 0 && offeredProviders(store).length > 0,
+      memberships: listed && sellsMemberships(read),
+      calls: listed && idsOfKind(read, "call").length > 0,
       proOnSale: PRO_ON_SALE,
     },
-    pro: store.subscriptionActive && hasPro(store.tier),
+    pro: store.subscriptionActive === true && store.tier !== undefined && hasPro(store.tier),
     planHref: isBillingConfigured() && may("billing") ? `${studioPath(store)}#billing` : null,
     billing: may("billing"),
     onSale: PLANS_ON_SALE,
@@ -45,7 +52,7 @@ export function studioGalleryContext(store: Store, role: Role): GalleryContext |
 }
 
 /** The actions `role` may open on `store`, each with its link on this store, for the search box to find in. */
-export function offeredActions(store: Store, role: Role): OfferedAction[] {
+export function offeredActions(store: DrawnStore, role: Role): OfferedAction[] {
   const ctx = studioGalleryContext(store, role);
   return ctx ? offeredFor(ctx, (segment) => studioPath(store, "", segment)) : [];
 }

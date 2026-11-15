@@ -154,6 +154,19 @@ async function main(): Promise<void> {
   is("Discord is not set up here, so no one is offered it", Object.values(lists).some((list) => list.some((entry) => entry.id === "discord")), false);
   is("a role it does not know is offered nothing, and nothing breaks", server.offeredActions(store, "ghost" as Role), []);
   is("a role it does not know has no gallery", server.studioGalleryContext(store, "toString" as Role), null);
+  // A header drawn with only the store's name and address (as tests/stn13-screen-help.test.ts draws it): no products read.
+  const bare = { sid: store.sid, name: store.name, handle: store.handle } as unknown as typeof store;
+  let bareList: ReturnType<typeof server.offeredActions> = [];
+  let bareThrew = false;
+  try {
+    bareList = server.offeredActions(bare, "owner");
+  } catch {
+    bareThrew = true;
+  }
+  is("a store drawn without its products still gets its list, without breaking", bareThrew, false);
+  const bareCtx = server.studioGalleryContext(bare, "owner")!;
+  is("nothing that needs its products is offered: no calls, memberships or video meetings, never a claim of none", [bareCtx.has.calls, bareCtx.has.memberships, bareCtx.has.meet], [false, false, false]);
+  is("everything it is offered, the owner of the whole store is offered too", ids(bareList).every((id) => ids(lists.owner).includes(id)), true);
   const tools = (await studioSearch(store, "owner", "blog")).groups.find((group) => group.id === "tools")!;
   const ctxOwner = server.studioGalleryContext(store, "owner")!;
   is("the search's tools come from the same gallery as the actions", ids(tools.results).every((id) => STUDIO_MODULES.some((module) => module.id === id && available({ id, title: "", segment: module.segment, permission: module.permission, words: [] }, ctxOwner))), true);

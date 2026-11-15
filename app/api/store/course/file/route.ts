@@ -56,5 +56,8 @@ export async function GET(request: NextRequest) {
   // A count that could not be read is never "resting" or "too many" (rule 24): it could not be checked just now.
   if (taken === "unknown") return limitUnknownResponse();
   if (!taken) return plain(503, speech(store).w.restingTitle);
-  return serveFile(file);
+  // A preview lesson's file goes to anyone, signed in or not: a free copy, paused with the store's other free
+  // downloads (lib/serve-file.ts), unless whoever asks holds the course (or owns the store), whose copy is a paid one.
+  const paid = !found.lesson.preview || (await courseAccess(store, product, await cookies())).state === "open";
+  return serveFile(file, { paid });
 }

@@ -83,6 +83,7 @@ const en = {
   searchClear: "Show every product",
   searchSlow: "Too many searches for now. Try again in a few minutes.",
   searchUnread: "The search could not run just now. Try again in a moment.",
+  searchUnavailable: "Search isn't available for this store right now. Browse the products below.",
   /** The store's own questions and answers (lib/store-faq.ts). */
   storeFaqTitle: "Questions, answered",
 };
@@ -147,6 +148,7 @@ const es: BlockWords = {
   searchClear: "Ver todos los productos",
   searchSlow: "Demasiadas búsquedas por ahora. Inténtalo dentro de unos minutos.",
   searchUnread: "La búsqueda no se pudo hacer ahora. Inténtalo de nuevo en un momento.",
+  searchUnavailable: "La búsqueda no está disponible en esta tienda por ahora. Mira los productos de abajo.",
   storeFaqTitle: "Preguntas y respuestas",
 };
 
@@ -208,6 +210,7 @@ const fr: BlockWords = {
   searchClear: "Voir tous les produits",
   searchSlow: "Trop de recherches pour le moment. Réessayez dans quelques minutes.",
   searchUnread: "La recherche n'a pas pu se faire pour le moment. Réessayez dans un instant.",
+  searchUnavailable: "La recherche n’est pas disponible pour cette boutique pour le moment. Parcourez les produits ci-dessous.",
   storeFaqTitle: "Vos questions, nos réponses",
 };
 
@@ -269,6 +272,7 @@ const de: BlockWords = {
   searchClear: "Alle Produkte zeigen",
   searchSlow: "Gerade zu viele Suchen. Versuche es in ein paar Minuten wieder.",
   searchUnread: "Die Suche hat gerade nicht geklappt. Versuche es gleich noch einmal.",
+  searchUnavailable: "Die Suche ist in diesem Shop gerade nicht verfügbar. Sieh dir die Produkte unten an.",
   storeFaqTitle: "Fragen und Antworten",
 };
 
@@ -330,6 +334,7 @@ const it: BlockWords = {
   searchClear: "Mostra tutti i prodotti",
   searchSlow: "Troppe ricerche per ora. Riprova tra qualche minuto.",
   searchUnread: "La ricerca non è riuscita ora. Riprova tra un momento.",
+  searchUnavailable: "La ricerca non è disponibile in questo negozio per ora. Sfoglia i prodotti qui sotto.",
   storeFaqTitle: "Domande e risposte",
 };
 
@@ -391,6 +396,7 @@ const nl: BlockWords = {
   searchClear: "Alle producten tonen",
   searchSlow: "Even te veel zoekopdrachten. Probeer het over een paar minuten opnieuw.",
   searchUnread: "Zoeken lukte nu even niet. Probeer het zo opnieuw.",
+  searchUnavailable: "Zoeken is in deze winkel nu niet beschikbaar. Bekijk de producten hieronder.",
   storeFaqTitle: "Vragen en antwoorden",
 };
 
@@ -452,6 +458,7 @@ const pt: BlockWords = {
   searchClear: "Ver todos os produtos",
   searchSlow: "Demasiadas pesquisas por agora. Tente novamente dentro de alguns minutos.",
   searchUnread: "Não foi possível pesquisar agora. Tente novamente daqui a pouco.",
+  searchUnavailable: "A pesquisa não está disponível nesta loja por agora. Veja os produtos abaixo.",
   storeFaqTitle: "Perguntas e respostas",
 };
 

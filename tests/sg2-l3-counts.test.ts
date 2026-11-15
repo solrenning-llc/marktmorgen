@@ -103,20 +103,21 @@ async function outcome<T>(run: () => Promise<T>): Promise<T | string> {
   }
 }
 
-/** The pipeline that counts a limit: [SET key 0 EX n NX, INCR key] on a key starting with `prefix`. */
+/** The pipeline that counts a limit (lib/window-count.ts): [INCR key, EXPIRE key n NX] on a key starting with `prefix`. */
 const counter = (prefix: string) => (commands: (string | number)[][]) =>
-  commands.length === 2 && commands[1]?.[0] === "INCR" && String(commands[1]?.[1]).startsWith(prefix);
+  commands.length === 2 && commands[0]?.[0] === "INCR" && String(commands[0]?.[1]).startsWith(prefix) && commands[1]?.[0] === "EXPIRE";
 
-/** Replies a limit's [SET NX, INCR] must never be read from. */
+/** Replies a window count (lib/window-count.ts: INCR, then EXPIRE NX) must never be read from. */
 const BAD_COUNTERS: [string, unknown][] = [
-  ["a count that is null", ["OK", null]],
-  ["a count written as text", ["OK", "1"]],
-  ["a fractional count", ["OK", 0.5]],
-  ["a negative count", ["OK", -1]],
-  ["a count that is an object", ["OK", { result: 1 }]],
-  ["a count that is true", ["OK", true]],
-  ["a reply missing the count", ["OK"]],
-  ["a third, unasked-for reply", ["OK", 1, 1]],
+  ["an EXPIRE answered false", [1, false]],
+  ["a count that is null", [null, 1]],
+  ["a count written as text", ["1", 1]],
+  ["a fractional count", [0.5, 1]],
+  ["a negative count", [-1, 1]],
+  ["a count that is an object", [{ result: 1 }, 1]],
+  ["a count that is true", [true, 1]],
+  ["a reply missing the EXPIRE's answer", [1]],
+  ["a third, unasked-for reply", [1, 1, 1]],
   ["a reply that is not a list", { result: 1 }],
 ];
 
@@ -147,12 +148,12 @@ void (async () => {
     rule = { when: counter("nl:rl:address:"), reply };
     is(`withinAddressLimit, ${label}: over the limit`, await outcome(() => withinAddressLimit("someone@sg2-l3.example")), false);
   }
-  rule = { when: counter("nl:rl:signin:"), reply: ["OK", 5] };
+  rule = { when: counter("nl:rl:signin:"), reply: [5, 1] };
   is("withinRateLimit: the fifth is still in", await withinRateLimit("203.0.113.7"), true);
-  rule = { when: counter("nl:rl:signin:"), reply: ["OK", 6] };
+  rule = { when: counter("nl:rl:signin:"), reply: [6, 1] };
   is("withinRateLimit: the sixth is over", await withinRateLimit("203.0.113.7"), false);
-  rule = { when: counter("nl:rl:address:"), reply: [null, 8] };
-  is("withinAddressLimit: a window already open (SET NX null) and the eighth is in", await withinAddressLimit("someone@sg2-l3.example"), true);
+  rule = { when: counter("nl:rl:address:"), reply: [8, 0] };
+  is("withinAddressLimit: a window already open (its expiry already set) and the eighth is in", await withinAddressLimit("someone@sg2-l3.example"), true);
   rule = null;
   is("withinRateLimit: the real counter still lets the first in", await withinRateLimit("203.0.113.8"), true);
   is("withinAddressLimit: the real counter still lets the first in", await withinAddressLimit("first@sg2-l3.example"), true);
@@ -166,9 +167,9 @@ void (async () => {
   }));
   const answer = async (res: Response) => [res.status, ((await res.json()) as { error?: string }).error ?? "ok"];
   for (const [label, prefix] of [["the machine's count", "nl:rl:signin:"], ["the address's count", "nl:rl:address:"]] as [string, string][]) {
-    rule = { when: counter(prefix), reply: ["OK", null] };
+    rule = { when: counter(prefix), reply: [null, 1] };
     is(`sign-in route, ${label} unknown: server_error, not rate_limited`, await answer(await ask("someone@sg2-l3.example")), [503, "server_error"]);
-    rule = { when: counter(prefix), reply: ["OK", 99] };
+    rule = { when: counter(prefix), reply: [99, 1] };
     is(`sign-in route, ${label} over the limit: rate_limited`, await answer(await ask("someone@sg2-l3.example")), [429, "rate_limited"]);
   }
   rule = null;
@@ -184,9 +185,9 @@ void (async () => {
     }));
     return new URL(res.headers.get("location") ?? "https://x/").searchParams.get("address");
   };
-  rule = { when: counter("nl:rl:address:"), reply: ["OK", null] };
+  rule = { when: counter("nl:rl:address:"), reply: [null, 1] };
   is("address move, the address's count unknown: error, not limited", await move(), "error");
-  rule = { when: counter("nl:rl:address:"), reply: ["OK", 99] };
+  rule = { when: counter("nl:rl:address:"), reply: [99, 1] };
   is("address move, past the limit: limited", await move(), "limited");
   rule = null;
 
@@ -248,15 +249,15 @@ void (async () => {
   part("openCourseLink: an emailed link opens only on a whole count of opens under the limit");
   const token = "a".repeat(64);
   const grant = JSON.stringify({ e: "buyer@sg2-l3.example", k: "k", h: "sg2-l3-course", p: "p_course" });
-  const opens = (commands: (string | number)[][]) => commands.length === 3 && commands[0]?.[0] === "GET" && commands[2]?.[0] === "INCR";
+  const opens = (commands: (string | number)[][]) => commands.length === 3 && commands[0]?.[0] === "GET" && commands[1]?.[0] === "INCR" && commands[2]?.[0] === "EXPIRE";
   for (const [label, reply] of BAD_COUNTERS) {
     const replies = Array.isArray(reply) ? [grant, ...reply] : reply;
     rule = { when: opens, reply: replies };
     is(`openCourseLink, ${label}: not opened`, await outcome(() => openCourseLink(token)), null);
   }
-  rule = { when: opens, reply: [grant, "OK", 10] };
+  rule = { when: opens, reply: [grant, 10, 0] };
   is("openCourseLink: the tenth open still opens", (await openCourseLink(token))?.p, "p_course");
-  rule = { when: opens, reply: [grant, null, 11] };
+  rule = { when: opens, reply: [grant, 11, 0] };
   is("openCourseLink: the eleventh does not", await openCourseLink(token), null);
 
   part("studentPage: an unknown number of students is never 0");

@@ -109,6 +109,16 @@ export class MemoryRedis {
     throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
   }
 
+  /**
+   * A source of ZUNIONSTORE or ZINTERSTORE, as Redis reads one: a sorted set as it is, a plain set with each member at
+   * score 1, a missing key as empty; a key of another kind is WRONGTYPE.
+   */
+  private zsetSource(key: string): { score: number; member: string }[] {
+    const held = this.data.get(key);
+    if (held instanceof Set) return [...held].map((member) => ({ score: 1, member: String(member) }));
+    return this.zsetRead(key);
+  }
+
   /** Redis deletes a sorted set when its last member goes: an emptied one is not kept. */
   private dropIfEmpty(key: string, z: { score: number; member: string }[]): void {
     if (z.length === 0 && this.data.get(key) === z) this.forgetKey(key);
@@ -2275,12 +2285,16 @@ export class MemoryRedis {
       }
 
       case "ZADD": {
-        const z = this.zset(key);
         // Flags before the first score, in any order, as Redis reads them. "NX": a member already there keeps the
         // score it has. "XX": only a member already there is moved. "CH": count the members changed too.
         let flags = 0;
-        while (flags < args.length && ["NX", "XX", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
+        while (flags < args.length && ["NX", "XX", "CH", "GT", "LT", "INCR"].includes(String(args[flags]).toUpperCase())) flags += 1;
         const set = new Set(args.slice(0, flags).map((flag) => String(flag).toUpperCase()));
+        // Not implemented here: refused by name, never read as a score (reviewer 3rjdf).
+        for (const flag of ["GT", "LT", "INCR"]) if (set.has(flag)) throw new Error(`MemoryRedis does not implement ZADD ${flag}`);
+        // XX adds nothing new, so on a missing key it makes nothing, as on Redis.
+        if (set.has("XX") && !this.data.has(key)) return 0;
+        const z = this.zset(key);
         const onlyNew = set.has("NX");
         const onlyOld = set.has("XX");
         const pairs = args.slice(flags);
@@ -2413,9 +2427,9 @@ export class MemoryRedis {
         const [firstKey, ...restKeys] = sources;
         for (const one of sources) this.live(one);
         const held = new Map<string, number>();
-        for (const entry of this.zsetRead(firstKey ?? "")) held.set(entry.member, entry.score);
+        for (const entry of this.zsetSource(firstKey ?? "")) held.set(entry.member, entry.score);
         for (const other of restKeys) {
-          const theirs = new Map(this.zsetRead(other).map((e) => [e.member, e.score]));
+          const theirs = new Map(this.zsetSource(other).map((e) => [e.member, e.score]));
           for (const [member, score] of [...held]) {
             const found = theirs.get(member);
             if (found === undefined) {
@@ -2454,7 +2468,7 @@ export class MemoryRedis {
         const held = new Map<string, number>();
         for (const one of sources) {
           this.live(one);
-          for (const entry of this.zsetRead(one)) held.set(entry.member, (held.get(entry.member) ?? 0) + entry.score);
+          for (const entry of this.zsetSource(one)) held.set(entry.member, (held.get(entry.member) ?? 0) + entry.score);
         }
         const made = [...held].map(([member, score]) => ({ score, member }));
         made.sort((a, b) => a.score - b.score || a.member.localeCompare(b.member));

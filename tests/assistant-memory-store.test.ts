@@ -13,6 +13,9 @@ import { DataRoomError, dataUsed, needData, type DataStore } from "@/lib/store-d
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const STATS = "m".repeat(16);
 const KEY = `nl:amem:${STATS}`;

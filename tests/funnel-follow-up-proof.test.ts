@@ -1,0 +1,33 @@
+/**
+ * MM-SA-40, same-family follow-up (reading 51LL): a funnel's sequence is never set to start from a form that cannot
+ * start it. A form starts a sequence only for an address it has proven: its list box checked, and the button in the
+ * email it sends pressed (app/api/store/form/route.ts). The forms a funnel makes never offer that box (lib/funnel-ai.ts
+ * writes offerList:false, and isFunnelAiDraft refuses a draft that sets it), so followUpMoment (lib/funnel-ai-rules.ts)
+ * pointed the sequence at a form that never starts it: the AI wrote emails nobody would ever get, and their words
+ * spoke of a box that is not there. Now a form is the moment only when it offers the box; otherwise the sequence
+ * follows a product, as for a funnel without a form.
+ */
+import { followUpMoment } from "@/lib/funnel-ai-rules";
+import { FUNNEL_TYPES, pagesOf } from "@/lib/funnel-types";
+import { done, is, part } from "./check";
+
+part("Every funnel type with an email form and no product picked");
+const withForm = FUNNEL_TYPES.filter((type) => pagesOf(type).some((page) => page.form && page.blocks.includes("form") && page.form.fields.some((field) => field.type === "email")));
+is("control: some funnel types ask for an email in a form", withForm.length > 0, true);
+for (const type of withForm) {
+  const moment = followUpMoment(type, {});
+  is(`${type.id}: never a form that offers no list box, which would never start the sequence`, moment?.trigger === "form", false);
+}
+
+part("A form that offers the box is still the moment");
+const quiz = FUNNEL_TYPES.find((type) => type.id === "quiz")!;
+const boxed = { ...quiz, slots: quiz.slots.map((slot) => (slot.kind === "page" && slot.form ? { ...slot, form: { ...slot.form, offerList: true } } : slot)) };
+is("with the box, the form starts the sequence", followUpMoment(boxed, {})?.trigger, "form");
+
+part("A free product picked is still first");
+const magnet = FUNNEL_TYPES.find((type) => type.slots.some((slot) => slot.kind === "product" && slot.wants === "free"));
+if (magnet) {
+  const free = magnet.slots.find((slot) => slot.kind === "product" && slot.wants === "free")!;
+  is("the free product's moment", followUpMoment(magnet, { [free.key]: "prod01" }), { trigger: "product", slot: free.key, productId: "prod01" });
+}
+done();

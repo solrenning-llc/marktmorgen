@@ -7,7 +7,10 @@
 // through this worker only made a second copy of every one of them, and made a
 // font the page asks for early arrive twice. The new name empties the old copies.
 // v7: a buyer's library (/library) joined the private pages below.
-const CACHE = "nimbus-v7";
+// v8: a store's letters, signing, paying and podcast pages, and the site's
+// invitations, joined them: each is drawn for the signed-in viewer (#4615).
+// The new name empties the copies of them already kept.
+const CACHE = "nimbus-v8";
 const SHELL = ["/", "/demo", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -33,11 +36,13 @@ self.addEventListener("activate", (event) => {
 
 // A store's own pages that show an order, a membership, a course, its
 // members-only community, an affiliate's own numbers, a membership to renew,
-// a buyer's own review of an order, or a certificate (which a creator can
-// withdraw, so an old copy must never stand in for it), on either address a
+// a buyer's own review of an order, a certificate (which a creator can
+// withdraw, so an old copy must never stand in for it), a letter (members-only
+// ones carry the whole text and the reader's email), a signing or paying page,
+// or a podcast (a draft is shown to its owner signed in), on either address a
 // store has (/@name/thanks here, /thanks on its own domain), and the site's
-// signed-in pages.
-const PRIVATE = /^\/(?:@[^/]+\/)?(?:thanks|orders|manage|course|book|community|affiliates|renew|certificate|review)(?:\/|$)|^\/(?:studio|signin|unsubscribe|library|demo\/thanks)(?:\/|$)/;
+// signed-in pages, an invitation among them (it shows the signed-in email).
+const PRIVATE = /^\/(?:@[^/]+\/)?(?:thanks|orders|manage|course|book|community|affiliates|renew|certificate|review|letters|sign|pay|podcast)(?:\/|$)|^\/(?:studio|signin|unsubscribe|library|invite|demo\/thanks)(?:\/|$)/;
 const PRIVATE_QUERY = /[?&](?:session_id|token|t|r|ask|ref|v)=/;
 
 self.addEventListener("fetch", (event) => {

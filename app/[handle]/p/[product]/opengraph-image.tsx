@@ -7,7 +7,7 @@ import { MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { imageSize } from "@/lib/image-size";
 import { averageText, showsRating, summaryOf } from "@/lib/reviews";
 import { canUseDomain } from "@/lib/domains";
-import { pricePill } from "@/components/store-product";
+import { salePill } from "@/components/store-product";
 import { takePublicRequest } from "@/lib/traffic";
 import { PRODUCT_CARD_PICTURE_PIXELS, PRODUCT_CARD_UNITS } from "@/lib/public-read-rules";
 import { speech } from "@/lib/buyer-words";
@@ -112,8 +112,9 @@ export default async function OpengraphImage({ params }: Params) {
     store && product ? summaryOf(store.statsId, product.id).catch(() => null) : Promise.resolve(null),
   ]);
   const stars = summary && showsRating(summary) ? summary : null;
-  // In the store's own currency and language (lib/money.ts, lib/buyer-words), as the page writes it.
-  const price = product && store ? pricePill(store, product) : "";
+  // In the store's own currency and language (lib/money.ts, lib/buyer-words), as the page writes it; while a sale
+  // covers it, the price its checkout charges (salePill), as the page's own price does.
+  const price = product && store ? salePill(store, product) : "";
   const address =
     store?.domain?.liveAt && canUseDomain(store) ? store.domain.name : `marktmorgen.com/@${store?.handle ?? ""}`;
 

@@ -580,9 +580,35 @@ const ERASED_UNREAD_WORDS = {
 
 /** The most addresses one message is checked for; a message holds a handful (a buyer, an affiliate), DELIVERY_MAX_BYTES bounds the rest. */
 const ERASED_CHECK_MAX = 50;
-const ADDRESS_LIKE = /^[^\s@]{1,64}@[^\s@]{1,253}\.[^\s@]{1,63}$/;
+/**
+ * An address anywhere in a text: alone, inside a sentence or as "Name <address>" (Claude 4 on #4555, LEVE). The local
+ * part keeps an apostrophe or a backtick, and a domain label is any letter or digit, accented and punycode ones too, as
+ * erasePerson and Stripe accept them (Claude 1 cloud R on #4562).
+ */
+const ADDRESS_IN_TEXT = /[^\s@<>()[\]{}",;:]{1,64}@[\p{L}\p{N}-]{1,63}(?:\.[\p{L}\p{N}-]{1,63})*\.[\p{L}\p{N}-]{2,63}/giu;
+/** A character an address's local part plainly holds; what stands before the last one outside them may be glued text. */
+const OUTSIDE_PLAIN_LOCAL = /[^\p{L}\p{N}._%+'`-]/u;
 
-/** Every email address written anywhere in a delivery's message, lowercased, each once. */
+/**
+ * Every address one match may be (Claude 2 on #4562): the match itself, without leading quotes, and what follows the last
+ * character outside a plain local part (an emoji, a link's "=" or a slash glued before it). One more is asked about,
+ * never one fewer: an extra print only adds an HMGET field.
+ */
+function addressReadings(match: string): string[] {
+  const at = match.lastIndexOf("@");
+  const local = match.slice(0, at);
+  const domain = match.slice(at);
+  const out = [local, local.replace(/^['`]+/, "")];
+  for (let i = local.length - 1; i >= 0; i -= 1) {
+    if (OUTSIDE_PLAIN_LOCAL.test(local[i])) {
+      out.push(local.slice(i + 1));
+      break;
+    }
+  }
+  return out.map((part) => part.replace(/^[.]+/, "")).filter((part) => part.length > 0).map((part) => `${part}${domain}`.toLowerCase());
+}
+
+/** Every email address written anywhere in a delivery's message, values and keys, lowercased, each once. */
 export function addressesIn(body: string): string[] {
   let value: unknown;
   try {
@@ -594,10 +620,19 @@ export function addressesIn(body: string): string[] {
   const walk = (v: unknown, depth: number): void => {
     if (depth > 12) return;
     if (typeof v === "string") {
-      const text = v.trim().toLowerCase();
-      if (text.length <= 254 && ADDRESS_LIKE.test(text)) found.add(text);
+      // The whole text first, when it is only an address (Claude 1 cloud R on #4562): as the anchored check before it.
+      const whole = v.trim().toLowerCase();
+      if (whole.length <= 254 && /^[^\s@]{1,64}@[^\s@]{1,190}$/u.test(whole) && whole.includes(".", whole.indexOf("@"))) found.add(whole);
+      for (const match of v.matchAll(ADDRESS_IN_TEXT)) {
+        for (const address of addressReadings(match[0])) if (address.length <= 254) found.add(address);
+      }
     } else if (Array.isArray(v)) v.forEach((item) => walk(item, depth + 1));
-    else if (v && typeof v === "object") Object.values(v).forEach((item) => walk(item, depth + 1));
+    else if (v && typeof v === "object") {
+      for (const [key, item] of Object.entries(v)) {
+        walk(key, depth + 1);
+        walk(item, depth + 1);
+      }
+    }
   };
   walk(value, 0);
   return [...found];
@@ -1141,7 +1176,24 @@ export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: st
       continue;
     }
   }
-  return { messages, readBytes };
+  // Never handed back about a person deleted from the store since (lib/person-data.ts: a webhook's message is never
+  // acted on for a deleted address; Claude 7's webhook hunt, 14 November 2026): one HMGET of the store's prints for
+  // every address in the messages read, read whole (eventsWork prices it). Marks that cannot be read are never "not
+  // deleted": the reading is unreadable, never a history without the check.
+  const addresses = [...new Set(messages.flatMap((message) => addressesIn(JSON.stringify(message))))];
+  if (!store.listId || addresses.length === 0) return { messages, readBytes };
+  if (addresses.length > ERASED_CHECK_MAX * RECENT_MESSAGES_MAX) throw new DeliveriesUnreadable();
+  const [marks] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
+  let prints: (string | number | null)[];
+  try {
+    prints = wholeErasedReply(marks, addresses.length);
+  } catch (error) {
+    if (!(error instanceof UnknownReplyError)) throw error;
+    throw new DeliveriesUnreadable();
+  }
+  const deleted = new Set(addresses.filter((_, i) => prints[i] !== null));
+  const kept = deleted.size === 0 ? messages : messages.filter((message) => !addressesIn(JSON.stringify(message)).some((address) => deleted.has(address)));
+  return { messages: kept, readBytes: readBytes + Buffer.byteLength(JSON.stringify(prints)) };
 }
 
 /**

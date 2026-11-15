@@ -477,11 +477,13 @@ export const EVENTS_MOST: EventsSize = {
 /**
  * What the recent events do: the store's log read (LRANGE), each delivery in
  * it measured (STRLEN), then all read in one script (lib/webhooks.ts,
- * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH)
- * and the messages of the type asked for sent. Without an argument, its most.
+ * READ_DELIVERIES: each measured again and read, READ_DELIVERIES_CALLS_EACH),
+ * the store's deletion marks read for the people in them (one HMGET, since 14
+ * November 2026: lib/webhooks.ts, recentMessagesOf), and the messages of the
+ * type asked for sent. Without an argument, its most.
  */
 export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
-  return { commands: s.deliveries > 0 ? 2 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 3 : 1 };
+  return { commands: s.deliveries > 0 ? 3 + (1 + READ_DELIVERIES_CALLS_EACH) * s.deliveries : 1, bytes: s.bytes, sent: s.sent, stripePages: 0, roundTrips: s.deliveries > 0 ? 4 : 1 };
 }
 
 /**

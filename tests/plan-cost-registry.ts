@@ -1,3 +1,4 @@
+import { SWEEP_LIBRARY_MARK_READS } from "@/lib/buyer-library";
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
@@ -908,6 +909,17 @@ export const PAYPAL_REFUND_WATCH = {
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
 } as const;
+/**
+ * The checkout sweep's notes of a store's buyers in their purchase library (lib/checkout-sweep.ts → rememberBuyersAt,
+ * lib/buyer-library.ts; #4754), in Redis commands added by the deletion check, held by tests/i4754-sweep-library.test.ts:
+ * - markReadsPerStoreRun: SWEEP_LIBRARY_MARK_READS, one HMGET of the store's deletion marks before the write and one
+ *   after it, for every buyer of the pass at once, only in a pass that has buyers to note;
+ * - takeBackPipelinesPerStoreRunAtMost: one pipeline of SREMs (forgetBoughtCommands, the 14 keys of each address taken
+ *   back) when a deletion landed between the two reads or the second did not read.
+ * The write itself was there before. A scheduled job bounded by its schedule and its stores per run, a company fixed
+ * cost like PAYPAL_PENDING_SWEEP (NOT_A_COST.SWEEP_LIBRARY_MARK_READS).
+ */
+export const SWEEP_LIBRARY_NOTES = { markReadsPerStoreRun: SWEEP_LIBRARY_MARK_READS, takeBackPipelinesPerStoreRunAtMost: 1 } as const;
 /**
  * The other half of the same function, the sweep of the store's pending PayPal orders (lib/paypal-sales.ts, watchPayPal,
  * pendingKey; Claude 6's second money review of #3392, LEVE 6), run by the same five-minute job:
@@ -2015,6 +2027,7 @@ export const OPEN: OpenItem[] = [];
 
 /** Exported limit or cost constants that are not a per-store monthly cost, and why. */
 export const NOT_A_COST: Record<string, string> = {
+  SWEEP_LIBRARY_MARK_READS: "lib/buyer-library.ts rememberBuyersAt (#4754): the two HMGET of a store's deletion marks the five-minute checkout sweep reads around its library write in a pass with buyers, a company fixed cost of that job, bounded by its schedule and stores per run (SWEEP_LIBRARY_NOTES above), never a plan's.",
   HOLDS_PER_ADDRESS: "lib/stock.ts: how many limited units one connection may hold on a store within one hold's time, an abuse bound that keeps a never-paying connection from holding a drop. Not a plan allowance; each press is still counted by the checkout's own lines.",
   TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",

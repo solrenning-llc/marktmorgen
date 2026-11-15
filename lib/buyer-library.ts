@@ -126,6 +126,12 @@ async function deletionMarks(listId: string, emails: string[]): Promise<(number 
 }
 
 /**
+ * The deletion marks rememberBuyersAt reads for one store's buyers in one pass: one HMGET before its write and one
+ * after it, whatever the number of buyers (tests/plan-cost-registry.ts, SWEEP_LIBRARY_NOTES).
+ */
+export const SWEEP_LIBRARY_MARK_READS = 2;
+
+/**
  * rememberBuyers for purchases made at known times (#4754): an address deleted from the store at or after its latest
  * purchase here (any deletion: the library is forgotten by both, lib/person-erasure.ts) is not noted again, so a
  * checkout seen again after the deletion leaves the library as the deletion left it; a purchase after the deletion is

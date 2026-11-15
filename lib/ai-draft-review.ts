@@ -166,16 +166,17 @@ const DIGITS = /(?<![\p{L}\p{N}_.,])[$€£]?\d+(?:[.,]\d+)*(?:\s?%|[kKmMbB](?![
 /**
  * Digits followed by these name an order or a shape, not a figure: "the 2nd
  * week", "the 1st draft", "3D printing". Ordinals in words ("second") are not
- * read either. Only a capital "D" is a shape: "30d" and "3d" are days. An
- * ordinal before a year, an anniversary or a count of people is still a
- * figure: "our 10th year in business", "our 1000th customer" (Claude 6's
- * focal return on #3437, review 5831982049).
+ * read either. Only a capital "D" is a shape: "30d" and "3d" are days. Any
+ * other ordinal in digits claims a figure, a rank or a count: "our 10th sale",
+ * "ranked 3rd", "our 10th-year anniversary", "our 1000th customer" (Codex G's
+ * MEDIUM on #3437: a short list of claimed nouns let every other one through).
+ * Only the order of a part of the draft is left out, the same parts PART_LABEL
+ * numbers, and a draft, an edition or a round.
  */
-const ORDINAL = /(?:st|nd|rd|th)(?![\p{L}\p{N}])/iuy;
-const CLAIMED_ORDINAL = /(?:st|nd|rd|th)\s+(?:years?|anniversary|birthday|customers?|buyers?|clients?|students?|members?|subscribers?|followers?)(?![\p{L}\p{N}])/iuy;
+const ORDINAL_OF_A_PART = /(?:st|nd|rd|th)\s+(?:weeks?|days?|steps?|modules?|lessons?|parts?|chapters?|emails?|sessions?|drafts?|editions?|rounds?|sections?|pages?|units?|classes?|videos?|episodes?)(?![\p{L}\p{N}])/iuy;
 const SHAPE = /D(?![\p{L}\p{N}])/uy;
 const sticky = (pattern: RegExp, text: string, at: number) => ((pattern.lastIndex = at), pattern.test(text));
-const notAFigureAfter = (text: string, at: number) => (sticky(ORDINAL, text, at) && !sticky(CLAIMED_ORDINAL, text, at)) || sticky(SHAPE, text, at);
+const notAFigureAfter = (text: string, at: number) => sticky(ORDINAL_OF_A_PART, text, at) || sticky(SHAPE, text, at);
 
 /**
  * Digits right after one of these words number a part of the draft, they claim nothing: "Week 1: Getting

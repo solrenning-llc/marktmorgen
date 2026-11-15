@@ -116,7 +116,10 @@ is("'10m' with nothing given is still listed as written", safely(() => unsourced
 is("'$10m' is still ten million", safely(() => unsourcedNumbers(["Raised $10m"], "10 minutes")), ["$10m"]);
 is("'10M' is still ten million", safely(() => unsourcedNumbers(["10M views"], "10 minutes")), ["10M"]);
 is("'3D printing' is not a 3", safely(() => unsourcedNumbers(["3D printing basics"], "")), []);
-is("an ordinal is not a figure, like 'second' in words", safely(() => unsourcedNumbers(["In the 2nd week, the 1st draft, the 3rd and the 4th"], "")), []);
+is("an ordinal of a part is not a figure, like 'second' in words", safely(() => unsourcedNumbers(["In the 2nd week, the 1st draft"], "")), []);
+// A bare ordinal ("the 3rd and the 4th") names no part, so it is listed to check (Codex G's MEDIUM on #3437): a
+// prompt to read it, never a refusal.
+is("a bare ordinal is listed to check", safely(() => unsourcedNumbers(["the 3rd and the 4th"], "")), ["3", "4"]);
 is("'Double chocolate' is a flavor, not twice", safely(() => unsourcedNumbers(["Double chocolate cookies and triple berry jam"], "")), []);
 is("'double your' and 'triple the' still claim a number", safely(() => unsourcedNumbers(["Double your sales and triple the reach"], "")), ["Double", "triple"]);
 is("'0.125' is not the 125 the creator gave (nit)", safely(() => unsourcedNumbers(["0.125 inch thick"], "125 pages")), ["0.125"]);
@@ -137,5 +140,10 @@ is("'our 10th year in business' claims a figure", safely(() => unsourcedNumbers(
 is("'our 1000th customer' claims a figure", safely(() => unsourcedNumbers(["Be our 1000th customer"], "")), ["1000"]);
 is("'the 10th year' the creator gave is not invented", safely(() => unsourcedNumbers(["Our 10th year"], "ten years in business")), []);
 is("a lesson's order is still not a figure", safely(() => unsourcedNumbers(["In the 2nd lesson and the 10th week"], "")), []);
+// Codex G's MEDIUM on #3437: an ordinal in a ranking or a count claims a figure; only a part of the draft is ordered.
+is("'Our 10th sale', 'Ranked 3rd' and 'our 10th-year anniversary' claim figures", safely(() => unsourcedNumbers(["Our 10th sale broke a record. Ranked 3rd in the market. Celebrate our 10th-year anniversary."], "", "en")), ["10", "3"]);
+is("'our 10th-year anniversary' alone claims a figure", safely(() => unsourcedNumbers(["Celebrate our 10th-year anniversary."], "", "en")), ["10"]);
+is("'We were 1st' claims a figure", safely(() => unsourcedNumbers(["We were 1st to market"], "")), ["1"]);
+is("the 1st draft, the 3rd step, the 2nd module and the 4th email are parts", safely(() => unsourcedNumbers(["The 1st draft, the 3rd step, the 2nd module and the 4th email"], "")), []);
 
 done();

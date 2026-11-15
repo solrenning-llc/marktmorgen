@@ -494,6 +494,11 @@ export type Paid = {
   via?: { aff: string; rate: number };
   off?: number;
   sale?: number;
+  /**
+   * The creator's PayPal account the order was paid to (added 12 November 2026; absent on orders paid before): the
+   * refund watch reads the capture as that account, whatever account the store has connected since.
+   */
+  m?: string;
 };
 export type CaptureResult = { ok: true; paid: Paid; fresh: boolean } | { ok: false; reason: "unknown" | "pending" | "declined" | "mismatch" | "error" };
 
@@ -681,6 +686,7 @@ async function settle(order: string, opened: Opened, captureId: string, email: s
     currency: opened.cur,
     at: Math.floor(Date.now() / 1000),
     handle: opened.h,
+    ...(MERCHANT_ID.test(opened.m) ? { m: opened.m } : {}),
     ...(opened.meta ? { meta: opened.meta } : {}),
     ...(opened.via ? { via: opened.via } : {}),
     ...(opened.off ? { off: opened.off, sale: opened.sale } : {}),
@@ -980,9 +986,12 @@ export async function watchPayPal(
       await redisPipeline([["ZREM", watchKey(statsId), order]]);
       continue;
     }
+    // The account the order was paid to, whatever account the store has connected since (C7, 12 November 2026); a
+    // record from before it was kept falls back to the account connected now.
+    const merchant = typeof paid.m === "string" && MERCHANT_ID.test(paid.m) ? paid.m : store.paypalSeller.merchant;
     let status = "";
     try {
-      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant: store.paypalSeller.merchant });
+      const capture = await call("GET", `/v2/payments/captures/${encodeURIComponent(paid.capture)}`, { merchant });
       // Without PayPal's own status it is not known whether it was refunded: asked again in an hour, never taken for
       // "not refunded", and moved back so it cannot hold the place of the orders behind it.
       if (typeof capture.status !== "string" || !capture.status) {
@@ -1227,13 +1236,13 @@ export const MAX_PAID_BYTES = 20 * (40 + 6 + 6 * 200) + 2_000;
  */
 export async function paypalKept(statsId: string | null, refunds: boolean): Promise<{ sales: number; refunds: number }> {
   if (!statsId || !isRedisConfigured()) return { sales: 0, refunds: 0 };
-  const asked = refunds ? 2 : 1;
-  const replies = repliesFor(await redisPipeline([["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])]), asked);
-  // ZCARD answers 0 for a key that is not there, never null: a count in any other shape, a reply cut short or one
-  // too many is unknown, never 0 (CX-123 rules 24 and 30). The refunds not asked for are 0, as before.
+  // Rule 24: these counts size what a read is counted for before it reads, so only whole counts are counts. A reply
+  // in another shape throws, and every caller refuses before reading, never as a store with no PayPal sales.
+  const commands = [["ZCARD", salesKey(statsId)], ...(refunds ? [["ZCARD", refundedKey(statsId)]] : [])];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
   const sales = countOf(replies?.[0]);
   const refunded = refunds ? countOf(replies?.[1]) : 0;
-  if (sales === null || refunded === null) throw new UnknownReplyError("the PayPal sales and refunds kept");
+  if (sales === null || refunded === null) throw new UnknownReplyError("the PayPal sales kept");
   return { sales, refunds: refunded };
 }
 

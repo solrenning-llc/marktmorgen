@@ -338,7 +338,7 @@
     "video": 69,
     "storage": 152,
     "orders": 505,
-    "store-email": 81,
+    "store-email": 82,
     "transactional-email": 165,
     "list-email": 0,
     "visits": 1076
@@ -6471,7 +6471,7 @@
    },
    "coefYear": {
     "ai": 7643,
-    "video": 1106,
+    "video": 1107,
     "storage": 2435,
     "orders": 3786,
     "store-email": 872,

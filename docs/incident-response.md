@@ -22,8 +22,8 @@ Escrito pela Claude 2 em 1/11/2026 a partir do código do main (508 [SG4], parte
 | Suspensão de loja | Uma loja suspensa pelo processo de denúncia fecha a entrada de novos contatos na lista | `lib/store.ts` (`suspended`), `lib/store-join.ts` |
 | Registro da equipe | Cada loja guarda as últimas 500 ações da equipe | `lib/team.ts` |
 | HSTS | O site obriga HTTPS no navegador | `next.config.ts` |
-| Canal de segurança | `/.well-known/security.txt` (RFC 9116) e a pergunta "How do I report a security problem?" na página `/platform/security` | 508 [SG4] parte 2 (PR #1554, ainda não incorporado) |
-| Análise de código | CodeQL em todo PR, no main e uma vez por dia; Dependabot para atualizações de segurança | 508 [SG4] parte 1 (PR #1551, ainda não incorporado) |
+| Canal de segurança | `/.well-known/security.txt` (RFC 9116) e a pergunta "How do I report a security problem?" na página `/platform/security` | 508 [SG4] parte 2: no main desde 1/11/2026 (PR #1554, commit 418680a748b3d605a2d8f3d7b27bc6a3e3185930, 02h45 Fortaleza); arquivo `public/.well-known/security.txt` |
+| Análise de código | CodeQL em todo PR, no main e uma vez por dia; Dependabot para atualizações de segurança | 508 [SG4] parte 1: no main desde 1/11/2026 (PR #1551, commit b8051926dd843dfd77f9af08633dff0576f0c375, 02h40 Fortaleza); arquivos `.github/workflows/codeql.yml` e `.github/dependabot.yml` |
 
 ## 2. O que NÃO existe hoje (lacunas reais)
 

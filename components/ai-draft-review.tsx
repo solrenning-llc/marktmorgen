@@ -1,7 +1,7 @@
 "use client";
 
 import { useId } from "react";
-import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, reviewDone, sensitiveWarning, type SensitiveTopic } from "@/lib/ai-draft-review";
+import { AI_DRAFT_BADGE, AI_DRAFT_CHECKS, ESTIMATE_BADGE, reviewDone, sensitiveLabel, sensitiveWarning, type DraftTopics } from "@/lib/ai-draft-review";
 
 /**
  * The "AI draft" badge and the three checks drawn under every draft the
@@ -18,23 +18,28 @@ export function AiDraftReview({
 }: {
   checks: readonly boolean[];
   onToggle: (index: number, ticked: boolean) => void;
-  /** What the draft is about that needs a reader who knows it: health, money, the law (756 [STN3], unit 2). */
-  topics?: readonly SensitiveTopic[];
+  /**
+   * What the draft is about that needs a reader who knows it: health, money, the law,
+   * or "unread" for a draft in a language the lists do not read (756 [STN3], unit 2).
+   */
+  topics?: DraftTopics;
   /** Numbers in the draft that the creator did not give, each shown as an estimate (756 [STN3], unit 3). */
   estimates?: readonly string[];
 }) {
   const base = useId();
   const done = reviewDone(checks);
   const warning = sensitiveWarning(topics);
+  const warningId = `${base}-topic`;
   return (
-    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review>
+    // The warning describes the group, so a screen reader reads it with the checks (Claude 6's review of #3436, LOW 5).
+    <fieldset className="rounded-xl border border-line bg-white p-3" data-ai-review aria-describedby={warning ? warningId : undefined}>
       <legend className="flex flex-wrap items-center gap-2 px-1 text-sm font-semibold text-ink">
         <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-ink">{AI_DRAFT_BADGE}</span>
         <span>Before you save it, check:</span>
       </legend>
       {warning ? (
-        <p className="mt-1 text-sm text-ink">
-          <strong>Sensitive topic:</strong> {warning}
+        <p id={warningId} className="mt-1 text-sm text-ink">
+          <strong>{sensitiveLabel(topics)}</strong> {warning}
         </p>
       ) : null}
       {estimates.length ? (

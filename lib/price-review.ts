@@ -269,9 +269,12 @@ export function optionPriceReview(
       : `Your store shows this as soon as you save. ${optionStorePriceWords(product.taxOnTop, false)}`,
   ];
   notes.push(...planWords(product.plan, product.planBefore, product.planAfter(price), price, money));
+  // A slip of ten times up or down is said first, and the save names the price (569 [NC1] (b)).
+  const jump = priceJump(option.priceCents, price);
   return {
     rows: [{ key: "option", label: `“${label}”`, now: money(option.priceCents), then: money(price), field: "price" }],
     note: notes.join(" "),
+    ...(jump ? { jump: priceJumpWords(jump, money(option.priceCents), money(price)), confirmCents: price } : {}),
   };
 }
 

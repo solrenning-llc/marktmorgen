@@ -19,9 +19,10 @@
  */
 import { readFileSync } from "node:fs";
 import { PRICE_JUMP_FACTOR, confirmedPrice, priceJump, priceJumpWords } from "@/lib/price-jump-rules";
-import { addProduct, claimHandle, editProduct, setProductHidden, setSubscription } from "@/lib/store";
+import { addOption, addProduct, claimHandle, editOption, editProduct, setProductHidden, setProductLink, setSubscription } from "@/lib/store";
+import { readProduct } from "@/lib/catalog";
 import { readListing } from "@/lib/catalog";
-import { type PricedProduct, priceReview } from "@/lib/price-review";
+import { type PricedProduct, optionPriceReview, priceReview } from "@/lib/price-review";
 import { formatMoney, readMoney } from "@/lib/money";
 import { priceCheckMessage } from "@/components/product-editor";
 import { storeForEmail } from "@/lib/store";
@@ -83,6 +84,33 @@ async function main(): Promise<void> {
   const internal = await editProduct(OWNER, id, "Workbook", "", "10");
   is("a save from the code itself (no check asked, the demo's reset) is not held", internal.ok, true);
 
+  part("A price option, the same way");
+  const kit = await addProduct(OWNER, "Kit", "", "10", null);
+  if (!kit.ok) throw new Error("the kit was not added");
+  for (const [label, price] of [["Basic", "10"], ["Pro", "30"]]) {
+    const added = await addOption(OWNER, kit.product.id, label, price);
+    if (!added.ok) throw new Error(`the ${label} option was not added: ${added.reason}`);
+  }
+  const options = async () => (await readProduct((await storeForEmail(OWNER))!, kit.product.id))!.options;
+  const [basic, pro] = await options();
+  await setProductLink(OWNER, basic.id, "https://example.com/basic");
+  const optionPrice = async () => (await options()).find((o) => o.id === basic.id)?.priceCents;
+  const held = await editOption(OWNER, basic.id, "Basic", "1000", { priceCheck: { confirmedCents: null } });
+  is("an option offered to buyers, $10 to $1,000 unconfirmed: refused with both prices", held.ok ? "saved" : [held.reason, held.priceJump], ["price_check", { beforeCents: 1000, afterCents: 100000, way: "up", times: 100 }]);
+  is("and the option stays $10", await optionPrice(), 1000);
+  const wrongOne = await editOption(OWNER, basic.id, "Basic", "1000", { priceCheck: { confirmedCents: 99999 } });
+  is("confirming another amount is refused", wrongOne.ok ? "saved" : wrongOne.reason, "price_check");
+  const named = await editOption(OWNER, basic.id, "Basic", "1000", { priceCheck: { confirmedCents: 100000 } });
+  is("confirmed at exactly $1,000: saved", [named.ok, await optionPrice()], [true, 100000]);
+  const smallOption = await editOption(OWNER, basic.id, "Basic", "500", { priceCheck: { confirmedCents: null } });
+  is("$1,000 to $500 needs no confirmation", smallOption.ok, true);
+  const nothingBehind = await editOption(OWNER, pro.id, "Pro", "3000", { priceCheck: { confirmedCents: null } });
+  is("an option with nothing to hand over (left off the page) is not held", nothingBehind.ok, true);
+  const fromCode = await editOption(OWNER, basic.id, "Basic", "5");
+  is("a save from the code itself (no check asked) is not held", fromCode.ok, true);
+  const optionRoute = readFileSync("app/api/store/option/route.ts", "utf8");
+  is("the option route passes what the creator confirmed and answers with both prices", [/priceCheck: \{ confirmedCents: confirmedPrice\(body\.confirmPrice\) \}/.test(optionRoute), /priceJump: result\.priceJump/.test(optionRoute)], [true, true]);
+
   part("Check what buyers pay says the jump and names the price");
   const product: PricedProduct = { hidden: false, options: 0, priceCents: 1000, interval: null, suggestedCents: null, intro: null, yearlyCents: null, id: "p1", tiers: [], bounds: { min: 100, max: 500_000 }, refuses: { free: false, membership: false, choose: false }, taxOnTop: false, plan: null, planBefore: false, planAfter: () => false };
   const typed = (price: string) => priceReview(product, { title: "Workbook", summary: "", about: "", price, every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "" }, (t) => readMoney(t, "usd"), (c) => formatMoney(c, "usd"));
@@ -91,9 +119,12 @@ async function main(): Promise<void> {
   const fine = typed("25");
   is("$10 to $25: no jump, nothing named", [fine?.jump, fine?.confirmCents, fine?.rows.length], [undefined, undefined, 1]);
   is("with price options (priced in each option), no jump", priceReview({ ...product, options: 2 }, { title: "Workbook", summary: "", about: "", price: "1000", every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "" }, (t) => readMoney(t, "usd"), (c) => formatMoney(c, "usd"))?.jump, undefined);
-  const held = priceCheckMessage({ beforeCents: 1000, afterCents: 100000 }, "usd");
-  is("a held save says nothing was saved, both prices and how to confirm", [/^Your changes were not saved\./.test(held), held.includes("$1,000"), held.includes("now, $10."), /Check what buyers pay/.test(held)], [true, true, true, true]);
+  const heldWords = priceCheckMessage({ beforeCents: 1000, afterCents: 100000 }, "usd");
+  is("a held save says nothing was saved, both prices and how to confirm", [/^Your changes were not saved\./.test(heldWords), heldWords.includes("$1,000"), heldWords.includes("now, $10."), /Check what buyers pay/.test(heldWords)], [true, true, true, true]);
   is("an unreadable answer still says what to do", /^Your changes were not saved\. Check the price/.test(priceCheckMessage(undefined, "usd")), true);
+
+  const optionReviewed = optionPriceReview({ label: "Basic", priceCents: 1000, details: "", sku: undefined }, "1000", { hidden: false, interval: null, shown: true, taxOnTop: false, plan: null, planBefore: false, planAfter: () => false }, (t) => readMoney(t, "usd"), (c) => formatMoney(c, "usd"));
+  is("an option's review says the jump and names the price", [optionReviewed?.jump?.includes("100 times"), optionReviewed?.confirmCents], [true, 100000]);
 
   part("The route and the studio");
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
@@ -103,7 +134,8 @@ async function main(): Promise<void> {
   is("the price now is read under the lock (inside onProduct)", /onProduct<[^>]*"price_check"/.test(store) && /priceJump\(product\.priceCents, fields\.priceCents\)/.test(store), true);
   const editor = readFileSync("components/product-editor.tsx", "utf8");
   is("the studio sends the price it showed, only once the review was shown", /priceReview === product.id && review\?\.confirmCents !== undefined\) payload\.confirmPrice = review\.confirmCents/.test(editor), true);
-  is("the studio says a price_check refusal in words", /data\.error === "price_check"/.test(editor), true);
+  is("the studio says a price_check refusal in words, for a product and for an option", [/data\.error === "price_check"/.test(editor), /reason === "price_check"/.test(editor)], [true, true]);
+  is("the option editor sends the price it showed", /optionReview === option\.id && review\?\.confirmCents !== undefined \? \{ confirmPrice: review\.confirmCents \}/.test(editor), true);
   const review = readFileSync("lib/price-review.ts", "utf8");
   is("Check what buyers pay says the jump", /priceJumpWords\(/.test(review), true);
   done();

@@ -56,6 +56,7 @@ import {
   MAX_OPTIONS,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  optionDelivers,
   parseDetails,
   type ProductOption,
 } from "@/lib/product-option";
@@ -3869,8 +3870,10 @@ export type OptionResult =
   | { ok: true; store: Store; removed: ProductFile[] }
   | {
       ok: false;
-      reason: "none" | "label" | "price" | "free" | "too_many" | "store_too_many" | "unknown" | "call" | "course" | "pwyw" | "bundle" | "sku" | "sku_kind";
+      reason: "none" | "label" | "price" | "free" | "too_many" | "store_too_many" | "unknown" | "call" | "course" | "pwyw" | "bundle" | "sku" | "sku_kind" | "price_check";
       limit?: number;
+      /** When a jump of the option's price was not confirmed (lib/price-jump-rules.ts): the price now and the one asked for. */
+      priceJump?: { beforeCents: number; afterCents: number } & PriceJump;
     };
 
 /** Checks a label and a typed price for one option, in the store's currency. */
@@ -3974,12 +3977,31 @@ export async function editOption(
   id: string,
   rawLabel: string,
   rawPrice: string,
-  more: { details?: unknown; best?: boolean; sku?: unknown } = {},
+  more: {
+    details?: unknown;
+    best?: boolean;
+    sku?: unknown;
+    /**
+     * The creator's own save (app/api/store/option/route.ts): the price of an option buyers are offered, on a published
+     * product, moved PRICE_JUMP_FACTOR times up or down is saved only when `confirmedCents` names it (569 [NC1] (b)).
+     */
+    priceCheck?: { confirmedCents: number | null };
+  } = {},
 ): Promise<OptionResult> {
   return onOption(email, id, (product, at, store) => {
     // Read in the store's own currency, as the store is under the lock.
     const fields = readOption(rawLabel, rawPrice, store.currency);
     if (typeof fields === "string") return { ok: false, reason: fields };
+    // The price now is read here, under the lock. A draft, or an option that hands nothing over (left off the page,
+    // lib/product-option.ts optionDelivers), is paid for by no buyer, as in the studio's review.
+    const opens = Boolean(product.course || product.podcast || product.shipping);
+    if (more.priceCheck && !product.hidden && optionDelivers(product.options[at], opens)) {
+      const before = product.options[at].priceCents;
+      const jump = priceJump(before, fields.priceCents);
+      if (jump && more.priceCheck.confirmedCents !== fields.priceCents) {
+        return { ok: false, reason: "price_check", priceJump: { beforeCents: before, afterCents: fields.priceCents, ...jump } };
+      }
+    }
     const sku = more.sku === undefined ? product.options[at].sku : readShippingSku(more.sku);
     if (sku === null) return { ok: false, reason: "sku" };
     if (more.sku !== undefined && sku && !product.shipping) return { ok: false, reason: "sku_kind" };

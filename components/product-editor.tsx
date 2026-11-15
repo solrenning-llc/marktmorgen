@@ -988,6 +988,8 @@ function OptionsBlock({
         setError(
           reason === "fast_money"
             ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
+            : reason === "price_check"
+            ? priceCheckMessage((data as { priceJump?: unknown }).priceJump, currency)
             : reason === "too_many"
             ? `A product carries up to ${MAX_OPTIONS} prices.`
             : reason === "label"
@@ -1186,7 +1188,8 @@ function OptionsBlock({
               );
               const save = () =>
                 run(
-                  { action: "edit", id: option.id, label, price: price.trim(), details, best, ...(shipped ? { sku } : {}) },
+                  // The price just seen in "Check what buyers pay", named so a jump of ten times is let through (569 [NC1] (b)).
+                  { action: "edit", id: option.id, label, price: price.trim(), details, best, ...(shipped ? { sku } : {}), ...(optionReview === option.id && review?.confirmCents !== undefined ? { confirmPrice: review.confirmCents } : {}) },
                   () => {
                     setEditingId(null);
                     setOptionReview(null);
@@ -1215,6 +1218,7 @@ function OptionsBlock({
                   {optionReview === option.id && review ? (
                     <div className="mt-3 rounded-[var(--r-md)] bg-white p-4 text-sm text-ink">
                       <h3 id={`option-${option.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                      {review.jump ? <p className="mt-2 font-semibold">{review.jump}</p> : null}
                       <dl className="mt-2 divide-y divide-line">
                         {review.rows.map((row) => (
                           <div key={row.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 py-2">

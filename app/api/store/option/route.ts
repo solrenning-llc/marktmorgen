@@ -1,4 +1,5 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { confirmedPrice } from "@/lib/price-jump-rules";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
 import {
@@ -18,6 +19,7 @@ const ACTIONS = new Set(["add", "edit", "remove", "move"]);
 
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
+  price_check: 409,
   too_many: 409,
   store_too_many: 409,
   unknown: 404,
@@ -70,7 +72,8 @@ export async function POST(request: NextRequest) {
     if (action === "add") {
       result = await addOption(ref, id, label, price, { details, best, sku });
     } else if (action === "edit") {
-      result = await editOption(ref, id, label, price, { details, best, sku });
+      // A price moved ten times up or down is saved only when the creator named it (569 [NC1] (b), lib/price-jump-rules.ts).
+      result = await editOption(ref, id, label, price, { details, best, sku, priceCheck: { confirmedCents: confirmedPrice(body.confirmPrice) } });
     } else if (action === "remove") {
       result = await removeOption(ref, id);
     } else {
@@ -83,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     if (!result.ok) {
       return Response.json(
-        { ok: false, error: result.reason, limit: result.limit },
+        { ok: false, error: result.reason, limit: result.limit, priceJump: result.priceJump },
         { status: STATUS[result.reason] ?? 400 },
       );
     }

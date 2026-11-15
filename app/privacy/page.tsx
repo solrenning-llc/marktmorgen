@@ -2251,9 +2251,9 @@ export default function PrivacyPage() {
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
             If a creator removed a course before we began keeping a record of
-            removed courses, some records you left in that course (lessons
-            done, quiz answers, a certificate) may not be reached when you ask
-            us to delete your data from that store.
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

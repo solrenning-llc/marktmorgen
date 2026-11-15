@@ -84,8 +84,11 @@ export function yearlyOfferEmail(input: { tier: Tier; trialing: boolean; stopUrl
       "",
       "Marktmorgen",
       // A commercial email (CAN-SPAM, 15 U.S.C. 7704(a)(3), (a)(5)): a working way to stop offers, and the company's
-      // postal address. offerOnce sends nothing without both.
-      ...(input.stopUrl ? ["", `To get no more offers from us: ${input.stopUrl}`] : []),
+      // postal address. offerOnce sends nothing without both. It says plainly that it is an advertisement
+      // (7704(a)(5)(A)(i)).
+      "",
+      "This email is an advertisement: an offer from Marktmorgen about your own plan.",
+      ...(input.stopUrl ? [`To get no more offers from us: ${input.stopUrl}`] : []),
       ...(input.postal ? [`Marktmorgen · ${input.postal}`] : []),
     ].join("\n"),
   };

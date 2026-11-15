@@ -1,6 +1,8 @@
 import type { NextRequest } from "next/server";
 import { offersTokenOk, stopOffers } from "@/lib/offer-stop";
-import { clientAddress, withinLimit } from "@/lib/request-guard";
+import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
+import { storeForEmail } from "@/lib/store";
+import { clientAddress, fromAnotherSite, withinLimit } from "@/lib/request-guard";
 
 /**
  * Stops the offers Marktmorgen emails a creator (lib/offer-stop.ts), from the link at the foot of such an email. The
@@ -22,19 +24,70 @@ function read(request: NextRequest): { sid: string; token: string } | null {
   return offersTokenOk(sid, token) ? { sid, token } : null;
 }
 
-/** Requests of this stop one connection may make in an hour, page and press together: enough for a person, never a scan. */
-export const OFFERS_STOP_PER_HOUR = 30;
+/**
+ * The studio's way to stop, for a creator whose link is lost or broken (no reply to be handled by hand): signed in, the
+ * same page shows the same button for their own store. Only this path reads a session, so only it is limited per
+ * connection; the signed link above never is (RFC 8058: one-click presses come from a mail provider's few addresses).
+ */
+export const OFFERS_STUDIO_PER_HOUR = 30;
 
-async function tooMany(request: NextRequest): Promise<Response | null> {
-  if (await withinLimit("offers-stop", clientAddress(request), OFFERS_STOP_PER_HOUR, 3_600).catch(() => false)) return null;
-  return page("Try again later", "<h1>Try again later</h1><p>Too many requests from here in the last hour. Please try again later.</p>", 429);
+const NOT_RECOGNIZED = page(
+  "Link not recognized",
+  `<h1>Link not recognized</h1><p>This link is not one we recognize. You can stop these offers from your studio instead: <a href="/api/store/offers?via=studio">stop offers while signed in</a>.</p>`,
+  400,
+);
+
+function notRecognized(): Response {
+  return NOT_RECOGNIZED.clone();
+}
+
+async function signedInStoreId(request: NextRequest): Promise<string | null> {
+  const email = await emailForSession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!email) return null;
+  return (await storeForEmail(email))?.sid ?? null;
+}
+
+const STUDIO_ACTION = "/api/store/offers?via=studio";
+
+async function studioGet(request: NextRequest): Promise<Response> {
+  if (!(await withinLimit("offers-studio", clientAddress(request), OFFERS_STUDIO_PER_HOUR, 3_600).catch(() => false))) {
+    return page("Try again later", "<h1>Try again later</h1><p>Too many requests from here in the last hour. Please try again later.</p>", 429);
+  }
+  const sid = await signedInStoreId(request);
+  if (!sid) return page("Sign in first", `<h1>Sign in first</h1><p><a href="/signin">Sign in to your studio</a>, then open this page again to stop offers from Marktmorgen.</p>`);
+  return page(
+    "Offers from Marktmorgen",
+    `<h1>Offers from Marktmorgen</h1><p>We sometimes email you an offer about your own plan, such as paying yearly. Emails about your account, your sales and your payments still come.</p><form method="post" action="${esc(STUDIO_ACTION)}"><button>Stop these offers</button></form>`,
+  );
+}
+
+async function studioPost(request: NextRequest): Promise<Response> {
+  // A press of the studio's button only: another site cannot use a creator's session to press it.
+  if (fromAnotherSite(request)) return page("Not from here", "<h1>Not from here</h1><p>To stop offers, use the button on this page while signed in to your studio.</p>", 403);
+  if (!(await withinLimit("offers-studio", clientAddress(request), OFFERS_STUDIO_PER_HOUR, 3_600).catch(() => false))) {
+    return page("Try again later", "<h1>Try again later</h1><p>Too many requests from here in the last hour. Please try again later.</p>", 429);
+  }
+  const sid = await signedInStoreId(request);
+  if (!sid) return page("Sign in first", `<h1>Sign in first</h1><p><a href="/signin">Sign in to your studio</a>, then open this page again to stop offers from Marktmorgen.</p>`, 401);
+  return stopped(sid);
+}
+
+async function stopped(sid: string): Promise<Response> {
+  try {
+    await stopOffers(sid);
+  } catch (error) {
+    // Said only once confirmed (CX-123 rule 24): never "Stopped" on an unknown answer.
+    console.error("stopping a creator's offers could not be confirmed", error);
+    return page("Not changed yet", "<h1>Not changed yet</h1><p>We could not confirm that these offers stopped just now. Please press the button again in a minute.</p>", 503);
+  }
+  return page("Stopped", "<h1>Stopped</h1><p>You will not get offers from Marktmorgen anymore. Emails about your account, your sales and your payments still come.</p>");
 }
 
 export async function GET(request: NextRequest) {
-  const waited = await tooMany(request);
-  if (waited) return waited;
+  if (request.nextUrl.searchParams.get("via") === "studio") return studioGet(request);
+  // The token is checked first, by CPU only: a link that is not one is refused without reading anything stored.
   const asked = read(request);
-  if (!asked) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize. You can also stop these emails by replying to one of them.</p>", 400);
+  if (!asked) return notRecognized();
   const action = `/api/store/offers?s=${encodeURIComponent(asked.sid)}&t=${encodeURIComponent(asked.token)}`;
   return page(
     "Offers from Marktmorgen",
@@ -43,18 +96,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  // Before anything is read (a mail app's one-click POST included). A POST only ever stops: there is no way to start
-  // the offers again from here, from this site or another.
-  const waited = await tooMany(request);
-  if (waited) return waited;
+  if (request.nextUrl.searchParams.get("via") === "studio") return studioPost(request);
+  // A mail app's one-click POST (RFC 8058) or the button: the token first, by CPU only, and no limit per connection.
+  // A POST only ever stops: there is no way to start the offers again from here, from this site or another.
   const asked = read(request);
-  if (!asked) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize.</p>", 400);
-  try {
-    await stopOffers(asked.sid);
-  } catch (error) {
-    // Said only once confirmed (CX-123 rule 24): never "Stopped" on an unknown answer.
-    console.error("stopping a creator's offers could not be confirmed", error);
-    return page("Not changed yet", "<h1>Not changed yet</h1><p>We could not confirm that these offers stopped just now. Please press the button again in a minute.</p>", 503);
-  }
-  return page("Stopped", "<h1>Stopped</h1><p>You will not get offers from Marktmorgen anymore. Emails about your account, your sales and your payments still come.</p>");
+  if (!asked) return notRecognized();
+  return stopped(asked.sid);
 }

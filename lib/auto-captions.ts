@@ -345,13 +345,17 @@ async function orderCharge(id: string, order: Order, final: boolean): Promise<{ 
     if (invoice.status === "paid") {
       const pi = invoice.payment_intent;
       if (typeof pi === "string" && /^pi_[A-Za-z0-9]{8,64}$/.test(pi)) {
-        // Paid in part from the credit balance: the card paid all that was left due, the balance the rest of the price.
+        // Paid for exactly this order's price, the card paying all that was left due (review of 599eab270): the card the
+        // whole price, or the card the rest after the credit balance paid part of it. An invoice for another amount (a
+        // discount on the customer, an item more) or a card amount that does not read is not known to be this order's
+        // payment: "unknown", looked at again, never taken as paid in full and never delivered on.
         const paidByCard = invoice.amount_paid;
-        if (invoice.total === order.cents && typeof paidByCard === "number" && Number.isSafeInteger(paidByCard) && paidByCard > 0 && paidByCard < order.cents &&
-          paidByCard === invoice.amount_due && typeof invoice.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(invoice.id)) {
-          return { pi, card: paidByCard, credit: invoice.id };
-        }
-        return { pi };
+        if (invoice.total !== order.cents || typeof paidByCard !== "number" || !Number.isSafeInteger(paidByCard) || paidByCard <= 0 ||
+          paidByCard > order.cents || paidByCard !== invoice.amount_due) return "unknown";
+        if (paidByCard === order.cents) return { pi };
+        // Paid in part from the credit balance: the card paid all that was left due, the balance the rest of the price.
+        if (typeof invoice.id === "string" && /^in_[A-Za-z0-9]{6,64}$/.test(invoice.id)) return { pi, card: paidByCard, credit: invoice.id };
+        return "unknown";
       }
       // Paid wholly from the credit balance (Claude 2 and Claude 6 on #3286): Stripe marks such an invoice paid when it
       // is finalized, with no payment, nothing due and nothing paid by card, for the whole price. Only exactly that.

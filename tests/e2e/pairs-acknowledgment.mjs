@@ -1,3 +1,4 @@
+import {waitForReactHandler} from "./react-hydration.mjs";
 /** Every creator-pick save/removal is intercepted, with no buyer or public data writes. */
 export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -39,7 +40,7 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
    // Only once React has taken the editor over (onclick set on its button): a pick made while a slow or busy browser is
    // still drawing the panel can be lost, which left the button disabled for good.
    const saveButton=section.getByRole("button",{name:"Save picks",exact:true});
-   await page.waitForFunction(el=>typeof el.onclick==="function",await saveButton.elementHandle(),{timeout:60000});
+   await waitForReactHandler(page,saveButton,"onClick");
    await first.selectOption(target);
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({
     target,events:window.__pairsSelectionEvents,

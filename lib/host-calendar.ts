@@ -36,6 +36,7 @@
 import { CALENDAR_LIST_PAUSED, integrationPauseWord } from "@/lib/integration-pause";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { Busy } from "@/lib/call-setup";
 import { readFeed, providerOf } from "@/lib/calendar-sync";
 import { checkUrl, problemWords as fetchProblemWords, SafeFetchError } from "@/lib/safe-fetch";
@@ -144,8 +145,19 @@ async function readConfig(host: string): Promise<Config | null> {
   return parseConfig(raw);
 }
 
+/**
+ * Writes a host's settings, only when Redis answers "OK" (CX-123 rule 24): any other reply leaves the write
+ * unknown, so it throws, and the route says it failed rather than that an address was forgotten.
+ */
 async function writeConfig(host: string, config: Config): Promise<void> {
-  await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]);
+  const [saved] = repliesFor(await redisPipeline([["SET", cfgKey(host), JSON.stringify(config)]]), 1) ?? [];
+  if (saved !== "OK") throw new UnknownReplyError("a host's calendar settings write");
+}
+
+/** Forgets a host's last reading and last failure, only on a count Redis answered for it. */
+async function forgetReadings(host: string): Promise<void> {
+  const [gone] = repliesFor(await redisPipeline([["DEL", goodKey(host), errKey(host)]]), 1) ?? [];
+  if (countOf(gone) === null) throw new UnknownReplyError("forgetting a host's calendar readings");
 }
 
 function emptyConfig(email: string): Config {
@@ -473,7 +485,7 @@ export async function removeHostIcs(store: Pick<Store, "statsId">, email: string
   const config = await readConfig(host);
   if (!config) return;
   await writeConfig(host, { ...config, ics: "", icsAddedAt: "", source: config.source === "ics" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
 }
 
 /**
@@ -490,7 +502,7 @@ export async function disconnectHostGoogle(store: Pick<Store, "statsId">, email:
   const { providerAccessRemoved } = await disconnectFor(store.statsId, "google", host);
   const config = await readConfig(host);
   if (config) await writeConfig(host, { ...config, read: [], write: "", source: config.source === "google" ? "none" : config.source });
-  await redisPipeline([["DEL", goodKey(host), errKey(host)]]);
+  await forgetReadings(host);
   return providerAccessRemoved;
 }
 

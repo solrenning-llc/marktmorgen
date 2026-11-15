@@ -42,6 +42,8 @@
  */
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
@@ -75,7 +77,8 @@ export type MetaRead = {
   day: string;
   at: number;
   /** What stopped the last try: the currencies differ, Meta was busy or failed. Empty when it worked. */
-  problem: "" | "currency" | "busy" | "error";
+  /** "big": the account has more lines over 30 days than one reading takes; tried again the next UTC day. */
+  problem: "" | "currency" | "busy" | "big" | "error";
   /** No try before this, after a problem Meta may get over (seconds). */
   after: number;
   /** Lines read, and what they come to, over the 30 days read. */
@@ -117,6 +120,11 @@ export const linesKey = (statsId: string) => `nl:stats:${statsId}:spend:meta`;
 const stateKey = (state: string) => `nl:metaads:state:${hash(`metaads-state:${state}`)}`;
 const userKey = (user: string) => `nl:metaads:user:${hash(`metaads-user:${user}`)}`;
 const STORES_KEY = "nl:metaads:stores";
+/** The daily pass's mark and the generation it holds (readMetaDue). */
+const PASS_KEY = "nl:metaads:pass";
+const GEN_KEY = "nl:metaads:gen";
+/** The longest a pass mark lasts while a store is paused (its payment may be recorded at any time). */
+export const PAUSED_PASS_SECONDS = 3600;
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
 const context = (statsId: string) => `metaads|${statsId}|token`;
 
@@ -159,6 +167,17 @@ export class MetaError extends Error {
   constructor(kind: "auth" | "permission" | "busy" | "error", message: string) {
     super(message);
     this.kind = kind;
+  }
+}
+
+/**
+ * The account's 30 days hold more rows than one read takes (20 pages of 500). Not something an hour changes: the same
+ * read would ask Meta its 20 pages again and refuse the part again, so it is noted busy until the next day, never
+ * tried every hour (each try is 20 calls against the creator's own ad account's rate limit at Meta).
+ */
+class MetaTooBig extends MetaError {
+  constructor() {
+    super("busy", "Meta had more ad spend than one read takes");
   }
 }
 
@@ -223,7 +242,7 @@ function parseRead(raw: unknown): MetaRead | null {
     return {
       day: typeof v.day === "string" ? v.day : "",
       at: Number(v.at) || 0,
-      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "error" ? v.problem : "",
+      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "big" || v.problem === "error" ? v.problem : "",
       after: Number(v.after) || 0,
       lines: Number(v.lines) || 0,
       cents: Number(v.cents) || 0,
@@ -246,8 +265,17 @@ async function readConnection(statsId: string): Promise<Connection | null> {
  */
 export async function metaLines(statsId: string): Promise<AdSpend[]> {
   if (!isRedisConfigured()) return [];
-  const [conn, raw] = await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]);
-  return Number(conn) ? parseLines(raw) : [];
+  // Read exactly (CX-123 rule 24): no lines only when the store is confirmed not connected or nothing was read yet;
+  // a reply in another shape throws, so the figures that use spend say it is unread instead of leaving it out as 0.
+  const replies = repliesFor(await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]), 2);
+  const connected = replies ? countOf(replies[0]) : null;
+  if (!replies || connected === null || connected > 1) throw new UnknownReplyError("Meta's ad spend lines");
+  const raw = replies[1];
+  if (connected === 0 || raw === null) return [];
+  // Every member whole, or none read (Codex Z on #2924): one line in another shape is not the rest as all of it.
+  const lines = parseLines(raw);
+  if (!lines) throw new UnknownReplyError("Meta's ad spend lines");
+  return lines;
 }
 
 /** What the studio shows; null while the deployment has no Meta app, so nothing about it is shown. */
@@ -378,6 +406,8 @@ export async function finishMeta(input: {
     ["SET", connKey(input.statsId), JSON.stringify(connection)],
     ["DEL", readKey(input.statsId)],
     ["SADD", STORES_KEY, input.statsId],
+    // Due now: the daily pass's mark no longer holds (readMetaDue).
+    ["INCR", GEN_KEY],
     ["SADD", userKey(user), input.statsId],
   ]);
   // Another person's token in its place: theirs is given back.
@@ -400,6 +430,8 @@ export async function chooseAccount(statsId: string, id: unknown): Promise<boole
     ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
     ["DEL", readKey(statsId)],
     ["DEL", linesKey(statsId)],
+    // Due now: the daily pass's mark no longer holds (readMetaDue).
+    ["INCR", GEN_KEY],
   ]);
   return true;
 }
@@ -411,16 +443,23 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
 
 /** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
 export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
-  const c = await readConnection(statsId);
+  // Redis not configured is not "not connected" (Codex U on #2924): the route would say "disconnected" with the
+  // sealed token, the connection and its lines still stored, so it is unknown and the studio is told it failed.
+  if (!isRedisConfigured()) throw new UnknownReplyError("a Meta connection: Redis is not configured");
+  // Read exactly (Claude 5 on #2924, rule 24): false only when the store is confirmed not connected; an unknown
+  // reply, or a deletion not answered in its shape, throws, so the studio is told it could not be done, never
+  // "disconnected" with the connection, its token and its lines still kept.
+  const c = await exactConnection(statsId);
   if (!c) return false;
   // Forgotten here whatever Meta says: a give-back that fails must not keep a connection the creator ended.
   await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
-  await forget(statsId, c.user);
+  confirmDeleted(await forget(statsId, c.user), 5, "a Meta connection's deletion");
   return c.accounts.find((a) => a.id === c.account) ?? null;
 }
 
-async function forget(statsId: string, user: string): Promise<void> {
-  await redisPipeline([
+/** Forgets one store's connection and what was read from it; answers the deletion's own replies. */
+async function forget(statsId: string, user: string): Promise<unknown[]> {
+  return redisPipeline([
     ["DEL", connKey(statsId)],
     ["DEL", readKey(statsId)],
     ["DEL", linesKey(statsId)],
@@ -439,6 +478,9 @@ export function signedUser(raw: unknown): string | null {
   if (!sig || !payload) return null;
   const made = createHmac("sha256", secret).update(payload).digest();
   const given = Buffer.from(sig, "base64url");
+  // Node's decoder skips characters outside the alphabet, reads "+" and "/" and ignores "=", so a garbled
+  // signature could decode to the right bytes: only its exact canonical base64url is one (input fuzz, Claude 7).
+  if (given.toString("base64url") !== sig) return null;
   if (given.length !== made.length || !timingSafeEqual(given, made)) return null;
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown };
@@ -450,20 +492,73 @@ export function signedUser(raw: unknown): string | null {
   }
 }
 
-/** Forgets every store a Meta user connected. Returns, for each, who to tell. */
+/** Every reply of one deletion pipeline confirmed by its own count, or UnknownReplyError: never taken as done unseen. */
+function confirmDeleted(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
+/** One store's connection read exactly (CX-123 rule 24): null only when it is confirmed absent; an unknown reply throws. */
+async function exactConnection(statsId: string): Promise<Connection | null> {
+  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
+  if (!read) throw new UnknownReplyError("a Meta connection");
+  if (read[0] === null) return null;
+  const c = parseConnection(read[0]);
+  if (!c) throw new UnknownReplyError("a Meta connection");
+  return c;
+}
+
+/**
+ * Forgets every store a Meta user connected. Returns, for each, who to tell.
+ *
+ * Read exactly (CX-123 rule 24): the user's stores, each connection and each
+ * deletion. An unknown reply throws before the user's index is deleted, so
+ * the callback answers 503 without a confirmation code
+ * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
+ * user connected is left without a way to find it.
+ *
+ * One pass walks at most META_FORGET_PASS stores. With more, the stores of
+ * this pass leave the index and the pass is not answered as done, so the next
+ * callback walks the rest; the index goes only once every store was walked
+ * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
+ * stores it already forgot, so their owners are still told (Claude 5 on #2869).
+ */
 export async function forgetMetaUser(user: string): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(user)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
-  for (const statsId of stores.slice(0, 50)) {
-    const c = await readConnection(statsId);
-    if (!c || c.user !== user) continue;
-    await forget(statsId, user);
-    forgot.push({ statsId, owner: c.owner });
+  const pass = stores.slice(0, META_FORGET_PASS);
+  try {
+    for (const statsId of pass) {
+      const c = await exactConnection(statsId);
+      if (!c || c.user !== user) continue;
+      confirmDeleted(await forget(statsId, user), 5, "a Meta connection's deletion");
+      forgot.push({ statsId, owner: c.owner });
+    }
+    if (stores.length > pass.length) {
+      confirmDeleted(await redisPipeline([["SREM", userKey(user), ...pass]]), 1, "a Meta user's walked stores");
+      throw new MetaIncompleteForget(forgot, "more stores than one pass walks; the next callback walks the rest");
+    }
+    confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
+  } catch (error) {
+    throw error instanceof MetaIncompleteForget ? error : new MetaIncompleteForget(forgot, error);
   }
-  await redisPipeline([["DEL", userKey(user)]]);
   return forgot;
+}
+
+/** The most stores one Meta deletion callback walks; with more, the next callback walks the rest. */
+export const META_FORGET_PASS = 50;
+
+/** A Meta deletion pass that did not finish; `forgot` holds the stores it did forget, whose owners are told now. */
+export class MetaIncompleteForget extends Error {
+  constructor(
+    readonly forgot: { statsId: string; owner: { email: string; handle: string } }[],
+    cause: unknown,
+  ) {
+    super("a Meta deletion pass did not finish", { cause });
+    this.name = "MetaIncompleteForget";
+  }
 }
 
 // ---- Reading what was spent ------------------------------------------------------------
@@ -500,8 +595,15 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   // (lib/integration-pause.ts); the daily pass counts it skipped and tries the next day.
   if (costsPaused(store)) return "paused";
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "busy";
-  const [got] = await redisPipeline([["SET", readingKey(statsId), "1", "NX", "EX", 90]]);
-  if (got === null) return "busy";
+  // The reading lock read exactly (lib/claim-mark.ts; CX-123 rule 24): another read's is "busy". An unknown one asks
+  // Meta nothing this time ("busy", tried again later) and is let go only while it holds this read's value.
+  const reading = claimValue();
+  const claimed = await claimMark(readingKey(statsId), 90, reading);
+  if (claimed === "taken") return "busy";
+  if (claimed !== "ours") {
+    await releaseMark(readingKey(statsId), reading);
+    return "busy";
+  }
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
     // Written only while that very connection is still there.
@@ -553,14 +655,18 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
       params = {};
     }
     // More pages than one read takes: a part is not the whole, so nothing kept is replaced.
-    if (next) throw new MetaError("busy", "Meta had more ad spend than one read takes");
+    if (next) throw new MetaTooBig();
     const fresh = linesFrom(rows, account.currency);
     // Every cent Meta said was spent must be in the lines kept: a row the lines left out (a day or an amount out of
     // range) would show a cost lower than Meta's, so the read is not taken.
     const said = rows.reduce((sum, row) => sum + minorUnits(row.spend, account.currency), 0);
     if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
-    const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
-    const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
+    // The kept lines read exactly (Claude 6 on #2924): nil is none kept; any other shape, a member included, is not
+    // read, so the write below never replaces the older lines with the fresh window alone.
+    const keptReply = repliesFor(await redisPipeline([["GET", linesKey(statsId)]]), 1);
+    const kept = !keptReply ? null : keptReply[0] === null ? [] : parseLines(keptReply[0]);
+    if (!kept) throw new UnknownReplyError("the Meta ad spend lines kept");
+    const merged = mergeLines(kept, fresh, window.from, window.to);
     const still = await readConnection(statsId);
     if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";
     await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]);
@@ -581,10 +687,13 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     }
     const busy = error instanceof MetaError && error.kind === "busy";
     console.error("reading Meta ad spend failed", error instanceof Error ? error.message : error);
-    await note({ problem: busy ? "busy" : "error", after: Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600) }).catch(() => false);
+    // Too big for one read: looked at again the next day, as a currency that differs is, not every hour.
+    const after = error instanceof MetaTooBig ? Math.floor(Date.parse(`${window.to}T00:00:00Z`) / 1000) + 86_400 : Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600);
+    await note({ problem: error instanceof MetaTooBig ? "big" : busy ? "busy" : "error", after }).catch(() => false);
     return busy ? "busy" : "error";
   } finally {
-    await redisPipeline([["DEL", readingKey(statsId)]]).catch(() => {});
+    // Only this read's own lock: one that ran out may be the next read's now.
+    await releaseMark(readingKey(statsId), reading);
   }
 }
 
@@ -609,8 +718,22 @@ function sameHost(link: string): boolean {
 }
 
 /**
+ * The daily pass's mark (C1 cost audit, 12 November 2026): a run that walked
+ * every connected store and found none due keeps PASS_KEY, holding the
+ * generation it read, until the first moment one can be due again (the next
+ * UTC day, or the earliest wait out of a problem). Each five-minute run before
+ * then reads only the mark and the generation, one command, instead of two
+ * keys of every connected store (1 + 2M commands, 288 runs a day, for a read
+ * owed once a day). Whatever makes a store due before then moves GEN_KEY on in
+ * the same write (a new connection, another account chosen), so the next run
+ * no longer finds its mark and walks. A run that did not see every store
+ * exactly (out of time, a reply it could not read, a store it could not look
+ * up) or asked Meta for anything leaves no mark: the next run walks, as before.
+ */
+/**
  * The daily pass, a few stores at a time, from the five-minute job: every
- * connected store not yet read today, and not waiting out a problem.
+ * connected store not yet read today, and not waiting out a problem. A store
+ * whose plan's costs are paused is tried again the next day.
  */
 export async function readMetaDue(
   deadline: number,
@@ -619,27 +742,61 @@ export async function readMetaDue(
 ): Promise<{ read: number; skipped: number }> {
   const counts = { read: 0, skipped: 0 };
   if (!isMetaConfigured() || !isRedisConfigured()) return counts;
-  const [members] = await redisPipeline([["SMEMBERS", STORES_KEY]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
-  const today = new Date().toISOString().slice(0, 10);
+  // The mark and the generation, read together: only the exact same generation skips the walk; anything else walks.
+  const marks = repliesFor(await redisPipeline([["MGET", PASS_KEY, GEN_KEY]]), 1)?.[0];
+  const pair = Array.isArray(marks) && marks.length === 2 ? marks : null;
+  const generation = pair && (pair[1] === null || (typeof pair[1] === "string" && /^\d{1,20}$/.test(pair[1]))) ? (pair[1] ?? "0") : null;
+  if (generation !== null && pair?.[0] === generation) return counts;
+  // Read exactly (CX-123 rule 24): an unknown list throws, so the daily job says it failed and the next run reads it.
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", STORES_KEY]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores with Meta connected");
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  // The next UTC day, when every store read today is due again.
+  let wake = Date.parse(`${today}T00:00:00Z`) + 86_400_000;
+  let whole = generation !== null;
+  let paused = false;
+  let seen = 0;
   for (const statsId of stores) {
     if (Date.now() >= deadline) break;
-    const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-    const c = parseConnection(rawConn);
-    if (!c) {
+    seen += 1;
+    const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+    // Only a connection confirmed absent takes the store off the list; one that cannot be read is skipped this time.
+    if (replies && replies[0] === null) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;
     }
-    const read = parseRead(rawRead);
-    if (c.broken || !c.account || read?.day === today || (read?.after ?? 0) * 1000 > Date.now()) continue;
+    const c = replies ? parseConnection(replies[0]) : null;
+    if (!replies || !c) {
+      counts.skipped += 1;
+      whole = false;
+      continue;
+    }
+    const read = parseRead(replies[1]);
+    if (c.broken || !c.account || read?.day === today) continue;
+    if ((read?.after ?? 0) * 1000 > Date.now()) {
+      wake = Math.min(wake, (read?.after ?? 0) * 1000);
+      continue;
+    }
     const store = await storeFor(c.sid).catch(() => null);
     if (!store || store.statsId !== statsId) {
       counts.skipped += 1;
+      whole = false;
       continue;
     }
     const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken);
     if (result === "read") counts.read += 1;
     else counts.skipped += 1;
+    // Paused (lib/integration-pause.ts): tried again the next day. Anything else asked of this pass is looked at
+    // again by the next run, which finds what it wrote and only then may leave the mark.
+    if (result !== "paused") whole = false;
+    else paused = true;
+  }
+  if (whole && seen === stores.length) {
+    // A paused store starts again on its own once its payment is recorded, and nothing moves GEN_KEY then: with one
+    // paused, the mark lasts at most PAUSED_PASS_SECONDS, so it is read within the hour, not the next day.
+    const seconds = Math.min(paused ? PAUSED_PASS_SECONDS : Infinity, Math.max(1, Math.ceil((wake - Date.now()) / 1000)));
+    await redisPipeline([["SET", PASS_KEY, generation as string, "EX", seconds]]);
   }
   return counts;
 }

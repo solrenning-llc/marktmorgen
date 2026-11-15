@@ -151,7 +151,12 @@ async function closingStore(handle: string, day: number, amount = 6_900) {
   await setSubscription(email, { customerId: customer, subscriptionId: `sub_${handle}old001`, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   await setSubscription(email, { active: false });
   world.customers.set(customer, email);
-  await redisPipeline([["ZADD", FINAL_INDEX, day - 30 * DAY, storeRef((await storeForEmail(email))!)]]);
+  const ref = storeRef((await storeForEmail(email))!);
+  await redisPipeline([["ZADD", FINAL_INDEX, day - 30 * DAY, ref]]);
+  // What its closing day wrote with it (closingDay): a final store with no such state is held as lost
+  // (tests/closing-final-state-lost.test.ts), not walked as here.
+  const stateKey = `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`;
+  await redisPipeline([["SET", stateKey, JSON.stringify({ of: day - 30 * DAY, day, renewals: day })]]);
   await markShut((await storeForEmail(email))!, day);
   const id = `sub_${handle}late01`;
   world.subs.set(id, { id, status: "active", customer, metadata: { store: handle, tier: "creator" }, created: S(day) - 3_600 });
@@ -354,7 +359,7 @@ async function main() {
     if (url.pathname === "/v1/subscriptions" && (init?.method ?? "GET") === "GET") {
       const page = await response.json() as { data: Record<string, unknown>[]; has_more: boolean };
       return Response.json({ ...page, data: page.data.map(row => String((row.metadata as { store?: string })?.store).startsWith("handoff") ? {
-        ...row, items: { data: [{ quantity: 1, current_period_start: S(day) - 86400, current_period_end: S(day) + 30 * 86400,
+        ...row, cancel_at: null, cancel_at_period_end: false, items: { data: [{ quantity: 1, current_period_start: S(day) - 86400, current_period_end: S(day) + 30 * 86400,
           price: { lookup_key: "nimbus_creator_month", currency: "usd", unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } } }] },
       } : row) });
     }

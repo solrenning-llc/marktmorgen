@@ -14,11 +14,12 @@ import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
-import { listBroadcastsStrict } from "@/lib/broadcasts";
+import { type BroadcastHeads, readBroadcastHeads } from "@/lib/broadcasts";
 import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
@@ -38,7 +39,7 @@ import { can } from "@/lib/team-roles";
 import { isBillingConfigured, trialOffered } from "@/lib/billing";
 import { planDisputed } from "@/lib/plan-dispute-rules";
 import { listSegments } from "@/lib/segments";
-import { activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
+import { MAX_WAIT_DAYS_PER_STEP, activeFlowLimit, dailyRunLimit } from "@/lib/flow-limits";
 import { listHeld, runsToday } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 
@@ -62,11 +63,19 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   const { store } = view;
 
   const allowance = monthlyAllowance(store);
-  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
+  // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
+  // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
+  // comes to before any is read (lib/broadcasts.ts, readBroadcastHeads).
+  const payStudio = async (units: number) => {
+    const counted = await countStudio(store, null, units);
+    return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
+  };
+  const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
-    usedThisMonth(store.listId, windowId(store)),
-    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
-    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
+    // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
+    usedThisMonth(store.listId, windowId(store)).catch(() => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).
+    readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" }).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -83,6 +92,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   ]);
   const levels = health ? healthLevels(health) : null;
   const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;
+  const loadedBroadcasts = listedBroadcasts?.ok ? listedBroadcasts.heads : null;
+  // Not read because the studio requests reading them comes to are not left: said in words, with why.
+  const emailsRefused = listedBroadcasts && !listedBroadcasts.ok ? listedBroadcasts.refused : null;
   const broadcasts = loadedBroadcasts ?? [];
   const flows = loadedFlows ?? [];
   const drafts = loadedDrafts ?? [];
@@ -130,7 +142,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Email</p>
+        <StudioTrail store={store} here="Email" />
         <h1 className="t-h2 mt-3">Write to your list</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Only the people who agreed to hear from you are written to: those who checked the box when they got
@@ -212,6 +224,15 @@ export default async function StudioEmailPage({ searchParams }: Params) {
           </div>
         ) : (
           <>
+          {/* Switched off after notices about its content (lib/takedown.ts): nothing is sent, everything waits. */}
+          {store.suspended ? (
+            <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
+              <p className="font-semibold">Email from your store is paused while it is switched off</p>
+              <p className="mt-2 text-sm text-ink-soft">
+                {`Your store is switched off after notices about its content, so nothing goes out to your list or your community: emails to your list, workflow steps and community announcements wait. They go out by themselves once your store is back on. A workflow step is checked again by itself and goes on at the first check after your store is back on; if your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after a step began to wait, that run stops at the step, and its history says so. Come-back offers to members who left are sent only while your store is on.`}
+              </p>
+            </div>
+          ) : null}
           {pause ? (
             <div role="status" className="mt-8 rounded-[var(--r-md)] border border-line bg-sand p-5 text-ink">
               <p className="font-semibold">Email to your list is paused</p>
@@ -231,6 +252,16 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
           ) : null}
+          {emailsRefused !== null ? (
+            <p role="status" className="mt-6 max-w-2xl">
+              Your sent and scheduled emails could not be shown: reading them counts as studio requests, and there are not enough left. {emailsRefused}
+            </p>
+          ) : null}
+          {can(role, "send") && broadcasts.some((b) => b.sent > 0) ? (
+            <p className="mt-6">
+              <a href={studioPath(store, "", "email/links")} className="underline">Change where a link goes in an email you already sent</a>
+            </p>
+          ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
             initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}
@@ -246,7 +277,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             counts={counts}
             used={used}
             allowance={allowance}
-            monthKnown={windowId(store) !== null}
+            monthKnown={windowId(store) !== null && used !== null}
             trial={trial}
             // The way up for a list that has outgrown Pro, offered beside the
             // month's count to whoever may change the plan (lib/plan.ts).
@@ -314,6 +345,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               runsToday: await runsToday(store.listId),
               held: can(role, "send") ? ((await listHeld(store.listId, 500).catch(() => null))?.length ?? null) : null,
             }}
+            switchedOff={Boolean(store.suspended)}
             assignees={can(role, "send") ? [store.email.toLowerCase(), ...(await readTeam(store.sid).catch(() => ({ members: [] as { email: string; role: Parameters<typeof can>[0] }[] }))).members.filter((m) => can(m.role, "orders")).map((m) => m.email.toLowerCase())] : []}
           />
           </>

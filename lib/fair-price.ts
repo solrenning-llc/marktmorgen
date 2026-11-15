@@ -130,7 +130,8 @@ export function readCountry(raw: string | null | undefined): string {
 export function countryOff(country: string, maxOff: number): number {
   const level = PRICE_LEVELS[country];
   if (!level || NEVER_LOWER.has(country) || level > FAIR_FROM_LEVEL) return 0;
-  const off = Math.floor(((1 - level) * 100) / 5) * 5;
+  // In whole percents (the levels have two places), so 1 - 0.55 is 45, never 44.999...
+  const off = Math.floor((100 - Math.round(level * 100)) / 5) * 5;
   return Math.max(0, Math.min(off, maxOff, 60));
 }
 

@@ -137,7 +137,8 @@ async function main(): Promise<void> {
   restore();
   for (const bad of BAD_COUNTS) {
     await note();
-    malform((command) => command[0] === "DEL" && String(command[1]).startsWith("nl:erase:ix:"), bad);
+    // The read and the delete-if-unchanged step (lib/erasure-index.ts FORGET_NOTED) answer {deleted, notes held}.
+    malform((command) => command[0] === "EVAL" && String(command[1]).startsWith("-- marktmorgen:forget-noted:v2\n"), [bad, 1]);
     const answer = await rejects(() => forgetNoted(STATS, PERSON));
     restore();
     is(`a deletion answered ${JSON.stringify(bad) ?? "nothing"}: not a receipt of none, the step fails`, answer, "UnknownReplyError");
@@ -148,8 +149,7 @@ async function main(): Promise<void> {
   const stepAnswer = await rejects(() => eraser!.run({ statsId: STATS, email: PERSON } as never, [], new Set()));
   restore();
   is("through the erasure's own step: it fails (said as an unfinished step), the note kept", [stepAnswer, await exists(notesKey)], ["UnknownReplyError", true]);
-  // (The stand-in counts every key named to DEL, there or not; only that a count comes back is held here.)
-  is("read in its shape: the record and the note go, with a count", [typeof (await forgetNoted(STATS, PERSON)), await exists(record), await exists(notesKey)], ["number", false, false]);
+  is("read in its shape: the record and the note go, with their count", [await forgetNoted(STATS, PERSON), await exists(record), await exists(notesKey)], [1, false, false]);
 
   part("5: endLocked keeps the locked sessions it could not read, and says so");
   const LOST = "lost@example.com";
@@ -389,9 +389,10 @@ async function main(): Promise<void> {
     is(`the list read as ${JSON.stringify(bad) ?? "nothing"}: unread, not empty`, answer, "UnknownReplyError");
   }
   malform(on("HGETALL", "nl:api:keys:"), { 0: "x" });
-  const strictRecords = [await rejects(() => keyRecords(SID, true)), (await keyRecords(SID).catch(() => null))?.length];
+  const strictRecords = [await rejects(() => keyRecords(SID, true)), await rejects(() => keyRecords(SID))];
   restore();
-  is("the studio's read of the keys (shownKeys, keyRecords strict) fails; the pause code's read is as before", strictRecords, ["UnknownReplyError", 0]);
+  // The pause code's read fails too (CX-123 rule 24, tests/r24-api-key-states.test.ts): read as no keys, a teammate leaving passed over their keys.
+  is("the studio's read of the keys (shownKeys) and the pause code's read both fail, never no keys", strictRecords, ["UnknownReplyError", "UnknownReplyError"]);
   malform(on("HGETALL", "nl:api:keys:"), null);
   const revoked = await rejects(() => revokeAllKeys(SID));
   restore();

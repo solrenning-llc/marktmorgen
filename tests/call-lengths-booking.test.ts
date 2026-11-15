@@ -16,7 +16,7 @@
  *   - the studio's save route refuses several lengths until the pages say
  *     each of them (the editor unit).
  */
-import { MAX_SETUP_LENGTHS, parseSetup, readSetup, type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import { MAX_SETUP_LENGTHS, parseSetup, readSetup, type CallSetup } from "@/lib/call-setup";
 import { MAX_CALL_LENGTHS, bookingLength, ownLength } from "@/lib/call-lengths";
 import { callCheckoutBody, holdAndCheckout, moveBooking, slotsForMove, type CallListing } from "@/lib/calls";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -24,6 +24,7 @@ import { readListing, readProduct } from "@/lib/catalog";
 import type { Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const bodies: URLSearchParams[] = [];
@@ -46,17 +47,6 @@ const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 30, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
 const LENGTHS = [{ minutes: 30, cents: 4500 }, { minutes: 60, cents: 8000 }];
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * 86_400_000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 async function main(): Promise<void> {
   redis.clear();

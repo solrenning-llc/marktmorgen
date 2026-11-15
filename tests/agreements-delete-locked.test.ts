@@ -350,9 +350,10 @@ async function main(): Promise<void> {
     // says so, with the version's mark, the way the assignment copier says a record it cannot read (lib/person-copy.ts).
     const scope = (await erasureScope(store, SIGNER))!;
     const mark = a.versions[0];
-    const copyOf = async () => (await COPIERS["lib/agreement-store.ts"](scope).catch(() => [])) as { id: string; versions: Record<string, unknown>[] }[];
+    const copyOf = async () => (await COPIERS["lib/agreement-store.ts"](scope).catch(() => [])) as { email: string; versions: Record<string, unknown>[] }[];
     const copy = await copyOf();
-    is("damaged kept text: the agreement is in the copy", copy.map((c) => c.id), [agreement.id]);
+    // Named by its signer's address: the agreement's id, the secret in its signing link, is left out of the copy.
+    is("damaged kept text: the agreement is in the copy, without its signing link's secret", copy.map((c) => [c.email, "id" in c]), [[a.email, false]]);
     is("damaged kept text: the version is there with its mark and an unread note, no text", copy[0]?.versions, [{ ...mark, unread: "This version's text is kept but could not be read for this copy." }]);
     await realPipeline([["SET", vKey, "{damaged"]]);
     is("text that is not JSON at all: the same unread note", (await copyOf())[0]?.versions[0]?.unread, "This version's text is kept but could not be read for this copy.");

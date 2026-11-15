@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle } from "@/lib/store";
-import { limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { leaveWeeklyTeam, setWeeklyOff, weeklyMemberTokenOk, weeklyTokenOk } from "@/lib/stats-report";
 
 /**
@@ -55,7 +55,14 @@ function notConfirmed(what: string): Response {
   return page("Not changed yet", `<h1>Not changed yet</h1><p>We could not confirm that ${what} just now. Please go back and press the button again in a minute.</p>`, 503);
 }
 
+/** Presses of the stop one connection may make in an hour, signed or not: enough for a person, never a scan of links. */
+export const WEEKLY_STOP_PER_HOUR = 30;
+
 export async function POST(request: NextRequest) {
+  // Before anything is read (a mail app's one-click POST included): a connection past its hour is told to wait.
+  if (!(await withinLimit("weekly-stop", clientAddress(request), WEEKLY_STOP_PER_HOUR, 3_600).catch(() => false))) {
+    return page("Try again later", "<h1>Try again later</h1><p>Too many presses from here in the last hour. Please try again later.</p>", 429);
+  }
   const member = readMember(request);
   if (member) {
     try {
@@ -70,6 +77,9 @@ export async function POST(request: NextRequest) {
   if (!asked) return page("Link not recognized", "<p>This link is not one we recognize.</p>", 400);
   const form = await limited(request, 2_000).then((r) => r.formData()).catch(() => null);
   const off = form?.get("do") !== "on";
+  // Another site may only stop these emails (proxy.ts lets a mail app's one-click POST in), never start them again:
+  // starting is a press on this site's own page.
+  if (!off && fromAnotherSite(request)) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize.</p>", 403);
   try {
     await setWeeklyOff(asked.handle, off);
   } catch (error) {

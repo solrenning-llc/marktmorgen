@@ -858,6 +858,12 @@
       "parameters": []
     },
     {
+      "source": "app/pricing/fees/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/pricing/fees",
+      "parameters": []
+    },
+    {
       "source": "app/pricing/page.tsx",
       "status": "AAA review not completed; scoped keyboard, viewport and automated AA checks in tests/e2e/pricing.mjs",
       "routeTemplate": "/pricing",
@@ -1426,6 +1432,7 @@
     "components/feature-catalogue.tsx",
     "components/feature-demos.tsx",
     "components/feature-visuals.tsx",
+    "components/fee-schedule.tsx",
     "components/forget-inbox-drafts.tsx",
     "components/forget-lesson-positions.tsx",
     "components/form-answers.tsx",
@@ -2128,6 +2135,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 146
+    "pageTemplates": 147
   }
 }

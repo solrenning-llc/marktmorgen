@@ -32,7 +32,7 @@ export default function PricingPage() {
   <div className="hm-page-hero"><div aria-hidden="true" className="hm-sky-layer"><div className="hm-blob hm-sun-page" /></div><div className="relative mx-auto max-w-6xl px-4 pb-4 pt-6 sm:px-8 sm:pt-6">
   <header className="max-w-3xl">
    <h1 className="t-h1">A clear price. Published limits.</h1>
-   <p className="mt-3 text-lg">{feeWords().feesRow} All prices below are in USD.{PRICING_OPEN ? <> <Link className="underline [color:inherit]" href="/demo">See the live demo</Link>.</> : null}</p>
+   <p className="mt-3 text-lg">{feeWords().feesRow} <Link className="underline [color:inherit]" href="/pricing/fees">See every fee, with sources</Link>. All prices below are in USD.{PRICING_OPEN ? <> <Link className="underline [color:inherit]" href="/demo">See the live demo</Link>.</> : null}</p>
    {!PRICING_OPEN && <p className="mt-3 font-semibold">Paid plans and paid selling are not open yet. You can prepare your store and explore the <Link className="underline [color:inherit]" href="/demo">live demo</Link>.</p>}
   </header>
   </div></div>

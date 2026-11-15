@@ -338,10 +338,18 @@ export async function erasePerson(
     const unique = [...new Set(files)];
     // Deleted now; if the file store does not answer, handed to the daily job
     // that deletes uploads nobody kept (app/api/cron/courses), so they go
-    // within a day by themselves.
+    // within a day by themselves. Every path is queued on its own, and one whose
+    // write failed is tried again at once (#4808): a failed write never stops the
+    // paths after it, since their records are already gone and a repeat erasure
+    // could not find them again. A path still not queued fails the erasure.
     await deleteFile(unique).catch(async (error: unknown) => {
       console.error("deleting a person: their files go with the daily job instead", error);
-      for (const path of unique) await noteTaskUpload(path, 0);
+      const queue = (paths: string[]) => Promise.allSettled(paths.map((path) => noteTaskUpload(path, 0)));
+      const first = await queue(unique);
+      const again = unique.filter((_, i) => first[i].status === "rejected");
+      const second = again.length ? await queue(again) : [];
+      const lost = again.filter((_, i) => second[i].status === "rejected");
+      if (lost.length) throw new Error(`deleting a person: ${lost.length} of their files could be neither deleted nor queued for deletion`);
     });
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);

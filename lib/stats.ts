@@ -29,7 +29,7 @@ import { creativeRowsFrom } from "@/lib/creative-results";
 import { type Paid, paypalPaymentId, readPayPalRefundsWithCoverage, readPayPalSales, sellsThroughPayPal } from "@/lib/paypal-sales";
 import { disputeTakes, type Entry, type KeptWindow, keptByCurrency } from "@/lib/retained-revenue";
 import { buyerChannelsFrom, type BuyerChannels } from "@/lib/buyer-channel-rules";
-import { type DiscountRow, discountImpact } from "@/lib/discount-impact";
+import { type DiscountElsewhere, type DiscountRow, discountElsewhere, discountImpact } from "@/lib/discount-impact";
 import { saleHandles } from "@/lib/store";
 import { type Together, parseTogether, togetherFrom } from "@/lib/also-bought";
 import { keepPaths, pathsFrom } from "@/lib/next-bought";
@@ -960,7 +960,7 @@ export type SalesStats = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (lib/discount-impact.ts); null with no discounted sale. */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean };
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere: DiscountElsewhere[] };
   /** When buyers bought over the 90 days: checkouts by hour of the week in UTC, Sunday 0:00 first (hoursOfWeek). */
   hours?: { sales: number[]; cents: number[] };
 };
@@ -1862,6 +1862,8 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
   out.discounts = {
     rows: discountImpact(read, new Set((refundRows ?? []).map((r) => r.paymentIntent).filter(Boolean)), store.currency, now, STATS_DAYS),
     refundsRead: refundRows !== null,
+    // Sales paid in another currency, totalled per currency beside the table, never converted (22 [E5] unit 2).
+    elsewhere: discountElsewhere(read, store.currency, now, STATS_DAYS),
   };
   out.previous = {
     d7: stretch(dayKey(now - 13 * 86400_000), cut7),
@@ -2217,7 +2219,7 @@ export type StatsData = {
   /** Purchases and renewals were read in full for the current 90-day ledger, independently of refunds. */
   paymentsComplete?: boolean;
   /** Full price beside each kind of discount over the 90 days (SalesStats.discounts). */
-  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean } | null;
+  discounts?: { rows: DiscountRow[] | null; refundsRead: boolean; elsewhere?: DiscountElsewhere[] } | null;
   /** Checkouts by hour of the week in UTC over the 90 days (SalesStats.hours); the browser turns them to its own time. */
   hours?: { sales: number[]; cents: number[] } | null;
   /**

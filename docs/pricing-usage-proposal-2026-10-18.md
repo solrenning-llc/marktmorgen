@@ -21,7 +21,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 | --- | --- | --- | --- |
 | Store | $118.58 | $1,213.33 | $69 / $690 |
 | Studio | $175.30 | $1,863.68 | $449 / $4,490 |
-| Scale | $276.63 | $3,043.00 | $999 / $9,990 |
+| Scale | $276.63 | $3,043.15 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -89,7 +89,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Storage: included · #553 · before #553 | **0.5 GB** · 5 GB · 5 GB | **6 GB** · 40 GB · 40 GB | **18 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
 | Access emails a month: included · #553 · before #553 | **25** · 150 · 150 | **62** · 400 · 400 | **220** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **12** · 75 · 75 | **47** · 300 · 300 | **180** · 800 · 800 |
+| Store emails a month: included · #553 · before #553 | **12** · 75 · 75 | **46** · 300 · 300 | **180** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.24% | 60.33% | 60.41% |
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.02% | 60.01% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.11% | 12.15% |

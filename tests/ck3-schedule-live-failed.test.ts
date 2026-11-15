@@ -105,6 +105,32 @@ async function main() {
     is("the next run switches it off and only then records the failure", [settle.failed, active, await failedFlag(), await isDue()], [1, false, true, false]);
     is("and the link finds no code", await livePromotionId(shop.stripeAccountId, "TESTCODE"), null);
 
+    part("RED (Claude 6 on #4522): a stop that never confirms stops calling Stripe after the paid tries, never shown as plainly failed");
+    await reset();
+    active = false;
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    const rules = (await import("@/lib/discount-schedule-rules")) as { STOP_TRIES?: number; SCHEDULE_UNITS: number };
+    const stopTries = rules.STOP_TRIES ?? 3;
+    stopFails = true;
+    stops = 0;
+    clock = start;
+    try {
+      // Every five minutes for the whole 48-hour window: far more runs than the tries paid for.
+      while (clock < end - RETRY_SECONDS) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+        clock += RETRY_SECONDS;
+      }
+    } finally {
+      stopFails = false;
+    }
+    const kept = await sched.readSchedules(STATS);
+    const entry = kept.ok ? (kept.schedules[0] as { failed: boolean; stopUnconfirmed?: boolean }) : null;
+    // Two stop calls a run: in the last switch-on try (paid as that try), then in each of the STOP_TRIES runs after it.
+    is("RED: Stripe is asked to stop it at most twice a run, in the last try and the paid stop tries", stops <= 2 * (stopTries + 1), true);
+    is("RED: every try is paid for at scheduling", rules.SCHEDULE_UNITS, ACTIVATION_TRIES + stopTries);
+    is("RED: out of the due list once its stop tries are used", await isDue(), false);
+    is("RED: kept as failed with its stop unconfirmed, never a plain failure", [entry?.failed, entry?.stopUnconfirmed], [true, true]);
+
     part("A pending stop past the end is left to Stripe's own expiry, with no call");
     await reset();
     active = false;

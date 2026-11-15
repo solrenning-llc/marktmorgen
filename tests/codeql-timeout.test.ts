@@ -50,7 +50,7 @@ const verdicts = spawnSync("python3", ["-B", "-c", [
   "       d('failure', 'merge_group'), d('cancelled', 'merge_group'), d('success', 'merge_group')])",
   "print([d('skipped', e) for e in ['pull_request', 'push', 'schedule', 'workflow_dispatch', '']])",
 ].join("\n")], { encoding: "utf8" });
-is("in the merge queue only analyze's skip passes, only with the switch; a run that fails or is cancelled still fails",
+is("in the merge queue only analyze's skip passes, only with the switch; a run that fails or is canceled still fails",
   verdicts.stdout.trim().split("\n")[0], "[True, False, False, False, False, True]");
 is("outside the merge queue a skipped analysis fails the required check", verdicts.stdout.trim().split("\n")[1], "[False, False, False, False, False]");
 done();

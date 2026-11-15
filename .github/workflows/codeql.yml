@@ -77,6 +77,12 @@ jobs:
     # daily and manual runs. The final check below accepts this one skip only under merge_group, only for this
     # job, only with CI_ANALYSIS_OUTSIDE_QUEUE (scripts/ci_all_checks.py), and the main-red alarm never takes a
     # merge-queue run of CodeQL as main's result (scripts/main_red_alarm.mjs).
+    # What moves: an execution error or a time-out of CodeQL on the combined tree (PR merged with the queue's main),
+    # which used to fail the merge group, now shows up on the push run of main for that same commit; that run fails
+    # and the main-red alarm opens its issue (.github/workflows/main-red-alarm.yml). It cannot change product code:
+    # the analysis only reads, and a finding never failed the group anyway (source 1).
+    # A cancel after documentation-scope succeeded also leaves this job skipped and the final check passes under
+    # merge_group. That is harmless: under merge_group this job never runs, canceled or not, so nothing is lost.
     if: ${{ !cancelled() && needs.documentation-scope.outputs.full != 'false' && github.event_name != 'merge_group' }}
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest

@@ -70,6 +70,13 @@ Sources read on 15/11/2026:
   held the close until it finished. What changes is the rare head with no CodeQL push run at all
   (a missing run, or a commit message with `[skip ci]`): it now waits for the daily run, which
   analyzes that head, instead of trusting a merge-group run that no longer analyzes.
+- What moves from the queue to main: an execution error or a time-out of CodeQL on the combined
+  tree, which used to fail the merge group, now shows up on the push run of main for that same
+  commit. That run fails and the main-red alarm opens its issue. It cannot change product code:
+  the analysis only reads, and a finding never failed the group anyway.
+- A cancel after the documentation scope succeeded also leaves `analyze` skipped, and "All checks
+  (codeql)" passes under `merge_group`. That is harmless: under `merge_group` the job never runs,
+  canceled or not, so no analysis is lost.
 - Security coverage stays the same: the alerts in code scanning always came from the pull
   request and main runs. What the queue loses is only a non-uploaded repeat that could not fail
   on a finding.

@@ -26,7 +26,24 @@ export default async function JoinPage({
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : "";
   if (!/^[0-9a-f]{64}$/.test(token)) redirect("/signin?status=invite-expired");
-  const invite = await peekInvite(token).catch(() => null);
+  // An invitation that could not be read just now is said so, never "expired": it may still be good.
+  const invite = await peekInvite(token).catch((error: unknown) => {
+    console.error("a team invitation could not be read", error);
+    return undefined;
+  });
+  if (invite === undefined) {
+    return (
+      <div className="relative min-h-screen overflow-hidden">
+        <main id="content" className="relative mx-auto max-w-xl px-4 py-16">
+          <MorningLogo />
+          <h1 className="t-h1 mt-6">Your invitation could not be read just now</h1>
+          <p className="notice notice-info mt-6" role="status">
+            Nothing was taken and the invitation was not used. Open the link from the email again in a moment.
+          </p>
+        </main>
+      </div>
+    );
+  }
   if (!invite) redirect("/signin?status=invite-expired");
   const role = ROLE_NAMES[invite.role];
 

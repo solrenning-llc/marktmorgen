@@ -89,13 +89,13 @@ import { NIMBUS_FROM, isSenderConfigured, sendBatch } from "@/lib/email";
 import { GIVE_BACK_FLOOR, GIVE_BACK_FLOOR_EXTRA_COMMANDS, giveBackToMonth, monthlyAllowance, releaseDay, reserveDay, takeFromMonth, takeFromMonthExact } from "@/lib/mail";
 import { IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_ROW_BYTES, importAllowanceFor, importRowsFor } from "@/lib/import-limits";
 import { costsPaused } from "@/lib/plan-standing";
-import { healthTags, noteSent, pausedFor, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
+import { healthTags, noteSent, pausedFor, pauseForSending, rampBack, rampRoom, startRamp } from "@/lib/mail-health";
 import { isPaidUp } from "@/lib/billing";
 import { storeBase } from "@/lib/purchase-email";
 import { movedPurchaseWords } from "@/lib/buyer-words/moved-purchases";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
-import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
+import { inviteEmail, inviteMembers, keptAlready, moveFoot, movePostal, noteKept, dropReminder, dueReminders, remindLater, reminderEmail, readInvite } from "@/lib/move-members";
 import { type DateOrder, MAX_AHEAD_DAYS, MAX_MOVED_MEMBERS, readRenewal } from "@/lib/move-rules";
 import { type ContactConsent, consentFrom, readClickFunnelsStatus, readOrderStatus } from "@/lib/clickfunnels-csv";
 
@@ -1998,11 +1998,30 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       await remindLater(sid, field, now - 3_600 * 1000);
       continue;
     }
+    // The line only leases what it hands out (dueReminders): a reminder put back for later says so, and every other
+    // way out of this turn (sent, nothing to send, no longer wanted) takes it off the line at the end.
+    let later = false;
+    const putBack = async (at: number) => {
+      later = true;
+      await remindLater(sid, field, at);
+    };
     try {
       const store = await storeForId(sid);
-      if (!store?.statsId || !isPaidUp(store) || (await pausedFor(sid))) continue;
+      if (!store?.statsId || !isPaidUp(store)) continue;
       const invite = await readInvite(store.statsId, field);
       if (!invite || invite.kept) continue;
+      // A sending pause is temporary (Codex G on #4359): the reminder waits in line for its end while that is still
+      // before the renewal date, and only a pause running past it lets the reminder go (reminderEmail would have nothing
+      // to send by then). A pause read in an unknown shape is not "no pause" (CX-123 rule 24): tried again later.
+      const pause = await pauseForSending(sid, now);
+      if (pause === undefined) {
+        await putBack(now);
+        continue;
+      }
+      if (pause) {
+        if (pause.until * 1000 < invite.r * 1000) await putBack(pause.until * 1000 - 3_600_000);
+        continue;
+      }
       // Never to somebody deleted from the store, nor to somebody the creator's list keeps as having left it, nor to
       // somebody who pressed stop on this store's reminders. Each read whole (CX-123 rule 24): unknown throws, and the
       // reminder is put back in line (the catch below).
@@ -2013,7 +2032,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       // later while that is still before the renewal date, so a creator who saves the address again still has it sent
       // (review of #3476, LOW 2); after that date there is nothing left for it to help with.
       if (!movePostal(store)) {
-        if (invite.r * 1000 > now + 3_600_000) await remindLater(sid, field, now);
+        if (invite.r * 1000 > now + 3_600_000) await putBack(now);
         continue;
       }
       if (await keptAlready(store, invite.e, invite.p)) {
@@ -2024,7 +2043,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       const letter = await reminderEmail(store, field, now);
       if (!letter) continue;
       if (!(await reserveDay(1))) {
-        await remindLater(sid, field, now);
+        await putBack(now);
         continue;
       }
       if ((await reserveMoved(store, 1)) < 1) {
@@ -2034,7 +2053,7 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
         // longer than that, a second refusal finds the next opening past the renewal date, so it is put back at most
         // once. Nothing went, so nothing goes twice.
         const opens = allowanceWindow(store)?.end;
-        if (opens && opens < invite.r * 1000) await remindLater(sid, field, opens - 3_600_000);
+        if (opens && opens < invite.r * 1000) await putBack(opens - 3_600_000);
         continue;
       }
       // Its stop link, written only once the day and the month have room for it: the member's own, the same as in
@@ -2070,11 +2089,14 @@ export async function sendMoveReminders(deadline: number, now = Date.now()): Pro
       } else if (sent === "retry") {
         await releaseMoved(store, 1);
         await releaseDay(1);
-        await remindLater(sid, field, now);
+        await putBack(now);
       }
     } catch (error) {
       console.error("sending a moved member's reminder failed", error);
-      await remindLater(sid, field, now);
+      await putBack(now);
+    } finally {
+      // A drop that cannot reach Redis leaves the lease to bring it back, where the send's own key keeps it once.
+      if (!later) await dropReminder(sid, field).catch((error) => console.error("taking a finished moved member's reminder off the line failed", error));
     }
   }
   return counts;

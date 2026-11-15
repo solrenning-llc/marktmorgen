@@ -11,6 +11,8 @@
  * Rendered from the real components (no browser): the classes that give the size and the elements that give the
  * landmarks are read from the markup they draw.
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SiteNav } from "@/components/site-nav";
@@ -56,5 +58,18 @@ if (bar) {
   const attrs = bar[2] + bar[3];
   is("the line about what is built today is a named region", (bar[1] === "section" || /role="region"/.test(attrs)) && /aria-label="[^"]+"/.test(attrs), true);
 }
+
+part("No page wraps the header in a landmark of its own (Claude 6's and Claude 7's MÉDIO on #4610)");
+// SiteNav draws the page's one <header> (banner). A caller that wraps it in <header>, <nav>, <section>, <aside> or
+// <main> nests a banner in another landmark: on /library that gave axe landmark-banner-is-top-level,
+// landmark-no-duplicate-banner and landmark-unique, and two banners for a screen reader.
+const sources = (dir: string): string[] =>
+  readdirSync(dir, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && /\.tsx$/.test(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name));
+const wrapped = [...sources("app"), ...sources("components")].filter((file) =>
+  /<(header|nav|section|aside|main)\b[^>]*>\s*(\{[^}]*\}\s*)*<SiteNav\b/.test(readFileSync(file, "utf8")),
+);
+is("every <SiteNav /> is drawn outside any other landmark", wrapped, []);
 
 done();

@@ -21,6 +21,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -63,6 +64,8 @@ const POOL_KEEP_SECONDS = 40 * 86_400;
 const poolKey = (statsId: string, windowId: string) => `nl:assist:pool:${statsId}:${windowId}`;
 /** That the month's pool was opened (ASSISTANT_POOL, KEYS[2]), kept as long as the pool. */
 const poolOpenedKey = (statsId: string, windowId: string) => `${poolKey(statsId, windowId)}:opened`;
+/** The pool's fields, every one a whole amount written by ASSISTANT_POOL. */
+const POOL_FIELDS = new Set(["cap", "held", "spent", "n"]);
 const threadKey = (token: string) => `nl:assist:c:${token}`;
 const missedKey = (statsId: string) => `nl:assist:missed:${statsId}`;
 
@@ -145,12 +148,21 @@ export function assistantShown(store: Store, now = Date.now()): boolean {
 export async function assistantLeft(store: Store, now = Date.now()): Promise<{ left: number; answered: number; capMicroUsd: number; spentMicroUsd: number; heldMicroUsd: number } | null> {
   const window = assistantWindow(store.assistantPlan, now / 1000);
   if (!window || !store.statsId || !isRedisConfigured()) return null;
-  const [raw, opened] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)], ["EXISTS", poolOpenedKey(store.statsId, window.id)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Rule 24: read exactly as ASSISTANT_POOL's own amount() does; a reply or a field that does not read is unknown,
+  // never 0 (which would show the month's pool as still there). A pool not written yet is a fresh month.
+  const reply = repliesFor(await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)], ["EXISTS", poolOpenedKey(store.statsId, window.id)]]), 2);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!reply || !flat || flat.length % 2 !== 0) throw new UnknownReplyError("the assistant's pool");
   // A month opened whose pool is gone refuses every reply (ASSISTANT_POOL): none is left, not a fresh month.
-  if (flat.length === 0 && opened !== 0) return { left: 0, answered: 0, capMicroUsd: assistantPoolMicroUsd(), spentMicroUsd: 0, heldMicroUsd: 0 };
+  if (flat.length === 0 && reply[1] !== 0) return { left: 0, answered: 0, capMicroUsd: assistantPoolMicroUsd(), spentMicroUsd: 0, heldMicroUsd: 0 };
   const fields = new Map<string, number>();
-  for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], Number(flat[i + 1]) || 0);
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!POOL_FIELDS.has(flat[i])) continue;
+    const value = flat[i + 1];
+    const n = /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n > 1_000_000_000_000) throw new UnknownReplyError("the assistant's pool");
+    fields.set(flat[i], n);
+  }
   const cap = Math.min(fields.get("cap") ?? assistantPoolMicroUsd(), assistantPoolMicroUsd());
   const held = fields.get("held") ?? 0, spent = fields.get("spent") ?? 0;
   return { left: Math.max(0, Math.floor((cap - held - spent) / assistantMessageWorstMicroUsd())), answered: fields.get("n") ?? 0, capMicroUsd: cap, spentMicroUsd: spent, heldMicroUsd: held };

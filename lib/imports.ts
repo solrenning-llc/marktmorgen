@@ -60,6 +60,7 @@ import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { windowCountBy } from "@/lib/window-count";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import {
@@ -173,8 +174,9 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
- * The replies are read exactly (CX-123 rule 24): the SET NX "OK" or nothing, the INCRBY a whole number (a give-back can
- * take the count below zero); any other shape throws UnknownReplyError. Before, the count was read with Number(),
+ * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
 async function takeMovedCount(store: Store, n: number, now: number): Promise<number> {
@@ -185,14 +187,14 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ["SET", key, "0", "NX", "EX", 32 * 86_400],
-      ["INCRBY", key, n],
+      ...windowCountBy(key, 32 * 86_400, n),
     ]),
     2,
   );
-  const total = replies?.[1];
+  // The INCRBY's count, then the EXPIRE's 0 or 1 (lib/window-count.ts): a key never left without its expiry.
+  const total = replies?.[0];
   const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
-  if (!replies || (replies[0] !== "OK" && replies[0] !== null) || !Number.isSafeInteger(counted)) throw new UnknownReplyError("the emails to people brought over this month");
+  if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) throw new UnknownReplyError("the emails to people brought over this month");
   const over = Math.min(n, Math.max(0, counted - cap));
   if (over > 0) await redisPipeline([["DECRBY", key, over]]);
   return n - over;
@@ -225,12 +227,9 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   if (!store.sid || !isRedisConfigured() || !window) return { ok: false, reason: "unavailable", limit };
   const key = `nl:imports:rows:${store.sid}:${window}`;
   try {
-    const [, total] = await redisPipeline([
-      ["SET", key, "0", "NX", "EX", 32 * 86_400],
-      ["INCRBY", key, n],
-    ]);
+    const [total, expire] = await redisPipeline(windowCountBy(key, 32 * 86_400, n));
     const counted = Number(total);
-    if (!Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
+    if (!Number.isSafeInteger(counted) || (expire !== 0 && expire !== 1)) return { ok: false, reason: "unavailable", limit };
     if (counted <= limit) return { ok: true };
     await redisPipeline([["DECRBY", key, n]]);
     return { ok: false, reason: "rows_month", limit };

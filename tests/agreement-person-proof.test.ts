@@ -30,7 +30,7 @@ async function main() {
   return createAgreement(store,draft);
  };
  part("Unverified person index never authorizes cleanup or admission");
- for(const members of [null,[],[null],[[null]],[[7]],[[id,id]],[[id],[]]]) {
+ for(const members of [null,[],[null],[[null]],[["bad"]],[[id,id]],[[id],[]]]) {
   const result=await attempt(members);
   is("unknown membership refused",result.ok? "accepted":result.reason,"unavailable");
   is("unknown membership leaves references",calls.some(c=>c[0]==="SREM"),false);
@@ -49,13 +49,6 @@ async function main() {
  is("verified absent reference alone removed",calls.filter(c=>c[0]==="SREM").map(c=>c.slice(2)),[[id]]);
  await attempt([[]]);
  is("verified empty membership reaches ordinary admission",calls.some(c=>c[0]==="ZADD"),true);
- // A member that is text but not an agreement id names no record (the index is only written with record ids): it is
- // taken out, alone, and admission goes on (issue #4804 review; the erasure and agreementsOfPerson pass over it too).
- await attempt([["bad"]]);
- is("a member that is not an id is the only one taken out",calls.filter(c=>c[0]==="SREM").map(c=>c.slice(2)),[["bad"]]);
- is("and admission goes on",calls.some(c=>c[0]==="ZADD"),true);
- await attempt([[id,"bad"]],[1]);
- is("beside a live id: only the stray member is taken out",calls.filter(c=>c[0]==="SREM").map(c=>c.slice(2)),[["bad"]]);
  redis.pipeline=original;
  part("Admission requires exact numeric reservation and expiry receipts");
  const countAttempt=async (receipt:unknown) => {

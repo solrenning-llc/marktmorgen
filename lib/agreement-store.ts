@@ -141,19 +141,14 @@ export async function createAgreement(store: Store, draft: AgreementDraft, now =
     const membership = await redisPipeline([["SMEMBERS", person]]);
     if (!Array.isArray(membership) || membership.length !== 1 || !Array.isArray(membership[0])) return unavailable();
     const members: unknown[] = membership[0];
-    if (new Set(members).size !== members.length || !Array.from(members).every((id) => typeof id === "string")) return unavailable();
-    // A member that is not an agreement id names no record (the set is only written with record ids, SADD agreement.id
-    // below), so it is taken out with the records gone, as the erasure and agreementsOfPerson pass over it (issue #4804
-    // review): never a reason to refuse a new agreement, nor counted against MAX_PER_PERSON.
-    const ids = (members as string[]).filter((id) => ID_PATTERN.test(id));
-    const stray = (members as string[]).filter((id) => !ID_PATTERN.test(id));
-    let gone: string[] = [];
+    if (new Set(members).size !== members.length || !Array.from(members).every((id) => typeof id === "string" && ID_PATTERN.test(id))) return unavailable();
+    const ids = members as string[];
     if (ids.length) {
       const alive = await redisPipeline(ids.map((id) => ["EXISTS", recordKey(id)]));
       if (!Array.isArray(alive) || alive.length !== ids.length || !Array.from(alive).every((value) => value === 0 || value === 1)) return unavailable();
-      gone = ids.filter((_, i) => alive[i] === 0);
+      const gone = ids.filter((_, i) => alive[i] === 0);
+      if (gone.length) await redisPipeline([["SREM", person, ...gone]]);
     }
-    if (gone.length || stray.length) await redisPipeline([["SREM", person, ...gone, ...stray]]);
     const keep = Math.ceil(KEEP_MS / 1000);
     const counts = await redisPipeline([
       ["ZREMRANGEBYSCORE", storeKey(store.sid), "-inf", String(now - KEEP_MS)],

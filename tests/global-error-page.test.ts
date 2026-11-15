@@ -50,7 +50,7 @@ async function main(): Promise<void> {
   part("2.5.5: 44 x 44 px targets, in the page's own styles");
   const style = (html.match(/<style>([\s\S]*?)<\/style>/) ?? [])[1] ?? "";
   is("the page carries its own styles", style.length > 0, true);
-  const rule = (selector: string) => (style.match(new RegExp(`${selector.replace(/[.[\]]/g, "\\$&")}\\s*\\{([^}]*)\\}`)) ?? [])[1] ?? "";
+  const rule = (selector: string) => (style.match(new RegExp(`${selector.replace(/[\\.[\]]/g, "\\$&")}\\s*\\{([^}]*)\\}`)) ?? [])[1] ?? "";
   const action = rule(".ge-action");
   is("each control is at least 44 px tall", /min-height:\s*44px/.test(action), true);
   is("and at least 44 px wide", /min-width:\s*44px/.test(action), true);

@@ -1,8 +1,9 @@
 /**
  * The colors of app/global-error.tsx, the page shown when the root layout itself fails. That page renders its own
  * document without app/globals.css, so it carries the site's own tokens as plain values: light from `:root`, dark
- * from `:root[data-color-scheme="dark"]` (ivory and ink, the violet action and link, the focus ring). Each text pair
- * keeps 7:1 (WCAG 1.4.6) and the ring 3:1 (tests/global-error-page.test.ts).
+ * from the dormant dark block of lib/dark-tokens.ts, which this page never switches on itself (ivory and ink, the
+ * violet action and link, the focus ring). Each text pair keeps 7:1 (WCAG 1.4.6) and the ring 3:1
+ * (tests/global-error-page.test.ts).
  */
 export const GLOBAL_ERROR_LOOK = {
   light: {

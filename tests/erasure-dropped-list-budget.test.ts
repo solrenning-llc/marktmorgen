@@ -7,7 +7,7 @@ import { done, is, part } from "./check";
 import { OWNER, makeWorld } from "./erasure-world";
 import { erasureScope, erasureSize } from "@/lib/person-erasure";
 import { ERASE_PER } from "@/lib/erasure-rules";
-import { noteRemovedCourse } from "@/lib/removed-courses";
+import { MAX_NOTED_LESSONS, MAX_NOTED_MODULES, REMOVED_COURSE_RECORD_BYTES, noteRemovedCourse } from "@/lib/removed-courses";
 import { MAX_LESSONS, MAX_MODULES, newItemId } from "@/lib/course";
 import { storeForEmail } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
@@ -35,6 +35,16 @@ async function main(): Promise<void> {
   const budgeted = size.droppedCourses * ERASE_PER.droppedCourses[1];
   console.log(`  read ${read} bytes of the dropped-course list, budgeted ${budgeted}`);
   is("the bytes budgeted for the dropped-course list cover the bytes read", budgeted >= read, true);
+
+  part("A course read whole, where the person has a record, is counted at its largest");
+  is("a noted course holds at most an outline's lessons and modules", [MAX_NOTED_LESSONS, MAX_NOTED_MODULES], [MAX_LESSONS, MAX_MODULES]);
+  const records = (await redisPipeline([["SCAN", "0", "MATCH", `nl:coursegone:${store.statsId}:c:*`, "COUNT", 10_000]])) as unknown as [[string, string[]]];
+  const keys = records[0][1];
+  const values = (await redisPipeline(keys.map((k) => ["GET", k]))) as unknown as string[];
+  const largest = Math.max(...values.map((v) => Buffer.byteLength(v)));
+  console.log(`  the largest course record holds ${largest} bytes, its bound ${REMOVED_COURSE_RECORD_BYTES}, counted ${ERASE_PER.droppedRecords[1]}`);
+  is("every noted course's record is inside its bound", [keys.length, largest <= REMOVED_COURSE_RECORD_BYTES], [100, true]);
+  is("and the erasure counts a record read at least at that bound", ERASE_PER.droppedRecords[1] >= REMOVED_COURSE_RECORD_BYTES, true);
   done();
 }
 

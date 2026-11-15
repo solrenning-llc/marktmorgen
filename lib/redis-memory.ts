@@ -140,16 +140,19 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
-        // lib/removed-courses.ts NOTE_REMOVED_COURSE: a course on the list has its record replaced (0); a new one is added
+        // lib/removed-courses.ts NOTE_REMOVED_COURSE: the list keeps the course and its product, the course's own key its
+        // lessons and modules, written together; a course on the list has both replaced (0); a new one is added
         // only while the list has room (1), never by dropping another; full, nothing written (-1).
-        if (key.startsWith("-- marktmorgen:removed-course-note:v1\n") && args[0] === "1" && args.length === 5) {
-          const [, list, course, record, most] = args;
+        if (key.startsWith("-- marktmorgen:removed-course-note:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, list, recordKey, course, entry, record, most] = args;
           if (this.run(["HEXISTS", list, course]) === 1) {
-            this.run(["HSET", list, course, record]);
+            this.run(["HSET", list, course, entry]);
+            this.run(["SET", recordKey, record]);
             return 0;
           }
           if (Number(this.run(["HLEN", list])) >= Number(most)) return -1;
-          this.run(["HSET", list, course, record]);
+          this.run(["HSET", list, course, entry]);
+          this.run(["SET", recordKey, record]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {

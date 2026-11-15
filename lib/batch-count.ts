@@ -27,6 +27,13 @@ import { repliesFor } from "@/lib/redis-reply";
 
 export const BATCH_KEPT_SECONDS = 23 * 3_600;
 
+/**
+ * Database commands a batch of a sender that takes from a monthly figure runs besides its emails: batchCountKept's GET,
+ * then keepBatchCount's SET or batchCountSettled's DEL (at most one of the two). Priced on every email at its worst, a
+ * batch of one (tests/plan-cost-registry.ts, the list-email and imports lines).
+ */
+export const BATCH_COUNT_EXTRA_COMMANDS = 2;
+
 /** The mark's key: the batch key and its people, sorted, hashed (no address is written in a key). */
 export function batchKeptKey(batchKey: string, to: readonly string[]): string {
   const people = [...to].map((t) => t.trim().toLowerCase()).sort().join(",");

@@ -66,6 +66,7 @@ import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
+import { BATCH_COUNT_EXTRA_COMMANDS } from "@/lib/batch-count";
 import { MAX_TRIMMED_PAGE_CHARS } from "@/lib/clickfunnels-page";
 import { IMPORTS_PER_SHARE_MONTH, MAX_APPLY_PAGES, PREVIEWS_PER_SHARE_MONTH, SHARE_LIMITS } from "@/lib/funnel-share-rules";
 import { MAX_SECTION_BYTES } from "@/lib/saved-blocks";
@@ -1067,13 +1068,15 @@ export const COST_LINES: CostLine[] = [
   {
     id: "list-email",
     feature: "The monthly emails: list email, sequences and workflows (#507), their notices to the owner, and emails to people brought over on Studio and Scale",
-    monthlyUsd: (tier) => monthlyEmails(tier) * PER_EMAIL,
+    // Each batch also reads, and then writes or deletes, its kept-count mark (lib/batch-count.ts): a batch of one at its worst.
+    monthlyUsd: (tier) => monthlyEmails(tier) * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND),
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "stopWriting(store.listId as string, r.to, \"refused\")"] },
       { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS"] },
+      { file: "lib/batch-count.ts", names: ["BATCH_COUNT_EXTRA_COMMANDS", "batchCountKept", "keepBatchCount", "batchCountSettled"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+    basis: "Every monthly email sent, at the most an email costs, plus BATCH_COUNT_EXTRA_COMMANDS commands for its batch's kept-count mark (lib/batch-count.ts: a GET, then a SET or a DEL; #4073), priced as if every email went in a batch of its own. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
     id: "transactional-email",
@@ -1142,12 +1145,13 @@ export const COST_LINES: CostLine[] = [
       // A step's one give-back (its end, or a send tried again) never below zero.
       const steps = a.steps * request("step", 10 + GIVE_BACK_FLOOR_EXTRA_COMMANDS);
       const reports = a.reports * request("light", 4, MAX_REPORT_ROWS * 400);
-      return rows + uploads + starts + steps + reports + a.movedEmails * PER_EMAIL;
+      return rows + uploads + starts + steps + reports + a.movedEmails * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND);
     },
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES", "IMPORT_WORST_COMMANDS_PER_ROW", "IMPORT_WORST_BYTES_PER_ROW", "IMPORT_MIN_ROWS_PER_UPLOAD"] },
       { file: "lib/imports.ts", names: ["takeImportRows", "reserveMoved", "IMPORT_LIMITS", "HELD_UPLOAD_SWEEP_COMMANDS", "JOB_WRITE_IF_EXTRA_COMMANDS", "IMPORT_END_EXTRA_COMMANDS"] },
       { file: "lib/mail.ts", names: ["GIVE_BACK_FLOOR_EXTRA_COMMANDS"] },
+      { file: "lib/batch-count.ts", names: ["BATCH_COUNT_EXTRA_COMMANDS"] },
       { file: "app/api/store/import/route.ts", names: ["import-start-month", "import-step-month", "import-report-month"] },
       // The store's deleted people, checked where a chunk of past buyers or members is written (review of #3383).
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
@@ -1739,7 +1743,7 @@ export function nonPayingWorst(): number {
   return TRIAL_VISITS * visitCost()
     + requests
     + TRIAL_ORDERS * ORDER_COST
-    + TRIAL_MONTHLY_EMAILS * PER_EMAIL
+    + TRIAL_MONTHLY_EMAILS * (PER_EMAIL + BATCH_COUNT_EXTRA_COMMANDS * COMMAND)
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)

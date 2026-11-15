@@ -40,7 +40,7 @@
  *   nl:metaads:user:<hash>        the stores a Meta user connected
  *   nl:metaads:stores             the stores connected, for the daily read
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -571,20 +571,31 @@ async function exactConnection(statsId: string): Promise<Connection | null> {
  * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
  * user connected is left without a way to find it.
  *
- * One pass walks at most META_FORGET_PASS stores. With more, the stores of
- * this pass leave the index and the pass is not answered as done, so the next
+ * One pass walks at most META_FORGET_PASS stores, from a random place in id
+ * order, wrapping around. With more, the stores of this pass leave the index and the pass is not answered as done, so the next
  * callback walks the rest; the index goes only once every store was walked
  * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
  * stores it already forgot, so their owners are still told (Claude 5 on #2869).
  */
-export async function forgetMetaUser(user: string, cutoff = Number.POSITIVE_INFINITY): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
+export async function forgetMetaUser(
+  user: string,
+  cutoff = Number.POSITIVE_INFINITY,
+  /** Where in the user's stores, in id order, this pass starts; a random place by default (Claude 7 on #4647). */
+  start?: number,
+): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
   // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
   const kept: string[] = [];
   const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
   if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
-  const pass = stores.slice(0, META_FORGET_PASS);
+  // A store kept (connected after the notice) stays in the index, so a pass that always took the same first
+  // META_FORGET_PASS stores could meet only kept ones and never reach an older store behind them: the deletion would
+  // never finish. Each pass starts at a random place in id order and wraps around, so every store left is reached by
+  // some pass (Claude 7 on #4647). With no more than one pass's worth, the start does not matter: every store is walked.
+  const ordered = [...stores].sort();
+  const from = ordered.length > META_FORGET_PASS ? (start ?? randomInt(ordered.length)) % ordered.length : 0;
+  const pass = [...ordered.slice(from), ...ordered.slice(0, from)].slice(0, META_FORGET_PASS);
   try {
     for (const statsId of pass) {
       const c = await exactConnection(statsId);

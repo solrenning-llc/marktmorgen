@@ -53,6 +53,8 @@ import { KIND, readPage, sellsAny, visibleCount } from "@/lib/catalog";
 import { groupBySection } from "@/lib/store-sections";
 import { offeredItems } from "@/lib/bundles";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
+import { trustLines } from "@/lib/store-trust";
+import { StoreTrustLine } from "@/components/store-trust-line";
 import { linkHost } from "@/lib/product-link";
 import { isHouseStore } from "@/lib/house-store";
 import { sellsInTestMode } from "@/lib/stripe-connect";
@@ -371,6 +373,8 @@ export default async function StorePage({ params, searchParams }: Params) {
             {store.bio ? (
               <p className="st-muted mx-auto mt-2 max-w-md leading-relaxed">{store.bio}</p>
             ) : null}
+            {/* 254 [WH3]: what the store's record says, in plain words; the payments line only while it can sell. */}
+            <StoreTrustLine lines={trustLines({ selling, createdAt: store.createdAt, language: store.language })} />
             <StoreSocialsRow socials={store.socials} name={store.name} words={bw} />
             <div className="mx-auto mt-2 flex max-w-xs flex-col items-center">
               <StoreShareButton name={store.name} lang={store.language} />

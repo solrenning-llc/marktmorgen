@@ -11,7 +11,7 @@ type Answer = { ok: true; previewId: string; draft: PreviewDraft & { questions?:
  * One field with a label and an example, one button; the progress is said in a live region (4.1.3) with no bar and
  * no promised time; when the draft arrives the focus moves to its heading (2.4.3). If the draft asks questions, each
  * is a group of answers to press, and one more draft is written with them; a third is never asked. There is no time
- * limit on this page (2.2.3). Nothing is kept here yet: keeping the draft and carrying it into the studio is unit 4.
+ * limit on this page (2.2.3). The draft is kept 24 hours for the studio (unit 4), and the visitor can delete it at once.
  */
 export function StorePreviewForm() {
   const fieldId = useId();
@@ -30,6 +30,25 @@ export function StorePreviewForm() {
   useEffect(() => {
     if (draft) heading.current?.querySelector<HTMLElement>("h3")?.focus();
   }, [draft]);
+
+  async function forget() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const response = await fetch("/api/store-preview/kept", { method: "DELETE" });
+      if (response.ok) {
+        setDraft(null);
+        setPreviewId(null);
+        setStatus(PREVIEW_WORDS.deleted);
+      } else {
+        setStatus(previewRefusalWords("failed"));
+      }
+    } catch {
+      setStatus(previewRefusalWords("failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function ask(answers?: { q: string; a: string }[]) {
     if (busy) return;
@@ -88,6 +107,8 @@ export function StorePreviewForm() {
       {draft ? (
         <div ref={heading}>
           <StorePreviewDraft draft={draft} currency="usd" headingId={headingId} />
+          <p>{PREVIEW_WORDS.keptFor}</p>
+          <button type="button" className="hm-claim-button pv-button" aria-disabled={busy} onClick={() => void forget()}>{PREVIEW_WORDS.deleteButton}</button>
         </div>
       ) : null}
       {questions.length ? (

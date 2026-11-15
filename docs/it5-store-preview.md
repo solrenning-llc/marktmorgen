@@ -30,7 +30,7 @@ Every figure comes from the repository's own tables; none is typed in the code t
 | The answers round: at most one more job, after the visitor answers the questions | 62,699 µUSD | the same reference; a preview never makes a third job |
 | The function time of those two jobs (the route's own duration, 2 GB) | **not priced yet** | priced in unit 1 from the AI route's existing function line, never assumed |
 | The page read (inside the first job, as in the studio) | inside the job's own reservation | lib/source-page.ts; OP5's open complement (3) must first give the writing reference room for the page text |
-| The database: the counts, the reservation, the preview kept 24 hours and read back | at most 40 commands, about 80 µUSD | `UPSTASH_MICRO_USD_PER_MILLION_COMMANDS`; held by a count in unit 2's tests |
+| The database: the counts, the reservation, the preview kept 24 hours and read back | at most 43 commands (40 in unit 0's estimate, 43 once counted in unit 4), about 86 µUSD | `UPSTASH_MICRO_USD_PER_MILLION_COMMANDS`; held by a count in unit 2's tests |
 
 **Known so far:** 125,478 µUSD (about US$0.13) a preview, before the function time. Until that line is priced, the preview's worst is **unknown**, and the switch stays off (rule: unknown fails, never zero).
 
@@ -86,7 +86,7 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
 
 0. **This design** (no code).
 1. **Rules and cost** (built on 15 November 2026, in this branch, tests/store-preview-rules.test.ts): lib/store-preview-rules.ts (pure), with the switch, the per-address and site-wide caps and the preview's worst computed from `WRITING_JOB_MICRO_USD`, the function time and the database commands.
-   - The function time is priced from the duration the preview's own route must declare (`PREVIEW_ROUTE`, `export const maxDuration = 60`): every second at full CPU and 2 GB, plus the call, once per job. With those rates the worst is 130,454 µUSD (about US$0.13) a preview: 125,398 for the two jobs, 4,976 of function time and 80 of database. Until that route exists with that declaration, `previewWorstMicroUsd` answers null, and the test requires the switch off.
+   - The function time is priced from the duration the preview's own route must declare (`PREVIEW_ROUTE`, `export const maxDuration = 60`): every second at full CPU and 2 GB, plus the call, once per job. With those rates the worst was 130,454 µUSD (about US$0.13) a preview: 125,398 for the two jobs, 4,976 of function time and 80 of database. Unit 4 counted 43 database commands, so it is now 130,460 µUSD, with 86 of database. Until that route exists with that declaration, `previewWorstMicroUsd` answers null, and the test requires the switch off.
    - The month's ceiling (`previewMonthCeiling`) takes the source of its places, (A) or (B), and chooses neither; anything malformed makes none.
    - The `preview-share` line in tests/plan-cost-registry.ts, with a test that every plan stays positive with it, monthly and yearly, waits for the owner's choice: under (B) there is no new line.
 2. **The anonymous job** (built on 15 November 2026, in this branch, off):
@@ -102,7 +102,7 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
      - **The owner's choice decides whether there are any previews at all:** `PREVIEW_PLACES` is null, and the count of paying stores is not read yet. With either unknown, previews are "full" and nothing is asked.
      - A new preview counts its address's day first (its network block, keyed, never the address as typed; `nl:storepv:addr:`), so a refused address takes nothing from the site. Then the site's day (`previewDayCeiling`) and month.
      - The answers round needs an id this door opened: 16 random characters signed with the day (`deriveKey`), good that day and the next. Checking it sends nothing to the database; with no key, the door opens nothing.
-     - One preview with its answers round sends at most 38 database commands, scripts counted command by command, within `PREVIEW_DB_COMMANDS` (40). That leaves 2 for unit 4 (keeping the draft and reading it back), which must recount them and raise the priced figure if they do not fit, never leave one out.
+     - One preview with its answers round sends at most 38 database commands, scripts counted command by command, within `PREVIEW_DB_COMMANDS`, 43 since unit 4 counted the keeping.
    - **3b, the form** (built on 15 November 2026, in this branch, off; components/store-preview-form.tsx, components/store-preview-draft.tsx, lib/store-preview-words.ts, tests/store-preview-form.test.ts):
      - The home page shows its section only inside `{STORE_PREVIEW_ON ? ... : null}`, and no other page names the form.
      - One field, labeled, with an example inside it, and one button. The progress is said in a live region, with no bar and no promised time; when the draft arrives, the focus moves to its heading.
@@ -111,7 +111,12 @@ With `PREVIEWS_PER_PAYING_STORE` = 1 and the known part only (US$0.1255; the fun
      - Every refusal is said in plain words with a way on; "full" and "address" offer the sign-up.
      - Targets of at least 44 px, a visible focus and lines no wider than 80 characters (app/home.css).
      - **Not yet checked:** a screen reader, a keyboard-only pass in a browser and the reading level by a tool. Those wait for the pull request that turns it on.
-4. **Keeping it:** the 24-hour token, the copy into the studio on sign-up with no second call, and deletion by the visitor and on expiry.
+4. **Keeping it** (built on 15 November 2026, in this branch, off; lib/store-preview-keep.ts, app/api/store-preview/kept/route.ts, components/store-setup-ai.tsx, tests/store-preview-keep.test.ts):
+   - After each job the door keeps **only the draft** (its lines, products and questions and answers), never the visitor's words, address or anything else typed. It is kept under a random token of 32 bytes in an HttpOnly, Secure, same-site cookie, for 24 hours at the most (`nl:storepv:kept:`); the answers round keeps it under the same token.
+   - **Carried once:** in the studio, the store's first-draft box (StoreSetupAi) asks for it only while the switch is on. It needs a person signed in with that cookie; reading and deleting are one command (GETDEL), so a second carry finds nothing, and the cookie is cleared. No model is asked. The tab keeps the draft until the creator keeps it, so a reload does not lose it. app/studio/page.tsx is not touched (reserved by Claude 3).
+   - **Deleted by the visitor at once** from the home page, signed in or not; the page says the draft is kept 24 hours in this browser only.
+   - **The database:** one preview kept, carried and deleted sends at most 43 commands, so `PREVIEW_DB_COMMANDS` went from 40 to 43, and the worst with it.
+   - **Privacy words:** the privacy policy and lib/person-data.ts say all of this in unit 5, in the same pull request that turns it on.
 5. **The privacy words** and the public help line, in the same pull request that would turn it on; turning it on is the owner's.
 
 ## Depends on

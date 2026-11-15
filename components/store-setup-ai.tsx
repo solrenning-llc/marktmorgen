@@ -5,6 +5,7 @@ import { AI_ALLOWANCE_UNKNOWN } from "@/components/ai-assist";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
+import { STORE_PREVIEW_ON } from "@/lib/store-preview-rules";
 
 type Kind = "download" | "course" | "call" | "membership";
 type Setup = { bios: string[]; products: { title: string; summary: string; kind: Kind; price: string }[]; faq: { q: string; a: string }[]; questions?: { q: string; options: string[] }[] };
@@ -53,6 +54,48 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
     else if (setup.bios.length || setup.products.length) draftHeading.current?.focus();
   }, [setup]);
   const asking = Boolean(setup?.questions?.length);
+  // 488 [IT5] unit 4: a draft written on the home page before signing up is carried here once, with no AI asked
+  // (app/api/store-preview/kept takes it and deletes it), and kept in this tab so a reload does not lose it.
+  useEffect(() => {
+    if (!STORE_PREVIEW_ON) return;
+    let cancelled = false;
+    const show = (carried: Setup) => {
+      if (cancelled || !Array.isArray(carried?.bios) || !Array.isArray(carried?.products) || !Array.isArray(carried?.faq)) return;
+      setSetup({ ...carried, questions: [] });
+      setBio(carried.bios[0] ?? "");
+      setRows(carried.products.map((p) => ({ ...p, keep: true })));
+      setAnnounce("The draft you wrote before signing up is below.");
+    };
+    let saved: string | null = null;
+    try {
+      saved = sessionStorage.getItem("mm-store-preview");
+    } catch {
+      saved = null;
+    }
+    if (saved) {
+      try {
+        show(JSON.parse(saved) as Setup);
+      } catch {
+        // A draft that does not read is left alone: the creator writes a new one.
+      }
+      return;
+    }
+    void fetch("/api/store-preview/kept", { method: "POST" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { draft?: Setup | null } | null) => {
+        if (!data?.draft) return;
+        try {
+          sessionStorage.setItem("mm-store-preview", JSON.stringify(data.draft));
+        } catch {
+          // Not kept in the tab: shown all the same.
+        }
+        show(data.draft);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function draft(answered: { q: string; a: string }[] = []) {
     if (drafting) return;
@@ -111,6 +154,12 @@ export function StoreSetupAi({ currency, left: startLeft, hasFaq, storeName }: {
         toast(parts.length ? `Kept: ${parts.join(", ")}.` : "Nothing was kept.");
         if (data.done.refused.length) setNote(`Not kept, because it has no price this store can charge yet: ${data.done.refused.join(", ")}. Type its price above and keep it again, or add it from Products.`);
         else setSetup(null);
+        // A draft carried from the home page (488 [IT5] unit 4) is not kept in the tab once it is kept here.
+        try {
+          sessionStorage.removeItem("mm-store-preview");
+        } catch {
+          // Nothing kept in the tab to remove.
+        }
         router.refresh();
         return;
       }

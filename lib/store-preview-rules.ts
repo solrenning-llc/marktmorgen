@@ -29,11 +29,12 @@ export const PREVIEW_JOBS = 2;
 /** Previews one address (hashed, by its network) may make in a day (UTC), counted before the site-wide count. */
 export const PREVIEWS_PER_ADDRESS_PER_DAY = 2;
 /**
- * Database commands one preview sends at the most, scripts' inner commands one by one: the address's and the site's
- * day and month counts, the reservation and its settling, the draft kept 24 hours and read back. Held against what
- * the preview's route really sends by that route's own tests (unit 2).
+ * Database commands one preview sends at the most, scripts' inner commands one by one, counted by the door's and the
+ * keeping's own tests (tests/store-preview-door.test.ts, tests/store-preview-keep.test.ts): the address's, the site's
+ * day and month counts (6), each job's count, reservation and settling (16 each), the draft kept after each job (2),
+ * and carrying it (the session read and GETDEL, 2) or deleting it (1). 40 in unit 1's estimate; 43 once counted.
  */
-export const PREVIEW_DB_COMMANDS = 40;
+export const PREVIEW_DB_COMMANDS = 43;
 
 /** Tokens one job may write back: the studio's own draft's (writeStoreSetup in lib/ai.ts asks for the same). */
 export const PREVIEW_OUTPUT_TOKENS = 2_500;

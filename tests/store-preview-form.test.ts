@@ -36,7 +36,8 @@ const form = readFileSync(join(root, "components/store-preview-form.tsx"), "utf8
 is("one field, labeled, with an example inside it", [/<label htmlFor=\{fieldId\}/.test(form), /placeholder=\{PREVIEW_WORDS\.example\}/.test(form), (form.match(/<textarea/g) ?? []).length], [true, true, 1]);
 is("one button to ask for the draft", (form.match(/type="submit"/g) ?? []).length, 1);
 is("the progress said in a live region, with no bar", [/aria-live="polite"/.test(form), /<progress|role="progressbar"/.test(form)], [true, false]);
-is("it posts to the preview's door, and nowhere else", [...form.matchAll(/fetch\("([^"]+)"/g)].map((m) => m[1]), ["/api/store-preview"]);
+is("it posts to the preview's door, and deletes the kept draft, nowhere else", [...form.matchAll(/fetch\("([^"]+)"/g)].map((m) => m[1]), ["/api/store-preview/kept", "/api/store-preview"]);
+is("the visitor can delete the kept draft at once, and is told it is kept 24 hours", [/method: "DELETE"/.test(form), /PREVIEW_WORDS\.keptFor/.test(form), /PREVIEW_WORDS\.deleteButton/.test(form)], [true, true, true]);
 is("the hidden field robots fill is there, out of the way of people", /name="website"[^>]*tabIndex=\{-1\}[^>]*aria-hidden="true"/.test(form) || /aria-hidden="true"[^>]*name="website"/.test(form), true);
 is("no words promise a time", Object.values(PREVIEW_WORDS).filter((w) => TIME_PROMISE.test(w)), []);
 

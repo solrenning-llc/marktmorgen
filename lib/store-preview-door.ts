@@ -22,6 +22,7 @@ import { shareAddress } from "@/lib/traffic-rules";
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { storeSetupWords } from "@/lib/ai";
 import { PREVIEW_ID, type PreviewJobResult, previewDraft } from "@/lib/store-preview";
+import { keepCookie, keepPreview, previewToken } from "@/lib/store-preview-keep";
 import {
   PREVIEWS_PER_ADDRESS_PER_DAY, type PreviewPlaces, STORE_PREVIEW_ON, previewDayCeiling, previewMonthCeiling, previewPoolCapMicroUsd,
 } from "@/lib/store-preview-rules";
@@ -153,5 +154,8 @@ export async function answerStorePreview(request: Request, options: StorePreview
     about: body.about, selling: body.selling, answers: body.answers,
   }, on);
   if (!result.ok) return json({ ok: false, error: result.reason === "spent" ? "full" : result.reason, previewId }, STATUS[result.reason]);
-  return json({ ok: true, previewId, draft: result.draft }, 200);
+  // Kept 24 hours, only the draft, for the studio to take on sign-up (unit 4); not kept, it is shown all the same.
+  const token = previewToken(request);
+  const kept = await keepPreview(token, result.draft);
+  return Response.json({ ok: true, previewId, draft: result.draft }, { status: 200, headers: kept ? { ...NO_STORE, "Set-Cookie": keepCookie(token) } : NO_STORE });
 }

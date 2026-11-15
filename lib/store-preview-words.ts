@@ -16,6 +16,9 @@ export const PREVIEW_WORDS = {
   empty: "There was not enough to write a draft from. Add a sentence about what you make and try again.",
   answerHeading: "A few questions to make it fit you",
   answerButton: "Write it again with my answers",
+  keptFor: "We keep this draft for 24 hours, in this browser only, so you can take it into your store when you sign up. Only the draft is kept, not what you typed.",
+  deleteButton: "Delete this draft now",
+  deleted: "Your draft was deleted.",
 } as const;
 
 /** The refusals the door can answer with (lib/store-preview-door.ts). */

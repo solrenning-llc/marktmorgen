@@ -19,10 +19,10 @@
  * overlap, a store seen twice while it moves between addresses — finds the day
  * taken and does nothing.
  */
-import { isRedisConfigured } from "@/lib/redis";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
@@ -33,6 +33,13 @@ import { formatMoney } from "@/lib/money";
 
 /** How long the mark on a month lasts: long enough that next month is a new one. */
 const CLAIM_SECONDS = 40 * 86_400;
+/**
+ * How long a run holds the month's claim while it pays and writes (#4620, part 3). The claim becomes the month's
+ * own (CLAIM_SECONDS) only once the email went, or may have; a run stopped before that (the function's 60 s, a read
+ * that failed) leaves a hold that runs out, and a run on one of the next days (PAYDAY_CATCH_UP_DAYS) does it then.
+ * Nobody is paid twice on it: payWithPayPal re-reads who is already on their way and holds its own lock.
+ */
+const HOLD_SECONDS = 15 * 60;
 /** A ceiling on one run, so a job that is behind still ends. */
 const MAX_STEPS = 10_000;
 
@@ -60,9 +67,29 @@ function monthOf(now: Date): string {
  * counted as failed and nobody is written to or paid on it.
  */
 async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS);
+  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, HOLD_SECONDS);
   if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
   return got === "ours";
+}
+
+/** Makes the month's claim the month's own, once its email went or may have. A failure is said; the hold then runs out. */
+async function keepMonth(statsId: string, month: string): Promise<void> {
+  try {
+    const replies = repliesFor(await redisPipeline([["EXPIRE", `nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS]]), 1);
+    if (replies?.[0] !== 1) console.error("a store's payday claim could not be kept for the month", replies?.[0]);
+  } catch (error) {
+    console.error("a store's payday claim could not be kept for the month", error);
+  }
+}
+
+/**
+ * Sends the payday email and keeps the month's claim unless the email was surely not sent: one that may have gone
+ * ("uncertain") is never written again, and one refused is tried again by a later run once the hold runs out.
+ */
+async function sendAndKeep(store: Store & { statsId: string }, month: string, message: Parameters<typeof sendEmailOutcome>[0]): Promise<boolean> {
+  const outcome = await sendEmailOutcome(message);
+  if (outcome !== "refused") await keepMonth(store.statsId, month);
+  return outcome === "sent";
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -223,7 +250,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   if (book.refundsChecked && (await paysAutomatically(store))) {
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency);
-    return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
   }
   const { subject, text } = paydayEmail({
     storeName: store.name,
@@ -236,7 +263,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
   });
-  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
     subject,

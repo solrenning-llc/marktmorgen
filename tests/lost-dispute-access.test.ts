@@ -113,6 +113,8 @@ const paid = (id: string, product: string, status: string | null, over: Record<s
   customer: "cus_TestBuyer0001",
   customer_details: { email: "buyer@example.com" },
   amount_total: 4900,
+  // A paid session names its currency (issue #4802: one that does not is an error, never the store's).
+  currency: "usd",
   metadata: { store: "nightpaint", product },
   payment_intent: { id: `pi_${id.slice(8)}`, object: "payment_intent", latest_charge: chargeIn(`ch_${id.slice(8)}`, status) },
   ...over,

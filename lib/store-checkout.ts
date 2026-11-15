@@ -1141,6 +1141,16 @@ export async function readOrder(
     }
   }
 
+  // What the buyer paid, read exactly (issue #4802): whole minor units from 0 and an explicit three-letter currency,
+  // or the order is an error. Never 0 for an amount that does not read, nor the store's currency for one not named:
+  // the thanks page, the purchase event, the booking and the offers all read these. A free checkout keeps Stripe's
+  // explicit amount_total of 0.
+  const paidAmount = session.amount_total;
+  const paidCurrency = session.currency;
+  if (typeof paidAmount !== "number" || !Number.isSafeInteger(paidAmount) || paidAmount < 0 || typeof paidCurrency !== "string" || !/^[a-z]{3}$/.test(paidCurrency)) {
+    return { state: "error" };
+  }
+
   return {
     state: "paid",
     membership,
@@ -1169,8 +1179,8 @@ export async function readOrder(
     option,
     file: option ? option.file : product.options.length > 0 ? null : product.file,
     link: option ? option.link : product.options.length > 0 ? null : product.link,
-    amount: typeof session.amount_total === "number" ? session.amount_total : 0,
-    currency: typeof session.currency === "string" && session.currency ? session.currency : store.currency,
+    amount: paidAmount,
+    currency: paidCurrency,
     reusable: reusableMethod(session),
     email,
     secondsLeft: Math.max(0, Math.floor(DOWNLOAD_WINDOW_SECONDS - age)),

@@ -81,6 +81,8 @@ const member = (id: string, product: string, status: string, latest: unknown) =>
   customer: "cus_TestMember001",
   customer_details: { email: "member@example.com" },
   amount_total: 1500,
+  // A paid session names its currency (issue #4802: one that does not is an error, never the store's).
+  currency: "usd",
   metadata: { store: "coachclub", product },
   payment_intent: null,
   subscription: { id: `sub_${id.slice(8)}`, object: "subscription", status, latest_invoice: latest, items: { data: [{ current_period_end: NOW - 10 * DAY }] } },

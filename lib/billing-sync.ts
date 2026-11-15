@@ -26,6 +26,7 @@ import { applyListedAssistant } from "@/lib/assistant-billing";
 import {
   type SubscriptionState,
   isAddOn,
+  customerOf,
   hasContractFunding,
   isBillingConfigured,
   listSubscriptions,
@@ -37,7 +38,7 @@ import {
 } from "@/lib/billing";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { allowanceWindow, samePeriod } from "@/lib/allowance-window";
-import { type Store, setSubscription, storeForHandle, storeRef, storesAfter } from "@/lib/store";
+import { type Store, accountStores, setSubscription, storeForEmail, storeForHandle, storeRef, storesAfter } from "@/lib/store";
 import { refusePlanIfClosing } from "@/lib/closing-plan-guard";
 
 const MAX_PAGES = 50;
@@ -103,6 +104,24 @@ export async function refreshPeriod(store: Store): Promise<Store> {
 }
 
 /**
+ * The store that wrote this subscription down, never found by the address in
+ * its metadata alone: renaming does not rewrite that address in Stripe, and an
+ * address let go leads nowhere for a month and may then be another creator's.
+ * First the store the address leads to, when it keeps this very id; otherwise
+ * the stores of the account Stripe's customer signs in with, the one that
+ * keeps this very id and owns it (lib/billing.ts, ownedBy: an address let go
+ * counts only with the store's own customer). Null when none, or more than one.
+ */
+async function storeKeeping(subscription: Record<string, unknown>, id: string, handle: string): Promise<Store | null> {
+  const named = await storeForHandle(handle);
+  if (named && named.subscriptionId === id) return named;
+  const { email } = customerOf(subscription);
+  if (!email) return null;
+  const keeping = (await accountStores(email)).filter((store) => store.subscriptionId === id && ownedBy(store, subscription));
+  return keeping.length === 1 ? keeping[0] : null;
+}
+
+/**
  * Writes down, the day the email about it goes, that a store's renewal is
  * unpaid (lib/billing-reminders.ts, 232 [CA1] unit 4), so what the email
  * says has stopped has stopped. Only for the subscription the store itself
@@ -116,13 +135,13 @@ export async function recordUnpaidRenewal(subscription: Record<string, unknown>)
   const id = typeof subscription.id === "string" ? subscription.id : "";
   const handle = (subscription.metadata as Record<string, unknown> | null | undefined)?.store;
   if (!id || typeof handle !== "string" || !handle || isAddOn(subscription)) return null;
-  const store = await storeForHandle(handle);
+  const store = await storeKeeping(subscription, id, handle);
   if (!store || store.subscriptionId !== id) return null;
   const state = stateOf(subscription);
   if (state.state === "unknown") throw new Error("the subscription's plan is unknown");
   if (state.state !== "active" || !state.renewalUnpaid || hasContractFunding(subscription)) return (store.renewalUnpaidSince ?? 0) > 0;
   await recordState(store, state);
-  const after = await storeForHandle(handle);
+  const after = await storeForEmail(storeRef(store));
   if (!after || !((after.renewalUnpaidSince ?? 0) > 0)) throw new Error("the unpaid renewal could not be written down");
   return true;
 }

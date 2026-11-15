@@ -14,7 +14,7 @@ import { LearningPathsEditor } from "@/components/learning-paths-editor";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductCourse, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readPaths } from "@/lib/learning-paths";
-import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME } from "@/lib/learning-path-rules";
+import { MAX_PATHS, MAX_PATH_COURSES, MAX_PATH_NAME, readPathInput } from "@/lib/learning-path-rules";
 import { PATHS_BODY_BYTES, courseChoices, pathsRefusal } from "@/lib/learning-paths-studio";
 import { redisPipeline } from "@/lib/redis";
 import { store as redis } from "./redis-stub";
@@ -40,9 +40,23 @@ async function main(): Promise<void> {
     ]),
     [{ id: "a", title: "Bread" }, { id: "c", title: "Pastry" }],
   );
-  const worst = JSON.stringify({ paths: Array.from({ length: MAX_PATHS }, (_, i) => ({ id: `abcdefg${i % 10}`, name: "x".repeat(MAX_PATH_NAME * 2), courses: Array.from({ length: MAX_PATH_COURSES }, () => "y".repeat(64)), order: "sequence" })) });
-  is("the body limit holds the longest list the rules keep (names counted at two bytes a character)", Buffer.byteLength(worst) <= PATHS_BODY_BYTES, true);
-  is("and not much more", PATHS_BODY_BYTES - Buffer.byteLength(worst) < 2_000, true);
+  // Codex X4's second MEDIUM on #3723: the longest body the editor sends for a list the rules keep as it is. Every
+  // path has its 8-letter id, a name of MAX_PATH_NAME UTF-16 units each three bytes in UTF-8 (漢: the most a kept
+  // character takes; a character outside the BMP is two units at four bytes, a quote or backslash two bytes, and
+  // control, format and doubled spaces are taken out by the rules), MAX_PATH_COURSES distinct course ids of 64
+  // characters (the rules' longest id) and the longer order, "sequence".
+  const worstBody = (name: string) => JSON.stringify({
+    paths: Array.from({ length: MAX_PATHS }, (_, i) => ({
+      id: `p${String(i).padStart(7, "0")}`,
+      name,
+      courses: Array.from({ length: MAX_PATH_COURSES }, (_, j) => String(i * MAX_PATH_COURSES + j).padEnd(64, "y")),
+      order: "sequence",
+    })),
+  });
+  const worst = worstBody("漢".repeat(MAX_PATH_NAME));
+  is("the worst name is one the rules keep as it is, at the name limit", [readPathInput({ name: "漢".repeat(MAX_PATH_NAME), courses: ["a", "b"], order: "sequence" }, new Set(["a", "b"])).ok, "漢".repeat(MAX_PATH_NAME).length], [true, MAX_PATH_NAME]);
+  is("no other kept name of the limit makes a longer body", ["x", '"', "\\", "é", "😀", "漢"].every((c) => Buffer.byteLength(worstBody(c.repeat(MAX_PATH_NAME / c.length))) <= Buffer.byteLength(worst)), true);
+  is("the body limit is exactly the longest list the rules keep (names at three bytes a unit)", [Buffer.byteLength(worst), PATHS_BODY_BYTES], [Buffer.byteLength(worst), Buffer.byteLength(worst)]);
 
   part("The route");
   is("only a POST", Object.keys(route).sort(), ["POST"]);
@@ -70,6 +84,20 @@ async function main(): Promise<void> {
     const response = await route.POST(new NextRequest("https://marktmorgen.com/api/store/learning-paths", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) }));
     return { status: response.status, body: (await response.json()) as Reply, cache: response.headers.get("cache-control") };
   };
+
+  // At the exact limit: the longest kept list gets past the size check to the rules (which refuse these made-up
+  // course ids as not this store's, 400), and one byte more is refused for its size (413) before anything is read.
+  // Sent as a browser sends it, with its length; and once without, the size then counted as it arrives.
+  const raw = async (text: string, length = true) => {
+    const headers: Record<string, string> = { "content-type": "application/json", cookie, ...(length ? { "content-length": String(Buffer.byteLength(text)) } : {}) };
+    const response = await route.POST(new NextRequest("https://marktmorgen.com/api/store/learning-paths", { method: "POST", headers, body: text }));
+    const reply = (await response.json()) as Reply;
+    return [response.status, reply.error, reply.problem ?? null];
+  };
+  is("the longest kept list is not refused for its size: the rules read it", [Buffer.byteLength(worst) === PATHS_BODY_BYTES, await raw(worst)], [true, [400, "refused", "courses"]]);
+  is("and the same without a stated length", await raw(worst, false), [400, "refused", "courses"]);
+  is("one byte more is refused for its size, before the rules", await raw(`${worst} `), [413, "invalid", null]);
+  is("and without a stated length, stopped at the limit as it arrives, nothing read", await raw(`${worst} `, false), [400, "invalid", null]);
 
   const out = await post({ paths: [{ name: "Baker", courses: [bread, pastry], order: "sequence" }] }, {});
   is("signed out: refused, nothing kept", [out.status, (await redisPipeline([["GET", `nl:paths:${statsId}`]]))[0]], [401, null]);

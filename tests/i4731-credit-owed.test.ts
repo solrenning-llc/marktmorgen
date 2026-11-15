@@ -77,6 +77,13 @@ async function main(): Promise<void> {
   is("once the read heals, the sweep credits the affiliate's referral for the sale paid", typeof (await hget(`nl:aff:${stats}:sales`, `paypal:${order}`)), "string");
   is("with no bond naming the person", (await pipeline([["HLEN", `nl:aff:${stats}:bond`]]))[0], 0);
   is("and the credit leaves the list", await owed(), false);
+
+  part("A second sweep credits nothing twice (51LL, LEVE)");
+  const tally = async () => (await pipeline([["HLEN", `nl:aff:${stats}:sales`], ["HGETALL", `nl:aff:${stats}:sales`], ["HLEN", `nl:aff:${stats}:shares`], ["HGETALL", `nl:aff:${stats}:shares`]]));
+  const once = await tally();
+  is("the partner's share for the sale is there after the first sweep", typeof (await hget(`nl:aff:${stats}:shares`, `paypal:${order}:${PARTNER}`)), "string");
+  await sweepPayPal(store, Date.now() + 20_000);
+  is("after a second sweep the sales and the shares are the same, count and content", await tally(), once);
   done();
 }
 

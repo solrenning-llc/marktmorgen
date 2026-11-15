@@ -22923,6 +22923,8 @@ Pedidos repetidos: aplicada a regra "Pedidos repetidos" de AGENTS.md. Conferidos
 
 Estado inicial: na fila. Posição: Grupo A, ACIMA DO MARCO MQ1. Antes de começar, confira o código e a fila de novo: o que já existir é registrado e pulado.
 
+Em andamento pelo Claude 1 cloud V: 15/11/2026, ramo claude/stn9-video-ia-study.
+
 Contexto: Nas telas vistas, a Stan só hospeda vídeo. Fornecedores desse mercado mudam depressa, e nenhum preço pode ser dado por conhecido.
 
 O que fazer, em unidades pequenas:

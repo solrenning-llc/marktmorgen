@@ -49,6 +49,27 @@ async function main(): Promise<void> {
   is("the erased student has no standing certificate", await certificateOf(course.id, who), null);
   is("the creator's certificate list contains none of the erased student's data", (await certificatesFor(course.id))?.list ?? [], []);
 
+  part("Its commands, every script's own counted, inside one buyer action (line buyer-actions, 100 commands)");
+  // The route takes one buyer action (app/api/store/course/certificate/route.ts), priced in tests/plan-cost-registry.ts
+  // at the heaviest action's 100 commands besides its take. The dearest press: a fresh certificate whose student was
+  // erased meanwhile, so it is written whole, the print read, and all of it taken back.
+  {
+    redis.clear();
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    let erasedOnce = false;
+    redis.run = ((c: (string | number)[]) => {
+      commands += 1;
+      if (!erasedOnce && c[0] === "SADD" && String(c[1]).includes(":certs:by:")) { erasedOnce = true; run(suppressCommand(LIST, "costed@example.com")); }
+      return run(c);
+    }) as typeof redis.run;
+    const costed = await press("costed@example.com").catch(() => null);
+    redis.run = run;
+    console.log(`  the dearest press: ${commands} commands`);
+    is("taken back", costed?.ok, false);
+    is("at most 100 commands, inside one buyer action", commands <= 100, true);
+  }
+
   part("Control: a student nobody erased gets their certificate");
   const kept = await press("other@example.com");
   is("issued, fresh", kept.ok && kept.fresh, true);

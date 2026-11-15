@@ -84,3 +84,10 @@ test("the checkouts ask their own switch when no test passes one: today an EU or
   assert.deepEqual(euCheckout({ supply: "ess", priceCents: 1000, items: { ip: "DE", billing: "DE" }, rates, records }), { kind: "refuse", reason: "review" });
   assert.deepEqual(ukCheckout({ supply: "ess", priceCents: 1000, items: { ip: "GB", billing: "GB" }, now: new Date("2026-11-14T12:00:00Z") }), { kind: "refuse", reason: "review" });
 });
+
+test("a clock that is not a moment never throws and never turns a switch on", () => {
+  const bad = new Date(Number.NaN);
+  assert.equal(euVatCollectOn({ ...all, now: bad }), false);
+  assert.equal(ukVatCollectOn({ ...all, now: bad }), false);
+  assert.ok(vatSwitchProblems("EU", { ...all, now: bad }).length > 0);
+});

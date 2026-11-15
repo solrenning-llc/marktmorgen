@@ -472,6 +472,21 @@ async function forget(statsId: string, user: string): Promise<unknown[]> {
 
 /** The user a signed_request from Meta is about, when its signature is the app's. */
 export function signedUser(raw: unknown): string | null {
+  return signedNotice(raw)?.user ?? null;
+}
+
+/** How far ahead of this server's clock a notice's issued_at may be. */
+const NOTICE_AHEAD_MS = 10 * 60_000;
+/** Clock room between Meta and this server when a notice is set against a connection's time. */
+export const NOTICE_SKEW_MS = 60_000;
+
+/**
+ * A signed_request from Meta whose signature is the app's: the user, and when Meta issued it (ms). A notice
+ * without an integer issued_at, or issued well in the future, is refused. An old one is still believed, so
+ * Meta asking again after a 503 still deletes, but it reaches only connections made before it (forgetMetaUser's
+ * cutoff): one seen once and sent again later never disconnects a store connected since (#4585).
+ */
+export function signedNotice(raw: unknown): { user: string; issuedAt: number } | null {
   const secret = appSecret();
   if (!secret || typeof raw !== "string" || raw.length > 4096) return null;
   const [sig, payload] = raw.split(".");
@@ -483,10 +498,14 @@ export function signedUser(raw: unknown): string | null {
   if (given.toString("base64url") !== sig) return null;
   if (given.length !== made.length || !timingSafeEqual(given, made)) return null;
   try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown };
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown; issued_at?: unknown };
     if (String(data.algorithm).toUpperCase() !== "HMAC-SHA256") return null;
     const user = typeof data.user_id === "string" || typeof data.user_id === "number" ? String(data.user_id) : "";
-    return /^\d{1,30}$/.test(user) ? user : null;
+    const issued = data.issued_at;
+    if (typeof issued !== "number" || !Number.isSafeInteger(issued) || issued <= 0) return null;
+    const issuedAt = issued * 1000;
+    if (issuedAt > Date.now() + NOTICE_AHEAD_MS) return null;
+    return /^\d{1,30}$/.test(user) ? { user, issuedAt } : null;
   } catch {
     return null;
   }
@@ -523,8 +542,10 @@ async function exactConnection(statsId: string): Promise<Connection | null> {
  * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
  * stores it already forgot, so their owners are still told (Claude 5 on #2869).
  */
-export async function forgetMetaUser(user: string): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
+export async function forgetMetaUser(user: string, cutoff = Number.POSITIVE_INFINITY): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
+  // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
+  const kept: string[] = [];
   const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
   if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
@@ -533,14 +554,21 @@ export async function forgetMetaUser(user: string): Promise<{ statsId: string; o
     for (const statsId of pass) {
       const c = await exactConnection(statsId);
       if (!c || c.user !== user) continue;
+      if (c.connectedAt > cutoff) {
+        kept.push(statsId);
+        continue;
+      }
       confirmDeleted(await forget(statsId, user), 5, "a Meta connection's deletion");
       forgot.push({ statsId, owner: c.owner });
     }
+    const walked = pass.filter((statsId) => !kept.includes(statsId));
     if (stores.length > pass.length) {
-      confirmDeleted(await redisPipeline([["SREM", userKey(user), ...pass]]), 1, "a Meta user's walked stores");
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
       throw new MetaIncompleteForget(forgot, "more stores than one pass walks; the next callback walks the rest");
     }
-    confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
+    if (kept.length) {
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
+    } else confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
   } catch (error) {
     throw error instanceof MetaIncompleteForget ? error : new MetaIncompleteForget(forgot, error);
   }

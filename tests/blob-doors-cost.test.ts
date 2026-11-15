@@ -35,7 +35,9 @@ const door = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP;
 // one CDN request, as pictureCheckBlob counts it; the community path sends no clean-up head (it only deletes).
 const check = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP + BLOB_SIMPLE_OP + MAX_IMAGE_BYTES * (BLOB_TRANSFER_PER_BYTE + ORIGIN_PER_BYTE) + CDN_PER_REQUEST;
 const handInHead = BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
-const perBuyerAction = Math.max(door, check, handInHead);
+/** A student's door: its token and the browser's put, every try, and the head of its name, every try (main, 293456c92). */
+const studentDoor = door + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
+const perBuyerAction = Math.max(door, studentDoor, check, handInHead);
 const mailPut = BLOB_PUT_TRIES * BLOB_ADVANCED_OP;
 
 part("What the code does at each door (read from the routes, so a new operation fails here)");
@@ -51,7 +53,9 @@ const communityFiles = read("lib/community-files.ts");
 is("the first bytes are one plain get, canceled after sixteen bytes", [count(communityFiles, "await get("), communityFiles.includes("reader.cancel()")], [1, true]);
 const taskDoor = read("app/api/store/course/task/upload/route.ts");
 is("a student's door signs one token after a buyer action, its file at most MAX_TASK_FILE_BYTES", [count(taskDoor, "issueSignedToken({"), taskDoor.includes("takeBuyerAction(on.store)"), taskDoor.includes("maximumSizeInBytes: MAX_TASK_FILE_BYTES")], [1, true, true]);
-is("a student's door asks the store nothing else", /\b(head|get|list|put)\(/.test(taskDoor.replace(/issueSignedToken\(/g, "")), false);
+// Changed on merging main (293456c92, 9 November 2026): the student's door heads its name once, inside its buyer action, to
+// refuse a name the file store already has; nothing else. That head is priced with every try (studentDoor below).
+is("a student's door heads its name once and asks the store nothing else", [count(taskDoor, "await head(pathname)"), /\b(get|list|put)\(/.test(taskDoor.replace(/issueSignedToken\(/g, "").replace(/await head\(pathname\)/g, ""))], [1, false]);
 const handIn = read("app/api/store/course/task/route.ts");
 is("a hand-in heads one file at most, after its buyer action", [count(handIn, "headFile("), handIn.includes("takeBuyerAction(store)")], [1, true]);
 const mailPictures = read("lib/mail-pictures.ts");
@@ -61,7 +65,7 @@ is("it is one of the store's calls to connected services, taken before the put",
 
 part("A community picture's check is priced as the studio's picture check is, less its clean-up head");
 is("at least pictureCheckBlob less the clean-up head the community path does not send", check >= pictureCheckBlob(MAX_IMAGE_BYTES) - BLOB_HEAD_TRIES * BLOB_SIMPLE_OP - 1e-12, true);
-is("so the dearest buyer action is the check, not the door", [check > door, registry.buyerBlobPerAction() >= check - 1e-12], [true, true]);
+is("so the dearest buyer action is the check, not a door, the student's with its head included", [check > door, check > studentDoor, registry.buyerBlobPerAction() >= check - 1e-12], [true, true, true]);
 
 part("The creator's community doors and checks are studio requests, inside studio-blob");
 is("a studio request is already priced above a community door", studioBlobPerRequest() >= door, true);

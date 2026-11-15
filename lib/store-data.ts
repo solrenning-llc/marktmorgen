@@ -44,12 +44,31 @@ export type DataChange = { slot: string; bytes: number; set?: boolean } | { unti
 export type DataTaken = { ok: true; used: number } | { ok: false; reason: "full" | "unknown"; used: number; room: number; message: string };
 
 /**
+ * The most months that are over one TAKE_DATA call takes off the room. They
+ * are read with one HMGET and removed with one HDEL, two commands however
+ * many there are (DATA_EXPIRED_COMMANDS), so the bound keeps those two
+ * commands' arguments small, not their number: 512 months is 42 years idle,
+ * past anything a store lists. Its script holds the same number as a
+ * literal, because scripts/test_store_data_redis.py runs it as written.
+ * Checked against each other by tests/kb22-receipt-number.test.ts.
+ */
+export const DATA_MONTHS_CLEARED_MOST = 512;
+
+/** The commands a TAKE_DATA call bills for the months that are over, at the most: their read and their removal. */
+export const DATA_EXPIRED_COMMANDS = 2;
+
+/**
  * KEYS[1] the store's room. ARGV[1] how far a change may grow it, ARGV[2]
  * "1" to take the change whatever it comes to, ARGV[3] this month
  * ("2026-10", UTC), then (mode, slot, bytes) three at a time: mode "s" sets
  * the slot to bytes, "a" adds bytes to it (never below zero). A slot named
  * "~2027-11" holds what expires by itself in that month, listed in "~"; every
- * call first takes the months that are over off the total. The room's own
+ * call first takes the months that are over off the total, all of them in
+ * DATA_EXPIRED_COMMANDS commands however long a store sat idle (review of
+ * #3001), so the total is exact at once; past DATA_MONTHS_CLEARED_MOST of
+ * them the oldest come off and the rest stay listed and counted until the
+ * next call, the room looking fuller than it is meanwhile, never emptier. A
+ * month listed twice comes off once. The room's own
  * field for each slot is counted in the total as well (64 bytes). Answers
  * {1, total} when taken, {0, total} when it would pass the room (nothing
  * written but the months taken off), {-1, total} for what it cannot read.
@@ -74,16 +93,27 @@ end
 local months = {}
 local listed = redis.call('HGET', KEYS[1], '~') or ''
 local relist = false
+local over, gone = {}, {}
 for m in string.gmatch(listed, '[^,]+') do
-  if m < month then
-    local held = tonumber(redis.call('HGET', KEYS[1], '~' .. m) or '0') or 0
-    -- Its bytes and its own field.
-    if held > 0 then total = total - held - 64 end
-    redis.call('HDEL', KEYS[1], '~' .. m)
+  if m < month and (gone[m] or #over < 512) then
+    if not gone[m] then
+      gone[m] = true
+      over[#over + 1] = '~' .. m
+    end
     relist = true
   else
     months[m] = true
   end
+end
+if #over > 0 then
+  -- One read and one removal for every month that is over, however many.
+  local held = redis.call('HMGET', KEYS[1], unpack(over))
+  for i = 1, #over do
+    local n = tonumber(held[i] or '0') or 0
+    -- Its bytes and its own field.
+    if n > 0 then total = total - n - 64 end
+  end
+  redis.call('HDEL', KEYS[1], unpack(over))
 end
 if total < 0 then total = 0 end
 local function keep()

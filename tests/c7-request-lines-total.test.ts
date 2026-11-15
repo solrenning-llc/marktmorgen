@@ -6,7 +6,7 @@
  * Synthetic: in-memory Redis, stand-in Stripe, no email sent.
  */
 import { claimHandle, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { readDraft } from "@/lib/payment-request-rules";
+import { MAX_LINES, parseRequest, readDraft } from "@/lib/payment-request-rules";
 import { createRequest, readRequest } from "@/lib/payment-request-store";
 import { openRequestCheckout } from "@/lib/payment-requests";
 import { store as redis } from "./redis-stub";
@@ -69,6 +69,20 @@ async function main(): Promise<void> {
   const opened = await openRequestCheckout(store, made.request.id, "https://marktmorgen.com", now);
   is("no checkout is opened for lines that do not add up to the total", opened.ok, false);
   is("no checkout was posted to Stripe", sessions.size, 0);
+
+  // Reviewer 3rjdf (same family) on this branch: every other way a stored record can disagree with itself.
+  part("A stored request reads only when its lines make its total, as a draft makes them");
+  const good = { ...raw, lines: [{ text: "Coaching session", quantity: 1, cents: 10000 }, { text: "Second session", quantity: 2, cents: 1000 }], total: 12000 };
+  is("(control) a whole record reads", parseRequest(good)?.total, 12000);
+  is("a total changed while every line reads", parseRequest({ ...good, total: 11000 }), null);
+  is("more lines than a request may have", parseRequest({ ...good, lines: Array.from({ length: MAX_LINES + 1 }, () => ({ text: "x", quantity: 1, cents: 1 })), total: MAX_LINES + 1 }), null);
+  is("no line at all", parseRequest({ ...good, lines: [], total: 0 }), null);
+  is("lines that are not a list", parseRequest({ ...good, lines: { 0: good.lines[0] } }), null);
+  is("a total that is not whole cents", parseRequest({ ...good, total: 12000.5 }), null);
+  is("lines whose sum is past a safe integer", parseRequest({ ...good, lines: [{ text: "x", quantity: Number.MAX_SAFE_INTEGER, cents: 2 }], total: Number.MAX_SAFE_INTEGER }), null);
+  is("a quantity of 0", parseRequest({ ...good, lines: [{ text: "x", quantity: 0, cents: 12000 }, { text: "y", quantity: 1, cents: 12000 }], total: 12000 }), null);
+  is("a negative amount", parseRequest({ ...good, lines: [{ text: "x", quantity: 1, cents: 13000 }, { text: "y", quantity: 1, cents: -1000 }], total: 12000 }), null);
+  is("a currency we do not take", parseRequest({ ...good, currency: "zzz" }), null);
   done();
 }
 

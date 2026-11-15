@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   const NOW = Date.UTC(2026, 10, 4, 12);
   const DAY = 86_400_000;
   const request = (id: string, over: Partial<PaymentRequest> = {}): PaymentRequest =>
-    ({ id: id.padEnd(32, "0"), sid: "s1", email: "ana@example.com", name: "", lines: [], note: "", currency: "usd", total: 5000, createdAt: NOW - DAY, dueDate: "", expiresAt: NOW + 30 * DAY, state: "open", autoReminders: 0, sent: [NOW - DAY], failed: "", ...over }) as PaymentRequest;
+    ({ id: id.padEnd(32, "0"), sid: "s1", email: "ana@example.com", name: "", lines: [{ text: "x", quantity: 1, cents: 5000 }], note: "", currency: "usd", total: 5000, createdAt: NOW - DAY, dueDate: "", expiresAt: NOW + 30 * DAY, state: "open", autoReminders: 0, sent: [NOW - DAY], failed: "", ...over }) as PaymentRequest;
   const agreement = (id: string, over: Partial<Agreement> = {}): Agreement =>
     ({ id: id.padEnd(32, "0"), sid: "s1", kind: "proposal", email: "ana@example.com", name: "", createdAt: NOW - DAY, expiresAt: NOW + 10 * DAY, state: "open", versions: [{ n: 1, sha256: "x", createdAt: NOW - DAY, signature: null }], sent: [NOW - DAY], failed: "", payRequest: "", copies: 0, closedAt: 0, ...over }) as Agreement;
 

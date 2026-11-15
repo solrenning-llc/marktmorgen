@@ -31,7 +31,7 @@
  * (MAX_PER_PERSON), the amount (a product's own price bounds,
  * lib/money.ts), the lines, the words and the days.
  */
-import { type Currency, currencyRule, readMoney } from "@/lib/money";
+import { type Currency, currencyRule, isCurrency, readMoney } from "@/lib/money";
 import type { Tier } from "@/lib/plan";
 import { type PlanFields, type Standing, standingOf } from "@/lib/plan-standing";
 
@@ -294,11 +294,13 @@ export function parseRequest(raw: unknown): PaymentRequest | null {
   // Every stored line read whole, and their sum exactly the stored total, or the record is not a request (issue #4777):
   // a line dropped while the total is kept left the page payable at a total its lines and its checkout did not make.
   // Callers read a null as unknown (readRequest and the rest throw), never as a request with fewer lines.
-  if (!Array.isArray(v.lines) || v.lines.length > MAX_LINES) return null;
+  // As readDraft makes them: one to MAX_LINES lines, each at least one of a positive amount, in a currency we take.
+  if (!Array.isArray(v.lines) || v.lines.length < 1 || v.lines.length > MAX_LINES || !isCurrency(v.currency)) return null;
   const lines: RequestLine[] = [];
   for (const l of v.lines as unknown[]) {
     const row = l && typeof l === "object" ? (l as Record<string, unknown>) : null;
     if (!row || typeof row.text !== "string" || !Number.isSafeInteger(row.quantity) || !Number.isSafeInteger(row.cents)) return null;
+    if ((row.quantity as number) < 1 || (row.cents as number) < 1) return null;
     lines.push({ text: row.text.slice(0, MAX_LINE_TEXT), quantity: row.quantity as number, cents: row.cents as number });
   }
   if (!Number.isSafeInteger(v.total) || linesTotal(lines) !== v.total) return null;

@@ -225,10 +225,12 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
   // A record that does not read (a line that does not read, or lines that do not add up to the total; issue #4777) is
   // never payable: nothing is opened, and the page says it could not be opened, never that the request is gone.
   const request = await requestOf(store, id).catch((error: unknown) => {
-    if (error instanceof UnknownReplyError) return "unknown" as const;
+    if (error instanceof UnknownReplyError) return error;
     throw error;
   });
-  if (request === "unknown") return { ok: false, reason: "error" };
+  // The error goes with the answer so the route logs what failed; it is not Stripe's, so the creator is not told of a
+  // checkout trouble and the account is not marked as refusing (noteCheckoutTrouble, chargesOffAfterRefusal).
+  if (request instanceof UnknownReplyError) return { ok: false, reason: "error", error: request };
   if (!request || statusOf(request, now) !== "open") return { ok: false, reason: "gone" };
   const held = await holdForCheckout(request.id);
   if (!held) return { ok: false, reason: "busy" };

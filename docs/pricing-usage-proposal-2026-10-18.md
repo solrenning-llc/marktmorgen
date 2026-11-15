@@ -43,7 +43,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $149 / $1,490 **(recommended)** | 15.9% | 60.29% | 60.04% | $89.84 | 0.42 |
+| $149 / $1,490 **(recommended)** | 15.6% | 60.29% | 60.04% | $89.84 | 0.42 |
 | $169 / $1,690 | 70.0% | 60.30% | 60.04% | $101.92 | 0.37 |
 | $199 / $1,990 | 100.0% | 60.59% | 60.35% | $120.58 | 0.31 |
 
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$149 / $1,490** | **$299 / $2,990** | **$999 / $9,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **530** · 3,400 · 3,000 | **1,400** · 10,000 · 10,000 | **27,000** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **520** · 3,400 · 3,000 | **1,400** · 10,000 · 10,000 | **27,000** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **31** · 200 · 200 | **67** · 450 · 450 | **1,000** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **1,000** · 7,000 · 5,000 | **6,800** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **5 + 37** · 40 + 250 · 40 + 250 | **54 + 270** · 80 + 400 · 80 + 400 |

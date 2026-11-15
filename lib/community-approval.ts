@@ -786,8 +786,11 @@ export async function forgetHeldPerson(id: string, who: string): Promise<number>
     ]),
     kept + unlisted.length,
   );
+  // Each count read exactly (rule 24, #4798): a whole number from 0 up to the members, keys or fields it was sent;
+  // more, less than 0 or another shape proves nothing, so the erasure says it did not finish and is retried.
+  const sent = [...(items.length ? [items.length, items.length] : []), 1, 2, ...unlisted.map(() => 1)];
   const counts = done?.map(countOf);
-  if (!counts || counts.some((n) => n === null)) throw new Error("Community held items erasure was not confirmed");
+  if (!counts || counts.some((n, i) => n === null || n > sent[i])) throw new UnknownReplyError("a member's held community items erasure");
   // The pictures last, each file before its line (Codex G on #3020, 6751455863): one that could not be deleted keeps
   // its line, and the erasure says it did not finish, so the next one deletes it.
   let left = 0;

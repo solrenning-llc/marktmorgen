@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { PIXEL_INFO, PIXEL_KINDS, type PixelField, type Pixels, hasPixels, readPixels } from "@/lib/pixels";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { closeDisclosure } from "@/lib/close-disclosure";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -67,7 +68,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: unknown; pixels?: unknown; error?: string; bad?: PixelField };
       if (pixelSettingsConfirmed(response.ok, data, local.pixels)) {
-        if (disclosure.current) disclosure.current.open = false;
+        closeDisclosure(disclosure.current, document);
         toast("Pixels saved.");
         router.refresh();
         return;
@@ -215,7 +216,7 @@ export function PixelEditor({ pixels, canViewAttribution = false }: { pixels: Pi
               type="button"
               className="btn btn-ghost"
               onClick={() => {
-                if (disclosure.current) disclosure.current.open = false;
+                closeDisclosure(disclosure.current, document);
                 setBad(null);
                 setError(null);
               }}

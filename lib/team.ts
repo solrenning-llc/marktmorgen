@@ -31,6 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -38,10 +39,11 @@ import { liveSecondStep } from "@/lib/second-step-gate";
 import { NIMBUS_FROM, headerText, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
 /** People on one store's team, invitations still waiting included. */
@@ -120,6 +122,18 @@ export type LogLine = {
 const EMPTY: Team = { members: [], invites: [] };
 
 /** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+/** Whether a team GET's text is a team record as the writers make it: a JSON object whose invitations, if any, are a list. */
+function readsAsTeamRecord(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const invites = (value as { invites?: unknown }).invites;
+    return invites === undefined || Array.isArray(invites);
+  } catch {
+    return false;
+  }
+}
+
 export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
@@ -368,22 +382,38 @@ export async function logTeam(sid: string, line: Omit<LogLine, "at">): Promise<v
   }
 }
 
-/** The activity log, newest first. */
-export async function readLog(sid: string): Promise<LogLine[]> {
-  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]);
+/**
+ * The activity log, newest first; null when Redis answered in a shape that cannot be read (rule 24), so the Team page
+ * never says "nothing yet". Only Redis's own empty list is none; a line that is itself not readable is skipped, as
+ * before, and counted in `skipped`, so a decision that needs every line (a removal's "never taken off") can tell it
+ * was not read whole (Claude 4 on #3164).
+ */
+export async function readLogWhole(sid: string): Promise<{ lines: LogLine[]; skipped: number } | null> {
+  if (!STORE_ID_PATTERN.test(sid) || !isRedisConfigured()) return { lines: [], skipped: 0 };
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(sid), 0, LOG_LINES - 1]]), 1)?.[0]);
+  if (!rows) return null;
   const lines: LogLine[] = [];
-  for (const row of Array.isArray(rows) ? rows : []) {
+  let skipped = 0;
+  for (const row of rows) {
     try {
-      const value = JSON.parse(String(row)) as Partial<LogLine>;
-      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") continue;
+      const value = JSON.parse(row) as Partial<LogLine>;
+      if (typeof value.at !== "string" || typeof value.who !== "string" || typeof value.what !== "string") {
+        skipped += 1;
+        continue;
+      }
       const role: Role = value.role === "owner" ? "owner" : parseTeamRole(value.role) ?? "support";
       lines.push({ at: value.at, who: value.who, role, what: value.what });
     } catch {
       // A line that cannot be read is skipped, not shown half.
+      skipped += 1;
     }
   }
-  return lines;
+  return { lines, skipped };
+}
+
+/** The activity log's readable lines, newest first, for showing; null when it could not be read (readLogWhole). */
+export async function readLog(sid: string): Promise<LogLine[] | null> {
+  return (await readLogWhole(sid))?.lines ?? null;
 }
 
 export type InviteResult =
@@ -416,12 +446,8 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const replies = repliesFor(await redisPipeline([
-      ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
-      ["INCR", counter],
-    ]), 2);
     // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
-    const sent = countOf(replies?.[1]);
+    const sent = windowCountOf(await redisPipeline(windowCount(counter, 24 * 60 * 60)));
     if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
@@ -618,25 +644,41 @@ export async function removeMember(store: Store, email: string, options: { repea
 }
 
 /**
- * What an invitation is for, read without spending it, so the page the link
- * opens can say which store and which role before anything happens.
+ * What an invitation is for, read without spending it, so the page the link opens can say which store and which
+ * role before anything happens: null when it no longer works. The link's GET in any other shape is unknown and
+ * throws UnknownReplyError, and a read behind it that fails (the store, the team) throws too: never "no longer
+ * works" for what could not be read (CX-123 rule 24).
  */
 export async function peekInvite(token: string): Promise<{ store: Store; email: string; role: TeamRole } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", inviteKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", inviteKey(token)]]), 1);
+  if (!read) throw new UnknownReplyError("a team invitation");
+  const [raw] = read;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a team invitation");
+  let claim: { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
   try {
-    const claim = JSON.parse(raw) as { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
-    const role = parseTeamRole(claim.role);
-    if (typeof claim.sid !== "string" || typeof claim.email !== "string" || !role) return null;
-    const store = await storeForId(claim.sid);
-    if (!store) return null;
-    const team = await readTeam(store.sid);
-    if (!team.invites.some((i) => i.id === claim.id)) return null;
-    return { store, email: normaliseEmail(claim.email), role };
+    claim = JSON.parse(raw) as typeof claim;
   } catch {
     return null;
   }
+  const role = parseTeamRole(claim?.role);
+  if (typeof claim?.sid !== "string" || typeof claim.email !== "string" || !role) return null;
+  // The store read exactly (Claude 6 on #2969): only one confirmed not there is "no longer works".
+  const store = await storeForIdExact(claim.sid);
+  if (!store) return null;
+  // The team read exactly too (Claude 1 on #2969, the team case of K2's MEDIUM): nil is no team, a string is the
+  // record as written, and any other answer is unknown, never an empty team that sends a valid link to "expired".
+  const teamRead = repliesFor(await redisPipeline([["GET", teamKey(store.sid)]]), 1);
+  if (!teamRead) throw new UnknownReplyError("a team");
+  const [teamRaw] = teamRead;
+  if (teamRaw !== null && typeof teamRaw !== "string") throw new UnknownReplyError("a team");
+  // A string is the record only when it reads as one (Codex X5 on #2969): text that is not JSON, empty text, JSON
+  // that is not a record or invitations that are not a list would be parsed as an empty team, which says expired.
+  if (typeof teamRaw === "string" && !readsAsTeamRecord(teamRaw)) throw new UnknownReplyError("a team record");
+  const live = parseTeam(teamRaw).invites.filter((i) => i.expiresAt > now());
+  if (!live.some((i) => i.id === claim.id)) return null;
+  return { store, email: normaliseEmail(claim.email), role };
 }
 
 export type JoinResult =
@@ -727,13 +769,21 @@ export async function dropTeam(store: Store): Promise<void> {
 export async function moveMemberships(from: string, to: string): Promise<void> {
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const [ids] = await redisPipeline([["SMEMBERS", indexKey(before)]]);
-  const list = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string" && STORE_ID_PATTERN.test(id)) : [];
+  // Their stores, read whole (rule 24; Codex G's 4223): an answer that is not a list of store ids is unknown and
+  // stops the move of their teams with nothing deleted, never "on no team", which deleted the old address's index.
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!list || !list.every((id) => STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores");
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
-    const store = await storeForId(sid);
-    if (!store || normaliseEmail(store.email) === after) continue;
+    // Read exactly (Codex G's 4224): a store that does not read stays on the old index; only one confirmed gone
+    // leaves it, as one the person now owns does.
+    const store = await storeForIdExactly(sid);
+    if (store === "unknown") {
+      stayed.push(sid);
+      continue;
+    }
+    if (store === "none" || normaliseEmail(store.email) === after) continue;
     const role = await withTeam(sid, async () => {
       const team = await readTeam(sid);
       if (!team.members.some((m) => m.email === before) || team.members.some((m) => m.email === after)) return null;

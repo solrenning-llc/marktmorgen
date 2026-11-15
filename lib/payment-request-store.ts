@@ -35,6 +35,7 @@
  */
 import { personKey } from "@/lib/person-key";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type Held, LockBusyError, releaseLock, takeLock, withLock } from "@/lib/redis-lock";
 import { type Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -187,7 +188,11 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
       ["EXPIRE", storeKey(store.sid), keep],
       ["EXPIRE", person, keep],
     ]);
-    const [open, kept, mine] = [Number(counts[5]), Number(counts[6]), Number(counts[7])];
+    // ZCARD and SCARD answer whole numbers from 0 up: anything else (null, "", a list, a reply cut short) is unknown
+    // (rule 24), never 0, so a cap is never passed on a count that was not read.
+    const exact = repliesFor(counts, 11);
+    const count = (at: number) => (exact && typeof exact[at] === "number" && Number.isSafeInteger(exact[at]) && (exact[at] as number) >= 0 ? (exact[at] as number) : Number.NaN);
+    const [open, kept, mine] = [count(5), count(6), count(7)];
     const undo = () => redisPipeline([["ZREM", openKey(store.sid), request.id], ["ZREM", storeKey(store.sid), request.id], ["SREM", person, request.id]]).catch(() => undefined);
     if (![open, kept, mine].every(Number.isSafeInteger)) {
       await undo();
@@ -225,16 +230,52 @@ export async function createRequest(store: Store, draft: RequestDraft, now = Dat
   }
 }
 
-/** One request by its id, or null. */
+/**
+ * One request by its id, or null when its record is confirmed gone (GET answers exactly null). A reply cut short or
+ * of another shape, or a record that is not a request, throws UnknownReplyError (rule 24), as reminderRequestOf does:
+ * never the same null as a deleted request, which made a paid checkout's webhook skip the request, left open without
+ * its receipt for the buyer to pay again.
+ */
 export async function readRequest(id: string): Promise<PaymentRequest | null> {
   if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(id)]]);
-  if (typeof raw !== "string") return null;
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a payment request's record");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a payment request's record");
+  let request: PaymentRequest | null;
   try {
-    return parseRequest(JSON.parse(raw));
+    request = parseRequest(JSON.parse(raw));
   } catch {
-    return null;
+    request = null;
   }
+  if (!request) throw new UnknownReplyError("a payment request's record");
+  return request;
+}
+
+/**
+ * The daily reminder's read of one of this store's requests, exactly (rule 24):
+ * null only when the record is confirmed absent (GET answered nil) or is
+ * another store's. Any other reply (none, a number, an object, a record that
+ * does not parse) throws UnknownReplyError, so the reminder is put off a day
+ * rather than dropped for good; the record's own expiry (KEEP_DAYS) is what
+ * at last makes it a real nil. Same one GET as readRequest.
+ */
+export async function reminderRequestOf(store: Pick<Store, "sid">, id: string): Promise<PaymentRequest | null> {
+  if (!ID_PATTERN.test(id) || !isRedisConfigured()) return null;
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a payment request's record");
+  const [raw] = replies;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a payment request's record");
+  let request: PaymentRequest | null;
+  try {
+    request = parseRequest(JSON.parse(raw));
+  } catch {
+    request = null;
+  }
+  if (!request) throw new UnknownReplyError("a payment request's record");
+  return store.sid && request.sid === store.sid ? request : null;
 }
 
 /** One of this store's requests, or null: a request is only ever found under the store that made it. */

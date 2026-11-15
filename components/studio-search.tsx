@@ -12,7 +12,9 @@ import {
   searchScheduler,
 } from "@/lib/studio-search-rules";
 
-// Drawn only once the page's script runs: before that the box could not search, so it is not shown at all.
+// Before the page's script runs the box could not search, so it is not shown or reachable yet; but the server
+// still draws it, unseen and inert, so it already holds its place and nothing under it moves when it appears
+// (a click begun on the page below then still lands where it was aimed).
 const subscribe = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
@@ -194,8 +196,6 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
     }
   };
 
-  if (!ready) return null;
-
   const groups: { title: string; items: { option: Option; index: number }[] }[] = [];
   options.forEach((option, index) => {
     const current = groups.at(-1);
@@ -204,7 +204,7 @@ export function StudioSearch({ sid, buyers }: { sid: string; buyers: boolean }) 
   });
 
   return (
-    <div role="search" aria-label="Studio" className="border-b border-line bg-white">
+    <div role="search" aria-label="Studio" inert={!ready} className={`border-b border-line bg-white${ready ? "" : " invisible"}`}>
       <div className="container-page py-3">
         <label htmlFor={inputId} className="field-label">
           Search the studio

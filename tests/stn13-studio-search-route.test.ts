@@ -109,7 +109,8 @@ async function main(): Promise<void> {
   const admin = await ask("admin@example.com", "buyers", { store: a.sid });
   is("admin: the Buyers tool is offered", ids(admin.body, "tools").includes("people"), true);
   is("a tool opens its own screen on the store", group(admin.body, "tools")?.results.find((r) => r.id === "people")?.href, `/studio/people?store=${a.sid}`);
-  is("searching wrote nothing to the team's log", (await readLog(a.sid)).length, 0);
+  // An unreadable log reads as null (lib/team.ts readLog), never as an empty one, so it fails here.
+  is("searching wrote nothing to the team's log", await readLog(a.sid), []);
 
   part("Counted before it reads");
   await resetLimits();

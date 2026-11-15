@@ -31,7 +31,7 @@ import { createHash } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { DataRoomError, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import type { Store } from "@/lib/store";
@@ -223,11 +223,15 @@ export async function recordLead(
       if (error instanceof DataRoomError) return "full";
       throw error;
     }
-    const [won] = await redisPipeline([["HSETNX", leadsKey(store.statsId), lead.id, json]]);
-    if (Number(won) !== 1) {
+    // Read exactly (CX-123 rule 24): 1 is written, 0 is the person's lead already there (its room given back). Any
+    // other reply may have written the lead, so its room is kept, never given back for a lead that may exist, and
+    // the answer is "unavailable" (thrown here, said by the catch below), never "duplicate".
+    const won = countOf(repliesFor(await redisPipeline([["HSETNX", leadsKey(store.statsId), lead.id, json]]), 1)?.[0]);
+    if (won === 0) {
       await giveData(store, [{ slot: LEADS_SLOT, bytes }]);
       return "duplicate";
     }
+    if (won !== 1) throw new UnknownReplyError("an affiliate lead's write");
     return "recorded";
   } catch (error) {
     console.error("recording an affiliate's lead failed", error);

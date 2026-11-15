@@ -232,6 +232,11 @@ export async function sales(store: Store, cursor: string | null, charge: Charge)
     const m = obj(row.metadata);
     return row.object !== "checkout.session" || typeof row.id !== "string" || !CURSOR.test(row.id) || !m || (m.store !== undefined && typeof m.store !== "string");
   })) return null;
+  // A page that lists one checkout twice, or that holds the very checkout it was asked to start after, is not the page
+  // Stripe documents (starting_after names the record before the page): unknown, never a sale counted twice or the
+  // same cursor handed back without moving on (#4687).
+  const ids = new Set(rows.map((row) => row.id));
+  if (ids.size !== rows.length || (cursor !== null && ids.has(cursor))) return null;
   const handles = saleHandles(store);
   // A checkout of this store is classed by its status, payment status and mode, each one Stripe documents: one Stripe
   // sent without them, or with a value this reader does not know, is unknown, never left out of the page as though it

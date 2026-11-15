@@ -38,7 +38,7 @@ test('control: a confirmed expanded charge reports its own time and explicit zer
  const f=await fixture(),r=await f.call(page([session({payment_intent:intent()})]));assert.equal(r.status,200);assert.equal(r.body.data[0].refunded_cents,0);assert.equal(r.body.data[0].disputed,false);assert.equal(r.body.data[0].paid_at,new Date(charge.created*1000).toISOString());
 });
 test('control: known open checkout and complete foreign checkout remain excluded',async()=>{
- const f=await fixture(),r=await f.call(page([session({status:'open',payment_status:'unpaid'}),session({metadata:{store:'other-store'}})]));assert.equal(r.status,200);assert.deepEqual(r.body.data,[]);
+ const f=await fixture(),r=await f.call(page([session({id:'cs_test_G2Open',status:'open',payment_status:'unpaid'}),session({id:'cs_test_G2Foreign',metadata:{store:'other-store'}})]));assert.equal(r.status,200);assert.deepEqual(r.body.data,[]);
 });
 for(const row of [{},session({status:'future_status'}),session({payment_status:'future_status'}),session({mode:'future_mode'})])test('unknown checkout classification cannot certify no sales '+JSON.stringify(row),async()=>{
  const f=await fixture(),r=await f.call(page([row]));console.log('G2_SALES_CLASS',JSON.stringify(r));assert.equal(r.status,502);

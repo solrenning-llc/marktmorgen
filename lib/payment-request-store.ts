@@ -468,7 +468,9 @@ export async function markPaid(store: Store, id: string, session: PaidSession, n
     const paid: PaymentRequest = {
       ...request,
       state: "paid",
-      paidAt: typeof session.created === "number" ? Math.min(now, session.created * 1000) : now,
+      // When the payment was seen, never the checkout's `created`, which is when the session was opened (#4685): a
+      // checkout opened before midnight and paid after it is dated the day the money came in, never the day before.
+      paidAt: now,
       amountPaid: Number(session.amount_total),
       payment: intentOf(session.payment_intent).slice(0, 255),
       session: typeof session.id === "string" ? session.id.slice(0, 255) : request.session,

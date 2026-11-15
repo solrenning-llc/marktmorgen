@@ -454,7 +454,7 @@ function DraftExtras({ draft, products, sid, placeholders, sequences, saveSequen
     </div> : null}
     {draft.sequence ? <div className="rounded-xl border border-line p-3 text-sm">
       <p className="font-semibold">Follow-up emails</p>
-      <p className="mt-1 text-xs text-ink-soft">{draft.sequence.trigger === "form" ? "Sent to people who send the funnel's form with their email and are on your list." : `Sent to people who get “${title(draft.sequence.productId ?? "")}”.`} An unsubscribe line is added to every email.</p>
+      <p className="mt-1 text-xs text-ink-soft">{draft.sequence.trigger === "form" ? "Sent to people who send the funnel's form, check its box to hear from you and confirm by email." : `Sent to people who get “${title(draft.sequence.productId ?? "")}”.`} An unsubscribe line is added to every email.</p>
       <ol className="mt-3 space-y-3">{steps.map((step, i) => <li key={i} className="rounded-lg border border-line p-3">
         <p className="text-xs text-ink-soft">{`Email ${i + 1} · ${i === 0 ? (step.delayHours === 0 ? "right away" : "after 1 day") : `${Math.round(step.delayHours / 24)} ${Math.round(step.delayHours / 24) === 1 ? "day" : "days"} after the one before`}`}</p>
         <label className="mt-2 block"><span className="field-label">Subject of email {i + 1}</span><input className="field mt-2" maxLength={MAX_DRAFTED_SUBJECT} value={step.subject} onChange={event => onSteps(steps.map((s, at) => at === i ? { ...s, subject: event.target.value } : s))} /></label>

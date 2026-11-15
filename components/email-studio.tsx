@@ -2173,7 +2173,7 @@ function Flows({
       : f.trigger === "tagged"
         ? `Starts when a sequence gives someone the label “${f.tag ?? ""}”`
       : f.trigger === "form"
-        ? `Starts when someone on your list sends the form “${automation.forms.find((x) => x.id === f.formId)?.name ?? "a form no longer in your store"}”${f.formOutcome ? ` and gets the result “${automation.forms.find((x) => x.id === f.formId)?.outcomes?.find((o) => o.id === f.formOutcome)?.title ?? "a result no longer in the form"}”` : ""}`
+        ? `Starts when someone sends the form “${automation.forms.find((x) => x.id === f.formId)?.name ?? "a form no longer in your store"}”${f.formOutcome ? ` and gets the result “${automation.forms.find((x) => x.id === f.formId)?.outcomes?.find((o) => o.id === f.formOutcome)?.title ?? "a result no longer in the form"}”` : ""} and confirms by email`
       : f.trigger === "finished"
         ? `Starts when someone who agreed to hear from you finishes ${products.find((p) => p.id === f.productId)?.title ?? "a course"}`
       : f.trigger === "started"

@@ -6,7 +6,6 @@ import { originFrom, linkOrigin } from "@/lib/request-origin";
 import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readForm, addResponse } from "@/lib/form-store";
-import { enroll } from "@/lib/flows";
 import { FORM_ID, formOpen, outcomeOf, readAnswers, scoreOf, scoreQuery } from "@/lib/forms";
 import { askToJoin } from "@/lib/store-join";
 import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
@@ -88,8 +87,10 @@ export async function POST(request: NextRequest) {
       joined = asked === "sent";
     }
     await addResponse(statsId, def.id, { id: randomBytes(16).toString("hex"), at: Math.floor(Date.now() / 1000), page: page?.id ?? "", answers: read.answers, outcome: outcome?.id ?? "", joined, ...(measured ? { score: measured.total, scores: measured.categories } : {}) }, store);
-    // Somebody already on the list: the sequences that start with this form start now (lib/flows.ts checks they may be written to).
-    if (read.email) await enroll(store, read.email, { joined: false, form: def.id, formOutcome: outcome?.id ?? "" });
+    // A sequence that starts with this form starts only for an address proven to be the sender's: on pressing the
+    // button of the confirmation email the list box sends, which carries the form and its result
+    // (app/api/store/join/confirm/route.ts). An address typed here proves nothing: anybody could type somebody
+    // else's, with the result they pick, start that person's emails and spend the one start they get (MM-SA-40).
 
     // A step of a funnel: counted as done there, and the person goes on.
     const here = page && mark ? await funnelHere(store, mark, "page", page.id).catch(() => null) : null;

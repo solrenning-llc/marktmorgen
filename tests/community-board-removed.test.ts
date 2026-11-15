@@ -18,12 +18,15 @@ if (boardShown) {
   const top = [{ key: "a", points: 9 }, { key: "b", points: 7 }, { key: "c", points: 5 }];
   const members = new Map([["a", { removed: false }], ["b", { removed: true }], ["c", { removed: false }]]);
   is("the removed member is not shown, the others keep their order", boardShown(top, members).map((s) => s.key), ["a", "c"]);
-  is("a member whose record was not found is still shown, unnamed", boardShown([{ key: "d", points: 1 }], new Map()).map((s) => s.key), ["d"]);
+  // Claude 1 cloud R's MÉDIO on #4546: a record not found, or not read, could be a removed member's, so it is not shown
+  // (fail-closed, rule 24); before, it was shown unnamed, which put a removed member back whenever the read was lost.
+  is("a member whose record was not found is not shown", boardShown([{ key: "d", points: 1 }], new Map()).map((s) => s.key), []);
 }
 
 part("The leaderboard page lists only what boardShown keeps");
 const page = readFileSync("app/[handle]/community/leaderboard/page.tsx", "utf8");
 is("the page reads boardShown", /boardShown\(standing\.top, members\)/.test(page), true);
 is("and never maps the board's raw top into the list", /standing\.top\.map\(\(s, i\)/.test(page), false);
+is("the members are read exactly, so a lost reply is unknown, never an empty list taken as members", /readMembersExact\(id, standing\.top\.map/.test(page), true);
 
 done();

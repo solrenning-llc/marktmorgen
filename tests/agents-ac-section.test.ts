@@ -8,6 +8,10 @@
  *   - its push, conflict and queue rules keep MV (a)'s stop while the main-vermelho issue is open;
  *   - it finds colliding PRs with git, not one API call per PR (AV10 (3));
  *   - its scan rides the inbox watcher or the Codex's hourly task (AV9, AV11), with no reminder of a session's own.
+ *   - it does not override the channel rules it sits beside (Claude 4 on #4578, 6900641796): enqueueing follows
+ *     ALL-236 B's faucet, not a coordinator batch; (i) says it replaces ALL-236 A7; every push waits for the agent's
+ *     minute and the traffic light (ALL-236 A3/A4); an old stack base is merged only on a conflict or a check that
+ *     fails because of its age (MV (c)).
  * Reads the files as they are; no network.
  */
 import { readFileSync } from "node:fs";
@@ -49,5 +53,17 @@ part("Collisions found with git, and the scan's clock");
 is("(e) finds colliding PRs with git, once a sweep", rule("e").includes("git fetch origin '+refs/pull/*/head:refs/pr/*'"), true);
 is("(c) rides the inbox watcher or the Codex's hourly task", rule("c").includes("AV11") && rule("c").includes("AV9"), true);
 is("no term defined only in the channel", [ac.includes("ritmo de 1 push a cada 5 a 20 minutos"), ac.includes("duas revisões READY de famílias diferentes")], [false, false]);
+
+part("The channel rules it sits beside (ALL-236 A3/A4, A7, B; MV (c))");
+const k = rule("k");
+is("(k) has no coordinator batch", [k.includes("o coordenador enfileira"), k.includes("antes de qualquer trabalho novo")], [false, false]);
+is("(k) leaves enqueueing to ALL-236 B's faucet", k.includes("o enfileiramento segue a torneira em vigor (ALL-236 B)"), true);
+is("(i) says it replaces ALL-236 A7", rule("i").includes("Substitui ALL-236 A7") && rule("i").includes("nesse ponto"), true);
+for (const letter of ["a", "b"]) is(`(${letter}) pushes only at the agent's minute and with the traffic light`, rule(letter).includes("no seu minuto e com o semáforo (ALL-236 A3/A4"), true);
+const j = rule("j");
+is("(j) no longer merges main into every old base", j.includes("O autor junta o main na base e a base no PR, ou"), false);
+is("(j) merges only on a conflict or a check failing for the base's age", [j.includes("só se o `git merge-tree` da base contra o main tiver conflito"), j.includes("reprovar por causa da idade da base")], [true, true]);
+is("(j) does not merge a clean base (MV (c))", j.includes("com `git merge-tree` limpo e verificações verdes, não junta (MV (c))"), true);
+is("(j) changes the base to main without merging when it is in or closed", j.includes("muda a base para `main`, sem juntar"), true);
 
 done();

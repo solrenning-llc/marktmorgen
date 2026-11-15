@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       const done = await confirmRecoveryAddress(email, session, typeof body.code === "string" ? body.code.slice(0, 20) : "");
       if (typeof done === "string") return Response.json({ ok: false, error: done }, { status: 400 });
       // The address is replaced already; a day that could not be called off stays shown in the studio, with Cancel.
-      await cancelReset(email, "recovery").catch((error: unknown) => console.error("calling off a two-step reset after a new recovery address failed", error));
+      await cancelReset(email, "recovery").catch(() => console.error("calling off a two-step reset after a new recovery address failed"));
       return Response.json({ ok: true, address: done.address });
     }
     if (body.action === "remove") {

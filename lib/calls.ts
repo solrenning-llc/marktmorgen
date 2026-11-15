@@ -92,7 +92,7 @@ import { bookingLength, ownLength } from "@/lib/call-lengths";
 import { planCheck, planReminders, readMoves, unplanReminders, writeMove } from "@/lib/call-records";
 import { calendarBusy } from "@/lib/calendar-sync";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
-import { emitEvent } from "@/lib/webhooks";
+import { changedFields, emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomOf } from "@/lib/call-rooms";
 import { alertCreator } from "@/lib/phone-alerts";
@@ -1648,11 +1648,14 @@ export async function moveBooking(input: {
   await tellMoved({ store, product, session, from, start, end, moves, email: input.booked.email, buyerTz: input.booked.buyerTz, origin, hosts }).catch(
     (error) => console.error("sending the move emails failed", error),
   );
+  const was = { start: new Date(from.start).toISOString(), end: new Date(from.end).toISOString() };
+  const movedTo = { start: new Date(start).toISOString(), end: new Date(end).toISOString() };
   await emitEvent(store, "call.moved", `${session}|${moves}`, {
     checkout_session: session,
     product: { id: product.id, title: product.title },
-    from: { start: new Date(from.start).toISOString(), end: new Date(from.end).toISOString() },
-    to: { start: new Date(start).toISOString(), end: new Date(end).toISOString() },
+    from: was,
+    to: movedTo,
+    previous: changedFields(was, movedTo),
     moves,
     buyer: { email: input.booked.email, timezone: input.booked.buyerTz },
   }).catch((error) => console.error("queueing the call.moved webhook failed", error));

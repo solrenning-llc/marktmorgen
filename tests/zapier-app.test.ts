@@ -240,11 +240,15 @@ async function main(): Promise<void> {
   is("each event's trigger is the one named for it", app.EVENTS.every((e) => app.triggers[e.key]?.operation.type === "hook" && e.key === e.event.replace(".", "_")), true);
 
   part("Each example says what its webhook really sends, field by field");
-  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"]] as const) {
+  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"]] as const) {
     const spec = app.EVENTS.find((e) => e.event === event);
     const sample = spec ? (app.triggers[spec.key].operation.sample as { type?: string; data?: Record<string, unknown> }) : null;
     is(`${event}: the example is that event's message`, sample?.type, event);
     is(`${event}: its fields are the ones ${file} sends`, Object.keys(sample?.data ?? {}).sort(), sentFields(read(file), event));
+  }
+  for (const key of ["membership_changed", "call_moved"]) {
+    const data = (app.triggers[key].operation.sample as { data: Record<string, Record<string, unknown>> }).data;
+    is(`${key}: the example's previous is what changed from \`from\` to \`to\`, as it was`, data.previous, Object.fromEntries(Object.entries(data.from).filter(([k, v]) => data.to[k] !== v)));
   }
   const disputeSample = app.triggers.dispute_opened.operation.sample as { data: Record<string, unknown> };
   is("a dispute's example names no buyer, as a dispute's webhook names none", "buyer" in disputeSample.data || /@/.test(JSON.stringify(disputeSample.data)), false);

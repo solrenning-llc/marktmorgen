@@ -77,6 +77,10 @@ async function main() {
     { price: "price_year", amount_cents: 69000, interval: "year", interval_count: 1, quantity: 1 },
   ]);
   is("with the product, the option and when", [(a.product as { id: string }).id, a.option, a.changed_at], ["p_member", "gold", new Date(1_790_000_000_000).toISOString()]);
+  // 378 [TB4] complement WG (a): previous holds only what changed, as it was.
+  is("previous: only the fields that changed, as they were", a.previous, { price: "price_month", amount_cents: 6900, interval: "month" });
+  const b = sent.find((m) => (m.data as { subscription: string }).subscription === "sub_B")!.data as Record<string, unknown>;
+  is("a quantity change's previous is its quantity alone", b.previous, { quantity: 1 });
   is("no extra Stripe request for it", asked.filter((p) => p !== "/v1/events"), []);
   await watchStripe(Date.now() + 10_000);
   is("noticed again, still sent once", (await recentMessages(store, "membership.changed", 10)).length, 2);

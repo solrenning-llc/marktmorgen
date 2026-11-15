@@ -1900,6 +1900,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         option: meta.option ?? null,
         from,
         to,
+        previous: changedFields(from, to),
         changed_at: iso(event.created),
       }, created);
     }
@@ -2049,6 +2050,18 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
       : ending && !wasEnding && set;
   }
   return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
+}
+
+/**
+ * What a change event's `previous` says (378 [TB4] complement WG (a)): only
+ * the fields of `from` whose value is not the one in `to`, as they were, so a
+ * receiver reads what changed without comparing the two. Plain values only,
+ * compared as they are.
+ */
+export function changedFields<T extends Record<string, string | number | boolean | null>>(from: T, to: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const key of Object.keys(from) as (keyof T)[]) if (from[key] !== to[key]) out[key] = from[key];
+  return out;
 }
 
 /** A subscription's first item as a membership's plan: its price, amount, interval and quantity; null when it has none. */

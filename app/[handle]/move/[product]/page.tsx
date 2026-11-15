@@ -67,7 +67,8 @@ export default async function MovePage({ params, searchParams }: Params) {
   // An unknown state is what the page says, whatever the address carries: never "moved" from a status in the link.
   const notice = unknownState ? m.notices.unknown : priceGone ? m.notices.price : (said ?? blocking);
   // Where the prices offered today are, when the one named is gone: the product's own page, while buyers can see it.
-  const pricesLink = priceGone && product && !product.hidden ? product : null;
+  // Never to a store switched off after a report (lib/takedown.ts), which sells nothing.
+  const pricesLink = priceGone && product && !product.hidden && !store.suspended ? product : null;
   // A draft is named only to whoever holds this move's private invitation; otherwise it is a product not known here (MM-SA-30).
   const named = product && (!product.hidden || invite) ? product : null;
 

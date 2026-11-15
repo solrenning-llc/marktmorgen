@@ -62,10 +62,10 @@ async function main(): Promise<void> {
     is("ben declines", await decline(id, "ben", req.pair, ROOM), true);
     is("ana is now refused (confirmed decline, as before)", await send(id, setting, "ana", "ben", "again", ROOM), { ok: false, reason: "declined" });
     for (const [what, reply] of [
-      ["a hole", [undefined, 0, 0]],
-      ["nothing", [null, 0, 0]],
-      ["text", ["1", 0, 0]],
-      ["a fraction", [0.5, 0, 0]],
+      ["a hole", [undefined, 0, 0, null, null]],
+      ["nothing", [null, 0, 0, null, null]],
+      ["text", ["1", 0, 0, null, null]],
+      ["a fraction", [0.5, 0, 0, null, null]],
       ["cut short", []],
     ] as [string, unknown][]) {
       const got = await sendWith(reply, id, "ana", "ben", `again (${what})`);
@@ -76,29 +76,59 @@ async function main(): Promise<void> {
   part("The recipient's conversation count (ZCARD, the MAX_CONVERSATIONS cap) in another shape");
   {
     for (const [what, reply] of [
-      ["a hole", [0, 0, undefined]],
-      ["nothing", [0, 0, null]],
-      ["text", [0, 0, String(MAX_CONVERSATIONS)]],
-      ["below zero", [0, 0, -1]],
-      ["a fraction", [0, 0, 1.5]],
+      ["a hole", [0, 0, undefined, null, null]],
+      ["nothing", [0, 0, null, null, null]],
+      ["text", [0, 0, String(MAX_CONVERSATIONS), null, null]],
+      ["below zero", [0, 0, -1, null, null]],
+      ["a fraction", [0, 0, 1.5, null, null]],
       ["cut short", [0, 0]],
+      ["cut short of the request check", [0, 0, 0]],
+      ["cut short of the inbox check", [0, 0, 0, null]],
     ] as [string, unknown][]) {
       const got = await sendWith(reply, id, "cara", "dan", `hello (${what})`);
       is(`count read as ${what}: unknown, no conversation past the cap`, [got, await seen(id, "dan")], ["unknown", 0]);
     }
-    is("a confirmed full inbox still refuses a new conversation", await sendWith([0, 0, MAX_CONVERSATIONS], id, "cara", "dan", "hello"), { ok: false, reason: "full" });
+    is("a confirmed full inbox still refuses a new conversation", await sendWith([0, 0, MAX_CONVERSATIONS, null, null], id, "cara", "dan", "hello"), { ok: false, reason: "full" });
     is("nothing reached dan", await seen(id, "dan"), 0);
   }
 
   part("Whether the two already talk (EXISTS) in another shape");
   {
     for (const [what, reply] of [
-      ["text", [0, "1", 0]],
-      ["nothing", [0, null, 0]],
-      ["a hole", [0, undefined, 0]],
+      ["text", [0, "1", 0, null, null]],
+      ["nothing", [0, null, 0, null, null]],
+      ["a hole", [0, undefined, 0, null, null]],
     ] as [string, unknown][]) {
       const got = await sendWith(reply, id, "eve", "fay", `hello (${what})`);
       is(`EXISTS read as ${what}: unknown, never in fay's conversations`, [got, await seen(id, "fay")], ["unknown", 0]);
+    }
+  }
+
+  part("The pair's place in the recipient's request list (ZSCORE) in another shape");
+  {
+    for (const [what, reply] of [
+      ["a number", [0, 1, 0, 5, null]],
+      ["empty text", [0, 1, 0, "", null]],
+      ["text that is not a number", [0, 1, 0, "soon", null]],
+      ["a list", [0, 1, 0, ["1"], null]],
+      ["a hole", [0, 1, 0, undefined, null]],
+    ] as [string, unknown][]) {
+      const got = await sendWith(reply, id, "gus", "hal", `hello (${what})`);
+      is(`request check read as ${what}: unknown, never in hal's conversations`, [got, await seen(id, "hal")], ["unknown", 0]);
+    }
+  }
+
+  part("The pair's place in the recipient's inbox (ZSCORE) in another shape");
+  {
+    for (const [what, reply] of [
+      ["a number", [0, 1, 0, null, 5]],
+      ["empty text", [0, 1, 0, null, ""]],
+      ["text that is not a number", [0, 1, 0, null, "soon"]],
+      ["a list", [0, 1, 0, null, ["1"]]],
+      ["a hole", [0, 1, 0, null, undefined]],
+    ] as [string, unknown][]) {
+      const got = await sendWith(reply, id, "ivy", "jon", `hello (${what})`);
+      is(`inbox check read as ${what}: unknown, never in jon's conversations`, [got, await seen(id, "jon")], ["unknown", 0]);
     }
   }
 

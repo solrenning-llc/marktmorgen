@@ -1,7 +1,7 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
-import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
+import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
@@ -41,7 +41,7 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
@@ -77,6 +77,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
+// As a namespace, so it never clashes with a named import of the same helpers elsewhere in this file.
+import * as exactReply from "@/lib/redis-reply";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -166,6 +168,37 @@ const QUEUE = "nl:mail:flowq";
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
 /**
+ * Moves each member from one sorted set to another, at a score, in one step (CX-123 rule 24): a member is written to
+ * KEYS[2] only by whoever took it off KEYS[1], and the answer is 1 or 0 for each, in order. Taking due runs off the
+ * queue into the lease, and putting them back, never leaves a run in neither: a reply lost after it ran leaves the run
+ * moved, where the next run's orphan pass (or the queue itself) finds it.
+ */
+export const FLOW_MOVE = `-- marktmorgen:flow-move:v1
+local out = {}
+for i = 2, #ARGV do
+  if redis.call('ZREM', KEYS[1], ARGV[i]) == 1 then
+    redis.call('ZADD', KEYS[2], ARGV[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Moves `members` from `from` to `to` at `score`: true for each one this call moved. An answer of another shape throws. */
+async function moveMembers(from: string, to: string, score: number, members: string[]): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply = repliesFor(await redisPipeline([["EVAL", FLOW_MOVE, 2, from, to, score, ...members]]), 1);
+  const moved = reply?.[0];
+  if (!Array.isArray(moved) || moved.length !== members.length) throw new UnknownReplyError("a move in the sequence queue");
+  return moved.map((value) => {
+    const n = countOf(value);
+    if (n !== 0 && n !== 1) throw new UnknownReplyError("a move in the sequence queue");
+    return n === 1;
+  });
+}
+
+/**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
  * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
@@ -213,22 +246,48 @@ function cleanStep(raw: unknown, known: (productId: string) => boolean, isFlow: 
 /** How many bytes the store's sequences hold, before they are read (lib/mcp-tools.ts, emailsTool); null when it did not come back. */
 export async function flowsBytes(listId: string | null): Promise<number | null> {
   if (!listId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["STRLEN", flowsKey(listId)]]);
-  const bytes = Number(n);
-  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  // Exactly one whole number from zero up (a list with none is 0); anything else did not come back (CX-123 rule 24).
+  const reply = exactReply.repliesFor(await redisPipeline([["STRLEN", flowsKey(listId)]]), 1);
+  return reply ? exactReply.countOf(reply[0]) : null;
 }
 
+/**
+ * The store's workflows, read exactly (CX-123 rule 24): none only when Redis says nil. A reply missing, extra, of
+ * another type or not a list of workflows throws UnknownReplyError, never "no workflows": a closed store's erasure
+ * (lib/closed-store-data.ts marksOf) and a person's copy (lib/person-copy.ts) must not go on without them. Callers
+ * that can do without (data-recount, buyer-profile, checkout-sweep) catch it themselves.
+ */
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);
-  if (typeof raw !== "string") return [];
-  try {
-    const list = JSON.parse(raw) as Flow[];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
+  return readFlowsExact(listId);
 }
+
+
+/**
+ * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
+ * or of another shape, a string that is not a JSON list, or a list with any element that is not a workflow, throws, so
+ * the due batch goes back in the queue for a later run instead of being dropped (CX-123 rule 24; a garbled '{', '{}'
+ * or '[1]' is unknown, not "no workflows" or "this workflow is gone": #2861).
+ */
+async function readFlowsExact(listId: string): Promise<Flow[]> {
+  const reply = repliesFor(await redisPipeline([["GET", flowsKey(listId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("the store's workflows");
+  if (reply[0] === null) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(reply[0]);
+  } catch {
+    throw new UnknownReplyError("the store's workflows");
+  }
+  if (!Array.isArray(list) || !list.every(isFlowShape)) throw new UnknownReplyError("the store's workflows");
+  return list as Flow[];
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A workflow as writeFlows stores it: a string id, a boolean active and a list of steps that are each an object. */
+const isFlowShape = (value: unknown): boolean =>
+  isRecord(value) && typeof value.id === "string" && typeof value.active === "boolean" && Array.isArray(value.steps) && value.steps.every(isRecord);
 
 export class FlowWriteUnconfirmed extends Error {
   constructor() {
@@ -482,15 +541,25 @@ export type FlowCounts = {
   acted: number;
 };
 
-/** How many have started each sequence, how many of its emails went out, and how many ended it or skipped one. */
+/**
+ * How many have started each sequence, how many of its emails went out, and how many ended it or skipped one.
+ * Counts never written are 0 (an empty hash); a reply of any other shape throws UnknownReplyError, never zeros
+ * (CX-123 rule 24).
+ */
 export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>> {
   const out = new Map<string, FlowCounts>();
   if (!flows.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)]));
+  const rows = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)])), flows.length);
+  if (!rows) throw new exactReply.UnknownReplyError("the sequences' counts");
   flows.forEach((f, i) => {
-    const raw = rows[i];
+    const raw = exactReply.stringList(rows[i]);
+    if (!raw || raw.length % 2 !== 0) throw new exactReply.UnknownReplyError("a sequence's counts");
     const map = new Map<string, number>();
-    if (Array.isArray(raw)) for (let j = 0; j + 1 < raw.length; j += 2) map.set(String(raw[j]), Number(raw[j + 1]) || 0);
+    for (let j = 0; j < raw.length; j += 2) {
+      const count = /^\d+$/.test(raw[j + 1]) ? Number(raw[j + 1]) : NaN;
+      if (!Number.isSafeInteger(count)) throw new exactReply.UnknownReplyError("a sequence's counts");
+      map.set(raw[j], count);
+    }
     out.set(f.id, { started: map.get("started") ?? 0, sent: map.get("sent") ?? 0, reached: map.get("reached") ?? 0, skipped: map.get("skipped") ?? 0, acted: map.get("acted") ?? 0 });
   });
   return out;
@@ -504,8 +573,11 @@ export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>>
 export async function flowsStartedFor(flows: Flow[], email: string): Promise<string[]> {
   if (!flows.length) return [];
   const address = normaliseEmail(email);
-  const found = await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)]));
-  return flows.filter((_, i) => Number(found[i]) === 1).map((f) => f.id);
+  // Exactly 1 or 0 for each: anything else is unknown, never "not started" (CX-123 rule 24).
+  const found = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)])), flows.length);
+  const starts = found?.map(exactReply.countOf);
+  if (!starts || starts.some((n) => n !== 0 && n !== 1)) throw new exactReply.UnknownReplyError("a person's sequence starts");
+  return flows.filter((_, i) => starts[i] === 1).map((f) => f.id);
 }
 
 /**
@@ -514,12 +586,13 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  */
 export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
-    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts).
-    const flows = startableFlows(await readFlows(store.listId), activeFlowLimit(store)).filter(
+    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
+    // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
+    const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
       (f) =>
         f.active &&
         f.steps.length > 0 &&
@@ -550,16 +623,26 @@ export async function enroll(store: Store, email: string, event: { joined: boole
  * Starts these sequences for these people, each person once per sequence:
  * the start is claimed before anything is lined up, so a sequence that
  * starts another, or a label given twice, never starts anybody a second time.
- * Says how many starts were new.
+ * Says how many starts were new; throws UnknownReplyError, after the
+ * definite starts, when a claim's reply was unknown.
  */
 async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
+  let unknown = false;
   for (const flow of flows) {
     if (!flow.steps.length) continue;
-    const claims = await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400]));
-    const claimed = addresses.filter((_, i) => claims[i] !== null);
+    // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
+    // person is neither restarted nor sent anything, and the whole call says so once the definite starts are done
+    // (CX-123 rule 24).
+    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400])), addresses.length);
+    if (!claims) {
+      unknown = true;
+      continue;
+    }
+    const claimed = addresses.filter((_, i) => claims[i] === "OK");
+    if (claims.some((claim) => claim !== "OK" && claim !== null)) unknown = true;
     if (!claimed.length) continue;
     // The store's runs a day (lib/flow-limits.ts): past it, nobody more is
     // started today, and their start is given back so a later moment can.
@@ -585,6 +668,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     ]);
     started += fresh.length;
   }
+  if (unknown) throw new UnknownReplyError("a sequence's once-only start");
   return started;
 }
 
@@ -983,6 +1067,9 @@ async function actOnDeals(
   return out;
 }
 
+/** What a step waiting on a store switched off after notices says (sendDueSteps; when it is looked at again: lib/flow-retry.ts). */
+const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices about its content. This step is checked again by itself and goes on at the first check after your store is back on. If your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after this step began to wait, the run stops here, with nothing done at this step.`;
+
 /**
  * People at a step that has to wait: each wait is counted on their run, and
  * each is tried again when lib/flow-retry.ts says, or stops there with
@@ -1008,7 +1095,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, known), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };
@@ -1078,23 +1165,19 @@ export async function sendDueSteps(
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
-  if (orphans.length) {
-    const back = await redisPipeline(orphans.map((m) => ["ZREM", LEASE, m]));
-    const mine = orphans.filter((_, i) => Number(back[i]) === 1);
-    if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
-  }
+  if (orphans.length) await moveMembers(LEASE, QUEUE, Math.floor(Date.now() / 1000), orphans);
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
     const members = Array.isArray(due) ? (due as string[]) : [];
     if (!members.length) break;
     // Whoever removes a member from the queue is the one who sends it.
-    const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
-    const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    // Off the queue and into the lease in one step: an answer not read leaves them leased, sent by nobody this run,
+    // and the orphan pass puts them back once the lease runs out.
+    const taken = await moveMembers(QUEUE, LEASE, now + LEASE_SECONDS, members);
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
-      if (Number(taken[i]) !== 1) return;
+      if (!taken[i]) return;
       // listId|handle|flowId|step|address — an address may itself hold a "|".
       const parts = member.split("|");
       const group = parts.slice(0, 4).join("|");
@@ -1106,9 +1189,7 @@ export async function sendDueSteps(
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
-        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+        await moveMembers(LEASE, QUEUE, at, emails.map((email) => `${group}|${email}`));
       };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.
@@ -1156,7 +1237,7 @@ export async function sendDueSteps(
       counts.dropped += emails.length;
       return;
     }
-    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlows(listId));
+    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
     const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {
@@ -1168,12 +1249,39 @@ export async function sendDueSteps(
       }
       return;
     }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+    // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
+    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), MAX_WAITS_PER_RUN times at the most, then
+    // the run stops, saying why), queued only
+    // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
+    if (store.suspended) {
+      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);
+      const out = await queueHeld(waiting.queue);
+      const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+      counts.later += later;
+      counts.dropped += emails.length - later;
+      const ended = waiting.outcomes.filter((o) => o.state === "failed");
+      await noteRuns(flow.id, ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const })), now).catch((error) => console.error("writing workflow history failed", error));
+      return;
+    }
     // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
     // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
     // the step's condition says.
-    const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
-    const found = Array.isArray(rows) ? rows : [];
-    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
+    // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
+    // "taken out". Any other shape is unknown: neither of those, and no go-ahead to send either. The batch goes back in
+    // the queue (sendDueSteps puts it back on a throw) and is done on a later run (CX-123 rule 24). Both the outer
+    // reply and the rows are read from their own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so
+    // neither a missing row nor a missing score is ever read as nil or as held (Codex U on #3124).
+    const replies = repliesFor(reply, emails.length + 1);
+    const rows = replies ? repliesFor(replies[0], emails.length) : null;
+    const scores: unknown[] = replies ? replies.slice(1) : [];
+    const score = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
+    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || !scores.every(score)) {
+      throw new Error("A due workflow step's rows or lease entries could not be read");
+    }
+    const found: unknown[] = rows;
+    const held = new Set(emails.filter((_, i) => scores[i] !== null));
     counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the
@@ -1285,6 +1393,20 @@ export async function sendDueSteps(
       const uncertain = new Set(result.uncertain ?? []);
       const rest = result.rest.filter((email) => !uncertain.has(email));
       const refused: Settled[] = [];
+      // Refused for good, address by address (lib/mail.ts sendTo, `refused`): known not sent, never uncertain;
+      // the run ends there, saying why. The others in the batch went and go on to the next step.
+      if (result.refused?.length) {
+        counts.dropped += result.refused.length;
+        refused.push(...result.refused.map((r) => ({
+          email: r.email,
+          state: "failed" as const,
+          note: r.removed
+            ? "The email service refused this address, so it was taken off your list and the run ended."
+            : "The email service did not accept this email for this address, so the run ended.",
+          to: -1,
+          status: "failed" as const,
+        })));
+      }
       let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
       const onQueue: (string | number)[][] = [];
       const tallies: (string | number)[][] = [];

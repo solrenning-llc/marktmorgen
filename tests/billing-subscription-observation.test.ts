@@ -30,7 +30,10 @@ async function main() {
     is("an identified inactive observation is preserved", await readSubscription(id), { state: "inactive", reason: state });
   }
   payload = { id, status: "active", cancel_at_period_end: false };
-  is("an identified legacy active observation remains available", (await readSubscription(id)).state, "active");
+  is("an identified active observation without its plan line is unknown (CX-123 rule 24)", await readSubscription(id), { state: "unknown" });
+  payload = { id, status: "active", cancel_at_period_end: false, cancel_at: null,
+    items: { object: "list", data: [{ price: { unit_amount: 6900, recurring: { interval: "month", interval_count: 1 } } }] } };
+  is("an identified legacy active observation with its plan line remains available", (await readSubscription(id)).state, "active");
   status = 404; payload = { error: { message: "not found" } };
   is("an explicit provider missing response remains missing", await readSubscription(id), { state: "inactive", reason: "missing" });
   status = 500; payload = { error: { message: "unavailable" } };

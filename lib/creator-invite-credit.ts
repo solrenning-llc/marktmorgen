@@ -33,10 +33,11 @@
  * from 2025 on, which is why the version is pinned here.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { isBillingConfigured, onPlatformAt } from "@/lib/billing";
-import { type Store, storeForEmail, storeForId } from "@/lib/store";
+import { type Store, storeForEmail } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import {
   ALL_KEY,
   type Credit,
@@ -250,13 +251,18 @@ async function paidInvoices(customer: string): Promise<PaidInvoice[]> {
 
 /** Step 1 for one invited store. Returns how many credits it wrote. */
 async function earnFrom(sid: string, nowSeconds: number): Promise<number> {
-  const [rawBy] = await redisPipeline([["GET", byKey(sid)]]);
-  const by = parseBy(rawBy);
+  // Read exactly (CX-123 rule 24, audit round 7): only an exact null is "not invited"; another shape fails the store
+  // this run, so the run is not complete.
+  const byRead = repliesFor(await redisPipeline([["GET", byKey(sid)]]), 1);
+  if (!byRead || (byRead[0] !== null && typeof byRead[0] !== "string")) throw new UnknownReplyError("invite credits: who invited a store");
+  const by = parseBy(byRead[0]);
   if (!by || by.back) return 0;
   const terms = readInviteTerms(by.terms);
   if (!terms) return 0;
-  const store = await storeForId(sid);
-  if (!store) return 0;
+  const found = await storeForIdExactly(sid);
+  if (found === "unknown") throw new UnknownReplyError("invite credits: an invited store");
+  if (found === "none") return 0;
+  const store = found;
   const customer = await customerFor(store);
   if (!customer) return 0;
 
@@ -363,17 +369,25 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
 
 /** Step 2 for one credit. True when it is now on the plan. */
 async function putOnPlan(id: string, history: Map<string, Map<string, string>>, nowSeconds: number): Promise<boolean> {
-  const [raw] = await redisPipeline([["GET", creditKey(id)]]);
-  const credit = parseCredit(raw);
+  // Read exactly (CX-123 rule 24, audit round 7): only a record confirmed absent (an exact null) or read back and no
+  // longer owed leaves the owed list here. Anything else throws: the credit stays listed and the next run tries again.
+  const read = repliesFor(await redisPipeline([["GET", creditKey(id)]]), 1);
+  if (!read) throw new UnknownReplyError(`invite credits: the read of ${id}`);
+  const credit = read[0] === null ? null : parseCredit(read[0]);
+  if (read[0] !== null && !credit) throw new UnknownReplyError(`invite credits: ${id} does not read back`);
   if (!credit || credit.state !== "owed") {
     await redisPipeline([["SREM", OWED_KEY, id]]);
     return false;
   }
-  const store = await storeForId(credit.to);
-  if (!store) {
+  // Gone only when the store is confirmed gone: relisting puts back only credits still owed, so a credit marked gone
+  // on a store read Redis answered in another shape would never be paid. Unknown throws and the credit stays owed.
+  const found = await storeForIdExactly(credit.to);
+  if (found === "unknown") throw new UnknownReplyError(`invite credits: the store ${id} is owed to`);
+  if (found === "none") {
     await redisPipeline([["SET", creditKey(id), JSON.stringify({ ...credit, state: "gone" })], ["SREM", OWED_KEY, id]]);
     return false;
   }
+  const store = found;
   const customer = await customerFor(store);
   // Not paying us yet: the credit waits here for the day they start.
   if (!customer) return false;
@@ -411,30 +425,41 @@ export async function settleInvites(deadline: number, now = Date.now()): Promise
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
   const nowSeconds = Math.floor(now / 1000);
 
-  const [all, cursor] = await redisPipeline([["ZREVRANGE", ALL_KEY, 0, -1], ["GET", CURSOR_KEY]]);
-  const sids = Array.isArray(all) ? all.map(String) : [];
-  const start = Math.min(Number(cursor) || 0, sids.length);
-  let walked = 0;
-  for (let n = 0; n < sids.length; n += 1) {
-    if (Date.now() > deadline) break;
-    const sid = sids[(start + n) % sids.length];
-    try {
-      counts.earned += await earnFrom(sid, nowSeconds);
-    } catch (error) {
-      counts.failed += 1;
-      console.error("reading an invited creator's payments failed", error);
+  // The two lists walked are read exactly (CX-123 rule 24, audit round 7): a list Redis answered in another shape is
+  // not an empty list. The run counts a failure and is not complete; the walk's place is kept for the next run.
+  const listed = repliesFor(await redisPipeline([["ZREVRANGE", ALL_KEY, 0, -1], ["GET", CURSOR_KEY]]), 2);
+  const sids = listed ? stringList(listed[0]) : null;
+  let walkedAll = false;
+  if (!sids) {
+    counts.failed += 1;
+    console.error("reading the invited creators failed", new UnknownReplyError("invite credits: the invited list"));
+  } else {
+    const start = Math.min(Number(listed?.[1]) || 0, sids.length);
+    let walked = 0;
+    for (let n = 0; n < sids.length; n += 1) {
+      if (Date.now() > deadline) break;
+      const sid = sids[(start + n) % sids.length];
+      try {
+        counts.earned += await earnFrom(sid, nowSeconds);
+      } catch (error) {
+        counts.failed += 1;
+        console.error("reading an invited creator's payments failed", error);
+      }
+      counts.invited += 1;
+      walked += 1;
     }
-    counts.invited += 1;
-    walked += 1;
+    walkedAll = walked === sids.length;
+    await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, sids.length)]]);
   }
-  const walkedAll = walked === sids.length;
-  await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, sids.length)]]);
 
-  const [owed] = await redisPipeline([["SMEMBERS", OWED_KEY]]);
-  const ids = Array.isArray(owed) ? owed.map(String) : [];
+  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", OWED_KEY]]), 1)?.[0]);
   const history = new Map<string, Map<string, string>>();
-  let pushedAll = true;
-  for (const id of ids) {
+  let pushedAll = ids !== null;
+  if (!ids) {
+    counts.failed += 1;
+    console.error("reading the owed invite credits failed", new UnknownReplyError("invite credits: the owed list"));
+  }
+  for (const id of ids ?? []) {
     if (Date.now() > deadline) {
       pushedAll = false;
       break;

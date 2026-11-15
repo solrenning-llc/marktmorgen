@@ -50,3 +50,10 @@ test("the address names the currencies, the days and the CSV format; one request
   assert.equal(await fetchEcbRates(["USD"], "2026-09-30", "2026-10-06", async () => ({ status: 503, text: async () => OFFICIAL })), null);
   assert.equal(await fetchEcbRates(["USD"], "2026-09-30", "2026-10-06", async () => { throw new Error("offline"); }), null);
 });
+
+test("input that is not the expected shape never throws", async () => {
+  assert.equal(periodEndRate(null as never, "USD", "2026-09-30"), null);
+  assert.equal(periodEndRate({} as never, "USD", "2026-09-30"), null);
+  assert.equal(ecbRatesUrl(null as never, "2026-09-30", "2026-10-06"), null);
+  assert.equal(await fetchEcbRates(null as never, "2026-09-30", "2026-10-06", async () => ({ status: 200, text: async () => OFFICIAL })), null);
+});

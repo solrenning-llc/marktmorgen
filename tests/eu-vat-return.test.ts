@@ -144,3 +144,16 @@ test("the export file lists every box of the return, in euro with two decimals, 
   const nil = ossReturn([], { year: 2027, quarter: 2, rates: none, filedOn: "2027-07-01" })!;
   assert.match(ossReturnCsv(nil, "EU372000001")!, /^5,26,Total VAT due \(nil return\),,Q2\.2027,,0\.00$/m);
 });
+
+test("input that is not the expected shape never throws: the return is unknown", () => {
+  const a = sale("cs_a", "2027-01-10", "DE", 1000, 1900);
+  assert.equal(ossReturn([a], null as never), null);
+  assert.equal(ossReturn([a], { year: 2027, quarter: 1, rates: {} as never, filedOn: "2027-04-02" }), null, "rates that are not a Map");
+  assert.equal(ossReturn(null as never, { year: 2027, quarter: 1, rates: none, filedOn: "2027-04-02" }), null);
+});
+
+test("an adjustment dated before its sale makes the return unknown, never a correction of a later quarter", () => {
+  const a = sale("cs_may", "2027-05-01", "DE", 1000, 1900);
+  const early = { ...a, adjustments: [{ date: "2027-02-01", taxableCents: -100, vatCents: -19, reason: "refund" }] };
+  assert.equal(ossReturn([early], { year: 2027, quarter: 1, rates: none, filedOn: "2027-04-02" }), null);
+});

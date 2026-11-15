@@ -36,7 +36,7 @@
 import { createHash } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import type { AttributionRule } from "@/lib/affiliate-setting";
 import { orderWrite } from "@/lib/order-data";
 import { HDEL_IF_EQUAL } from "@/lib/redis-reply";
@@ -146,8 +146,11 @@ export async function forgetBuyer(store: Store, email: string): Promise<boolean>
  */
 export async function forgetBondPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([forgetBondCommand(statsId, email)]);
-  return Number(gone) || 0;
+  // Read exactly (CX-123 rule 24): a reply cut short or in another shape is unknown, never "0 deleted", so the
+  // erasure records this part as not finished instead of reporting the bond gone.
+  const gone = countOf(repliesFor(await redisPipeline([forgetBondCommand(statsId, email)]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("the deletion of a buyer's affiliate bond");
+  return gone;
 }
 
 /** Where one buyer's bond is kept (its hash and field), for a script that takes it back with other writes (lib/paypal-delivery.ts). */

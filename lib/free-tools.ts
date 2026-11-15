@@ -21,6 +21,11 @@ export const FREE_TOOLS: readonly FreeTool[] = [
     title: "QR code for a link",
     sentence: "Type a web address to make a QR code you can download and print, made in your browser.",
   },
+  {
+    slug: "resize-a-picture",
+    title: "Resize a picture for a product page",
+    sentence: "Make a picture the size a store keeps a product picture at, in your browser, without uploading it.",
+  },
 ];
 
 /**

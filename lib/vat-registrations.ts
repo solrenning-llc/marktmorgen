@@ -55,7 +55,9 @@ const realDay = (value: unknown): value is string => {
   return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === value;
 };
 const said = (value: unknown, most: number) => typeof value === "string" && value.trim().length > 0 && value.length <= most;
-const notAfter = (day: unknown, now: Date): boolean => realDay(day) && day <= now.toISOString().slice(0, 10);
+const validClock = (now: unknown): now is Date => now instanceof Date && Number.isFinite(now.getTime());
+/** A real day not after `now`; a clock that is not a moment confirms nothing. */
+const notAfter = (day: unknown, now: Date): boolean => validClock(now) && realDay(day) && day <= now.toISOString().slice(0, 10);
 
 /** The EU registration's number when it is complete and in effect on `now`; else null. */
 export function euOssNumber(eu: SwitchInput["eu"] = EU_OSS_REGISTRATION, now = new Date()): string | null {

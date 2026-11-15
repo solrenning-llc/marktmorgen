@@ -408,14 +408,20 @@ export async function deleteRequest(store: Store, id: string, now = Date.now()):
   return "deleted";
 }
 
+/**
+ * Removes a request's record and its four links. Done only on an exact acknowledgement (rule 24, #4775): one reply for
+ * each of the five commands, each a count of 0 or 1. A reply cut short or of any other shape throws, so the caller
+ * never reports "deleted" for a removal it could not confirm; the route then answers that it could not be done.
+ */
 async function forget(request: PaymentRequest): Promise<void> {
-  await redisPipeline([
+  const replies = repliesFor(await redisPipeline([
     ["DEL", recordKey(request.id)],
     ["ZREM", storeKey(request.sid), request.id],
     ["ZREM", openKey(request.sid), request.id],
     ["ZREM", DUE, `${request.sid}|${request.id}`],
     ["SREM", personSet(request.sid, request.email), request.id],
-  ]);
+  ]), 5);
+  if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("a payment request's deletion");
 }
 
 /**

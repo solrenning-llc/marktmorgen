@@ -23,8 +23,8 @@ function answer(command: string, whole: unknown) {
   redis.pipeline = (async (commands: (string | number)[][]) => (commands[0]?.[0] === command ? whole : real(commands))) as typeof redis.pipeline;
 }
 
-// Each press from its own connection: the stop's per-connection limit (WEEKLY_STOP_PER_HOUR, tests/one-click-notices.test.ts)
-// is not what this file checks, and its presses outnumber it.
+// Each press from its own connection, as a person's would be (the stop has no limit per connection since 15 November
+// 2026, tests/one-click-notices.test.ts).
 let presses = 0;
 async function press(url: string, form?: Record<string, string>): Promise<{ status: number; page: string }> {
   const body = new URLSearchParams(form ?? {});
@@ -91,6 +91,7 @@ async function main() {
     pressed = await press(ownerUrl(), { do: "on" });
     redis.pipeline = real;
     is(`${name}: not said as On again`, pressed.page.includes("On again"), false);
+    is(`${name}: answered as a page that was not done (503)`, pressed.status, 503);
   }
 
   part("a team member's own stop: an unknown answer is never said as Stopped");

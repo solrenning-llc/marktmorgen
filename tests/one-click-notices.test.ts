@@ -9,12 +9,13 @@
  * Checked: each sender sets both headers on the same stop link; proxy.ts lets the one-click POST in from another site;
  * and that POST, with no form field but List-Unsubscribe=One-Click, stops the emails (app/api/store/weekly POST). From
  * another site it can only stop, never start again; a link that does not read says the same whether the store exists or
- * not; and one connection presses at most WEEKLY_STOP_PER_HOUR times an hour.
+ * not, and reads nothing stored for it; and a mail provider's
+ * address pressing many times is never told to wait (no limit per connection).
  */
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { proxy } from "@/proxy";
-import { POST as weeklyPost, WEEKLY_STOP_PER_HOUR } from "@/app/api/store/weekly/route";
+import { POST as weeklyPost } from "@/app/api/store/weekly/route";
 import { weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { claimHandle, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -54,19 +55,31 @@ async function main(): Promise<void> {
     headers: { host: HOST, origin: "https://mail.example.net", "sec-fetch-site": "cross-site", "content-type": "application/x-www-form-urlencoded" },
     body: "do=on",
   });
-  is("refused", (await weeklyPost(startFromElsewhere)).status, 403);
+  const refused = await weeklyPost(startFromElsewhere);
+  const refusedPage = await refused.text();
+  is("refused", refused.status, 403);
+  is("saying the truth: the link is known, only our own page turns them on", [/not one we recognize/.test(refusedPage), /Only our own page can turn these emails back on/.test(refusedPage)], [false, true]);
   is("still off", await weeklyOff(store.handle), true);
 
   part("A link that does not read, for a store that exists or not, says the same");
   const wrong = (handle: string) => new NextRequest(`https://${HOST}/api/store/weekly?h=${handle}&t=${"x".repeat(32)}`, { method: "POST", headers: { host: HOST, "x-forwarded-for": "198.51.100.7" }, body: "" });
+  const realPipeline = redis.pipeline.bind(redis);
+  let reads = 0;
+  redis.pipeline = ((commands: (string | number)[][]) => {
+    reads += 1;
+    return realPipeline(commands);
+  }) as typeof redis.pipeline;
   const real = await weeklyPost(wrong(store.handle));
   const none = await weeklyPost(wrong("nosuchstore"));
+  redis.pipeline = realPipeline;
   is("same status and same page", [real.status, await real.text()], [none.status, await none.text()]);
+  is("refused as 400, with no Redis call: the token is checked first, by CPU only", [real.status, reads], [400, 0]);
 
-  part("One connection presses at most WEEKLY_STOP_PER_HOUR times an hour");
+  part("A mail provider's address pressing many times is never told to wait (RFC 8058)");
   const flood = () => new NextRequest(url, { method: "POST", headers: { host: HOST, "x-forwarded-for": "203.0.113.50", "content-type": "application/x-www-form-urlencoded" }, body: "List-Unsubscribe=One-Click" });
-  for (let i = 0; i < WEEKLY_STOP_PER_HOUR; i += 1) await weeklyPost(flood());
-  is("the next is told to wait", (await weeklyPost(flood())).status, 429);
+  const presses: number[] = [];
+  for (let i = 0; i < 60; i += 1) presses.push((await weeklyPost(flood())).status);
+  is("60 presses in an hour, every one stops", presses.every((status) => status === 200), true);
   done();
 }
 

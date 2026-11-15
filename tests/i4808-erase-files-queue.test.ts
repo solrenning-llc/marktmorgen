@@ -61,6 +61,13 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("not done", outcome === "ok", false);
   is("each path was tried twice before giving up", tries >= 2, true);
+  // Review 3rjdf (LEVE): said as incomplete, so the team's log says "not complete", never a thrown step.
+  is("said as incomplete, not thrown", outcome, "incomplete");
+  // Review 3rjdf (MEDIUM): the repeat erasure finds nothing through the records already deleted, so the paths are kept
+  // where it reads them first, and it queues them then.
+  const again = await erasePerson(world2.store, bo, { kind: "person" });
+  is("a repeat erasure with the queue back finishes", again.ok, true);
+  is("and the file it could not queue before is queued now", (await queued()).length > 0, true);
   done();
 }
 void main().catch((error) => { console.error(error); process.exit(1); });

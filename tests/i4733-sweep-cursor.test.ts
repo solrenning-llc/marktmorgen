@@ -3,7 +3,7 @@
  * saved place in a store's checkouts on any failure of its first page (lib/checkout-sweep.ts walkDay), a 500, a 429 or
  * a timeout included, so the next run started from the newest checkouts again and, in a store with several pages, an
  * older paid order could leave the confirmation window unread. Now the place is let go only when Stripe answers 400 or
- * 404 naming the very session the walk started after as missing; any other failure keeps it. Control: that exact
+ * 404 with Stripe's code resource_missing naming the very session the walk started after; any other failure keeps it. Control: that exact
  * answer still lets it go, so a run is never stuck on a session Stripe no longer lists. Synthetic only.
  */
 import { sweepCheckouts } from "@/lib/checkout-sweep";
@@ -63,11 +63,26 @@ async function main(): Promise<void> {
   for (const status of [400, 404]) {
     const key = `nl:sweep:walk:complete:${store.stripeAccountId}:${store.sid || store.handle}`;
     await redis.pipeline([["SET", key, place]]);
-    failWith = { status, body: { error: { type: "invalid_request_error", message: "No such checkout.session: 'cs_test_mfourplace0000001'" } } };
+    failWith = { status, body: { error: { type: "invalid_request_error", code: "resource_missing", param: "starting_after", message: "No such checkout.session: 'cs_test_mfourplace0000001'" } } };
     const log = console.error;
     console.error = () => {};
     try { await sweepCheckouts(Date.now() + 20_000); } finally { console.error = log; }
     is(`${status} naming it: the place is let go, so the next run starts from the newest`, await redis.pipeline([["GET", key]]), [null]);
+  }
+
+  part("Decided by Stripe's code, not its exact sentence (review of the same family, 51LL)");
+  for (const [label, body, expected] of [
+    ["resource_missing, worded \"checkout session\", naming it: let go", { error: { type: "invalid_request_error", code: "resource_missing", param: "starting_after", message: "No such checkout session: 'cs_test_mfourplace0000001'" } }, [null]],
+    ["another code, the same sentence: kept", { error: { type: "invalid_request_error", code: "parameter_invalid_empty", param: "starting_after", message: "No such checkout.session: 'cs_test_mfourplace0000001'" } }, [place]],
+    ["no code, the same sentence: kept", { error: { type: "invalid_request_error", message: "No such checkout.session: 'cs_test_mfourplace0000001'" } }, [place]],
+  ] as const) {
+    const key = `nl:sweep:walk:complete:${store.stripeAccountId}:${store.sid || store.handle}`;
+    await redis.pipeline([["SET", key, place]]);
+    failWith = { status: 400, body };
+    const log = console.error;
+    console.error = () => {};
+    try { await sweepCheckouts(Date.now() + 20_000); } finally { console.error = log; }
+    is(label, await redis.pipeline([["GET", key]]), expected);
   }
   failWith = null;
   done();

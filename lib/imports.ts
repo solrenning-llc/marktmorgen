@@ -56,7 +56,7 @@
  * import will check it, against the store as it is, and nothing written.
  */
 import { DataRoomError } from "@/lib/store-data";
-import { allowanceWindow, resetWords, windowId } from "@/lib/allowance-window";
+import { allowanceWindow, resetWords, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -174,7 +174,7 @@ async function holdMoved(store: Store, n: number, now = Date.now()): Promise<num
 /**
  * Store's own figure (IMPORT_ALLOWANCES.creator.movedEmails a month): takes up to `n`, all over it given back at once.
  * The replies are read exactly (CX-123 rule 24): the INCRBY a whole number (a give-back can take the count below zero),
- * then the EXPIRE NX's 0 or 1 (lib/window-count.ts, so the month's key never outlives its window); any other shape
+ * then the EXPIRE NX's 0 or 1 (lib/window-count.ts; windowKeySeconds, so the key outlives its window, stretched or not); any other shape
  * throws UnknownReplyError. Before, the count was read with Number(),
  * which took a list or `true` for a small number.
  */
@@ -186,7 +186,7 @@ async function takeMovedCount(store: Store, n: number, now: number): Promise<num
   const key = movedKey(store.sid, window);
   const replies = repliesFor(
     await redisPipeline([
-      ...windowCountBy(key, 32 * 86_400, n),
+      ...windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n),
     ]),
     2,
   );
@@ -226,7 +226,7 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   if (!store.sid || !isRedisConfigured() || !window) return { ok: false, reason: "unavailable", limit };
   const key = `nl:imports:rows:${store.sid}:${window}`;
   try {
-    const [total, expire] = await redisPipeline(windowCountBy(key, 32 * 86_400, n));
+    const [total, expire] = await redisPipeline(windowCountBy(key, windowKeySeconds(store, 32 * 86_400, now), n));
     const counted = Number(total);
     if (!Number.isSafeInteger(counted) || (expire !== 0 && expire !== 1)) return { ok: false, reason: "unavailable", limit };
     if (counted <= limit) return { ok: true };

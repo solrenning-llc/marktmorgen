@@ -32,10 +32,10 @@ beforeEach(() => {
 });
 
 /**
- * A yearly store that uses something on 2 Mar 2026 (`use`, in time order), then switches to monthly on 16 Mar and stops at
+ * A yearly store that uses something on 2 Mar 2026 (`spend`, in time order), then switches to monthly on 16 Mar and stops at
  * the period's end (16 Apr): March runs on to it. Claude 6's scenario on #4561.
  */
-async function stretched(tier: "creator" | "pro", use: (email: string) => Promise<void> = async () => {}): Promise<string> {
+async function stretched(tier: "creator" | "pro", spend: (email: string) => Promise<void> = async () => {}): Promise<string> {
   const email = `sib4561-${tier}@example.com`;
   const yearStart = at(2026, 1, 1, 10);
   const switchAt = at(2026, 3, 16, 10);
@@ -46,7 +46,7 @@ async function stretched(tier: "creator" | "pro", use: (email: string) => Promis
     assert.ok(await writeSubscription(email, { customerId: "cus_Sib4561Owner1", subscriptionId: "sub_Sib4561Owner1", active: true, tier, cycle: "year",
       period: { start: s(yearStart), end: s(addMonthsMs(yearStart, 12)), renews: true } }));
   });
-  await use(email);
+  await spend(email);
   await when(switchAt, async () => assert.ok(await writeSubscription(email, { active: true, cycle: "month", period: monthly })));
   await when(switchAt + 3_600_000, async () => assert.ok(await writeSubscription(email, { active: true, cycle: "month", period: { ...monthly, renews: false } })));
   return email;

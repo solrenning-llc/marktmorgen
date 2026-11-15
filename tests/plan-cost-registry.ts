@@ -1515,6 +1515,11 @@ export const COST_LINES: CostLine[] = [
       // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
       { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");"] },
       { file: "app/api/store/book/move/route.ts", names: ["if (!(await bookedHere(store, session))) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"slow\");"] },
+      // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
+      // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
+      // before it is read (lib/store-search-index.ts, c1-cost-store-search).
+      { file: "app/[handle]/page.tsx", names: ["searchStorePaid(store, wantedSearch)"] },
+      { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "takePublicRequest(store, \"public\", undefined, 1)", "paidRead(store, shownIds)", "paidRead(store, missing)", "takePublicRequest(store, \"public\", undefined, units)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

@@ -74,6 +74,11 @@ async function main(): Promise<void> {
   part("Another subscriber of the same carrier /48");
   is("another /64 of that /48 keeps its own 20 (Claude 7 on #4636)", (await asks(["2001:db8:77:beef::9"]))[0] !== "limited", true);
 
+  part("One phone asking 200 times never locks its carrier's other subscribers out");
+  const phone = await asks(Array.from({ length: 200 }, (_, i) => `2001:db8:78:1:${(i + 1).toString(16)}::1`));
+  is("its own 20 go through, the rest are limited", [phone.slice(0, 20).every((a) => a !== "limited"), phone.slice(20).every((a) => a === "limited")], [true, true]);
+  is("and a neighbour /64 of the same /48 still gets its copy (Claude 6 on #4636)", (await asks(["2001:db8:78:beef::9"]))[0] !== "limited", true);
+
   part("A whole /48 asking from a new /64 each time");
   redis.clear();
   await claimHandle(owner, "freeharbor", "Free Harbor", "");

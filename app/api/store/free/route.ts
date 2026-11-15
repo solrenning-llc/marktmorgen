@@ -10,7 +10,9 @@ import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 
-/** The copies of one store that a whole IPv6 /48 can ask for in an hour: ten connections' worth (lib/free.ts IP_LIMIT). */
+/** The copies of one store a connection (its /64) may ask for in an hour, the same as lib/free.ts IP_LIMIT. */
+const CONNECTION_PER_HOUR = 20;
+/** The copies of one store that a whole IPv6 /48 can ask for in an hour: ten connections' worth. */
 const NET_PER_HOUR = 200;
 import { readListing } from "@/lib/catalog";
 
@@ -95,6 +97,9 @@ export async function POST(request: NextRequest) {
   const address = clientAddress(request);
   const ip = visitorAddress(address) || "unknown";
   const net = shareAddress(address) || "unknown";
+  // The connection's own 20 first, so an ask its /64 is refused never reaches the /48's count: one phone asking 200
+  // times can add at most 20 to it and never locks its carrier's other subscribers out (Claude 6 on #4636).
+  if (!(await withinLimit("free-conn", `${ip}|${store.handle}`, CONNECTION_PER_HOUR, 3_600))) return away(`${page}&status=limited`);
   if (!(await withinLimit("free-net", `${net}|${store.handle}`, NET_PER_HOUR, 3_600))) return away(`${page}&status=limited`);
 
   try {

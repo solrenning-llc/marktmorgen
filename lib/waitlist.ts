@@ -352,6 +352,10 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       continue;
     }
     const { store, product } = target;
+    // Back to draft since the launch started: not on sale, so nobody is told it is. The launch waits where it is, with
+    // nothing reserved and the list kept, and goes on once the product is published again (MM-SA-53). Bounded as any
+    // hold: the job key lapses 120 days after its last write. No command more: the product was read just above.
+    if (product.hidden) continue;
     const said = speech(store);
     const g = givingWords(store.language);
     const words = launchBody(

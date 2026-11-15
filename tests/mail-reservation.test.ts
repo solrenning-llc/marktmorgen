@@ -214,3 +214,35 @@ test('a day-only reservation taken before 00:00 UTC and given back after it retu
   assert.equal(await reserveDay(1,mailDay()),false,'and the new day still stops at its cap');
  });
 });
+// Codex U on #3928 (MÉDIO, RED confirmed by Claude 2 on 4f8c5f74f8): the day a reservation counts on is the one at
+// its counters' pipeline, after the awaits before it (admission, paid window, sender), not the one when the caller
+// made its MailDay; and the give-back returns to that same day.
+test('reservation chooses its day after asynchronous admission and before the atomic counters',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const oldBefore=await dayCount(OLD_DAY),newBefore=await dayCount(NEW_DAY);
+  const day=mailDay();
+  const pending=reserve(store,1,false,day);
+  set(AFTER_MIDNIGHT);
+  assert.equal(await pending,'ok');
+  assert.equal(await dayCount(OLD_DAY),oldBefore,'the pre-await day is untouched');
+  assert.equal(await dayCount(NEW_DAY),(newBefore??0)+1,'the mutation-time day owns the reservation');
+  assert.equal(await reserve(store,1,false,mailDay()),'day','so the new day stops at its cap with it counted');
+  await release(store,1,day);
+  assert.equal(await dayCount(NEW_DAY),newBefore??0,'release reuses the mutation-time day');
+ });
+});
+test('a day-only reservation also chooses its day at its counters, after the sender is asked',async()=>{
+ process.env.MARKETING_DAILY_CAP='1';
+ await atClock(BEFORE_MIDNIGHT,async set=>{
+  const oldBefore=await dayCount(OLD_DAY),newBefore=await dayCount(NEW_DAY);
+  const day=mailDay();
+  const pending=reserveDay(1,day);
+  set(AFTER_MIDNIGHT);
+  assert.equal(await pending,true);
+  assert.equal(await dayCount(OLD_DAY),oldBefore,'the pre-await day is untouched');
+  assert.equal(await dayCount(NEW_DAY),(newBefore??0)+1,'the mutation-time day owns the reservation');
+  await releaseDay(1,day);
+  assert.equal(await dayCount(NEW_DAY),newBefore??0,'releaseDay reuses the mutation-time day');
+ });
+});

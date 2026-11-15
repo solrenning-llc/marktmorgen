@@ -35,6 +35,12 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return Response.json(row);
   }
   const one = url.pathname.match(/^\/v1\/promotion_codes\/(promo_\w+)$/);
+  // Main's DELETE looks the code up by its id (findCode, lib/discount.ts) before switching it off.
+  if (init?.method === "GET" && one) {
+    const row = promos.get(one[1]);
+    if (!row) return Response.json({ error: { type: "invalid_request_error", code: "resource_missing", message: "No such promotion code" } }, { status: 404 });
+    return Response.json(row);
+  }
   if (init?.method === "POST" && one) {
     const row = promos.get(one[1]);
     if (!row) return Response.json({ error: { message: "No such promotion code" } }, { status: 404 });

@@ -28,9 +28,13 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
  * Working out the book, beside what scales: its fixed commands (the book
  * counted, its seven hashes, the PayPal refunds' set, two reads of
  * listings, the parts written back and the lock), the request itself held
- * while it works, and its counting.
+ * while it works, and its counting. Each record's refund kept on it
+ * (lib/affiliates.ts, AFFILIATE_REFUND_MARK: three scripts, at most
+ * REFUND_MARKS_PER_READ records a reading, REFUND_MARK_BYTES each) is held against
+ * these units in tests/plan-cost-registry.test.ts (affiliatePageRead).
  */
-export const AFFILIATE_PAGE_UNITS = 4;
+// 4 until 13 November 2026; one more for the refunds kept on the records (REFUND_MARKS_PER_READ at REFUND_MARK_BYTES).
+export const AFFILIATE_PAGE_UNITS = 5;
 /**
  * The picture a product's shared link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx), paid as public
  * requests before anything is read or drawn: held above its worst case, PRODUCT_CARD_READ in

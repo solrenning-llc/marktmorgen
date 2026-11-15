@@ -610,6 +610,12 @@ export class MemoryRedis {
           for (const target of targets) this.run(["DEL", target]);
           return 1;
         }
+        // lib/payment-request-store.ts REMOVE_IDLE_STORE: a store leaves the sweep's list only while it has no open request.
+        if (key.startsWith("-- marktmorgen:payreq-idle-store:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, open, stores, now, sid] = args;
+          this.run(["ZREMRANGEBYSCORE", open, "-inf", now]);
+          return this.run(["ZCARD", open]) === 0 ? this.run(["SREM", stores, sid]) : 0;
+        }
         // lib/payment-request-store.ts SAVE: a request's record written only while its write lock is the writer's,
         // "new" only when absent, "edit" only over the record still there, with its open entry and reminder in step.
         if (key.startsWith("-- marktmorgen:payreq-save:v1\n") && args[0] === "4" && args.length === 13) {

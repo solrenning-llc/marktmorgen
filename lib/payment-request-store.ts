@@ -517,9 +517,27 @@ export async function storesWithRequests(): Promise<Set<string>> {
   return new Set(members);
 }
 
-/** Leaves a store off that list once it has no open request. */
+/**
+ * The expired entries dropped, the open ones counted and the store taken off the sweep's list only when none is left,
+ * in one step (issue #4728): a request opened after the count and before the removal kept no store on the list, and
+ * the sweep never confirmed it. KEYS: the store's open requests, the list. ARGV: now, the store. Answers SREM's 0 or
+ * 1, or 0 when a request is still open. lib/redis-memory.ts runs it the same way.
+ */
+export const REMOVE_IDLE_STORE = `-- marktmorgen:payreq-idle-store:v1
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", ARGV[1])
+if redis.call("ZCARD", KEYS[1]) == 0 then
+  return redis.call("SREM", KEYS[2], ARGV[2])
+end
+return 0`;
+
+/**
+ * Leaves a store off that list once it has no open request: only after a count read exactly as zero (an unknown count
+ * keeps it on), and then in one step that counts again inside Redis (REMOVE_IDLE_STORE), so a request opened between
+ * the two keeps the store on. A failure leaves it on, to be swept again.
+ */
 export async function settleStoreList(sid: string, now = Date.now()): Promise<void> {
-  if ((await openCount(sid, now).catch(() => 1)) === 0) await redisPipeline([["SREM", STORES, sid]]).catch(() => undefined);
+  if ((await openCount(sid, now).catch(() => 1)) !== 0) return;
+  await redisPipeline([["EVAL", REMOVE_IDLE_STORE, 2, openKey(sid), STORES, String(now), sid]]).catch(() => undefined);
 }
 
 /** How many times an erasure reads the person's set again, for a request made while it ran. */

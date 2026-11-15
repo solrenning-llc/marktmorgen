@@ -600,7 +600,40 @@ async function readOpened(order: string): Promise<Opened | null> {
   }
 }
 
-type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown } };
+type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown }; links?: unknown };
+
+/**
+ * Whether an Orders v2 answer is this order's own (#4444, Codex X8): its `id` is the order asked about, and every
+ * capture in it whose `up` link names an order names this one. Amount, currency and payee alone do not tell two orders
+ * of the same price apart, so an answer holding another order's completed record would otherwise confirm this one with
+ * that order's capture and buyer. An `up` link that is there but does not name exactly this order's Orders v2 path
+ * (no href, not text, another URL) is not proof either. An answer that is not this order's says nothing about it: its
+ * outcome is unknown.
+ */
+function ownAnswer(done: Record<string, unknown>, order: string): boolean {
+  if (done.id !== order) return false;
+  const units = Array.isArray(done.purchase_units) ? (done.purchase_units as { payments?: { captures?: unknown } }[]) : [];
+  for (const unit of units) {
+    const captures = Array.isArray(unit?.payments?.captures) ? (unit.payments.captures as CaptureRow[]) : [];
+    for (const capture of captures) {
+      const links = Array.isArray(capture?.links) ? (capture.links as { rel?: unknown; href?: unknown }[]) : [];
+      for (const link of links) {
+        if (link?.rel !== "up") continue;
+        // A capture with no links at all is allowed by the API's shape; an `up` link present is declared evidence, so
+        // it must be text whose path is exactly this order's (Codex g's MÉDIO on #4453). Anything else is unknown.
+        if (typeof link.href !== "string") return false;
+        let path: string;
+        try {
+          path = new URL(link.href).pathname;
+        } catch {
+          return false;
+        }
+        if (path !== `/v2/checkout/orders/${order}`) return false;
+      }
+    }
+  }
+  return true;
+}
 
 /** The capture an order holds, and who paid it, as PayPal describes an order (checkout_orders_v2, order). */
 function captureIn(done: Record<string, unknown>): { capture: CaptureRow | null; payee: unknown; email: string } {
@@ -727,6 +760,13 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
       await watchLater(order, opened);
       return { ok: false, reason: "error" };
     }
+  }
+  // An answer that is not this order's own (another order's record) proves nothing about this one: unknown, kept in
+  // pending for the sweep to ask PayPal again, nothing written down or handed over (#4444, rule 30).
+  if (!ownAnswer(done, order)) {
+    console.error("a PayPal answer named another order", order);
+    await watchLater(order, opened);
+    return { ok: false, reason: "error" };
   }
   const { capture, payee, email } = captureIn(done);
   // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
@@ -957,6 +997,9 @@ export async function watchPayPal(
       await later();
       continue;
     }
+    // Another order's record (completed, voided or anything else) says nothing about this one: kept and asked again
+    // (#4444, rule 30). A kept order is let go when its record ends (30 days).
+    if (!ownAnswer(done, order)) continue;
     const { capture, payee, email } = captureIn(done);
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again

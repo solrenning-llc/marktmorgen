@@ -238,8 +238,9 @@ async function available(account: string): Promise<Map<string, number>> {
  * and a currency (missing, an id Stripe did not expand, an amount that does
  * not read), or a charge whose amount or currency does not read, throws, so
  * the member is tried again; the cost is never weighed in another currency.
+ * A transaction whose source is not this charge's id (#4727) throws too.
  */
-export function settledCost(give: number, charge: { amount?: unknown; currency?: unknown; balance_transaction?: unknown }): { cur: string; amount: number } {
+export function settledCost(give: number, charge: { id?: unknown; amount?: unknown; currency?: unknown; balance_transaction?: unknown }): { cur: string; amount: number } {
   const paid = charge.amount;
   if (!Number.isSafeInteger(paid) || (paid as number) <= 0) throw new Error("what this payment's charge took could not be read");
   if (!Object.hasOwn(charge, "balance_transaction")) throw new Error("this payment's charge did not say what it settled as");
@@ -251,6 +252,11 @@ export function settledCost(give: number, charge: { amount?: unknown; currency?:
   const row = objectOf(bt);
   if (!row || !Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || typeof row.currency !== "string" || !CURRENCY.test(row.currency)) {
     throw new Error("what this payment's charge settled as could not be read");
+  }
+  // Only this charge's own transaction weighs its refund: one whose source is another object, or none, is never
+  // read as this payment's cost, and the member is tried again (#4727).
+  if (typeof charge.id !== "string" || !/^(ch|py)_[A-Za-z0-9]+$/.test(charge.id) || idOf(row.source) !== charge.id) {
+    throw new Error("this balance transaction does not belong to the payment's charge");
   }
   return { cur: row.currency, amount: Math.ceil((give * (row.amount as number)) / (paid as number)) };
 }

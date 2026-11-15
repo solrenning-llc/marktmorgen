@@ -114,11 +114,11 @@ async function main() {
     is("a readable dollar balance that covers it: refunded once", typeof out === "object" ? [out.done.length, out.failed, sent, saved.r] : out, [1, 0, 1, "done"]);
   }
   {
-    const { out, saved, posts: sent } = await run("euro", euros, { ...healthyCharge, balance_transaction: { amount: 900, currency: "eur" } });
+    const { out, saved, posts: sent } = await run("euro", euros, { ...healthyCharge, balance_transaction: { amount: 900, currency: "eur", source: "ch_r24balance" } });
     is("a readable euro balance weighed in the currency it settles in: refunded once", typeof out === "object" ? [out.done.length, out.failed, sent, saved.r] : out, [1, 0, 1, "done"]);
   }
   {
-    const { out, saved } = await run("euroshort", { object: "balance", available: [usd(449, "eur")], pending: [] }, { ...healthyCharge, balance_transaction: { amount: 900, currency: "eur" } });
+    const { out, saved } = await run("euroshort", { object: "balance", available: [usd(449, "eur")], pending: [] }, { ...healthyCharge, balance_transaction: { amount: 900, currency: "eur", source: "ch_r24balance" } });
     is("a euro balance one cent short of the settled cost (450): final short", typeof out === "object" ? [out.short.length, out.failed, saved.r] : out, [1, 0, "short"]);
   }
   done();

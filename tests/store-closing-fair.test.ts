@@ -245,7 +245,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const row = world.subs.get(`sub_${intent[1]}`);
     const charge = world.charges.get(intent[1]) ?? { amount: row ? paidInvoiceOf(row).amount_paid : 0, amount_refunded: 0, disputed: false };
     world.charges.set(intent[1], charge);
-    return json({ id: `pi_${intent[1]}`, latest_charge: { id: `ch_${intent[1]}`, currency: "usd", ...charge, balance_transaction: { amount: Math.round(charge.amount * world.rate), currency: world.settles } } });
+    return json({ id: `pi_${intent[1]}`, latest_charge: { id: `ch_${intent[1]}`, currency: "usd", ...charge, balance_transaction: { source: `ch_${intent[1]}`, amount: Math.round(charge.amount * world.rate), currency: world.settles } } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((r) => r.payment_intent === url.searchParams.get("payment_intent")), has_more: false });
   if (path === "/refunds" && method === "POST") {

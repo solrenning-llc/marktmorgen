@@ -443,6 +443,18 @@ const EVENTS = [
       completed_at: "2026-10-21T18:20:00.000Z",
     },
   },
+  {
+    key: "product_updated",
+    event: "product.updated",
+    noun: "Product",
+    label: "Product Updated",
+    description: "Triggers when a product on your store is saved, with what its name, summary or price were before.",
+    data: {
+      product: { id: "p_8f2c1a", title: "The Weeknight Cookbook", summary: "Thirty dinners in thirty minutes", price_cents: 3900, currency: "usd", url: "https://marktmorgen.com/@harbor/p_8f2c1a" },
+      previous: { price_cents: 2900 },
+      updated_at: "2026-10-22T09:00:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

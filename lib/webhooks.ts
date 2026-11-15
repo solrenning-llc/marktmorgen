@@ -106,6 +106,7 @@ export const WEBHOOK_EVENTS = [
   "product.published",
   "membership.trial_ending",
   "course.lesson_completed",
+  "product.updated",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 

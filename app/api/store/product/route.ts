@@ -40,7 +40,7 @@ const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
-import { emitEvent } from "@/lib/webhooks";
+import { changedFields, emitEvent } from "@/lib/webhooks";
 import { productLink } from "@/lib/checkout-recovery";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
@@ -249,11 +249,18 @@ export async function POST(request: NextRequest) {
 
   // A draft this request publishes (action "visibility"), for the webhook below.
   let wasDraft = false;
+  // A product on the store this request edits, as it was (action "edit"), for the webhook below.
+  let editedFrom: { title: string; summary: string; price_cents: number } | null = null;
   try {
     let result: Outcome;
     // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
     let cleanupPending = false;
     if (action === "add" || action === "edit") {
+      // What an edited product on the store said before, for its product.updated webhook below (one read).
+      if (action === "edit") {
+        const was = await readListing(guarded.store, id).catch(() => null);
+        editedFrom = was && !was.hidden ? { title: was.title, summary: was.summary, price_cents: was.priceCents } : null;
+      }
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
@@ -488,6 +495,17 @@ export async function POST(request: NextRequest) {
         how: action === "add" ? "added" : "draft_published",
         published_at: new Date(at).toISOString(),
       }).catch((error) => console.error("queueing the product.published webhook failed", error));
+    }
+    // A product on the store saved just now: what it is, and only what changed of its title, summary and price.
+    const edited = action === "edit" && editedFrom && result.product && !result.product.hidden ? result.product : null;
+    if (edited && editedFrom) {
+      const now = { title: edited.title, summary: edited.summary, price_cents: edited.priceCents };
+      const at = Date.now();
+      await emitEvent(guarded.store, "product.updated", `updated|${edited.id}|${at}`, {
+        product: { id: edited.id, title: edited.title, summary: edited.summary, price_cents: edited.priceCents, currency: guarded.store.currency, url: productLink(guarded.store, edited.id) },
+        previous: changedFields(editedFrom, now),
+        updated_at: new Date(at).toISOString(),
+      }).catch((error) => console.error("queueing the product.updated webhook failed", error));
     }
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];

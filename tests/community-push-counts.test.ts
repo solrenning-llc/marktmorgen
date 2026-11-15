@@ -52,6 +52,8 @@ async function attempt<T>(match: (c: Command[]) => boolean, reply: unknown, act:
 }
 
 async function main(): Promise<void> {
+  // A device is written only while its member's record is there (#4666): this one is a member.
+  await pipeline([["HSET", `nl:cm:${ID}:m`, WHO, "{}"]]);
   part("Controls");
   is("a member with no devices has 0", await deviceCount(ID, WHO), 0);
   const first = subscription();

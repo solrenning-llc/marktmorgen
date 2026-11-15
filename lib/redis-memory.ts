@@ -346,6 +346,13 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/community-push.ts PUSH_DEVICE_IF_MEMBER: a device written only while its member's record is there.
+        if (key.startsWith("-- marktmorgen:push-device-if-member:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, devices, members, who, endpoint, value, any] = args;
+          if (any !== "any" && this.run(["HEXISTS", members, who]) === 0) return 0;
+          this.run(["HSET", devices, endpoint, value]);
+          return 1;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

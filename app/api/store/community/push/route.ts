@@ -60,6 +60,8 @@ export async function POST(request: NextRequest) {
     if (result === "invalid") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
     if (result === "unavailable") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
     if (result === "full") return Response.json({ ok: false, error: "full" }, { status: 409 });
+    // Taken out of the community (deleted) since it was let in: nothing written (#4666).
+    if (result === "out") return Response.json({ ok: false, error: "out" }, { status: 403 });
     // No room in the store's data room for one more device (lib/store-data.ts).
     if (result === "noroom") return Response.json({ ok: false, error: "noroom" }, { status: 409 });
     return Response.json({ ok: true, devices: await left(who) });

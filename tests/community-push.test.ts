@@ -11,6 +11,7 @@ import { createECDH, randomBytes } from "node:crypto";
 import { MAX_MEMBER_DEVICES, deviceCount, forgetDevice, forgetMember, rememberDevice, renewDevice } from "@/lib/community-push";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
+import { store as redis } from "./redis-stub";
 
 const ID = "cm1";
 const ANA = "a1a1a1a1a1a1";
@@ -43,6 +44,8 @@ const same = (n: number) => {
 };
 
 async function main() {
+  // A device is written only while its member's record is there (#4666): Ana is a member.
+  await redis.pipeline([["HSET", `nl:cm:${ID}:m`, ANA, "{}"]]);
   part("Remembering a device");
   is("a real subscription is kept", await rememberDevice(ID, ANA, same(1), ROOM), "added");
   is("one device is listening", await deviceCount(ID, ANA), 1);

@@ -46,6 +46,17 @@ const DEVICES_SLOT = "cm:ps";
 import { type Subscription, readSubscription, sendPush, vapidKeys, vapidKeysFor } from "@/lib/web-push";
 
 const pushKey = (id: string, who: string) => `nl:cm:${id}:ps:${who}`;
+
+/**
+ * A device written only while its member is still in (#4666): KEYS[1] the member's devices, KEYS[2] the community's
+ * member records; ARGV[1] the member's field there, ARGV[2] the device's endpoint, ARGV[3] the device, ARGV[4] "any"
+ * for the creator, who has no member record. 1 when written, 0 when the member's record is gone: an erasure deletes
+ * it before the devices (lib/community-erasure.ts), so a registration it overtook never brings the devices back.
+ */
+export const PUSH_DEVICE_IF_MEMBER = `-- marktmorgen:push-device-if-member:v1
+if ARGV[4] ~= "any" and redis.call("HEXISTS", KEYS[2], ARGV[1]) == 0 then return 0 end
+redis.call("HSET", KEYS[1], ARGV[2], ARGV[3])
+return 1`;
 /** Where lib/community.ts keeps the member records (its membersKey): only read here, never written. */
 const membersKey = (id: string) => `nl:cm:${id}:m`;
 
@@ -149,7 +160,7 @@ async function devicesOf(id: string, who: string): Promise<SentDevice[]> {
   return out;
 }
 
-export type AddDeviceResult = "added" | "known" | "full" | "noroom" | "invalid" | "unavailable";
+export type AddDeviceResult = "added" | "known" | "full" | "noroom" | "invalid" | "unavailable" | "out";
 
 /**
  * Remembers one device. `raw` is what the browser's own subscription object
@@ -178,7 +189,15 @@ export async function rememberDevice(id: string, who: string, raw: unknown, room
   // A new device takes room in the store's data room first; one known already is rewritten in its place.
   const grown = dataBytes([subscription.endpoint, value], 1) - (already ? dataBytes([subscription.endpoint, held as string], 1) : 0);
   if (grown > 0 && !(await takeData(room, [{ slot: DEVICES_SLOT, bytes: grown }])).ok) return "noroom";
-  await redisPipeline([["HSET", key, subscription.endpoint, value]]);
+  // Only while the member is still in, in the same step (#4666): one erased since this was let in writes nothing, and
+  // the room taken for it goes back. An answer of another shape is unknown (rule 24): the room stays taken, as for a
+  // write that may have landed, and it throws.
+  const wrote = repliesFor(await redisPipeline([["EVAL", PUSH_DEVICE_IF_MEMBER, 2, key, membersKey(id), who, subscription.endpoint, value, who === CREATOR ? "any" : "member"]]), 1)?.[0];
+  if (wrote === 0) {
+    if (grown > 0) await giveData(room, [{ slot: DEVICES_SLOT, bytes: grown }]);
+    return "out";
+  }
+  if (wrote !== 1) throw new UnknownReplyError("a member's push device write");
   if (grown < 0) await giveData(room, [{ slot: DEVICES_SLOT, bytes: -grown }]);
   return already ? "known" : "added";
 }

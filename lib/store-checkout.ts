@@ -51,7 +51,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
-import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
+import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlementCurrencyFor, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -737,7 +737,7 @@ export async function createCheckout(
       live: BUYER_CURRENCY_LIVE,
       mode: DEFAULT_BUYER_CURRENCY_MODE,
       fee: hasApplicationFee(body),
-      settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId)),
+      settles: settlesIn(store.currency, await settlementCurrencyFor(store)),
       manualPrices: false,
       taxRates: hasTaxRates(body),
     }));

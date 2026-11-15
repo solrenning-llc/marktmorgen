@@ -48,6 +48,9 @@
  * Stripe's page. Nothing here converts an amount, and no report reads it.
  */
 import { onAccount } from "@/lib/stripe-account";
+import type { Store } from "@/lib/store";
+import { takeBuyerRead } from "@/lib/buyer-actions";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 /** Off until the test-mode proofs in docs/buyer-currency-and-language.md. */
 export const BUYER_CURRENCY_LIVE: boolean = false;
@@ -146,4 +149,36 @@ export async function accountSettlementCurrency(accountId: string | null | undef
     console.error("reading the account's settlement currency failed", error);
     return null;
   }
+}
+
+/** Half a day, as the account's currencies are kept (lib/payment-methods.ts): an account's settlement currency seldom changes. */
+export const SETTLEMENT_CURRENCY_SECONDS = 12 * 60 * 60;
+/** Where an account's settlement currency is kept: three lowercase letters, nothing else. */
+export const settlementKey = (account: string): string => `nl:pay:settles:${account}`;
+const CODE = /^[a-z]{3}$/;
+
+/**
+ * The creator's account's settlement currency for a checkout (22 [E5] unit 3b): paid for and kept before
+ * BUYER_CURRENCY_LIVE can turn on, so a busy store never asks Stripe on every session. One buyer request unit
+ * (lib/buyer-actions.ts takeBuyerRead) is taken before anything is read; refused, nothing is read and the answer is
+ * unknown (null), which keeps the store's currency. A kept answer of exactly three lowercase letters is used as it is;
+ * anything else kept is read again from Stripe. Only a known answer is kept, for SETTLEMENT_CURRENCY_SECONDS.
+ */
+export async function settlementCurrencyFor(
+  store: Pick<Store, "stripeAccountId">,
+  take: (store: Store, units?: number) => Promise<boolean> = takeBuyerRead,
+): Promise<string | null> {
+  const account = store.stripeAccountId;
+  if (!account) return null;
+  if (!(await take(store as Store, 1))) return null;
+  const cache = isRedisConfigured();
+  if (cache) {
+    const kept = await redisPipeline([["GET", settlementKey(account)]]).then((r) => r?.[0], () => null);
+    if (typeof kept === "string" && CODE.test(kept)) return kept;
+  }
+  const code = await accountSettlementCurrency(account);
+  if (code !== null && cache) {
+    await redisPipeline([["SET", settlementKey(account), code, "EX", SETTLEMENT_CURRENCY_SECONDS]]).catch((error) => console.error("keeping the account's settlement currency failed", error));
+  }
+  return code;
 }

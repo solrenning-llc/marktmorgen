@@ -168,6 +168,8 @@ test("a cut-short or overlong marks pipeline is unknown", async () => {
 
 test("the list contact of another shape is unknown, never 'still on the list'", async () => {
   for (const value of [undefined, 0, 1, true, ["x"], { unsub: false }]) await refuses(isMarks, slotAs(3, value), `contact ${String(value)}`);
+  // A contact text that is not a contact (not JSON, or JSON of another shape) is unknown too, never "has not left the list".
+  for (const value of ["{", "not json", "[]", "null", "7"]) await refuses(isMarks, slotAs(3, value), `contact text ${value}`);
 });
 
 test("with no contact list, the fourth read (a one-key EXISTS) of any other shape is unknown (Codex Z on #2929)", async () => {

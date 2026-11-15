@@ -557,8 +557,10 @@ export async function runBackup(options: BackupRunOptions = {}): Promise<BackupR
       progress = Buffer.byteLength(value, "utf8") <= progressBound(review) ? { set: value } : "drop";
       return { ok: false, reason: "copy_incomplete", keys: copied.keys, bytes: copied.bytes, parts: copied.parts };
     }
-    // Closed (a set, whole or with keys left out): its progress is done with.
-    if (copied.ok || copied.reason === "export_key_over_ceiling") progress = had ? "drop" : "keep";
+    // Closed (a set, whole or with keys left out): its progress is done with. So is a copy that ran out of parts: it can
+    // never close, and kept it would be resumed into the same full list and fail again at once (Claude 2's BAIXO on
+    // #3293), so the next run starts afresh.
+    if (copied.ok || copied.reason === "export_key_over_ceiling" || copied.reason === "export_too_many_parts") progress = had ? "drop" : "keep";
     // A failed day deletes nothing after it (Codex G on e95705e66): the last good copy stays, past the retention if
     // need be, until a new one is verified.
     if (!copied.ok) return copied;

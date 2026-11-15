@@ -266,6 +266,27 @@ async function main(): Promise<void> {
   latency = 0;
   is("with one part allowed, the deadline ends the copy as too many parts, and no progress is kept", [reasonOf(onePart), (await real([["GET", PROGRESS]]))[0]], ["export_too_many_parts", null]);
 
+  part("A resumed copy that runs out of parts lets its progress go (Claude 2's BAIXO on #3293 @0ff05777eb)");
+  {
+    reset(D + 65 * DAY, 60);
+    const twoParts = { ...review, maxParts: 2, maxStoredBytes: 35 * 2 * 1_131_232 };
+    latency = pace;
+    const first = await runBackup({ now: D + 65 * DAY, review: twoParts, store, key });
+    at(D + 65 * DAY + HOUR);
+    await real([["DEL", `nl:backup:ran:${new Date(D + 65 * DAY).toISOString().slice(0, 10)}`]]);
+    const second = await runBackup({ now: D + 65 * DAY + HOUR, review: twoParts, store, key });
+    latency = 0;
+    is("control: the first run paused, the resumed one ran out of parts", [reasonOf(first), reasonOf(second)], ["copy_incomplete", "export_too_many_parts"]);
+    is("the progress is let go: a copy that ran out of parts can never close", (await real([["GET", PROGRESS]]))[0], null);
+    at(D + 65 * DAY + 2 * HOUR);
+    await real([["DEL", `nl:backup:ran:${new Date(D + 65 * DAY).toISOString().slice(0, 10)}`]]);
+    // At the same pace: kept, the progress would be resumed into its full part list and fail at once again.
+    latency = pace;
+    const third = await runBackup({ now: D + 65 * DAY + 2 * HOUR, review: twoParts, store, key });
+    latency = 0;
+    is("the day's next run starts afresh and pauses as a new copy, never failing again at once", reasonOf(third), "copy_incomplete");
+  }
+
   part("Measured: the full copy at the cap of 10,000 keys, 200 SCAN pages, under the 240 s cutoff (#3273)");
   {
     // The design's caps: 10,000 keys, 4 MiB copied, its commands; 8 parts, so the copy can span as many runs as it takes.
@@ -297,6 +318,8 @@ async function main(): Promise<void> {
         const counts = result.ok || reasonOf(result) === "copy_incomplete";
         const keys = counts ? keysOf(result) - copied : 0;
         if (counts) copied = keysOf(result);
+        // Out of parts, the progress is let go: the next run starts a new copy from the first key.
+        if (reasonOf(result) === "export_too_many_parts") copied = 0;
         runs.push({ keys, seconds: Math.round(((simulated - v0) + cpuMs) / 100) / 10, cpuMs: Math.round(cpuMs), reason: reasonOf(result), alive: backupAlarmSignal(result)?.kind === "alive" });
         if (result.ok) closed = result;
       }

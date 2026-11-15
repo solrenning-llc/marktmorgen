@@ -156,6 +156,25 @@ async function main(): Promise<void> {
   const seats = (await read(r)).full.call.sessions[0].seats;
   is("never three seats sold in a session saved with two", third === "opened" && saved.ok && seats === 2, false);
 
+  part("Removing the call is under the same lock (Codex P on #4023)");
+  const x = await callStore("removelock@example.com", "removelock", "acct_1RemoveLockA", live([{ id: "sessionx1", start: T1, seats: 3 }]));
+  const xpage = await read(x);
+  const xcookie = `${SESSION_COOKIE}=${await openSession(x.email)}`;
+  const remove = async () => {
+    const res = await saveCall(new NextRequest("https://marktmorgen.com/api/store/call", { method: "POST", headers: { "content-type": "application/json", "x-nimbus-store": xpage.store.sid, cookie: xcookie }, body: JSON.stringify({ id: x.id, remove: true }) }));
+    return ((await res.json()) as { ok: boolean }).ok;
+  };
+  let removed = false;
+  // The creator removes the call while a buyer's booking, holding the lock, reads the checkouts already open.
+  during.list = async () => {
+    removed = await remove();
+  };
+  const buyer = await sell(xpage.store, xpage.full, T1);
+  delete during.list;
+  is("never a call removed and its seat sold at the same time", removed && buyer === "opened", false);
+  is("control: once no booking holds the lock, the call is removed", await remove(), true);
+  is("control: …and the product is no longer a call", Boolean((await readProduct((await storeForEmail(x.email)) as Store, x.id))?.call), false);
+
   done();
 }
 

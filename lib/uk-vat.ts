@@ -273,12 +273,16 @@ export function ukVatAdjustment(record: UkVatRecord, change: { at: number; exVat
   // Nothing left to tax leaves no VAT behind.
   if (exLeft === 0 && vatLeft !== 0) return null;
   const convert = (cents: number) => (record.currency === "GBP" ? cents : record.sterlingRate ? toPence(cents, record.sterlingRate.perPound) : null);
-  // An entry that takes what is left to nothing takes what is left in pence too, not a fresh conversion, whose rounding
-  // could pass below zero and refuse a full refund made in parts (Claude 7 on #4574, LEVE 2).
-  const exVatPence = exLeft === 0 ? -sum("exVatPence") : convert(change.exVatCents);
-  const vatPence = vatLeft === 0 ? -sum("vatPence") : convert(change.vatCents);
-  if (exVatPence === null || vatPence === null || !whole(exVatPence) || !whole(vatPence)) return null;
-  if (sum("exVatPence") + exVatPence < 0 || sum("vatPence") + vatPence < 0) return null;
+  // Converted on what is left, never entry by entry: an entry's pence are what is left after it, converted, less the
+  // pence left before it. The pence left then always equal what is left converted, so per-entry rounding cannot drift
+  // box 1 to nothing while VAT is still owed (Claude 7 on #4574 @5554f02147), and an entry that takes what is left to
+  // nothing takes the pence left with it (LEVE 2).
+  const exPenceAfter = convert(exLeft);
+  const vatPenceAfter = convert(vatLeft);
+  if (exPenceAfter === null || vatPenceAfter === null || !whole(exPenceAfter) || !whole(vatPenceAfter)) return null;
+  const exVatPence = exPenceAfter - sum("exVatPence");
+  const vatPence = vatPenceAfter - sum("vatPence");
+  if (!whole(exVatPence) || !whole(vatPence) || exVatPence > 0 || vatPence > 0) return null;
   return { ...record, adjustments: [...record.adjustments, { date, exVatCents: change.exVatCents, vatCents: change.vatCents, exVatPence, vatPence, reason: change.reason }] };
 }
 

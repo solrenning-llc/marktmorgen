@@ -1,6 +1,6 @@
 import { cachedOfferListings, savedOfferIssues } from "@/lib/funnel-offer-review";
 import type { Store } from "@/lib/store";
-import { MAX_PAGE_FUNNELS, MAX_FUNNEL_PAGES, type PageFunnel } from "@/lib/page-funnel";
+import { MAX_PAGE_FUNNELS, MAX_FUNNEL_PAGES, type PageFunnel, stepPlaces } from "@/lib/page-funnel";
 import { MAX_SITE_PAGES, pageOut, siteKey } from "@/lib/site-page-rules";
 import { MAX_BLOCKS, MAX_STORED_PAGE_BYTES, parsePage, pageProblem } from "@/lib/sales-page";
 import { KIND } from "@/lib/catalog";
@@ -18,7 +18,8 @@ const MAX_REVIEW_FORM_BYTES = 64 * 1024;
 export async function readFunnelFormReviews(store: Store, funnels: readonly PageFunnel[], options: { reviewOffers?: boolean } = {}): Promise<Map<string, FunnelLaunchIssue[]>> {
   const result = new Map(funnels.map(funnel => [funnel.id, [] as FunnelLaunchIssue[]]));
   const pages = new Map(store.sitePages.filter(page => pageOut(page)).map(page => [page.id, page]));
-  const references = funnels.flatMap(funnel => funnel.steps.flatMap((step, stepIndex) => step.kind === "page" && pages.has(step.id) ? [{ funnel: funnel.id, page: pages.get(step.id)!, stepIndex }] : []));
+  // A split test's pages are reviewed too, each at the split's place.
+  const references = funnels.flatMap(funnel => funnel.steps.flatMap((step, stepIndex) => stepPlaces(step).flatMap(place => place.kind === "page" && pages.has(place.id) ? [{ funnel: funnel.id, page: pages.get(place.id)!, stepIndex }] : [])));
   if (!references.length) return result;
   const unknown = (ref: typeof references[number], detail = "Forms on this page could not be checked. Reload before relying on this review."): FunnelLaunchIssue => ({
     code: "forms_unknown", title: `Step ${ref.stepIndex + 1}: ${ref.page.title}`, detail, stepIndex: ref.stepIndex,

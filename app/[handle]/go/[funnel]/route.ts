@@ -1,8 +1,7 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { originFrom } from "@/lib/request-origin";
-import { nextOpen, withMark } from "@/lib/page-funnel";
-import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
+import { nextHref, readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
 
 /**
  * A funnel of pages' own address, /@chef/go/launch (and chef.com/go/launch on
@@ -16,6 +15,10 @@ import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
  * a reading out of shape is unknown, never "no funnel has it", so the route
  * says try again later and sends nobody anywhere (CX-123 rule 24). The same
  * holds for the funnel's product steps.
+ *
+ * A first step that is a split test (526 [FN2]) sends each visitor to one of
+ * its pages that can be shown, drawn afresh for this visit by its shares,
+ * with no cookie and nothing about the person; none can, it is passed over.
  */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ handle: string; funnel: string }> }) {
   const { handle: raw, funnel: slug } = await params;
@@ -40,14 +43,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // A product the store still lists whose listing cannot be read is unknown, never "a deleted product".
   const states = await stepStates(store, funnel, { strictProducts: true }).catch(() => null);
   if (states === null) return later();
-  const first = nextOpen(funnel, -1, (step) => states.find((s) => s.step === step)?.open ?? false);
-  const path = first >= 0 ? states[first].path : null;
-  if (!path) return away(`/@${store.handle}`);
+  const target = nextHref(funnel, states, -1);
+  if (!target) return away(`/@${store.handle}`);
 
   // What the link carried, kept; a mark of another funnel, dropped.
   const carried = new URLSearchParams(request.nextUrl.searchParams);
   carried.delete("f");
   const query = carried.toString();
-  const target = withMark(path, funnel.id);
   return away(query ? `${target}${target.includes("?") ? "&" : "?"}${query}` : target);
 }

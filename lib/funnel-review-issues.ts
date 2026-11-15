@@ -17,11 +17,15 @@ import { canSell } from "@/lib/store-checkout";
 
 /** The checks a funnel's saved pages, forms and offers fail: the page reviews first, then each offer step's. */
 export function funnelPageIssues(store: Store, formIssues: readonly FunnelLaunchIssue[], states: readonly StepState[] | null): FunnelLaunchIssue[] {
-  const offerRecords = cachedOfferListings(store, (states ?? []).flatMap((state) => (state.reviewProduct ? [state.reviewProduct] : [])));
+  // A split test's products are reviewed as steps are, each named at the split's place.
+  const each = (state: StepState) => [state, ...(state.options ?? [])];
+  const offerRecords = cachedOfferListings(store, (states ?? []).flatMap(each).flatMap((state) => (state.reviewProduct ? [state.reviewProduct] : [])));
   return [
     ...formIssues,
-    ...(states ?? []).flatMap((state, stepIndex) =>
-      (state.reviewProduct ? savedOfferIssues(store, state.reviewProduct, offerRecords) : []).map((detail) => ({ code: "step" as const, title: `Step ${stepIndex + 1}: ${state.title}`, detail, stepIndex })),
+    ...(states ?? []).flatMap((top, stepIndex) =>
+      each(top).flatMap((state) =>
+        (state.reviewProduct ? savedOfferIssues(store, state.reviewProduct, offerRecords) : []).map((detail) => ({ code: "step" as const, title: `Step ${stepIndex + 1}: ${state.title}`, detail, stepIndex })),
+      ),
     ),
   ];
 }

@@ -35,7 +35,7 @@
 import type { Product } from "@/lib/catalog";
 import type { PageBlock, SalesPage } from "@/lib/sales-page";
 import type { FormDef } from "@/lib/forms";
-import type { PageFunnel } from "@/lib/page-funnel";
+import type { PageFunnel, PageFunnelStep } from "@/lib/page-funnel";
 import type { FunnelStep } from "@/lib/funnel";
 import type { StoreSection, Announcement } from "@/lib/store-sections";
 import type { StoreLink } from "@/lib/store-link";
@@ -291,9 +291,21 @@ export function copiedForm(form: FormDef, id: string, products: IdMap, now: numb
   };
 }
 
-/** A funnel for the other store, off, walking its pages' and products' copies; a step whose page or product is not copied is left out. */
+/**
+ * A funnel for the other store, off, walking its pages' and products' copies;
+ * a step whose page or product is not copied is left out, and so is a split
+ * test with any page not copied (its shares were set for all of them).
+ */
 export function copiedFunnel(funnel: PageFunnel, id: string, slug: string, pages: IdMap, products: IdMap, nowSeconds: number, left: BlocksLeft): PageFunnel {
-  const steps = funnel.steps.flatMap((step) => {
+  const steps = funnel.steps.flatMap((step): PageFunnelStep[] => {
+    if (step.kind === "split") {
+      const options = step.options.map((option) => ({ ...option, id: (option.kind === "page" ? pages(option.id) : products(option.id)) }));
+      if (options.some((option) => !option.id)) {
+        left.refs += 1;
+        return [];
+      }
+      return [{ kind: "split", id: step.id, options }];
+    }
     const mapped = step.kind === "page" ? pages(step.id) : products(step.id);
     if (!mapped) {
       left.refs += 1;

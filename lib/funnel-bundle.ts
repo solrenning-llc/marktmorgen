@@ -41,7 +41,7 @@ import {
   type SalesPage,
 } from "@/lib/sales-page";
 import { MAX_SITE_PAGES, MAX_SITE_TITLE, SITE_KINDS, SLUG_PATTERN, MAX_SLUG, type SitePage } from "@/lib/site-page-rules";
-import { MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, type PageFunnelStep } from "@/lib/page-funnel";
+import { type FunnelPlace, MAX_FUNNEL_NAME, MAX_FUNNEL_PAGES, type PageFunnelStep } from "@/lib/page-funnel";
 import { MAX_FORMS, newFormId, parseForm, tierIssues, type FormDef } from "@/lib/forms";
 import { sensitiveFieldOf } from "@/lib/form-sensitive";
 
@@ -55,7 +55,7 @@ export const MAX_PRODUCT_LABEL = 80;
 
 /** A placeholder for one of the sender's products, mapped by the receiver to one of theirs. */
 export type BundleProduct = { ref: string; label: string; wants: "free" | "paid" };
-export type BundleStep = { kind: PageFunnelStep["kind"]; ref: string };
+export type BundleStep = { kind: FunnelPlace["kind"]; ref: string };
 /** One of the funnel's pages: its blocks refer to products and forms by placeholder. */
 export type BundlePage = { ref: string; title: string; slug: string; target: string; style: PageStyle; blocks: PageBlock[] };
 /** A form a page asks, without its id or its answers; a result's product is a placeholder. */
@@ -122,13 +122,15 @@ export type LeftOut = {
   reviewPicks: number;
   /** Steps whose page or product no longer exists. */
   steps: number;
+  /** Split test steps (526 [FN2]): a file carries pages in order only, so these stay with the sender. */
+  splits: number;
   /** Product cards or button targets naming a product the store no longer has. */
   products: number;
   /** Form blocks naming a form the store no longer has. */
   forms: number;
 };
 
-const emptyLeft = (): LeftOut => ({ pictures: 0, videos: 0, bios: 0, guarantees: 0, countdowns: 0, quotes: 0, reviewPicks: 0, steps: 0, products: 0, forms: 0 });
+const emptyLeft = (): LeftOut => ({ pictures: 0, videos: 0, bios: 0, guarantees: 0, countdowns: 0, quotes: 0, reviewPicks: 0, steps: 0, splits: 0, products: 0, forms: 0 });
 
 /**
  * A store's funnel as a file. `mode` "share" leaves out what is about the
@@ -173,6 +175,10 @@ export function buildBundle(source: BundleSource, mode: "share" | "own"): { bund
   const steps: BundleStep[] = [];
   const pages: BundlePage[] = [];
   for (const step of source.steps.slice(0, MAX_FUNNEL_PAGES)) {
+    if (step.kind === "split") {
+      left.splits += 1;
+      continue;
+    }
     if (step.kind === "product") {
       // A call is booked on a page of its own and never a step; checked first, so it is not named in the file for nothing.
       const ref = source.products.get(step.id)?.call ? "" : productRef(step.id);
@@ -265,6 +271,7 @@ export function leftOutWords(left: LeftOut): string[] {
   if (left.reviewPicks) out.push("The reviews you picked to show first stay yours; buyers' reviews are never shared.");
   if (left.quotes) out.push(n(left.quotes, "1 thing said about you elsewhere is left out.", "# things said about you elsewhere are left out."));
   if (left.steps) out.push(n(left.steps, "1 step whose page or product is gone is left out.", "# steps whose page or product is gone are left out."));
+  if (left.splits) out.push(n(left.splits, "1 split test is left out, with its pages: add it again after the funnel is brought in.", "# split tests are left out, with their pages: add them again after the funnel is brought in."));
   if (left.products) out.push(n(left.products, "1 product card or button names a product you no longer have, and is left empty.", "# product cards or buttons name products you no longer have, and are left empty."));
   if (left.forms) out.push(n(left.forms, "1 form block names a form you no longer have, and is left empty.", "# form blocks name forms you no longer have, and are left empty."));
   return out;
@@ -473,7 +480,7 @@ export function readBundle(raw: unknown, options: { maxBytes: number; own?: bool
 /** A bundle as the preview shows it: enough to choose products and see the work left, without its words. */
 export type BundleOutline = {
   name: string;
-  steps: { kind: PageFunnelStep["kind"]; ref: string; title: string }[];
+  steps: { kind: FunnelPlace["kind"]; ref: string; title: string }[];
   pages: { ref: string; title: string; kinds: BlockKind[] }[];
   forms: { ref: string; name: string; questions: number }[];
   products: (BundleProduct & { step: boolean })[];

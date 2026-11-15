@@ -14,6 +14,10 @@ import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { readFunnelMutationResult, type FunnelMutation } from "@/lib/funnel-mutation-response";
 import { funnelReachRatioMetric, funnelStepMetrics } from "@/lib/funnel-metrics";
+import type { SplitView } from "@/lib/funnel-split-results";
+import { SplitResults } from "@/components/funnel-split-results";
+import { FunnelSplitEditor } from "@/components/funnel-split-editor";
+import { type SplitDraft, checkSplitDraft, editSplitDraft, newSplitDraft, stepsForSave } from "@/lib/funnel-split-draft";
 import { DIAGNOSIS_NOTE, funnelFindings } from "@/lib/funnel-diagnosis";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import {
@@ -22,18 +26,21 @@ import {
   MAX_FUNNEL_SLUG,
   MAX_PAGE_FUNNELS,
   type PageFunnel,
+  type FunnelPlace,
   type PageFunnelStep,
+  funnelPlaces,
   funnelSlugFrom,
+  stepPlaces,
 } from "@/lib/page-funnel";
 
 /** A page or product that can be a step, as the studio lists it. */
-export type StepChoice = { kind: PageFunnelStep["kind"]; id: string; title: string; note: string };
+export type StepChoice = { kind: FunnelPlace["kind"]; id: string; title: string; note: string };
 
 /** One saved funnel, with its steps as the store stands and how many people each reached. */
 export type SavedFunnel = {
   funnel: PageFunnel;
   pageIssues?: FunnelLaunchIssue[];
-  steps: { editor?: FunnelStepEditorLink | null; title: string; open: boolean; why: string; free: boolean; product: boolean; seen: number | null; done: number | null }[];
+  steps: { editor?: FunnelStepEditorLink | null; title: string; open: boolean; why: string; free: boolean; product: boolean; seen: number | null; done: number | null; split?: SplitView | null }[];
 };
 
 type Draft = { id: string; name: string; slug: string; slugTouched: boolean; on: boolean; steps: PageFunnelStep[] };
@@ -42,7 +49,8 @@ const MESSAGES: Record<string, string> = {
   name: "Give the funnel a name. Only you see it.",
   slug: "The address can have only lowercase letters, numbers and dashes.",
   taken: "Another funnel of this store already has that address.",
-  steps: "A funnel needs at least one step, each page or product once.",
+  steps: `A funnel needs at least one step, each page or product once, ${MAX_FUNNEL_PAGES} pages at most (each page of a split test counts).`,
+  split: "A split test needs two to four different pages or products, with shares in whole percents that add up to 100.",
   full: `A store can have ${MAX_PAGE_FUNNELS} funnels. Remove one to add another.`,
   page: "One of the pages was deleted. Choose another.",
   gone: "One of the products was deleted. Choose another.",
@@ -53,6 +61,8 @@ const MESSAGES: Record<string, string> = {
 };
 
 const key = (step: Pick<PageFunnelStep, "kind" | "id">) => `${step.kind}:${step.id}`;
+/** Every page a draft's steps land on, a split test's included: what counts against the funnel's pages. */
+const placeCount = (steps: PageFunnelStep[]) => funnelPlaces({ steps }).length;
 
 /**
  * The studio's funnels of pages (lib/page-funnel.ts): each with its address,
@@ -85,16 +95,20 @@ export function PageFunnelEditor({
   const flight = useRef(false);
   const recovery = useRef(false);
   const [uncertain, setUncertain] = useState(false);
+  /** A split test being built or edited inside the draft (526 [FN2]): applied to the draft only, saved with the funnel. */
+  const [splitDraft, setSplitDraft] = useState<SplitDraft | null>(null);
+  const splitReturn = useRef<string | null>(null);
   const locked = busy || uncertain;
   useLeaveGuard(draft !== null || busy || uncertain);
 
   const pages = choices.filter((c) => c.kind === "page");
   const products = choices.filter((c) => c.kind === "product");
-  const titleOf = (step: PageFunnelStep) => choices.find((c) => key(c) === key(step))?.title ?? "No longer available";
+  const titleOf = (step: FunnelPlace) => choices.find((c) => key(c) === key(step))?.title ?? "No longer available";
 
   function start(funnel: PageFunnel | null) {
     if (flight.current || recovery.current) return;
     setError(null);
+    setSplitDraft(null);
     setDraft(
       funnel
         ? { id: funnel.id, name: funnel.name, slug: funnel.slug, slugTouched: true, on: funnel.on, steps: funnel.steps }
@@ -121,6 +135,20 @@ export function PageFunnelEditor({
     returnTo.current = null;
     focusFirst([back, "pf-new", "page-funnels-title"]);
   }, [formOpen]);
+  // The split test form: its heading takes the focus when it opens; the button that opened it gets it back when it closes.
+  const splitOpen = splitDraft !== null;
+  const wasSplitOpen = useRef(false);
+  useEffect(() => {
+    if (splitOpen === wasSplitOpen.current) return;
+    wasSplitOpen.current = splitOpen;
+    if (splitOpen) {
+      document.querySelector<HTMLElement>("[data-split-editor-title]")?.focus();
+      return;
+    }
+    const back = splitReturn.current;
+    splitReturn.current = null;
+    focusFirst([back, "pf-split-add", "pf-name"]);
+  }, [splitOpen]);
   const wasRemoving = useRef<string | null>(null);
   useEffect(() => {
     const was = wasRemoving.current;
@@ -166,11 +194,28 @@ export function PageFunnelEditor({
   function addStep() {
     if (flight.current || recovery.current) return;
     setDraft((d) => {
-      if (!d || d.steps.length >= MAX_FUNNEL_PAGES) return d;
-      const used = new Set(d.steps.map(key));
+      if (!d || placeCount(d.steps) >= MAX_FUNNEL_PAGES) return d;
+      const used = new Set(d.steps.flatMap(stepPlaces).map(key));
       const pick = choices.find((c) => !used.has(key(c)));
       return pick ? { ...d, steps: [...d.steps, { kind: pick.kind, id: pick.id }] } : d;
     });
+  }
+
+  function openSplit(next: SplitDraft | null, from: string) {
+    if (flight.current || recovery.current || !next) return;
+    splitReturn.current = from;
+    setError(null);
+    setSplitDraft(next);
+  }
+
+  function applySplit() {
+    if (flight.current || recovery.current || !draft || !splitDraft) return;
+    const checked = checkSplitDraft(splitDraft, draft.steps, choices);
+    if (!checked.ok) return;
+    const at = splitDraft.editing ?? Math.min(splitDraft.at, draft.steps.length);
+    splitReturn.current = `pf-split-edit-${at}`;
+    setDraft({ ...draft, steps: checked.steps });
+    setSplitDraft(null);
   }
 
   async function send(body: FunnelMutation, done: string) {
@@ -212,14 +257,15 @@ export function PageFunnelEditor({
 
   function save() {
     if (flight.current || recovery.current) return;
-    if (!draft) return;
-    const repeated = new Set(draft.steps.map(key)).size !== draft.steps.length;
+    if (!draft || splitDraft) return;
+    const places = draft.steps.flatMap(stepPlaces).map(key);
+    const repeated = new Set(places).size !== places.length;
     if (repeated) {
       setError("Each page or product can be one step of a funnel, once.");
       return;
     }
     send(
-      { funnel: { id: draft.id || undefined, name: draft.name, slug: draft.slug, on: draft.on, steps: draft.steps } },
+      { funnel: { id: draft.id || undefined, name: draft.name, slug: draft.slug, on: draft.on, steps: stepsForSave(draft.steps) as PageFunnelStep[] } },
       draft.id ? "Funnel saved." : "Funnel made.",
     );
   }
@@ -387,6 +433,7 @@ export function PageFunnelEditor({
                       ) : (
                         <p className="mt-0.5 font-semibold text-ink">{step.why}</p>
                       )}
+                      {step.split ? <SplitResults view={step.split} step={index + 1} /> : null}
                       {step.editor ? (
                         <Link
                           href={step.editor.href}
@@ -494,6 +541,24 @@ export function PageFunnelEditor({
                 <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-violet-brand text-[0.8125rem] font-bold text-white">
                   {index + 1}
                 </span>
+                {step.kind === "split" ? (
+                  <p id={`pf-step-${index}`} className="min-w-0 flex-1 text-sm text-ink">
+                    <span className="font-semibold">{`Split test, step ${index + 1}: `}</span>
+                    {step.options.map((option) => `${titleOf(option)} gets ${option.share}%`).join("; ")}
+                    <span className="block text-xs text-ink-soft">Each visitor is sent to one of these pages, at random, by these shares.</span>
+                    <button
+                      id={`pf-split-edit-${index}`}
+                      type="button"
+                      className="btn btn-ghost mt-1"
+                      disabled={splitDraft !== null}
+                      aria-label={`Edit split test, step ${index + 1}`}
+                      onClick={() => openSplit(editSplitDraft(draft.steps, index), `pf-split-edit-${index}`)}
+                    >
+                      Edit split test
+                    </button>
+                  </p>
+                ) : (
+                <>
                 <label className="sr-only" htmlFor={`pf-step-${index}`}>{`Step ${index + 1}`}</label>
                 <select id={`pf-step-${index}`} value={key(step)} onChange={(e) => setStep(index, e.target.value)} className="field min-w-0 flex-1">
                   {choices.some((c) => key(c) === key(step)) ? null : <option value={key(step)}>{titleOf(step)}</option>}
@@ -512,10 +577,12 @@ export function PageFunnelEditor({
                     </optgroup>
                   ) : null}
                 </select>
+                </>
+                )}
                 <button
                   type="button"
                   onClick={() => move(index, -1)}
-                  disabled={index === 0}
+                  disabled={index === 0 || splitDraft !== null}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-paper disabled:opacity-40"
                   aria-label={`Move step ${index + 1} up`}
                 >
@@ -524,7 +591,7 @@ export function PageFunnelEditor({
                 <button
                   type="button"
                   onClick={() => move(index, 1)}
-                  disabled={index === draft.steps.length - 1}
+                  disabled={index === draft.steps.length - 1 || splitDraft !== null}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-paper disabled:opacity-40"
                   aria-label={`Move step ${index + 1} down`}
                 >
@@ -533,6 +600,7 @@ export function PageFunnelEditor({
                 <button
                   type="button"
                   onClick={() => patch({ steps: draft.steps.filter((_, i) => i !== index) })}
+                  disabled={splitDraft !== null}
                   className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-danger-soft hover:text-danger"
                   aria-label={`Remove step ${index + 1}`}
                 >
@@ -541,15 +609,38 @@ export function PageFunnelEditor({
               </li>
             ))}
           </ol>
-          {draft.steps.length < MAX_FUNNEL_PAGES && draft.steps.length < choices.length ? (
+          {placeCount(draft.steps) < MAX_FUNNEL_PAGES && placeCount(draft.steps) < choices.length ? (
             <button
               type="button"
               onClick={addStep}
               className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-sm font-bold text-ink-soft transition-colors hover:border-violet-brand hover:text-violet-deep"
             >
               <Icon name="plus" size={18} />
-              {`Add a step (${draft.steps.length} of ${MAX_FUNNEL_PAGES})`}
+              {`Add a step (${placeCount(draft.steps)} of ${MAX_FUNNEL_PAGES} pages)`}
             </button>
+          ) : null}
+          {splitDraft === null && newSplitDraft(draft.steps, choices, draft.steps.length) ? (
+            <button
+              id="pf-split-add"
+              type="button"
+              onClick={() => openSplit(newSplitDraft(draft.steps, choices, draft.steps.length), "pf-split-add")}
+              className="mt-3 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line-strong text-sm font-bold text-ink-soft transition-colors hover:border-violet-brand hover:text-violet-deep"
+            >
+              <Icon name="plus" size={18} />
+              Add a split test (2 to 4 pages, each counts as a page)
+            </button>
+          ) : null}
+          {splitDraft ? (
+            <FunnelSplitEditor
+              draft={splitDraft}
+              steps={draft.steps}
+              choices={choices}
+              onChange={(next) => {
+                if (!flight.current && !recovery.current) setSplitDraft(next);
+              }}
+              onApply={applySplit}
+              onCancel={() => setSplitDraft(null)}
+            />
           ) : null}
 
           <label className="mt-5 flex min-h-11 items-center gap-3 text-sm font-semibold text-ink" htmlFor="pf-on">
@@ -569,13 +660,18 @@ export function PageFunnelEditor({
           {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
 
           <div className="mt-5 flex flex-wrap items-center gap-3">
-            <button type="button" onClick={save} aria-busy={busy} disabled={locked || !draft.name.trim() || draft.steps.length === 0} className="btn btn-primary">
+            <button type="button" onClick={save} aria-busy={busy} disabled={locked || splitDraft !== null || !draft.name.trim() || draft.steps.length === 0} aria-describedby={splitDraft ? "pf-split-pending" : undefined} className="btn btn-primary">
               {busy ? "Saving…" : draft.id ? "Save the funnel" : "Make the funnel"}
             </button>
-            <button type="button" className="btn btn-ghost" onClick={() => { setDraft(null); setError(null); }} disabled={locked}>
+            <button type="button" className="btn btn-ghost" onClick={() => { setDraft(null); setSplitDraft(null); setError(null); }} disabled={locked}>
               Cancel
             </button>
           </div>
+          {splitDraft ? (
+            <p id="pf-split-pending" className="mt-2 text-sm text-ink-soft">
+              Use or cancel the split test above before you save the funnel.
+            </p>
+          ) : null}
         </fieldset>
       ) : null}
 

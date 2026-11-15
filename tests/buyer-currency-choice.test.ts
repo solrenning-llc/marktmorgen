@@ -42,3 +42,17 @@ test("the checkout passes the store's own choice", () => {
   assert.ok(checkout.includes("mode: buyerCurrencyModeOf(store),"));
   assert.ok(!checkout.includes("mode: DEFAULT_BUYER_CURRENCY_MODE,"));
 });
+
+/**
+ * 208 [SH5]'s condition, second half (Claude 7 on #4579): the creator can switch the buyer's currency off. "off"
+ * keeps every session in the store's currency, whatever else holds, and is kept like the two ways.
+ */
+test("the creator's switch: off keeps the store's currency, and is kept", async () => {
+  const { buyerCurrencyPlan } = await import("@/lib/buyer-currency");
+  const base = { live: true, fee: false, settles: true, manualPrices: true, taxRates: false };
+  assert.deepEqual(buyerCurrencyPlan({ ...base, mode: "off" }), { adaptive: false, manual: false, why: "creator-off" });
+  redis.clear();
+  await claimHandle(OWNER, "choicestore", "Choice", "");
+  assert.equal((await setBuyerCurrency(OWNER, "off")).ok, true);
+  assert.equal(buyerCurrencyModeOf((await storeForEmail(OWNER))!), "off");
+});

@@ -242,6 +242,46 @@ export async function essentialTakeBelow(scope: string, who: string, below: numb
 }
 
 /**
+ * KEYS[1] the thing's mark; KEYS[2] the counter; ARGV[1] the mark's life in seconds; ARGV[2] the ceiling; ARGV[3] the
+ * counter's window in seconds. A mark already there answers its kept verdict, and nothing is counted again; with no
+ * mark, the counter takes one (opening its window as withinLimit does) and the mark keeps the verdict: "in" within the
+ * ceiling, "out" past it. One script, so the mark and the count are both done or both undone.
+ */
+export const COUNT_ONCE = `-- marktmorgen:count-once:v1
+local held = redis.call("GET", KEYS[1])
+if held then return held end
+redis.call("SET", KEYS[2], "0", "EX", ARGV[3], "NX")
+local n = redis.call("INCR", KEYS[2])
+local verdict = "out"
+if n <= tonumber(ARGV[2]) then verdict = "in" end
+redis.call("SET", KEYS[1], verdict, "EX", ARGV[1])
+return verdict`;
+
+/**
+ * Counts one thing (a message, by its own mark) once against withinLimit's counter for `scope` and `who`, however many
+ * times it is tried (Codex L on #3926): the mark and the count are taken in one script, and the mark keeps the count's
+ * verdict, so a try whose answer was lost leaves both done or both undone, and the next try reads the same verdict
+ * instead of passing uncounted. "within" or "exceeded" for the thing, kept for the mark's life; "unknown" when Redis is
+ * not configured or not answering, or answers in another shape (the caller tries again, never sends uncounted). A mark
+ * written before this script (a claim's time) is read as counted within: it was taken by a try that went on to count.
+ */
+export async function limitOnce(mark: string, markSeconds: number, scope: string, who: string, limit: number, windowSeconds: number): Promise<LimitState> {
+  if (!isRedisConfigured()) return "unknown";
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["EVAL", COUNT_ONCE, 2, mark, await limitKey(scope, who), markSeconds, limit, windowSeconds]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  const value = slot && Object.hasOwn(slot, "value") ? slot.value : undefined;
+  if (value === "in") return "within";
+  if (value === "out") return "exceeded";
+  return typeof value === "string" && /^\d{13}\.\d{9}$/.test(value) ? "within" : "unknown";
+}
+
+/**
  * The count of a SET NX + INCR pipeline, only in its exact shape: two
  * replies, the SET's "OK" or null, and the INCR's own whole number of at
  * least 1; null for anything else. Read by the replies' own data fields,

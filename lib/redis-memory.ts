@@ -139,6 +139,17 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/request-guard.ts COUNT_ONCE: a mark's kept verdict, or one more on the counter and the verdict kept.
+        if (key.startsWith("-- marktmorgen:count-once:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, mark, counter, markSeconds, ceiling, window] = args;
+          const held = this.run(["GET", mark]);
+          if (typeof held === "string") return held;
+          this.run(["SET", counter, "0", "EX", window, "NX"]);
+          const n = this.run(["INCR", counter]);
+          const verdict = typeof n === "number" && n <= Number(ceiling) ? "in" : "out";
+          this.run(["SET", mark, verdict, "EX", markSeconds]);
+          return verdict;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;

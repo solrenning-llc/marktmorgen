@@ -55,8 +55,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NIMBUS_FROM, RESEND_BASE, headerText, oneAddress, sendEmail } from "@/lib/email";
 import { creatorDomain } from "@/lib/mail-from";
-import { claimMark } from "@/lib/claim-mark";
-import { withinLimit } from "@/lib/request-guard";
+import { limitOnce } from "@/lib/request-guard";
 import { HANDLE_PATTERN, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
@@ -312,11 +311,13 @@ export async function forwardInbound(id: string): Promise<"sent" | "skipped" | "
     if (!listed) return "retry";
     // Counted once a message (mail-queue hunt): a send Resend refused is a retry, and Resend makes the announcement
     // again; counted on each try, one message refused a few times spent the hour's allowance and the store's next
-    // messages that hour were skipped for good. The message's mark is kept the allowance's hour; a mark that cannot
-    // be read is a retry that spends nothing.
-    const counted = await claimMark(`nl:inbound:counted:${id}`, 3_600);
+    // messages that hour were skipped for good. The message's mark is kept the allowance's hour. The mark and the
+    // count are one script, and the mark keeps the count's verdict (Codex L on #3926): a try whose answer was lost left
+    // both done or both undone, so the next try reads the same verdict and never goes on uncounted. An answer that
+    // cannot be read is a retry.
+    const counted = await limitOnce(`nl:inbound:counted:${id}`, 3_600, "creator-inbound", handle, CREATOR_HOURLY, 3_600);
     if (counted === "unknown") return "retry";
-    if (counted === "ours" && !(await withinLimit("creator-inbound", handle, CREATOR_HOURLY, 3_600))) return "skipped";
+    if (counted === "exceeded") return "skipped";
     creator = { name: headerText(found.name, 60).replace(/["\\<>]/g, "") || handle, email, address: `${handle}@${creators}` };
     store = found;
   }

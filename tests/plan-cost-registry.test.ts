@@ -107,6 +107,13 @@ function scopesInCode(): Map<string, string[]> {
       if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), m[1] ?? "EssentialLimit"])); }
       else add(`<dynamic:${m[2].trim()}>`, file);
     }
+    // limitOnce (lib/request-guard.ts) counts a thing once on withinLimit's own counter: its scope is the third argument
+    // (its own definition, "function limitOnce(", is not a call).
+    for (const m of text.matchAll(/(?<!function )\blimitOnce\([^,]+,[^,]+,\s*([^,]+),/g)) {
+      const literals = [...m[1].matchAll(/"([^"]+)"/g)].map((l) => l[1]);
+      if (literals.length) for (const l of literals) { add(l, file); counters.set(l, new Set([...(counters.get(l) ?? []), "Limit"])); }
+      else add(`<dynamic:${m[1].trim()}>`, file);
+    }
     for (const m of text.matchAll(/\bcountUse\(([^,]+),/g)) add(`countUse:${m[1].trim().slice(0, 60)}`, file);
   }
   return found;

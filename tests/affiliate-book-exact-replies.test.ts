@@ -200,6 +200,12 @@ const STATE_SHAPES: [string, Alter][] = [
   ["the time answered 1e9", meta(["1e9", "1", "0"])],
   ["the time answered a number", meta([NOW - 60, "1", "0"])],
   ["the kept mark answered a number", meta([String(NOW - 60), 1, "0"])],
+  // #4741: a kept book whose marks are missing or unknown is unknown, never the "not kept" or "a day" a valid mark says.
+  ["the kept mark answered unknown text", meta([String(NOW - 60), "?", "0"])],
+  ["the kept mark was missing from an existing book", meta([String(NOW - 60), null, "0"])],
+  ["the retry mark answered unknown text", meta([String(NOW - 60), "1", "?"])],
+  ["the retry mark was missing from an existing book", meta([String(NOW - 60), "1", null])],
+  ["the time was missing while the book was present", meta([null, "1", "0"])],
   ["the part's length answered null", at(1, null)],
   ["the part's length answered the text 12", at(1, "12")],
   ["the part's length answered 1.5", at(1, 1.5)],

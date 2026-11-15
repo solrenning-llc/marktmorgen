@@ -143,4 +143,7 @@ Os bytes são os da listing sintética, de cerca de 530 bytes. O pior caso usa o
 - **O que causa:** com ids informados, como faz a busca, o trabalho cresce com o quadrado do catálogo. Vai de 10 mil para 100 mil produtos e o tempo da busca sobe 68 vezes, enquanto a leitura sem ids sobe 12 vezes.
 - **Peso hoje:** com o teto de 2.000, é cerca de 30 ms de CPU por busca, dentro do que o pior caso já conta.
 - **Peso acima do teto:** passa a ser o maior custo de CPU da busca.
-- **Conserto:** um `Set` em vez de `includes`, sem mudar limite nenhum. Entra na unidade 5 (construção do que não muda limite), com um teste que fixa que a busca com 100 mil produtos fica perto do tempo da leitura sem ids.
+- **Conserto, feito (primeira peça da unidade 5, sem mudar limite nenhum):** `wanted` agora usa um `Set`.
+  - O teste ganhou um check RED, que falhou antes do conserto: com 100 mil produtos, a busca não pode passar de 5 vezes a leitura sem ids. Por ser uma razão entre duas medidas da mesma execução, não depende da velocidade da máquina.
+  - Antes: 16.856 ms contra 576 ms. Depois: 745 ms contra 598 ms. Com 2 mil produtos, 36 ms; com 10 mil, 120 ms.
+  - Os 188 arquivos de teste que leem listings passam.

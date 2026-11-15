@@ -177,7 +177,8 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
 /**
  * Writes a confirmed waitlist entry back only while its confirmation link and the entry itself still exist, in one
  * step (#4268): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2] the entry. Answers 1 written, 0
- * not. Billed as one EVAL; lib/redis-memory.ts runs the same check in one step.
+ * not. Billed as one EVAL and the calls inside it, at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the same
+ * check in one step.
  */
 const WAIT_CONFIRM = [
   "-- marktmorgen:waitlist-confirm:v1",
@@ -186,6 +187,17 @@ const WAIT_CONFIRM = [
   "return 1",
 ].join("\n");
 
+/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HEXISTS and HSET (tests/waitlist-confirm-cost.test.ts). */
+export const WAIT_CONFIRM_CALLS = 3;
+
+/**
+ * Public requests of the store's a press takes before it writes anything (#4404): the page the button is on pays one,
+ * and a press that writes the entry back (WAIT_CONFIRM) or signs the address up to the list does more than that one
+ * pays for (the link and the store read again, the script and its calls, the sign-up's first round), so it takes one
+ * more first, or writes nothing. Held in tests/waitlist-confirm-cost.test.ts and named in tests/plan-cost-registry.ts.
+ */
+export const WAIT_CONFIRM_UNITS = 1;
+
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
 export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
   const grant = await readWaitToken(token);
@@ -193,6 +205,9 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
   const entry = parseEntry(raw);
   if (!entry) return { ok: false };
+  // Paid before it spends: a press that writes takes WAIT_CONFIRM_UNITS of the store's public requests, or is refused.
+  const joins = Boolean(entry.c && store.listId);
+  if ((!entry.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false };
   // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
   // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
   // the list again and lifts the erasure print.
@@ -200,7 +215,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
     if (written !== 1) return { ok: false };
   }
-  if (entry.c && store.listId) {
+  if (joins && store.listId) {
     const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
       console.error("could not add a waitlist address to a list", error);
       // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.

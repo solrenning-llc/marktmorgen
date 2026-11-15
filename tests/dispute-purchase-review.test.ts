@@ -5,9 +5,9 @@ import { readDisputePurchaseReview } from "@/lib/dispute-purchase-review";
 import { state, reset } from "./dispute-review-world";
 
 const store = { handle: "sample", stripeAccountId: "acct_fixture", tier: "creator", statsId: "statsfixture" } as unknown as Store;
-function fixture() {
+function fixture(sessionId = "cs_fixture") {
   const charge = { object: "charge", id: "ch_fixture", paid: true, captured: true, amount: 1000, amount_captured: 1000, created: 200, currency: "usd", payment_intent: "pi_fixture", livemode: false };
-  const session = { object: "checkout.session", id: "cs_fixture", mode: "payment", status: "complete", payment_status: "paid", amount_total: 1000, created: 100, currency: "usd", livemode: false,
+  const session = { object: "checkout.session", id: sessionId, mode: "payment", status: "complete", payment_status: "paid", amount_total: 1000, created: 100, currency: "usd", livemode: false,
     metadata: { store: "old-handle", product: "a".repeat(32), title: "Provider-recorded synthetic title" },
     customer_details: { email: "buyer@example.test" },
     payment_intent: { object: "payment_intent", id: "pi_fixture", status: "succeeded", livemode: false, latest_charge: charge } };
@@ -72,3 +72,13 @@ test("unknown deadline and history remain unknown without inventing submission p
   assert.ok(result.ok);
   assert.equal(result.responseDeadline, null); assert.equal(result.pastDue, null); assert.equal(result.submissionCount, null); assert.equal(result.submitted, false);
 });
+
+// #4713: Stripe issues Checkout Session IDs as cs_test_... and cs_live_...; the review reads them like any other.
+for (const id of ["cs_fixture", "cs_test_SyntheticFixture123", "cs_live_SyntheticFixture123"]) {
+  test("dispute purchase review with checkout session id " + id, async () => {
+    reset(); const f = fixture(id); state.replies.push(f.dispute, f.listed);
+    const result = await readDisputePurchaseReview(store, "du_fixture");
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.binding.purchase, id);
+  });
+}

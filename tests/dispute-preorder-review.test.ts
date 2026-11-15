@@ -44,3 +44,12 @@ test("grant and refund are separate recorded states, with no invented grant date
  reset();state.reply=[1,JSON.stringify({...row,given:undefined,revoked:150}),60_000];
  assert.deepEqual(await readRetainedPreorderReview(store,binding,at),{status:"available",checkoutCreatedAt:100,grantedAt:null,revokedAt:150,lookupStartedAt:200,retainedUntil:260});
 });
+
+// #4713: the retained pre-order read accepts the same Checkout Session IDs as the dispute binding.
+for (const id of ["cs_fixture", "cs_test_SyntheticFixture123", "cs_live_SyntheticFixture123"]) {
+  test("retained pre-order read with checkout session id " + id, async () => {
+    const bound = { ...binding, purchase: id } as StripePurchaseBinding;
+    reset(); state.reply = [1, JSON.stringify({ to: bound.buyerEmail, pi: bound.paymentIntent, at: 100, given: 120 }), 60_000];
+    assert.equal((await readRetainedPreorderReview(store, bound, at)).status, "available");
+  });
+}

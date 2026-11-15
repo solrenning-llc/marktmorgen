@@ -18,7 +18,7 @@ import {
   say,
   unsay,
 } from "@/lib/community-chat";
-import { advance } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const ID = "cm1";
@@ -30,6 +30,8 @@ const quiet = parseChatSetting({ on: true, creatorOnly: true });
 const slow = parseChatSetting({ on: true, slow: 60 });
 
 async function main() {
+  // A room message is written only while its author's record is there (#4670): Ana and Bia are members.
+  await redis.pipeline([["HSET", `nl:cm:${ID}:m`, ANA, "{}", BIA, "{}"]]);
   part("What the settings parse to");
   is("a community from before has no room", parseChatSetting(undefined).on, false);
   is("links are allowed unless said otherwise", parseChatSetting({ on: true }).links, true);

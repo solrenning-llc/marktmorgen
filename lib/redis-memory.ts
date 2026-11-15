@@ -346,6 +346,14 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/community-chat.ts CHAT_SAY_IF_MEMBER: a room message written only while its author's record is there.
+        if (key.startsWith("-- marktmorgen:chat-say-if-member:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, room, members, who, score, message, kept, any] = args;
+          if (any !== "any" && this.run(["HEXISTS", members, who]) === 0) return [0];
+          const added = this.run(["ZADD", room, score, message]);
+          const trimmed = this.run(["ZREMRANGEBYRANK", room, 0, -(Number(kept) + 1)]);
+          return [added, trimmed];
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

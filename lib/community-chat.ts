@@ -47,6 +47,21 @@ import { stringList } from "@/lib/redis-reply";
 
 const base = (id: string) => `nl:cm:${id}`;
 const roomKey = (id: string) => `${base(id)}:ch`;
+/** The community's member records (lib/community.ts, membersKey), read here only to admit a message. */
+const membersKey = (id: string) => `${base(id)}:m`;
+
+/**
+ * A room message written only while its author is still in (#4670): KEYS[1] the room, KEYS[2] the community's member
+ * records; ARGV[1] the author's field there, ARGV[2] the message's number, ARGV[3] the message, ARGV[4] how many the
+ * room keeps, ARGV[5] "any" for the creator, who has no member record. {1, trimmed} when written and the room trimmed
+ * to its last ARGV[4]; {0} when the author's record is gone: an erasure deletes it before their messages
+ * (lib/community-erasure.ts), so a message it overtook never lands in the room.
+ */
+export const CHAT_SAY_IF_MEMBER = `-- marktmorgen:chat-say-if-member:v1
+if ARGV[5] ~= "any" and redis.call("HEXISTS", KEYS[2], ARGV[1]) == 0 then return {0} end
+local added = redis.call("ZADD", KEYS[1], ARGV[2], ARGV[3])
+local trimmed = redis.call("ZREMRANGEBYRANK", KEYS[1], 0, -(tonumber(ARGV[4]) + 1))
+return {added, trimmed}`;
 const countKey = (id: string) => `${base(id)}:chn`;
 const spokeKey = (id: string, who: string) => `${base(id)}:chs:${who}`;
 const CHAT_AUTHOR = /^(?:creator|[0-9a-f]{32})$/;
@@ -189,7 +204,7 @@ function copyArray(raw: unknown): unknown[] {
 
 export type SaidResult =
   | { ok: true; message: ChatMessage }
-  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown"; wait?: number };
+  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown" | "out"; wait?: number };
 
 function singleReply(reply: unknown): unknown {
   return Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
@@ -234,11 +249,12 @@ export async function say(
     if (typeof n !== "number" || !Number.isSafeInteger(n) || n <= 0) return { ok: false, reason: "unknown" };
     const said = cleanText(name, 80);
     const message: ChatMessage = { i: n, a: who, text, at: now(), ...(said ? { n: said } : {}) };
-    const written = await redisPipeline([
-      ["ZADD", roomKey(id), message.i, JSON.stringify(message)],
-      // The room keeps its last MAX_CHAT_KEPT and forgets the rest.
-      ["ZREMRANGEBYRANK", roomKey(id), 0, -(MAX_CHAT_KEPT + 1)],
-    ]);
+    // Only while the author is still in, in one step (#4670); the room keeps its last MAX_CHAT_KEPT and forgets the rest.
+    const reply = repliesFor(await redisPipeline([
+      ["EVAL", CHAT_SAY_IF_MEMBER, 2, roomKey(id), membersKey(id), who, message.i, JSON.stringify(message), MAX_CHAT_KEPT, owner ? "any" : "member"],
+    ]), 1)?.[0];
+    if (Array.isArray(reply) && reply.length === 1 && reply[0] === 0) return { ok: false, reason: "out" };
+    const written = reply;
     if (!Array.isArray(written) || written.length !== 2 || written[0] !== 1
       || typeof written[1] !== "number" || !Number.isSafeInteger(written[1]) || written[1] < 0) return { ok: false, reason: "unknown" };
     return { ok: true, message };

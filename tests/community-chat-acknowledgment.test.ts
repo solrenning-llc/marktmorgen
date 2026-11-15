@@ -12,13 +12,16 @@ async function main() {
   const id="a".repeat(32), who="b".repeat(32), open=parseChatSetting({on:true}), slow=parseChatSetting({on:true,slow:60});
   const original=redis.pipeline.bind(redis);
   let operation="", answer:unknown[]=[], applied=false, throws=false, calls:string[]=[];
+  // The room's write is one EVAL since #4670 (ZADD and its trim, while the author is still in): it is still the "ZADD"
+  // step here, and the two replies the test gives are that EVAL's one reply, a list of them (none stays none).
+  const nameOf=(command:(string|number)[]|undefined)=>command?.[0]==="EVAL"&&String(command[1]).startsWith("-- marktmorgen:chat-say-if-member:")?"ZADD":String(command?.[0]);
   redis.pipeline=async(commands)=>{
-    calls.push(String(commands[0]?.[0]));
-    if(commands[0]?.[0]===operation){if(applied)await original(commands);if(throws)throw Error("synthetic lost reply");return answer as never;}
+    calls.push(nameOf(commands[0]));
+    if(nameOf(commands[0])===operation){if(applied)await original(commands);if(throws)throw Error("synthetic lost reply");return (operation==="ZADD"&&commands[0]?.[0]==="EVAL"?(answer.length?[answer]:[]):answer) as never;}
     return original(commands);
   };
   async function attempt(op:string,reply:unknown[],apply=false,cooldown=false,fail=false){
-    redis.clear();operation=op;answer=reply;applied=apply;throws=fail;calls=[];
+    redis.clear();await original([["HSET",`nl:cm:${id}:m`,who,"{}"]]);operation=op;answer=reply;applied=apply;throws=fail;calls=[];
     try{return await say(id,cooldown?slow:open,who,false,"A synthetic message");}catch{return {threw:true};}
   }
   try{
@@ -72,7 +75,7 @@ async function main() {
   await saveConfig(store.community!.id,{...freshConfig(store.name),chat:open});
   const cookie=`${SESSION_COOKIE}=${await openSession(owner)}`;
   let inserted=0;
-  redis.pipeline=async(commands)=>{const reply=await original(commands);if(commands[0]?.[0]==="ZADD"&&String(commands[0][1]).endsWith(":ch")){inserted++;return [] as never;}return reply;};
+  redis.pipeline=async(commands)=>{const reply=await original(commands);if((commands[0]?.[0]==="ZADD"&&String(commands[0][1]).endsWith(":ch"))||(commands[0]?.[0]==="EVAL"&&String(commands[0][1]).startsWith("-- marktmorgen:chat-say-if-member:")&&String(commands[0][3]).endsWith(":ch"))){inserted++;return [] as never;}return reply;};
   try{
     const response=await POST(new NextRequest("https://marktmorgen.com/api/store/community/chat",{method:"POST",headers:{"content-type":"application/json",cookie},body:JSON.stringify({handle:store.handle,action:"say",text:"Route message"})}));
     const body=await response.json();

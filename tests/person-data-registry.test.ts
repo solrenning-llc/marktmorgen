@@ -29,6 +29,9 @@ part("Every file that keeps something per person is in the registry");
 const listed = new Set(PERSON_DATA.map((d) => d.file));
 const found = personFiles(root);
 is("the scan finds the files it should", ["lib/contacts.ts", "lib/learn.ts", "lib/community.ts", "lib/crm.ts", "lib/flows.ts"].every((f) => found.some((x) => x.file === f)), true);
+// A file written with a person's address in its content (a stamped copy, lib/pdf-stamp.ts) is found too, so a copy kept
+// in the file store with somebody's address on it cannot go unlisted again (Claude 7 on main 4865799f53).
+is("and a file that writes a stored file with a person's address in it", found.some((x) => x.file === "lib/pdf-stamp.ts"), true);
 is(
   "each is in lib/person-data.ts (add a line saying what deleting a person does to it)",
   found.filter((f) => !listed.has(f.file)).map((f) => `${f.file}${f.keys.length ? ` (keys ${f.keys.join(", ")})` : ""}`),

@@ -233,3 +233,16 @@ test("Whop comparison does not claim a directory its cited address no longer sho
  assert.ok(!text.includes("Whop has a public discovery directory") && !text.includes("A public Discover directory with business search"));
  assert.ok(text.includes("could not be confirmed"));
 });
+
+test("Beacons comparison says only what Beacons' help center states, its pricing page being unreadable", () => {
+ // #4571 batch 6: read November 15, 2026, beacons.ai/pricing returns Cloudflare's block page. Beacons' help center
+ // ("Beacons Pricing Plans", "Beacons Pro Page") lists order bumps, memberships and courses with video hosting on the
+ // $30 Creator Plus plan, and none of its 174 articles mentions a 12,000-brand affiliate network.
+ const page=findPage("proof","beacons");assert.ok(page);
+ const text=JSON.stringify(page);
+ assert.ok(!text.includes("the free one included") && !text.includes("12,000") && !text.includes("but only one"));
+ assert.ok(!/read on September \d+, 2026/.test(text));
+ const table=page.blocks.find(b=>b.kind==="table");assert.ok(table && table.kind==="table");
+ assert.ok(table.rows.find(r=>r[0]==="Order bumps and upsells")![1].includes("$30"));
+ assert.ok(table.note?.includes("was not read"));
+});

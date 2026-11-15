@@ -88,6 +88,41 @@ async function main(): Promise<void> {
       }
     }
   }
+  // Issue #4780's sibling (3rjdf's review of this branch): the other reads of the same copy, each damaged on its own.
+  // The copy is read from the whole community here (the oldest post is before the trace); the trace's own read is
+  // reached by moving that post back after the trace began.
+  const readWith = async (name: string, reply: unknown): Promise<"threw" | string> => {
+    let hit = false;
+    redis.pipeline = (async (batch: Batch) => {
+      if (!hit && batch[0]?.[0] === name) {
+        hit = true;
+        return reply as unknown[];
+      }
+      return real(batch);
+    }) as typeof redis.pipeline;
+    try {
+      const traces = await memberTraces(id, ada);
+      return JSON.stringify([traces.posts.length, traces.likedPosts, traces.reported]);
+    } catch {
+      return "threw";
+    } finally {
+      redis.pipeline = real;
+    }
+  };
+  const ODD: [string, unknown][] = [["null", [null]], ["a number", [7]], ["no reply", []], ["a list with a number", [["x", 7]]]];
+  part("The feed's oldest post (ZRANGEBYSCORE), which decides how the copy is read");
+  for (const [what, reply] of ODD) is(`answered ${what}: the copy fails, never "no posts"`, await readWith("ZRANGEBYSCORE", reply), "threw");
+  part("The whole community's posts (ZREVRANGE)");
+  for (const [what, reply] of ODD) is(`answered ${what}: the copy fails, never "no posts"`, await readWith("ZREVRANGE", reply), "threw");
+  part("A post's record read for the copy (GET)");
+  is("a post answered as a number: the copy fails", await readWith("GET", [7]), "threw");
+  is("the post replies cut short: the copy fails", await readWith("GET", []), "threw");
+  // Back after the trace began: the copy reads her trace.
+  const first = JSON.parse(String(redis.run(["GET", `nl:cm:${id}:p:${mine.post.id}`])));
+  redis.run(["SET", `nl:cm:${id}:p:${mine.post.id}`, JSON.stringify({ ...first, at: TRACED_SINCE + 1 })]);
+  part("Her trace (SMEMBERS)");
+  is("(control) read from her trace, her post is there", await readWith("NONE", null), JSON.stringify([1, [theirs.post.id], [`post ${creators.post.id}`]]));
+  for (const [what, reply] of ODD) is(`answered ${what}: the copy fails, never "nothing she did"`, await readWith("SMEMBERS", reply), "threw");
   Date.now = realNow;
   done();
 }

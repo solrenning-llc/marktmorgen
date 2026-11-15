@@ -148,14 +148,18 @@ async function main(): Promise<void> {
   refundReply = undefined;
 
   part("Unknown or stale cached evidence is not public proof");
-  await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW+3600,country:"DE"}])]]);
+  await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify({a:on.stripeAccountId,s:[{product:bread.product.id,title:"Sourdough course",at:NOW+3600,country:"DE"}]})]]);
   is("a future cached purchase is hidden",await recentSales(on),[]);
   await setProductHidden(OWNER,bread.product.id,true);
   const current=(await storeForEmail(OWNER))!;
-  await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW-3600,country:"DE"}])]]);
+  await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify({a:on.stripeAccountId,s:[{product:bread.product.id,title:"Sourdough course",at:NOW-3600,country:"DE"}]})]]);
   const beforeHidden=asked;
   is("a cached hidden product is excluded from the already-loaded catalog",await recentSales({...current,stripeAccountId:on.stripeAccountId,recentSales:true}),[]);
   is("hiding it requires no additional provider lookup",asked,beforeHidden);
+
+  await redis.pipeline([["SET",`nl:recent:feed:${base.statsId}`,JSON.stringify([{product:bread.product.id,title:"Sourdough course",at:NOW-3600,country:"DE"}])]]);
+  await recentSales({...current,stripeAccountId:on.stripeAccountId,recentSales:true});
+  is("(#4709) a copy kept before copies named their account is worked out again: the refunds are read afresh",asked>beforeHidden,true);
 
   part("On the pages");
   const productPage = readFileSync("app/[handle]/p/[product]/page.tsx", "utf8");

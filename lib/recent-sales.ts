@@ -41,8 +41,14 @@ const FEED_SECONDS = 300;
 const listKey = (statsId: string) => `nl:recent:${statsId}`;
 const feedKey = (statsId: string) => `nl:recent:feed:${statsId}`;
 
-/** One purchase as it is kept: the product, when, the billing country and the payment. */
-type Kept = { p: string; at: number; c: string; pi: string };
+/**
+ * One purchase as it is kept: the product, when, the billing country, the payment and the Stripe account it was made
+ * on. A purchase is shown only while that account is the store's connected one (#4709): its refunds are read there.
+ */
+type Kept = { p: string; at: number; c: string; pi: string; a: string };
+
+/** What the pages' cached copy holds: the account its purchases were checked on, and the cards (#4709). */
+type Feed = { a: string; s: RecentSale[] };
 
 
 /** A checkout as Stripe returns it, with only what is read here. */
@@ -82,14 +88,15 @@ export function showable(record: RecentRecord, now = Date.now()): boolean {
 }
 
 /** Writes a settled checkout down, when it may be shown. Called once a checkout (lib/sale-events.ts). */
-export async function rememberSale(store: Pick<Store, "statsId" | "recentSales">, record: RecentRecord): Promise<void> {
-  if (!store.recentSales || !store.statsId || !isRedisConfigured() || !showable(record)) return;
+export async function rememberSale(store: Pick<Store, "statsId" | "recentSales" | "stripeAccountId">, record: RecentRecord): Promise<void> {
+  if (!store.recentSales || !store.statsId || !store.stripeAccountId || !isRedisConfigured() || !showable(record)) return;
   const country = record.customer_details?.address?.country;
   const kept: Kept = {
     p: (record.metadata ?? {}).product as string,
     at: record.created as number,
     c: typeof country === "string" && /^[A-Z]{2}$/.test(country) ? country : "",
     pi: intentOf(record),
+    a: store.stripeAccountId,
   };
   await redisPipeline([
     ["LPUSH", listKey(store.statsId), JSON.stringify(kept)],
@@ -106,7 +113,8 @@ function parseKept(raw: unknown): Kept | null {
     const v = JSON.parse(raw) as Partial<Kept>;
     if (typeof v.p !== "string" || !v.p || typeof v.pi !== "string" || !/^pi_[A-Za-z0-9]{6,}$/.test(v.pi) ||
         typeof v.at !== "number" || !Number.isSafeInteger(v.at) || v.at <= 0) return null;
-    return { p: v.p, at: v.at, c: typeof v.c === "string" ? v.c : "", pi: v.pi };
+    // A purchase kept before the account was written down reads with none, and is never shown as any account's.
+    return { p: v.p, at: v.at, c: typeof v.c === "string" ? v.c : "", pi: v.pi, a: typeof v.a === "string" ? v.a : "" };
   } catch {
     return null;
   }
@@ -150,8 +158,10 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
     if (!Array.isArray(reply) || reply.length !== 2) return [];
     const [cached, list] = reply;
     if (cached !== null && typeof cached !== "string") return [];
-    if (typeof cached === "string") {
-      const read = JSON.parse(cached) as RecentSale[];
+    // A copy checked on another account, or kept before copies said which (an array), is worked out again (#4709).
+    const copy = typeof cached === "string" ? (JSON.parse(cached) as Partial<Feed> | null) : null;
+    if (copy && typeof copy === "object" && !Array.isArray(copy) && copy.a === store.stripeAccountId) {
+      const read = copy.s;
       return Array.isArray(read) ? read.filter((s) => s && typeof s.product === "string" && typeof s.title === "string" && typeof s.country === "string" && Number.isSafeInteger(s.at) && s.at > 0 && s.at * 1000 >= now - RECENT_DAYS * 86_400_000 && s.at * 1000 <= now && store.catalog.items.some(item => item.id === s.product && (item.kind & KIND.hidden) === 0)).slice(0, SHOWN) : [];
     }
     const since = Math.floor(now / 1000) - RECENT_DAYS * 86_400;
@@ -159,7 +169,11 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
     if (!Array.isArray(list) || list.length > KEPT) return [];
     const read = list.map(parseKept);
     if (read.some(k => k === null)) return [];
-    const kept = read.filter((k): k is Kept => k !== null && k.at >= since && k.at <= Math.floor(now / 1000));
+    // Only purchases made on the account connected now (#4709), newest first by their own time (#4743): the order
+    // they were written in is not their order, since a sweep can write several at once, newest first.
+    const kept = read
+      .filter((k): k is Kept => k !== null && k.a === store.stripeAccountId && k.at >= since && k.at <= Math.floor(now / 1000))
+      .sort((x, y) => y.at - x.at);
     let shown: RecentSale[] = [];
     if (kept.length) {
       const refunded = await refundedSince(store.stripeAccountId, Math.min(...kept.map((k) => k.at)));
@@ -174,7 +188,8 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
         })
         .slice(0, SHOWN);
     }
-    await redisPipeline([["SET", feedKey(statsId), JSON.stringify(shown), "EX", FEED_SECONDS]]);
+    const feed: Feed = { a: store.stripeAccountId, s: shown };
+    await redisPipeline([["SET", feedKey(statsId), JSON.stringify(feed), "EX", FEED_SECONDS]]);
     return shown;
   } catch (error) {
     console.error("reading recent purchases failed", error);

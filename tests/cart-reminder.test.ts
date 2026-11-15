@@ -23,6 +23,7 @@ import { cartAskIds, cartAskKey } from "@/lib/checkout-ask-cart";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { CART_NOTE_COMMANDS, COMMAND, PER_EMAIL, TAKE_COMMANDS, UNIT_COST } from "./plan-cost-registry";
 
 const OWNER = "owner@example.com";
 const checkouts: URLSearchParams[] = [];
@@ -97,7 +98,18 @@ async function main(): Promise<void> {
     ...over,
   });
   is("not without the yes", await remindAbandoned(await load(), left("cs_test_noyes000000001", { consent: { promotions: "opt_out" } }) as never), "skip");
+  // Review of #3929 (MÉDIO, cost): the carts note a cart reminder writes before its mark is priced in the store email
+  // it is (tests/plan-cost-registry.ts, UNIT_COST.email), never left unpriced (MR: an unknown cost is never zero).
+  const counting = redis.pipeline.bind(redis);
+  let noteCommands = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    noteCommands += commands.filter((c) => String(c[1] ?? "").startsWith("nl:recover:carts:")).length;
+    return counting(commands);
+  }) as typeof redis.pipeline;
   is("with it: one email", await remindAbandoned(await load(), left("cs_test_cartleft000001") as never), "sent");
+  redis.pipeline = counting;
+  is("the carts note's commands are the ones priced", noteCommands, CART_NOTE_COMMANDS);
+  is("and the store email's unit pays them", UNIT_COST.email >= PER_EMAIL + (TAKE_COMMANDS + CART_NOTE_COMMANDS) * COMMAND, true);
   const mail = emails.at(-1)!;
   is("to the buyer, about their cart", [mail.to, mail.subject], ["ana@example.com", "Your cart at Harbor Kitchen"]);
   is("naming everything in it, at today's prices", [mail.text.includes("You put Pantry Guide and Grocery Lists in your cart at Harbor Kitchen"), mail.text.includes("- Pantry Guide: $12"), mail.text.includes("- Grocery Lists: $5")], [true, true, true]);

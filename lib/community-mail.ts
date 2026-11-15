@@ -31,6 +31,7 @@ import { orderWrite } from "@/lib/order-data";
 import { type BatchMessage, sendBatch } from "@/lib/email";
 import { CHECKED_BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { SITE_URL } from "@/lib/site-url";
+import { leadsKey } from "@/lib/contact-rules";
 import type { Store } from "@/lib/store";
 import {
   type CommunityConfig,
@@ -315,6 +316,36 @@ async function recipientBatch(id: string, start: number, count: number): Promise
   } catch { return null; }
 }
 
+const GONE = new Set(["bounced", "complained", "refused"]);
+
+/**
+ * The members whose address the store's list did not take off for a hard bounce, a spam complaint or a refusal (`gone`
+ * with `unsub`, lib/contacts.ts stopWriting): such an address never gets an announcement either, so a member who
+ * marked one as spam is not written to again and a dead address stops being tried (tests/community-mail-list-gone.test.ts).
+ * A plain unsubscribe from the list is not read here: the community's own stop link decides its emails. A member not
+ * on the list is kept. A row in no known shape is unknown (rule 24): it throws, and the batch waits.
+ */
+async function keptOnList(listId: string, members: Member[]): Promise<Member[]> {
+  if (!members.length) return members;
+  const rows = repliesFor(await redisPipeline([["HMGET", leadsKey(listId), ...members.map((m) => m.e)]]), 1)?.[0];
+  if (!Array.isArray(rows) || rows.length !== members.length) throw new UnknownReplyError("the store's list rows of an announcement batch");
+  return members.filter((_, i) => {
+    if (!Object.hasOwn(rows, i)) throw new UnknownReplyError("a store's list row");
+    const raw: unknown = rows[i];
+    if (raw === null) return true;
+    if (typeof raw !== "string") throw new UnknownReplyError("a store's list row");
+    let row: unknown;
+    try {
+      row = JSON.parse(raw);
+    } catch {
+      throw new UnknownReplyError("a store's list row");
+    }
+    if (!row || typeof row !== "object" || Array.isArray(row)) throw new UnknownReplyError("a store's list row");
+    const { unsub, gone } = row as { unsub?: unknown; gone?: unknown };
+    return !(unsub === true && typeof gone === "string" && GONE.has(gone));
+  });
+}
+
 /**
  * Moves one send on for as long as `deadline` allows. Safe to call from two
  * places at once: only one holds the send at a time.
@@ -379,7 +410,9 @@ export async function advanceAnnouncement(
       // member whose ticket can never be asked about is passed over, counted, never sent to (sortBatch).
       const read: SortedBatch | null = await (async (): Promise<SortedBatch> => {
         const found = await readMembersExact(community, keys);
-        const candidates = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
+        const asking = keys.map((k) => found.get(k)).filter((m): m is Member => Boolean(m && m.mail && !m.removed));
+        // Never an address the store's list took off for a hard bounce, a spam complaint or a refusal (keptOnList).
+        const candidates = store.listId ? await keptOnList(store.listId, asking) : asking;
         return sortBatch(store, community, candidates, (m) => holdsTicket(store, config, m.e, { strict: true }), job.tries);
       })().catch((error: unknown) => {
         console.error("an announcement could not read who is in a batch", error);
@@ -446,7 +479,42 @@ export async function advanceAnnouncement(
   }
 }
 
-/** Moves every waiting send on. For the mail job. */
+/** The runs in a row an announcement may fail with an error before it is stopped as failed (advanceAnnouncements). */
+export const ANNOUNCEMENT_ERRORS_MOST = 5;
+
+/**
+ * An announcement whose run threw: logged, and counted on its own record under its lock, so it is tried again by the
+ * next run and, after ANNOUNCEMENT_ERRORS_MOST in a row (a sent batch puts the count back to 0), stopped as failed and
+ * taken out of line, saying so to the creator. A record that cannot be read or locked is left as it is: the next run
+ * tries again.
+ */
+async function countError(id: string, error: unknown): Promise<void> {
+  console.error("a community announcement failed; the others go on", id, error);
+  const lock = claimValue();
+  if ((await claimMark(lockKey(id), 90, lock)) !== "ours") return;
+  try {
+    const job = await readJob(id);
+    if (!job || job.status === "sent" || job.status === "failed") return;
+    const failures = job.failures + 1;
+    const stopped = failures >= ANNOUNCEMENT_ERRORS_MOST;
+    await save({
+      ...job,
+      failures,
+      status: stopped ? "failed" : "waiting",
+      note: stopped
+        ? `This send stopped after the same error ${ANNOUNCEMENT_ERRORS_MOST} times in a row. Nothing more was sent.`
+        : "Paused for a moment: something went wrong on our side. It is tried again by itself.",
+    });
+    if (stopped) await redisPipeline([["SREM", QUEUE, id]]);
+  } finally {
+    await releaseMark(lockKey(id), lock);
+  }
+}
+
+/**
+ * Moves every waiting send on. For the mail job. Each announcement on its own: one that throws is counted against
+ * itself (countError) and never keeps the ones after it from going out (tests/community-mail-isolated.test.ts).
+ */
 export async function advanceAnnouncements(load: (handle: string) => Promise<Store | null>, deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const [raw] = await redisPipeline([["SMEMBERS", QUEUE]]);
@@ -454,7 +522,11 @@ export async function advanceAnnouncements(load: (handle: string) => Promise<Sto
   let touched = 0;
   for (const id of ids) {
     if (Date.now() > deadline) break;
-    if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    try {
+      if (await advanceAnnouncement(id, load, deadline)) touched += 1;
+    } catch (error) {
+      await countError(id, error).catch((failure: unknown) => console.error("counting an announcement's error failed", id, failure));
+    }
   }
   return touched;
 }

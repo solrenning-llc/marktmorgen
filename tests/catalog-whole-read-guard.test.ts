@@ -49,6 +49,7 @@ const KNOWN: Record<string, { reads: number; why: string }> = {
   "app/studio/calendar/page.tsx": { reads: 1, why: "the studio calendar reads every call" },
   "app/studio/bundles/page.tsx": { reads: 1, why: "the bundles page lists every bundle" },
   "app/studio/reviews/page.tsx": { reads: 1, why: "the reviews page names the products of the reviews shown (the ids filtered to those reviews)" },
+  "app/api/store/automation-draft/route.ts": { reads: 1, why: "a workflow draft reads the store's visible products, bounded: productIds(store) filtered, then .slice(0, MAX_DRAFT_PRODUCTS); listed because the line pattern stops at the filter's \"))\" and does not see the .slice (added when origin/main was merged in, 15/11/2026)" },
 };
 
 const READERS = "(?:readListings|readListingsMeasured|readListingsExact|readListingsExactMeasured|readProducts)";

@@ -33,9 +33,15 @@ export function endingMark(statsId: string, subscription: string, endsAt: number
   return `nl:ending:${statsId}:${subscription}:${endsAt}`;
 }
 
-export type EndingSetting = { on: boolean };
+/**
+ * The creator's switch, with the postal address every email to a list must carry (as the come-back email's,
+ * lib/member-health-rules.ts parseNudge): on only when it says true and an address is given; off by default.
+ */
+export type EndingSetting = { on: boolean; address: string };
+export const NO_ENDING: EndingSetting = { on: false, address: "" };
 
-/** The creator's switch: on only when it says true; off by default. */
 export function parseEnding(raw: unknown): EndingSetting {
-  return { on: raw !== null && typeof raw === "object" && (raw as Record<string, unknown>).on === true };
+  const value = raw !== null && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const address = typeof value.address === "string" ? value.address.replace(/\s+/g, " ").trim().slice(0, 300) : "";
+  return { on: value.on === true && address.length > 0, address };
 }

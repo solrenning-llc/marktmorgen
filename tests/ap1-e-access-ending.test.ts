@@ -40,8 +40,8 @@ is("the mark names the membership and its end", endingMark("st1", "sub_A", 1_763
 is("a moved end has a mark of its own", endingMark("st1", "sub_A", 1_763_300_000) !== endingMark("st1", "sub_A", 1_765_900_000), true);
 
 part("The creator's switch");
-is("off by default", parseEnding(undefined), { on: false });
-is("on only by true", [parseEnding({ on: "yes" }).on, parseEnding({ on: 1 }).on, parseEnding({ on: true }).on], [false, false, true]);
+is("off by default", parseEnding(undefined), { on: false, address: "" });
+is("on only by true, with a postal address", [parseEnding({ on: "yes", address: "1 Main St" }).on, parseEnding({ on: true }).on, parseEnding({ on: true, address: "  1  Main St " })], [false, false, { on: true, address: "1 Main St" }]);
 
 part("The words");
 for (const code of LANGUAGE_CODES) {

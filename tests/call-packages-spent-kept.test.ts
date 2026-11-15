@@ -14,7 +14,8 @@
  */
 import { addProduct, claimHandle, ensureStatsId, setCallPackage, setProductCall, setStripeAccount, setSubscription, storeForEmail, type Listing, type Store } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { holdSession, packageKeys, packageSessionUsed, packageState, prepareSession, readBought, recordPackage } from "@/lib/call-packages";
+import { holdSession, packageKeys, packageReadCommands, packageSessionUsed, packageState, prepareSession, readBought, recordPackage } from "@/lib/call-packages";
+import { readFileSync } from "node:fs";
 import { CONFIRMED_SECONDS } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
 import { store as redis } from "./redis-stub";
@@ -223,6 +224,32 @@ async function main(): Promise<void> {
     is("its spent sessions are kept in a record of their own", spentKeys.length, 1);
     is("which never expires before the package", spentKeys.every((key) => Number(redis.run(["TTL", key])) >= record - 5), true);
     is("and is small: one short member a session", spentKeys.every((key) => (redis.run(["SMEMBERS", key]) as string[]).every((m) => m.length <= 16)), true);
+  }
+
+  // Claude 7 on #3487 (MÉDIO, cost): spent() reads the package's record (SMEMBERS) and may write a seen session down
+  // (SADD, EXPIRE, EXISTS, DEL), so a card costs more than one EXISTS a hold; the orders page meters what it sends.
+  part("Reading a package sends no more commands than the orders page meters for it");
+  {
+    const { store, product } = await setUp();
+    const PAID = checkoutId("m");
+    await buy(store, product, PAID, 30);
+    const past = nowSeconds() - 3_600;
+    for (let i = 0; i < 3; i += 1) await holdSession(store, PAID, sessionId("m", i), past);
+    // Confirmed by its mark only, not yet written down with the package: the reading writes them down (the dearest path).
+    for (let i = 0; i < 3; i += 1) redis.run(["SET", `nl:call:confirmed:${sessionId("m", i)}`, "1", "EX", CONFIRMED_SECONDS]);
+    const bought = (await readBought(PAID))!;
+    const pipeline = redis.pipeline.bind(redis);
+    let sent = 0;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      sent += commands.length;
+      return pipeline(commands);
+    }) as typeof redis.pipeline;
+    const state = await packageState(bought);
+    redis.pipeline = pipeline;
+    is("every session counted spent", state.left, 0);
+    is("packageState sends no more commands than packageReadCommands", sent <= packageReadCommands(bought), true);
+    is("and the orders page meters packageReadCommands for each package card",
+      readFileSync("lib/buyer-orders.ts", "utf8").includes("await meter?.take(packageReadCommands(bought));"), true);
   }
 
   Date.now = realNow;

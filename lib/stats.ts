@@ -358,7 +358,7 @@ export type Today = {
   views: number;
   checkouts: number;
   sources: { source: string; visits: number }[];
-  /** Null when Stripe is not connected or did not answer. */
+  /** Null when Stripe is not connected, did not answer, or the reading was partial (#4725). */
   sales: { sales: number; cents: number } | null;
 };
 const todaySalesKey = (statsId: string, day: string) => `nl:stats:${statsId}:today:${day}`;
@@ -393,13 +393,18 @@ export async function readToday(store: Store, now = Date.now()): Promise<Today> 
     }
   } else if (readsSales(store)) {
     const start = Math.floor(Date.parse(`${date}T00:00:00Z`) / 1000);
-    sales = await readPaidSales(store, start, 1)
-      .then(({ sales: rows }) => {
+    // A partial reading (more Stripe pages, an incomplete PayPal read, a sale with no currency) is never summed as the
+    // day's sales (#4725): it is unavailable, and kept so for the same two minutes as a complete one. A complete empty
+    // reading is zero. Stripe that did not answer is not kept, so the next poll asks again.
+    const read = await readPaidSales(store, start, 1)
+      .then(({ sales: rows, partial }) => {
+        if (partial) return { sales: null };
         const own = rows.filter((sale) => sale.currency === store.currency && dayKey(sale.created) === date);
-        return { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) };
+        return { sales: { sales: own.length, cents: own.reduce((n, sale) => n + sale.cents, 0) } };
       })
       .catch(() => null);
-    if (sales) await redisPipeline([["SET", todaySalesKey(statsId, date), JSON.stringify(sales), "EX", TODAY_SALES_SECONDS]]);
+    sales = read?.sales ?? null;
+    if (read) await redisPipeline([["SET", todaySalesKey(statsId, date), JSON.stringify(read.sales), "EX", TODAY_SALES_SECONDS]]);
   }
   return {
     date,

@@ -6,7 +6,7 @@
  *
  * All or nothing: what does not fit is refused and given back. A store that pays nothing must hold one of the
  * month's places (lib/free-pool.ts), as for every figure that costs. Unknown is closed (CX-123 rule 24): no window,
- * no place that could be read, or a count that is not exactly the SET NX and INCRBY replies, and the read is not
+ * no place that could be read, or a count that is not exactly the INCRBY and EXPIRE NX replies, and the read is not
  * made; a count that may have landed is left counted higher, never lower.
  */
 import { allowanceWindow, keepSecondsFor } from "@/lib/allowance-window";
@@ -43,13 +43,16 @@ export async function takeDripStartUnits(store: Store, units: number, now = Date
   const k = key(id, window.id);
   let counted: number | null = null;
   try {
+    // INCRBY first, then the window's expiry only when the key has none (EXPIRE … NX), as lib/window-count.ts counts
+    // (9bad368379): a SET NX EX before the INCRBY did nothing when the key was there, and if the key expired between
+    // the two the INCRBY made it again with no expiry, so the store's figure would stay spent for good.
     const replies = repliesFor(await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
       ["INCRBY", k, units],
+      ["EXPIRE", k, keepSecondsFor(window, now), "NX"],
     ]), 2);
-    // Exactly "OK" or nil for the SET, and a whole count of at least what this took for the INCRBY.
-    const total = replies?.[1];
-    if (replies && (replies[0] === "OK" || replies[0] === null) && typeof total === "number" && Number.isSafeInteger(total) && total >= units) counted = total;
+    // Exactly a whole count of at least what this took for the INCRBY, and 0 or 1 for the EXPIRE.
+    const total = replies?.[0];
+    if (replies && (replies[1] === 0 || replies[1] === 1) && typeof total === "number" && Number.isSafeInteger(total) && total >= units) counted = total;
   } catch {
     counted = null;
   }

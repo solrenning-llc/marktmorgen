@@ -12,8 +12,9 @@ import type { Course } from "@/lib/course";
 import { emailKey, recordEnrollment, registerDrip, sendDripEmails } from "@/lib/learn";
 import type { Listing, Store } from "@/lib/store";
 import { allowanceFor, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
-import { calendarWindow } from "@/lib/allowance-window";
+import { allowanceWindow, calendarWindow } from "@/lib/allowance-window";
 import { dripStartUnits } from "@/lib/drip-start-rules";
+import { takeDripStartUnits } from "@/lib/drip-start";
 import { catalog } from "./course-repurchase-catalog-world";
 import { stripe } from "./course-repurchase-stripe-world";
 import { mail } from "./course-drip-mail-world";
@@ -35,6 +36,7 @@ const course: Course = {
 const product = { id: "prod_dripmonth1", title: "Month course", priceCents: 4900, course: { id: courseId, lessons: 2 } } as unknown as Listing;
 const store = { handle: "drip-month", previousHandles: [], name: "Drip Month", email: "owner@example.test", statsId: "4".repeat(32), sid: "3".repeat(32), language: "en", stripeAccountId: "acct_synthetic03" } as unknown as Store;
 const DAY = 86_400;
+const allowanceWindowOf = (at: number) => allowanceWindow(store, at * 1000)?.id ?? "none";
 // April 1: Month 1 opens on May 1, and May 2 is in the same calendar month (a store that pays nothing counts by it).
 const start = Math.floor(Date.UTC(2026, 3, 1, 12) / 1000);
 const opens = start + 30 * DAY;
@@ -113,6 +115,18 @@ async function main() {
   is("unknown: nothing is announced", await run(opens), []);
   is("and nobody is read at Stripe", sessionsAsked(), 0);
   is("the next run announces it, never skipped", await run(opens + DAY), ["Now open in Month course: Month 1"]);
+
+  part("A count key left with no expiry is given the window's expiry by the next take (Claude 7's MEDIUM on #3369)");
+  // Added on #3369 (Claude 7's MEDIUM): with SET NX EX before the INCRBY, a key that was there (and so kept by the SET)
+  // but had lost its expiry stayed forever. Here the key is left with a count and no expiry, as an INCRBY after its
+  // expiry left it; the next take must give it one.
+  await fresh([students[0]]);
+  const countKey = `nl:dripstart:${store.sid}:${allowanceWindowOf(opens)}`;
+  await redis.pipeline([["SET", countKey, "1"]]);
+  is("the key starts with no expiry", (await redis.pipeline([["TTL", countKey]]))[0], -1);
+  is("the take is counted", await takeDripStartUnits(store, 1, opens * 1000), "taken");
+  const ttl = (await redis.pipeline([["TTL", countKey]]))[0] as number;
+  is("and the key now ends with its window", ttl > 0, true);
 
   part("The figure is a plan line, and the stores that pay nothing carry their share");
   const line = COST_LINES.find((one) => one.id === "drip-start-read");

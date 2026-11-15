@@ -102,8 +102,10 @@ async function main(): Promise<void> {
     if (commands.length === 1 && commands[0][0] === "EVAL") {
       // The script ran (its HSET landed: the in-memory Redis does not run this script, so the write is made here) and its answer was lost.
       evalRan = true;
-      const [, , , hash, field, , value] = commands[0];
-      return real([["HSET", hash, field, value]]).then(() => { throw new Error("Redis request failed with status 502"); });
+      // TOKEN_WRITE_IF (Codex V on #3925): KEYS the list, the prints and the link's record; ARGV the address, its row's
+      // SHA-1, the row to write, its print and the record. Both the record and the row land, then the answer is lost.
+      const [, , , hash, , recordKey, field, , value, , record] = commands[0];
+      return real([["SET", recordKey, record], ["HSET", hash, field, value]]).then(() => { throw new Error("Redis request failed with status 502"); });
     }
     if (evalRan) return contactsRead(commands, listId, [null]);
     return null;

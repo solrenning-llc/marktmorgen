@@ -239,6 +239,27 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/contacts.ts TOKEN_WRITE_IF: a link's record and its contact's token, only while the row is as read and the address has no print.
+        if (key.startsWith("-- marktmorgen:contact-token-write-if:v1\n")) {
+          const keyCount = Number(args[0]);
+          const writes = keyCount - 2;
+          const argv = args.slice(1 + keyCount);
+          if (!Number.isSafeInteger(keyCount) || writes < 1 || argv.length !== writes * 5) throw new Error("MemoryRedis: unsupported EVAL");
+          const [list, marks] = args.slice(1, 3);
+          const records = args.slice(3, 1 + keyCount);
+          const out: number[] = [];
+          for (let n = 0; n < writes; n += 1) {
+            const [field, was, value, print, record] = argv.slice(n * 5, n * 5 + 5);
+            const current = this.run(["HGET", list, field]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (seen === was && this.run(["HEXISTS", marks, print]) === 0) {
+              this.run(["SET", records[n], record]);
+              this.run(["HSET", list, field, value]);
+              out.push(1);
+            } else out.push(0);
+          }
+          return out;
+        }
         // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
         // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
         if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {

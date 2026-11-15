@@ -369,7 +369,11 @@ export const CONTACT_COMMANDS_MOST = {
   noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
   takeBackRound: 1 + 1 + 2,
   takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
-  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
+  /**
+   * tokensFor for `n` addresses: both reads, and one TOKEN_WRITE_IF (1, plus at most 4 calls for each: the row, the
+   * print, the record and the row written), under the bound kept from before it of a record, a checked write (1 + 2)
+   * and a taken-back record each.
+   */
   tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
 } as const;
 
@@ -863,6 +867,58 @@ async function casWrite(key: string, writes: { email: string; value: string; was
   }
 }
 
+/**
+ * An unsubscribe link's record and its contact's token, written only while the row still holds what was read and the
+ * address has no deletion print, all in one step (Codex V on #3925): an erasure writes the print first and deletes the
+ * row after it (lib/person-erasure.ts), so a print that landed after tokensFor read the prints is seen here, at write
+ * time, and nothing is written. KEYS[1] the list, KEYS[2] the store's prints, KEYS[2 + n] the n-th link's record;
+ * ARGV in fives: the address, the SHA-1 of its row as read, the row to write, its print, the link's record.
+ */
+const TOKEN_WRITE_IF = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-token-write-if:v1",
+  "local out = {}",
+  "local n = 0",
+  "for i = 1, #ARGV, 5 do",
+  "  n = n + 1",
+  '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
+  '  local seen = ""',
+  "  if cur then seen = redis.sha1hex(cur) end",
+  '  if seen == ARGV[i + 1] and redis.call("HEXISTS", KEYS[2], ARGV[i + 3]) == 0 then',
+  '    redis.call("SET", KEYS[2 + n], ARGV[i + 4])',
+  '    redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 2])',
+  "    out[#out + 1] = 1",
+  "  else",
+  "    out[#out + 1] = 0",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
+/**
+ * TOKEN_WRITE_IF for these writes: which were written. An answer in another shape is read back, in its exact shape
+ * (rule 24): a row holding what was to be written and its link's record there means the script ran; anything else is
+ * unknown and throws UnknownReplyError, never "not written" (a link may exist) nor "written" (it may lead nowhere).
+ */
+async function tokenWriteIf(listId: string, writes: { email: string; value: string; was: string; token: string; record: string }[]): Promise<boolean[]> {
+  const key = leadsKey(listId);
+  try {
+    const [result] = await redisPipeline([[
+      "EVAL", TOKEN_WRITE_IF, 2 + writes.length, key, suppressedKey(listId), ...writes.map((w) => tokenKey(w.token)),
+      ...writes.flatMap((w) => [w.email, w.was, w.value, suppressionPrint(listId, w.email), w.record]),
+    ]]);
+    const each = repliesFor(result, writes.length);
+    if (each && each.every((v) => v === 0 || v === 1)) return each.map((v) => v === 1);
+    throw new Error("unexpected answer");
+  } catch {
+    const replies = await redisPipeline([["HMGET", key, ...writes.map((w) => w.email)], ...writes.map((w) => ["GET", tokenKey(w.token)])]);
+    const rows = fieldsOf(replies[0], writes.length, "an unsubscribe link's write, read back");
+    const records = repliesFor(replies.slice(1), writes.length);
+    if (records && writes.every((w, i) => rows[i] === w.value && records[i] === w.record)) return writes.map(() => true);
+    throw new UnknownReplyError("an unsubscribe link's write");
+  }
+}
+
 /** An HMGET's answer for `count` fields, each its text or nothing; any other shape throws UnknownReplyError. */
 function fieldsOf(reply: unknown, count: number, what: string): (string | null)[] {
   const each = repliesFor(reply, count);
@@ -998,7 +1054,7 @@ export async function tokensFor(
         if (marks[j] !== null) deleted.add(email);
       });
     }
-    const writes: { email: string; value: string; was: string; token: string }[] = [];
+    const writes: { email: string; value: string; was: string; token: string; record: string }[] = [];
     pending.forEach((email, i) => {
       const raw = found[i];
       const contact = parseContact(raw);
@@ -1009,27 +1065,18 @@ export async function tokensFor(
         return;
       }
       const token = randomBytes(20).toString("hex");
-      writes.push({ email, value: JSON.stringify({ ...contact, t: token }), was: sha1(raw), token });
+      writes.push({ email, value: JSON.stringify({ ...contact, t: token }), was: sha1(raw), token, record: `${listId}|${email}|${handle}` });
     });
     if (!writes.length) break;
-    // The token's own record first, so a link is never sent that leads
-    // nowhere; then each contact only if it is still as it was read, so an
-    // unsubscribe made meanwhile is never written over, and two sends at
-    // once keep one token between them.
-    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
-    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
-    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
-    const set = repliesFor(records, writes.length);
-    if (!set || set.some((reply) => reply !== "OK")) {
-      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
-      throw new UnknownReplyError("an unsubscribe link's record");
-    }
-    const done = await casWrite(key, writes);
+    // The link's record and the contact's token in one step, only while the row is as it was read and the address
+    // has no deletion print at write time (TOKEN_WRITE_IF; Codex V on #3925): an unsubscribe made meanwhile is never
+    // written over, two sends at once keep one token between them, and a person deleted since the prints were read is
+    // given no link. A record is never left without its row, nor a row without its record, so a link never leads nowhere.
+    const done = await tokenWriteIf(listId, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
     });
     const lost = writes.filter((_, i) => !done[i]);
-    if (lost.length) await redisPipeline(lost.map((w) => ["DEL", tokenKey(w.token)]));
     pending = lost.map((w) => w.email);
   }
   return out;

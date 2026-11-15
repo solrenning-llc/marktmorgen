@@ -30,6 +30,9 @@ function billed(commands: Commands, scriptCalls: number): number {
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
     else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + scriptCalls;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
+    // TOKEN_WRITE_IF (Codex V on #3925): 2 + w keys and five arguments for each of its w writes; per write at most the
+    // row's HGET, the print's HEXISTS, the record's SET and the row's HSET.
+    else if (head.startsWith("-- marktmorgen:contact-token-write-if:v1")) total += 1 + 4 * ((c.length - 5) / 6);
     else total += 1000; // a script this test does not know is not free
   }
   return total;

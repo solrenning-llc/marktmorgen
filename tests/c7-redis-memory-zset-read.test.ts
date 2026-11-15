@@ -1,0 +1,78 @@
+/**
+ * The in-memory Redis (lib/redis-memory.ts) read a sorted set through one helper that made the key when it was missing
+ * and replaced a key of another kind with an empty set. Redis does neither: a read or a removal of members on a
+ * missing key makes nothing, a key of another kind answers WRONGTYPE and is kept, and a set whose last member goes is
+ * deleted. Checked against redis-server 7 on 15 November 2026 (C7). A test could pass on the stand-in because a read
+ * made a key, or because a value of another kind was silently emptied.
+ */
+import { store as redis } from "./redis-stub";
+import { done, is, part } from "./check";
+
+const run = async (command: (string | number)[]): Promise<unknown> => {
+  try {
+    return (await redis.pipeline([command]))[0];
+  } catch (error) {
+    return String(error instanceof Error ? error.message : error).split(" ")[0];
+  }
+};
+const exists = async (key: string) => (await redis.pipeline([["EXISTS", key]]))[0];
+
+async function main(): Promise<void> {
+  part("On a missing key: the answer Redis gives, and no key made");
+  const reads: [string, (string | number)[], unknown][] = [
+    ["ZSCORE", ["ZSCORE", "nk", "m"], null],
+    ["ZCARD", ["ZCARD", "nk"], 0],
+    ["ZCOUNT", ["ZCOUNT", "nk", "-inf", "+inf"], 0],
+    ["ZRANGEBYSCORE", ["ZRANGEBYSCORE", "nk", "-inf", "+inf"], []],
+    ["ZREVRANGEBYSCORE", ["ZREVRANGEBYSCORE", "nk", "+inf", "-inf"], []],
+    ["ZREVRANGE", ["ZREVRANGE", "nk", 0, -1], []],
+    ["ZREVRANK", ["ZREVRANK", "nk", "m"], null],
+    ["ZREM", ["ZREM", "nk", "m"], 0],
+    ["ZREMRANGEBYSCORE", ["ZREMRANGEBYSCORE", "nk", "-inf", "+inf"], 0],
+    ["ZREMRANGEBYRANK", ["ZREMRANGEBYRANK", "nk", 0, -1], 0],
+    ["ZSCAN", ["ZSCAN", "nk", 0], ["0", []]],
+  ];
+  for (const [name, command, answer] of reads) {
+    redis.clear();
+    is(`${name}: answers as Redis`, await run(command), answer);
+    is(`${name}: makes no key`, await exists("nk"), 0);
+  }
+
+  part("On a key of another kind: WRONGTYPE, and the value kept");
+  for (const [name, command] of [
+    ["ZSCORE", ["ZSCORE", "s", "m"]],
+    ["ZCARD", ["ZCARD", "s"]],
+    ["ZRANGEBYSCORE", ["ZRANGEBYSCORE", "s", "-inf", "+inf"]],
+    ["ZREVRANGE", ["ZREVRANGE", "s", 0, -1]],
+    ["ZREM", ["ZREM", "s", "m"]],
+    ["ZADD", ["ZADD", "s", 1, "m"]],
+    ["ZINCRBY", ["ZINCRBY", "s", 1, "m"]],
+    ["ZUNIONSTORE source", ["ZUNIONSTORE", "d", 1, "s"]],
+  ] as [string, (string | number)[]][]) {
+    redis.clear();
+    await redis.pipeline([["SET", "s", "x"]]);
+    is(`${name}: WRONGTYPE`, await run(command), "WRONGTYPE");
+    is(`${name}: the string is kept`, (await redis.pipeline([["GET", "s"]]))[0], "x");
+  }
+
+  part("A sorted set whose last member goes is deleted, as on Redis");
+  for (const [name, command] of [
+    ["ZREM", ["ZREM", "z", "a"]],
+    ["ZREMRANGEBYSCORE", ["ZREMRANGEBYSCORE", "z", "-inf", "+inf"]],
+    ["ZREMRANGEBYRANK", ["ZREMRANGEBYRANK", "z", 0, -1]],
+  ] as [string, (string | number)[]][]) {
+    redis.clear();
+    await redis.pipeline([["ZADD", "z", 1, "a"]]);
+    is(`${name}: removes the one member`, await run(command), 1);
+    is(`${name}: the key is gone`, await exists("z"), 0);
+  }
+
+  part("Control: a sorted set that exists reads and writes as before");
+  redis.clear();
+  await redis.pipeline([["ZADD", "z", 2, "b", 1, "a"]]);
+  is("ZRANGEBYSCORE", await run(["ZRANGEBYSCORE", "z", "-inf", "+inf"]), ["a", "b"]);
+  is("ZSCORE", await run(["ZSCORE", "z", "b"]), "2");
+  is("ZREM of one keeps the other", [await run(["ZREM", "z", "a"]), await run(["ZCARD", "z"])], [1, 1]);
+  done();
+}
+main().catch((error) => { console.error(error); process.exit(1); });

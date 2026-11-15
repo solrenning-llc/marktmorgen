@@ -18,6 +18,10 @@ import { readSales, studioStats, type Stats } from "@/lib/stats";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { DiscountImpact } from "@/components/discount-impact";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_discount_impact_only";
 
@@ -144,6 +148,8 @@ async function main(): Promise<void> {
   sessions = [
     session("cs_test_full00000001", "ana@example.com", 2, 2000, 0),
     session("cs_test_sale00000001", "ben@example.com", 6, 1600, 400, { sale: "20" }),
+    // LOW 3 of #4576: a checkout paid in euros, with a code, read through Stripe's list into `elsewhere`.
+    { ...session("cs_test_euro00000001", "cy@example.com", 4, 1800, 200, { code: "SPRING" }), currency: "eur" },
   ];
   refunds = [{ id: "re_1", status: "succeeded", amount: 1600, currency: "usd", created: Math.floor((NOW - DAY) / 1000), payment_intent: "pi_sale00000001" }];
   const read = await readSales(store, NOW);
@@ -153,9 +159,17 @@ async function main(): Promise<void> {
       { kind: "sale", sales: 1, cents: 1600, off: 400, refunded: 1, buyers: 1, again: 0 },
     ],
     refundsRead: true,
-    elsewhere: [],
+    elsewhere: [{ currency: "eur", sales: 1, cents: 1800, discounted: 1, off: 200 }],
   });
   is("with nothing more asked of Stripe than the sales, renewals, refunds and disputes the numbers read anyway", [...new Set(asked)].sort(), ["/checkout/sessions", "/disputes", "/invoices", "/payment_intents", "/refunds"]);
+
+  part("The sentence alone when the store's own currency has no discounted sale (LOW 1 of #4576)");
+  const alone = renderToStaticMarkup(createElement(DiscountImpact, { rows: null, refundsRead: false, currency: "usd", elsewhere: [{ currency: "eur", sales: 2, cents: 9000, discounted: 1, off: 500 }] }));
+  is("no table, the sentence kept", [alone.includes("<table"), alone.includes("data-discount-elsewhere"), alone.includes("€90.00 from 2 sales, 1 with a discount taking €5.00 off")], [false, true, true]);
+  is("it does not speak of a table that is not there", alone.includes("not added to the table"), false);
+  is("nothing at all with nothing to say", renderToStaticMarkup(createElement(DiscountImpact, { rows: null, refundsRead: false, currency: "usd", elsewhere: [] })), "");
+  const panel = readFileSync("components/stats-panel.tsx", "utf8");
+  is("the panel draws it when there are rows or sales elsewhere", panel.includes("(data.discounts?.rows || data.discounts?.elsewhere?.length)"), true);
 
   part("Members by how they joined");
   is("from what the checkout wrote on the membership", [entryOf({}), entryOf({ intro: "3" }), entryOf({ winback: "yes" }), entryOf({ discount: "code" }), entryOf({ discount: "sale" }), entryOf({ discount: "x" })], ["full", "intro", "comeback", "code", "sale", "full"]);

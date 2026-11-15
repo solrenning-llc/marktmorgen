@@ -55,7 +55,7 @@ const INCLUDED = [
   "Sales pages and landing pages built from blocks, and reviews only buyers can write",
   "A community for your buyers, with spaces, posts, comments, moderation and live events members RSVP to",
   `Up to ${MAX_OPTIONS} prices on any product, bundles of 2 to 20 products, pay what you want, discount codes and payment plans`,
-  "15 currencies, and Apple Pay, Google Pay, Klarna and the other ways to pay you switch on in Stripe",
+  "Your store's prices in one of 15 currencies, and Apple Pay, Google Pay, Klarna and the other ways to pay you switch on in Stripe",
   "Offers before and after paying: a box at checkout, and up to five one-click offers after",
   "An affiliate program with a page for each affiliate, paid from your own PayPal in one press or on payday by itself",
   "Your own numbers counted without cookies, as CSV files too, and ad pixels for Meta, Google, TikTok and Pinterest — those are the platforms' own, and visitors are asked first where the law requires it",
@@ -107,7 +107,7 @@ const CREATOR_GROUPS: PlanGroup[] = [
     icon: "bank",
     title: "Your own payment account",
     // The share of a sale is said once, under the price ("0% of sales"); not again here (243 [CF6], 31/10 complement).
-    body: "Buyers pay into your own Stripe account, in 15 currencies, and the money is yours.",
+    body: "Buyers pay into your own Stripe account, in your store's currency (one of 15), and the money is yours.",
   },
   {
     icon: "users",

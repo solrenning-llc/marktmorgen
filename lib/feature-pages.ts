@@ -276,7 +276,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: `Stan's own help center lists pricing tiers among its most requested features and says there is no native way to offer them under one product — read on September 18, 2026. Here they are on the ${PLAN_AT.creator} plan.`,
+        text: `Stan's own help center lists pricing tiers among its most requested features and says there is no native way to offer them under one product — read on November 15, 2026. Here they are on the ${PLAN_AT.creator} plan.`,
       },
       {
         kind: "uses",
@@ -590,7 +590,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: "Every tool on your own account",
-        intro: "Stan's pricing page, read on September 20, 2026, puts discount codes, order bumps, upsells and payment plans on its $99 plan.",
+        intro: "Stan's pricing page, read on November 15, 2026, puts discount codes, order bumps, upsells and payment plans on its $99 plan.",
         items: [
           { icon: "clock", title: "A sale with a real end", body: "Pick a percentage and when it starts and ends, for every product or only some. While it runs the old price is crossed out on your store and on each product's page, with when it ends, and Stripe takes it off with no code to type. At the end it stops by itself, and the discount stops working at Stripe too." },
           { icon: "percent", title: "Discount codes", body: "A word you choose, a percentage or an amount off, and a cap on uses if you want one. Up to twenty codes, kept as coupons on your own Stripe. Shared as a link (?code=SPRING), a code applies itself at checkout." },
@@ -873,7 +873,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 30: what someone starting out asks, answered by the code (lib/email-faq.ts).
           ...emailBeginnerQuestions(),
-          { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on September 20, 2026.` },
+          { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on November 15, 2026.` },
           { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
           { q: `What if my list needs more than ${PRO_EMAILS} emails a month?`, a: PLANS_ON_SALE ? `Move up to Scale from your studio: the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year. You are charged the difference for the rest of the period you already paid for, and you can go back to Studio whenever you like. Without it, an email that passes the month's number waits and goes out by itself when the month turns.` : `Scale is the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year, but plans are not on sale yet, so no store can move to it today. An email that passes the month's number waits and goes out by itself when the month turns.` },
           { q: `Can I email people on the ${PLAN_AT.creator} plan at all?`, a: `Your list downloads as a CSV on every plan, and on the ${PLAN_AT.creator} plan your store can send the people who agree straight to your own Mailchimp, Kit, beehiiv or MailerLite. Writing to them from Marktmorgen is what Studio adds.` },
@@ -967,7 +967,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       {
         kind: "features",
         title: `Your ad pixels, on the ${PLAN_AT.creator} plan`,
-        intro: "Stan puts advertising pixels on its $99 plan, according to its pricing page, read on September 20, 2026.",
+        intro: "Stan puts advertising pixels on its $99 plan, according to its pricing page, read on November 15, 2026.",
         items: [
           { icon: "target", title: "Meta, Google, TikTok and Pinterest", body: "Paste the pixel's ID. Your pages report every view, every checkout started, every lead and every purchase with its amount." },
           { icon: "shield", title: "Asked first, where the law says so", body: "Visitors in the European Economic Area, the UK, Switzerland and Brazil are asked in plain words, and nothing loads unless they say yes." },
@@ -1583,7 +1583,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "How do I know a message came from you?", a: "Check its Marktmorgen-Signature header against the secret you were shown when you added the address, and check that its time is recent. When you make a new secret, the old one keeps signing beside it for a day, as a second v1 in the same header: accept a message when any v1 matches." },
           { q: "What if a message did not arrive?", a: "It is tried again by itself for about forty hours. If it still failed, press Send again beside it in your studio's log: the same message, with the same event id, is sent once more, so a receiver that already has it can ignore the repeat." },
           { q: "What if the same event arrives twice?", a: "Every event has an ID made from what it is about, and it is sent once however often it is noticed. Keep the IDs you have seen and ignore a repeat, in case a retry crosses a slow answer." },
-          { q: "Does Stan have webhooks?", a: "Not according to its help center, read on September 17, 2026." },
+          { q: "Does Stan have webhooks?", a: "Not according to its help center, read on November 15, 2026." },
         ],
       },
     ],
@@ -1651,7 +1651,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "When is a lesson with an assignment done?", a: "When the student hands it in, or, if you read each one, when you approve it. Either way it counts toward the certificate, and you choose whether the lessons after it wait." },
           { q: "Where are the files students hand in kept?", a: "Privately, with your store's files, where only the student who handed one in and you and your team can download it. Removing the assignment or the lesson deletes them." },
           { q: "Does Kajabi take written work and files?", a: "Its assessments take a paragraph or a file upload of up to 10 MB, according to its help center, read on October 11, 2026." },
-          { q: "Does Stan have quizzes and certificates?", a: "Not according to its help center, read on September 17, 2026." },
+          { q: "Does Stan have quizzes and certificates?", a: "Not according to its help center, read on November 15, 2026." },
         ],
       },
     ],

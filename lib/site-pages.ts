@@ -516,7 +516,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "The part that decides",
-        note: "Sources: Stan's help center articles 'Creator vs. Creator Pro', 'How to Connect Stan with Stripe', 'How to Cash Out Inside Stan', 'Experiment: How to Connect an Existing Stripe Account' and 'How to Subscribe on the Stan Mobile App', read on September 18, 2026; 'Can I Create More Than One Stan Store?' and 'How to Change Your Stan Username or Email', read on September 19, 2026. The rows on products, prices, trials and the customer area re-checked on Stan's help center on September 26, 2026; 'Can I Create More Than One Stan Store?' re-read, and 'Can I Grant Administrative Access to a Team Member?' and 'How Can I Add My Customer Reviews?' read on September 27, 2026, and the rows on ways to pay and currency re-checked the same day. The rows on live events, bundles and moving from another platform from 'How to Add an Integrated Webinar to Community', 'Webinar Product', the Digital Downloads category, 'How to Import Your Existing Email List into Stan' and 'How Do I Manually Give Access or Add a Customer to a Product?', read on September 27, 2026. Stan's 14-day free trial from their article 'Stan Store Pricing 2026', read on September 28, 2026, the same day every other row was re-checked on their help center and the rows on the line about you and the customer area were corrected from 'How to Add or Update Your Profile Bio' and 'Common Feature Requests On Our Radar'. The row on inviting other creators from 'What is Stan's Referral Program?', read on September 30, 2026.",
+        note: "Sources: Stan's help center articles 'Creator vs. Creator Pro', 'How to Connect Stan with Stripe', 'How to Cash Out Inside Stan', 'Experiment: How to Connect an Existing Stripe Account' and 'How to Subscribe on the Stan Mobile App', 'Can I Create More Than One Stan Store?' and 'How to Change Your Stan Username or Email', read on November 15, 2026. The rows on products, prices, trials and the customer area re-checked on Stan's help center on September 26, 2026; 'Can I Create More Than One Stan Store?' re-read, and 'Can I Grant Administrative Access to a Team Member?' and 'How Can I Add My Customer Reviews?' read on September 27, 2026, and the rows on ways to pay and currency re-checked the same day. The rows on live events, bundles and moving from another platform from 'How to Add an Integrated Webinar to Community', 'Webinar Product', the Digital Downloads category, 'How to Import Your Existing Email List into Stan' and 'How Do I Manually Give Access or Add a Customer to a Product?', read on September 27, 2026. Stan's 14-day free trial from their article 'Stan Store Pricing 2026', read on September 28, 2026, the same day every other row was re-checked on their help center and the rows on the line about you and the customer area were corrected from 'How to Add or Update Your Profile Bio' and 'Common Feature Requests On Our Radar'. The row on inviting other creators from 'What is Stan's Referral Program?', read on September 30, 2026.",
         head: ["", "Stan", "Marktmorgen"],
         rows: [
           ["Monthly price", "$29 and $99, free for the first 14 days", monthlyRow()],
@@ -549,7 +549,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "quote",
         text: "In order to use Stripe with Stan, you will be prompted to create a new Custom Stripe account that is managed by Stan. You will not be able to connect an existing Stripe account.",
-        source: "Stan help center, 'How to Connect Stan with Stripe', read September 18, 2026",
+        source: "Stan help center, 'How to Connect Stan with Stripe', read November 15, 2026",
       },
       {
         kind: "note",
@@ -611,7 +611,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "quote",
         text: "We no longer support new user-connected Stripe accounts except for users from Brazil.",
-        source: "Gumroad help center, 'Connect your Stripe account to Gumroad', read September 18, 2026",
+        source: "Gumroad help center, 'Connect your Stripe account to Gumroad', read November 15, 2026",
       },
       {
         kind: "steps",
@@ -681,7 +681,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "quote",
         text: "The 9% fee applies to users on the free plan or the $10/month Creator plan.",
-        source: "Beacons help center, 'Beacons Products Transaction Fees', read September 18, 2026",
+        source: "Beacons help center, 'Beacons Products Transaction Fees', read November 15, 2026",
       },
       {
         kind: "steps",
@@ -802,7 +802,7 @@ export const PAGES: TopicPage[] = [
       {
         kind: "table",
         title: "Apps and devices",
-        note: "Stan's help center, article 406, read September 17, 2026: the Stan app is \u201ccurrently only available on iPhone and iPad through the iOS App Store.\u201d",
+        note: "Stan's help center, article 406, read November 15, 2026: the Stan app is \u201ccurrently only available on iPhone and iPad through the iOS App Store.\u201d",
         head: ["", "Stan", "Marktmorgen"],
         rows: [
           ["iPhone app", "Yes \u2014 a creator app, rated 4.9 stars on the App Store", "Not available \u2014 Stan is ahead here. The studio installs to the home screen instead, and sends notifications of sales and bookings on iOS 16.4 or later"],

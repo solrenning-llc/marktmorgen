@@ -7,7 +7,10 @@
  * - the trail's links (components/breadcrumb.tsx), "Studio" above all, were 44 px tall but only as wide as their
  *   word: "Studio" 41 px.
  *
- * Both are now at least 44 by 44 px. Rendered from the real components, so the box is read from what they draw.
+ * - the add-a-tool gallery's titles (components/add-gallery.tsx) were 44 px tall but as narrow as their word: on
+ *   /studio/add "Blog" was 35 px wide and "Inbox" 43 px.
+ *
+ * All are now at least 44 by 44 px. Rendered from the real components, so the box is read from what they draw.
  */
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -30,5 +33,11 @@ const logo = /<Link href="\/" className="([^"]*)" aria-label="Marktmorgen, home"
 is("the logo link is found", logo !== null, true);
 const logoClasses = (logo?.[1] ?? "").split(/\s+/);
 is("it is a box (inline-flex) 44 px tall and 44 px wide", ["inline-flex", "min-h-11", "min-w-11", "items-center"].every((c) => logoClasses.includes(c)), true);
+
+part("The add-a-tool gallery's titles are 44 by 44 px");
+const gallery = readFileSync("components/add-gallery.tsx", "utf8");
+const galleryLink = /const LINK = "([^"]*)"/.exec(gallery)?.[1]?.split(/\s+/) ?? [];
+is("its link class is found", galleryLink.length > 0, true);
+is("44 px tall and 44 px wide, so \"Blog\" (35 px) and \"Inbox\" (43 px) are whole targets", ["min-h-11", "min-w-11"].every((c) => galleryLink.includes(c)), true);
 
 done();

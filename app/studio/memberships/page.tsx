@@ -319,7 +319,7 @@ export default async function StudioMembershipsPage({ searchParams }: Params) {
                     A renewal counts when it was paid in the last 30 days after Stripe had tried the card more than once, or after
                     the member was emailed that it failed. Read from your own Stripe account, in your store&apos;s currency.
                     {recovery.elsewhere ? ` ${recovery.elsewhere} more ${recovery.elsewhere === 1 ? "renewal was" : "renewals were"} recovered in a currency other than ${recovery.currency.toUpperCase()}; ${recovery.elsewhere === 1 ? "its amount is" : "their amounts are"} not in these figures.` : ""}
-                    {recovery.complete ? "" : " Your account holds more paid invoices than one reading takes, so the oldest of the 30 days may be missing."}
+                    {recovery.complete ? "" : " Your account holds more paid invoices than one reading takes. These figures may omit some payments received in the last 30 days."}
                     {" How many emails go, and the card notice, are set under \u201cWhen a member\u2019s payment fails\u201d in your studio\u2019s settings."}
                   </p>
                 </section>

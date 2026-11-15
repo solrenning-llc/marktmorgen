@@ -27,8 +27,9 @@ const BILLING_REASONS = new Set([
   "subscription_create", "subscription_cycle", "subscription_threshold", "subscription_update", "upcoming",
 ]);
 
-// v2: with the renewals in another currency counted (22 [E5], unit 2e).
-const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}:v2`;
+// v2: with the renewals in another currency counted (22 [E5], unit 2e). v3: an older invoice paid in the window is
+// read too (#4732), so a v2 reading that claimed complete coverage without it is never reused.
+const cacheKey = (store: Store) => `nl:dun:report:${store.statsId}:v3`;
 
 export type RecoveryReport = {
   /** When Stripe was read, in seconds. */
@@ -155,11 +156,11 @@ export async function recoveryReport(store: Store, fresh = false, now = Date.now
   const seen = new Set<string>();
   let after = "";
   let complete = false;
-  // Created up to 60 days ago: a renewal that failed is retried for weeks
-  // before it is paid, and still lands in the last 30 days.
-  const createdSince = Math.floor(now / 1000) - 60 * DAY;
+  // The window is when the invoice was paid (status_transitions.paid_at), which Stripe's invoice list cannot filter
+  // by: an invoice created long before can be paid in the window after its retries (#4732). So no creation date is
+  // asked; the list is read newest first up to MAX_PAGES, and a list with a page past them is said to be incomplete.
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const query = new URLSearchParams({ status: "paid", limit: "100", "created[gte]": String(createdSince) });
+    const query = new URLSearchParams({ status: "paid", limit: "100" });
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/invoices?${query}`);
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length > 100 ||

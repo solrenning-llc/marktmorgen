@@ -12,7 +12,7 @@ import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
 import {
   BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
-  bookingsWork, codeMakeWork, codeStopWork, codesWork, DELIVERIES_MOST, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
+  bookingsWork, codeMakeWork, codeStopWork, codesWork, DELIVERIES_MOST, RESEND_WORK, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_CODES } from "@/lib/discount";
@@ -47,6 +47,8 @@ const EVENTS_LEAST = 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent
 const EVENTS_MOST_COUNT = 1 + apiReadUnits(eventsWork());
 /** The recent deliveries (GET /api/v1/hooks/deliveries), measured first like the events: an empty log, and the most. */
 const DELIVERIES_MOST_COUNT = 1 + apiReadUnits(eventsWork(DELIVERIES_MOST));
+/** A delivery sent again (POST /api/v1/hooks/resend): its reads at their most, with the door's request. */
+const RESEND_COUNT = 1 + apiReadUnits(RESEND_WORK);
 const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(MEMBERSHIP_NUMBERS_BYTES));
 const MEMBERSHIPS_COUNT_COLD = 1 + apiReadUnits(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
 const n = (count: number) => count.toLocaleString("en-US");
@@ -683,6 +685,15 @@ export default function DevelopersPage() {
     }
   ]
 }`}</Code>
+        <Endpoint method="POST" path="/api/v1/hooks/resend">
+          Sends one delivery that failed for good again, once, now, as your studio&apos;s Send again does:{" "}
+          <code className="font-mono">{`{"delivery": "dlv_…"}`}</code>, an id from that list. It is the same message
+          with the same event id, so an address that already took it can drop the repeat, signed afresh, and the answer
+          says how it went, as for a test. A delivery that was delivered, or that was already sent again and that copy
+          delivered or still being tried, is answered 409 and not sent. It counts as {n(RESEND_COUNT)} of your API
+          requests, taken before anything is read, and as one of your store&apos;s webhook deliveries for the month; it
+          shares the ten a minute with the tests.
+        </Endpoint>
       </LegalSection>
 
       <LegalSection title="Sales and refunds">

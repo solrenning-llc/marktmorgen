@@ -2044,6 +2044,7 @@
     "app/api/v1/codes/route.ts",
     "app/api/v1/events/route.ts",
     "app/api/v1/hooks/deliveries/route.ts",
+    "app/api/v1/hooks/resend/route.ts",
     "app/api/v1/hooks/route.ts",
     "app/api/v1/hooks/test/route.ts",
     "app/api/v1/leads/labels/route.ts",

@@ -24,7 +24,7 @@ import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
-  codesWork, DELIVERIES_MOST, deliveryRowsSentMost, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
+  codesWork, DELIVERIES_MOST, RESEND_WORK, deliveryRowsSentMost, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
   BUNDLE_CHOICES_MOST, BUNDLE_PAGE_LISTINGS, BUNDLE_SEARCH_STRETCH, IMPORTS_MOST, IMPORTS_READ, bundleChoicesWork, importsWork,
@@ -621,6 +621,8 @@ test("an API reading that reads more than a page takes further requests that cov
   covers(eventsWork(), "events at their most");
   // The list of recent deliveries (GET /api/v1/hooks/deliveries): eventsWork with its own most sent, at its most and at every log size.
   covers(eventsWork(DELIVERIES_MOST), "deliveries at their most");
+  // A failed delivery sent again through the API (POST /api/v1/hooks/resend): its reads at their most, taken before any.
+  covers(RESEND_WORK, "a delivery sent again at its most");
   for (let deliveries = 0; deliveries <= LOG_SIZE; deliveries += 10) for (const each of [0, 1_000, DELIVERY_MAX_BYTES]) {
     const bounds = Array<number>(deliveries).fill(each);
     covers(eventsWork({ deliveries, bytes: deliveries * (LOG_ENTRY_BYTES + each), sent: deliveryRowsSentMost(bounds) }), `deliveries ${deliveries}/${each}`);
@@ -703,6 +705,7 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"leads\", API_PAGE)", "await scanLeads(store, cursor, onlyAgreed)");
   before("lib/api-read.ts", "return scannedPage(hold, listPageMost(\"members\", API_PAGE)", "await memberPage(id, start, API_PAGE)");
   before("lib/api-read.ts", "return scannedPage(hold, LEAD_LOOKUP_MOST", '["HGET", leadsKey(listId), email]');
+  before("app/api/v1/hooks/resend/route.ts", "const refused = await takeMoreApi(writer.store, apiReadUnits(RESEND_WORK));", "await resendDelivery(writer.store, id,");
   before("lib/api-numbers.ts", "const settle = await hold(most);", '["GET", key]');
   before("lib/api-numbers.ts", "const refused = await charge(units, taken);", "await readNumbers(store, now)");
   assert.ok(!read("lib/mcp-tools.ts").includes("readTitles("), "the MCP tools never read every card, nor the listings' fall-back that reads every product");

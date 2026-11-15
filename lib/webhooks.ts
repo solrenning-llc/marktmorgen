@@ -1435,8 +1435,12 @@ return 1`;
 
 export type ResendResult =
   | { ok: true; delivery: Delivery; view: WebhooksView }
+  | ResendRefused;
+type ResendRefused =
   | { ok: false; reason: "missing" | "not_failed" | "not_heard" | "resent" | "limited" | "unavailable" }
   | { ok: false; reason: "used" | "paused" | "too_large"; message: string };
+/** resendDelivery with `view: false`: the same, without the studio's view. */
+export type ResendBareResult = { ok: true; delivery: Delivery; view: null } | ResendRefused;
 
 /**
  * Sends a failed delivery again, once, now, because the creator asked from
@@ -1448,9 +1452,14 @@ export type ResendResult =
  * names the one it sends again, tried once and not put back on the schedule.
  * Like a test it is one of the store's webhook deliveries for its month,
  * taken before the endpoint is called, and it shares the tests' limit a
- * minute, so a press held down cannot hammer anybody.
+ * minute, so a press held down cannot hammer anybody. `view: false` leaves the
+ * studio's view, with its delivery log, unread, for an answer that never sends
+ * it (POST /api/v1/hooks/resend).
  */
-export async function resendDelivery(store: Store, deliveryId: string, now = Date.now()): Promise<ResendResult> {
+// The bare one first, so ReturnType<typeof resendDelivery> stays the studio's ResendResult.
+export function resendDelivery(store: Store, deliveryId: string, now: number, options: { view: false }): Promise<ResendBareResult>;
+export function resendDelivery(store: Store, deliveryId: string, now?: number): Promise<ResendResult>;
+export async function resendDelivery(store: Store, deliveryId: string, now = Date.now(), { view = true }: { view?: boolean } = {}): Promise<ResendResult | ResendBareResult> {
   if (!store.statsId || !DELIVERY_ID_PATTERN.test(deliveryId)) return { ok: false, reason: "missing" };
   const statsId = store.statsId;
   // Paused like a test while the plan's costs are paused, whoever calls this.
@@ -1544,7 +1553,7 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
     ["LPUSH", logKey(statsId), done.id],
     ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1],
   ]);
-  return { ok: true, delivery: done, view: await webhooksView(store) };
+  return view ? { ok: true, delivery: done, view: await webhooksView(store) } : { ok: true, delivery: done, view: null };
 }
 
 /** What a test message says, by where it was asked for: the studio's Webhooks page, or a request with an API key (POST /api/v1/hooks/test). */

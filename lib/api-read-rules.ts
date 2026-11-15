@@ -516,6 +516,19 @@ export const DELIVERIES_MOST: EventsSize = {
 };
 
 /**
+ * A failed delivery sent again through the API (POST /api/v1/hooks/resend,
+ * lib/webhooks.ts resendDelivery), at its most, taken before anything is
+ * read: the delivery and its time left, the last resend of it, the store's
+ * webhook settings and the key it was added with, the deletion marks of the
+ * people in it, the mark (the delivery as read and as marked, sent to the
+ * database), the minute's count and the month's delivery taken, the copy kept
+ * and the log. Each delivery at DELIVERY_MAX_BYTES, five times over, with
+ * room for the rest; the answer is small. The try itself is one of the
+ * store's webhook deliveries, priced there.
+ */
+export const RESEND_WORK: ReadWork = { commands: 24, bytes: 5 * DELIVERY_MAX_BYTES + 16_384, sent: 1_024, stripePages: 0, roundTrips: 14 };
+
+/**
  * The measuring alone at its most, set aside before the log is read (Codex
  * G2, #2192: fifty sizes were looked up before any request beyond the first
  * was taken): the log and a size for each delivery it can hold. Part of

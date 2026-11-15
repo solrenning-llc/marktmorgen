@@ -766,7 +766,9 @@ export default function PrivacyPage() {
           The box starts empty. We send you one email, with the link to what
           you asked for, and nothing else. When you use that link, your address
           is added to that creator&apos;s list, marked with your choice, and
-          the creator can download the list. If you never use the link, the
+          the creator can download the list. When you checked the box, we also
+          keep which version of its words you agreed to, where you checked it
+          and when, so that what you agreed to can be shown. If you never use the link, the
           request is deleted after 7 days and your address is not added to
           anything. To limit abuse, we also keep a one-way hash of your email
           address, and of your IP address, for one hour.

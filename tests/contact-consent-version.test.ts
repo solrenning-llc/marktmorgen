@@ -1,7 +1,7 @@
 /**
  * A yes to a creator's list keeps which words it was given to (GDPR art. 7(1): the sender must be able to show what
  * was agreed to). Before, a contact kept `agreed`, `agreedAt` and `source` (how they first agreed), never the
- * version of the sentence they ticked, so a change of the box's words could not be told apart afterwards (5FNwB's
+ * version of the sentence they checked, so a change of the box's words could not be told apart afterwards (5FNwB's
  * finding on main 4865799f53, MÉDIO, law).
  *
  * Now every own yes keeps LIST_CONSENT_VERSION, where it was given and when (lib/contact-consent.ts,
@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     return [c?.consentVersion, c?.consentFrom, c?.consentAt];
   };
 
-  part("A ticked box at checkout keeps the version, the place and when");
+  part("A checked box at checkout keeps the version, the place and when");
   {
     const at = "2026-11-15T10:00:00.000Z";
     await upsertContact(listId, "ana@example.com", { agreed: true, explicit: true, source: "buyer", at, consent: "checkout" }, null);
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     is("and the yes itself, as before", [contact("ana@example.com")?.agreed, contact("ana@example.com")?.agreedAt], [true, at]);
   }
 
-  part("A later yes from another place is the one kept; an older tick repeated never replaces it");
+  part("A later yes from another place is the one kept; an older check repeated never replaces it");
   {
     const later = "2026-11-15T11:00:00.000Z";
     await upsertContact(listId, "ana@example.com", { agreed: true, explicit: true, source: "free", at: later, consent: "free" }, null);
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     is("the first yes's time is still the first", contact("ana@example.com")?.agreedAt, "2026-11-15T10:00:00.000Z");
   }
 
-  part("No version without words shown: a purchase without the box, or a yes nobody ticked here");
+  part("No version without words shown: a purchase without the box, or a yes nobody checked here");
   {
     await upsertContact(listId, "ben@example.com", { agreed: false, explicit: false, source: "buyer", at: "2026-11-15T10:00:00.000Z", consent: "checkout" }, null);
     is("a purchase without the box keeps no consent record", kept("ben@example.com"), [undefined, undefined, undefined]);
@@ -120,8 +120,8 @@ async function main(): Promise<void> {
 
   part("Every own yes in the code names its place");
   {
-    // Each call that records a ticked box passes `consent`; the only one without is the company's own bounce and
-    // complaint check (lib/verify-mail.ts), which no person ticked.
+    // Each call that records a checked box passes `consent`; the only one without is the company's own bounce and
+    // complaint check (lib/verify-mail.ts), which no person checked.
     const calls = (file: string) => {
       const text = readFileSync(file, "utf8");
       const found: string[] = [];

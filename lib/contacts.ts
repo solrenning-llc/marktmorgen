@@ -43,6 +43,7 @@ import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
 import { type DataOwner, orderWriteIfSame } from "@/lib/order-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { CONSENT_VERSION_PATTERN, LIST_CONSENT_VERSION, type ConsentPlace, isConsentPlace } from "@/lib/contact-consent";
 
 /** How many product names one address keeps. */
 const MAX_TITLES = 20;
@@ -89,6 +90,15 @@ export type Contact = {
    * joined; absent when they did not, or took it back. Never set by an import.
    */
   clicks?: string;
+  /**
+   * Their latest own yes (GDPR art. 7(1)): the version of the words they
+   * checked (lib/contact-consent.ts), where they gave it and when. Absent for a
+   * yes given before 15 November 2026 and for one an import or the API
+   * brought, whose words were not ours to show.
+   */
+  consentVersion?: string;
+  consentFrom?: ConsentPlace;
+  consentAt?: string;
 };
 
 // Labels' rules live with the list's other pure rules, so a page may read them too (99 [E2-TAG-BROADCAST]).
@@ -180,6 +190,10 @@ export function parseContact(raw: unknown): Contact | null {
       tags: Array.isArray(value.tags) ? readTags(value.tags.filter((t): t is string => typeof t === "string")) : [],
       importedAt: typeof value.importedAt === "string" ? value.importedAt : "",
       ...(typeof value.clicks === "string" && value.clicks ? { clicks: value.clicks } : {}),
+      // Kept whole or not at all: a version this module never writes, or a place it does not know, is no record of a yes.
+      ...(typeof value.consentVersion === "string" && CONSENT_VERSION_PATTERN.test(value.consentVersion) && isConsentPlace(value.consentFrom) && typeof value.consentAt === "string" && value.consentAt
+        ? { consentVersion: value.consentVersion, consentFrom: value.consentFrom, consentAt: value.consentAt }
+        : {}),
     };
   } catch {
     return null;
@@ -219,6 +233,8 @@ export async function upsertContact(
     clicks?: boolean;
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
+    /** Where they checked the box, for a yes they gave on one of Marktmorgen's own sentences: kept with the version of its words (lib/contact-consent.ts). */
+    consent?: ConsentPlace;
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
@@ -318,6 +334,19 @@ export async function upsertContact(
     const clicks = resubscribe ? (allowed ? input.at || now : "") : before?.clicks || (allowed ? input.at || now : "");
     if (clicks) next.clicks = clicks;
     if (deleted && !agreed) delete next.clicks;
+    // Their own yes on our words keeps which words, where and when (GDPR art. 7(1)); the latest one is kept, and an
+    // older check repeated (a thank-you page reloaded) never replaces a newer one. Kept after they leave, as the yes was.
+    const consentAt = input.at === undefined ? now : input.at;
+    const keptAt = Date.parse(before?.consentAt || "");
+    if (ownYes && agreed && input.consent && Number.isFinite(saidAt) && (!Number.isFinite(keptAt) || saidAt >= keptAt)) {
+      next.consentVersion = LIST_CONSENT_VERSION;
+      next.consentFrom = input.consent;
+      next.consentAt = consentAt;
+    } else if (before?.consentVersion && before.consentFrom && before.consentAt && !(deleted && !agreed)) {
+      next.consentVersion = before.consentVersion;
+      next.consentFrom = before.consentFrom;
+      next.consentAt = before.consentAt;
+    }
     await needContacts(room, [{ before, next }]);
     const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
     const joined = input.sid ? joinedCommands(input.sid, email) : [];

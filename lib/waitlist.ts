@@ -185,7 +185,7 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
   }
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
+    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", consent: "waitlist", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>
       console.error("could not add a waitlist address to a list", error),
     );
   }

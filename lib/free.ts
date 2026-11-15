@@ -373,6 +373,7 @@ export async function recordLead(
       explicit: claim.c,
       clicks: claim.k === true,
       source: "free",
+      consent: "free",
       sid: store.sid,
       productId: claim.p,
       title,

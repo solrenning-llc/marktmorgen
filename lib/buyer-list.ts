@@ -90,6 +90,7 @@ export async function putOnList(store: Store, order: ListedOrder): Promise<"done
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
+        consent: "checkout",
         sid: store.sid,
         clicks: order.clicks === true,
         productId: first.id,

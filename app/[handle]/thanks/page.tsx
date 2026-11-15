@@ -232,6 +232,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
+        consent: "checkout",
       }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
@@ -296,6 +297,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
+        consent: "checkout",
       }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {
@@ -361,6 +363,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
         explicit: true,
         at: new Date(order.created * 1000).toISOString(),
         source: "buyer",
+        consent: "checkout",
       }, orderRoom(store)).catch((error) => console.error("adding a buyer to a list failed", error));
     }
     if (canConfirm(store)) {

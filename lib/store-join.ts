@@ -131,7 +131,7 @@ export async function confirmJoin(token: string, store: Store | null): Promise<C
   const grant = await readJoinToken(token);
   if (!grant || !store || store.statsId !== grant.s || !store.listId) return { ok: false, reason: "expired" };
   // The list's room in the store's data room is its room too: past it, the address is not added, as on a full list.
-  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) => {
+  const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: grant.k === true, source: "free", consent: grant.f ? "form" : "join", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) => {
     if (error instanceof DataRoomError) return { joined: false, gotProduct: false, full: true };
     throw error;
   });

@@ -44,7 +44,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/discount-schedule.ts", how: "none", what: "A discount code's start and end (511 [CK3]): the code's word, its times and its tries, by the store; nothing about any buyer, so deleting a person changes nothing here" },
   { file: "lib/redis-memory.ts", how: "none", what: "In-memory database adapter: follows callers' keys and deletions and keeps no separate per-person index" },
   // ---------------------------------------------------------------- the list and email
-  { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, and whether they agreed to hear from you" },
+  { file: "lib/contacts.ts", how: "erased", what: "Their row on your list: address, name, labels, what they asked for or bought, whether they agreed to hear from you, and, when they checked the box themselves, which version of its words, where and when" },
   { file: "lib/contacts.ts", how: "erased", what: "The link in your emails that unsubscribes them" },
   { file: "lib/suppression.ts", how: "suppression", what: "A one-way fingerprint of the address, so your store never emails it again and no import puts it back. It cannot be turned back into the address. When they asked for the deletion themselves, it also notes that it was their request. Only the person can lift it, by joining your list again themselves." },
   { file: "lib/joined-stores.ts", how: "erased", via: "lib/buyer-library.ts", what: "The note that they joined your list, used to find them when they ask to be deleted everywhere" },

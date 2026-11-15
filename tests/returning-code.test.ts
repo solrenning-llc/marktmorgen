@@ -104,7 +104,8 @@ const ENDED: ReturningCode = { code: "OLDTHANKS", coupon: "cpn_ReturnOld0001", o
 let linkWrites = 0;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  for (const command of commands) if (command[0] === "SET" && String(command[1]).startsWith("nl:rcode:link:")) linkWrites += 1;
+  // A link is written by SET, or since #4769 by the step that writes it only while the address was not deleted (EVAL, its key third).
+  for (const command of commands) if ((command[0] === "SET" && String(command[1]).startsWith("nl:rcode:link:")) || (command[0] === "EVAL" && String(command[3]).startsWith("nl:rcode:link:"))) linkWrites += 1;
   return realPipeline(commands);
 }) as typeof redis.pipeline;
 

@@ -36,6 +36,7 @@ import { importedFor } from "@/lib/imported-purchases";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
+import { keepUnlessErased } from "@/lib/suppression";
 import { withinLimit } from "@/lib/request-guard";
 import { type ReturningCode, otherDiscountForAll, readLinkToken, returningCodeFor } from "@/lib/returning-code-rules";
 import { activePwyw } from "@/lib/pay-what-you-want";
@@ -127,9 +128,18 @@ export async function sendReturningLink(store: Store, productId: string, product
   if ((await paidHere(store, typed)) !== true) return;
   const token = randomBytes(32).toString("hex");
   const record: LinkRecord = { s: store.handle, p: productId, c: code.code, e: email };
-  // Only a SET answered exactly "OK" is a link (CX-123 rule 24): anything else emails nothing.
-  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(record), "EX", RETURNING_LINK_SECONDS]]), 1);
-  if (!written || written[0] !== "OK") throw new Error("a returning-buyer code link was not confirmed written");
+  if (store.listId) {
+    // Written only while neither address was deleted from the store, in the same step that reads the mark
+    // (lib/suppression.ts KEEP_UNLESS_ERASED; #4769): a deletion made before the old purchase was read, or since,
+    // leaves no link with the address and sends no email. A reply in any other shape throws: nothing is sent.
+    const gone = await keepUnlessErased(linkKey(token), store.listId, JSON.stringify(record), RETURNING_LINK_SECONDS, [email, typed]);
+    if (gone.size) return;
+  } else {
+    // A store with no list has deleted nobody (lib/person-erasure.ts makes the list before it marks anyone).
+    // Only a SET answered exactly "OK" is a link (CX-123 rule 24): anything else emails nothing.
+    const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(record), "EX", RETURNING_LINK_SECONDS]]), 1);
+    if (!written || written[0] !== "OK") throw new Error("a returning-buyer code link was not confirmed written");
+  }
   const words = returningLinkWords(store.language);
   const link = `${origin}/@${store.handle}/p/${encodeURIComponent(productId)}?rtoken=${token}#returning`;
   const sent = await send({

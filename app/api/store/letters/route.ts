@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
       const broadcast = await readBroadcast(id);
       if (!broadcast || broadcast.listId !== store.listId) return refuse("gone", "That email is not one of this store's. Reload the page.", 404);
       const done = await publishLetter(store, broadcast, Date.now(), body.products, body.open === true, body.preview);
+      // Posing as Marktmorgen (568 [GD2] (c)): the studio's sentence, with where, the passage, why and the fix.
+      if (!done.ok && done.reason === "brand_imitation") return Response.json({ ok: false, error: done.reason, message: done.message, passage: done.passage }, { status: 409 });
       if (!done.ok) return refuse(done.reason, done.message, done.reason === "unavailable" ? 503 : 409);
       return Response.json({ ok: true, path: `/@${store.handle}/letters/${done.letter.id}` });
     }

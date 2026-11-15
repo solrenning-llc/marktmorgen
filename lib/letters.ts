@@ -17,6 +17,7 @@ import type { Store } from "@/lib/store";
 import { dataBytes } from "@/lib/store-data-rules";
 import { takeData } from "@/lib/store-data";
 import type { Broadcast } from "@/lib/broadcasts";
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationMessage, imitationWhy } from "@/lib/brand-imitation-rules";
 import { itemFor } from "@/lib/catalog";
 import { LETTER_ID, LETTER_KEEP_DAYS, MAX_LETTER_PRODUCTS, MAX_PUBLISHED_LETTERS, LETTER_PREVIEW_MAX, type Letter, isPreview, letterProducts, parseLetter } from "@/lib/letter-rules";
 
@@ -60,7 +61,28 @@ export function letterRoomBytes(letter: Letter): number {
   return dataBytes([JSON.stringify(letter), letter.id], 2);
 }
 
-export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not_sent" | "products" | "preview" | "kept" | "full" | "too_many" | "unavailable"; message: string };
+export type Published =
+  | { ok: true; letter: Letter }
+  | { ok: false; reason: "not_sent" | "products" | "preview" | "kept" | "full" | "too_many" | "unavailable"; message: string }
+  | { ok: false; reason: "brand_imitation"; message: string; passage: LetterImitation };
+
+/** Where in a sent email words posing as Marktmorgen were found, with the passage, why and the fix (568 [GD2] (c)). */
+export type LetterImitation = { field: "subject" | "body"; excerpt: string; why: string; fix: string };
+
+/**
+ * The part of a sent email that poses as Marktmorgen itself, or null (568 [GD2] (c), lib/brand-imitation-rules.ts).
+ * A published email is a page of the store anybody may be sent to, so one reading "Marktmorgen Support: verify your
+ * account" is a phishing page on marktmorgen.com. List emails are held to the rule when they are sent; one sent before
+ * that is held to it here, when it would be published.
+ */
+export function letterImitation(broadcast: Pick<Broadcast, "subject" | "body">): LetterImitation | null {
+  for (const field of ["subject", "body"] as const) {
+    const words = typeof broadcast[field] === "string" ? broadcast[field].slice(0, MAX_TEXT) : "";
+    const found = imitationIn(words);
+    if (found) return { field, excerpt: excerptAt(words, found.at, found.length), why: imitationWhy("the email cannot be published with it"), fix: IMITATION_FIX };
+  }
+  return null;
+}
 
 /**
  * Publishes one email the store sent: a copy of its subject and words as
@@ -79,6 +101,12 @@ export type Published = { ok: true; letter: Letter } | { ok: false; reason: "not
 export async function publishLetter(store: Store, broadcast: Broadcast, now = Date.now(), products?: unknown, open = false, preview?: unknown): Promise<Published> {
   if (!isRedisConfigured() || !store.sid) return { ok: false, reason: "unavailable", message: "This can't be saved right now. Try again in a minute." };
   if (!store.listId || broadcast.listId !== store.listId || broadcast.status !== "sent") return { ok: false, reason: "not_sent", message: "Only an email this store has sent can be published." };
+  // Asked before anything is read or written: nothing is published, and the email is not changed.
+  const posing = letterImitation(broadcast);
+  if (posing) {
+    const where = posing.field === "subject" ? "the subject line" : "the email's text";
+    return { ok: false, reason: "brand_imitation", message: imitationMessage(posing, where, "This email was not published"), passage: posing };
+  }
   const refuse: Published = { ok: false, reason: "products", message: `Check up to ${MAX_LETTER_PRODUCTS} of this store's products. Reload the page if one was just deleted.` };
   const keep = products === undefined || products === null;
   if (!keep && !Array.isArray(products)) return refuse;

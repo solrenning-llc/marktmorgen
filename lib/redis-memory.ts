@@ -63,9 +63,20 @@ export class MemoryRedis {
     return [...this.data.keys()].sort();
   }
 
+  /**
+   * Keys a command made or changed as a hash, set, list or sorted set: one left empty when the command ends is
+   * deleted with its expiry, as Redis keeps no empty collection (a read of a missing key makes none, a removal of the
+   * last member deletes it).
+   */
+  private touched = new Set<string>();
+  /** How deep run() is (a script's own commands run inside it): the empty ones are dropped when the outermost ends. */
+  private depth = 0;
+
   private list(key: string): string[] {
     const held = this.data.get(key);
+    this.touched.add(key);
     if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "string")) return held as string[];
+    if (held !== undefined) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
     const made: string[] = [];
     this.data.set(key, made);
     return made;
@@ -73,7 +84,9 @@ export class MemoryRedis {
 
   private hash(key: string): Map<string, string> {
     const held = this.data.get(key);
+    this.touched.add(key);
     if (held instanceof Map) return held;
+    if (held !== undefined) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
     const made = new Map<string, string>();
     this.data.set(key, made);
     return made;
@@ -81,14 +94,27 @@ export class MemoryRedis {
 
   private set(key: string): Set<string> {
     const held = this.data.get(key);
+    this.touched.add(key);
     if (held instanceof Set) return held;
+    if (held !== undefined) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
     const made = new Set<string>();
     this.data.set(key, made);
     return made;
   }
 
+  /** Drops what a command left as an empty collection, with its expiry (touched). */
+  private dropEmptyTouched(): void {
+    for (const key of this.touched) {
+      const held = this.data.get(key);
+      const empty = (held instanceof Map || held instanceof Set) ? held.size === 0 : Array.isArray(held) && held.length === 0;
+      if (empty) this.forgetKey(key);
+    }
+    this.touched.clear();
+  }
+
   /** The sorted set at `key` for a command that writes one (ZADD, ZINCRBY): made when missing; WRONGTYPE for a key of another kind, as Redis answers, never overwritten. */
   private zset(key: string): { score: number; member: string }[] {
+    this.touched.add(key);
     if (!this.data.has(key)) {
       const made: { score: number; member: string }[] = [];
       this.data.set(key, made);
@@ -132,6 +158,16 @@ export class MemoryRedis {
 
   /** Runs one command, the way redisPipeline runs each of its own. */
   run(command: (string | number)[]): unknown {
+    this.depth += 1;
+    try {
+      return this.runOne(command);
+    } finally {
+      this.depth -= 1;
+      if (this.depth === 0) this.dropEmptyTouched();
+    }
+  }
+
+  private runOne(command: (string | number)[]): unknown {
     const [rawName, ...rest] = command;
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");
@@ -1984,6 +2020,7 @@ export class MemoryRedis {
         // Returns the new total, which is how lib/delivery.ts knows the
         // exact delivery that took a store past its allowance.
         const held = this.data.get(key);
+        if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
         const by = (Number(args[0]) || 0) * (name === "DECRBY" ? -1 : 1);
         const next = (typeof held === "string" ? Number(held) || 0 : 0) + by;
         this.data.set(key, String(next));
@@ -1992,6 +2029,7 @@ export class MemoryRedis {
       case "INCR":
       case "DECR": {
         const held = this.data.get(key);
+        if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
         const next = (typeof held === "string" ? Number(held) || 0 : 0) + (name === "DECR" ? -1 : 1);
         this.data.set(key, String(next));
         return next;

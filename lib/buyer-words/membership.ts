@@ -213,6 +213,8 @@ const en = {
   askSee: "See exactly what you would pay today, before anything is charged:",
   askWorks: "The link works for 14 days and opens only this change. Nothing changes unless you press the button on that page.",
   askReply: (store: string) => `Questions? Reply to this email and it reaches ${store}.`,
+  /** 361 [AP1] (d): the creator's own discount on the first year, through this email only; the renewal said. */
+  askOfferLine: (percent: string, first: string, renewal: string) => `Through this email, your first year is ${first}, ${percent} off, and it renews at ${renewal} a year.`,
 
   // ---- Switching to another plan ------------------------------------------------------
   switchProblems: {
@@ -591,6 +593,7 @@ const es: MembershipWords = {
   askSee: "Mira exactamente lo que pagarías hoy, antes de que se cobre nada:",
   askWorks: "El enlace funciona 14 días y solo abre este cambio. No cambia nada a menos que pulses el botón de esa página.",
   askReply: (store) => `¿Dudas? Responde a este correo y le llegará a ${store}.`,
+  askOfferLine: (percent, first, renewal) => `Con este correo, tu primer año cuesta ${first}, un ${percent} menos, y se renueva a ${renewal} al año.`,
 
   switchProblems: {
     expired: { title: "Este enlace ha expirado", body: "Un enlace a tu membresía funciona durante una hora. Pide uno nuevo en la página de tu membresía." },
@@ -960,6 +963,7 @@ const fr: MembershipWords = {
   askSee: "Voyez exactement ce que vous paieriez aujourd'hui, avant que rien ne soit débité :",
   askWorks: "Le lien fonctionne 14 jours et n'ouvre que ce changement. Rien ne change tant que vous n'appuyez pas sur le bouton de cette page.",
   askReply: (store) => `Des questions ? Répondez à cet e-mail et ${store} le recevra.`,
+  askOfferLine: (percent, first, renewal) => `Avec cet e-mail, votre première année coûte ${first}, soit ${percent} de moins, puis se renouvelle à ${renewal} par an.`,
 
   switchProblems: {
     expired: { title: "Ce lien a expiré", body: "Un lien vers votre abonnement fonctionne pendant une heure. Demandez-en un nouveau sur la page de votre abonnement." },
@@ -1331,6 +1335,7 @@ const de: MembershipWords = {
   askSee: "Sehen Sie genau, was Sie heute zahlen würden, bevor etwas berechnet wird:",
   askWorks: "Der Link gilt 14 Tage und öffnet nur diese Änderung. Es ändert sich nichts, solange Sie nicht auf den Knopf auf dieser Seite drücken.",
   askReply: (store) => `Fragen? Antworten Sie auf diese E-Mail, sie erreicht ${store}.`,
+  askOfferLine: (percent, first, renewal) => `Über diese E-Mail kostet Ihr erstes Jahr ${first}, ${percent} weniger, danach verlängert es sich zu ${renewal} pro Jahr.`,
 
   switchProblems: {
     expired: {
@@ -1715,6 +1720,7 @@ const it: MembershipWords = {
   askSee: "Guarda esattamente quanto pagheresti oggi, prima che venga addebitato qualcosa:",
   askWorks: "Il link funziona per 14 giorni e apre solo questo cambio. Non cambia nulla finché non premi il pulsante su quella pagina.",
   askReply: (store) => `Domande? Rispondi a questa email e arriverà a ${store}.`,
+  askOfferLine: (percent, first, renewal) => `Con questa email il tuo primo anno costa ${first}, il ${percent} in meno, e si rinnova a ${renewal} all'anno.`,
 
   switchProblems: {
     expired: { title: "Questo link è scaduto", body: "Un link al tuo abbonamento funziona per un'ora. Chiedine uno nuovo dalla pagina del tuo abbonamento." },
@@ -2084,6 +2090,7 @@ const nl: MembershipWords = {
   askSee: "Zie precies wat je vandaag zou betalen, voordat er iets wordt afgeschreven:",
   askWorks: "De link werkt 14 dagen en opent alleen deze wijziging. Er verandert niets tenzij je op de knop op die pagina drukt.",
   askReply: (store) => `Vragen? Beantwoord deze e-mail en het komt bij ${store}.`,
+  askOfferLine: (percent, first, renewal) => `Via deze e-mail kost je eerste jaar ${first}, ${percent} minder, en daarna verlengt het voor ${renewal} per jaar.`,
 
   switchProblems: {
     expired: { title: "Deze link is verlopen", body: "Een link naar je lidmaatschap werkt een uur. Vraag een nieuwe aan op de pagina van je lidmaatschap." },
@@ -2451,6 +2458,7 @@ const pt: MembershipWords = {
   askSee: "Veja exatamente quanto pagaria hoje, antes de qualquer cobrança:",
   askWorks: "A ligação funciona durante 14 dias e abre apenas esta alteração. Nada muda a menos que carregue no botão dessa página.",
   askReply: (store) => `Dúvidas? Responda a este email e chega a ${store}.`,
+  askOfferLine: (percent, first, renewal) => `Através deste email, o seu primeiro ano custa ${first}, menos ${percent}, e renova a ${renewal} por ano.`,
 
   switchProblems: {
     expired: { title: "Esta ligação expirou", body: "Uma ligação para a sua subscrição funciona durante uma hora. Peça uma nova na página da sua subscrição." },

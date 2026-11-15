@@ -23,6 +23,7 @@
  *     all twelve. A share for as long as the member pays is the same either
  *     way, so it does not stop the offer.
  */
+import { readAskPercent } from "@/lib/yearly-ask-offer-rules";
 import { RECURRING_ALWAYS } from "@/lib/affiliate-setting";
 import { type YearlyCandidate, type Yearly, activeYearly } from "@/lib/yearly-price";
 
@@ -123,11 +124,12 @@ export function askFits(sub: YearlySub, nowSeconds: number): boolean {
 }
 
 /** The email offering yearly: on, and the postal address every list email carries. */
-export type YearlyAsk = { on: boolean; address: string };
-export const NO_YEARLY_ASK: YearlyAsk = { on: false, address: "" };
+/** `percent`: the creator's own discount on the first year through this email (361 [AP1] (d), lib/yearly-ask-offer-rules.ts); 0 for none. */
+export type YearlyAsk = { on: boolean; address: string; percent: number };
+export const NO_YEARLY_ASK: YearlyAsk = { on: false, address: "", percent: 0 };
 
 export function parseYearlyAsk(raw: unknown): YearlyAsk {
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const address = typeof value.address === "string" ? value.address.replace(/\s+/g, " ").trim().slice(0, 300) : "";
-  return { on: value.on === true && address.length > 0, address };
+  return { on: value.on === true && address.length > 0, address, percent: readAskPercent(value.percent) };
 }

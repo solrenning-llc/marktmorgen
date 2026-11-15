@@ -129,6 +129,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
+        if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, pool, bound, ...keys] = args;
+          const length = Number(this.run(["LLEN", pool]));
+          const n = Math.max(0, Math.min(keys.length, Number(bound) - length));
+          for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
+          return n;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

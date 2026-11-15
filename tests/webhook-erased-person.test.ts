@@ -13,6 +13,7 @@ import net from "node:net";
 import { MAX_ATTEMPTS, RETRY_MINUTES, addEndpoint, deliverDue, emitEvent, resendDelivery, setSendHooksForTests, webhooksView } from "@/lib/webhooks";
 import { claimHandle, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { erasePerson } from "@/lib/person-erasure";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -74,6 +75,9 @@ async function main(): Promise<void> {
   const added = await addEndpoint(store, "https://hooks.example.com/sales", ["sale.completed"]);
   if (!added.ok) throw new Error("not added");
   let when = Date.now();
+  // One clock for the tries and for Redis's (the stand-in's TIME is Date.now), so a deletion's second and a message's
+  // time compare as they would on one server: the tries below move hours ahead of the wall clock.
+  Date.now = () => when;
   const nextTry = async (minutes: number) => {
     when += minutes * 60_000 + 1000;
     await deliverDue(when + 60_000, when);
@@ -130,6 +134,26 @@ async function main(): Promise<void> {
   is("the retry did not go out while the mark was unread", sentTo("unsure@example.com"), 1);
   await nextTry(RETRY_MINUTES[1]);
   is("it is sent at the next try, once the mark reads", sentTo("unsure@example.com"), 2);
+
+  part("A person deleted and back since is told of what they did after it (MQ-PRE on #4555)");
+  await erasePerson(store, "back@example.com", { kind: "person" });
+  store = (await storeForEmail("hk-owner@example.com"))!;
+  // A new sale made after the deletion, two seconds past it on any clock.
+  const after = when + 2000;
+  await emitEvent(store, "sale.completed", "cs_hk_0006", { amount_cents: 4900, buyer: { email: "back@example.com", name: null } }, after);
+  await deliverDue(after + 60_000, after);
+  is("the sale made after the deletion is sent", sentTo("back@example.com"), 1);
+
+  part("A deletion mark that does not read as a second holds the delivery, and one from before it lets it go");
+  if (!store.listId) throw new Error("no list");
+  const odd = "odd@example.com";
+  await original([["HSET", suppressedKey(store.listId), suppressionPrint(store.listId, odd), "soon"]]);
+  await emitEvent(store, "sale.completed", "cs_hk_0007", { amount_cents: 4900, buyer: { email: odd, name: null } }, when);
+  await deliverDue(when + 60_000, when);
+  is("a mark that is not a second sends nothing", sentTo(odd), 0);
+  await original([["HSET", suppressedKey(store.listId), suppressionPrint(store.listId, odd), 0]]);
+  await nextTry(RETRY_MINUTES[0]);
+  is("a mark from before the sale lets it go at the next try", sentTo(odd), 1);
 
   server.close();
   done();

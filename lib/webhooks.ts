@@ -598,19 +598,32 @@ export function addressesIn(body: string): string[] {
 }
 
 /**
- * Whether a person named in a delivery's message has been deleted from the store since (lib/suppression.ts), read
- * now, before anything is sent: lib/person-data.ts says a webhook's message is never acted on for a deleted address
- * (Claude 7's webhook hunt, 14 November 2026). One HMGET of the store's prints for every address in it, read whole
- * (wholeErasedReply): any other reply throws UnknownReplyError, never "not deleted". A message with no address, or a
- * store with no list (its deletion marks are kept under its list), names nobody deleted, and reads nothing.
+ * Whether a person named in a delivery's message was deleted from the store since the message was made
+ * (lib/suppression.ts), read now, before anything is sent: lib/person-data.ts says a webhook's message is never acted
+ * on for a deleted address (Claude 7's webhook hunt, 14 November 2026). One HMGET of the store's prints for every
+ * address in it, read whole (wholeErasedReply): any other reply throws UnknownReplyError, never "not deleted". A
+ * message with no address, or a store with no list (its deletion marks are kept under its list), names nobody
+ * deleted, and reads nothing.
+ *
+ * A print keeps the second of the deletion (ERASED_PRINT). Only a message made before it, or in the same second, is
+ * held, as lib/paypal-delivery.ts KEEP_RECEIPT reads it: a person deleted and back since (a new purchase) is told
+ * of what they did after it. A print or a message time that does not read as a second is unknown (rule 24): it
+ * throws UnknownReplyError, so the message is held and tried again, never sent on a guess.
  */
-async function namesErased(store: Pick<Store, "listId">, body: string): Promise<boolean> {
+async function namesErased(store: Pick<Store, "listId">, body: string, createdAt: number): Promise<boolean> {
   const addresses = addressesIn(body);
   if (!store.listId || addresses.length === 0) return false;
   // More than the check reads is not read as "not deleted": the message is held as unknown.
   if (addresses.length > ERASED_CHECK_MAX) throw new UnknownReplyError("the people a webhook message names");
+  if (typeof createdAt !== "number" || !Number.isFinite(createdAt) || createdAt < 0) throw new UnknownReplyError("when a webhook message was made");
+  const madeSecond = Math.floor(createdAt / 1000);
   const [reply] = await redisPipeline([suppressedAmongCommand(store.listId, addresses)]);
-  return wholeErasedReply(reply, addresses.length).some((print) => print !== null);
+  return wholeErasedReply(reply, addresses.length).some((print) => {
+    if (print === null) return false;
+    const at = typeof print === "number" ? print : /^\d{1,15}$/.test(print) ? Number(print) : NaN;
+    if (!Number.isSafeInteger(at)) throw new UnknownReplyError("when a person was deleted from the store");
+    return at >= madeSecond;
+  });
 }
 
 /** One try of one delivery. Returns the delivery as it stands after it. */
@@ -653,7 +666,7 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
   if (store !== "taken" && delivery.type !== "test") {
     let erased: boolean;
     try {
-      erased = await namesErased(store, delivery.body);
+      erased = await namesErased(store, delivery.body, delivery.createdAt);
     } catch (error) {
       if (!(error instanceof UnknownReplyError)) throw error;
       console.error("WEBHOOK DELETION MARKS UNREAD: the delivery is held, not sent", delivery.statsId, delivery.id, next.attempts);
@@ -1337,7 +1350,7 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   // Never sent again by hand about a person deleted from the store since (namesErased); a mark that cannot be read
   // is unknown, never "not deleted": nothing is marked, taken or sent.
   try {
-    if (await namesErased(store, before.body)) return { ok: false, reason: "missing" };
+    if (await namesErased(store, before.body, before.createdAt)) return { ok: false, reason: "missing" };
   } catch (error) {
     if (!(error instanceof UnknownReplyError)) throw error;
     return { ok: false, reason: "unavailable" };

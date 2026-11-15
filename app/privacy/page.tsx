@@ -149,6 +149,19 @@ export default function PrivacyPage() {
           list&apos;s own one-click unsubscribe.
         </p>
         <p>
+          <strong className="text-black">A reminder before a membership ends.</strong>{" "}
+          Only on stores whose creator switched it on, and only to somebody who
+          agreed to hear from that creator and has not left their list: when a
+          membership is set to end, we read from the creator&apos;s Stripe
+          account when it ends, which product it is and the address it is paid
+          from, read it again just before sending, and email that address once,
+          the day before it ends, on the creator&apos;s behalf, with the date and
+          the link to their membership page. We keep a mark that the reminder
+          for that membership and that end date went, by the Stripe
+          subscription and never by address, for 400 days. It carries the
+          creator&apos;s list&apos;s own one-click unsubscribe.
+        </p>
+        <p>
           <strong className="text-black">Managing a membership.</strong> When
           a member asks for a link to manage or cancel their membership, we use
           the email address they type to look for their membership on the

@@ -405,3 +405,8 @@ export async function pressLever(
   if (outcome.state === "refused") return { ...view, outcome };
   return { flipped: "unknown", undo: false, outcome };
 }
+
+/** The switch the card draws, from the server's control as the page was last rendered and the card's own view. */
+export function shownSwitch(control: LeverSwitch, view: SwitchView): LeverSwitch {
+  return switchNow(control, view.flipped === true);
+}

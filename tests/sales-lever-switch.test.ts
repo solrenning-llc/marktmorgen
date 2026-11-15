@@ -22,6 +22,7 @@ import {
   type LeverSwitch,
   leverToggle,
   pressLever,
+  shownSwitch,
   switchBack,
 } from "@/lib/sales-lever-toggle-rules";
 import { SalesLevers, addOnFact } from "@/components/sales-levers";
@@ -299,3 +300,25 @@ test("the switch follows the switch pattern without a time limit, motion or colo
   assert.match(source, /aria-disabled=\{/);
   assert.doesNotMatch(source, /\sdisabled=\{/);
 });
+
+test("after a saved switch, a refresh of the page draws the saved state, never its opposite (Claude 7's MÉDIO 1 on #3563)", async () => {
+  const { session, read } = await world();
+  assert.ok(await setNextOffer(OWNER, { on: true, email: true }));
+  const post = poster(session);
+  const before = toggle(await read(), "next", true);
+  const off = await pressLever(before, SWITCH_START, "switch", post);
+  assert.equal(off.outcome?.state, "saved");
+  assert.equal(shownSwitch(before, off).on, false, "before any refresh: off");
+  // Any save elsewhere on the studio page calls router.refresh(): the server renders the card's control from the
+  // saved store again, and React keeps the card's own state.
+  const refreshed = toggle(await read(), "next", true);
+  assert.equal(refreshed.on, false);
+  assert.equal(shownSwitch(refreshed, off).on, false, "after a refresh: still off, as saved");
+  // Undo from the refreshed page turns it back on, and a refresh after that still says on.
+  const undone = await pressLever(refreshed, off, "undo", post);
+  assert.equal(undone.outcome?.state, "saved");
+  assert.deepEqual((await read()).nextOffer, { on: true, email: true });
+  assert.equal(shownSwitch(refreshed, undone).on, true);
+  assert.equal(shownSwitch(toggle(await read(), "next", true), undone).on, true);
+});
+

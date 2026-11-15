@@ -4,7 +4,7 @@ import { LegalPage, LegalSection } from "@/components/legal-page";
 import { API_PAGE, LEAD_LOOKUP_MOST } from "@/lib/api-read";
 import { API_RATE } from "@/lib/api-guard";
 import { FIELD_NAME_MAX, MAX_FIELDS_ASKED } from "@/lib/api-fields";
-import { DELIVERY_WRITE_MAX_BYTES, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
+import { DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
 import { MAX_KEYS } from "@/lib/api-key-rules";
 import { ADDS_PER_DAY, GIVES_PER_DAY } from "@/lib/api-write";
 import { API_SALES_UNITS, API_WRITE_UNITS, NON_PAYING_ALLOWANCES, STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -84,7 +84,7 @@ const BASE = "https://marktmorgen.com/api/v1";
 
 export default function DevelopersPage() {
   return (
-    <LegalPage title="Developers" eyebrow="For your own tools" effective={null} legalNav={false} lastUpdated="November 2, 2026">
+    <LegalPage title="Developers" eyebrow="For your own tools" effective={null} legalNav={false} lastUpdated="November 15, 2026">
       <p>
         Read your store from your own tools: your list, your community&apos;s members, a course&apos;s students, your
         affiliates and your bookings; and, with a key made to write, add people to your list, label them, and give or
@@ -620,6 +620,39 @@ export default function DevelopersPage() {
 
 200  {"data": {"email": "dana@example.com", "product": "k3j9x2p1ab", "status": "taken_back"}}`}</Code>
         <p>{`A store may give ${GIVES_PER_DAY.toLocaleString("en-US")} products a day through the API. A body is JSON of up to 4,000 bytes.`}</p>
+      </LegalSection>
+
+      <LegalSection title="Webhooks">
+        <p>
+          Your store can send what happens in it to up to {MAX_ENDPOINTS} addresses of your own (the{" "}
+          <Link href="/help#can-i-connect-zapier-make-or-my-own-server" className="text-black underline underline-offset-2 hover:no-underline">
+            webhooks
+          </Link>
+          ). A key that writes can add and remove them, as your studio&apos;s Webhooks page does; your inbox is told of
+          each one added or removed.
+        </p>
+        <Endpoint method="POST" path="/api/v1/hooks">
+          Adds an address: <code className="font-mono">{`{"url": "https://…", "events": ["sale.completed"]}`}</code>. The
+          answer has its <code className="font-mono">id</code> and its signing <code className="font-mono">secret</code>,
+          this once.
+        </Endpoint>
+        <Endpoint method="DELETE" path="/api/v1/hooks">
+          Removes one: <code className="font-mono">{`{"id": "we_…"}`}</code>.
+        </Endpoint>
+        <Endpoint method="POST" path="/api/v1/hooks/test">
+          Sends one test message to one address now, as your studio&apos;s Send test does:{" "}
+          <code className="font-mono">{`{"id": "we_…"}`}</code>. It is signed like every message, its type is{" "}
+          <code className="font-mono">test</code>, and nothing happens in your store. It is tried once, never again, and
+          the answer says whether the address took it, the status it answered (0 when it did not answer) and, when it
+          failed, why. It is one of your store&apos;s webhook deliveries for the month, taken before it is sent; with none
+          left the answer is 429 <code className="font-mono">monthly_limit</code> and nothing is sent. A store can send ten
+          tests a minute; past them the answer is 429 <code className="font-mono">rate_limited</code>.
+        </Endpoint>
+        <Code>{`{"id": "we_0123456789abcdef"}
+
+200  {"data": {"delivery": "dlv_…", "endpoint": "we_0123456789abcdef", "type": "test", "delivered": true, "status": 200, "error": null, "sent_at": "2026-11-15T14:05:00.000Z"}}
+200  {"data": {"delivery": "dlv_…", "endpoint": "we_0123456789abcdef", "type": "test", "delivered": false, "status": 500, "error": "…", "sent_at": "2026-11-15T14:05:00.000Z"}}
+404  {"error": "not_found", "message": "No endpoint with that id on this store."}`}</Code>
       </LegalSection>
 
       <LegalSection title="Sales and refunds">

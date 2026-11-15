@@ -1479,11 +1479,25 @@ export async function resendDelivery(store: Store, deliveryId: string, now = Dat
   return { ok: true, delivery: done, view: await webhooksView(store) };
 }
 
+/** What a test message says, by where it was asked for: the studio's Webhooks page, or a request with an API key (POST /api/v1/hooks/test). */
+export const TEST_MESSAGE_WORDS = {
+  studio: "A test from your Marktmorgen studio. Nothing happened in your store.",
+  api: "A test sent with one of your store's API keys. Nothing happened in your store.",
+} as const;
+
 /**
  * Sends one test message to one endpoint, now, and says how it went. Tried
- * once, never retried, and listed with the rest.
+ * once, never retried, and listed with the rest. `via` says where it was
+ * asked for (its words, TEST_MESSAGE_WORDS); `view: false` leaves the studio's
+ * view, with its delivery log, unread, for an answer that never sends it (the
+ * API's, inside one API request).
  */
-export async function sendTest(store: Store, id: string, now = Date.now()): Promise<{ ok: true; delivery: Delivery; view: WebhooksView } | { ok: false; reason: "missing" | "limited" | "unavailable" } | { ok: false; reason: "used" | "held"; message: string }> {
+export async function sendTest(
+  store: Store,
+  id: string,
+  now = Date.now(),
+  { via = "studio", view = true }: { via?: keyof typeof TEST_MESSAGE_WORDS; view?: boolean } = {},
+): Promise<{ ok: true; delivery: Delivery; view: WebhooksView | null } | { ok: false; reason: "missing" | "limited" | "unavailable" } | { ok: false; reason: "used" | "held"; message: string }> {
   if (!store.statsId) return { ok: false, reason: "missing" };
   const statsId = store.statsId;
   const config = await readConfig(statsId);
@@ -1506,7 +1520,7 @@ export async function sendTest(store: Store, id: string, now = Date.now()): Prom
     type: "test",
     created: Math.floor(now / 1000),
     store: { handle: store.handle, name: store.name, url: `${SITE_URL}/@${store.handle}` },
-    data: { message: "A test from your Marktmorgen studio. Nothing happened in your store." },
+    data: { message: TEST_MESSAGE_WORDS[via] },
   });
   const delivery: Delivery = {
     id: `dlv_${randomBytes(12).toString("hex")}`,
@@ -1529,7 +1543,7 @@ export async function sendTest(store: Store, id: string, now = Date.now()): Prom
     ["LPUSH", logKey(statsId), done.id],
     ["LTRIM", logKey(statsId), 0, LOG_SIZE - 1],
   ]);
-  return { ok: true, delivery: done, view: await webhooksView(store) };
+  return { ok: true, delivery: done, view: view ? await webhooksView(store) : null };
 }
 
 // ---- Reading Stripe for what happened there ---------------------------------

@@ -21,6 +21,9 @@ import { readFileSync } from "node:fs";
 import { PRICE_JUMP_FACTOR, confirmedPrice, priceJump, priceJumpWords } from "@/lib/price-jump-rules";
 import { addProduct, claimHandle, editProduct, setProductHidden, setSubscription } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { type PricedProduct, priceReview } from "@/lib/price-review";
+import { formatMoney, readMoney } from "@/lib/money";
+import { priceCheckMessage } from "@/components/product-editor";
 import { storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -43,7 +46,7 @@ async function main(): Promise<void> {
   is("an unreadable price is not judged here", [priceJump(Number.NaN, 1000), priceJump(1000, -5), priceJump(1.5, 1000)], [null, null, null]);
   is("a confirmation names the new price exactly", [confirmedPrice(100000), confirmedPrice("100000"), confirmedPrice(1.5), confirmedPrice(-1), confirmedPrice(null), confirmedPrice(undefined)], [100000, 100000, null, null, null, null]);
   const said = priceJumpWords({ way: "up", times: 100 }, "$10.00", "$1,000.00");
-  is("the words say both prices and how many times", [said.includes("$10.00"), said.includes("$1,000.00"), said.includes("100 times")], [true, true, true]);
+  is("the words say both prices and how many times", [said.includes("$10.00"), said.includes("$1,000"), said.includes("100 times")], [true, true, true]);
   is("down says less", priceJumpWords({ way: "down", times: 10 }, "$100.00", "$10.00").includes("a tenth"), true);
 
   part("The save, under the store's lock");
@@ -80,6 +83,18 @@ async function main(): Promise<void> {
   const internal = await editProduct(OWNER, id, "Workbook", "", "10");
   is("a save from the code itself (no check asked, the demo's reset) is not held", internal.ok, true);
 
+  part("Check what buyers pay says the jump and names the price");
+  const product: PricedProduct = { hidden: false, options: 0, priceCents: 1000, interval: null, suggestedCents: null, intro: null, yearlyCents: null, id: "p1", tiers: [], bounds: { min: 100, max: 500_000 }, refuses: { free: false, membership: false, choose: false }, taxOnTop: false, plan: null, planBefore: false, planAfter: () => false };
+  const typed = (price: string) => priceReview(product, { title: "Workbook", summary: "", about: "", price, every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "" }, (t) => readMoney(t, "usd"), (c) => formatMoney(c, "usd"));
+  const big = typed("1000");
+  is("$10 to $1,000: the jump is said with both prices, and the save names $1,000", [big?.jump?.includes("$1,000"), big?.jump?.includes("now, $10."), big?.confirmCents], [true, true, 100000]);
+  const fine = typed("25");
+  is("$10 to $25: no jump, nothing named", [fine?.jump, fine?.confirmCents, fine?.rows.length], [undefined, undefined, 1]);
+  is("with price options (priced in each option), no jump", priceReview({ ...product, options: 2 }, { title: "Workbook", summary: "", about: "", price: "1000", every: "", pwyw: false, suggested: "", introPrice: "", introCount: "1", yearlyPrice: "" }, (t) => readMoney(t, "usd"), (c) => formatMoney(c, "usd"))?.jump, undefined);
+  const held = priceCheckMessage({ beforeCents: 1000, afterCents: 100000 }, "usd");
+  is("a held save says nothing was saved, both prices and how to confirm", [/^Your changes were not saved\./.test(held), held.includes("$1,000"), held.includes("now, $10."), /Check what buyers pay/.test(held)], [true, true, true, true]);
+  is("an unreadable answer still says what to do", /^Your changes were not saved\. Check the price/.test(priceCheckMessage(undefined, "usd")), true);
+
   part("The route and the studio");
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
   is("the route passes what the creator confirmed", /editProduct\(ref, id, title, summary, price, recurring, suggested, \{ confirmedCents: confirmedPrice\(body\.confirmPrice\) \}\)/.test(route), true);
@@ -87,7 +102,7 @@ async function main(): Promise<void> {
   const store = readFileSync("lib/store.ts", "utf8");
   is("the price now is read under the lock (inside onProduct)", /onProduct<[^>]*"price_check"/.test(store) && /priceJump\(product\.priceCents, fields\.priceCents\)/.test(store), true);
   const editor = readFileSync("components/product-editor.tsx", "utf8");
-  is("the studio sends the price it showed", /confirmPrice:/.test(editor), true);
+  is("the studio sends the price it showed, only once the review was shown", /priceReview === product.id && review\?\.confirmCents !== undefined\) payload\.confirmPrice = review\.confirmCents/.test(editor), true);
   is("the studio says a price_check refusal in words", /data\.error === "price_check"/.test(editor), true);
   const review = readFileSync("lib/price-review.ts", "utf8");
   is("Check what buyers pay says the jump", /priceJumpWords\(/.test(review), true);

@@ -1,5 +1,6 @@
 "use client";
 
+import { priceJump, priceJumpWords } from "@/lib/price-jump-rules";
 import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
@@ -240,6 +241,19 @@ function payloadOf(draft: Draft): Record<string, unknown> {
   };
 }
 
+/**
+ * The words for a save the product route held because its price moves ten times up or down (lib/price-jump-rules.ts)
+ * and was not confirmed: in this tab the check was skipped, or the price changed in another one.
+ */
+export function priceCheckMessage(raw: unknown, currency: Currency): string {
+  const said = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const before = typeof said.beforeCents === "number" ? said.beforeCents : null;
+  const after = typeof said.afterCents === "number" ? said.afterCents : null;
+  const jump = before !== null && after !== null ? priceJump(before, after) : null;
+  const what = jump ? `${priceJumpWords(jump, formatMoney(before!, currency), formatMoney(after!, currency))} ` : "";
+  return `Your changes were not saved. ${what}Check the price, then select Save and confirm it in "Check what buyers pay".`;
+}
+
 /** Whether what was typed in the price field means free. */
 function typedFree(price: string): boolean {
   return /^0+(\.0{1,2})?$/.test(price.trim());
@@ -289,6 +303,8 @@ async function send(
       return wrong(why === "suggested" || !PWYW_MESSAGES[why] ? pwywSuggested(currency) : PWYW_MESSAGES[why]);
     }
     if (data.error === "price") return wrong(productPrice(currency));
+    // A price ten times up or down that this save did not name (569 [NC1] (b)): both prices, and how to confirm it.
+    if (data.error === "price_check") return wrong(priceCheckMessage((data as { priceJump?: unknown }).priceJump, currency));
     if (data.error === "outline_left") {
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
@@ -2268,6 +2284,8 @@ export function ProductEditor({
               const save = () => {
                 const payload = payloadOf(draft);
                 if (aboutUnread && !draft.about) delete payload.about;
+                // The price the creator has just seen in "Check what buyers pay", named so a jump of ten times is let through.
+                if (priceReview === product.id && review?.confirmCents !== undefined) payload.confirmPrice = review.confirmCents;
                 run(
                   { action: "edit", id: product.id, ...payload },
                   () => {
@@ -2310,6 +2328,7 @@ export function ProductEditor({
               {priceReview === product.id && review ? (
                 <div className="mt-3 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
                   <h3 id={`product-${product.id}-price-review-title`} tabIndex={-1} className="font-semibold">Check what buyers pay</h3>
+                  {review.jump ? <p className="mt-2 font-semibold">{review.jump}</p> : null}
                   {/* A summary list (GOV.UK "Check answers"): what buyers pay changes as soon as it is saved. */}
                   <dl className="mt-2 divide-y divide-line">
                     {review.rows.map((row) => (

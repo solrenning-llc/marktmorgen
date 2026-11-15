@@ -27,6 +27,7 @@ import { readRecurring } from "@/lib/product-recurring";
 import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
+import { confirmedPrice } from "@/lib/price-jump-rules";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -55,7 +56,7 @@ const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "vis
 /** What one change came to: the product as saved, when there is one to show. */
 type Outcome =
   | { ok: true; product: Product | null }
-  | { ok: false; reason: string; limit?: number; pwyw?: string };
+  | { ok: false; reason: string; limit?: number; pwyw?: string; priceJump?: { beforeCents: number; afterCents: number; way: "up" | "down"; times: number } };
 
 /**
  * What a saved change has just stopped buyers being shown.
@@ -105,6 +106,7 @@ async function silenced(email: string, changedId: string): Promise<string[]> {
 /** How firmly to answer when a change is refused. */
 const STATUS: Record<string, number> = {
   too_many: 409,
+  price_check: 409,
   unknown: 404,
   unavailable: 503,
 };
@@ -251,7 +253,8 @@ export async function POST(request: NextRequest) {
       const done =
         action === "add"
           ? await addProduct(ref, title, summary, price, recurring, suggested)
-          : await editProduct(ref, id, title, summary, price, recurring, suggested);
+          // A price moved ten times up or down is saved only when the creator named it (569 [NC1] (b), lib/price-jump-rules.ts).
+          : await editProduct(ref, id, title, summary, price, recurring, suggested, { confirmedCents: confirmedPrice(body.confirmPrice) });
       result = done.ok ? { ok: true, product: done.product } : done;
       // What is taken off goes first, so the one put on in its place is never refused for the other.
       const steps: (() => Promise<{ ok: true; product: Product } | { ok: false; reason: string }>)[] = [];
@@ -459,7 +462,7 @@ export async function POST(request: NextRequest) {
 
     if (!result.ok) {
       return Response.json(
-        { ok: false, error: result.reason, limit: result.limit, pwyw: result.pwyw },
+        { ok: false, error: result.reason, limit: result.limit, pwyw: result.pwyw, priceJump: result.priceJump },
         { status: STATUS[result.reason] ?? 400 },
       );
     }

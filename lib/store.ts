@@ -191,6 +191,7 @@ export type { CourseRef, Listing, Product };
  * inventing a different one for this store alone.
  */
 import { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
+import { type PriceJump, priceJump } from "@/lib/price-jump-rules";
 export { HANDLE_PATTERN } from "@/lib/store-handle-pattern";
 
 
@@ -3302,10 +3303,12 @@ export type ProductResult =
   | { ok: true; store: Store; product: Product }
   | {
       ok: false;
-      reason: "none" | "title" | "price" | "free" | "too_many" | "unknown" | "call" | "course" | "pwyw" | "bundle" | "shipped";
+      reason: "none" | "title" | "price" | "free" | "too_many" | "unknown" | "call" | "course" | "pwyw" | "bundle" | "shipped" | "price_check";
       limit?: number;
       /** When the choose-your-price setting was refused: why. */
       pwyw?: PwywProblem;
+      /** When a jump of the price was not confirmed (lib/price-jump-rules.ts): the price now and the one asked for. */
+      priceJump?: { beforeCents: number; afterCents: number } & PriceJump;
     };
 
 /** An id nothing else in this store is using. */
@@ -3439,13 +3442,20 @@ export async function editProduct(
   rawPrice: string,
   recurring: Recurring | null = null,
   rawSuggested: string | null = null,
+  /**
+   * The creator's own save (app/api/store/product/route.ts): a published product's price moved PRICE_JUMP_FACTOR
+   * times up or down is saved only when `confirmedCents` names the new price exactly (569 [NC1] (b)). Absent for a
+   * save the code makes itself (the demo's reset), which no slip of a finger can have typed.
+   */
+  priceCheck?: { confirmedCents: number | null },
 ): Promise<ProductResult> {
   let pwywWhy: PwywProblem | undefined;
+  let jumped: ({ beforeCents: number; afterCents: number } & PriceJump) | undefined;
   let refusal: "title" | "price" | null = null;
   // Written only when the product is changed, so the store's own list id is
   // what a free product gets (below) whatever the price turned out to be.
   let freeNow = false;
-  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped">(
+  const result = await onProduct<"free" | "call" | "course" | "pwyw" | "title" | "price" | "bundle" | "shipped" | "price_check">(
     email,
     id,
     (product, store) => {
@@ -3454,6 +3464,15 @@ export async function editProduct(
       if (typeof fields === "string") {
         refusal = fields;
         return { ok: false, reason: fields };
+      }
+      // The price now is read here, under the lock, so a save confirmed against another tab's price is held too.
+      // A draft is paid for by no buyer, and a product with price options is priced in each option.
+      if (priceCheck && !product.hidden && product.options.length === 0) {
+        const jump = priceJump(product.priceCents, fields.priceCents);
+        if (jump && priceCheck.confirmedCents !== fields.priceCents) {
+          jumped = { beforeCents: product.priceCents, afterCents: fields.priceCents, ...jump };
+          return { ok: false, reason: "price_check" };
+        }
       }
       if (fields.priceCents === 0 && recurring) return { ok: false, reason: "free" };
       const pwywCents = readSuggested(rawSuggested, store.currency);
@@ -3497,6 +3516,7 @@ export async function editProduct(
   );
   if (!result.ok) {
     if (result.reason === "pwyw") return { ok: false, reason: "pwyw", pwyw: pwywWhy };
+    if (result.reason === "price_check" && jumped) return { ok: false, reason: "price_check", priceJump: jumped };
     if (refusal) return { ok: false, reason: refusal };
     return result;
   }

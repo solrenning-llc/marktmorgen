@@ -32,6 +32,7 @@ import { yearlyProblem } from "@/lib/yearly-price";
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { readShippingSku } from "@/lib/shipping";
+import { priceJump, priceJumpWords } from "@/lib/price-jump-rules";
 
 export type PricedProduct = {
   /** A draft is seen by no buyer: nothing to review. */
@@ -78,7 +79,11 @@ export type PriceField = "every" | "pwyw" | "price" | "suggested" | "intro" | "y
 
 export type PriceRow = { key: string; label: string; now: string; then: string; field: PriceField };
 
-export type PriceReview = { rows: PriceRow[]; note: string };
+/**
+ * `jump`: said first when the price moves PRICE_JUMP_FACTOR times up or down (569 [NC1] (b), lib/price-jump-rules.ts),
+ * and `confirmCents`, the price the save then names so the route lets it through.
+ */
+export type PriceReview = { rows: PriceRow[]; note: string; jump?: string; confirmCents?: number };
 
 /** The rows that say an amount charged. */
 const MONEY_ROWS = new Set(["price", "suggested", "intro", "yearly"]);
@@ -207,7 +212,9 @@ export function priceReview(product: PricedProduct, draft: PriceDraft, read: (ty
     : every
       ? `New members join at this once you save.${store} A checkout already open keeps what it opened with. Members who already joined keep the price, schedule, trial and end they joined at.`
       : `Members who already joined are still charged what they joined at. Saving does not cancel them. Each membership ends when they or you cancel it, or after its last payment. To stop them, cancel their memberships in your Stripe dashboard. New buyers see this once you save.${store}`;
-  return { rows, note: note + planned };
+  // A slip of ten times up or down is said before the rows (the route holds it until this save names the price).
+  const jump = optioned ? null : priceJump(product.priceCents, price);
+  return { rows, note: note + planned, ...(jump ? { jump: priceJumpWords(jump, money(product.priceCents), money(price)), confirmCents: price } : {}) };
 }
 
 /**

@@ -37,6 +37,12 @@ const CODEQL_COMMENT = [
   "  # runs and one waits, and a newer push replaces the waiting one, so runs never pile up.",
 ].join("\n") + "\n";
 const read = (name: string) => readFileSync(`.github/workflows/${name}.yml`, "utf8");
+/**
+ * The one heavy job gated by the event: CodeQL's analyze, skipped under merge_group, where it uploaded nothing and
+ * could not fail on a finding; it still runs on every pull request, push to main, daily and manual run, and its final
+ * check accepts that skip only there (.github/workflows/codeql.yml, scripts/ci_all_checks.py, tests/codeql-timeout.test.ts).
+ */
+const QUEUE_SKIP: Record<string, string> = { "codeql/analyze": " && github.event_name != 'merge_group'" };
 
 /** Top-level jobs of a workflow: {job id: its text}. */
 function jobs(text: string): Record<string, string> {
@@ -75,10 +81,12 @@ for (const name of WORKFLOWS) {
   for (const [id, body] of Object.entries(all)) {
     if (id === "all-checks" || id === "documentation-scope") continue;
     const condition = /^ {4}if: (.*)$/m.exec(body)?.[1] ?? "";
-    is(`${name}/${id}: gated only by the scope result, never by event, ref or branch`, [
+    const skip = QUEUE_SKIP[`${name}/${id}`];
+    is(`${name}/${id}: gated only by the scope result${skip ? " and, at its end, the merge-queue skip" : ""}, never by anything else of the event, ref or branch`, [
       condition.startsWith("${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'"),
-      /github\.(event_name|ref|head_ref|base_ref)|merge_group|pull_request/.test(condition),
-    ], [true, false]);
+      skip === undefined || condition.endsWith(skip + " }}"),
+      /github\.(event_name|ref|head_ref|base_ref)|merge_group|pull_request/.test(skip ? condition.replace(skip, "") : condition),
+    ], [true, true, false]);
   }
   const pullRequestReads = text.split("\n").filter((line) => line.includes("github.event.pull_request"));
   is(`${name}: pull request fields are read only as the scope's inputs, which are empty under merge_group`,

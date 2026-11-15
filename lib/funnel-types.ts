@@ -51,7 +51,8 @@ export type PageSlot = {
    */
   /**
    * The page's form. `offerList`: it offers the box to hear from the creator, the only way a form starts a sequence
-   * (MM-SA-40, followUpMoment). No funnel type sets it today: a funnel's forms are made without the box.
+   * (MM-SA-40, followUpMoment). The box is unchecked on the public form (components/sales-blocks.tsx): it changes
+   * nothing for a visitor who does not check it.
    */
   form?: { name: string; fields: { type: "short" | "long" | "email"; label: string; required: boolean }[]; offerList?: boolean };
 };
@@ -143,6 +144,8 @@ export const FUNNEL_TYPES: FunnelType[] = [
             { type: "long", label: "What would you like help with?", required: true },
             { type: "long", label: "What have you tried so far?", required: false },
           ],
+          // The box to hear from the creator, unchecked on the page: whoever checks it and confirms gets the follow-up.
+          offerList: true,
         },
       },
     ],
@@ -158,7 +161,8 @@ export const FUNNEL_TYPES: FunnelType[] = [
         title: "Find what fits you",
         slug: "quiz",
         blocks: ["hero", "form"],
-        form: { name: "Quiz", fields: [{ type: "email", label: "Your email", required: false }] },
+        // The box to hear from the creator, unchecked on the page: whoever checks it and confirms gets the follow-up.
+        form: { name: "Quiz", fields: [{ type: "email", label: "Your email", required: false }], offerList: true },
       },
       thanks,
     ],

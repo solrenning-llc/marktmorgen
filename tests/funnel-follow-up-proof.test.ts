@@ -17,8 +17,14 @@ const withForm = FUNNEL_TYPES.filter((type) => pagesOf(type).some((page) => page
 is("control: some funnel types ask for an email in a form", withForm.length > 0, true);
 for (const type of withForm) {
   const moment = followUpMoment(type, {});
-  is(`${type.id}: never a form that offers no list box, which would never start the sequence`, moment?.trigger === "form", false);
+  const page = moment?.trigger === "form" ? pagesOf(type).find((p) => p.key === moment.slot) : null;
+  is(`${type.id}: never a form that offers no list box, which would never start the sequence`, moment?.trigger !== "form" || page?.form?.offerList === true, true);
 }
+
+part("A form without the box is never the moment");
+const quizNoBox = FUNNEL_TYPES.find((type) => type.id === "quiz")!;
+const unboxed = { ...quizNoBox, slots: quizNoBox.slots.map((slot) => (slot.kind === "page" && slot.form ? { ...slot, form: { ...slot.form, offerList: false } } : slot)) };
+is("without the box, no form trigger", followUpMoment(unboxed, {})?.trigger === "form", false);
 
 part("A form that offers the box is still the moment");
 const quiz = FUNNEL_TYPES.find((type) => type.id === "quiz")!;

@@ -118,7 +118,9 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
   });
   const pagePlaceholders = placeholdersIn(JSON.stringify([pageCopy, blockCopy])).length;
   const sequencePlaceholders = aiDraft?.sequence ? placeholdersIn(JSON.stringify(aiDraft.sequence.steps)).length : 0;
-  const sequenceBlocked = saveSequence && (sequencePlaceholders > 0 || !aiDraft?.sequence?.steps.every(step => step.subject.trim() && step.body.trim()));
+  // A follow-up that starts from a form whose list box the creator turned off would never start (MM-SA-40): not saved.
+  const sequenceFormOff = Boolean(aiDraft?.sequence && aiDraft.sequence.trigger === "form" && aiDraft.sequence.formSlot && !formDrafts[aiDraft.sequence.formSlot]?.offerList);
+  const sequenceBlocked = saveSequence && (sequenceFormOff || sequencePlaceholders > 0 || !aiDraft?.sequence?.steps.every(step => step.subject.trim() && step.body.trim()));
   const capacityIssue = type && (funnelsLeft <= 0 ? MESSAGES.full : pagesOf(type).length > pagesLeft ? MESSAGES.pages_full : pagesOf(type).length > 0 && !canMakePages ? MESSAGES.forbidden : null);
 
   function choose(next: FunnelType) {
@@ -130,7 +132,7 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
     setSaveSequence(false);
     setType(next);
     setName(next.label);
-    setFormDrafts(Object.fromEntries(pagesOf(next).filter(page => page.form && page.blocks.includes("form")).map(page => [page.key, { fields: page.form!.fields.map(field => ({ ...field })), offerList: false }])));
+    setFormDrafts(Object.fromEntries(pagesOf(next).filter(page => page.form && page.blocks.includes("form")).map(page => [page.key, { fields: page.form!.fields.map(field => ({ ...field })), offerList: page.form!.offerList === true && page.form!.fields.some(field => field.type === "email") }])));
     setPageCopy(Object.fromEntries(pagesOf(next).map(page => [page.key, { headline: page.title, intro: "" }])));
     setError(null);
     // The first product that fits each step, each product once.
@@ -151,7 +153,12 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
   function applyDraft(draft: FunnelAiDraft) {
     if (!type || draft.type !== type.id) return;
     setPageCopy(current => ({ ...current, ...draft.pageCopy }));
-    setFormDrafts(current => ({ ...current, ...draft.formDrafts }));
+    // The draft's questions, with the creator's own choice of the list box kept: a draft never decides consent
+    // (isFunnelAiDraft refuses one that sets it), so it never turns the box off either.
+    setFormDrafts(current => ({
+      ...current,
+      ...Object.fromEntries(Object.entries(draft.formDrafts).map(([key, form]) => [key, { ...form, offerList: Boolean(current[key]?.offerList) && form.fields.some(field => field.type === "email") }])),
+    }));
     setBlockCopy(draft.blockCopy);
     setAiDraft({ offers: draft.offers, sequence: draft.sequence, missing: draft.missing, diagnostics: draft.diagnostics });
     setSaveSequence(false);
@@ -379,6 +386,7 @@ export function FunnelTypePicker({ products, pagesLeft, canMakePages, funnelsLef
             </section>
           ) : null}
           {reviewing && !formDraftsValid ? <p className="notice notice-warn mt-4 text-sm" role="status">{MESSAGES.form_draft}</p> : null}
+          {reviewing && saveSequence && sequenceFormOff ? <p className="notice notice-warn mt-4 text-sm" role="status">The follow-up emails start when someone checks the form&apos;s box to hear from you and confirms by email. Turn the box back on in the form above, or leave the emails unsaved.</p> : null}
           {error ? (
             <p className="notice notice-error mt-4" role="alert">
               {error}

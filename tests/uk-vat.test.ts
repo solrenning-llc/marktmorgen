@@ -140,3 +140,31 @@ test("the export has the figures only with the owner's VAT registration number",
     "",
   ].join("\n"));
 });
+
+test("VAT taken back with no value refunded never drains a sale's VAT (Claude 7 on #4574)", () => {
+  let record = ukVatRecord({ sale: "cs_uk_drain", store: "st_1", invoice: ukInvoice(invoiceInput)!, place: { kind: "uk", evidence: gb } })!;
+  const later = at("2026-11-20T12:00:00Z");
+  assert.equal(ukVatAdjustment(record, { at: later, exVatCents: 0, vatCents: -1, reason: "refund" }), null, "no value refunded, no VAT given back");
+  // Small refunds each one cent off cannot pile up: what is left keeps the sale's proportion.
+  let taken = 0;
+  for (let i = 0; i < 200; i += 1) {
+    const next = ukVatAdjustment(record, { at: later, exVatCents: -2, vatCents: -1, reason: "refund" });
+    if (!next) break;
+    record = next;
+    taken += 1;
+  }
+  const q4 = ukReturn([record], { start: "2026-10-01", end: "2026-12-31", filedOn: "2027-01-03" })!;
+  assert.ok(Math.abs(q4.box1Pence - Math.round(q4.box6Pence * 0.2)) <= 1, `box 1 ${q4.box1Pence} against box 6 ${q4.box6Pence} after ${taken} entries`);
+});
+
+test("a full refund in two halves in another currency is recorded, the last taking what is left in pence (Claude 7 on #4574)", () => {
+  const period = { perPound: "1.3137", basis: "hmrc-period" as const, day: "2026-11-01", source: "https://www.trade-tariff.service.gov.uk/exchange_rates" };
+  const record = ukVatRecord({ sale: "cs_uk_usd", store: "st_1", invoice: ukInvoice({ ...invoiceInput, currency: "USD", sterling: period })!, place: { kind: "uk", evidence: gb } })!;
+  const later = at("2026-11-20T12:00:00Z");
+  const half = ukVatAdjustment(record, { at: later, exVatCents: -500, vatCents: -100, reason: "refund" });
+  assert.notEqual(half, null);
+  const whole = ukVatAdjustment(half!, { at: later, exVatCents: -500, vatCents: -100, reason: "refund" });
+  assert.notEqual(whole, null, "the second half is recorded");
+  const q4 = ukReturn([whole!], { start: "2026-10-01", end: "2026-12-31", filedOn: "2027-01-03" })!;
+  assert.deepEqual([q4.box1Pence, q4.box6Pence], [0, 0], "nothing left declared");
+});

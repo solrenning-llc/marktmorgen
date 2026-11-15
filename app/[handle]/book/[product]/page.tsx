@@ -83,15 +83,16 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
+  const pkgState = pkg ? await packageState(pkg.bought) : null;
   // Switched off after notices about its content (lib/takedown.ts), as the store's own page; a booking
-  // already paid (moved above) and a package already bought are the buyer's, and keep their way in.
-  if (store.suspended && !pkg) return <StoreResting store={store} suspended />;
+  // already paid (moved above) and a package already bought with a session still to book are the buyer's, and keep
+  // their way in. A package used up or past its last day books nothing, so it opens nothing either (Codex G on #3193).
+  if (store.suspended && !(pkgState && pkgState.left > 0)) return <StoreResting store={store} suspended />;
   // A draft call is left off the store (lib/catalog.ts): its title, price and
   // times are for the store's owner and team, signed in, and for a package
   // already bought for it (a booking already paid is moved above, read from
   // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
   if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const pkgState = pkg ? await packageState(pkg.bought) : null;
   // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
   // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
   const soon = await isSoon(store, product.id).catch(() => null);

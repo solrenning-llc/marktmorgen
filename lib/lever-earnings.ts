@@ -1,4 +1,4 @@
-import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
+import { BUMP_KEYS, bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { formatMoney } from "@/lib/money";
 
 /**
@@ -19,7 +19,11 @@ import { formatMoney } from "@/lib/money";
  *     its payment does not say it followed a "No", so it is counted here.
  *   - Bundle: a paid Checkout Session whose own product is a bundle
  *     (metadata `bundle`), at its whole amount_total (tax and any order bump on
- *     the same order included).
+ *     the same order included). A cart (metadata `cart` = "yes") holding a
+ *     bundle in any position is one order counted as "left": its total also pays
+ *     for the cart's other products (#4737).
+ *   - A cart's products after its first are written under the bump keys, and are
+ *     never an order bump (#4736).
  *   - Downsell, checkout recovery, next offer: not recognizable. The reminder
  *     (lib/checkout-recovery.ts) and the next offer (components/next-offer-card.tsx)
  *     link to the product page, and the order placed from there carries no
@@ -94,6 +98,14 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
       continue;
     }
     const total = exact(row.amount_total) ? row.amount_total : null;
+    // A cart (lib/cart-checkout.ts) writes its products after the first under the same bump keys and a bundle's list
+    // under its position's key (bundle, bump_bundle, ...): its extra products are no order bump (#4736), and a bundle in
+    // it, in any position, makes it one Bundle order without an amount, since the total also pays for the other
+    // products and the record does not split it (#4737).
+    if (meta.cart === "yes") {
+      if ((["bundle", ...BUMP_KEYS.map((key) => `${key}_bundle` as const)] as const).some((slot) => bundleFromMeta(meta, slot).length)) add("bundle", code, null);
+      continue;
+    }
     const bumps = bumpsFromMeta(meta);
     if (bumps.length) {
       const discount = (row.total_details as { amount_discount?: unknown } | null | undefined)?.amount_discount;
@@ -126,10 +138,10 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
 }
 
 const HOW: Record<LeverKey, string> = {
-  bump: "Counted from each order bump's own price on paid checkouts, before tax. An order with a discount is not counted, because the bump's discounted share is not recorded.",
+  bump: "Counted from each order bump's own price on paid checkouts, before tax. An order with a discount is not counted, because the bump's discounted share is not recorded. Products added to a cart are not order bumps.",
   upsell: "Counted from each one-click offer paid after checkout, as charged. Downsells are paid the same way and are included here.",
   downsell: "A downsell is paid like an upsell and its payment does not say it followed a No, so it is counted under Upsell.",
-  bundle: "Counted from each whole paid order for a bundle, as charged, including tax and any order bump on the same order.",
+  bundle: "Counted from each whole paid order for a bundle, as charged, including tax and any order bump on the same order. A cart with a bundle in it is counted as an order without an amount, because the cart's total also pays for its other products.",
   recovery: "A reminder links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
   next: "The next offer links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
 };

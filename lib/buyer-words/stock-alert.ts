@@ -14,7 +14,7 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 export type StockAlertNotice = { title: string; body: string };
 
 /** What the page says after the form or a link, by its `status`. */
-export type StockAlertStatus = "email" | "limited" | "full" | "closed" | "unsent" | "error" | "expired";
+export type StockAlertStatus = "email" | "limited" | "busy" | "full" | "closed" | "unsent" | "error" | "expired";
 
 export type StockAlertWords = {
   /** The page's name, and the small label above its heading. */
@@ -73,6 +73,7 @@ const en: StockAlertWords = {
   notices: {
     email: { title: "That does not look like an email address", body: "Check it and try again. The confirmation goes to the address you type, so it has to be one you can open." },
     limited: { title: "Too many requests for now", body: "To keep this form from being used to flood somebody's inbox, it takes a limited number an hour. Try again in an hour." },
+    busy: { title: "Too many requests for now", body: "To keep these links from being misused, they take a limited number every 10 minutes. Try again in 10 minutes." },
     full: { title: "This list is full", body: "It holds as many people as it can. Nothing was kept." },
     closed: { title: "This is not sold out", body: "It may be back in stock already, or this store does not send these emails. Nothing was kept." },
     unsent: {
@@ -116,6 +117,7 @@ const es: StockAlertWords = {
   notices: {
     email: { title: "Eso no parece una dirección de correo", body: "Revísala e inténtalo de nuevo. La confirmación va a la dirección que escribas, así que tiene que ser una que puedas abrir." },
     limited: { title: "Demasiadas solicitudes por ahora", body: "Para que este formulario no se use para llenar el correo de alguien, acepta un número limitado por hora. Inténtalo dentro de una hora." },
+    busy: { title: "Demasiadas solicitudes por ahora", body: "Para que estos enlaces no se usen mal, aceptan un número limitado cada 10 minutos. Inténtalo dentro de 10 minutos." },
     full: { title: "Esta lista está llena", body: "Tiene tantas personas como puede. No se guardó nada." },
     closed: { title: "No está agotado", body: "Puede que ya esté disponible, o esta tienda no envía estos correos. No se guardó nada." },
     unsent: {
@@ -159,6 +161,7 @@ const fr: StockAlertWords = {
   notices: {
     email: { title: "Cela ne ressemble pas à une adresse e-mail", body: "Vérifiez-la et réessayez. La confirmation part à l’adresse saisie, qui doit donc être une adresse que vous pouvez ouvrir." },
     limited: { title: "Trop de demandes pour l’instant", body: "Pour que ce formulaire ne serve pas à remplir la boîte de quelqu’un, il en accepte un nombre limité par heure. Réessayez dans une heure." },
+    busy: { title: "Trop de demandes pour l’instant", body: "Pour que ces liens ne soient pas détournés, ils en acceptent un nombre limité toutes les 10 minutes. Réessayez dans 10 minutes." },
     full: { title: "Cette liste est complète", body: "Elle contient autant de personnes que possible. Rien n’a été gardé." },
     closed: { title: "Ce produit n’est pas épuisé", body: "Il est peut-être déjà de retour, ou cette boutique n’envoie pas ces e-mails. Rien n’a été gardé." },
     unsent: {
@@ -202,6 +205,7 @@ const de: StockAlertWords = {
   notices: {
     email: { title: "Das sieht nicht nach einer E-Mail-Adresse aus", body: "Prüf sie und versuch es noch einmal. Die Bestätigung geht an die Adresse, die du eingibst, also muss es eine sein, die du öffnen kannst." },
     limited: { title: "Gerade zu viele Anfragen", body: "Damit dieses Formular nicht benutzt wird, um jemandes Postfach zu füllen, nimmt es nur eine begrenzte Zahl pro Stunde an. Versuch es in einer Stunde wieder." },
+    busy: { title: "Gerade zu viele Anfragen", body: "Damit diese Links nicht missbraucht werden, nehmen sie nur eine begrenzte Zahl alle 10 Minuten an. Versuch es in 10 Minuten wieder." },
     full: { title: "Diese Liste ist voll", body: "Sie fasst so viele Personen, wie sie kann. Es wurde nichts gespeichert." },
     closed: { title: "Das ist nicht ausverkauft", body: "Vielleicht ist es schon wieder verfügbar, oder dieser Shop verschickt diese E-Mails nicht. Es wurde nichts gespeichert." },
     unsent: {
@@ -245,6 +249,7 @@ const it: StockAlertWords = {
   notices: {
     email: { title: "Non sembra un indirizzo email", body: "Controllalo e riprova. La conferma va all’indirizzo che scrivi, quindi deve essere uno che puoi aprire." },
     limited: { title: "Troppe richieste per ora", body: "Perché questo modulo non venga usato per riempire la casella di qualcuno, ne accetta un numero limitato all’ora. Riprova tra un’ora." },
+    busy: { title: "Troppe richieste per ora", body: "Perché questi link non vengano usati male, ne accettano un numero limitato ogni 10 minuti. Riprova tra 10 minuti." },
     full: { title: "Questa lista è piena", body: "Contiene tutte le persone che può. Non è stato salvato nulla." },
     closed: { title: "Non è esaurito", body: "Forse è già di nuovo disponibile, oppure questo negozio non invia queste email. Non è stato salvato nulla." },
     unsent: {
@@ -288,6 +293,7 @@ const nl: StockAlertWords = {
   notices: {
     email: { title: "Dat lijkt geen e-mailadres", body: "Controleer het en probeer het opnieuw. De bevestiging gaat naar het adres dat je typt, dus het moet er een zijn dat je kunt openen." },
     limited: { title: "Te veel aanvragen op dit moment", body: "Zodat dit formulier niet gebruikt wordt om iemands inbox te vullen, neemt het een beperkt aantal per uur aan. Probeer het over een uur opnieuw." },
+    busy: { title: "Te veel aanvragen op dit moment", body: "Zodat deze links niet misbruikt worden, nemen ze een beperkt aantal per 10 minuten aan. Probeer het over 10 minuten opnieuw." },
     full: { title: "Deze lijst is vol", body: "Er staan zoveel mensen op als er passen. Er is niets bewaard." },
     closed: { title: "Dit is niet uitverkocht", body: "Misschien is het al weer op voorraad, of deze winkel verstuurt deze e-mails niet. Er is niets bewaard." },
     unsent: {
@@ -331,6 +337,7 @@ const pt: StockAlertWords = {
   notices: {
     email: { title: "Isto não parece um endereço de e-mail", body: "Verifique e tente novamente. A confirmação vai para o endereço escrito, por isso tem de ser um que consiga abrir." },
     limited: { title: "Demasiados pedidos por agora", body: "Para que este formulário não seja usado para encher a caixa de alguém, aceita um número limitado por hora. Tente novamente daqui a uma hora." },
+    busy: { title: "Demasiados pedidos por agora", body: "Para que estes links não sejam mal usados, aceitam um número limitado a cada 10 minutos. Tente novamente daqui a 10 minutos." },
     full: { title: "Esta lista está cheia", body: "Já tem todas as pessoas que cabem. Nada foi guardado." },
     closed: { title: "Isto não está esgotado", body: "Talvez já tenha voltado ao stock, ou esta loja não envia estes e-mails. Nada foi guardado." },
     unsent: {

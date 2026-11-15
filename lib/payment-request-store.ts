@@ -532,6 +532,8 @@ return 0`;
 
 /** Redis commands REMOVE_IDLE_STORE sends, counted as Upstash bills a script: the EVAL and its three calls. */
 export const REMOVE_IDLE_STORE_COMMANDS = 4;
+/** Redis commands openCount sends: the expired entries dropped and the open ones counted. */
+export const OPEN_COUNT_COMMANDS = 2;
 
 /**
  * Leaves a store off that list once it has no open request: only after a count read exactly as zero (an unknown count

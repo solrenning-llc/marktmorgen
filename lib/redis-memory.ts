@@ -613,6 +613,11 @@ export class MemoryRedis {
         // lib/payment-request-store.ts REMOVE_IDLE_STORE: a store leaves the sweep's list only while it has no open request.
         if (key.startsWith("-- marktmorgen:payreq-idle-store:v1\n") && args[0] === "2" && args.length === 5) {
           const [, open, stores, now, sid] = args;
+          // Real Redis stops the script with WRONGTYPE on an open list that is not a sorted set, and the store stays on
+          // the sweep's list; this.zset would make it an empty one and take the store off.
+          this.live(open);
+          const held = this.data.get(open);
+          if (held !== undefined && !(Array.isArray(held) && (held.length === 0 || typeof held[0] === "object"))) throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
           this.run(["ZREMRANGEBYSCORE", open, "-inf", now]);
           return this.run(["ZCARD", open]) === 0 ? this.run(["SREM", stores, sid]) : 0;
         }

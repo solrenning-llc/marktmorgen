@@ -913,6 +913,26 @@ export class MemoryRedis {
           });
           return [gone, unlinked, this.run(["HLEN", members])];
         }
+        // lib/free.ts FREE_CLAIM_IF_SAME: a free copy's claim, and its erasure note when there are notes, written only
+        // while the address's deleted mark is still the one the request read ("0" none, "1" and the mark): 1, else 0.
+        if (key.startsWith("-- marktmorgen:free-claim-if-same:v1\n") && ((args[0] === "2" && args.length === 7) || (args[0] === "3" && args.length === 11))) {
+          const three = args[0] === "3";
+          const [claim, erased] = args.slice(1, 3);
+          const notes = three ? args[3] : null;
+          const [print, was, value, seconds, score, oldest, notesSeconds] = args.slice(three ? 4 : 3);
+          this.scriptCalls += 1;
+          const mark = this.run(["HGET", erased, print]);
+          if ((mark === null ? "0" : `1${mark}`) !== was) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", claim, value, "EX", seconds]);
+          if (notes !== null) {
+            this.scriptCalls += 3;
+            this.run(["ZADD", notes, score, claim]);
+            this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+            this.run(["EXPIRE", notes, notesSeconds]);
+          }
+          return 1;
+        }
         // lib/suppression.ts ERASED_PRINT: a deleted person's print, at the second on Redis's clock (this stand-in's).
         if (key.startsWith("-- marktmorgen:erased-print:v1\n") && args[0] === "1" && args.length === 3) {
           this.scriptCalls += 2;

@@ -58,6 +58,13 @@ async function main(): Promise<void> {
   await requestCopy({ store, product, email: other, consent: false, ip: "192.0.2.2", origin: "https://example.com" });
   is("one claim kept", (await claims()).length, 1);
   is("and an erasure finds it through its note", await forgetNoted(store.statsId, other), 1);
+
+  part("A person deleted before may ask again: the mark found at the start is no refusal");
+  const back = "returning@example.com";
+  await real([suppressCommand(store.listId as string, back)]);
+  const answer = await requestCopy({ store, product, email: back, consent: true, ip: "192.0.2.3", origin: "https://example.com" });
+  is("asked again: the same answer as anybody's", answer, await requestCopy({ store, product, email: "first-time@example.com", consent: true, ip: "192.0.2.4", origin: "https://example.com" }));
+  is("and their claim is kept beside the other one, for the link to lift the mark with their yes", (await claims()).length, 2);
   done();
 }
 main().catch((error) => {

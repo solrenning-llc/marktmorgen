@@ -53,6 +53,7 @@ import {
   plainRead,
 } from "@/lib/contacts";
 import { noteForErasure } from "@/lib/erasure-index";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { contactOpen } from "@/lib/store-contact";
 
 export { MAX_LEADS };
@@ -211,6 +212,11 @@ export async function requestCopy(input: {
   }
   const email = normaliseEmail(raw);
   if (!canGiveProduct(store, product)) return "unavailable";
+  // The address's deleted mark as this request found it (#4683): the claim is written only while it is still the
+  // same, so an erasure that finished while this request was on its way is never undone by it. A mark already there
+  // is no refusal: a person deleted before may ask again, and their own yes at the link lifts it (lib/contacts.ts).
+  const mark = await markOf(store, email);
+  if (mark === undefined) return "error";
 
   const byConnection = await within(await ipKey(ip, store.handle), IP_LIMIT);
   if (byConnection === null) return "error";
@@ -239,7 +245,13 @@ export async function requestCopy(input: {
     ...(input.lead && /^[0-9a-f]{12}$/.test(input.lead) ? { a: input.lead } : {}),
   };
   const claimed = await claimKey(token);
-  await redisPipeline([["SET", claimed, JSON.stringify(claim), "EX", CLAIM_TTL_SECONDS], ...noteForErasure(store.statsId, email, claimed)]);
+  const kept = await keepClaim(store, email, mark, claimed, JSON.stringify(claim));
+  if (kept !== "kept") {
+    // Deleted meanwhile: nothing written and nothing sent, and the order's room goes back, as nothing was given. A reply
+    // not known keeps the room until its hours end, as any count not confirmed does.
+    if (kept === "erased") await settleAdmitted(store, admitted.hour);
+    return kept === "erased" ? "unavailable" : "error";
+  }
 
   const name = store.name;
   const g = givingWords(store.language);
@@ -271,6 +283,48 @@ export async function requestCopy(input: {
   const tally = sent ? await countOrder(store, `free:${token}`, 0) : false;
   if (tally !== "unknown") await settleAdmitted(store, admitted.hour);
   return sent ? "sent" : "error";
+}
+
+/**
+ * The claim and its erasure note, written in one step only while the address's deleted mark is still `mark` (#4683):
+ * KEYS[1] the claim, KEYS[2] the store's deleted marks, KEYS[3] the address's notes (when the store has its numbers);
+ * ARGV[1] the address's print, ARGV[2] the mark as read ("0" none, "1" and the mark), ARGV[3] the claim, ARGV[4] its
+ * seconds, then the note: its score, the oldest score kept and the notes' seconds. Answers 1 written, 0 not (the mark
+ * changed). Billed 1 + 5 commands inside.
+ */
+export const FREE_CLAIM_IF_SAME = `-- marktmorgen:free-claim-if-same:v1
+local m = redis.call('HGET', KEYS[2], ARGV[1])
+local now = '0'
+if m then now = '1' .. m end
+if now ~= ARGV[2] then return 0 end
+redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
+if KEYS[3] then
+  redis.call('ZADD', KEYS[3], ARGV[5], KEYS[1])
+  redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', ARGV[6])
+  redis.call('EXPIRE', KEYS[3], ARGV[7])
+end
+return 1`;
+
+/** The address's deleted mark on this store: null none, the mark, or undefined when Redis's reply is not one (rule 24). */
+async function markOf(store: Store, email: string): Promise<string | null | undefined> {
+  if (!store.listId || !isRedisConfigured()) return null;
+  const reply = repliesFor(await redisPipeline([["HGET", suppressedKey(store.listId), suppressionPrint(store.listId, email)]]).catch(() => null), 1);
+  if (!reply) return undefined;
+  return reply[0] === null || typeof reply[0] === "string" ? reply[0] : undefined;
+}
+
+async function keepClaim(store: Store, email: string, mark: string | null, claimed: string, text: string): Promise<"kept" | "erased" | "unknown"> {
+  const note = noteForErasure(store.statsId, email, claimed);
+  if (!store.listId) {
+    // A store with no list has deleted nobody (lib/suppression.ts suppressedCommand): written as it always was.
+    await redisPipeline([["SET", claimed, text, "EX", CLAIM_TTL_SECONDS], ...note]);
+    return "kept";
+  }
+  const [zadd, trim, expire] = note;
+  const keys = zadd ? [claimed, suppressedKey(store.listId), String(zadd[1])] : [claimed, suppressedKey(store.listId)];
+  const args = [suppressionPrint(store.listId, email), mark === null ? "0" : `1${mark}`, text, CLAIM_TTL_SECONDS, ...(zadd ? [zadd[2], trim[3], expire[2]] : [])];
+  const reply = repliesFor(await redisPipeline([["EVAL", FREE_CLAIM_IF_SAME, keys.length, ...keys, ...args]]).catch(() => null), 1)?.[0];
+  return reply === 1 ? "kept" : reply === 0 ? "erased" : "unknown";
 }
 
 /** What an emailed link names, without spending anything. For the page. */

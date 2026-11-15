@@ -39,7 +39,8 @@ export const UK_VAT_RATE = { basisPoints: 2000, source: "https://www.gov.uk/vat-
 /** The rate is read again before this day; past it no UK sale is collected. */
 export const UK_VAT_RATE_VALID_UNTIL = "2026-12-31";
 
-const NOT_A_COUNTRY = /^(AA|Q[M-Z]|X[A-Z]|ZZ|T1)$/;
+/** Never a country here: user-assigned ranges, proxies' unknown markers, and "UK", which ISO 3166-1 reserves (the UK is GB). */
+const NOT_A_COUNTRY = /^(AA|Q[M-Z]|X[A-Z]|ZZ|T1|UK)$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const whole = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value);
 const realDay = (value: unknown): value is string => {
@@ -65,6 +66,7 @@ function code(value: unknown): string | null | "bad" {
 
 /** Where the consumer belongs for UK VAT: every item given must agree; GB (Northern Ireland included) is the UK. */
 export function ukPlace(items: { ip: unknown; billing: unknown; card?: unknown }): UkPlace {
+  if (!items || typeof items !== "object") return { kind: "unknown", reason: "missing" };
   const ip = code(items.ip);
   const billing = code(items.billing);
   const card = items.card === undefined ? undefined : code(items.card);
@@ -97,12 +99,14 @@ export type UkCheckout =
 export function ukCheckout(input: { supply: EuSupply; priceCents: number; items: { ip: unknown; billing: unknown; card?: unknown }; reviewed?: boolean; now?: Date }): UkCheckout {
   const now = input.now ?? new Date();
   const place = ukPlace(input.items);
+  const clockOk = now instanceof Date && Number.isFinite(now.getTime());
   if (place.kind === "unknown") return { kind: "refuse", reason: "place" };
   if (place.kind === "outside") return { kind: "outside", country: place.country };
   if (input.supply === "free") return { kind: "free" };
   if (input.supply === "goods") return { kind: "refuse", reason: "goods" };
   if (input.supply === "human") return { kind: "refuse", reason: "human" };
   if (input.supply !== "ess") return { kind: "refuse", reason: "supply" };
+  if (!clockOk) return { kind: "refuse", reason: "rate-expired" };
   if ((input.reviewed ?? UK_VAT_COLLECT_REVIEWED) !== true) return { kind: "refuse", reason: "review" };
   if (now.toISOString().slice(0, 10) > UK_VAT_RATE_VALID_UNTIL) return { kind: "refuse", reason: "rate-expired" };
   const vat = ukVatOnTop(input.priceCents);
@@ -110,22 +114,24 @@ export function ukCheckout(input: { supply: EuSupply; priceCents: number; items:
   return { kind: "collect", vat, place };
 }
 
-/** The sterling conversion of a sale in another currency: HMRC's period rate or the UK market selling rate at the supply. */
-export type UkSterlingRate = { gbpPerUnit: string; basis: "hmrc-period" | "uk-market"; day: string; source: string };
+/**
+ * The sterling conversion of a sale in another currency: HMRC's period rate or the UK market selling rate at the
+ * supply, given as HMRC publishes its rates, units of the currency per £1 (e.g. "1.3137" US dollars).
+ */
+export type UkSterlingRate = { perPound: string; basis: "hmrc-period" | "uk-market"; day: string; source: string };
 const RATE = /^(0|[1-9]\d{0,6})(\.\d{1,6})?$/;
 
-/** Minor units of a currency to pence at `gbpPerUnit` (pounds per unit), half up once, in integers; null when it does not read. */
-export function toPence(cents: number, gbpPerUnit: string): number | null {
-  if (!whole(cents) || typeof gbpPerUnit !== "string" || !RATE.test(gbpPerUnit)) return null;
-  const [units, decimals = ""] = gbpPerUnit.split(".");
+/** Minor units of a currency to pence at `perPound` (units per £1): cents / perPound, half up once, in integers; null when it does not read. */
+export function toPence(cents: number, perPound: string): number | null {
+  if (!whole(cents) || typeof perPound !== "string" || !RATE.test(perPound)) return null;
+  const [units, decimals = ""] = perPound.split(".");
   const micro = BigInt(units) * BigInt(1_000_000) + BigInt((decimals + "000000").slice(0, 6));
   if (micro <= BigInt(0)) return null;
-  const negative = cents < 0;
-  const product = BigInt(Math.abs(cents)) * micro;
-  const half = BigInt(500_000);
-  const pence = (product + half) / BigInt(1_000_000);
+  const two = BigInt(2);
+  // |cents| / (micro / 10^6), half up: floor((2 * |cents| * 10^6 + micro) / (2 * micro)); the sign put back after.
+  const pence = (two * BigInt(Math.abs(cents)) * BigInt(1_000_000) + micro) / (two * micro);
   if (pence > BigInt(Number.MAX_SAFE_INTEGER)) return null;
-  return negative ? -Number(pence) : Number(pence);
+  return cents < 0 ? -Number(pence) : Number(pence);
 }
 
 /** The sale's VAT in pence: itself in sterling; otherwise at a rate of the supply's day (or, for HMRC's period rate, its month). */
@@ -134,7 +140,7 @@ function vatInPence(vatCents: number, currency: string, suppliedOn: string, ster
   if (!sterling || !realDay(sterling.day) || (sterling.basis !== "hmrc-period" && sterling.basis !== "uk-market") || !/^https:\/\/\S+$/.test(sterling.source)) return null;
   // "the appropriate rate for any supply is that current at the time of the supply" (Notice 700, 7.6).
   if (sterling.basis === "uk-market" ? sterling.day !== suppliedOn : sterling.day.slice(0, 7) !== suppliedOn.slice(0, 7)) return null;
-  const pence = toPence(vatCents, sterling.gbpPerUnit);
+  const pence = toPence(vatCents, sterling.perPound);
   return pence === null ? null : { pence, rate: sterling };
 }
 
@@ -231,7 +237,7 @@ export type UkVatRecord = {
 export function ukVatRecord(sale: { sale: string; store: string; invoice: UkInvoice; place: UkPlace }): UkVatRecord | null {
   if (!sale || !text(sale.sale, 255) || !text(sale.store, 64) || !sale.invoice || sale.place?.kind !== "uk") return null;
   const inv = sale.invoice;
-  const exVat = inv.currency === "GBP" ? { pence: inv.amountExVatCents } : inv.sterlingRate ? { pence: toPence(inv.amountExVatCents, inv.sterlingRate.gbpPerUnit) } : null;
+  const exVat = inv.currency === "GBP" ? { pence: inv.amountExVatCents } : inv.sterlingRate ? { pence: toPence(inv.amountExVatCents, inv.sterlingRate.perPound) } : null;
   if (!exVat || exVat.pence === null) return null;
   return {
     v: 1, sale: sale.sale, store: sale.store, date: inv.timeOfSupply, currency: inv.currency, exVatCents: inv.amountExVatCents, vatCents: inv.vatCents,
@@ -248,12 +254,17 @@ export function ukVatAdjustment(record: UkVatRecord, change: { at: number; exVat
   const date = dayOf(change?.at);
   if (!record || !date || date < record.date || !whole(change.exVatCents) || !whole(change.vatCents) || !text(change.reason, 100)) return null;
   if (change.exVatCents > 0 || change.vatCents > 0 || (change.exVatCents === 0 && change.vatCents === 0)) return null;
-  const convert = (cents: number) => (record.currency === "GBP" ? cents : record.sterlingRate ? toPence(cents, record.sterlingRate.gbpPerUnit) : null);
+  // The VAT keeps the rate's proportion of the amount refunded: one cent either way is rounding, more is refused.
+  const expected = Math.floor((Math.abs(change.exVatCents) * record.rateBasisPoints + 5000) / 10000);
+  if (Math.abs(Math.abs(change.vatCents) - expected) > 1) return null;
+  const convert = (cents: number) => (record.currency === "GBP" ? cents : record.sterlingRate ? toPence(cents, record.sterlingRate.perPound) : null);
   const exVatPence = convert(change.exVatCents);
   const vatPence = convert(change.vatCents);
   if (exVatPence === null || vatPence === null) return null;
   const left = (field: "exVatPence" | "vatPence", now: number) => record[field] + record.adjustments.reduce((n, a) => n + a[field], 0) + now;
   if (left("exVatPence", exVatPence) < 0 || left("vatPence", vatPence) < 0) return null;
+  // Nothing left to tax leaves no VAT behind.
+  if (left("exVatPence", exVatPence) === 0 && left("vatPence", vatPence) !== 0) return null;
   return { ...record, adjustments: [...record.adjustments, { date, exVatPence, vatPence, reason: change.reason }] };
 }
 
@@ -278,6 +289,7 @@ const monthEnd = (day: string) => {
  * The owner's own purchases (box 4) and any other outputs are not Marktmorgen's records and are not filled here.
  */
 export function ukReturn(records: readonly UkVatRecord[], input: { start: string; end: string; filedOn: string }): UkReturn | null {
+  if (!input || typeof input !== "object") return null;
   if (!Array.isArray(records) || !realDay(input.start) || !realDay(input.end) || !realDay(input.filedOn) || input.start > input.end || input.filedOn <= input.end) return null;
   if (!monthEnd(input.end) || input.start.slice(8) !== "01") return null;
   let box1 = 0;
@@ -312,6 +324,7 @@ export function ukReturnCsv(ret: UkReturn, vatNumber: string): string | null {
     ["box", "item", "amount_gbp"],
     ["", `VAT registration number ${vatNumber}, period ${ret.start} to ${ret.end}, due ${ret.deadline}`, ""],
     ["1", "VAT due on sales (Marktmorgen's UK digital supplies)", pounds(ret.box1Pence)],
+    // NOT CHECKED: whether box 6 must be given in whole pounds; the value is kept to the penny for the owner.
     ["6", "Value of those supplies excluding VAT (add every other output of the business)", pounds(ret.box6Pence)],
     ["4", "VAT reclaimed on purchases: from the owner's own purchase records, not filled here", ""],
   ];

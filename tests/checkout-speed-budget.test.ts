@@ -7,8 +7,10 @@
  * Synthetic store; the creator's Stripe account is a stand-in for `fetch`; nothing real is reached.
  */
 import { NextRequest } from "next/server";
-import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
+import { setSoon } from "@/lib/waitlist";
+import { setExpectedDay } from "@/lib/preorders";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
@@ -31,16 +33,21 @@ const CART_COMMANDS_MOST = 12;
 const MORE_MOST: Record<"bump" | "gift" | "bundle", [number, number]> = { bump: [7, 10], gift: [8, 11], bundle: [7, 10] };
 /** Unit 4, measured the same day: a price option, a bundle the buyer builds and a payment plan, each [round trips, commands]. */
 const UNIT4_MOST: Record<"option" | "pick" | "plan", [number, number]> = { option: [7, 10], pick: [7, 10], plan: [8, 11] };
+/** Unit 5, measured the same day: a monthly subscription and a pre-order, each [round trips, commands]. */
+const UNIT5_MOST: Record<"subscription" | "preorder", [number, number]> = { subscription: [7, 10], preorder: [7, 10] };
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
 
 const stripeCalls: string[] = [];
+/** The last session asked of Stripe, to tell which path the click took. */
+let lastSession = new URLSearchParams();
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   stripeCalls.push(`${method} ${path}`);
+  if (path === "/checkout/sessions" && method === "POST") lastSession = new URLSearchParams(String(init?.body));
   if (path === "/checkout/sessions" && method === "POST") return new Response(JSON.stringify({ id: `cs_test_${"s".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -158,6 +165,32 @@ async function main(): Promise<void> {
   const planned = await setProductExtras(owner, made.product.id, { plan: { payments: 3, interval: "month", amountCents: 300 } });
   if (!planned.ok) throw new Error(`no plan: ${planned.reason}`);
   await unit4("plan", (f) => { f.set("product", made.product.id); f.set("pay", "plan"); });
+  part("Unit 5: a monthly subscription and a pre-order, the recurring and the early money");
+  const unit5 = async (label: "subscription" | "preorder", fill: (f: FormData) => void) => {
+    roundTrips = 0;
+    commands = 0;
+    stripeCalls.length = 0;
+    const f = new FormData();
+    f.set("handle", "speedshop");
+    fill(f);
+    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com" } }));
+    const [tripsMost, commandsMost] = UNIT5_MOST[label];
+    is(`${label}: on to Stripe's page`, response.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+    // The path it took, so the budget is the subscription's or the pre-order's own, not a plain sale's.
+    is(`${label}: its own kind of session`, label === "subscription" ? lastSession.get("mode") : lastSession.get("metadata[preorder]"), label === "subscription" ? "subscription" : "yes");
+    is(`${label}: at most ${tripsMost} round trips and ${commandsMost} commands, one request to Stripe`, [roundTrips <= tripsMost, commands <= commandsMost, stripeCalls.length <= STRIPE_REQUESTS_MOST], [true, true, true]);
+  };
+  const monthly = await addProduct(owner, "Bakers Club", "", "9", { interval: "month", trialDays: 0, payments: 0 });
+  if (!monthly.ok) throw new Error("no subscription product");
+  await setProductLink(owner, monthly.product.id, "https://example.com/club");
+  await unit5("subscription", (f) => { f.set("product", monthly.product.id); });
+  const early = await addProduct(owner, "Sourdough Book", "", "25", null);
+  if (!early.ok) throw new Error("no pre-order product");
+  await setProductLink(owner, early.product.id, "https://example.com/book");
+  const shop = (await storeForEmail(owner))!;
+  await setSoon(shop, early.product.id, true);
+  await setExpectedDay(shop, early.product.id, new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10));
+  await unit5("preorder", (f) => { f.set("product", early.product.id); f.set("preorder", "yes"); });
   done();
 }
 

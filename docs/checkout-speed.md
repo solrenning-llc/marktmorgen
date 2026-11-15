@@ -1,6 +1,6 @@
 # Checkout speed (277 [H3-2])
 
-What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 to 4, 15 November 2026.
+What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 to 5, 15 November 2026.
 
 ## The path
 
@@ -34,9 +34,16 @@ Unit 4 adds three more, also with one request to Stripe each:
 | A bundle the buyer builds (two picked of three) | 7 | 10 |
 | A payment plan (three monthly payments) | 8 | 11 |
 
+Unit 5 holds the recurring and the early money, one request to Stripe each; the test also checks that each took its own kind of session:
+
+| Case | Database round trips | Database commands |
+| --- | --- | --- |
+| A monthly subscription (`mode=subscription`) | 7 | 10 |
+| A pre-order of a coming-soon product | 7 | 10 |
+
 The work the route leaves for after its answer (`after()`: counting the visit, the A/B tests) runs while the buyer is already on the way to Stripe, so it is not in the budget. A change that adds a wait before the redirect fails this test, and whoever raises a figure says why in the same change. A lower figure is welcome, and the budget is then lowered to it.
 
-Units 1 to 4 cover a plain product, a cart of plain products, an extra, a gift, a fixed bundle, a price option, a bundle the buyer builds and a payment plan. Courses, calls, memberships, pre-orders and physical products go through their own checks and are left for a later unit, measured the same way.
+Units 1 to 5 cover a plain product, a cart of plain products, an extra, a gift, a fixed bundle, a price option, a bundle the buyer builds, a payment plan, a monthly subscription and a pre-order. Courses, calls and physical products go through their own checks and are left for a later unit, measured the same way.
 
 ## What is not ours
 

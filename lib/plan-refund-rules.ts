@@ -138,6 +138,9 @@ export function planRefund(input: PlanRefundInput): PlanRefund {
   if (c.disputedCents !== null && !cents(c.disputedCents)) return { kind: "unknown", reason: "unreadable" };
   if (typeof c.billingReason !== "string" || typeof c.succeeded !== "boolean") return { kind: "unknown", reason: "unreadable" };
   if (!Number.isFinite(c.paidAtSeconds) || !Number.isFinite(input.nowSeconds) || !Number.isFinite(input.periodStartSeconds)) return { kind: "unknown", reason: "unreadable" };
+  // A period start is whole seconds a date can hold, through the twelve months counted from it (issue #4776): a finite
+  // number outside that range made every month comparison NaN, read as no month used and the whole year refundable.
+  if (!Number.isSafeInteger(input.periodStartSeconds) || Number.isNaN(addMonthsLikeStripe(input.periodStartSeconds, 12))) return { kind: "unknown", reason: "unreadable" };
 
   if (!c.succeeded) return { kind: "none", reason: "not_paid" };
   if (c.invoiceTotalCents !== c.amountCents) return { kind: "unknown", reason: "split_payment" };

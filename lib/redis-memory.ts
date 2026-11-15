@@ -137,6 +137,17 @@ export class MemoryRedis {
           for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
           return n;
         }
+        // lib/winback-send.ts WINBACK_CLAIM: a come-back offer's once-mark, grant and note, only while no deletion print.
+        if (key.startsWith("-- marktmorgen:winback-claim:v1\n") && args[0] === "4" && args.length === 13) {
+          const [, prints, once, link, notes, print, onceValue, onceSeconds, grant, linkSeconds, at, oldest, notesSeconds] = args;
+          if (this.run(["HEXISTS", prints, print]) === 1) return 2;
+          if (this.run(["SET", once, onceValue, "NX", "EX", onceSeconds]) !== "OK") return 0;
+          this.run(["SET", link, grant, "EX", linkSeconds]);
+          this.run(["ZADD", notes, at, link]);
+          this.run(["ZREMRANGEBYSCORE", notes, "-inf", oldest]);
+          this.run(["EXPIRE", notes, notesSeconds]);
+          return 1;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

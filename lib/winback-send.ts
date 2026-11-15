@@ -39,6 +39,7 @@ import { OFFER_DAYS, ONCE_PER_DAYS, canWinBack, winbackOn } from "@/lib/winback"
 import { affiliatesWords } from "@/lib/buyer-words/affiliates";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { noteForErasure } from "@/lib/erasure-index";
+import { suppressedKey, suppressionPrint } from "@/lib/suppression";
 
 const CURSOR_KEY = "nl:wb:cursor";
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -54,6 +55,65 @@ const onceKey = (statsId: string, email: string, product: string) =>
   `nl:wb:once:${statsId}:${sha(`nimbus-wb-once:${normaliseEmail(email)}|${product}`).slice(0, 32)}`;
 const linkKey = (token: string) => `nl:wb:link:${token}`;
 const countKey = (statsId: string) => `nl:wb:n:${statsId}`;
+
+/**
+ * The offer's once-mark, its grant and the grant's erasure note, in one step, only while the address has no deletion
+ * print for the store (#4807): a run that read the person before their erasure finds the print and writes nothing of
+ * them, so nothing holds their address after the erasure completed. KEYS: the store's prints, the once-mark, the
+ * grant, the erasure notes. ARGV: the print, the once-mark's value and seconds, the grant and its seconds, the note's
+ * time, the oldest note kept and the notes' seconds. Answers 1 written, 0 the once-mark already there (nothing
+ * written), 2 the address erased (nothing written).
+ */
+export const WINBACK_CLAIM = `-- marktmorgen:winback-claim:v1
+if redis.call("HEXISTS", KEYS[1], ARGV[1]) == 1 then return 2 end
+if not redis.call("SET", KEYS[2], ARGV[2], "NX", "EX", ARGV[3]) then return 0 end
+redis.call("SET", KEYS[3], ARGV[4], "EX", ARGV[5])
+redis.call("ZADD", KEYS[4], ARGV[6], KEYS[3])
+redis.call("ZREMRANGEBYSCORE", KEYS[4], "-inf", ARGV[7])
+redis.call("EXPIRE", KEYS[4], ARGV[8])
+return 1`;
+
+type WinbackClaim = "ours" | "taken" | "erased" | "unknown";
+
+/** WINBACK_CLAIM, read exactly: a reply of another shape is read back from the once-mark, as claimMark does. */
+async function claimOffer(listId: string, email: string, once: string, onceValue: string, link: string, grant: string, statsId: string): Promise<WinbackClaim> {
+  const note = noteForErasure(statsId, email, link);
+  const [zadd, prune, expire] = note;
+  if (!zadd || !prune || !expire) return "unknown";
+  let reply: unknown;
+  try {
+    reply = repliesFor(await redisPipeline([[
+      "EVAL", WINBACK_CLAIM, 4, suppressedKey(listId), once, link, zadd[1],
+      suppressionPrint(listId, email), onceValue, ONCE_PER_DAYS * 86_400, grant, OFFER_DAYS * 86_400, zadd[2], prune[3], expire[2],
+    ]]), 1)?.[0];
+  } catch {
+    reply = undefined;
+  }
+  if (reply === 1) return "ours";
+  if (reply === 0) return "taken";
+  if (reply === 2) return "erased";
+  try {
+    const held = repliesFor(await redisPipeline([["GET", once]]), 1);
+    if (held && held[0] === onceValue) return "ours";
+  } catch {
+    // unknown below
+  }
+  return "unknown";
+}
+
+/**
+ * Whether the address is still free of a deletion print, read just before the email (#4807): an erasure that came
+ * after the claim deletes the mark and the grant itself (the grant is noted for it), and this keeps the email from
+ * going. Read exactly: 0 free, 1 erased; anything else is not known to be free, so nothing is sent.
+ */
+async function stillFree(listId: string, email: string): Promise<boolean> {
+  try {
+    const reply = repliesFor(await redisPipeline([["HEXISTS", suppressedKey(listId), suppressionPrint(listId, email)]]), 1)?.[0];
+    return countOf(reply) === 0;
+  } catch {
+    return false;
+  }
+}
 
 /** A day as the store's language writes it: "October 8, 2026", "8 de octubre de 2026". */
 const day = (seconds: number, language: unknown) =>
@@ -249,17 +309,18 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
       const unsub = tokens.get(email);
       if (!unsub) continue;
       const onceValue = claimValue();
-      const once = await claimMark(onceKey(statsId, email, product.id), ONCE_PER_DAYS * 86_400, onceValue);
+      const token = randomBytes(20).toString("hex");
+      const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
+      // The once-mark, the grant and its erasure note in one step, only while the address has no deletion print (#4807).
+      const once = await claimOffer(store.listId, email, onceKey(statsId, email, product.id), onceValue, linkKey(token), JSON.stringify(grant), statsId);
       if (once !== "ours") {
-        // Heard one lately, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the next
-        // run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
+        // Heard one lately, erased, or unknown: nothing is sent. On unknown the membership's own mark is let go, so the
+        // next run asks again. A once-mark answered oddly that did land holds this claim's value and reads as ours above.
         if (once === "unknown") await releaseMark(sentKey(account, subId), claim);
         continue;
       }
-
-      const token = randomBytes(20).toString("hex");
-      const grant = { s: statsId, e: email, p: product.id, o: meta.option ?? "", c: store.winback.coupon, pc: store.winback.percent, m: store.winback.months };
-      await redisPipeline([["SET", linkKey(token), JSON.stringify(grant), "EX", OFFER_DAYS * 86_400], ...noteForErasure(statsId, email, linkKey(token))]);
+      // An erasure that came after the claim: its print is read again just before the email, which then never goes.
+      if (!(await stillFree(store.listId, email))) continue;
       const ended = typeof sub.ended_at === "number" ? sub.ended_at : nowSeconds;
       const mail = winbackEmail({
         storeName: store.name,

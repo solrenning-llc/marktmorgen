@@ -101,6 +101,7 @@ export const WEBHOOK_EVENTS = [
   "sequence.step",
   "membership.changed",
   "dispute.opened",
+  "waitlist.joined",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 

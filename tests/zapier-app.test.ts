@@ -240,7 +240,7 @@ async function main(): Promise<void> {
   is("each event's trigger is the one named for it", app.EVENTS.every((e) => app.triggers[e.key]?.operation.type === "hook" && e.key === e.event.replace(".", "_")), true);
 
   part("Each example says what its webhook really sends, field by field");
-  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"]] as const) {
+  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"], ["call.moved", "lib/calls.ts"], ["waitlist.joined", "lib/waitlist.ts"]] as const) {
     const spec = app.EVENTS.find((e) => e.event === event);
     const sample = spec ? (app.triggers[spec.key].operation.sample as { type?: string; data?: Record<string, unknown> }) : null;
     is(`${event}: the example is that event's message`, sample?.type, event);
@@ -258,6 +258,7 @@ async function main(): Promise<void> {
     ["membership_changed", "membership.changed", "sub_Z1:1", { subscription: "sub_Z1", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, option: null, from: null, to: null, changed_at: "2026-10-21T10:00:00.000Z" }],
     ["dispute_opened", "dispute.opened", "dp_Z1", { dispute: "dp_Z1", charge: "ch_Z1", amount_cents: 2900, currency: "usd", reason: "fraudulent", status: "needs_response" }],
     ["sequence_step", "sequence.step", "f1:s1:ada@example.com", { sequence: { id: "f1", name: "Welcome" }, step: 1, email: "ada@example.com" }],
+    ["waitlist_joined", "waitlist.joined", "wait|p1|ada@example.com|1", { email: "ada@example.com", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, asked_to_hear_from_you: false, requested_at: null }],
   ] as const) {
     const op = app.triggers[key].operation as Op & { performList: (z: Z, b: Bundle) => Promise<{ type: string }[]> };
     const zap = await op.performSubscribe!(makeZ(writer.key), bundle({ targetUrl: `https://hooks.zapier.com/hooks/catch/1/${key}` }));

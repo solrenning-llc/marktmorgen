@@ -376,6 +376,19 @@ const EVENTS = [
       email: "ada@example.com",
     },
   },
+  {
+    key: "waitlist_joined",
+    event: "waitlist.joined",
+    noun: "Waitlist Spot",
+    label: "New Waitlist Spot",
+    description: "Triggers when someone confirms their spot on the waitlist of a product you marked coming soon.",
+    data: {
+      email: "ada@example.com",
+      product: { id: "p_8f2c1a", title: "The Weeknight Cookbook" },
+      asked_to_hear_from_you: true,
+      requested_at: "2026-10-19T14:05:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

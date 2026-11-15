@@ -29,6 +29,7 @@ not already.
     buyer: the dispute, its payment, the product, the amount, the reason Stripe
     gives and the date the answer is due.
   - Sequence Step Reached (`sequence.step`)
+  - New Waitlist Spot (`waitlist.joined`)
 
   Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
   its trigger, and each example has exactly the fields its webhook sends

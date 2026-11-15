@@ -25,7 +25,8 @@ import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
-import { listingSizes, productIds } from "@/lib/catalog";
+import { listingSizes, productIds, readListing } from "@/lib/catalog";
+import { emitEvent } from "@/lib/webhooks";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
@@ -192,6 +193,16 @@ export async function confirmSpot(token: string, store: Store | null): Promise<{
   if (!entry) return { ok: false };
   if (!entry.ok) {
     await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    // The creator's webhooks hear of it once (378 [TB4] complement WG (a)): the first press only, under one seed, so
+    // a second press, or the same one again, never sends it twice (lib/webhooks.ts keeps the event's own mark).
+    // asked_to_hear_from_you is the box: they also asked to hear from the creator (and so join the list below).
+    const listing = await readListing(store, grant.p).catch(() => null);
+    await emitEvent(store, "waitlist.joined", `wait|${grant.p}|${grant.e}|${entry.at}`, {
+      email: grant.e,
+      product: { id: grant.p, title: listing?.title ?? null },
+      asked_to_hear_from_you: entry.c,
+      requested_at: entry.at > 0 ? new Date(entry.at * 1000).toISOString() : null,
+    }).catch((error) => console.error("queueing the waitlist.joined webhook failed", error));
   }
   if (entry.c && store.listId) {
     await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store, () => takePublicRequest(store, "public")).catch((error) =>

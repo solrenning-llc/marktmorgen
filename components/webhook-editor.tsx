@@ -24,6 +24,7 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "membership.changed", label: "Membership changed", hint: "A membership moved to another price or quantity on your Stripe account" },
   { key: "dispute.opened", label: "Dispute opened", hint: "A buyer disputed a payment made at your checkout" },
   { key: "sequence.step", label: "Sequence step", hint: "Somebody reached a step of a sequence that calls your webhooks" },
+  { key: "waitlist.joined", label: "Waitlist joined", hint: "Someone confirmed their spot on the waitlist of a product coming soon" },
 ];
 const ALL = EVENTS.map((e) => e.key);
 

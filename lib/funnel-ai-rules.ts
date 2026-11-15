@@ -246,12 +246,17 @@ export type FunnelAiDraft = {
   diagnostics: FunnelDiagnostic[];
 };
 
-/** The slot the follow-up sequence starts from: a free product got, else a form sent, else the last product got. */
+/**
+ * The slot the follow-up sequence starts from: a free product got, else a form sent, else the last product got. A form
+ * is the moment only when it offers the box to hear from the creator (offerList): a form starts a sequence only for an
+ * address it has proven, with that box checked and confirmed by email (MM-SA-40). A form without the box never starts
+ * one, so the sequence follows a product instead.
+ */
 export function followUpMoment(type: FunnelType, picked: Readonly<Record<string, string>>): { trigger: "product"; slot: string; productId: string } | { trigger: "form"; slot: string } | null {
   const products = type.slots.filter((slot) => slot.kind === "product");
   const free = products.find((slot) => slot.kind === "product" && slot.wants === "free" && picked[slot.key]);
   if (free) return { trigger: "product", slot: free.key, productId: picked[free.key] };
-  const form = pagesOf(type).find((page) => page.form && page.blocks.includes("form") && page.form.fields.some((field) => field.type === "email"));
+  const form = pagesOf(type).find((page) => page.form && page.form.offerList === true && page.blocks.includes("form") && page.form.fields.some((field) => field.type === "email"));
   if (form) return { trigger: "form", slot: form.key };
   const last = [...products].reverse().find((slot) => picked[slot.key]);
   return last ? { trigger: "product", slot: last.key, productId: picked[last.key] } : null;

@@ -49,7 +49,11 @@ export type PageSlot = {
    * at that step, none of them a claim, and the form block among the page's
    * blocks points at it.
    */
-  form?: { name: string; fields: { type: "short" | "long" | "email"; label: string; required: boolean }[] };
+  /**
+   * The page's form. `offerList`: it offers the box to hear from the creator, the only way a form starts a sequence
+   * (MM-SA-40, followUpMoment). No funnel type sets it today: a funnel's forms are made without the box.
+   */
+  form?: { name: string; fields: { type: "short" | "long" | "email"; label: string; required: boolean }[]; offerList?: boolean };
 };
 
 /** A product the funnel's page leads to without it being a step: a call, booked on a page of its own. */

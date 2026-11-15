@@ -242,7 +242,8 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
           "",
           `Each kind of alert comes at most once a week, the goal ones once a month. To stop these emails and the weekly one: ${stopUrl}`,
         ].join("\n"),
-        headers: { "List-Unsubscribe": `<${stopUrl}>` },
+        // A mail app's own unsubscribe, in one click (RFC 8058): app/api/store/weekly takes the POST from any site (proxy.ts).
+        headers: { "List-Unsubscribe": `<${stopUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
       }).catch(() => false);
     }
   }

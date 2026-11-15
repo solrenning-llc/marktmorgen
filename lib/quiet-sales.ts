@@ -144,7 +144,8 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
     to: store.email,
     subject: `${store.name}: no sales in ${verdict.days} days`.slice(0, 180),
     text: lines.join("\n"),
-    headers: { "List-Unsubscribe": `<${stopUrl}>` },
+    // A mail app's own unsubscribe, in one click (RFC 8058): app/api/store/weekly takes the POST from any site (proxy.ts).
+    headers: { "List-Unsubscribe": `<${stopUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
   }).catch(() => false);
   return ok ? "sent" : "failed";
 }

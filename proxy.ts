@@ -188,13 +188,14 @@ const MAX_API_BODY_BYTES = 4 * 1024 * 1024;
 
 /**
  * The addresses another site may post to: the one-click unsubscribes that
- * mail apps send (RFC 8058), the list's and the waitlist launch's. Each token
+ * mail apps send (RFC 8058), the list's, the waitlist launch's and the stop of
+ * the numbers emails to a creator (app/api/store/weekly). Each token
  * is the whole key, each only ever takes somebody off, and a web mail app is
  * entitled to press it from its own page. The waitlist route still refuses a
  * post from another site without its token in the address (its page's own
  * button; tests/proxy-one-click-waitlist.test.ts).
  */
-const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe", "/api/store/waitlist/leave"]);
+const CROSS_SITE_POSTS = new Set(["/api/mail/unsubscribe", "/api/store/waitlist/leave", "/api/store/weekly"]);
 
 /**
  * Every request under /api/ that changes something passes here first.

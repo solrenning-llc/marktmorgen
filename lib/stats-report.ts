@@ -708,7 +708,8 @@ export async function maybeBusyAlert(store: Store, today: number, now = Date.now
     to: store.email,
     subject: `${store.name} is busy today: ${today.toLocaleString("en-US")} visits so far`.slice(0, 180),
     text: lines.join("\n"),
-    headers: { "List-Unsubscribe": `<${stopUrl}>` },
+    // A mail app's own unsubscribe, in one click (RFC 8058): app/api/store/weekly takes the POST from any site (proxy.ts).
+    headers: { "List-Unsubscribe": `<${stopUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
   }).catch(() => false);
 }
 

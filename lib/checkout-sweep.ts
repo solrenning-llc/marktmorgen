@@ -51,7 +51,7 @@ import { sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { onAccount, platformKey } from "@/lib/stripe-account";
+import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
 import { isSettled } from "@/lib/instant-pay";
 import { CONFIRM_WITHIN_SECONDS, type SessionRecord, canConfirm, confirmPurchase, confirmationKey } from "@/lib/purchase-email";
 import { REMIND_WITHIN_SECONDS, remindAbandoned } from "@/lib/checkout-recovery";
@@ -391,8 +391,11 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
       try {
         listed = await onAccount("GET", account, query);
       } catch (error) {
-        // The place may be a session Stripe no longer lists: let it go, so the next run is not stuck on it.
-        if (page === 0 && resumed) place = "";
+        // The place is let go only when Stripe says the very session it starts after is not there (#4733): a 400 or 404
+        // naming it, so the next run is not stuck on it. Any other failure (a 500, a 429, a timeout, another session
+        // named) keeps it, so the next run goes on from there instead of from the newest, and an older paid order is
+        // not left unread past its confirmation window.
+        if (page === 0 && resumed && placeGone(error, kept)) place = "";
         throw error;
       }
       // A page that is not a list is not "no checkouts" (CX-123 rule 24, L6): it stops this store's sweep, said as failed.
@@ -418,6 +421,11 @@ async function walkDay(store: Store, kind: WalkKind, since: number, deadline: nu
       : place !== kept ? ["SET", key, `${began}|${place}`, "EX", CONFIRM_WITHIN_SECONDS] : null;
     if (write) await redisPipeline([write]).catch((error) => console.error("keeping the checkout sweep's place failed", store.handle, kind, describe(error)));
   }
+}
+
+/** Whether a failed page answer is Stripe saying the session the walk started after is gone: 400 or 404, naming it. */
+function placeGone(error: unknown, session: string): boolean {
+  return error instanceof StripeError && (error.status === 400 || error.status === 404) && error.stripeMessage === `No such checkout.session: '${session}'`;
 }
 
 export type SweepCounts = {

@@ -17,8 +17,10 @@
  * once say it once; the one that lost says "unknown", never "crossed".
  *
  * The number takes its room in the store's data room before it is written
- * (the largest record it can become, so the count moving never grows it), and
- * gives it back when it is turned off. Nothing here sends an email or a phone
+ * (the largest record it can become, so the count moving never grows it).
+ * Turning it off keeps that room counted (one slot a product, set again by
+ * the next save): giving it back could race a save and leave a live record
+ * uncounted (Codex G on #3650). Over, never under. Nothing here sends an email or a phone
  * alert, reads Stripe or shows a field: those are unit 5.
  */
 import { createHash } from "node:crypto";
@@ -26,7 +28,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { MAX_LOW_STOCK, crossedLow, readLowStock } from "@/lib/stock-alert-rules";
 import { MAX_STOCK } from "@/lib/product-extras";
-import { type DataStore, giveData, takeData } from "@/lib/store-data";
+import { type DataStore, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
 export type LowStock = { low: number; seen: number | null };
@@ -91,9 +93,11 @@ export async function setLowStock(store: DataStore, productId: string, raw: unkn
   const key = keyOf(store.statsId);
   try {
     if (low === 0) {
+      // The room stays counted (Codex G on #3650): giving it back here could race a save whose room was taken and
+      // whose record is written after this, leaving a live record uncounted. Set again by the next save, it is one
+      // slot a product at most, over and never under, until the store closes.
       const removed = countOf(repliesFor(await redisPipeline([["HDEL", key, productId]]), 1)?.[0]);
       if (removed === null || removed > 1) return "unknown";
-      if (removed === 1) await giveData(store, [{ slot: slotOf(productId), bytes: 0, set: true }], now);
       return "off";
     }
     if (!isLeft(left)) return "unknown";

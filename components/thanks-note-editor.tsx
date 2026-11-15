@@ -7,6 +7,10 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_NOTE_BODY, MAX_NOTE_HEADING, MAX_NOTE_LABEL, readNote, parseNote, type ThanksNote } from "@/lib/thanks-note";
 import { videoAddress } from "@/lib/sales-page";
 import { MAX_LINK_LENGTH } from "@/lib/product-link";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
+
+/** Where in the note a "poses as Marktmorgen" refusal was found (568 [GD2] (c)), as the server names it. */
+const NOTE_PARTS: Record<string, string> = { heading: "the note's heading", body: "the note's text", button: "the button's words", link: "the button's link" };
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
@@ -63,6 +67,12 @@ export function ThanksNoteEditor({ productId, productTitle, storeName, initial }
       const data = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : null;
       if (!response.ok || data?.ok !== true || data.error || !Object.prototype.hasOwnProperty.call(data, "note") || (expected === null ? data.note !== null : JSON.stringify(parseNote(data.note)) !== JSON.stringify(expected))) {
         const problem = data?.ok === true ? undefined : data?.error;
+        // Posing as Marktmorgen: the part, the passage, why and the fix come from the server; the note stays as typed.
+        if (problem === "brand_imitation") {
+          const field = data?.passage && typeof data.passage === "object" ? String((data.passage as Record<string, unknown>).field) : "";
+          setError(imitationMessage(data?.passage, NOTE_PARTS[field] ?? "the note", "Your note was not saved"));
+          return;
+        }
         setError(typeof problem === "string" && Object.prototype.hasOwnProperty.call(MESSAGES, problem) ? MESSAGES[problem] : "We could not confirm this note. Reload this page to check before trying again.");
         return;
       }

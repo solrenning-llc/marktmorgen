@@ -341,7 +341,12 @@ export async function decideLeads(store: Store, ids: string[], decision: LeadDec
         if (chosen.some((l) => l.state !== "reversed")) return { ok: false, reason: "not_ready" };
         next = chosen.map((l) => ({ ...l, state: "open", d: 0, why: "" }));
       }
-      await redisPipeline(next.map((l) => ["HSET", leadsKey(statsId), l.id, JSON.stringify(l)]));
+      // Each lead's write read exactly (#4753, rule 24): one reply of its own per HSET, the integer 0 or 1 (the field was
+      // there, so 0 when it is rewritten). Anything else, a short, missing, null, text or out-of-range reply, is a write
+      // not known to have landed: thrown, so the studio says it could not save and the creator can decide again (the
+      // decision is the same whatever the leads hold now), never "approved" or "reversed" over an unchanged record.
+      const written = repliesFor(await redisPipeline(next.map((l) => ["HSET", leadsKey(statsId), l.id, JSON.stringify(l)])), next.length);
+      if (!written || written.some((reply) => reply !== 0 && reply !== 1)) throw new UnknownReplyError("a decision on affiliate leads");
       return { ok: true, changed: next.length };
     });
   } catch (error) {

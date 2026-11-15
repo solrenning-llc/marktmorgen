@@ -12,6 +12,11 @@
  * Expected: every change is written only over the settings it read (or only
  * while they are still absent), read again and made again on a lost race, a
  * bounded number of times; the add's remote read happens before that window.
+ * The same holds for the two writers that refresh or stop the settings on
+ * their own: the studio's and the feed's identity refresh (ensureFeedToken, a
+ * renamed store) and the stop of an over-polled address (stopFeedToken), which
+ * read the whole settings and wrote them back blind, so a calendar removed
+ * between their read and their write came back (review of #4007).
  *
  * Synthetic only: the in-memory Redis, a made-up store, and a calendar served
  * by a local server behind a stand-in public address.
@@ -20,7 +25,17 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import type { Store } from "@/lib/store";
-import { CalendarChangeBusyError, addFeed, newFeedToken, removeFeed, storeIdForToken } from "@/lib/calendar-sync";
+import {
+  CALENDAR_POLLS_PER_HOUR,
+  CALENDAR_REFUSED_PER_HOUR,
+  CalendarChangeBusyError,
+  addFeed,
+  bookedCalendarFeed,
+  ensureFeedToken,
+  newFeedToken,
+  removeFeed,
+  storeIdForToken,
+} from "@/lib/calendar-sync";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -161,6 +176,49 @@ async function main(): Promise<void> {
   redis.pipeline = real;
   is("it throws (rule 24)", thrown, "UnknownReplyError");
   is("and nothing else of the calendar was deleted", (await kept()).feeds.length, 2);
+
+  part("a rename refresh never restores a calendar removed after its read (review of #4007)");
+  await seed();
+  // Right after the refresh reads the settings, another request removes the first calendar.
+  const removingAfterRead = (armed: { on: boolean }) =>
+    (async (c: Commands) => {
+      if (armed.on && c.length === 1 && c[0][0] === "GET" && c[0][1] === cfgKey) {
+        armed.on = false;
+        const answer = await real(c);
+        await real([["SET", cfgKey, JSON.stringify({ ...JSON.parse(String(answer[0])), feeds: [FEEDS[1]] })]]);
+        return answer;
+      }
+      return real(c);
+    }) as typeof redis.pipeline;
+  const renameRace = { on: true };
+  redis.pipeline = removingAfterRead(renameRace);
+  const RENAMED = { ...STORE, handle: "renamed-race-studio" } as Store;
+  await ensureFeedToken(RENAMED).catch(() => {});
+  redis.pipeline = real;
+  is("the race was run", renameRace.on, false);
+  is("the concurrent removal stays", (await kept()).feeds.map((f) => f.id), [FEEDS[1].id]);
+  await ensureFeedToken(RENAMED);
+  const renamed = (await kept()) as unknown as { feeds: { id: string }[]; handle: string; token: string | null };
+  is("the next opening still refreshes the name, the removal kept and the address the same", [renamed.handle, renamed.feeds.map((f) => f.id), renamed.token], ["renamed-race-studio", [FEEDS[1].id], TOKEN]);
+
+  part("stopping an over-polled address never restores a calendar removed after its read (review of #4007)");
+  await seed();
+  await real([["DEL", `nl:cal:pace:${STATS}`, `nl:cal:refused:${STATS}`]]);
+  const at = Date.UTC(2031, 5, 1, 12, 0);
+  const quick = async () => ({ ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR", listId: null, named: [] });
+  const owner = { statsId: STATS, handle: STORE.handle, callsId: null, token: TOKEN };
+  // Every answer the hour allows and every refusal the line prices: the address still answers after them.
+  for (let i = 0; i < CALENDAR_POLLS_PER_HOUR + CALENDAR_REFUSED_PER_HOUR; i += 1) await bookedCalendarFeed(owner, quick, at + i);
+  is("before the stop, the address is still named", (await kept()).token, TOKEN);
+  const stopRace = { on: true };
+  redis.pipeline = removingAfterRead(stopRace);
+  await bookedCalendarFeed(owner, quick, at + 60_000);
+  redis.pipeline = real;
+  is("the race was run", stopRace.on, false);
+  is("the concurrent removal stays", (await kept()).feeds.map((f) => f.id), [FEEDS[1].id]);
+  await bookedCalendarFeed(owner, quick, at + 61_000);
+  const stopped = (await kept()) as unknown as { feeds: { id: string }[]; token: string | null; stoppedAt?: string };
+  is("the address is stopped, with when, and the removal kept", [stopped.token, stopped.stoppedAt !== undefined, stopped.feeds.map((f) => f.id)], [null, true, [FEEDS[1].id]]);
 
   server.close();
   done();

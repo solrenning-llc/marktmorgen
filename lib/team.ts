@@ -768,12 +768,15 @@ export async function moveMemberships(from: string, to: string, unswept: Map<str
   if (!isRedisConfigured()) return [];
   const before = normaliseEmail(from);
   const after = normaliseEmail(to);
-  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
-  if (!ids) throw new UnknownReplyError("a teammate's stores");
-  const list = ids.filter((id) => STORE_ID_PATTERN.test(id));
+  // Their stores, read whole (rule 24; Codex G's 4223): an answer that is not a list of store ids is unknown and
+  // stops the move of their teams with nothing deleted, never "on no team", which deleted the old address's index.
+  const list = stringList(repliesFor(await redisPipeline([["SMEMBERS", indexKey(before)]]), 1)?.[0]);
+  if (!list || !list.every((id) => STORE_ID_PATTERN.test(id))) throw new UnknownReplyError("a teammate's stores");
   // Stores whose membership stayed on the old address: their index entry is kept.
   const stayed: string[] = [];
   for (const sid of list) {
+    // Read exactly (Codex G's 4224): a store that does not read stays on the old index; only one confirmed gone
+    // leaves it. One the new address owns is not skipped: its old place is taken off below.
     const found = await storeForIdExactly(sid);
     // Confirmed gone: nothing opens it, and its index entry goes. Not known: never read as gone.
     if (found === "none") continue;

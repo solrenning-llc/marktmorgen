@@ -7,7 +7,8 @@
  * Synthetic store; the creator's Stripe account is a stand-in for `fetch`; nothing real is reached.
  */
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
+import { readProduct } from "@/lib/catalog";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
@@ -28,6 +29,8 @@ const CART_ROUND_TRIPS_MOST = 8;
 const CART_COMMANDS_MOST = 12;
 /** Unit 3, measured the same day: a box checked at checkout, a gift and a fixed bundle, each [round trips, commands]. */
 const MORE_MOST: Record<"bump" | "gift" | "bundle", [number, number]> = { bump: [7, 10], gift: [8, 11], bundle: [7, 10] };
+/** Unit 4, measured the same day: a price option, a bundle the buyer builds and a payment plan, each [round trips, commands]. */
+const UNIT4_MOST: Record<"option" | "pick" | "plan", [number, number]> = { option: [7, 10], pick: [7, 10], plan: [8, 11] };
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
@@ -127,6 +130,34 @@ async function main(): Promise<void> {
   const bundled = await setProductBundle(owner, set.product.id, [made.product.id, second.product.id]);
   if (!bundled.ok) throw new Error(`no bundle: ${bundled.reason}`);
   await measure("bundle", (f) => { f.set("product", set.product.id); });
+  part("Unit 4: a price option, a bundle the buyer builds and a payment plan");
+  const unit4 = async (label: "option" | "pick" | "plan", fill: (f: FormData) => void) => {
+    roundTrips = 0;
+    commands = 0;
+    stripeCalls.length = 0;
+    const f = new FormData();
+    f.set("handle", "speedshop");
+    fill(f);
+    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com" } }));
+    const [tripsMost, commandsMost] = UNIT4_MOST[label];
+    is(`${label}: on to Stripe's page`, response.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+    is(`${label}: at most ${tripsMost} round trips and ${commandsMost} commands, one request to Stripe`, [roundTrips <= tripsMost, commands <= commandsMost, stripeCalls.length <= STRIPE_REQUESTS_MOST], [true, true, true]);
+  };
+  const priced = await addProduct(owner, "Bread Course", "", "29", null);
+  if (!priced.ok) throw new Error("no priced product");
+  const optioned = await addOption(owner, priced.product.id, "Printed copy", "39");
+  if (!optioned.ok) throw new Error(`no option: ${optioned.reason}`);
+  const option = (await readProduct(optioned.store, priced.product.id))!.options[0];
+  await setProductLink(owner, option.id, "https://example.com/printed");
+  await unit4("option", (f) => { f.set("product", priced.product.id); f.set("option", option.id); });
+  const pickSet = await addProduct(owner, "Pick Two", "", "15", null);
+  if (!pickSet.ok) throw new Error("no pick bundle");
+  const picked = await setProductBundle(owner, pickSet.product.id, [made.product.id, second.product.id, added.product.id], 2);
+  if (!picked.ok) throw new Error(`no pick bundle: ${picked.reason}`);
+  await unit4("pick", (f) => { f.set("product", pickSet.product.id); f.append("pick", made.product.id); f.append("pick", second.product.id); });
+  const planned = await setProductExtras(owner, made.product.id, { plan: { payments: 3, interval: "month", amountCents: 300 } });
+  if (!planned.ok) throw new Error(`no plan: ${planned.reason}`);
+  await unit4("plan", (f) => { f.set("product", made.product.id); f.set("pay", "plan"); });
   done();
 }
 

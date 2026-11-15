@@ -16,6 +16,7 @@ import type { Letter } from "@/lib/letter-rules";
 import { readLetterGrant, requestLetterLink } from "@/lib/letter-access";
 import { allowanceUsed } from "@/lib/store-allowance";
 import { suppressCommand } from "@/lib/suppression";
+import { ORDERS_UNIT_COMMANDS } from "@/lib/buyer-orders-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -176,6 +177,43 @@ async function main(): Promise<void> {
     is("the erased address has no grant", await redis.run(["GET", grantKey]), null);
     is("no email was sent", mails.length - mailsBefore, 0);
     is("nothing taken from the allowance", (await used()) - allowanceBefore, 0);
+  }
+
+  part("One request's commands, a script's own counted, stay inside the one public request it takes (#4772)");
+  {
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    redis.run = ((c: (string | number)[]) => { commands += 1; return run(c); }) as typeof redis.run;
+    try {
+      await ask(`member${++member}@example.com`);
+      await settle();
+    } finally {
+      redis.run = run;
+    }
+    console.log(`  one link asked for and sent: ${commands} commands`);
+    is(`at most ORDERS_UNIT_COMMANDS (${ORDERS_UNIT_COMMANDS}), what one public request pays for`, commands <= ORDERS_UNIT_COMMANDS, true);
+  }
+
+  part("A store from before lists: its list id is made once, by the first link, never again by a later one (#4772)");
+  {
+    const given = store.listId!;
+    for (const key of redis.keys()) {
+      const [raw] = await real([["GET", key]]).catch(() => [null]);
+      if (typeof raw !== "string" || !raw.includes(given)) continue;
+      const record = JSON.parse(raw) as Record<string, unknown>;
+      if (record.listId !== given) continue;
+      delete record.listId;
+      await real([["SET", key, JSON.stringify(record)]]);
+    }
+    const stale: Store = { ...store, listId: undefined } as Store;
+    const askStale = (email: string) => requestLetterLink({ store: stale, letter, email, ip: `198.51.100.${++n}`, origin: "https://marktmorgen.com" });
+    await askStale(`member${++member}@example.com`);
+    await settle();
+    const made = (await storeForEmail(OWNER))?.listId ?? null;
+    await askStale(`member${++member}@example.com`);
+    await settle();
+    is("the first link made a list id", typeof made === "string" && made.length > 0, true);
+    is("the second kept it, writing none", (await storeForEmail(OWNER))?.listId ?? null, made);
   }
 
   console.error = realError;

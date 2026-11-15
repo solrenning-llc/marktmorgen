@@ -31,6 +31,9 @@ const hostile: [string, string][] = [
   ["'<style' with no end", "<style>".repeat(SIZE / 7)],
   ["'<!--' with no end", "<!--".repeat(SIZE / 4)],
   ["a mailto link with no '>'", "<a href='mailto:x@example.org' ".repeat(SIZE / 32)],
+  // One tag that never closes, holding many attributes: each try used to run to the end of the page (Claude 6 on #4619).
+  ["one '<a' holding many href= and no '>'", `<a ${"href='x' ".repeat(SIZE / 9)}`],
+  ["one '<a' holding many mailto href= and no '>'", `<a ${"href='mailto:x' ".repeat(SIZE / 16)}`],
 ];
 
 for (const [label, html] of hostile) {
@@ -39,7 +42,7 @@ for (const [label, html] of hostile) {
 }
 
 test("a whole find on a hostile site ends well inside the function's time limit", async () => {
-  for (const html of ["<".repeat(SIZE), "<title>".repeat(SIZE / 7), "<meta ".repeat(SIZE / 6)]) {
+  for (const html of ["<".repeat(SIZE), "<title>".repeat(SIZE / 7), "<meta ".repeat(SIZE / 6), `<meta ${"name='og:site_name' ".repeat(SIZE / 20)}`, `<a href="/contact">Contact</a><a ${"href='/contact' ".repeat(SIZE / 16)}`]) {
     const started = performance.now();
     await readSite("https://shop.example.org", async (url) => (url.endsWith("/robots.txt") ? null : { url, html }));
     const took = performance.now() - started;
@@ -57,4 +60,14 @@ test("a real page still reads the same", () => {
   assert.equal(pageText(page), "Fern & Pine Write to us at hello@fernandpine.com our desk or partners@fernandpine.com. No unsolicited email. Contact us Partnerships Shop");
   assert.deepEqual(contactPages(page, "https://fernandpine.com/"), ["https://fernandpine.com/pages/partners", "https://fernandpine.com/contact"]);
   assert.deepEqual(publishedAddresses(page, "https://fernandpine.com/", "fernandpine.com").map((a) => a.email), ["partners@fernandpine.com", "hello@fernandpine.com"]);
+});
+
+test("a letter that is longer in lower case never moves a cut (İ before a script)", () => {
+  // toLowerCase() makes "İ" two code units: cuts taken from it landed beside the marks (Claude 6 on #4619).
+  for (const count of [3, 12]) {
+    const page = `<p>${"İ".repeat(count)}</p><script>var secret = 1;</script><p>info@fernandpine.com</p>`;
+    assert.equal(pageText(page), `${"İ".repeat(count)} info@fernandpine.com`);
+    assert.deepEqual(publishedAddresses(page, "https://fernandpine.com/", "fernandpine.com").map((a) => a.email), ["info@fernandpine.com"]);
+  }
+  assert.deepEqual(contactPages(`<p>İİİİ</p><A HREF="/contact">Contact Us</A>`, "https://fernandpine.com/"), ["https://fernandpine.com/contact"]);
 });

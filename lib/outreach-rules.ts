@@ -213,7 +213,9 @@ export const PAGE_READ_CHARS = 500_000;
  * that never closes runs to the end of the page, as the regex did not: what follows it was the block's own text.
  */
 function dropBlocks(html: string, open: string, close: string): string {
-  const lower = html.toLowerCase();
+  // Only A–Z lowered, so every index in `lower` is the same in `html`: toLowerCase() turns "İ" into two code units,
+  // and every cut after one would land beside the mark (Claude 6 on #4619).
+  const lower = asciiLower(html);
   let out = "";
   let at = 0;
   for (;;) {
@@ -233,6 +235,19 @@ function dropBlocks(html: string, open: string, close: string): string {
   }
 }
 
+/** A–Z lowered, nothing else, so the text keeps its length and each index means the same in both. */
+const asciiLower = (text: string): string => text.replace(/[A-Z]+/g, (run) => run.toLowerCase());
+
+/**
+ * Every whole opening tag `<name ...>` of a page, with where it starts, in linear time: `[^<>]*` ends at the next
+ * "<" or ">", so a run with no ">" is scanned once from its own "<name". What a tag holds is then read inside it
+ * alone, with no pattern that backtracks to the end of the page (Claude 6 on #4619: one "<a" holding many href=
+ * and no ">" was quadratic).
+ */
+export function* openingTags(html: string, name: string): Generator<{ tag: string; at: number }> {
+  for (const match of html.matchAll(new RegExp(`<${name}\\b[^<>]*>`, "gi"))) yield { tag: match[0], at: match.index ?? 0 };
+}
+
 /**
  * The tags of a page put out, each with " ", in linear time (#4592): `<[^>]+>` backtracked over the rest of the page
  * from every "<" with no ">" after it; `<[^<>]*>` stops at the next "<", so each "<" is looked at once. A "<" that
@@ -247,8 +262,12 @@ export function pageText(html: string): string {
   page = dropBlocks(page, "<style", "</style>");
   page = dropBlocks(page, "<!--", "-->");
   const stripped = stripTags(
-    // The whole opening tag gives way to the address, or it would go with the tag. [^<>] keeps each try to one tag.
-    page.replace(/<a\b[^<>]*\bhref\s*=\s*["']mailto:([^"'?<>]+)[^"'<>]*["'][^<>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `),
+    // The whole opening tag gives way to the address, or it would go with the tag. Each whole tag is read once, and
+    // the address is looked for inside it alone (openingTags).
+    page.replace(/<a\b[^<>]*>/gi, (tag: string) => {
+      const to = /\bhref\s*=\s*["']mailto:([^"'?<>]+)/i.exec(tag)?.[1];
+      return to === undefined ? tag : ` ${to.replace(/%40/gi, "@")} `;
+    }),
   );
   return decodeEntities(stripped).replace(/\s+/g, " ").trim();
 }
@@ -309,18 +328,27 @@ function contactRank(path: string, text: string): number {
 export function contactPages(html: string, base: string): string[] {
   const home = new URL(base);
   const found = new Map<string, number>();
-  // Each try kept to one tag and a link's words to 2,000 characters, so a page of "<a " with no ">" or of links with
-  // no "</a>" is read in linear time (#4592).
-  for (const match of html.slice(0, PAGE_READ_CHARS).matchAll(/<a\b[^<>]*href\s*=\s*["']([^"'#<>]+)["'][^<>]*>([\s\S]{0,2000}?)<\/a>/gi)) {
+  // Each whole tag read once and its href looked for inside it, and a link's words looked for in the 2,000 characters
+  // after it only, so a page of "<a " with no ">", of one "<a" holding many href=, or of links with no "</a>" is read
+  // in linear time (#4592; Claude 6 on #4619).
+  const page = html.slice(0, PAGE_READ_CHARS);
+  const lower = asciiLower(page);
+  for (const { tag, at } of openingTags(page, "a")) {
+    const href = /\bhref\s*=\s*["']([^"'#<>]+)["']/i.exec(tag)?.[1];
+    if (href === undefined) continue;
+    const start = at + tag.length;
+    const close = lower.slice(start, start + 2_000 + 4).indexOf("</a>");
+    if (close < 0) continue;
+    const words = page.slice(start, start + close);
     let url: URL;
     try {
-      url = new URL(match[1], home);
+      url = new URL(href, home);
     } catch {
       continue;
     }
     if (url.protocol !== "https:" || siteDomain(url.hostname) !== siteDomain(home.hostname)) continue;
     if (NOT_A_CONTACT_PAGE.test(url.pathname)) continue;
-    const text = stripTags(dropBlocks(dropBlocks(match[2], "<script", "</script>"), "<style", "</style>")).replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
+    const text = stripTags(dropBlocks(dropBlocks(words, "<script", "</script>"), "<style", "</style>")).replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
     const rank = contactRank(url.pathname.toLowerCase(), text);
     if (rank === 0) continue;
     const key = `${url.origin}${url.pathname}`;

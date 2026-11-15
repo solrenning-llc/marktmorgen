@@ -286,6 +286,50 @@ export class MemoryRedis {
           this.run(["SET", book, json]);
           return 1;
         }
+        // lib/contacts.ts CONTACT_FENCED_WRITE_IF: CONTACT_WRITE_IF (the row and the mark as read) only while its fence exists,
+        // a mark lifted only when older than the fence (its second, on this clock); 2 refused by the fence, 0 changed, 1 written.
+        if (key.startsWith("-- marktmorgen:contact-fenced-write-if:v3\n") && ((args[0] === "5" && args.length === 15) || (args[0] === "6" && args.length === 18))) {
+          const withIndex = args[0] === "6";
+          const [list, marks, agreedCount, leftCount, fence] = args.slice(1, 6);
+          const [field, was, value, print, markWas, liftAsked, agreed, leftBy, lifetime, member, day] = args.slice(withIndex ? 7 : 6);
+          const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
+          const left = this.run(["PTTL", fence]) as number;
+          this.scriptCalls += 1;
+          if (left === -2) return 2;
+          this.scriptCalls += 1;
+          if (sha1(this.run(["HGET", list, field])) !== was) return 0;
+          let held: unknown = null;
+          if (print !== "") {
+            held = this.run(["HGET", marks, print]);
+            this.scriptCalls += 1;
+            if (sha1(held) !== markWas) return 0;
+          }
+          const lift = liftAsked === "1" && typeof held === "string";
+          if (lift) {
+            if (left < 0 || !/^-?\d+(\.\d+)?$/.test(held as string)) return 2;
+            this.scriptCalls += 1;
+            if ((Number(held) + 1) * 1000 > this.now() - (Number(lifetime) - left)) return 2;
+          }
+          this.run(["HSET", list, field, value]);
+          this.scriptCalls += 1;
+          if (lift) { this.run(["HDEL", marks, print]); this.scriptCalls += 1; }
+          if (agreed === "1") { this.run(["INCR", agreedCount]); this.scriptCalls += 1; }
+          if (leftBy === "1") { this.run(["INCR", leftCount]); this.scriptCalls += 1; }
+          else if (leftBy === "-1") { this.run(["DECR", leftCount]); this.scriptCalls += 1; }
+          if (withIndex) { this.run(["SADD", args[6], member]); this.run(["EXPIREAT", args[6], day]); this.scriptCalls += 2; }
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link and the entry still exist.
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, link, list, email, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", link]) === 0) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", list, email]) === 0) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
+          return 1;
+        }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
           const target = args[1];

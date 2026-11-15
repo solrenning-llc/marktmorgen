@@ -1569,12 +1569,10 @@ export async function moveBooking(input: {
 
   const moves = from.moves + 1;
   if (letGo) await releaseClaim(letGo.hosts, letGo.claim).catch(() => {});
-  try {
-    await unplanReminders(callsId, store.handle, session, from.start);
-    if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start);
-  } catch (error) {
-    console.error("planning reminders after a move failed", error);
-  }
+  // Each on its own (Claude 7, 13 November 2026): a failure dropping the old time's reminders never skips planning the
+  // new time's. An old reminder left in the queue is not sent: the reminder job sends only for the booking's start now.
+  await unplanReminders(callsId, store.handle, session, from.start).catch((error) => console.error("dropping a moved booking's old reminders failed", error));
+  if (writesAboutBookings(store)) await planReminders(callsId, store.handle, session, start).catch((error) => console.error("planning reminders after a move failed", error));
   // A Google Meet or Zoom meeting moves with the booking (lib/meet-links.ts),
   // before anybody is told, so the emails carry the link of the new time.
   await callMoved({ store, product, session, from, start, end, email: input.booked.email }).catch((error) =>

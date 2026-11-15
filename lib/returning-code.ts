@@ -44,7 +44,8 @@ import { saleOff } from "@/lib/store-sale";
 import { returningLinkWords } from "@/lib/buyer-words/returning-link";
 import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
-import { type Listing, type Store, saleHandles } from "@/lib/store";
+import { type Listing, type Store, ensureListId, saleHandles, storeRef } from "@/lib/store";
+import { keepUnlessErased } from "@/lib/suppression";
 
 /** Public requests one check counts as: the same reads and Stripe calls as ownedHere for the next product after a purchase. */
 export const RETURNING_CODE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
@@ -125,11 +126,16 @@ function later(task: () => Promise<void>): void {
 /** Emails the link only when the address paid for an order here before; anything unknown sends nothing. */
 export async function sendReturningLink(store: Store, productId: string, productTitle: string, code: ReturningCode, email: string, origin: string, send: typeof sendEmail = sendEmail, typed = email): Promise<void> {
   if ((await paidHere(store, typed)) !== true) return;
+  // The link is written only in the same step that reads the store's erasure mark (#4769): a buyer erased while the
+  // check ran, or before a later lookup found the old purchase, gets no link and no email. A store with no list of
+  // erased people yet is given one, so the mark has a place to be read from; another store under that address sends
+  // nothing. An unreadable reply throws (keepUnlessErased): nothing is emailed.
+  const current = store.listId ? store : await ensureListId(storeRef(store));
+  if (!current?.listId || current.sid !== store.sid) return;
   const token = randomBytes(32).toString("hex");
   const record: LinkRecord = { s: store.handle, p: productId, c: code.code, e: email };
-  // Only a SET answered exactly "OK" is a link (CX-123 rule 24): anything else emails nothing.
-  const written = repliesFor(await redisPipeline([["SET", linkKey(token), JSON.stringify(record), "EX", RETURNING_LINK_SECONDS]]), 1);
-  if (!written || written[0] !== "OK") throw new Error("a returning-buyer code link was not confirmed written");
+  const erased = await keepUnlessErased(linkKey(token), current.listId, JSON.stringify(record), RETURNING_LINK_SECONDS, [email, typed]);
+  if (erased.size > 0) return;
   const words = returningLinkWords(store.language);
   const link = `${origin}/@${store.handle}/p/${encodeURIComponent(productId)}?rtoken=${token}#returning`;
   const sent = await send({

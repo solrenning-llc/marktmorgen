@@ -13,7 +13,13 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
-async function measure(n: number): Promise<{ commands: number; sent: number }> {
+/** The store's monthly emails taken (lib/mail.ts reserve), from its window's count, read without counting a command. */
+async function monthTaken(shop: { listId?: string | null }): Promise<number> {
+  const keys = redis.keys().filter((k) => k.startsWith(`nl:mail:used:${shop.listId}:`));
+  return keys.reduce((sum, k) => sum + Number(redis.run(["GET", k]) ?? 0), 0);
+}
+
+async function measure(n: number, erasedAt = -1): Promise<{ commands: number; sent: number; status?: string; stops: number; reserved: number }> {
   redis.clear();
   const owner = "update-owner@example.test";
   let productId = "";
@@ -48,10 +54,19 @@ async function measure(n: number): Promise<{ commands: number; sent: number }> {
   if (!started.ok) throw new Error(JSON.stringify(started));
   const run = redis.run.bind(redis);
   let commands = 0;
-  redis.run = ((c: (string | number)[]) => { commands += 1; return run(c); }) as typeof redis.run;
+  let noted = 0;
+  const monthBefore = await monthTaken(shop);
+  redis.run = ((c: (string | number)[]) => {
+    commands += 1;
+    const result = run(c);
+    // The person at erasedAt is erased between their stop link's erasure note and its grant: the erasure deleted the
+    // note (and found no grant yet), as lib/erasure-index.ts forgetNoted does.
+    if (c[0] === "ZADD" && String(c[3] ?? "").startsWith("nl:upd:stop:") && noted++ === erasedAt) run(["DEL", String(c[1])]);
+    return result;
+  }) as typeof redis.run;
   try {
     const job = await advanceUpdate(started.job.id, storeForHandle, Date.now() + 60_000);
-    return { commands, sent: job?.sent ?? 0 };
+    return { commands, sent: job?.sent ?? 0, status: job?.status, stops: redis.keys().filter((k) => k.startsWith("nl:upd:stop:")).length, reserved: (await monthTaken(shop)) - monthBefore };
   } finally {
     redis.run = run;
   }
@@ -68,6 +83,18 @@ async function main(): Promise<void> {
   console.log(`  fifty recipients: ${fifty.commands} commands, ${(fifty.commands / 50).toFixed(2)} each`);
   is("all sent", fifty.sent, 50);
   is("each under the price of one alone", fifty.commands / 50 <= UPDATE_EMAIL_COMMANDS, true);
+
+  part("A person erased between their stop link's note and its grant (#4781): skipped, their email kept spent, the rest sent");
+  const lone = await measure(1, 0);
+  console.log(`  one recipient, erased meanwhile: ${lone.commands} commands, ${lone.reserved} email taken`);
+  is("nothing sent, no grant kept", [lone.sent, lone.stops], [0, 0]);
+  is("the email reserved for them stays taken, so the month's emails bound this path too", lone.reserved, 1);
+  is(`and it costs at most ${UPDATE_EMAIL_COMMANDS} commands for that email`, lone.commands <= UPDATE_EMAIL_COMMANDS, true);
+  const pair = await measure(2, 0);
+  console.log(`  two recipients, the first erased meanwhile: ${pair.commands} commands, ${pair.reserved} emails taken`);
+  is("the other is sent in the same run, the batch not thrown back", [pair.sent, pair.status, pair.stops], [1, "sent", 1]);
+  is("two emails taken, one for each", pair.reserved, 2);
+  is("each under UPDATE_EMAIL_COMMANDS", pair.commands / 2 <= UPDATE_EMAIL_COMMANDS, true);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

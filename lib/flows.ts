@@ -5,7 +5,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -1428,12 +1428,10 @@ export async function sendDueSteps(
       // Whoever the sender left out because they left the list after sendGroup read them (sendTo reads each row again:
       // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
       // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
+      // Each is written only where their run still exists: one erased meanwhile leaves nothing behind (Claude 7 on #4307).
       const accounted = new Set([...result.done, ...result.rest, ...uncertain]);
       const gone = going.filter((email) => !accounted.has(email));
-      if (gone.length) {
-        counts.dropped += gone.length;
-        outcomes.push(...gone.map((email) => ({ email, state: "failed" as const, note: "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", to: -1, status: "left" as const })));
-      }
+      if (gone.length) counts.dropped += gone.length;
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
         outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
@@ -1442,6 +1440,7 @@ export async function sendDueSteps(
       }
       queued = true;
       await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
+      await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now);
     } catch (error) {
       // Something after the attempt could not be confirmed. The attempts stay
       // open, so nothing is repeated by itself; when nothing was queued after

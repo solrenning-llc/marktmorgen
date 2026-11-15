@@ -341,6 +341,35 @@ export async function settleAttempts(listId: string, flowId: string, index: numb
   await redisPipeline(commands);
 }
 
+/**
+ * Ends as "left" the runs of people the sender left out because they left the list after their row was read, each in
+ * one Redis step and only where the run still holds its own record (its address, written when it opened or at any
+ * earlier step): a person erased meanwhile (forgetWorkflowPerson) took their run with them, and nothing of theirs,
+ * their address least of all, is written back (Claude 7 on #4307). What claimAttempts wrote again after the erasure
+ * (the open attempt and its event, with no address) is deleted in the same step.
+ * KEYS: the run, its history, the workflow's index; ARGV: the address, the time, the event, the lifetime, the person.
+ */
+const LEFT_IF_RUN = `-- marktmorgen:flow-left-if-run:v1
+if redis.call('HEXISTS', KEYS[1], 'email') == 0 then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return 0
+end
+redis.call('HDEL', KEYS[1], 'open')
+redis.call('RPUSH', KEYS[2], ARGV[3])
+redis.call('HSET', KEYS[1], 'email', ARGV[1], 'status', 'left', 'step', -1, 'note', '', 'updatedAt', ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[2], ARGV[5])
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+redis.call('EXPIRE', KEYS[2], ARGV[4])
+return 1`;
+
+export async function settleLeftIfRun(flowId: string, index: number, stepId: string, kind: string, emails: string[], note: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => {
+    const person = personOf(email);
+    return ["EVAL", LEFT_IF_RUN, 3, runKey(flowId, person), logKey(flowId, person), indexKey(flowId), normaliseEmail(email), nowSeconds, event({ at: nowSeconds, step: index, stepId, kind, state: "failed", note }), RUN_KEEP_SECONDS, person];
+  }));
+}
+
 /** What happened at a step without an attempt: a condition that did not hold, the goal reached, the run ended. */
 export async function noteRuns(
   flowId: string,

@@ -7,7 +7,8 @@
  */
 import { personOf, readRun } from "@/lib/flow-runs";
 import { enroll, saveFlow, sendDueSteps, setFlowActive } from "@/lib/flows";
-import { upsertContact } from "@/lib/contacts";
+import { forgetContactPerson, upsertContact } from "@/lib/contacts";
+import { forgetWorkflowPerson } from "@/lib/flows";
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, storeForHandle } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -21,6 +22,7 @@ const shift = 0;
 Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;
+let eraseAfterRead: (() => Promise<void>) | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
   if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
@@ -30,6 +32,12 @@ redis.pipeline = (async (batch: Command[]) => {
     const contact = JSON.parse(raw as string);
     await real([["HSET", key, leaveAfterRead, JSON.stringify({ ...contact, unsub: true, unsubAt: new Date().toISOString() })]]);
     leaveAfterRead = null;
+  }
+  if (eraseAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+    // The person is erased right after sendGroup read their row (before sendTo's own read).
+    const erase = eraseAfterRead;
+    eraseAfterRead = null;
+    await erase();
   }
   return values;
 }) as typeof redis.pipeline;
@@ -70,6 +78,20 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(after?.run));
   is("nothing was sent to them", sentTo("race@example.com"), 0);
   is("the run is closed as left, with no attempt left open", [after?.run.status, after?.run.open], ["left", ""]);
+
+  part("Erased between the step's row read and the send (Claude 7 on #4307)");
+  await upsertContact(list, "erased@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "erased@example.com", { joined: false, tag: "welcome" });
+  eraseAfterRead = async () => {
+    await forgetContactPerson(list, "erased@example.com");
+    await forgetWorkflowPerson(store, "erased@example.com");
+  };
+  await run();
+  is("the erasure was injected", eraseAfterRead, null);
+  is("nothing was sent to them", sentTo("erased@example.com"), 0);
+  is("their run is not written back: nothing of them is left", await readRun(flowId, personOf("erased@example.com")), null);
+  const [indexed] = await real([["ZSCORE", `nl:wf:runs:${flowId}`, personOf("erased@example.com")]]);
+  is("and they are not in the workflow's list of runs", indexed, null);
   mail.restore();
   done();
 }

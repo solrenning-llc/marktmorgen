@@ -148,6 +148,21 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        // lib/removed-courses.ts NOTE_REMOVED_COURSE: the list keeps the course and its product, the course's own key its
+        // lessons and modules, written together; a course on the list has both replaced (0); a new one is added
+        // only while the list has room (1), never by dropping another; full, nothing written (-1).
+        if (key.startsWith("-- marktmorgen:removed-course-note:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, list, recordKey, course, entry, record, most] = args;
+          if (this.run(["HEXISTS", list, course]) === 1) {
+            this.run(["HSET", list, course, entry]);
+            this.run(["SET", recordKey, record]);
+            return 0;
+          }
+          if (Number(this.run(["HLEN", list])) >= Number(most)) return -1;
+          this.run(["HSET", list, course, entry]);
+          this.run(["SET", recordKey, record]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
           this.live(listKey);
@@ -546,6 +561,17 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
+        }
+        // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
+        if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, drafts, lease, value, field, json] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HSET", drafts, field, json]);
+        }
+        if (key.startsWith("-- marktmorgen:draft-del-held:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, drafts, lease, value, field] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HDEL", drafts, field]);
         }
         // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
         if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -1001,6 +1027,19 @@ export class MemoryRedis {
           // Match SET KEEPTTL: no expiry extension or removal.
           this.data.set(record, next);
           return 1;
+        }
+        // lib/affiliates.ts AFFILIATE_REFUND_MARK: each record's refund mark written only over exactly the text read (its SHA-1).
+        if (key.startsWith("-- marktmorgen:affiliate-refund-mark:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          let n = 0;
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            if (typeof current === "string" && createHash("sha1").update(current).digest("hex") === args[i + 1]) {
+              this.run(["HSET", target, args[i], args[i + 2]]);
+              n += 1;
+            }
+          }
+          return n;
         }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
@@ -2089,6 +2128,14 @@ export class MemoryRedis {
       }
       case "LLEN":
         return this.data.has(key) ? this.list(key).length : 0;
+      case "LPOP": {
+        // LPOP key, one at a time as lib/licence-keys.ts takes a key from its pool: nil on an empty list, which goes.
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LINDEX": {
         if (!this.data.has(key)) return null;
         const list = this.list(key);

@@ -2,7 +2,8 @@
  * Deleting one person from a community (lib/community-erasure.ts), Claude 6 on #2957: the member's own record names
  * their handle and their unsubscribe token, and it is the only place that names them. It is deleted last, after the
  * handle and the token, so when deleting either of those fails, the record is still there for the retry, which then
- * reaches what was left. Synthetic data only.
+ * reaches what was left. Synthetic data only. Brought to #3095 from #2957 (Claude 4); the handle's step is this PR's
+ * one compare-and-delete.
  */
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
@@ -58,18 +59,14 @@ test("healthy: the record, the handle and the token all go in one pass", async (
   assert.deepEqual(await kept(), { record: false, handle: false, unsub: false });
 });
 
+// On this PR the handle goes in one compare-and-delete (lib/community-mentions.ts FORGET_HANDLE, an EVAL on the
+// handles key), so its delete and its owner's read fail together.
+const handleStep = (c: Command) => c[0] === "EVAL" && String(c[1]).includes("community-handle-forget") && c.includes(handlesKey);
+
 test("the handle's delete fails: the record is kept, and the retry deletes the handle and then the record", async () => {
   await seed();
-  await assert.rejects(() => failing((c) => c[0] === "HDEL" && c[1] === handlesKey, () => forgetCommunityPerson(community, member, email, [])));
+  await assert.rejects(() => failing(handleStep, () => forgetCommunityPerson(community, member, email, [])));
   assert.deepEqual(await kept(), { record: true, handle: true, unsub: false }, "the record still names the handle for the retry");
-  await forgetCommunityPerson(community, member, email, []);
-  assert.deepEqual(await kept(), { record: false, handle: false, unsub: false });
-});
-
-test("the handle's owner read fails: the record is kept for the retry", async () => {
-  await seed();
-  await assert.rejects(() => failing((c) => c[0] === "HGET" && c[1] === handlesKey, () => forgetCommunityPerson(community, member, email, [])));
-  assert.equal((await kept()).record, true);
   await forgetCommunityPerson(community, member, email, []);
   assert.deepEqual(await kept(), { record: false, handle: false, unsub: false });
 });
@@ -93,4 +90,21 @@ test("the record cannot be read: nothing it names is lost, the record is kept, a
 test("confirmed absence: no record, nothing to delete, done with 0", async () => {
   redis.clear();
   assert.equal(await forgetCommunityPerson(community, member, email, []), 0);
+});
+
+// Codex X5 on #3095 (MEDIUM): the trace's DEL of one key was taken as exact on any whole number, so a reply of 2, which
+// one key cannot give, was counted and the erasure said finished.
+test("a trace deletion answered with a count one key cannot give is never a finished erasure", async () => {
+  await seed();
+  const trace = `nl:cm:${community}:tr:${member}`;
+  await call([["SADD", trace, "p:1"]]);
+  redis.pipeline = (async (commands: Command[]) => {
+    if (commands.length === 1 && commands[0][0] === "DEL" && commands[0][1] === trace && commands[0].length === 2) return [2];
+    return call(commands);
+  }) as typeof redis.pipeline;
+  try {
+    await assert.rejects(() => forgetCommunityPerson(community, member, email, []), { name: "UnknownReplyError" });
+  } finally {
+    redis.pipeline = original;
+  }
 });

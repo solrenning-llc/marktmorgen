@@ -39,5 +39,5 @@ is("every product that opens the community can be checked, one no longer in the 
 is("a checked product taken off the community's list no longer counts", panel.includes("const picked = chosen.filter((id) => access.includes(id));") && panel.includes("previewSpaces(spaces, access, picked)"), true);
 is("the spaces are a list, each named with its place when names repeat", panel.includes("<ul") && panel.includes("previewName(spaces, space.id)"), true);
 const studio = readFileSync("components/community-studio.tsx", "utf8");
-is("the studio shows it under the spaces, with the community's own spaces, access and the open products", studio.includes("<MemberPreview spaces={config.spaces} access={config.access} open={open} />"), true);
+is("the studio shows it under the spaces, with the community's own spaces, access, the open products and the locked spaces' way in (542 [CM1])", studio.includes("<MemberPreview spaces={config.spaces} access={config.access} open={open} locked={lockedPreview} />"), true);
 done();

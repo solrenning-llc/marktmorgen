@@ -44,7 +44,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:auth:devices:", "nl:auth:fresh:", "nl:auth:link:", "nl:auth:move:", "nl:auth:move-broken:", "nl:auth:moving:", "nl:auth:rec:",
   "nl:auth:second:",
   "nl:auth:code:", "nl:auth:linkcode:", "nl:auth:lastcode:", "nl:rl:code-addr:", "nl:rl:code-day:", "nl:rl:code-ip:",
-  "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
+  "nl:auth:rec:bound:", "nl:auth:rec:link:", "nl:auth:rec:set:", "nl:auth:rec:until:", "nl:auth:session:", "nl:auth:sessions:",
   "nl:backup:last-fail", "nl:backup:last-ok", "nl:backup:lock", "nl:backup:ran:", "nl:bench:ranges", "nl:bench:s:", "nl:billing:sync:after", "nl:billing:sync:cursor", "nl:busy:",
   "nl:cal:builds:", "nl:cal:busy:", "nl:cal:cfg:", "nl:cal:chg:", "nl:cal:err:", "nl:cal:good:", "nl:cal:lock:", "nl:cal:out:", "nl:cal:pace:", "nl:cal:refused:", "nl:cal:tok:",
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
@@ -192,7 +192,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // ---------------------------------------------------------------- an account's sign-in: a person's, not a store's
   // nl:2fa:lockedset: also holds one shared list of kept accounts, at most KEPT_ANY_MAX tags of 41 bytes (lib/two-step.ts KEEP_ANY).
   "nl:2fa:": C, "nl:2fa:hold:": C, "nl:2fa:locked:": C, "nl:2fa:lock:": C, "nl:2fa:lockedset:": C, "nl:2fa:keptstar:": Cr(400), "nl:2fa:once:": C, "nl:2fa:rescue:": C, "nl:2fa:setup:": C,
-  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:link:": C,
+  "nl:auth:devices:": C, "nl:auth:fresh:": C, "nl:auth:link:": C, "nl:auth:move:": C, "nl:auth:move-broken:": C, "nl:auth:moving:": C, "nl:auth:rec:": C, "nl:auth:rec:bound:": C, "nl:auth:rec:link:": C,
   "nl:auth:rec:set:": C, "nl:auth:rec:until:": C, "nl:auth:second:": C, "nl:auth:session:": C, "nl:auth:sessions:": C,
   "nl:auth:code:": C, "nl:auth:linkcode:": C, "nl:auth:lastcode:": C, "nl:rl:code-addr:": C, "nl:rl:code-day:": C, "nl:rl:code-ip:": C,
   "nl:pk:": C, "nl:pk:auth:": C, "nl:pk:cred:": C, "nl:pk:drop:": C, "nl:pk:lock:": C, "nl:pk:reg:": C, "nl:rl:address:": C, "nl:rl:signin:": C,
@@ -291,6 +291,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // The studio demo without sign-up (256 [KJ1], lib/studio-demo-rules.ts): the company's day and its sessions, no store's; each session ends 21 hours after it opened.
   "nl:sdemo:": C, "nl:sdemo:{<session>}:<family>[:<part>]": C,
   "nl:join:t:": T("nl:erase:ix:", 7),
+  // License keys (lib/licence-keys.ts): a product's pool, keys, sales (with the mark of a sale refunded before it had a key, or whose full refund is still pending), records and buyers waiting.
   "nl:keys:": E,
   "nl:lc:": E,
   // A student's private lesson notes (290 [SQ1], lib/lesson-notes.ts), named by the store's statsId.

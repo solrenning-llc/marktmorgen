@@ -3,6 +3,7 @@ import { commentsOn, markSeen, recentComments } from "@/lib/lesson-comments";
 import { CREATOR_AUTHOR, commentClock } from "@/lib/lesson-comments-rules";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -83,8 +84,9 @@ export default async function StudioCoursePage({
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
   const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card. A read that
+  // failed is null and is said on the page, never shown as no refund owed (CX-123 rule 30).
+  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -103,7 +105,8 @@ export default async function StudioCoursePage({
   const [talking, recent] = await Promise.all([commentsOn(course.id), recentComments(course.id, 50)]);
   await markSeen(course.id);
   const titles = new Map(lessonsInOrder(course).map(({ lesson }) => [lesson.id, lesson.title]));
-  const aiState = aiAvailableFor(store) ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 };
+  // An unread allowance is said as unknown by every AiOn reader, never as 0 left (rule 24; lib/ai-on-value.ts).
+  const aiState = aiAvailableFor(store) ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null);
   // Work handed in for the course's assignments (lib/assignment.ts): what is waiting, or everything.
   const hasTasks = lessonsInOrder(course).some(({ lesson }) => lesson.task);
   const showingWork = query.work === "all" ? "all" : "waiting";
@@ -181,7 +184,16 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds for AI captions could not be checked
+            </h2>
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
+          </section>
+        ) : owedRows.length ? (
           <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
             <h2 id="captions-refunds" className="text-base font-bold text-ink">
               Refunds for AI captions not confirmed yet
@@ -344,6 +356,11 @@ export default async function StudioCoursePage({
           <p className="mt-2 text-ink-soft">
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
+          </p>
+          <p className="mt-2 text-sm">
+            <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+              Filter students and change many at once
+            </Link>
           </p>
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">

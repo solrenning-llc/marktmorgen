@@ -7,10 +7,12 @@ import { Icon } from "@/components/icons";
 import { MAX_BIO_LENGTH, MAX_NAME_LENGTH } from "@/lib/store-field-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { closeDisclosure } from "@/lib/close-disclosure";
+import { STORE_IMITATION_MESSAGE } from "@/lib/brand-imitation-rules";
 
 const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   name: "Give the store a name before saving.",
+  brand_imitation: `${STORE_IMITATION_MESSAGE} Nothing was saved.`,
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "Stores are not switched on yet, so nothing was saved.",

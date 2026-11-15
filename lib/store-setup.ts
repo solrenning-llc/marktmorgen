@@ -17,6 +17,7 @@ import { MAX_BIO_LENGTH, type Store, addProduct, setFaq, setProductPage, updateD
 import { parseFaq } from "@/lib/store-faq";
 import { EMPTY_PAGE, blocksFromTemplate, parsePage } from "@/lib/sales-page";
 import { writePage } from "@/lib/sales-page-store";
+import { storeImitation } from "@/lib/brand-imitation-rules";
 
 export type SetupKept = { bio: boolean; products: number; pages: number; faq: boolean; refused: string[] };
 
@@ -31,7 +32,8 @@ const text = (value: unknown, max: number) => (typeof value === "string" ? value
 export async function keepStoreSetup(ref: string, store: Store, body: Record<string, unknown>): Promise<SetupKept> {
   const done: SetupKept = { bio: false, products: 0, pages: 0, faq: false, refused: [] };
   const bio = text(body.bio, MAX_BIO_LENGTH * 2).trim().slice(0, MAX_BIO_LENGTH);
-  if (bio) done.bio = (await updateDetails(ref, store.name, bio)).ok;
+  // A line that poses as Marktmorgen is not kept (568 [GD2] (c), unit 3), as the details form would refuse it.
+  if (bio && !storeImitation({ name: "", bio })) done.bio = (await updateDetails(ref, store.name, bio)).ok;
   for (const raw of Array.isArray(body.products) ? body.products.slice(0, 3) : []) {
     const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
     const title = text(p.title, 120);

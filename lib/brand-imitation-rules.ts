@@ -198,3 +198,20 @@ export function brandImitationOnPage(words: readonly string[], links: readonly s
   }
   return null;
 }
+
+/**
+ * A store's own name and description (568 [GD2] (c), unit 3): the name is at the top of every page of the store and
+ * is the sender's name on its emails, so a name that reads as Marktmorgen's, look-alike letters included ("Markt
+ * Morgen", "Marktm0rgen Help"), is refused outright, as an address with the name in it already is (lib/store.ts,
+ * newAddressProblem); the description is read with the rule above. Null when neither poses.
+ */
+export function storeImitation(store: { name: unknown; bio: unknown }): { field: "name" | "bio" } | null {
+  const name = typeof store.name === "string" ? store.name.slice(0, 200) : "";
+  if (plainLetters(name).replace(/\./g, "").includes("marktmorgen") || imitationIn(name)) return { field: "name" };
+  if (imitationIn(typeof store.bio === "string" ? store.bio : "")) return { field: "bio" };
+  return null;
+}
+
+/** What the studio says when a store's name or description is refused for it, in plain words. */
+export const STORE_IMITATION_MESSAGE =
+  "Your store's name or the line under it reads as Marktmorgen's own, so buyers would take your store for us. Use a name of your own; you may still say your store runs on Marktmorgen.";

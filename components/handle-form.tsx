@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { STORE_IMITATION_MESSAGE } from "@/lib/brand-imitation-rules";
 
 type State =
   | { kind: "idle" }
@@ -18,6 +19,7 @@ const MESSAGES: Record<string, string> = {
   too_many: "An account runs five stores at most.",
   first: "Make your first store before another one.",
   signed_out: "Your session ended. Log in again.",
+  brand_imitation: `${STORE_IMITATION_MESSAGE} No store was made.`,
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "We could not confirm whether your store was created. Check the studio before trying again.",
 };

@@ -129,6 +129,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
+        if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
+          const [, pool, bound, ...keys] = args;
+          const length = Number(this.run(["LLEN", pool]));
+          const n = Math.max(0, Math.min(keys.length, Number(bound) - length));
+          for (const k of keys.slice(0, n)) this.run(["RPUSH", pool, k]);
+          return n;
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;
@@ -449,6 +457,37 @@ export class MemoryRedis {
           this.run(["HINCRBY", ledger, "reserved", rawCharge]); return 1;
         }
         // CX-67: atomic held membership and aggregate observations.
+        // lib/broadcasts.ts BROADCAST_HEADS: each email's record without its body ("size": its length in bytes; "read": up to its bound), -1 missing, -2 no body.
+        if (key.startsWith("-- marktmorgen:broadcast-heads:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const mode = args[1 + count];
+          const bounds = args.slice(2 + count);
+          return keys.map((one, i) => {
+            const raw = this.run(["GET", one]);
+            if (raw === null || raw === undefined) return -1;
+            if (typeof raw !== "string") throw new Error("WRONGTYPE");
+            const at = raw.indexOf('"body":"');
+            if (at < 0) return -2;
+            const start = at + 8;
+            let from = start;
+            let head: string | null = null;
+            for (;;) {
+              const quote = raw.indexOf('"', from);
+              if (quote < 0) break;
+              let slashes = 0;
+              while (raw[quote - 1 - slashes] === "\\") slashes += 1;
+              if (slashes % 2 === 0) {
+                if (quote > start) head = raw.slice(0, start) + raw.slice(quote);
+                break;
+              }
+              from = quote + 1;
+            }
+            if (head === null) return -2;
+            const bytes = new TextEncoder().encode(head);
+            return mode === "size" ? bytes.length : new TextDecoder().decode(bytes.slice(0, Number(bounds[i])));
+          });
+        }
         // lib/webhooks.ts READ_DELIVERIES: each delivery read only while it is no larger than its bound, {0} at the first larger one.
         if (key.startsWith("-- marktmorgen:webhook-deliveries-read:v1\n")) {
           const count = Number(args[0]);
@@ -513,6 +552,13 @@ export class MemoryRedis {
           const [, lock, from, to, seconds] = args;
           if (this.run(["GET", lock]) !== from) return 0;
           this.run(["SET", lock, to, "EX", seconds]);
+          return 1;
+        }
+        // lib/auto-captions.ts: a captions record replaced, with its expiry, only while it is still the value read.
+        if (key.startsWith("-- marktmorgen:captions-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, record, from, to, seconds] = args;
+          if (this.run(["GET", record]) !== from) return 0;
+          this.run(["SET", record, to, "EX", seconds]);
           return 1;
         }
         // lib/sns-receipt.ts: an Amazon notice's receipt taken over, or marked done, only while it holds the value given.
@@ -1052,6 +1098,18 @@ export class MemoryRedis {
           const [, lease, queue, member, score, next] = args;
           if (this.run(["ZSCORE", lease, member]) === null) return 0;
           this.run(["ZADD", queue, score, next]);
+          return 1;
+        }
+        // lib/sent-links.ts APPEND_SENT_LINK: an email's link changes written only over exactly the record read, with their expiry.
+        if (key.startsWith("-- marktmorgen:sent-link-append:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, target, expected, value, seconds] = args;
+          this.live(target);
+          const held = this.data.get(target);
+          if (held !== undefined && typeof held !== "string") throw new Error("WRONGTYPE");
+          this.scriptCalls += 1;
+          if ((held ?? "") !== expected) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", target, value, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:crm-pipelines-save:v2\n") && args[0] === "1" && args.length === 4) {
@@ -1768,6 +1826,7 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        if (key.startsWith("-- marktmorgen:order-write-if-new:v1\n")) return this.orderWriteIfNew(args);
         // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
         if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, sales, reference, expected, next] = args;
@@ -1978,6 +2037,15 @@ export class MemoryRedis {
         for (const value of args) list.unshift(value);
         return list.length;
       }
+      case "LPOP": {
+        // LPOP key, no count (lib/licence-keys.ts, a key from the pool): the first item, or null; an emptied list is gone.
+        if (args.length) throw new Error("ERR LPOP with a count is not implemented in MemoryRedis");
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LTRIM": {
         const list = this.list(key);
         const [from, to] = [Number(args[0]), Number(args[1])];
@@ -2021,6 +2089,14 @@ export class MemoryRedis {
       }
       case "LLEN":
         return this.data.has(key) ? this.list(key).length : 0;
+      case "LPOP": {
+        // LPOP key, one at a time as lib/licence-keys.ts takes a key from its pool: nil on an empty list, which goes.
+        if (!this.data.has(key)) return null;
+        const list = this.list(key);
+        const first = list.shift() ?? null;
+        if (!list.length) this.data.delete(key);
+        return first;
+      }
       case "LINDEX": {
         if (!this.data.has(key)) return null;
         const list = this.list(key);
@@ -2380,6 +2456,34 @@ export class MemoryRedis {
   private typeOf(key: string): string {
     if (!this.present(key)) return "none";
     return String(this.run(["TYPE", key]));
+  }
+
+  /**
+   * lib/order-data.ts, ORDER_WRITE_IF_NEW: the same checks before anything is written (hash writes only, each well
+   * formed, the first an HSETNX, on keys that are hashes or not there, the room included), {-2} with nothing written
+   * when that HSETNX's field is already there, and otherwise ORDER_WRITE as it runs.
+   */
+  private orderWriteIfNew(args: string[]): unknown {
+    const count = Number(args[0]);
+    const keys = args.slice(1, 1 + count);
+    const argv = args.slice(1 + count);
+    const n = Number(argv[0]);
+    const hashOrNone = (key: string) => ["hash", "none"].includes(this.typeOf(key));
+    if (!Number.isInteger(n) || n < 1 || n > 48 || argv[1] !== "HSETNX" || argv[3] !== "2" || !hashOrNone(keys[0])) return [-1];
+    let i = 1;
+    for (let c = 0; c < n; c += 1) {
+      const name = argv[i];
+      const k = Number(argv[i + 1]);
+      const argc = Number(argv[i + 2]);
+      if (!Number.isInteger(k) || k < 2 || !keys[k - 1] || !Number.isInteger(argc) || i + 2 + argc > argv.length - 1) return [-1];
+      if (!((name === "HSETNX" && argc === 2) || (name === "HSET" && argc >= 2 && argc % 2 === 0) || (name === "HDEL" && argc >= 1))) return [-1];
+      if (!hashOrNone(keys[k - 1])) return [-1];
+      i += 3 + argc;
+    }
+    if (i !== argv.length) return [-1];
+    const first = keys[Number(argv[2]) - 1];
+    if (this.typeOf(first) === "hash" && this.hash(first).has(argv[4])) return [-2];
+    return this.orderWrite(args);
   }
 
   /**

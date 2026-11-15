@@ -14,7 +14,7 @@ import { GET as back } from "@/app/api/billing/return/route";
 import { HELD_SLACK_DAYS, createBillingCheckout, ownedBy } from "@/lib/billing";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
-import { RELEASE_QUARANTINE_DAYS, claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, type Store } from "@/lib/store";
+import { RELEASE_QUARANTINE_DAYS, claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, storeRef, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -134,6 +134,30 @@ async function main() {
     is("A's, made before B took the address: not B's", ownedBy(s.b, record), false);
     is("one made since B holds it: B's by the email, as before", ownedBy(s.b, { ...record, created: Math.floor(Date.now() / 1000) }), true);
     is("still A's, by its own customer", ownedBy(s.a, record), true);
+  }
+
+  part("One customer for the whole account (review of 7c3aae961): B paid before on the account's customer, its plan ended, then took A's address");
+  {
+    const s = await twoStores(6, () => ({ store: `sessownx6` }));
+    // B pays on the account's one customer, as a second store's checkout does, and that plan ends.
+    const own = "sub_SessOwnB60000000";
+    subscriptions.set(own, subscription(own, s.customer, { store: s.x }, Math.floor(Date.now() / 1000)));
+    await setSubscription(storeRef(s.b), { customerId: s.customer, subscriptionId: own, active: false, tier: "creator", cycle: "month", period: paidPeriod() });
+    const before = (await storeForId(s.b.sid))!;
+    is("B is on the account's customer, its own plan ended", [before.stripeCustomerId, before.subscriptionId, before.subscriptionActive], [s.customer, own, false]);
+    const record = { ...subscriptions.get(s.sub)!, customer: { id: s.customer, email: s.owner } };
+    is("the daily sync's ownedBy: A's subscription is not B's, though the customer is the same", ownedBy(before, record), false);
+    is("A's own is still A's", ownedBy((await storeForId(s.a.sid))!, record), true);
+    is("B's own (made while it holds the address) is still B's", ownedBy(before, { ...subscriptions.get(own)!, customer: { id: s.customer, email: s.owner } }), true);
+    const answer = await s.comeTo(before);
+    const after = (await storeForId(s.b.sid))!;
+    is("the way back with A's earlier session on B: not written", [billingOf(answer) === "on", after.subscriptionId, after.subscriptionActive], [false, own, false]);
+  }
+
+  part("A store with no id yet (an old record): its checkout carries no empty id, and an empty one reads as none");
+  {
+    const s = await twoStores(7, () => ({ store: `sessownx7`, store_sid: "" }));
+    is("an empty store_sid on A's own session: read as none, so the old rules decide (its own customer)", billingOf(await s.comeTo(s.a)), "on");
   }
 
   part("The slack for clock skew stays inside the quarantine, so it can never reach another store's subscription");

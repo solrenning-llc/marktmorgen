@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { BACKUP_FILES_PAGE_BYTES } from "@/lib/backup-files-contract";
-import { BACKUP_FILES_PAGE_MICRO_USD, backupFilesRouteWorstMonth } from "@/lib/backup-files-source";
+import { BACKUP_FILES_PAGE_MICRO_USD, BACKUP_FILES_ROUTE_SECONDS, backupFilesRouteWorstMonth } from "@/lib/backup-files-source";
 import { NOT_A_COST } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
@@ -21,9 +21,14 @@ part("One admitted page, at the dearest prices");
 // $7.00 a million each (the dearer listing of the two sources on).
 const cpu = (221_000 * 10) / 3600;
 const memory = (18_300 * 2 * 10) / 3600;
-const answer = (BACKUP_FILES_PAGE_BYTES / 1e9) * 430_000;
-const exact = 0.6 + cpu + memory + answer + 2 * 2 + 7 + 7;
+// The answer as Fast Origin Transfer and Fast Data Transfer ($0.43 + $0.35 a GB) and one CDN Request ($3.20 a million);
+// a page of Upstash bandwidth ($0.03 a GB). docs/backup-costs-2026-11-08.md, section 5b: $0.00154736 a call.
+const answer = (BACKUP_FILES_PAGE_BYTES / 1e9) * (430_000 + 350_000) + 3.2;
+const bandwidth = (BACKUP_FILES_PAGE_BYTES / 1e9) * 30_000;
+const exact = 0.6 + cpu + memory + answer + 2 * 2 + bandwidth + 7 + 7;
 is("never under what a page can cost", BACKUP_FILES_PAGE_MICRO_USD >= exact, true);
+is("never under the dated review's ceiling per call, $0.00154736 (Claude 7's MÉDIO on #3313)", BACKUP_FILES_PAGE_MICRO_USD >= 1548, true);
+is("held no longer than the route's own maxDuration", readFileSync("app/api/backup/files/route.ts", "utf8").includes(`export const maxDuration = ${BACKUP_FILES_ROUTE_SECONDS};`), true);
 is("rounded up to a whole micro-dollar, no more", BACKUP_FILES_PAGE_MICRO_USD, Math.ceil(exact));
 
 part("The month: the review's ceiling, each source on, 32 UTC days, R2's block, 10% room");

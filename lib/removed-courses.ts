@@ -80,24 +80,25 @@ export const PRUNE_AT_MOST = 50;
 
 /**
  * In one step, as Redis runs a script: each named entry leaves the list only if it is still exactly the entry read
- * (not noted again since), the store's data room holds none of its people's slots and neither its students nor its
- * certificates are there any more; it takes its course's own key (the lessons and modules) with it, so none is left
- * behind out of every list. KEYS: the list, the data room, then each course's students, certificates and own key.
+ * (not noted again since), the store's data room holds none of its people's slots and none of its students,
+ * certificates or handed-in work is there any more; it takes its course's own key (the lessons and modules) with it, so
+ * none is left behind out of every list. KEYS: the list, the data room, then each course's students, certificates,
+ * tasks and own key.
  * ARGV: each course's id and entry. Answers how many left.
  */
-export const PRUNE_REMOVED_COURSES = `-- marktmorgen:removed-course-prune:v2
+export const PRUNE_REMOVED_COURSES = `-- marktmorgen:removed-course-prune:v3
 local left = 0
 for i = 1, #ARGV, 2 do
   local id = ARGV[i]
-  local k = 3 + 3 * ((i - 1) / 2)
+  local k = 3 + 4 * ((i - 1) / 2)
   local held = redis.call("HGET", KEYS[1], id) ~= ARGV[i + 1]
   for _, prefix in ipairs({"cd", "ct", "cc", "ca", "lc"}) do
     if not held and redis.call("HEXISTS", KEYS[2], prefix .. ":" .. id) == 1 then held = true end
   end
-  if not held and (redis.call("EXISTS", KEYS[k]) == 1 or redis.call("EXISTS", KEYS[k + 1]) == 1) then held = true end
+  if not held and (redis.call("EXISTS", KEYS[k]) == 1 or redis.call("EXISTS", KEYS[k + 1]) == 1 or redis.call("EXISTS", KEYS[k + 2]) == 1) then held = true end
   if not held then
     redis.call("HDEL", KEYS[1], id)
-    redis.call("DEL", KEYS[k + 2])
+    redis.call("DEL", KEYS[k + 3])
     left = left + 1
   end
 end
@@ -124,11 +125,12 @@ function prunable(pairs: string[], nowSeconds: number): { courseId: string; entr
 }
 
 /**
- * A course's two indexes of people, given by the caller so this file imports no course module (lib/learn.ts and
- * lib/certificate.ts import lib/course.ts, which imports this file): its students (lib/learn.ts studentsIndexKey) and
- * its certificates (lib/certificate.ts allKey). lib/certificate.ts courseIndexes builds it.
+ * A course's three indexes of people, given by the caller so this file imports no course module (lib/learn.ts and
+ * lib/certificate.ts import lib/course.ts, which imports this file): its students (lib/learn.ts studentsIndexKey), its
+ * certificates (lib/certificate.ts allKey) and the work handed in (lib/assignment.ts allKey). lib/certificate.ts
+ * courseIndexes builds it.
  */
-export type CourseIndexes = (courseId: string) => [students: string, certificates: string];
+export type CourseIndexes = (courseId: string) => [students: string, certificates: string, tasks: string];
 
 /**
  * Makes room in a full list by the entries that hold nothing any more: how many left. The candidates are asked in
@@ -145,7 +147,7 @@ async function makeRoom(statsId: string, room: Pick<DataStore, "sid" | "statsId"
   if (candidates.length === 0) return 0;
   for (let at = 0; at < candidates.length; at += PRUNE_AT_MOST) {
     const batch = candidates.slice(at, at + PRUNE_AT_MOST);
-    const keys = [removedKey(statsId), roomKey, ...batch.flatMap(({ courseId }) => { const [students, certificates] = indexes(courseId); return [students, certificates, recordKey(statsId, courseId)]; })];
+    const keys = [removedKey(statsId), roomKey, ...batch.flatMap(({ courseId }) => { const [students, certificates, tasks] = indexes(courseId); return [students, certificates, tasks, recordKey(statsId, courseId)]; })];
     const args = batch.flatMap(({ courseId, entry }) => [courseId, entry]);
     const left = repliesFor(await redisPipeline([["EVAL", PRUNE_REMOVED_COURSES, keys.length, ...keys, ...args]]), 1)?.[0];
     if (!Number.isSafeInteger(left) || (left as number) < 0 || (left as number) > batch.length) throw new UnknownReplyError("making room in a store's dropped courses");

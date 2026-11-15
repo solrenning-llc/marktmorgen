@@ -204,8 +204,13 @@ export const certKey = (id: string) => `nl:cert:${id}`;
 const CERTS_SLOT = (courseId: string) => `cc:${courseId}`;
 const indexKey = (courseId: string) => `nl:course:${courseId}:certs`;
 export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
-/** A course's students and certificates, the indexes a dropped course's note is kept by while either holds anyone (lib/removed-courses.ts). */
-export const courseIndexes: CourseIndexes = (courseId) => [studentsIndexKey(courseId), allKey(courseId)];
+/** The work handed in for a course, as lib/assignment.ts keeps it (its allKey), read here only for courseIndexes. */
+const tasksIndexKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;
+/**
+ * A course's students, certificates and handed-in work, the indexes a dropped course's note is kept by while any holds
+ * anyone (lib/removed-courses.ts; Claude 1 cloud R on #4563: a ca: slot read as nothing does not prove no work is kept).
+ */
+export const courseIndexes: CourseIndexes = (courseId) => [studentsIndexKey(courseId), allKey(courseId), tasksIndexKey(courseId)];
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
 /** A command answering 1 when this learner holds a certificate of a course: a dropped one's probe (lib/person-erasure.ts). */

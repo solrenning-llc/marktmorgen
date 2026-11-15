@@ -19,6 +19,7 @@ import { done, is, part } from "./check";
 import { MAX_REMOVED_COURSES, noteRemovedCourse, removedCourses } from "@/lib/removed-courses";
 import { dataKey } from "@/lib/store-data";
 import { FINISH_KEEP_SECONDS } from "@/lib/course-finish";
+import { readFileSync } from "node:fs";
 import { courseIndexes } from "@/lib/certificate";
 
 const STATS = "statsprune0001";
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
   is("RED: the list stays full", await next(), "full");
   is("RED: the entry is kept", await listed("ctask"), true);
   is("and its own key with it", redis.run(["EXISTS", recordKey("ctask")]), 1);
+  is("the tasks index checked is the one lib/assignment.ts writes", readFileSync("lib/assignment.ts", "utf8").includes("const allKey = (courseId: string) => `nl:course:${courseId}:tasks:all`;") && courseIndexes("ctask")[2] === "nl:course:ctask:tasks:all", true);
 
   part("An entry noted before the drop time was kept never leaves");
   fill("cuntimed");

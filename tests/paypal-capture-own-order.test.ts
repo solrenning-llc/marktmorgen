@@ -144,6 +144,37 @@ async function main(): Promise<void> {
   is("a capture of another order under this order's id is not a success", linked.ok ? "paid" : linked.reason, "error");
   is("and C is not recorded as paid", await readPaid(c.order), null);
 
+  part("An `up` link present but not naming an Orders v2 order is not proof (Codex g's MÉDIO on #4453)");
+  const shapes: [string, Record<string, unknown>][] = [
+    ["no href", { rel: "up", method: "GET" }],
+    ["a number for href", { rel: "up", method: "GET", href: 12345 }],
+    ["text that is not an order URL", { rel: "up", method: "GET", href: "https://api-m.paypal.com/somewhere/else" }],
+    ["a capture URL", { rel: "up", method: "GET", href: "https://api-m.paypal.com/v2/payments/captures/3C679366HH908799" }],
+  ];
+  for (const [what, link] of shapes) {
+    const d = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+    if (!d.ok) throw new Error("no order");
+    captureWith = (o) => {
+      const body = completed(o, "49.00", "COMPLETED", "buyer-d@example.com");
+      const unit = (body.purchase_units as { payments: { captures: Record<string, unknown>[] } }[])[0];
+      unit.payments.captures[0].links = [link];
+      return { status: 201, body };
+    };
+    const answer = await captureOrder(store, d.order);
+    is(`${what}: not a success, unknown`, answer.ok ? "paid" : answer.reason, "error");
+    is(`${what}: nothing recorded as paid`, await readPaid(d.order), null);
+  }
+  const e = await openOrder(store, product, "https://marktmorgen.com", { digitalConsent: TEST_CONSENT });
+  if (!e.ok) throw new Error("no order");
+  captureWith = (o) => {
+    const body = completed(o, "49.00", "COMPLETED", "buyer-e@example.com");
+    const unit = (body.purchase_units as { payments: { captures: Record<string, unknown>[] } }[])[0];
+    unit.payments.captures[0].links = [{ rel: "up", method: "GET", href: `https://api-m.paypal.com/v2/checkout/orders/${o}` }];
+    return { status: 201, body };
+  };
+  const ownLink = await captureOrder(store, e.order);
+  is("control: an `up` link naming this very order still settles it", ownLink.ok ? ownLink.paid.order : ownLink.reason, e.order);
+
   part("The sweep reads only this order's own record");
   // PayPal's reading of A answers with B's completed record, then with B voided: neither settles A nor lets it go.
   orders.set(a.order, answerOfB);

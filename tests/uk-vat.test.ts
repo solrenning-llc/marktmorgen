@@ -75,21 +75,39 @@ test("the full VAT invoice has every detail of Notice 700/21, 4.1, the VAT in st
 test("in another currency the VAT is in sterling at HMRC's period rate of the month or the UK market rate of the day; never another", () => {
   const usd = { ...invoiceInput, currency: "USD" };
   assert.equal(ukInvoice(usd), null, "no rate, no invoice");
-  const period = { gbpPerUnit: "0.7612", basis: "hmrc-period" as const, day: "2026-11-01", source: "https://www.trade-tariff.service.gov.uk/exchange_rates" };
+  // HMRC publishes its period rates as units of the currency per £1; the code takes them as published.
+  const period = { perPound: "1.3137", basis: "hmrc-period" as const, day: "2026-11-01", source: "https://www.trade-tariff.service.gov.uk/exchange_rates" };
   const invoice = ukInvoice({ ...usd, sterling: period });
-  assert.equal(invoice?.vatSterlingPence, 152); // 200 × 0.7612 = 152.24
+  assert.equal(invoice?.vatSterlingPence, 152); // 200 / 1.3137 = 152.24
   assert.deepEqual(invoice?.sterlingRate, period);
   assert.equal(ukInvoice({ ...usd, sterling: { ...period, day: "2026-10-01" } }), null, "another month's period rate");
   assert.equal(ukInvoice({ ...usd, sterling: { ...period, basis: "uk-market", day: "2026-11-13" } }), null, "a market rate of another day");
   assert.equal(ukInvoice({ ...usd, sterling: { ...period, basis: "ecb" as never } }), null, "the ECB's rate is not one of Notice 700's");
 });
 
-test("toPence converts in integers, half up, both signs", () => {
-  assert.equal(toPence(200, "0.7612"), 152);
-  assert.equal(toPence(1, "0.5"), 1);
-  assert.equal(toPence(-1, "0.5"), -1);
-  assert.equal(toPence(-200, "0.7612"), -152);
+test("toPence divides by the units per £1 in integers, half up, both signs", () => {
+  assert.equal(toPence(200, "1.3137"), 152);
+  assert.equal(toPence(1, "2"), 1);
+  assert.equal(toPence(-1, "2"), -1);
+  assert.equal(toPence(-200, "1.3137"), -152);
   assert.equal(toPence(100, "abc"), null);
+  assert.equal(toPence(100, "0"), null);
+});
+
+test("input that is not the expected shape never throws; 'UK' is not a country code", () => {
+  assert.deepEqual(ukPlace(null as never), { kind: "unknown", reason: "missing" });
+  assert.deepEqual(ukPlace({ ip: "UK", billing: "UK" }), { kind: "unknown", reason: "not-a-country" });
+  assert.equal(ukReturn([], null as never), null);
+  assert.equal(ukReturn(null as never, { start: "2027-04-01", end: "2027-06-30", filedOn: "2027-07-01" }), null);
+  assert.equal(ukCheckout({ supply: "ess", priceCents: 1000, items: gb, reviewed: true, now: new Date(Number.NaN) }).kind, "refuse");
+});
+
+test("a refund keeps the rate's VAT on its amount and leaves no VAT on nothing", () => {
+  const record = ukVatRecord({ sale: "cs_uk_2", store: "st_1", invoice: ukInvoice(invoiceInput)!, place: { kind: "uk", evidence: gb } })!;
+  const later = at("2026-11-20T12:00:00Z");
+  assert.notEqual(ukVatAdjustment(record, { at: later, exVatCents: -333, vatCents: -67, reason: "refund" }), null, "66.6 is 67; one cent either way is rounding");
+  assert.equal(ukVatAdjustment(record, { at: later, exVatCents: -1, vatCents: -200, reason: "refund" }), null, "VAT out of proportion");
+  assert.equal(ukVatAdjustment(record, { at: later, exVatCents: -1000, vatCents: -100, reason: "refund" }), null, "a full refund leaves no VAT behind");
 });
 
 test("the record, its refunds at the sale's own rate, and the return's box 1 and box 6, due one month and 7 days after", () => {

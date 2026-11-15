@@ -122,8 +122,9 @@ export async function GET(request: NextRequest) {
       await recordSample(store, data);
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
-      // Every line, or none when a part could not be read: the ad figures are then left out, never shown as $0.
-      const spends = await spendsForReport(store.statsId);
+      // Every line, or null when a part could not be read: the ad figures are then left out, never shown as $0,
+      // and the email says the spend was not read (review of #4027).
+      const spends = await spendsForReport(store.statsId, null);
       const goal = (await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS }))).cents;
       const message = withGoalAvailability(token ? weeklyMessage(store, data, stopUrl, spends, goal) : null, goal);
       if (!message) {

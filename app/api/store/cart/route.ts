@@ -39,7 +39,8 @@ import { cartItemOf, cartShipping, shipsWithOnline } from "@/lib/cart-shipping";
 import { SHIP_REGIONS, activeShipping, shipsToWords } from "@/lib/shipping";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { deliversDigitally } from "@/lib/digital-consent";
-import { releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { giveBackHold, holdAdmission, releaseCartStockHolds, stockLeft, withCartStockHolds } from "@/lib/stock";
+import { limitedStock } from "@/lib/product-extras";
 import { HOLD_SECONDS } from "@/lib/stripe-account";
 
 /** The cart's checkout last opened in this browser, whose held units are handed back when it pays for a cart again (lib/stock.ts). */
@@ -140,7 +141,8 @@ export async function GET(request: NextRequest) {
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
   // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
-  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
+  // The suggestions read what is left of a limited one only within the reads the cart's own lines left (MAX_CART in all).
+  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale, MAX_CART - left.size).catch(() => []) : [];
   const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
   return Response.json(
     {
@@ -211,6 +213,7 @@ async function suggestions(
   soon: Set<string>,
   country: string,
   locale: string,
+  stockReads: number,
 ): Promise<Suggestion[]> {
   if (inCart.length === 0 || ids.length >= MAX_CART || !canSell(store)) return [];
   const words = cartWords(store.language);
@@ -234,10 +237,19 @@ async function suggestions(
   if (wanted.length === 0) return [];
   const listed = await readListings(store, wanted.map((want) => want.id));
   const out: Suggestion[] = [];
+  let reads = stockReads;
   for (const want of wanted) {
     const product = listed.find((p) => p.id === want.id);
     if (!product || !cartable(product) || !canSellProduct(store, product)) continue;
     if (product.keys && (await outOfKeys(store, product).catch(() => true))) continue;
+    // A limited one with none left, or whose count cannot be read, is not offered: its line would only say "Sold out" (lib/stock.ts).
+    // Past the reads the cart's own lines left, a limited one is passed over unread, so the open cart reads at most MAX_CART counts.
+    if (product.stock !== null) {
+      if (reads <= 0) continue;
+      reads -= 1;
+      const left = await stockLeft(store, product).catch(() => undefined);
+      if (left !== null && !(typeof left === "number" && left > 0)) continue;
+    }
     out.push({
       id: want.id,
       title: product.title,
@@ -311,6 +323,8 @@ export async function POST(request: NextRequest) {
     if (out) return away(`/@${store.handle}?cart=changed#cart`);
   }
 
+  // Whether this press took a hold count (holdAdmission), given back when no unit stays held.
+  let charged = false;
   try {
     // A lookup that does not answer never stops the sale: the click rides on the order as pending (owner's decision 6).
     const credit = await attributionOrPending(store, products[0].id, {
@@ -326,7 +340,15 @@ export async function POST(request: NextRequest) {
     const upsell = offerFrom ? newUpsellKey() : null;
     // A buyer who went back from Stripe's page hands back the units that checkout held before holding them again (lib/stock.ts).
     const previous = request.cookies.get(CART_HOLD_COOKIE)?.value ?? "";
-    if (previous) await releaseCartStockHolds(store, products, previous).catch(() => {});
+    const handedBack = previous ? await releaseCartStockHolds(store, products, previous).catch(() => false) : false;
+    // The same per-connection bound on holding as the one-product checkout (lib/stock.ts, HOLDS_PER_ADDRESS): charged
+    // only here, right before a unit is held, and not for a press that just handed back its own; unknown holds nothing.
+    charged = products.some((p) => limitedStock(p) !== null) && !handedBack;
+    if (charged) {
+      const admitted = await holdAdmission(store, clientAddress(request));
+      if (admitted === "unknown") return away(`/@${store.handle}?cart=error#cart`);
+      if (admitted === "exceeded") return away(`/@${store.handle}?status=slow`);
+    }
     // One unit of each limited product held for this checkout, or nothing opened (lib/stock.ts, withCartStockHolds).
     const holding = await withCartStockHolds(store, products, async (held) => createCartCheckout(store, products, linkOrigin(request, store), {
       held,
@@ -344,7 +366,10 @@ export async function POST(request: NextRequest) {
       offers: upsell && offerFrom ? { upsellKey: upsell.fingerprint, from: offerFrom.id } : null,
     }), (error) => error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused);
     // Sold out since the cart was opened: back to it, which says which; busy or unreadable: nothing was charged, try again.
-    if (!holding.ok) return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
+    if (!holding.ok) {
+      if (charged) await giveBackHold(store, clientAddress(request));
+      return away(`/@${store.handle}?cart=${holding.reason === "soldout" ? "changed" : "error"}#cart`);
+    }
     const opened = holding.value;
     if (reminding) await keepAssistReminder({ store, session: opened.id, email: remindEmail, version: remindVersion });
     for (const product of products) after(() => countHit(request, store, { kind: "checkout", id: product.id }));
@@ -356,6 +381,8 @@ export async function POST(request: NextRequest) {
     }
     return new Response(null, { status: 303, headers });
   } catch (error) {
+    // Refused before Stripe was asked: no unit stays held, so the hold count is given back.
+    if (charged && (error instanceof OrdersPausedError || error instanceof DigitalConsentMissing || error instanceof CartShippingRefused)) await giveBackHold(store, clientAddress(request));
     if (error instanceof OrdersPausedError) return away(`/@${store.handle}?status=${error.reason === "paused" ? "paused" : "error"}`);
     // The box was not checked (or the page was from before its words changed): back to the cart, nothing charged.
     if (error instanceof DigitalConsentMissing) return away(`/@${store.handle}?cart=consent#cart`);

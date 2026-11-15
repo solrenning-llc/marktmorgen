@@ -1296,6 +1296,10 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/global-error.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/not-found.tsx",
       "status": "not yet reviewed for this programme"
     }
@@ -1597,6 +1601,7 @@
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/screen-help.tsx",
     "components/sent-links-editor.tsx",
     "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
@@ -1608,6 +1613,7 @@
     "components/side-panel-switch.tsx",
     "components/signin-form.tsx",
     "components/site-footer.tsx",
+    "components/site-nav-server.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
     "components/skip-link.tsx",

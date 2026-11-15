@@ -74,6 +74,27 @@ Sources read on 15/11/2026:
   request and main runs. What the queue loses is only a non-uploaded repeat that could not fail
   on a finding.
 
+## Two edges of the change (independent security review, 15/11/2026)
+
+The review of this branch (issue #3869, Claude 1, read-only) found no GRAVE, ALTO or MÉDIO
+finding and named these two LEVE edges; both are kept as they are, on purpose.
+
+- **An execution error or a time-out reaches main.** Today a CodeQL execution error or time-out
+  on a merge group's combined tree fails "All checks (codeql)" and blocks the group. After the
+  change the queue no longer runs the analysis, so such an error is first seen on main: main
+  fast-forwards to the queue's commit, CodeQL's push run analyzes that same tree and fails, and
+  the main-red alarm (`scripts/main_red_alarm.mjs`) opens the "MAIN VERMELHO" issue, which never
+  takes CodeQL's merge-group run as main's result. It cannot affect product code: the analysis
+  only reads the tree and uploads alerts; it changes no file and nothing it produces is deployed.
+  A finding never failed a merge group anyway (point 1 above).
+- **A cancel after the scope also passes the skip under `merge_group`.** If a merge group's run
+  is canceled after `documentation-scope` succeeded, `analyze` (whose `if` starts with
+  `!cancelled()`) reports skipped, and "All checks (codeql)" (`if: always()`) accepts that skip
+  as the intended one. Harmless: under `merge_group` the job never runs, so the cancel loses no
+  analysis. On every other event a skipped `analyze` still fails the check (`decide` in
+  `scripts/ci_all_checks.py`, held by `scripts/test_ci_all_checks.py` and
+  `tests/codeql-timeout.test.ts`).
+
 Expected gain: a merge group's longest check drops from about 64 minutes median to the next
 slowest required workflow; CodeQL itself answers in the time of its documentation-scope job
 (about one minute). The new figure is to be measured on the queue after the change; nothing here

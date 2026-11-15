@@ -58,6 +58,7 @@ import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
 import { MAX_STORE_BYTES, PHOTO_LEFT_MAX } from "@/lib/store";
+import { SEARCH_INDEX_MAX_BYTES } from "@/lib/store-search-index";
 import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib/stats";
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
@@ -536,6 +537,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:voice:lock:@lib/customer-voice.ts": short("One summary at a time", "studio", 1, 128),
   "nl:rsum:@lib/review-ai-summary.ts": short("A product's AI summary of its reviews, kept eight days: its head (under 400 bytes) and its themes' sorted set (:themes), at most three entries of under 1,000 bytes each (the kept one, the one being kept, and one a failed clean-up left, taken out by the next try)", "studio", 8, 4 * KB),
   "nl:rsum:@lib/reviews.ts": short("The same summary: its themes removed here by a review they counted that is deleted, hidden, refunded or rewritten; head and themes deleted with the product's reviews", "studio", 8, 4 * KB),
+  "nl:search:build:@lib/store-search-index.ts": short("One build of a store's search index at a time, a minute", "request", 1, 128, REQ("page")),
+  "nl:search:@lib/store-search-index.ts": { what: "A store's search index: each visible product's id, title and one-line summary, kept ten minutes", parts: [capped(SEARCH_INDEX_MAX_BYTES, "One record a store, kept SEARCH_INDEX_SECONDS; a larger one keeps only a short note that it is too large, for the same time.", src("lib/store-search-index.ts", "SEARCH_INDEX_MAX_BYTES", "SEARCH_INDEX_SECONDS"))] },
   "nl:rsum:lock:@lib/review-ai-summary.ts": short("One review summary at a time, two minutes", "studio", 1, 128),
   "nl:rsum:last:@lib/review-ai-summary.ts": short("When a product's last AI summary of its reviews was made, kept eight days and not deleted with the summary, so the week's limit holds", "studio", 8, 64),
   "nl:rsum:ver:@lib/review-ai-summary.ts": short("A random mark of a product's reviews, read and checked in the same step as keeping a summary", "studio", 8, 64),
@@ -708,6 +711,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:save:@lib/membership-manage.ts": { what: "A save offer made to a member", parts: [item(MARK, "One per membership.", "membership")] },
   "nl:mnum:@lib/membership-numbers.ts": { what: "Membership numbers, cached", parts: [capped(512 * KB, "One cached view.")] },
   "nl:metaads:conn:@lib/meta-ads.ts": { what: "The Meta ads connection", parts: [capped(4 * KB, "One a store.")] },
+  "nl:metaads:gen@lib/meta-ads.ts": company("The Meta daily pass's generation", "One counter for every store, moved on by a connection or a chosen account."),
+  "nl:metaads:pass@lib/meta-ads.ts": company("The Meta daily pass's mark", "One key for every store, gone by the next UTC day."),
   "nl:metaads:read:@lib/meta-ads.ts": { what: "When Meta was last read", parts: [capped(KB, "One a store.")] },
   "nl:metaads:reading:@lib/meta-ads.ts": short("A reading under way", "integration", 1, 128),
   "nl:metaads:state:@lib/meta-ads.ts": short("A consent in progress", "integration", 1, 512),

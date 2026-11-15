@@ -436,7 +436,9 @@ export async function openWinBack(
 export async function forgetWinbackPerson(statsId: string | null, productIds: string[], email: string): Promise<number> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
   // DEL's own count only: any other answer throws (CX-123 rule 24), so the erasure is never reported done on it.
-  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1)?.[0]);
-  if (gone === null) throw new UnknownReplyError("the come-back marks forgotten");
+  // A count above the keys sent does not match the DEL that ran (#4790): unknown too.
+  const keys = productIds.map((p) => onceKey(statsId, email, p));
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the come-back marks forgotten");
   return gone;
 }

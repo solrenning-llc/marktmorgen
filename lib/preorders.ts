@@ -646,7 +646,11 @@ async function releaseJob(
         const payment = await onAccount("GET", store.stripeAccountId, `/payment_intents/${encodeURIComponent(entry.pi)}?expand[]=latest_charge`);
         // Refunded in full or lost to a dispute (lib/refunds.ts): never handed over.
         if (await givenBack(store.stripeAccountId, payment)) {
-          await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]);
+          // Confirmed only by whole replies to both writes (issue #4730), as revokeRefundedPreorders reads the same
+          // mark: an unknown one throws, and the catch below keeps the job for the next run, which reads the mark
+          // again and ends the job once it is there, with nothing handed over. No call more on the normal path.
+          const saved = repliesFor(await redisPipeline([["HSET", entriesKey(sid, pid), session, JSON.stringify({ ...entry, revoked: now() } satisfies Preorder)], keep(sid, pid)]), 2);
+          if (!oneWrite(saved?.[0]) || !oneWrite(saved?.[1])) throw new UnknownReplyError("a pre-order's revoked mark");
           continue;
         }
       }

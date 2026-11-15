@@ -31,6 +31,9 @@ import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { NextRequest } from "next/server";
 import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
 import { consentMetaValue } from "@/lib/digital-consent";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
 const calls: { method: string; path: string; body: URLSearchParams }[] = [];

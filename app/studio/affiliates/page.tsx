@@ -6,7 +6,7 @@ import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
-import { affiliateLink, readBook } from "@/lib/affiliates";
+import { affiliateLink, paidThroughPayPal, readBook } from "@/lib/affiliates";
 import { isSenderConfigured } from "@/lib/email";
 import { canSell } from "@/lib/store-checkout";
 import { AffiliateStudio } from "@/components/affiliate-studio";
@@ -193,7 +193,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
             why: line.lead!.why,
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
-          payouts={book?.payouts ?? []}
+          payouts={(book?.payouts ?? []).map((payout) => ({ ...payout, sent: paidThroughPayPal(payout) }))}
           refundsChecked={book?.refundsChecked ?? true}
           invoicesChecked={book?.invoicesChecked ?? true}
           today={new Date().toISOString().slice(0, 10)}

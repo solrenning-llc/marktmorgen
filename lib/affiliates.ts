@@ -2265,7 +2265,7 @@ export async function addPayout(store: Store, input: PayoutInput): Promise<Payou
 
 /**
  * The id of the payout that writes down one PayPal payout item (lib/paypal-payouts.ts, settlePayPal): the same item
- * gives the same id, 12 hex characters like any payout's, so the creator can still remove it (removePayout).
+ * gives the same id, 12 hex characters like any payout's. It is never removed (removePayout, #4606).
  */
 export function payoutIdForItem(item: string): string {
   return createHash("sha256").update(`paypal-payout-item|${item}`).digest("hex").slice(0, 12);
@@ -2317,11 +2317,29 @@ export async function payoutReferences(store: Store): Promise<Set<string>> {
   return references;
 }
 
-export async function removePayout(store: Store, id: string): Promise<boolean> {
+export async function removePayout(store: Store, id: string): Promise<boolean | "sent"> {
   if (!store.statsId || !/^[0-9a-f]{12}$/.test(id)) return false;
-  const [held, removed] = await redisPipeline([["HGET", payoutsKey(store.statsId), id], ["HDEL", payoutsKey(store.statsId), id]]);
-  if (Number(removed) === 1 && typeof held === "string") await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
+  // A payout PayPal sent is never taken off the book (#4606): the book would owe it again, and the next payday (or
+  // "Pay now") would send the same money a second time from the creator's PayPal. Only a payout the creator wrote
+  // down by hand is undone. Read first; a value of any other shape is not removed either.
+  const [held] = await redisPipeline([["HGET", payoutsKey(store.statsId), id]]);
+  if (held === null || held === undefined) return false;
+  if (typeof held !== "string") throw new UnknownReplyError("a payout before it is taken off");
+  const payout = parsePayout(held);
+  if (payout && paidThroughPayPal(payout)) return "sent";
+  const [removed] = await redisPipeline([["HDEL", payoutsKey(store.statsId), id]]);
+  if (Number(removed) === 1) await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
   return Number(removed) === 1;
+}
+
+/**
+ * Whether a payout in the book is one PayPal sent (lib/paypal-payouts.ts, settlePayPal): written under the id of its
+ * PayPal item (payoutIdForItem) with the reference "PayPal <item>". A payout the creator wrote down by hand has a
+ * random id, so a reference they typed as "PayPal ..." is still theirs to undo.
+ */
+export function paidThroughPayPal(payout: Payout): boolean {
+  const item = /^PayPal (\S+)$/.exec(payout.reference)?.[1];
+  return item !== undefined && payoutIdForItem(item) === payout.id;
 }
 
 /** Where what the creator says they paid their affiliates is counted in the store's data room (lib/store-data.ts). */

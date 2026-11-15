@@ -10,7 +10,7 @@
  * stand-in; every scenario counts the PayPal batches made, which must stay at one for one commission.
  */
 import { connectPayPal, onTheirWay, payWithPayPal, settlePayPal } from "@/lib/paypal-payouts";
-import { readBook, removePayout } from "@/lib/affiliates";
+import { addPayout, readBook, removePayout } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -166,8 +166,15 @@ async function main(): Promise<void> {
   await payWithPayPal(store);
   is("the next payday sends nothing more: one PayPal batch", created.length, 1);
   const [id] = await bookIds();
-  is("the payout's id is one the creator can remove (12 hex)", /^[0-9a-f]{12}$/.test(id ?? ""), true);
-  is("and it is removed", await removePayout(store, id ?? ""), true);
+  is("the payout's id is 12 hex, as any payout's", /^[0-9a-f]{12}$/.test(id ?? ""), true);
+  // #4606: Undo on a payout PayPal sent took it off the book, the book owed it again, and the next payday paid the
+  // affiliate twice from the creator's PayPal. It is refused, the payout stays, and nothing is sent again.
+  is("Undo on a payout PayPal sent is refused", await removePayout(store, id ?? ""), "sent");
+  is("and the payout stays in the book", [(await bookIds()).length, await paidCents(store)], [1, 3000]);
+  await payWithPayPal(store);
+  is("after that Undo, the next payday sends nothing more", created.length, 1);
+  const hand = await addPayout(store, { aff: (await readBook(store))!.payouts[0].aff, cents: 500, currency: "USD", date: "2026-11-15", reference: "PayPal 7XK2 sent by hand" });
+  is("a payout written by hand is still taken off by Undo", await removePayout(store, hand?.id ?? ""), true);
 
   part("Two settles at once: written once");
   await seed(store);

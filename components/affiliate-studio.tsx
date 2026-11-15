@@ -78,6 +78,7 @@ const MESSAGES: Record<string, string> = {
   refunds:
     "Stripe could not be asked about refunds just now, so what is owed is not settled. Try again in a moment rather than record a payout against a guess.",
   unknown: "That affiliate or payout is no longer on record. Reload the page.",
+  sent: "PayPal already sent this payout, so it stays on the record. Taking it off would pay the affiliate again on the next payday.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   unavailable: "This could not be done just now, so nothing was saved. Try again in a moment.",
@@ -213,7 +214,8 @@ export function AffiliateStudio({
   rows: Row[];
   lines: LineView[];
   linesTotal?: number | null;
-  payouts: Payout[];
+  /** `sent` when PayPal sent it (lib/affiliates.ts paidThroughPayPal): shown without Undo. */
+  payouts: (Payout & { sent?: boolean })[];
   refundsChecked: boolean;
   /** False when the invoices of memberships and plans could not all be read. */
   invoicesChecked?: boolean;
@@ -638,14 +640,19 @@ export function AffiliateStudio({
                   </span>
                   <span className="flex items-center gap-3">
                     <span className="font-semibold tabular-nums text-ink">{money(payout.cents, payout.currency)}</span>
-                    <button
-                      type="button"
-                      className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
-                      disabled={busy !== null}
-                      onClick={() => act(`p-${payout.id}`, { action: "unpay", payout: payout.id }, "Payout taken off the record.")}
-                    >
-                      Undo
-                    </button>
+                    {/* A payout PayPal sent has no Undo (#4606): taking it off would pay the affiliate twice. */}
+                    {payout.sent ? (
+                      <span className="text-sm text-ink-soft">Sent by PayPal</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex min-h-11 items-center text-sm font-bold text-ink-soft underline underline-offset-4 hover:text-danger"
+                        disabled={busy !== null}
+                        onClick={() => act(`p-${payout.id}`, { action: "unpay", payout: payout.id }, "Payout taken off the record.")}
+                      >
+                        Undo
+                      </button>
+                    )}
                   </span>
                   {errorAt(`p-${payout.id}`)}
                 </li>

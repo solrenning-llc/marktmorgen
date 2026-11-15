@@ -60,7 +60,9 @@ const wholeCents = (value: unknown): value is number => typeof value === "number
 export function ownCommission(input: OwnCommissionInput): OwnCommission {
   if (!input.programmeOn) return { kind: "none", reason: "off" };
   if (input.rateBps === null) return { kind: "none", reason: "no_rate" };
-  if (!Number.isSafeInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10_000 ||
+  // A payment or dispute read that did not give a boolean is unreadable, never "paid" or "not disputed" (Codex G on #3853).
+  if (typeof input.succeeded !== "boolean" || typeof input.disputed !== "boolean" ||
+      !Number.isSafeInteger(input.rateBps) || input.rateBps < 0 || input.rateBps > 10_000 ||
       !wholeCents(input.amountCents) || !wholeCents(input.refundedCents) || input.refundedCents > input.amountCents ||
       !wholeCents(input.paidOutCents) || !Number.isFinite(input.paidAtSeconds) || !Number.isFinite(input.nowSeconds)) {
     return { kind: "unknown", reason: "unreadable" };
@@ -77,9 +79,12 @@ export function ownCommission(input: OwnCommissionInput): OwnCommission {
   if (kept <= 0) return stop("refunded");
   const answers = [input.referral.samePerson, input.referral.sameCard, input.referral.sameDevice, input.referral.sameAddress];
   if (answers.some((answer) => answer === true)) return stop("self_referral");
-  if (answers.some((answer) => answer !== false)) return { kind: "unknown", reason: "referral_unknown" };
-
   const owedCents = Math.floor((kept * input.rateBps) / 10_000);
+  // What was paid out above what the kept part could still earn is no longer owed whatever an unknown signal turns out
+  // to be ("not the same": that difference; "the same": all of it), so at least that is taken back now (Claude 2 H on #3853).
+  if (answers.some((answer) => answer !== false)) {
+    return input.paidOutCents > owedCents ? { kind: "take_back", takeBackCents: input.paidOutCents - owedCents } : { kind: "unknown", reason: "referral_unknown" };
+  }
   if (input.paidOutCents > owedCents) return { kind: "take_back", takeBackCents: input.paidOutCents - owedCents };
   const windowEnds = input.paidAtSeconds + REFUND_DAYS * DAY_SECONDS;
   if (input.nowSeconds <= windowEnds) return { kind: "wait", untilSeconds: windowEnds };

@@ -562,7 +562,9 @@ async function main(): Promise<void> {
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // #3411's PayPal pending record at the merge of main c757064cc0: Scale's yearly month 579.97 where main shows 579.98;
     // Store and Studio unchanged.
-    is("11: and 37.05, 258.70 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.97"]);
+    // Merge of main 24fcd87caf (15 November 2026, with #4022) into #3411: both together cost Studio's yearly month one
+    // cent more, 258.69 where 258.70 was; still above zero (MR). Cost is not lowered.
+    is("11: and 37.05, 258.69 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.97"]);
   } finally {
     Date.now = realNow;
   }

@@ -90,7 +90,14 @@ async function main(): Promise<void> {
   const wired = checkout.indexOf("applyBuyerCurrency(body,");
   is("the product checkout: after inTheCurrencyShown and after the share, only behind the key", [share > 0, wired > share, checkout.indexOf("inTheCurrencyShown(body);") < wired, /if \(BUYER_CURRENCY_LIVE\) \{\s*applyBuyerCurrency\(body,/.test(checkout)], [true, true, true, true]);
   is("it reads the fee and the tax rates from the session it judges", [checkout.includes("fee: hasApplicationFee(body)"), checkout.includes("taxRates: hasTaxRates(body)"), checkout.includes("settles: settlesIn(store.currency, await settlementCurrencyFor(store))")], [true, true, true]);
-  const others = readdirSync("lib").filter((f) => f.endsWith(".ts") && f !== "store-checkout.ts" && f !== "buyer-currency.ts").filter((f) => /applyBuyerCurrency|adaptive_pricing\[enabled\]", "true"|adaptive_pricing\]\[enabled\]=true/.test(read(`lib/${f}`)));
+  // Claude 6's LOW 2 on #4577: every file under lib/ and app/, nested too, and any way of writing the field on
+  // (body.set, a literal "true", an object with enabled: true), not only the top level and one spelling.
+  const walk = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${dir}/${entry.name}`;
+    return entry.isDirectory() ? walk(path) : /\.tsx?$/.test(entry.name) ? [path] : [];
+  });
+  const turnsOn = /applyBuyerCurrency|adaptive_pricing(\[enabled\]|\]\[enabled\])["']?\s*[,=:]\s*["']?true|adaptive_pricing["']?\s*:\s*\{\s*enabled\s*:\s*true/;
+  const others = [...walk("lib"), ...walk("app")].filter((f) => f !== "lib/store-checkout.ts" && f !== "lib/buyer-currency.ts").filter((f) => turnsOn.test(read(f)));
   is("no other checkout turns Stripe's conversion on", others, []);
   is("the buyer-facing answer still says no while the key is off", read("lib/currency-faq.ts").includes("No. Our checkout asks Stripe not to convert"), true);
 

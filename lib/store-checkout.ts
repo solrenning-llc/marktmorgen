@@ -729,8 +729,11 @@ export async function createCheckout(
 
   // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
   // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
-  // inTheCurrencyShown set it above. Judged here, after the share, on the
-  // session as it will be sent. The creator's choice is the store's own
+  // inTheCurrencyShown set it above. Judged here, after the share. One line
+  // still changes later: open() puts pay what you want's own Price on the
+  // first line, but a session with pay what you want is held in the store's
+  // currency (heldReasons, "pwyw"), so the plan never converts it (Claude 6's
+  // LOW 1 on #4577). The creator's choice is the store's own
   // (buyerCurrencyModeOf: (a) when it never chose); the creator's own prices
   // per currency arrive with their fields later in unit 3b.
   if (BUYER_CURRENCY_LIVE) {

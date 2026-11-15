@@ -14,6 +14,9 @@ import { GET as back } from "@/app/api/billing/return/route";
 import { HELD_SLACK_DAYS, createBillingCheckout, ownedBy } from "@/lib/billing";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
+import { refusePlanIfClosing } from "@/lib/closing-plan-guard";
+import { FINAL_INDEX } from "@/lib/closing-holds";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { openSession, SESSION_COOKIE } from "@/lib/auth";
 import { RELEASE_QUARANTINE_DAYS, claimHandle, createStore, ensureStatsId, releaseHandle, renameHandle, setSubscription, storeForEmail, storeForId, storeRef, type Store } from "@/lib/store";
 import { paidPeriod } from "./billing-period-fixture";
@@ -28,6 +31,8 @@ type Reply = Record<string, unknown>;
 const sessions = new Map<string, Reply>();
 const subscriptions = new Map<string, Reply>();
 let lastCheckout: URLSearchParams | null = null;
+/** Every subscription ended at Stripe (DELETE), by id. */
+const ended: string[] = [];
 /** What Stripe's list of subscriptions holds, for the daily sync. */
 let listed: Reply[] = [];
 
@@ -43,6 +48,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const session = url.pathname.match(/^\/v1\/checkout\/sessions\/(cs_\w+)$/);
   if (session) return sessions.has(session[1]) ? json(sessions.get(session[1])) : json({ error: { message: "No such checkout session" } }, 404);
   const sub = url.pathname.match(/^\/v1\/subscriptions\/(sub_\w+)$/);
+  if (sub && method === "DELETE") {
+    ended.push(sub[1]);
+    return json({ ...(subscriptions.get(sub[1]) ?? { id: sub[1] }), status: "canceled" });
+  }
   if (sub && method === "GET") return subscriptions.has(sub[1]) ? json(subscriptions.get(sub[1])) : json({ error: { message: "No such subscription" } }, 404);
   if (url.pathname === "/v1/subscriptions" && method === "GET") return json({ object: "list", data: listed, has_more: false, url: "/v1/subscriptions" });
   if (url.pathname.startsWith("/v1/prices") || url.pathname.startsWith("/v1/products") || url.pathname.startsWith("/v1/subscriptions") || url.pathname.startsWith("/v1/customers")) {
@@ -159,6 +168,32 @@ async function main() {
     const answer = await s.comeTo(before);
     const after = (await storeForId(s.b.sid))!;
     is("the way back with A's earlier session on B: not written", [billingOf(answer) === "on", after.subscriptionId, after.subscriptionActive], [false, own, false]);
+  }
+
+  part("One customer for the account, B closing (coordinator, 15 November 2026): B's closing never ends A's plan");
+  {
+    const s = await twoStores(8, () => ({ store: `sessownx8` }));
+    const own = "sub_SessOwnB80000000";
+    subscriptions.set(own, subscription(own, s.customer, { store: s.x }, Math.floor(Date.now() / 1000)));
+    await setSubscription(storeRef(s.b), { customerId: s.customer, subscriptionId: own, active: false, tier: "creator", cycle: "month", period: paidPeriod() });
+    const b = (await storeForId(s.b.sid))!;
+    // B is in its closing day: its plan ended and its closing line has it.
+    await redis.pipeline([["ZADD", FINAL_INDEX, Date.now() - 86_400_000, storeRef(b)]]);
+    ended.length = 0;
+    const result = await refusePlanIfClosing({ store: b, handle: s.x, subscriptionId: s.sub, customerId: s.customer });
+    is("A's plan, which A keeps, is not B's to end: nothing done, A's plan untouched", [result, ended.includes(s.sub), (await storeForId(s.a.sid))?.subscriptionId], ["no", false, s.sub]);
+    // The account's stores do not read: unknown, so nothing is ended (fail closed).
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => commands.some((c) => c[0] === "SMEMBERS") ? [] : real(commands)) as typeof redis.pipeline;
+    let unknown = "resolved";
+    try {
+      await refusePlanIfClosing({ store: b, handle: s.x, subscriptionId: s.sub, customerId: s.customer });
+    } catch (error) {
+      unknown = error instanceof UnknownReplyError ? "unknown" : String(error);
+    } finally {
+      redis.pipeline = real;
+    }
+    is("an account read that does not read: unknown, and A's plan is not ended", [unknown, ended.includes(s.sub)], ["unknown", false]);
   }
 
   part("A store with no id yet (an old record): its checkout carries no empty id, and an empty one reads as none");

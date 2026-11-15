@@ -18,6 +18,7 @@
  */
 import { NextRequest } from "next/server";
 import { POST as signIn } from "@/app/api/auth/request/route";
+import { POST as typeCode } from "@/app/api/auth/email-code/route";
 import { createHash } from "node:crypto";
 import {
   EMAIL_CODE_TRIES_PER_IP_HOUR,
@@ -123,7 +124,7 @@ async function main(): Promise<void> {
   try {
     forCreator = await shapeOf("203.0.113.10", creator);
     forNew = await shapeOf("203.0.113.11", "newcomer@example.test");
-    is("both answers go before anything is sent or an account is read", [links(), mail.sent.length, afterTasks.length], [0, 0, 2]);
+    is("both answers go before anything is sent or an account is read, each with its link and code written", [links(), mail.sent.length, afterTasks.length], [2, 0, 2]);
     is("and run the very same commands first: the time of the answer cannot tell an account", forCreator.shape, forNew.shape);
     is("none of them reads an account", forCreator.shape.some((line) => /nl:store:owner|nl:account:stores/.test(line)), false);
     again = await signIn(request("203.0.113.12", "another@example.test"));
@@ -131,10 +132,23 @@ async function main(): Promise<void> {
     console.warn = warn;
   }
   const [a, b] = [await forCreator.answer.json(), await forNew.answer.json()];
+  // The code page with each request id and a wrong code (3rjdf's ALTO on fc47acaa27): answered alike, so it cannot
+  // tell an account (its code record written) from a new address (none, before: "expired").
+  const typed = async (id: unknown, from: string) => {
+    const response = await typeCode(new NextRequest(`${ORIGIN}/api/auth/email-code`, {
+      method: "POST",
+      headers: { Host: "marktmorgen.com", Origin: ORIGIN, "Content-Type": "application/json", "x-forwarded-for": from },
+      body: JSON.stringify({ request: id, code: "000000" }),
+    }));
+    return [response.status, await response.json()];
+  };
+  is("the code page answers the request of an account and of a new address alike", await typed(a.request, "203.0.113.50"), await typed(b.request, "203.0.113.51"));
+  is("both are a wrong code, never \"expired\" for one of them", [(await typed(a.request, "203.0.113.52"))[1].error, (await typed(b.request, "203.0.113.55"))[1].error], ["code_wrong", "code_wrong"]);
   for (const task of afterTasks.splice(0)) await (task as () => Promise<void>)();
+  is("and still alike once the account's email went (fc47acaa27 wrote the account's record only then)", await typed(a.request, "203.0.113.53"), await typed(b.request, "203.0.113.54"));
   is("then an address with an account is sent its email", mail.sent.filter((m) => m.to.includes(creator)).length, 1);
   is("under the very request id its browser was given, so the code in it opens there", redis.keys().includes(`nl:auth:code:${sha(`nimbus-auth-code:${a.request}`).slice(0, 40)}`), true);
-  is("and a new address is sent nothing", [links(), mail.sent.filter((m) => !m.to.includes(creator)).length], [1, 0]);
+  is("and a new address is sent nothing", mail.sent.filter((m) => !m.to.includes(creator)).length, 0);
   is("both are told the same: busy, with the honest message", [forCreator.answer.status, a.ok, a.error, a.message, forNew.answer.status, b.ok, b.error, b.message], [503, false, "busy", SIGN_IN_BUSY_MESSAGE, 503, false, "busy", SIGN_IN_BUSY_MESSAGE]);
   is("both are given a request id of the same shape", [typeof a.request, typeof b.request, String(a.request).length === String(b.request).length], ["string", "string", true]);
   is("never \"too many tries\", which is false for one who asked once", [a.error, b.error].includes("rate_limited"), false);
@@ -146,15 +160,32 @@ async function main(): Promise<void> {
 
   part("An account that cannot be read past the ceiling is sent nothing, under the same answer");
   redis.clear();
+  ownStore(creator);
   redis.run(["SET", SITE, SIGN_IN_LINKS_PER_HOUR + 5]);
-  redis.pipeline = (async (commands: Command[]) => (commands.some((c) => String(c[1]).startsWith("nl:store:owner:")) ? ["not a reply"] : real(commands))) as typeof redis.pipeline;
   mail.clearCaptured();
   const error = console.error;
-  console.error = () => {};
+  const logged: string[] = [];
+  console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
   try {
     const unreadable = await signIn(request("203.0.113.20", creator));
+    redis.pipeline = (async (commands: Command[]) => (commands.some((c) => String(c[1]).startsWith("nl:store:owner:")) ? ["not a reply"] : real(commands))) as typeof redis.pipeline;
     for (const task of afterTasks.splice(0)) await (task as () => Promise<void>)();
-    is("busy, nothing sent", [unreadable.status, (await unreadable.json()).error, links(), mail.sent.length], [503, "busy", 0, 0]);
+    redis.pipeline = real;
+    is("busy, nothing sent, and said in the log", [unreadable.status, (await unreadable.json()).error, mail.sent.length, logged.some((line) => line.includes("nothing was sent"))], [503, "busy", 0, true]);
+
+    part("An account's email that does not go past the ceiling is logged, never silent");
+    logged.length = 0;
+    await signIn(request("203.0.113.21", creator));
+    mail.disableSes();
+    const key = process.env.RESEND_API_KEY;
+    delete process.env.RESEND_API_KEY;
+    try {
+      for (const task of afterTasks.splice(0)) await (task as () => Promise<void>)();
+    } finally {
+      process.env.RESEND_API_KEY = key;
+      mail.configure();
+    }
+    is("nothing sent, and the log says an account's email was not sent", [mail.sent.length, logged.some((line) => line.includes("an account's email was not sent"))], [0, true]);
   } finally {
     redis.pipeline = real;
     console.error = error;

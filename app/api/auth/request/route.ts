@@ -9,6 +9,7 @@ import {
   addressLimitAnswer,
   blockLimitAnswer,
   rateLimitAnswer,
+  prepareSignInLink,
   sendSignInLink,
   siteLinksAnswer,
   unusedSignInRequest,
@@ -107,13 +108,16 @@ export async function POST(request: NextRequest) {
       // Past it, a flood must not stop the creators' own logins: an address that already has an account is still sent
       // its email, a new one waits. Both get the same "busy" answer and a request id, and the answer goes before the
       // account is even read: the reads and the email run after it (next/server after), so neither the answer nor the
-      // time it takes tells an account from a new address while the site is under a flood. An account that cannot be
-      // read is sent nothing (CX-123 rule 24).
-      const issued = unusedSignInRequest();
-      const [origin, handle] = [linkOrigin(request), prefillHandle(body.handle)];
+      // time it takes tells an account from a new address while the site is under a flood. The link and the code's
+      // record are written for every address before the answer, the same commands, so the code page
+      // (app/api/auth/email-code) answers the request id of an account and of a new address alike. An account that
+      // cannot be read is sent nothing (CX-123 rule 24), and an email that does not go is logged.
+      const prepared = await prepareSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
+      const issued = prepared.request;
       after(async () => {
         try {
-          if (await hasAccount(email)) await sendSignInLink(email, origin, handle, issued);
+          if (isHouseAddress(email) || !(await hasAccount(email))) return;
+          if (!(await prepared.deliver())) console.error("sign-in past the site's ceiling: an account's email was not sent");
         } catch (error) {
           console.error("sign-in past the site's ceiling: nothing was sent", error);
         }

@@ -614,24 +614,33 @@ export function unusedSignInRequest(): string {
 /** What a request for a link answers: whether it was sent, and the request's id, which only the asking browser holds. */
 export type SignInRequest = { sent: boolean; request: string };
 
+/** A sign-in request whose link and code are written, and whose email is not sent yet: `deliver` sends it. */
+export type PreparedSignIn = { request: string; deliver: () => Promise<boolean> };
+
 /**
  * Creates the one-time link and a six-digit code (652 [WG12]) and emails them
  * together. The request's id goes back to the browser that asked, whatever
  * the address, so it says nothing about who has an account; the code opens
  * only with it. A new request leaves only its own code working.
  */
-export async function sendSignInLink(
-  email: string,
-  origin: string,
-  handle?: unknown,
-  // The id already given to the browser, when the email is sent after the answer (past SIGN_IN_LINKS_PER_HOUR).
-  request: string = randomToken(),
-): Promise<SignInRequest> {
+export async function sendSignInLink(email: string, origin: string, handle?: unknown): Promise<SignInRequest> {
+  const prepared = await prepareSignInLink(email, origin, handle);
+  return { sent: await prepared.deliver(), request: prepared.request };
+}
+
+/**
+ * sendSignInLink's first half: writes the link and the code's record, the same commands for every address, and leaves
+ * the email to `deliver`. Past SIGN_IN_LINKS_PER_HOUR the route writes them for every address before its answer and
+ * sends the email after it only to an account (app/api/auth/request), so the code page (app/api/auth/email-code)
+ * answers a request of an account and of a new address alike: "wrong code", never "expired" for one of them only.
+ */
+export async function prepareSignInLink(email: string, origin: string, handle?: unknown): Promise<PreparedSignIn> {
   const address = normaliseEmail(email);
+  const request = randomToken();
   // The demo store's owner is nobody (lib/house-store.ts): no link is made
   // for that address, so no session can ever be opened as it. The caller
   // answers as it does for any address, and says nothing about this one.
-  if (isHouseAddress(address)) return { sent: false, request };
+  if (isHouseAddress(address)) return { request, deliver: async () => false };
   const token = randomToken();
   const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
   const link = await linkKey(token);
@@ -658,7 +667,7 @@ export async function sendSignInLink(
   // when it is a valid one, so the address step opens with it filled in
   // (lib/handle-prefill.ts). It is not stored with the token or anywhere else.
   const url = withPrefill(`${origin}/signin/confirm?token=${token}`, handle);
-  const sent = await sendEmail({ meter: { by: "company" },
+  const deliver = () => sendEmail({ meter: { by: "company" },
     from: NIMBUS_FROM,
     to: address,
     subject: "Your Marktmorgen login link",
@@ -679,7 +688,7 @@ export async function sendSignInLink(
       "If you did not ask for it, ignore this email — nothing happens.",
     ].join("\n"),
   });
-  return { sent, request };
+  return { request, deliver };
 }
 
 /**

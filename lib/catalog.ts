@@ -982,22 +982,40 @@ export const STORE_SEARCH_LIMIT = STORE_PAGE_SIZE * 2;
 /** The longest search the store page takes. */
 export const MAX_STORE_SEARCH = 80;
 
-/** Words as a search compares them: no accents, no case, letters and digits only. */
+/** Letters NFD does not take apart, as a buyer types them on a plain keyboard. */
+const PLAIN_LETTERS: Record<string, string> = { "\u00df": "ss", "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+
+/**
+ * Words as a search compares them: no accents, no case, letters and digits only. An apostrophe is part of its
+ * word ("Beginner’s" is "beginners", as typed without it), and the letters NFD keeps whole are spelled plainly.
+ */
 export function searchWords(text: string): string[] {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc`]/g, "")
+    .replace(/[\u00df\u0142\u00f8\u00e6\u0153\u0111\u00f0\u00fe\u0131]/g, (letter) => PLAIN_LETTERS[letter])
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }
 
-/** Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one). */
+/** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
+const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
+
+/**
+ * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
+ * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
+ */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
-  const asked = searchWords(query);
-  if (asked.length === 0) return false;
-  const has = searchWords(`${listing.title} ${listing.summary}`);
-  return asked.every((word) => has.some((one) => one.startsWith(word)));
+  const text = `${listing.title} ${listing.summary}`;
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
+  return [searchWords(query), searchWords(unhyphened(query))].some(
+    (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
+  );
 }
 
 /**
@@ -1278,9 +1296,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;

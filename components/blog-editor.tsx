@@ -264,7 +264,8 @@ export function BlogEditor({ post, products, back, look, language = "en" }: { po
         ) : null}
         {post.id ? (
           <span className="ml-auto">
-            <ConfirmAction className="btn btn-ghost text-danger!" disabled={busy !== null} busy={busy === "delete"} question="Delete this post? It cannot be brought back." yes={busy === "delete" ? "Deleting…" : "Yes, delete"} onConfirm={remove}>
+            {/* The delete button is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1, 5.37:1 on the page and 4.96:1 hovered; .btn-ghost's ink is 16.28:1). */}
+            <ConfirmAction className="btn btn-ghost" disabled={busy !== null} busy={busy === "delete"} question="Delete this post? It cannot be brought back." yes={busy === "delete" ? "Deleting…" : "Yes, delete"} onConfirm={remove}>
               <Icon name="trash" size={15} />
               Delete
             </ConfirmAction>

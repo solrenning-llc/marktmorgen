@@ -25,7 +25,13 @@ const INTENTS: [string, string, string, string][] = [
 ];
 
 /** Kept on the site class's colour after measuring, with the reason (see PR-BODY.md); filled from the measurement. */
-const KEPT: Record<string, string> = {};
+const KEPT: Record<string, string> = {
+  "components/blog-editor.tsx btn-ghost text-danger question=\"Delete this post?": "The delete button is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
+  "components/workflow-tools.tsx tag text-danger Failed ${n(counts.failed)}": "The failed count is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
+  "components/feature-visuals.tsx field text-ink-mute Who it is for, what makes it different": "The sample field's text is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
+  "components/call-editor.tsx field-hint text-ink is not longer than the call's own length": "Its two length hints are kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
+  "components/call-editor.tsx field-hint text-ink A group call has one length": "Its two length hints are kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
+};
 
 part("a colour asked for over a site class applies (the important variant), or is kept with its reason");
 for (const [file, site, utility, phrase] of INTENTS) {
@@ -39,6 +45,7 @@ for (const [file, site, utility, phrase] of INTENTS) {
   is(`${key}: the element is found`, at > 0 && classes.length > 0, true);
   if (KEPT[key]) {
     is(`${key}: kept on the site colour, and says why in the source`, source.includes(KEPT[key]), true);
+    is(`${key}: no colour utility left that would do nothing`, classes.split(/\s+/).some((c) => c === utility || c === `${utility}!`), false);
   } else {
     is(`${key}: the colour applies (${utility}!)`, classes.split(/\s+/).includes(`${utility}!`), true);
     is(`${key}: no plain ${utility} left that would do nothing`, classes.split(/\s+/).includes(utility), false);

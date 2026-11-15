@@ -323,7 +323,8 @@ function RunEffectCounts({ events }: { events: readonly RunEvent[] }) {
       <p className="flex flex-wrap gap-2">
         <span className="tag">{`Attempted ${n(counts.attempted)}`}</span>
         <span className="tag tag-live">{`Confirmed ${n(counts.confirmed)}`}</span>
-        <span className="tag text-danger!">{`Failed ${n(counts.failed)}`}</span>
+        {/* The failed count is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1, 4.96:1 on the tag; the tag's own ink is 9.31:1, and the word says it). */}
+        <span className="tag">{`Failed ${n(counts.failed)}`}</span>
         <span className="tag tag-next">{`Uncertain ${n(counts.uncertain)}`}</span>
       </p>
       {waiting ? <p className="mt-1 text-ink-soft">{`${n(waiting)} of them ${waiting === 1 ? "has" : "have"} no outcome written yet, so ${waiting === 1 ? "it is" : "they are"} counted as uncertain, not done.`}</p> : null}

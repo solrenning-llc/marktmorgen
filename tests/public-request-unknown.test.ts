@@ -17,8 +17,10 @@
 import { NextRequest } from "next/server";
 import { withinStore } from "@/lib/metered-limits";
 import { UnknownReplyError } from "@/lib/redis-reply";
-import { claimHandle, storeForHandle } from "@/lib/store";
-import { takePublicRequest } from "@/lib/traffic";
+import { addProduct, claimHandle, storeForHandle } from "@/lib/store";
+import { holdPublicRequests, takePublicRequest } from "@/lib/traffic";
+import { takeBuyerRead } from "@/lib/buyer-actions";
+import { shelfShown } from "@/lib/course-shelf";
 import { requestOrdersLink } from "@/lib/buyer-orders";
 import { ownedBeforeCart } from "@/lib/cart-offers";
 import { POST as contactForm } from "@/app/api/store/contact/route";
@@ -171,6 +173,22 @@ async function main(): Promise<void> {
   is("unknown: nothing is offered", await outcome(() => ownedBeforeCart(shop, "buyer@example.com")), "answered null");
   answering("requests", SPENT);
   is("spent: nothing is offered", await outcome(() => ownedBeforeCart(shop, "buyer@example.com")), "answered null");
+
+  part("A caller that reads a yes or no is never broken by an unknown count (Claude 7's MÉDIO on #3068)");
+  // About 65 call sites read takePublicRequest, takeBuyerRead or holdPublicRequests as a boolean, with nothing to catch a
+  // throw: an unknown count is a no there, as before, and only the callers that say "could not check" ask for the
+  // exact answer. The optional "More from" shelf on a student's course page is one: it used to be empty, never the page down.
+  answering("requests", ["7"]);
+  is("takePublicRequest: an unknown count is a no, never a throw", await outcome(() => takePublicRequest(shop)), "answered false");
+  is("takeBuyerRead: the same", await outcome(() => takeBuyerRead(shop, 2)), "answered false");
+  is("holdPublicRequests: the same", await outcome(() => holdPublicRequests(shop, 3, Date.now())), "answered false");
+  const extra = await addProduct("owner@example.com", "Extra guide", "", "9", null);
+  if (!extra.ok) throw new Error("the synthetic product was not made");
+  const withExtra = (await storeForHandle("requestshop"))!;
+  answering("requests", ["7"]);
+  is("the course page's shelf is empty on an unknown count, never the page down", await outcome(() => shelfShown(withExtra, [extra.product.id], "course0001", "buyer@example.com")), "answered []");
+  answering("requests", SPENT);
+  is("and on a spent window, as before", await outcome(() => shelfShown(withExtra, [extra.product.id], "course0001", "buyer@example.com")), "answered []");
 
   answering("", null);
   done();

@@ -1,4 +1,5 @@
 import { fastMoneyOnPage } from "@/lib/terms-check-rules";
+import { brandImitationOnPage, pageLinks } from "@/lib/brand-imitation-rules";
 import { pageWords } from "@/lib/page-translate";
 import { templateLeft } from "@/lib/template-text";
 import type { NextRequest } from "next/server";
@@ -75,6 +76,9 @@ export async function POST(request: NextRequest) {
   if (product.hidden !== true) {
     const refused = fastMoneyOnPage(pageWords(page));
     if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });
+    // Nor posing as Marktmorgen itself, in its words or its links (568 [GD2] (c), lib/brand-imitation-rules.ts).
+    const posing = brandImitationOnPage(pageWords(page), pageLinks(page));
+    if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: posing }, { status: 409 });
     // A part a template left for the creator to write, in either version, never goes out with the product
     // (754 [STN1], unit 1); a draft's page keeps it until the product is published.
     const left = templateLeft(page);

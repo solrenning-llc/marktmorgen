@@ -23,7 +23,7 @@
  *     the creator.
  */
 import { autoCaptionCents, CENTS_PER_MINUTE, GIVE_UP_HOURS, MIN_CENTS, readAutoAsk } from "@/lib/auto-captions-rules";
-import { autoRefundsOwed, autoWriting, captionRefundsStuckMonth, REFUND_LOOKS_MAX, requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
+import { autoRefundsOwed, autoWriting, CAPTIONS_STUCK_COUNT_COMMANDS, captionRefundsStuckMonth, REFUND_LOOKS_MAX, requestAutoCaptions, syncAutoCaptions } from "@/lib/auto-captions";
 import { streamCaptions } from "@/lib/stream";
 import { streamPath } from "@/lib/stream-rules";
 import type { Store } from "@/lib/store";
@@ -158,8 +158,9 @@ async function main(): Promise<void> {
   part("The price");
   is("six dollars a minute for each language, minutes rounded up", [autoCaptionCents(600, 1), autoCaptionCents(601, 2), autoCaptionCents(90 * 60, 3)], [6000, 13200, 162000]);
   is("never under the minimum; nothing for a video with no length", [autoCaptionCents(30, 1), autoCaptionCents(0, 1)], [MIN_CENTS, 0]);
-  // At its dearest: ten cents a language, a dime more if the spoken one is counted apart, and the card's 2.9% and 30 cents.
-  const worst = (minutes: number, languages: number) => minutes * (languages + 1) * 10 + autoCaptionCents(minutes * 60, languages) * 0.029 + 30;
+  // At its dearest: ten cents a language, a dime more if the spoken one is counted apart, and the card's 2.9% and 30 cents;
+  // and the month's count of a refund gone stuck (CAPTIONS_STUCK_COUNT_COMMANDS Redis commands, at Upstash's $2 a million).
+  const worst = (minutes: number, languages: number) => minutes * (languages + 1) * 10 + autoCaptionCents(minutes * 60, languages) * 0.029 + 30 + CAPTIONS_STUCK_COUNT_COMMANDS * (2 / 1_000_000) * 100;
   is("it pays for itself at its dearest, at every length from one minute to four hours, one language or three", Array.from({ length: 240 }, (_, i) => i + 1).every((m) => [1, 2, 3].every((n) => autoCaptionCents(m * 60, n) > worst(m, n))), true);
   is("languages: the spoken one first, each once, three at most, none it cannot do", [
     readAutoAsk("en", ["es", "en", "xx"])?.languages,

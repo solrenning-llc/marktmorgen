@@ -538,6 +538,8 @@ function splitBack(pending: Pending & { card: number }, cents: number | null): {
 const stuckMonthKey = (month: string) => `nl:captions:stuck:month:${month}`;
 /** Past the next yearly look at the month. */
 const STUCK_MONTH_SECONDS = 400 * 86_400;
+/** The Redis commands the month's count adds, at most once a captions order (the look that marks its refund stuck). */
+export const CAPTIONS_STUCK_COUNT_COMMANDS = 3;
 /** The Redis commands one read of a month's stuck refunds sends (captionRefundsStuckMonth). */
 export const CAPTIONS_STUCK_MONTH_READ_COMMANDS = 2;
 
@@ -727,6 +729,7 @@ async function collectRefund(id: string, pending: Pending, owed: Owed, now: numb
       ["ZREM", QUEUE, id],
       ...keepListed(pending),
       // Counted for the owner's monthly report: how many, and what they still owe; no store, video or person.
+      // CAPTIONS_STUCK_COUNT_COMMANDS: these three.
       ["HINCRBY", month, "stuck", 1],
       ["HINCRBY", month, "cents", owed.cents ?? pending.cents],
       ["EXPIRE", month, STUCK_MONTH_SECONDS],

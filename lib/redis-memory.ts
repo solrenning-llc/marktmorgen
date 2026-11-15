@@ -239,6 +239,42 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
+        // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
+        if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {
+          const withIndex = args[0] === "5";
+          const [list, marks, agreedCount, leftCount] = args.slice(1, 5);
+          const [field, was, value, print, markWas, lift, agreed, left, member, day] = args.slice(withIndex ? 6 : 5);
+          const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
+          if (sha1(this.run(["HGET", list, field])) !== was) return 0;
+          if (print !== "" && sha1(this.run(["HGET", marks, print])) !== markWas) return 0;
+          this.run(["HSET", list, field, value]);
+          if (lift === "1" && print !== "") this.run(["HDEL", marks, print]);
+          if (agreed === "1") this.run(["INCR", agreedCount]);
+          if (left === "1") this.run(["INCR", leftCount]);
+          else if (left === "-1") this.run(["DECR", leftCount]);
+          if (withIndex) {
+            this.run(["SADD", args[5], member]);
+            this.run(["EXPIREAT", args[5], day]);
+          }
+          return 1;
+        }
+        // lib/order-data.ts ORDER_WRITE_IF_SAME: each check, then ORDER_WRITE as it is on the rest.
+        if (key.startsWith("-- marktmorgen:order-write-if-same:v1\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          const checks = Number(argv[0]);
+          if (!Number.isInteger(checks) || checks < 1 || checks > 4 || argv.length < 1 + 3 * checks) return [-1];
+          for (let c = 0; c < checks; c += 1) {
+            const target = keys[Number(argv[1 + 3 * c]) - 1];
+            if (target === undefined) return [-1];
+            const current = this.run(["HGET", target, argv[2 + 3 * c]]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (seen !== argv[3 + 3 * c]) return [-2];
+          }
+          return this.orderWrite([String(count), ...keys, ...argv.slice(1 + 3 * checks)]);
+        }
         // lib/certificate.ts CERT_SLOT_SWAP: a student's slot moved to a new certificate only while it still names the one read.
         if (key.startsWith("-- marktmorgen:cert-slot-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, slots, who, expected, id] = args;
@@ -904,6 +940,29 @@ export class MemoryRedis {
           this.data.set(record, next);
           return 1;
         }
+        // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
+        // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
+        if (key.startsWith("-- marktmorgen:inbox-write:v1\n") && (args[0] === "4" || args[0] === "5") && args.length === 1 + Number(args[0]) + 9) {
+          const n = Number(args[0]);
+          const [record, index, list, episode, token] = args.slice(1, 1 + n);
+          const [expected, next, keep, score, id, message, max, tokenValue, endEpisode] = args.slice(1 + n);
+          const call = (command: (string | number)[]) => {
+            this.scriptCalls += 1;
+            return this.run(command);
+          };
+          const current = call(["GET", record]);
+          if (expected === "" ? current !== null : current !== expected) return 0;
+          call(["SET", record, next, "EX", keep]);
+          call(["ZADD", index, score, id]);
+          if (message !== "") {
+            call(["RPUSH", list, message]);
+            call(["LTRIM", list, -Number(max), -1]);
+          }
+          call(["EXPIRE", list, keep]);
+          if (n === 5) call(["SET", token, tokenValue, "EX", keep]);
+          if (endEpisode === "1") call(["DEL", episode]);
+          return 1;
+        }
         // lib/affiliates.ts AFFILIATE_SWAP: one affiliate's record written only over exactly the text read.
         if (key.startsWith("-- marktmorgen:affiliate-swap:v1\n") && args[0] === "1" && args.length === 5) {
           const [, people, field, expected, next] = args;
@@ -963,6 +1022,15 @@ export class MemoryRedis {
           if (this.run(["ZSCORE", notes, member]) === null) return 0;
           this.run(["SET", link, value, "EX", seconds]);
           return 1;
+        }
+        // lib/flows.ts FLOW_MOVE: each member off KEYS[1] and onto KEYS[2] at ARGV[1], only by whoever took it off; 1 or 0 each.
+        if (key.startsWith("-- marktmorgen:flow-move:v1\n") && args[0] === "2" && args.length >= 4) {
+          const [, from, to, score, ...members] = args;
+          return members.map((member) => {
+            if (this.run(["ZREM", from, member]) !== 1) return 0;
+            this.run(["ZADD", to, score, member]);
+            return 1;
+          });
         }
         if (key.startsWith("-- marktmorgen:flow-queue-if-leased:v1\n") && args[0] === "2" && args.length === 6) {
           const [, lease, queue, member, score, next] = args;
@@ -1684,6 +1752,13 @@ export class MemoryRedis {
         }
         if (key.startsWith("-- marktmorgen:store-data:v1\n") && args[0] === "1") return this.storeData(args.slice(1));
         if (key.startsWith("-- marktmorgen:order-write:v1\n")) return this.orderWrite(args);
+        // lib/licence-keys.ts SALE_SWAP: a sale's place among the keys given changed only while it holds the expected mark.
+        if (key.startsWith("-- marktmorgen:license-sale-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, sales, reference, expected, next] = args;
+          if (this.run(["HGET", sales, reference]) !== expected) return 0;
+          this.run(next === "" ? ["HDEL", sales, reference] : ["HSET", sales, reference, next]);
+          return 1;
+        }
         // lib/order-data.ts ORDER_WRITE_ONCE: ORDER_WRITE behind a once-only mark (KEYS[2]), read first; a mark there
         // writes nothing, and a command refused inside takes the mark back out.
         if (key.startsWith("-- marktmorgen:order-write-once:v1\n") && Number(args[0]) >= 2) {
@@ -2006,6 +2081,8 @@ export class MemoryRedis {
         const set = this.set(key);
         let gone = 0;
         for (const one of args) if (set.delete(one)) gone += 1;
+        // As redis-server: a set left empty is no longer a key (#4263's "log out of all devices" removes its members).
+        if (!set.size) this.data.delete(key);
         return gone;
       }
       case "SISMEMBER":

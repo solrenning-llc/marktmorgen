@@ -115,7 +115,8 @@ async function main(): Promise<void> {
   is("the registry states its looks (PAYPAL_WATCH_LOOKS.looksPerOrderWatched)", stated?.looksPerOrderWatched, standing.looks);
 
   part("An order whose capture is in a status the watch does not read: never dropped, never asked hourly for 400 days");
-  const unread = await looksAt("REVERSED");
+  // A status PayPal does not publish for a capture (REVERSED is taken back since main's C4-13, not unknown).
+  const unread = await looksAt("SOMETHING_NEW");
   is("it is still watched while its paid record lasts", unread.leftAfterDays, null);
   const late = stated?.lateLooksPerOrder;
   is("the registry states the looks after the watch's days", typeof late === "number" && late > 0 && stated?.lateLookSeconds === 30 * DAY && late === Math.ceil((400 - 180) / 30), true);

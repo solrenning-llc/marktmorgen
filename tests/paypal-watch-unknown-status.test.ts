@@ -139,7 +139,10 @@ async function main(): Promise<void> {
   is("the sale is granted to begin with", grantBefore > 0, true);
 
   part("A capture status the watch does not read is unknown: looked at again in an hour, never counted as a refund");
-  for (const status of ["REVERSED", "DECLINED", "FAILED", "SOMETHING_NEW"]) {
+  // REVERSED, DECLINED and FAILED are no longer unknown here: main's C4-13 (the owner, 4 November 2026) takes the
+  // purchase back on each, held by tests/paypal-reversed-access.test.ts. The unknown ones are statuses PayPal does not
+  // publish for a capture.
+  for (const status of ["SOMETHING_NEW", "UNDER_REVIEW", "ON_HOLD", "VOIDED_LATER"]) {
     captures.set(paid.paid.capture, status);
     const seen = await look();
     is(`status ${status}: still watched, an hour on, not counted as a refund`, [seen.watched, seen.inSeconds !== null && seen.inSeconds <= 3600 && seen.inSeconds > 3500, seen.refunded], [true, true, false]);
@@ -153,7 +156,7 @@ async function main(): Promise<void> {
   is("a REFUNDED reply about another capture: still watched an hour on, nothing taken back", [foreign.watched, foreign.refunded, foreign.kept], [true, false, grantBefore]);
 
   part("Past the watch's 180 days, an unknown status is still never dropped");
-  captures.set(paid.paid.capture, "REVERSED");
+  captures.set(paid.paid.capture, "SOMETHING_NEW");
   const raw = (await redis.pipeline([["GET", `nl:ppsell:paid:${sale.order}`]]))[0] as string;
   const rec = JSON.parse(raw);
   rec.at = nowS() - 181 * 86_400;

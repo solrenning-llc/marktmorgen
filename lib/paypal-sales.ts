@@ -845,12 +845,6 @@ export async function deliverPayPal(input: {
  * When a paid order is next asked about: often while refunds are likely, then
  * less and less, until PayPal's refund window closes.
  */
-/**
- * The capture statuses the refund watch reads: money still standing (COMPLETED, PARTIALLY_REFUNDED) or taken back in
- * full (REFUNDED). Any other is unknown to it: looked at again, never read as either.
- */
-const CAPTURE_STATUSES_READ = new Set(["COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"]);
-
 export function nextLook(paidAt: number, now: number): number | null {
   const age = now - paidAt;
   if (age >= WATCH_SECONDS) return null;
@@ -898,6 +892,12 @@ const CAPTURE_KEEPS: ReadonlySet<string> = new Set(["COMPLETED", "PENDING", "PAR
 /** Of those, the statuses of a payment taken: written down and handed over when the order is still waiting on it. */
 const CAPTURE_PAID: ReadonlySet<string> = new Set(["COMPLETED", "PARTIALLY_REFUNDED"]);
 const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED", "FAILED", "DECLINED"]);
+/**
+ * The capture statuses the refund watch reads (#4536, merged with C4-13): the ones that keep the purchase
+ * (CAPTURE_KEEPS) and the ones that take it back (CAPTURE_TAKEN_BACK). Any other is unknown to it: looked at again
+ * (unknownLook), never read as either and never dropped as "not refunded".
+ */
+const CAPTURE_STATUSES_READ: ReadonlySet<string> = new Set([...CAPTURE_KEEPS, ...CAPTURE_TAKEN_BACK]);
 /** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
 const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
 /** How many due paid orders one run of the refund watch looks at for a store: PAYPAL_WATCH_BATCH, the one batch (PAYPAL_REFUND_WATCH and NOT_A_COST.REFUND_WATCH_BATCH in tests/plan-cost-registry.ts). */

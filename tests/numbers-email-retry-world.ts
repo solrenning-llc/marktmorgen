@@ -23,7 +23,7 @@ export const retry = {
   lostAnswer: false,
   /** The emails that reached their address, in order (a try is not a delivery). */
   delivered: [] as string[],
-  spends: "none" as "none" | "throws",
+  spends: "none" as "none" | "throws" | "metaUnread",
   team: "members" as "members" | "throws",
 };
 
@@ -81,6 +81,12 @@ export async function postToChat(url: string): Promise<"sent" | "refused" | "unk
 export async function readSpends(): Promise<never[]> {
   if (retry.spends === "throws") throw new Error("synthetic ad spend read failure");
   return [];
+}
+
+/** The lines and whether Meta's part read: "throws" is the typed lines unread, "metaUnread" Meta's part unread. */
+export async function readSpendLines(): Promise<{ spends: never[]; metaUnread: boolean }> {
+  if (retry.spends === "throws") throw new Error("synthetic ad spend read failure");
+  return { spends: [], metaUnread: retry.spends === "metaUnread" };
 }
 
 // lib/team.ts

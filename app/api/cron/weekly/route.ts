@@ -11,7 +11,8 @@ import { SITE_URL } from "@/lib/site-url";
 import { EMAIL_KEY_HOLDS_MS, claimWeek, readNumbers, releaseWeek, sendPart, tryPeriodAgain, weekPeriod, weeklyMessage, weeklyOff, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
-import { readSpends } from "@/lib/ad-spend";
+import { readSpendLines } from "@/lib/ad-spend";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { recordSample } from "@/lib/benchmarks";
 import { weeklyMemberToken, weeklyTeam } from "@/lib/stats-report";
 import { readTeamMembers } from "@/lib/team";
@@ -184,7 +185,11 @@ export async function GET(request: NextRequest) {
 async function summaryInputs(store: Store, emailOff: boolean): Promise<{ data: StatsData; spends: AdSpend[]; copies: string[] } | null> {
   const data = await readNumbers(store);
   if (!data) return null;
-  const spends = await readSpends(store.statsId);
+  // Every line or unknown (rule 24): typed lines that cannot be read throw, and so does a Meta part that could not be
+  // read, so the summary never takes one part as all of the spend (Claude 5 on #2924) nor the spend as none.
+  const spent = await readSpendLines(store.statsId);
+  if (spent.metaUnread) throw new UnknownReplyError("the Meta ad spend lines for the weekly summary");
+  const spends = spent.spends;
   if (emailOff) return { data, spends, copies: [] };
   const chosen = await weeklyTeam(store.handle);
   if (!chosen.length || !store.sid) return { data, spends, copies: [] };

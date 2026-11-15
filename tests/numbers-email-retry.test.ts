@@ -164,6 +164,15 @@ async function main(): Promise<void> {
   body = await run(weekly, "/api/cron/weekly");
   is("the next run sends and posts", [body.sent, owner(), retry.posts.length], [1, 1, 1]);
 
+  part("Weekly: a Meta part of the ad spend that could not be read is unknown too: nothing sent on one part as all of it, and the week is let go");
+  reset();
+  retry.chat = "channel";
+  retry.spends = "metaUnread";
+  body = await run(weekly, "/api/cron/weekly");
+  is("Meta unread: failed, not quiet, nothing sent or posted", [body.failed, body.quiet, body.sent, owner(), retry.posts.length], [1, 0, 0, 0, 0]);
+  is("Meta unread: the week's claim is let go", held("nl:weekly:sent:"), false);
+  retry.spends = "none";
+
   part("Weekly: a team that could not be read sends no summary without the team's copies, and lets the week go");
   reset();
   chooseMember();

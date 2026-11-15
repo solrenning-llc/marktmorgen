@@ -22,6 +22,9 @@ import { POST as affiliatesRoute } from "@/app/api/store/affiliates/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 process.env.RESEND_API_KEY = "re_test_partner_accept_only";
 globalThis.fetch = (async () => new Response("{}", { status: 404 })) as typeof fetch;

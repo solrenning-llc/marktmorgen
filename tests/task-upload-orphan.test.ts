@@ -137,3 +137,20 @@ test("a hand-in that goes through keeps its file off the sweep", async () => {
   assert.equal(await sweptLater(w.path), false);
   assert.ok(files.has(w.path), "the handed-in file is kept");
 });
+
+test("work handed in again, whose replaced file's delete fails, leaves that file to the daily sweep", async () => {
+  const w = await world("orphanredo");
+  assert.equal((await handIn(w)).body.ok, true);
+  const first = w.path;
+  // A second file through the door, in the same student's folder, handed in over the first.
+  const second = `${first.slice(0, first.lastIndexOf("/") + 1)}${randomBytes(16).toString("hex")}.jpg`;
+  await noteTaskUpload(second);
+  files.add(second);
+  blobState.failDeletes = true;
+  const result = await handIn({ ...w, path: second });
+  blobState.failDeletes = false;
+  assert.equal(result.body.ok, true, "the new work is kept");
+  assert.ok(files.has(first), "the replaced file's delete failed: it is still there");
+  assert.ok(await sweptLater(first), "the daily sweep deletes the replaced file");
+  assert.ok(files.has(second), "the work handed in now keeps its file");
+});

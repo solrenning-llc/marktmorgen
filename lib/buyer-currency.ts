@@ -56,8 +56,11 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 /** Off until the test-mode proofs in docs/buyer-currency-and-language.md. */
 export const BUYER_CURRENCY_LIVE: boolean = false;
 
-/** The creator's two ways, (a) and (b). */
-export type BuyerCurrencyMode = "automatic" | "manual";
+/**
+ * The creator's two ways, (a) and (b), and the switch that keeps buyers in the store's currency ("off": 208 [SH5]
+ * builds only if the creator can turn it on and off; Claude 7 on #4579).
+ */
+export type BuyerCurrencyMode = "automatic" | "manual" | "off";
 
 /** What a store does when its creator chose nothing: (a). */
 export const DEFAULT_BUYER_CURRENCY_MODE: BuyerCurrencyMode = "automatic";
@@ -66,10 +69,10 @@ export const DEFAULT_BUYER_CURRENCY_MODE: BuyerCurrencyMode = "automatic";
 export function buyerCurrencyModeOf(store: Pick<Store, "buyerCurrency">): BuyerCurrencyMode | "unknown" {
   const kept = store.buyerCurrency;
   if (kept === undefined) return DEFAULT_BUYER_CURRENCY_MODE;
-  return kept === "automatic" || kept === "manual" ? kept : "unknown";
+  return kept === "automatic" || kept === "manual" || kept === "off" ? kept : "unknown";
 }
 
-export type BuyerCurrencyWhy = "off" | "mode-unknown" | "held" | "fee" | "settlement" | "automatic" | "manual" | "manual-none";
+export type BuyerCurrencyWhy = "off" | "creator-off" | "mode-unknown" | "held" | "fee" | "settlement" | "automatic" | "manual" | "manual-none";
 
 /**
  * What a session may hold that waits for its own test-mode proof before it converts (the coordinator's care item 4,
@@ -103,6 +106,7 @@ export function buyerCurrencyPlan(input: {
   held?: readonly BuyerCurrencyHold[];
 }): BuyerCurrencyPlan {
   if (!input.live) return STORE_CURRENCY("off");
+  if (input.mode === "off") return STORE_CURRENCY("creator-off");
   if (input.mode !== "automatic" && input.mode !== "manual") return STORE_CURRENCY("mode-unknown");
   if (input.held && input.held.length > 0) return STORE_CURRENCY("held");
   if (input.fee) return STORE_CURRENCY("fee");

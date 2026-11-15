@@ -540,7 +540,8 @@ export type Store = {
   /**
    * How this store's buyers may pay in their own currency (22 [E5] unit 3b,
    * lib/buyer-currency.ts): "automatic" is (a), Stripe converts; "manual" is
-   * (b), the creator's own prices first. Absent when the creator never chose,
+   * (b), the creator's own prices first; "off" keeps buyers in the store's
+   * currency (the creator's switch, 208 [SH5]). Absent when the creator never chose,
    * which is (a); "unknown" when a kept value was of another shape, which keeps
    * the store's currency. Read only behind BUYER_CURRENCY_LIVE.
    */
@@ -2810,18 +2811,19 @@ export async function setTax(
 
 /** A kept buyer-currency choice: one of the two ways, or unknown. Pure. */
 function parseBuyerCurrency(value: unknown): BuyerCurrencyMode | "unknown" {
-  return value === "automatic" || value === "manual" ? value : "unknown";
+  return value === "automatic" || value === "manual" || value === "off" ? value : "unknown";
 }
 
 /**
  * Keeps the creator's choice of how buyers may pay in their own currency
- * (22 [E5] unit 3b): (a) "automatic" or (b) "manual", nothing else.
+ * (22 [E5] unit 3b): (a) "automatic", (b) "manual" or "off" (the store's
+ * currency only), nothing else.
  */
 export async function setBuyerCurrency(
   email: string,
   mode: BuyerCurrencyMode,
 ): Promise<{ ok: true; store: Store } | { ok: false; reason: "none" | "invalid" }> {
-  if (mode !== "automatic" && mode !== "manual") return { ok: false, reason: "invalid" };
+  if (mode !== "automatic" && mode !== "manual" && mode !== "off") return { ok: false, reason: "invalid" };
   const next = await patchStore(email, () => ({ buyerCurrency: mode }));
   return next ? { ok: true, store: next } : { ok: false, reason: "none" };
 }

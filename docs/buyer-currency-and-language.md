@@ -205,3 +205,5 @@ The rest of unit 2 for buyers paying in another currency on purpose (the A/B tes
 - Each unit's PR carries its own Acessibilidade section (AX274).
 - The currency fields are labelled with the currency's name and code.
 - A buyer is never shown a converted amount we made up: only the creator's own amounts, or Stripe's on its own page.
+
+**The creator's switch (208 [SH5], Claude 7 on #4579, 15 November 2026).** Item 208 builds only if the creator can turn the buyer's currency on and off. Unit 3b adds a third choice, `off`, kept on the store like the two ways (`setBuyerCurrency`), with which every session stays in the store's currency (`buyerCurrencyPlan` answers `creator-off`). The studio field for it comes with the key.

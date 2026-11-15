@@ -19,3 +19,9 @@ export function text(value: unknown, max: number) {
 export async function setSitePages() {
   throw new Error('Unexpected creation of store stats');
 }
+
+// Merged with main of 15 November 2026 (Claude 1 cloud O): main's forms route gives a store with no stats id its id
+// through ensureStatsId (no longer setSitePages); the synthetic store here has one, so that path is never expected.
+export async function ensureStatsId() {
+  throw new Error('Unexpected creation of store stats');
+}

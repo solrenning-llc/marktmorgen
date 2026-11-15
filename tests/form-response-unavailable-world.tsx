@@ -13,6 +13,10 @@ export const useSearchParams=()=>new URLSearchParams();
 export function StudioHeader(){return null;}
 export function StudioStorePin({children}:{children:ReactNode}){return children;}
 export function studioPath(){return '/studio';}
+/** Main's email page pays its studio requests before it reads the broadcast heads; both are synthetic here. */
+export async function countStudio(){return {ok:true as const};}
+// Merged with main of 15 November 2026 (Claude 1 cloud O): main's forms route gives a store with no stats id its id (ensureStatsId); this synthetic store has one.
+export async function ensureStatsId(){throw Error('unexpected: the synthetic store has its stats id');}
 export async function studioView(){return {ok:true,view:{store,role:'owner',email:store.email,stores:[],owned:[]}};}
 export async function creatorFrom(){return state.denied?new Response('forbidden',{status:403}):{store};}
 export async function guardStoreWrite(){return state.denied?{ok:false,response:new Response('forbidden',{status:403})}:{ok:true,store,role:'owner',body:state.body??{form:form.id,responseRef:'a'.repeat(64)}};}
@@ -51,6 +55,7 @@ export function idsOfKind(){return [] as string[];}
 export async function readTitles(){return new Map<string,string>();}
 export async function listCounts(){return {all:0,confirmed:0,unsubscribed:0};}
 export async function listBroadcastsStrict(){return [];}
+export async function readBroadcastHeads(){return {ok:true as const,heads:[]};}
 export function letterIdFor(){return 'synthetic-letter';}
 export async function publishedLetters(){return new Map();}
 export function broadcastMoney(){return null;}

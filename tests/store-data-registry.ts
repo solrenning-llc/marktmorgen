@@ -54,6 +54,8 @@ import { IMPORT_ALLOWANCES, IMPORT_ROW_BYTES } from "@/lib/import-limits";
 import { AI_MONTHLY } from "@/lib/ai-rules";
 import { ANSWERS_MONTHLY } from "@/lib/answers-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
+import { MAX_REMOVED_COURSES } from "@/lib/removed-courses";
+import { MAX_LESSONS, MAX_MODULES } from "@/lib/course";
 import { PAID_UPLOAD_OPENS } from "@/lib/upload-budget-policy";
 import { ENTRY_BYTES } from "@/lib/store-data-rules";
 import { TASK_COUNT_WEIGHT } from "@/lib/crm";
@@ -91,6 +93,7 @@ import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { APPLY_DAY_SECONDS, APPLY_MAX_KEPT, APPLY_MAX_PER_PERSON, APPLY_RECORD_MAX_BYTES } from "@/lib/apply-first-store";
+import { REFUND_MARK_MAX_BYTES } from "@/lib/affiliate-lead-rules";
 
 const KB = 1_024;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
@@ -265,16 +268,17 @@ export const FAMILIES: Record<string, Family> = {
   "nl:affkit:@lib/affiliate-kit.ts": short("An affiliate kit's counts, by the day and the window", "ai", 40),
   "nl:aff:payday:@lib/affiliate-payday.ts": short("A store's monthly payday claimed", "day", 40),
   "nl:aff:@lib/affiliates.ts": {
-    what: "Affiliates: their records, addresses, codes, clicks, sales and shares, and what the creator says was paid",
+    what: "Affiliates: their records, addresses, codes, clicks, sales and shares (each sale and share with its refund kept when read on its own Stripe account), and what the creator says was paid",
     room: ["lib/affiliates.ts"],
     parts: [
       capped(MAX_AFFILIATES * (1_536 + 4 * ENTRY_BYTES), "MAX_AFFILIATES records (an address, a note of MAX_NOTE_LENGTH in any script, the rest), each with its address, code and click counts.", src("lib/affiliate-setting.ts", "MAX_AFFILIATES"), src("lib/affiliates.ts", "MAX_NOTE_LENGTH")),
       kept(512, "A sale credited and up to two partners' shares of it."),
+      kept(3 * REFUND_MARK_MAX_BYTES, "The refund kept on the sale and on each partner's share when read on the account it was paid into (lib/affiliates.ts AFFILIATE_REFUND_MARK): one field, `rf`, in base 36, the account being the record's own `acct`."),
     ],
   },
   // Confirmed leads (18 October 2026): each counted in the store's data room before it is written, with room for its decision, and refused past it.
   "nl:aff:leads:lock:@lib/affiliate-leads.ts": short("A program's leads being decided or a person's address taken off one, ten seconds at the most", "studio", 1, 128),
-  "nl:aff:@lib/affiliate-lead-rules.ts": { what: "Confirmed leads an affiliate was credited for: the person's address, the kind, the terms then and the creator's decision", room: ["lib/affiliate-leads.ts"] },
+  "nl:aff:@lib/affiliate-lead-rules.ts": { what: "Confirmed leads an affiliate was credited for: the person's address, the kind, the terms then, the creator's decision and a booking's refund kept when read on its own account (lib/affiliates.ts AFFILIATE_REFUND_MARK, REFUND_MARK_MAX_BYTES, taken from the room with the lead)", room: ["lib/affiliate-leads.ts"] },
   "nl:aff:link:@lib/affiliates.ts": short("An emailed link to apply or sign in, a day", "store", 1, LINK_BYTES, MAIL("affiliate")),
   "nl:aff:seen:@lib/affiliates.ts": short("A click counted once per visitor a day", "request", 2, KEY, REQ("affiliate")),
   "nl:aff:session:@lib/affiliates.ts": short("An affiliate signed in on one browser, thirty days, from an emailed link", "store", 30, KEY, MAIL("affiliate")),
@@ -422,6 +426,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:card:opens:@lib/card-update.ts": short("Presses of a card link", "own", 21, MARK, MAIL("card")),
   "nl:catalog:@lib/catalog.ts": { what: "Products: their listings, their heavy rest, their cards", room: ["lib/store.ts"], parts: [capped(KEY, "The mark of a catalog moved.")] },
   "nl:cert:@lib/certificate.ts": { what: "Certificates, kept for good", room: ["lib/certificate.ts"] },
+  "nl:coursegone:@lib/removed-courses.ts": { what: "The courses a store dropped, with their lessons and modules, so a person's records kept under one are still erased", parts: [capped(MAX_REMOVED_COURSES * (200 + 68 * (MAX_LESSONS + MAX_MODULES)), "At most MAX_REMOVED_COURSES courses, each its id and its product's id in the list (nl:coursegone:<statsId>) and the ids of its lessons and modules in its own key beside it (nl:coursegone:<statsId>:c:<courseId>), 64 bytes at the most, quoted, with at most MAX_NOTED_LESSONS lessons and MAX_NOTED_MODULES modules: a drop past that is refused, never made by dropping an older course.", src("lib/removed-courses.ts", "MAX_REMOVED_COURSES", "MAX_NOTED_LESSONS", "MAX_NOTED_MODULES"))] },
   "nl:course:@lib/certificate.ts": { what: "A course's certificates, by student", room: ["lib/certificate.ts"] },
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
@@ -990,6 +995,7 @@ export const FAMILIES: Record<string, Family> = {
     ],
   },
   "nl:stock:@lib/stock.ts": { what: "Stock left, by product, and a sale's hold: counted with its product (PRODUCT_SIDE_BYTES)", room: ["lib/store.ts"] },
+  "nl:stock:back:@lib/stock.ts": short("A held checkout's one hand-back, kept no longer than its hold (Codex X5 and L on #4409)", "request", 1, 128, REQ("checkout")),
   "nl:stock:lock:@lib/stock.ts": short("One count at a time", "request", 1, 128, REQ("checkout")),
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
@@ -1068,6 +1074,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:upsell:pending@lib/upsell.ts": company("Offers being charged", "One sorted set, minutes, each an order's."),
   "nl:@lib/usage-billing.ts": { what: "What a meter billed, is adding, told, a month", parts: [capped(3 * 3 * 14 * KEY, "Three meters, three marks, 400 days.")] },
   "nl:watch:monthly:@lib/usage-billing.ts": company("A subscription's monthly watching billed", "The company's billing of its own plan."),
+  "nl:vault:fresh:@lib/vault.ts": short("A vault upload finished and not yet attached", "upload", 7, KEY),
   "nl:vault:up:@lib/vault.ts": short("A vault upload in progress", "upload", 1, 512),
   "nl:verified:@lib/verified-numbers.ts": { what: "The store's verified numbers, cached", parts: [capped(16 * KB, "One a store.")] },
   "nl:verified:cursor@lib/verified-numbers.ts": company("Where the verification job stopped", "One key, the company's job."),

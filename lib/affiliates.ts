@@ -2941,7 +2941,8 @@ export type HoldFlag = "paid-search" | "same-address";
 export type Book = {
   rows: Row[];
   lines: Line[];
-  payouts: Payout[];
+  /** `sent` when PayPal sent it (paidThroughPayPal): never undone, so the studio shows it without Undo (#4606). */
+  payouts: (Payout & { sent?: boolean })[];
   /**
    * What the rows' totals are in: the store's currency. Sales and payouts in
    * another one — from before the store changed its currency — are listed
@@ -3433,7 +3434,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
+  // Each payout says whether PayPal sent it (#4606): the studio draws no Undo on those.
+  return { rows, lines, payouts: paid.map((payout) => ({ ...payout, sent: paidThroughPayPal(payout) })), refundsChecked, invoicesChecked, currency: store.currency, elsewhere };
 }
 
 /** How many invoice pages of a hundred are read when the book is opened. */

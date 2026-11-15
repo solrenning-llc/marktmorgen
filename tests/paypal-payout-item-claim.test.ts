@@ -171,9 +171,11 @@ async function main(): Promise<void> {
   // affiliate twice from the creator's PayPal. It is refused, the payout stays, and nothing is sent again.
   is("Undo on a payout PayPal sent is refused", await removePayout(store, id ?? ""), "sent");
   is("and the payout stays in the book", [(await bookIds()).length, await paidCents(store)], [1, 3000]);
+  is("the book marks it sent by PayPal, so the studio draws no Undo", (await readBook(store)).payouts.map((p) => p.sent), [true]);
   await payWithPayPal(store);
   is("after that Undo, the next payday sends nothing more", created.length, 1);
   const hand = await addPayout(store, { aff: (await readBook(store))!.payouts[0].aff, cents: 500, currency: "USD", date: "2026-11-15", reference: "PayPal 7XK2 sent by hand" });
+  is("a payout written by hand is not marked sent", (await readBook(store)).payouts.find((p) => p.id === hand?.id)?.sent, false);
   is("a payout written by hand is still taken off by Undo", await removePayout(store, hand?.id ?? ""), true);
 
   part("Two settles at once: written once");

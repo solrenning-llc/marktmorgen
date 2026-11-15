@@ -46,7 +46,8 @@ try {
    const url=new URL(route.request().url());
    if(url.origin!=='https://store.test'){out.outside++;return route.abort();}
    if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:'<!doctype html><html lang="en"><body><a href="#top">Synthetic page link</a><div id="root"></div></body></html>'});
-   if(url.pathname===api)return route.fulfill({contentType:'application/json',body:JSON.stringify(answer(JSON.parse(route.request().postData()||'{}')))});
+   // The answer takes a moment, as a real one does: long enough for a disabled Send button to lose the focus.
+   if(url.pathname===api){await new Promise(r=>setTimeout(r,300));return route.fulfill({contentType:'application/json',body:JSON.stringify(answer(JSON.parse(route.request().postData()||'{}')))});}
    return route.abort();
   });
   await page.goto('https://store.test/');
@@ -90,7 +91,13 @@ try {
   await page.fill('[role=dialog] textarea','Hello there, a synthetic question.');
   await press(page,'[role=dialog] button[type=submit]');
   await page.waitForSelector('[data-chat-thread] p');
+  out.chat.afterSend=await where(page);
   out.chat.sentStatus=await status(page);
+  // A second message, sent with the Send button as a keyboard user does (Enter in the textarea is a new line).
+  await page.fill('[role=dialog] textarea','A second synthetic question.');
+  await press(page,'[role=dialog] button[type=submit]');
+  await page.waitForFunction(()=>[...document.querySelectorAll('[data-chat-thread] p')].some(p=>p.textContent.includes('A second synthetic question.')));
+  out.chat.afterSecond=await where(page);
   await press(page,'[role=dialog] form button[type=button]');
   await page.waitForSelector('#store-chat-email');
   out.chat.newChat=await where(page);
@@ -123,6 +130,7 @@ try {
   await page.fill('[role=dialog] textarea','Is there a synthetic answer?');
   await press(page,'[role=dialog] button[type=submit]');
   await page.waitForSelector('[data-assistant-thread] [data-ai-label]');
+  out.assistant.afterAsk=await where(page);
   await press(page,'[role=dialog] p button');
   await page.waitForFunction(()=>!document.querySelector('[data-assistant-thread] [data-ai-label]'));
   out.assistant.deleted={on:await where(page),status:await status(page)};
@@ -158,8 +166,9 @@ try {
 
 type Where = string;
 const result = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", browserScript], { encoding: "utf8", timeout: 120_000, maxBuffer: 2_000_000 })) as {
-  chat: { opened: Where; liveBefore: number; statusBefore: string[]; escaped: { on: Where; expanded: string }; closed: Where; sentStatus: string[]; newChat: Where; escapedElsewhere: Where };
+  chat: { afterSend: Where; afterSecond: Where; opened: Where; liveBefore: number; statusBefore: string[]; escaped: { on: Where; expanded: string }; closed: Where; sentStatus: string[]; newChat: Where; escapedElsewhere: Where };
   assistant: {
+    afterAsk: Where;
     opened: Where;
     statusBefore: string[];
     toHandoff: Where;
@@ -180,6 +189,8 @@ is("opening it from its button takes the focus to the panel's title (2.4.3)", ch
 is("its conversation's live region and its status region are there before anything is said (4.1.3)", [chat.liveBefore, chat.statusBefore], [1, [""]]);
 is("Escape takes the focus back to the button, now collapsed", chat.escaped, { on: "launcher", expanded: "false" });
 is("Close takes the focus back to the button", chat.closed, "launcher");
+is("a first message sent with the Send button keeps the keyboard focus in the panel, never on the page (2.4.3)", chat.afterSend !== "body", true);
+is("…and so does the next one", chat.afterSecond !== "body", true);
 is("Sent is said in the status region", chat.sentStatus, ["Sent. The answer shows here, and goes to your email too."]);
 is("Start a new conversation puts the focus on the email field of the new form, never on the page", chat.newChat, "input email");
 is("Escape with the focus elsewhere on the page closes the panel and leaves the focus there (3.2.5)", chat.escapedElsewhere, "outside");
@@ -189,6 +200,7 @@ is("opening it from its button takes the focus to the panel's title (2.4.3)", as
 is("its status region is there before anything is said (4.1.3)", assistant.statusBefore, [""]);
 is("asking the creator puts the focus on the email field of that form", assistant.toHandoff, "handoff input email");
 is("closing that form puts the focus back on the question", assistant.backFromHandoff, "textarea");
+is("a question answered keeps the keyboard focus in the panel, never on the page (2.4.3)", assistant.afterAsk !== "body", true);
 is("deleting the chat puts the focus on the question and says Deleted.", assistant.deleted, { on: "textarea", status: ["Deleted."] });
 is("a question sent to the creator puts the focus back on the question and says Sent", assistant.handedOver, { on: "textarea", status: ["Sent. Synthetic Store answers you by email."] });
 is("the month's replies spent: the focus on the email field of the form that asks the creator, and only that is said, not the earlier Sent", assistant.spent, {

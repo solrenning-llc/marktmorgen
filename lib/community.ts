@@ -45,7 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -1408,9 +1408,16 @@ export async function memberTraces(id: string, who: string): Promise<MemberTrace
   if (!isRedisConfigured()) return { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
   // Read from the member's own trace when every post the community keeps is
   // from after the trace began; otherwise the whole community, as before it.
-  const [oldestIds] = await redisPipeline([["ZRANGEBYSCORE", feedKey(id), "-inf", "+inf", "LIMIT", 0, 1]]);
-  const oldestId = Array.isArray(oldestIds) && oldestIds.length ? String(oldestIds[0]) : "";
-  const oldest = oldestId ? await readPost(id, oldestId) : null;
+  // Read exactly (#4780's sibling): an odd reply is never "no posts", which would read only the trace and leave out
+  // what she did before it. A post record that does not read is taken as older than the trace (the whole community is
+  // read, never less); a GET of another shape is unknown.
+  const [oldestIds] = await exactBatch([["ZRANGEBYSCORE", feedKey(id), "-inf", "+inf", "LIMIT", 0, 1]]);
+  const listed = stringList(oldestIds);
+  if (!listed) throw new UnknownReplyError("the community's oldest post, for a member's copy");
+  const oldestId = listed[0] ?? "";
+  const [oldestRaw] = oldestId ? await exactBatch([["GET", postKey(id, oldestId)]]) : [null];
+  if (oldestRaw !== null && typeof oldestRaw !== "string") throw new UnknownReplyError("the community's oldest post, for a member's copy");
+  const oldest = oldestId ? parsePost(oldestRaw) : null;
   if (oldestId && (!oldest || oldest.at < TRACED_SINCE)) return scanTraces(id, who);
   return tracedOf(id, who);
 }
@@ -1418,12 +1425,15 @@ export async function memberTraces(id: string, who: string): Promise<MemberTrace
 /** What the member's trace names (lib/community-trace.ts), each checked against what is kept now. */
 async function tracedOf(id: string, who: string): Promise<MemberTraces> {
   const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
-  const [raw] = await redisPipeline([["SMEMBERS", traceKey(id, who)]]);
-  const refs = (Array.isArray(raw) ? raw : []).map(String).sort();
+  // Her trace read exactly (#4780's sibling): an odd reply is unknown, never "nothing she did".
+  const [raw] = await exactBatch([["SMEMBERS", traceKey(id, who)]]);
+  const traced = stringList(raw);
+  if (!traced) throw new UnknownReplyError("a member's trace, for their copy");
+  const refs = [...traced].sort();
   const parts = refs.map((ref) => ref.split(":"));
   const postIds = [...new Set(parts.filter((p) => p[0] === "p" && p.length === 2).map((p) => p[1]))];
   const posts: Post[] = [];
-  for (let i = 0; i < postIds.length; i += TRACE_BATCH) posts.push(...(await readPosts(id, postIds.slice(i, i + TRACE_BATCH))));
+  for (let i = 0; i < postIds.length; i += TRACE_BATCH) posts.push(...(await postsForCopy(id, postIds.slice(i, i + TRACE_BATCH))));
   for (const post of posts) {
     if (post.a === who) out.posts.push({ post: post.id, space: post.sp, title: post.title, text: post.text, at: post.at, edited: post.ed, hidden: post.hid });
   }
@@ -1469,6 +1479,22 @@ async function exactBatch(commands: (string | number)[][]): Promise<unknown[]> {
   return replies;
 }
 
+/**
+ * Posts for a member's copy (#4780's sibling), read exactly: one reply for each, each nil (the post is gone) or text.
+ * A record that is there and does not read may be theirs, so it is unknown, never left out in silence. Only for the
+ * copy: readPosts, which the community's pages use, keeps passing over what does not read.
+ */
+async function postsForCopy(id: string, posts: string[]): Promise<Post[]> {
+  const ids = posts.filter((p) => ITEM_ID.test(p));
+  const rows = await exactBatch(ids.map((p) => ["GET", postKey(id, p)]));
+  return rows.flatMap((raw) => {
+    if (raw === null) return [];
+    const post = typeof raw === "string" ? parsePost(raw) : null;
+    if (!post) throw new UnknownReplyError("a community post, for a member's copy");
+    return [post];
+  });
+}
+
 /** A SISMEMBER read exactly for a member's copy: 1 there, 0 confirmed not there, anything else UnknownReplyError (#4780). */
 function isMember(reply: unknown): boolean {
   const n = countOf(reply);
@@ -1480,11 +1506,13 @@ function isMember(reply: unknown): boolean {
 async function scanTraces(id: string, who: string): Promise<MemberTraces> {
   const out: MemberTraces = { posts: [], comments: [], likedPosts: [], likedComments: [], reported: [], pollPosts: [] };
   if (!isRedisConfigured()) return out;
-  const [raw] = await redisPipeline([["ZREVRANGE", feedKey(id), 0, MAX_POSTS - 1]]);
-  const ids = (Array.isArray(raw) ? raw : []).map(String);
+  // The feed read exactly (#4780's sibling): an odd reply is unknown, never "no posts".
+  const [raw] = await exactBatch([["ZREVRANGE", feedKey(id), 0, MAX_POSTS - 1]]);
+  const ids = stringList(raw);
+  if (!ids) throw new UnknownReplyError("the community's posts, for a member's copy");
   for (let i = 0; i < ids.length; i += TRACE_BATCH) {
     const batch = ids.slice(i, i + TRACE_BATCH);
-    const posts = await readPosts(id, batch);
+    const posts = await postsForCopy(id, batch);
     const replies = await exactBatch(
       posts.flatMap((p) => [
         ["HGETALL", commentsKey(id, p.id)],

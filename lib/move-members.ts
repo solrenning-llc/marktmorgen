@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -284,21 +285,40 @@ export async function keptAlready(store: Store, email: string, productId: string
   return false;
 }
 
-/** Reminders due now, taken off the line: "<store id>|<field>". A reminder not sent is put back by the caller. */
+/** How long a run holds the reminders it took (dueReminders) before they come due again on their own. */
+export const REMINDER_LEASE_SECONDS = 15 * 60;
+
+/**
+ * Reminders due now, "<store id>|<field>", leased rather than taken off the line (webhooks/cron audit, Claude 1,
+ * 12/11/2026): each is moved REMINDER_LEASE_SECONDS ahead, only while still in line (XX, so one forgotten in between
+ * is never added back). The caller puts one back for later (remindLater) or takes it off once finished
+ * (dropReminder); one a run never finishes (the function cut off, Redis failing for the put-back too) comes due again
+ * when the lease runs out, instead of being lost.
+ */
 export async function dueReminders(now = Date.now(), limit = 50): Promise<{ sid: string; field: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).map(String);
-  if (entries.length) await redisPipeline([["ZREM", DUE_KEY, ...entries]]);
+  const until = Math.floor(now / 1000) + REMINDER_LEASE_SECONDS;
+  if (entries.length) await redisPipeline([["ZADD", DUE_KEY, "XX", ...entries.flatMap((entry) => [until, entry])]]);
   return entries.flatMap((entry) => {
     const [sid, field] = [entry.slice(0, entry.indexOf("|")), entry.slice(entry.indexOf("|") + 1)];
     return sid && FIELD_PATTERN.test(field) ? [{ sid, field }] : [];
   });
 }
 
-/** Puts a reminder back in line, to be tried again in an hour. */
+/** Takes a finished reminder off the line: sent, nothing to send, or no longer wanted. */
+export async function dropReminder(sid: string, field: string): Promise<void> {
+  await redisPipeline([["ZREM", DUE_KEY, `${sid}|${field}`]]);
+}
+
+/**
+ * Puts a leased reminder back in line, to be tried again in an hour: only while it is still in line (XX), so one taken
+ * off meanwhile (a deletion, a membership kept) is never made again (Codex U on #4359). New reminders are put in line
+ * where the invite is made, never here.
+ */
 export async function remindLater(sid: string, field: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
+  await redisPipeline([["ZADD", DUE_KEY, "XX", Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
 }
 
 /** Who a member's link is for, on this store and membership, while it works. */
@@ -365,16 +385,26 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  const [rows] = await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]);
-  const held = fields.flatMap((field, i) => {
-    const invite = parseInvite(Array.isArray(rows) ? rows[i] : null);
-    return invite ? [{ field, invite }] : [];
+  // Read exactly (unknown is never zero): a reply in another shape, or a kept invite that does not read, may still
+  // hold the address and its reminder, so it is never said to be forgotten. It throws, and the erasure reports this
+  // part as not done and tries again (lib/person-erasure.ts), the way forgetLeadPerson does.
+  const what = "a person's membership move invitations";
+  const replies = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1);
+  const rows = replies ? listSlots(replies[0]) : null;
+  if (!rows || rows.length !== fields.length) throw new UnknownReplyError(what);
+  const held: { field: string; invite: Invite }[] = [];
+  fields.forEach((field, i) => {
+    if (rows[i] === null) return;
+    const invite = parseInvite(rows[i]);
+    if (!invite) throw new UnknownReplyError(what);
+    held.push({ field, invite });
   });
   if (!held.length) return 0;
-  await redisPipeline([
+  const gone = repliesFor(await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
     ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
-  ]);
+  ]), 3);
+  if (!gone || gone.some((n) => { const c = countOf(n); return c === null || c > held.length; })) throw new UnknownReplyError(what);
   return held.length;
 }

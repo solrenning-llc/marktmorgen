@@ -26,6 +26,12 @@ const S = " ";
 
 type Notice = { title: string; body: string };
 
+/** "A", "A and B", "A, B and C": the parts that are there, said with the language's own "and". */
+function series(parts: (string | false)[], and: string): string {
+  const said = parts.filter((part): part is string => Boolean(part));
+  return said.length < 2 ? said.join("") : `${said.slice(0, -1).join(", ")} ${and} ${said[said.length - 1]}`;
+}
+
 const en = {
   // ---- Shared by several pages and emails -------------------------------------------
   checkInbox: "Check your inbox",
@@ -88,6 +94,8 @@ const en = {
   freeNotConsented: (store: string) =>
     `You did not check the box to hear from ${store}, so your address reaches them marked as having asked for this one thing, and nothing more.`,
   freeIgnore: "If you did not ask for this, ignore this email. Nothing happens unless the link is used.",
+  /** The way to write to the creator, when the store page's contact form is open (lib/store-contact.ts): replies to the free copy's email do not reach them (755 [STN2]). */
+  freeContact: (store: string, link: string) => `To write to ${store}, use the contact form on their page: ${link}`,
   freeSentBy: (store: string) =>
     `Sent by Marktmorgen on behalf of ${store}. Marktmorgen uses your address for nothing else, and replies to this email do not reach ${store}.`,
 
@@ -252,8 +260,9 @@ const en = {
   giftReceiptSubject: (title: string) => `Your gift is on its way: ${title}`,
   aGift: (title: string) => `A gift: ${title}`,
   giftFor: (email: string) => `For: ${email}`,
-  weEmailed: (email: string, withMessage: boolean) =>
-    `We emailed ${email} just now, with your name${withMessage ? " and your message" : ""} and a link to open it. It is theirs, on their address; you do not get a copy.`,
+  // Only what the email to them carried (lib/gifts.ts): a name left empty is sent as "Someone", never said to be yours.
+  weEmailed: (email: string, withName: boolean, withMessage: boolean) =>
+    `We emailed ${email} just now, with ${series([withName && "your name", withMessage && "your message", "a link to open it"], "and")}. It is theirs, on their address; you do not get a copy.`,
 
   // ---- Leaving a review: its page --------------------------------------------------------------
   reviewMetaTitle: "Your review",
@@ -451,6 +460,7 @@ const es: GivingWords = {
   freeNotConsented: (store) =>
     `No marcaste la casilla para recibir noticias de ${store}, así que tu dirección le llega indicando que pediste solo esto, y nada más.`,
   freeIgnore: "Si no lo pediste, ignora este email. No pasa nada a menos que se use el enlace.",
+  freeContact: (store, link) => `Para escribir a ${store}, usa el formulario de contacto de su página: ${link}`,
   freeSentBy: (store) =>
     `Enviado por Marktmorgen en nombre de ${store}. Marktmorgen no usa tu dirección para nada más, y las respuestas a este email no llegan a ${store}.`,
 
@@ -606,8 +616,8 @@ const es: GivingWords = {
   giftReceiptSubject: (title) => `Tu regalo va en camino: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabamos de enviar un email a ${email} con tu nombre${withMessage ? ", tu mensaje" : ""} y un enlace para abrirlo. Es suyo, en su dirección; tú no recibes una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabamos de enviar un email a ${email} con ${series([withName && "tu nombre", withMessage && "tu mensaje", "un enlace para abrirlo"], "y")}. Es suyo, en su dirección; tú no recibes una copia.`,
 
   reviewMetaTitle: "Tu reseña",
   orderRefundedTitle: "Este pedido se reembolsó",
@@ -789,6 +799,7 @@ const fr: GivingWords = {
   freeNotConsented: (store) =>
     `Vous n'avez pas coché la case pour recevoir des nouvelles de ${store}, votre adresse lui parvient donc avec la mention que vous avez demandé uniquement ceci, et rien de plus.`,
   freeIgnore: "Si vous ne l'avez pas demandé, ignorez cet e-mail. Rien ne se passe tant que le lien n'est pas utilisé.",
+  freeContact: (store, link) => `Pour écrire à ${store}, utilisez le formulaire de contact de sa page : ${link}`,
   freeSentBy: (store) =>
     `Envoyé par Marktmorgen pour le compte de ${store}. Marktmorgen n'utilise votre adresse pour rien d'autre, et les réponses à cet e-mail ne parviennent pas à ${store}.`,
 
@@ -941,8 +952,8 @@ const fr: GivingWords = {
   giftReceiptSubject: (title) => `Votre cadeau est en route${S}: ${title}`,
   aGift: (title) => `Un cadeau${S}: ${title}`,
   giftFor: (email) => `Pour${S}: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Nous venons d'envoyer un e-mail à ${email}, avec votre nom${withMessage ? ", votre message" : ""} et un lien pour l'ouvrir. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Nous venons d'envoyer un e-mail à ${email}, avec ${series([withName && "votre nom", withMessage && "votre message", "un lien pour l'ouvrir"], "et")}. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
 
   reviewMetaTitle: "Votre avis",
   orderRefundedTitle: "Cette commande a été remboursée",
@@ -1123,6 +1134,7 @@ const de: GivingWords = {
   freeNotConsented: (store) =>
     `Sie haben das Kästchen für Nachrichten von ${store} nicht angekreuzt, daher erhält ${store} Ihre Adresse mit dem Vermerk, dass Sie nur dies angefordert haben, und nichts weiter.`,
   freeIgnore: "Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail. Es passiert nichts, solange der Link nicht benutzt wird.",
+  freeContact: (store, link) => `Um ${store} zu schreiben, nutzen Sie das Kontaktformular auf der Seite: ${link}`,
   freeSentBy: (store) =>
     `Gesendet von Marktmorgen im Auftrag von ${store}. Marktmorgen verwendet Ihre Adresse für nichts anderes, und Antworten auf diese E-Mail erreichen ${store} nicht.`,
 
@@ -1275,8 +1287,8 @@ const de: GivingWords = {
   giftReceiptSubject: (title) => `Ihr Geschenk ist unterwegs: ${title}`,
   aGift: (title) => `Ein Geschenk: ${title}`,
   giftFor: (email) => `Für: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Wir haben ${email} soeben eine E-Mail geschickt, mit Ihrem Namen${withMessage ? ", Ihrer Nachricht" : ""} und einem Link zum Öffnen. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Wir haben ${email} soeben eine E-Mail geschickt, mit ${series([withName && "Ihrem Namen", withMessage && "Ihrer Nachricht", "einem Link zum Öffnen"], "und")}. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
 
   reviewMetaTitle: "Ihre Bewertung",
   orderRefundedTitle: "Diese Bestellung wurde erstattet",
@@ -1457,6 +1469,7 @@ const it: GivingWords = {
   freeNotConsented: (store) =>
     `Non hai spuntato la casella per ricevere notizie da ${store}, quindi il tuo indirizzo gli arriva con l'indicazione che hai chiesto solo questo, e nient'altro.`,
   freeIgnore: "Se non l'hai chiesto tu, ignora questa email. Non succede nulla finché il link non viene usato.",
+  freeContact: (store, link) => `Per scrivere a ${store}, usa il modulo di contatto della sua pagina: ${link}`,
   freeSentBy: (store) =>
     `Inviata da Marktmorgen per conto di ${store}. Marktmorgen non usa il tuo indirizzo per nient'altro, e le risposte a questa email non arrivano a ${store}.`,
 
@@ -1612,8 +1625,8 @@ const it: GivingWords = {
   giftReceiptSubject: (title) => `Il tuo regalo è in arrivo: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Per: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Abbiamo appena inviato un'email a ${email}, con il tuo nome${withMessage ? ", il tuo messaggio" : ""} e un link per aprirlo. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Abbiamo appena inviato un'email a ${email}, con ${series([withName && "il tuo nome", withMessage && "il tuo messaggio", "un link per aprirlo"], "e")}. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
 
   reviewMetaTitle: "La tua recensione",
   orderRefundedTitle: "Questo ordine è stato rimborsato",
@@ -1794,6 +1807,7 @@ const nl: GivingWords = {
   freeNotConsented: (store) =>
     `Je hebt het vakje om van ${store} te horen niet aangevinkt, dus je adres komt bij hen terecht met de vermelding dat je alleen hierom hebt gevraagd, en verder niets.`,
   freeIgnore: "Heb je hier niet om gevraagd, negeer deze e-mail dan. Er gebeurt niets zolang de link niet wordt gebruikt.",
+  freeContact: (store, link) => `Wil je ${store} schrijven? Gebruik het contactformulier op de pagina: ${link}`,
   freeSentBy: (store) =>
     `Verstuurd door Marktmorgen namens ${store}. Marktmorgen gebruikt je adres nergens anders voor, en antwoorden op deze e-mail komen niet aan bij ${store}.`,
 
@@ -1944,8 +1958,8 @@ const nl: GivingWords = {
   giftReceiptSubject: (title) => `Je cadeau is onderweg: ${title}`,
   aGift: (title) => `Een cadeau: ${title}`,
   giftFor: (email) => `Voor: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `We hebben ${email} zojuist gemaild, met je naam${withMessage ? ", je bericht" : ""} en een link om het te openen. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `We hebben ${email} zojuist gemaild, met ${series([withName && "je naam", withMessage && "je bericht", "een link om het te openen"], "en")}. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
 
   reviewMetaTitle: "Je beoordeling",
   orderRefundedTitle: "Deze bestelling is terugbetaald",
@@ -2126,6 +2140,7 @@ const pt: GivingWords = {
   freeNotConsented: (store) =>
     `Não assinalou a caixa para receber notícias de ${store}, por isso o seu endereço chega-lhe com a indicação de que pediu apenas isto, e mais nada.`,
   freeIgnore: "Se não pediu isto, ignore este email. Nada acontece a menos que a ligação seja utilizada.",
+  freeContact: (store, link) => `Para escrever a ${store}, use o formulário de contacto da página: ${link}`,
   freeSentBy: (store) =>
     `Enviado pela Marktmorgen em nome de ${store}. A Marktmorgen não utiliza o seu endereço para mais nada, e as respostas a este email não chegam a ${store}.`,
 
@@ -2281,8 +2296,8 @@ const pt: GivingWords = {
   giftReceiptSubject: (title) => `O seu presente está a caminho: ${title}`,
   aGift: (title) => `Um presente: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabámos de enviar um email para ${email}, com o seu nome${withMessage ? ", a sua mensagem" : ""} e uma ligação para o abrir. É da pessoa, no endereço dela; não recebe uma cópia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabámos de enviar um email para ${email}, com ${series([withName && "o seu nome", withMessage && "a sua mensagem", "uma ligação para o abrir"], "e")}. É da pessoa, no endereço dela; não recebe uma cópia.`,
 
   reviewMetaTitle: "A sua avaliação",
   orderRefundedTitle: "Esta encomenda foi reembolsada",

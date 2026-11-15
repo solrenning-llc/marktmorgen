@@ -25,8 +25,15 @@ import { enroll } from "@/lib/flows";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
 
-const finishedKey = (courseId: string, email: string) => `nl:course:${courseId}:fin:${emailKey(email)}`;
-const openedKey = (courseId: string, email: string) => `nl:course:${courseId}:open:${emailKey(email)}`;
+const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
+const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;
+const finishedKey = (courseId: string, email: string) => finishedKeyOf(courseId, emailKey(email));
+const openedKey = (courseId: string, email: string) => openedKeyOf(courseId, emailKey(email));
+/**
+ * The commands answering 1 when this learner (lib/learn.ts emailKey) has a start or a finish mark in a course: two of a
+ * dropped course's probes (lib/person-erasure.ts), since both marks are written with no student row (#4542 review).
+ */
+export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [["EXISTS", openedKeyOf(courseId, learner)], ["EXISTS", finishedKeyOf(courseId, learner)]];
 
 /** How long a moment's mark lives once its sequences started: a student opens and finishes a course once. */
 const KEPT_SECONDS = 400 * 86_400;

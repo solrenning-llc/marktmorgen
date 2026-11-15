@@ -53,7 +53,7 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readKindExact, readListing, readListingExactly } from "@/lib/catalog";
+import { readKind, readKindExact, readListing, readListingsExactly } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -1080,6 +1080,7 @@ export async function sendDripEmails(
   origin: string,
   nowSeconds = Math.floor(Date.now() / 1000),
   deadline = Date.now() + DRIP_RUN_MS,
+  loadCourses?: (ids: string[]) => Promise<Map<string, Course | null | "unknown">>,
 ): Promise<DripCounts> {
   const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0, held: 0 };
   // A store read once a run, not once a course: its record is read whole (lib/store-exact.ts).
@@ -1098,6 +1099,31 @@ export async function sendDripEmails(
   const cursor = dripCursor(replies[1]);
   const members = [...new Set(listed)].sort();
   const first = cursor ? Math.max(0, members.findIndex((member) => member >= cursor.m)) : 0;
+  const order = members.map((_, i) => members[(first + i) % members.length]);
+  // Courses and listings read a hundred at a command ahead of the walk (the route passes readCoursesEach; the cost
+  // ceiling under Claude 7's MÉDIO on #3344), never one GET each: a course's entry is its own answer ("unknown" keeps
+  // it for another run), and a read that fails whole leaves its courses unknown for this run, nothing sent on them.
+  const courses = new Map<string, Promise<Course | null | "unknown">>();
+  const courseOf = (at: number, id: string): Promise<Course | null | "unknown"> => {
+    if (!courses.has(id)) {
+      if (loadCourses) {
+        const ids = [...new Set(order.slice(at).map((m) => m.split("|")[0]).filter((c) => c && !courses.has(c)))].slice(0, 100);
+        const read = loadCourses(ids);
+        // The exact null (no such course) is kept as null: only a missing answer is unknown.
+        for (const one of ids) courses.set(one, read.then((map) => (map.has(one) ? (map.get(one) as Course | null | "unknown") : "unknown"), () => "unknown" as const));
+      } else courses.set(id, loadCourse(id).catch(() => "unknown" as const));
+    }
+    return courses.get(id)!;
+  };
+  const listings = new Map<string, Promise<Map<string, Listing | null | "unknown"> | null>>();
+  const listingOf = async (store: Store, handle: string, productId: string): Promise<Listing | null | "unknown"> => {
+    if (!listings.has(handle)) {
+      const ids = [...new Set(order.filter((m) => m.split("|")[1] === handle).map((m) => m.split("|")[2]).filter(Boolean))];
+      listings.set(handle, readListingsExactly(store, ids).catch(() => null));
+    }
+    const read = await listings.get(handle)!;
+    return read && read.has(productId) ? (read.get(productId) as Listing | null | "unknown") : "unknown";
+  };
   let stopped: { m: string; h: string } | null = null;
   for (let i = 0; i < members.length; i += 1) {
     const member = members[(first + i) % members.length];
@@ -1108,7 +1134,7 @@ export async function sendDripEmails(
       break;
     }
     try {
-      const left = await dripCourse(member, from, { load: loadOnce, loadCourse, origin, nowSeconds, deadline, counts, refused });
+      const left = await dripCourse(member, from, { load: loadOnce, course: (id) => courseOf(i, id), listing: listingOf, origin, nowSeconds, deadline, counts, refused });
       if (left !== null) {
         // No further on the course this run began with than where it began (a page whose sends are slow and fail,
         // their marks let go): the next run begins with the course after it, and this one comes in its turn, from its
@@ -1143,7 +1169,8 @@ async function dripCourse(
   from: string,
   run: {
     load: (handle: string) => Promise<Store | null>;
-    loadCourse: (id: string) => Promise<Course | null>;
+    course: (id: string) => Promise<Course | null | "unknown">;
+    listing: (store: Store, handle: string, productId: string) => Promise<Listing | null | "unknown">;
     origin: string;
     nowSeconds: number;
     deadline: number;
@@ -1167,9 +1194,11 @@ async function dripCourse(
     return refusedHere >= DRIP_REFUSALS_PER_COURSE || (run.refused.get(handle) ?? 0) >= DRIP_REFUSALS_PER_STORE;
   };
   const store = courseId && handle && productId ? await run.load(handle) : null;
-  const product = store ? await readListingExactly(store, productId) : null;
+  const product = store ? await run.listing(store, handle, productId) : null;
   if (product === "unknown") throw new UnknownReplyError("a drip course's product");
-  const course = product?.course?.id === courseId ? await run.loadCourse(courseId) : null;
+  const read = product?.course?.id === courseId ? await run.course(courseId) : null;
+  if (read === "unknown") throw new UnknownReplyError("a drip course's outline");
+  const course = read;
   if (!store || !product || !course) {
     // Confirmed: the store, the product or the course is not there, or the product no longer holds this course.
     await redisPipeline([["SREM", DRIP_SET, member]]);

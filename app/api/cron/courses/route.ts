@@ -4,7 +4,7 @@ import { isRedisConfigured } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured } from "@/lib/email";
 import { storeForHandleExactly } from "@/lib/store-exact";
-import { readCourseExact } from "@/lib/course";
+import { readCourseExact, readCoursesEach } from "@/lib/course";
 import { sendDripEmails } from "@/lib/learn";
 import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
@@ -58,7 +58,7 @@ async function run(request: NextRequest, started: number) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     // Not walked (the drip set could not be read exactly): said in the log and the answer, never "0 sent"; the sweeps still run.
-    const counts = await sendDripEmails(dripStore, readCourseExact, SITE_URL, Math.floor(started / 1000), started + 40_000).catch((error: unknown) => {
+    const counts = await sendDripEmails(dripStore, readCourseExact, SITE_URL, Math.floor(started / 1000), started + 40_000, (ids) => readCoursesEach(ids)).catch((error: unknown) => {
       console.error("could not send the drip emails", error);
       return null;
     });

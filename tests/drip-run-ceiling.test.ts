@@ -83,7 +83,7 @@ async function main(): Promise<void> {
   const month = (["creator", "pro", "scale"] as const).map((tier) => Math.round(dripRunMonthlyUsd(tier) * 100) / 100);
   // Store, Studio and Scale at their data room full of students, every product a course: well under a dollar or two,
   // where the marks without the ceiling cost more than each plan's whole net profit.
-  is("Store, Studio and Scale a month, in dollars", month, [0.56, 0.84, 1.12]);
+  is("Store, Studio and Scale a month, in dollars", month, [0.31, 0.59, 0.87]);
 
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {

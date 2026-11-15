@@ -777,6 +777,40 @@ export async function readListingExactly(store: Store, id: string | null | undef
   return listing && listing.id === id ? listing : "unknown";
 }
 
+/**
+ * readListingExactly for several products of one store, a hundred at a command (MGET) for those held outside its
+ * record, for the daily drip walk (lib/learn.ts; the cost ceiling under Claude 7's MÉDIO on #3344): the listing,
+ * null only for an exact null or one the record says it does not hold, "unknown" for an entry it cannot read. Throws
+ * UnknownReplyError only when the MGET itself is not answered whole.
+ */
+export async function readListingsExactly(store: Store, ids: string[]): Promise<Map<string, Listing | null | "unknown">> {
+  const found = new Map<string, Listing | null | "unknown">();
+  const catalog = store.catalog;
+  const elsewhere: string[] = [];
+  for (const id of [...new Set(ids)]) {
+    if (!id) found.set(id, null);
+    else if (catalog.inline || !productIds(store).includes(id)) found.set(id, await readListing(store, id));
+    else {
+      const inHead = catalog.head.find((listing) => listing.id === id);
+      if (inHead) found.set(id, inHead);
+      else if (!catalog.id || !isRedisConfigured()) found.set(id, "unknown");
+      else elsewhere.push(id);
+    }
+  }
+  for (let i = 0; i < elsewhere.length; i += 100) {
+    const some = elsewhere.slice(i, i + 100);
+    const replies = repliesFor(await redisPipeline([["MGET", ...some.map((id) => listingKey(catalog.id as string, id))]]), 1);
+    const rows = replies?.[0];
+    if (!Array.isArray(rows) || rows.length !== some.length) throw new UnknownReplyError("a store's listings");
+    some.forEach((id, n) => {
+      if (rows[n] === null) return found.set(id, null);
+      const listing = typeof rows[n] === "string" && rows[n] ? parseListing(parseJson(rows[n])) : null;
+      found.set(id, listing && listing.id === id ? listing : "unknown");
+    });
+  }
+  return found;
+}
+
 /** One listing when it is a course, or null; a store of null answers null. */
 export async function readCourseListing(store: Store | null, id: string | null | undefined): Promise<Listing | null> {
   const found = store ? await readListing(store, id) : null;

@@ -78,6 +78,28 @@ async function main(): Promise<void> {
     is(`${name}: the destination is gone`, await exists("d"), 0);
   }
 
+  // Reviewer 3rjdf against Redis 7.0.15 (15 November 2026).
+  part("ZADD XX on a missing key adds nothing and makes no key");
+  redis.clear();
+  is("answers 0", await run(["ZADD", "nk", "XX", 1, "m"]), 0);
+  is("no key", await exists("nk"), 0);
+
+  part("A plain set is a source of ZUNIONSTORE and ZINTERSTORE, each member at score 1");
+  redis.clear();
+  await redis.pipeline([["SADD", "s", "a", "b"], ["ZADD", "z", 5, "a"]]);
+  is("ZUNIONSTORE of a set and a sorted set", [await run(["ZUNIONSTORE", "d", 2, "s", "z"]), await run(["ZRANGEBYSCORE", "d", "-inf", "+inf", "WITHSCORES"])], [2, ["b", "1", "a", "6"]]);
+  is("ZINTERSTORE of a set and a sorted set", [await run(["ZINTERSTORE", "d2", 2, "s", "z"]), await run(["ZRANGEBYSCORE", "d2", "-inf", "+inf", "WITHSCORES"])], [1, ["a", "6"]]);
+  is("ZINTERSTORE with the sorted set first", [await run(["ZINTERSTORE", "d3", 2, "z", "s"]), await run(["ZRANGEBYSCORE", "d3", "-inf", "+inf", "WITHSCORES"])], [1, ["a", "6"]]);
+
+  part("ZADD with GT, LT or INCR is refused by name, never written as a score that is not a number");
+  for (const flag of ["GT", "LT", "INCR"]) {
+    redis.clear();
+    await redis.pipeline([["ZADD", "z", 1, "a"]]);
+    const said = await run(["ZADD", "z", flag, 2, "a"]);
+    is(`${flag}: refused by name`, typeof said === "string" && said !== "WRONGTYPE" && String(said).length > 0, true);
+    is(`${flag}: the score is kept`, await run(["ZSCORE", "z", "a"]), "1");
+  }
+
   part("Control: a sorted set that exists reads and writes as before");
   redis.clear();
   await redis.pipeline([["ZADD", "z", 2, "b", 1, "a"]]);

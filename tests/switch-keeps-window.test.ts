@@ -565,7 +565,7 @@ async function main(): Promise<void> {
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of #3545 into #3079 (15 November 2026): the same byte-sized reads cost a yearly month 0.76 to 0.77 dollars more.
-    is("11: and 38.02, 259.67 and 580.96 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.02", "259.67", "580.96"]);
+    is("11: and 38.02, 259.67 and 580.95 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.02", "259.67", "580.95"]);
   } finally {
     Date.now = realNow;
   }

@@ -1654,6 +1654,7 @@
     "components/structured-data.tsx",
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
+    "components/studio-bell.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
@@ -1700,6 +1701,7 @@
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/withdrawal-where.tsx",
+    "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],

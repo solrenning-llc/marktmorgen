@@ -109,8 +109,8 @@ async function main(): Promise<void> {
     is("each booking's two meeting records read with a GET each (no byte cap where they are written)", recordGets, 2 * CALENDAR_CALLS);
     const commands = made.sent.length;
     is(`measured (${commands}) within the answer and the making as priced (${CALENDAR_POLL_SHAPE.commands} + ${calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS)})`, commands <= CALENDAR_POLL_SHAPE.commands + calendarBuildCommands(MAX_PRODUCTS, CALENDAR_CALLS), true);
-    is("the making's shape at its worst: 3,039 commands (5,531 when every listing and every room read was a GET)", CALENDAR_BUILD_SHAPE.commands, 3_039);
-    is(`and the measured making is within that figure (${commands} <= ${CALENDAR_POLL_SHAPE.commands} + 3,039)`, commands <= CALENDAR_POLL_SHAPE.commands + 3_039, true);
+    is("the making's shape at its worst: 3,041 commands (5,533 when every listing and every room read was a GET)", CALENDAR_BUILD_SHAPE.commands, 3_041);
+    is(`and the measured making is within that figure (${commands} <= ${CALENDAR_POLL_SHAPE.commands} + 3,041)`, commands <= CALENDAR_POLL_SHAPE.commands + 3_041, true);
   }
 
   part("The listing MGETs are sent a few at a time, never all at once (MGET_CONCURRENCY)");

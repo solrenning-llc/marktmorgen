@@ -6,7 +6,7 @@
  *   nl:pre:pi:<payment>           string  "<store>|<product>|<checkout>", so a refund finds its pre-order
  *   nl:pre:<store>:any            string  present once the store has taken a pre-order
  *   nl:pre:<store>:refunds        string  how far the refunds were read for pre-orders
- *   nl:pre:<store>:seen           set     refunds already handled
+ *   nl:pre:<store>:seen           set     refunds already handled, thirty days from the last
  *   nl:pre:jobs                   set     "<store>|<product>|<handle>": products put on sale with pre-orders to hand over
  *
  * <store> is the store's statsId, which stays through a change of handle.
@@ -55,6 +55,10 @@ const anchorKey = (sid: string) => `nl:pre:${sid}:refunds`;
  */
 export const PREORDER_REFUND_PAGES_PER_STORE = 3;
 const seenKey = (sid: string) => `nl:pre:${sid}:seen`;
+/** The refunds already handled are kept thirty days from the last one marked (tests/store-data-registry.ts): each mark
+ * gives the set its expiry again. Past it a row is only read again, and handling it again changes nothing (the record
+ * it took back is marked revoked and kept on its own). */
+const SEEN_KEEP_SECONDS = 30 * 86_400;
 /** Where a pass over the refunds stands between runs (revokeRefundedPreorders), in the store's nl:pre: keys (erased with it). */
 const passKey = (sid: string) => `nl:pre:${sid}:refunds:pass`;
 /** How long a pass is kept: well past the runs it takes, and short enough that one left behind is started again. */
@@ -120,7 +124,10 @@ function heldAt(refund: Record<string, unknown>): number | null {
 /** A write of one item (HDEL, HSET, EXPIRE or SADD of one field, member or key) answers 0 or 1; anything else is unknown (Codex Z). */
 const oneWrite = (reply: unknown): boolean => reply === 0 || reply === 1;
 /** Marks a row of the refunds job read; true only when Redis answered the SADD of one member with 0 or 1. */
-const markRead = async (sid: string, id: string): Promise<boolean> => oneWrite(repliesFor(await redisPipeline([["SADD", seenKey(sid), id]]), 1)?.[0]);
+const markRead = async (sid: string, id: string): Promise<boolean> => {
+  const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+  return !!marked && oneWrite(marked[0]) && marked[1] === 1;
+};
 const giveKey = (session: string) => `nl:pre:give:${session}`;
 const JOBS = "nl:pre:jobs";
 /** How long a pre-order is kept after it was last changed: past any refund window, as a gift is. */

@@ -521,10 +521,12 @@ async function afterPaid(store: Store, session: string, target: Listing, pi: Rec
   const reference = typeof pi.id === "string" ? pi.id : "";
   // What Stripe took, read exactly (lib/paid-amount.ts): one that does not read is never confirmed to the buyer or
   // counted at $0 or in the store's currency. Unknown: the offer's place stays held until its hours end, as for a
-  // count not confirmed (lib/orders.ts, countOrder).
+  // count not confirmed (lib/orders.ts, countOrder). Never silent: logged with the checkout it followed and its own
+  // payment, so the buyer's order can be found and answered, never with the buyer's address. A confirmation without
+  // the amount is not sent here: its email would be one no counted order pays for, and its words exist in no language.
   const money = intentMoneyOf(pi);
   if (!money) {
-    console.error("a paid offer's amount or currency does not read; not confirmed or counted", reference);
+    console.error("a paid offer's amount or currency does not read; not confirmed or counted", session, reference);
     return "unknown";
   }
   const amountCents = money.cents;

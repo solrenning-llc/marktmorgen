@@ -6,7 +6,7 @@ import { BUMP_CHOICES, idsOfKind, readCards, readListings, readProduct } from "@
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -17,7 +17,8 @@ import { imageUrl, picturedFrom } from "@/lib/product-image";
 import { FunnelEditor } from "@/components/funnel-editor";
 import { offerableAfterPaying } from "@/lib/bundles";
 import { PageFunnelEditor, type SavedFunnel, type StepChoice } from "@/components/page-funnel-editor";
-import { readFunnelCountsStrict, readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
+import { readFunnelCountsStrict, readPageFunnelsStrict, readSplitCountsStrict, splitCountUnits, stepStates } from "@/lib/page-funnel-store";
+import { splitView } from "@/lib/funnel-split-results";
 import { MAX_SITE_PAGES, pageOut } from "@/lib/site-page-rules";
 import { FunnelTypePicker, type TypeProduct } from "@/components/funnel-type-picker";
 import { MAX_PAGE_FUNNELS } from "@/lib/page-funnel";
@@ -132,9 +133,19 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
   };
   const inventory = await readPageFunnelsStrict(store.statsId).catch(() => null);
   const formReviews = readFunnelFormReviews(store, inventory ?? [], { reviewOffers: true });
+  // A split test's counts per version (526 [FN2]) are read beyond what a studio page pays for: their own studio
+  // requests are taken first (splitCountUnits, two reads a version), and without them the versions' counts are
+  // unavailable, never 0.
+  const splitUnits = (inventory ?? []).reduce((sum, funnel) => sum + splitCountUnits(funnel), 0);
+  const splitsPaid = splitUnits > 0 && (await countStudio(store, null, splitUnits).then((counted) => counted.ok, () => false));
   const savedFunnels: SavedFunnel[] = await Promise.all(
     (inventory ?? []).map(async (funnel) => {
-      const [states, counts, pageReviews] = await Promise.all([stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null), readFunnelCountsStrict(store.statsId, funnel).catch(() => null), formReviews]);
+      const [states, counts, pageReviews, splitCounts] = await Promise.all([
+        stepStates(store, funnel, { strictProducts: true, includeReviewProduct: true }).catch(() => null),
+        readFunnelCountsStrict(store.statsId, funnel).catch(() => null),
+        formReviews,
+        splitsPaid && splitCountUnits(funnel) > 0 ? readSplitCountsStrict(store.statsId, funnel).catch(() => null) : null,
+      ]);
       return {
         funnel,
         // The same checks the AI explanation finds again (lib/funnel-review-issues.ts).
@@ -154,6 +165,15 @@ export default async function StudioFunnelsPage({ searchParams }: Params) {
           product: state.step.kind === "product",
           seen: counts?.[i]?.seen ?? null,
           done: counts?.[i]?.done ?? null,
+          split: state.step.kind === "split"
+            ? splitView({
+                step: state.step,
+                titles: state.step.options.map((option, place) => ("options" in state ? state.options?.[place]?.title : undefined) ?? choices.find((choice) => choice.kind === option.kind && choice.id === option.id)?.title ?? "Saved page"),
+                kinds: state.step.options.map((option, place) => ({ product: option.kind === "product", free: ("options" in state ? state.options?.[place]?.free : undefined) ?? (option.kind === "product" && free.has(option.id)) })),
+                counts: splitCounts?.[i] ?? null,
+                since: funnel.since,
+              })
+            : null,
         })),
       };
     }),

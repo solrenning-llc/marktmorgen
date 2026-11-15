@@ -773,7 +773,7 @@ export default async function ThanksPage({ params, searchParams }: Params) {
     const statsId = store.statsId;
     after(async () => {
       if (await isStorePeople(asker, store)) return;
-      await countFunnelDone(statsId, funnelHereNow.funnel, funnelHereNow.index, funnelVisitor(statsId, funnelHereNow.funnel.id, clientAddress(asker), asker.headers.get("user-agent") ?? ""));
+      await countFunnelDone(statsId, funnelHereNow.funnel, funnelHereNow.index, funnelVisitor(statsId, funnelHereNow.funnel.id, clientAddress(asker), asker.headers.get("user-agent") ?? ""), funnelHereNow.place);
     });
   }
   const funnelNext = funnelHereNow?.next && !offer && !store.suspended ? funnelHereNow.next : null;

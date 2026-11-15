@@ -32,7 +32,7 @@
  * studio. Pure and browser-safe.
  */
 import { SLUG_PATTERN, slugFrom } from "@/lib/site-page-rules";
-import { type LiveShare, type SplitOption, liveShares, parseSplit, pickShare } from "@/lib/funnel-split-rules";
+import { type LiveShare, type SplitOption, liveShares, parseSplit, pickShare, splitVersion } from "@/lib/funnel-split-rules";
 
 /** A page a visitor can land on: one of the store's own pages, or a product's page. */
 export type FunnelPlace = {
@@ -187,6 +187,17 @@ export function sameSteps(a: readonly PageFunnelStep[], b: readonly PageFunnelSt
 /** Where a page or product sits in a funnel, or -1: a split's destination is at its split's place. */
 export function stepIndex(funnel: Pick<PageFunnel, "steps">, kind: FunnelPlace["kind"], id: string): number {
   return funnel.steps.findIndex((step) => stepPlaces(step).some((place) => place.kind === kind && place.id === id));
+}
+
+/**
+ * The version (a-d) a page is in a split step, or null when the step is not
+ * a split or the page is not one of its destinations. Each page is in a
+ * funnel once, so the page a visitor is on names the version they saw.
+ */
+export function placeVersion(step: PageFunnelStep, place: FunnelPlace | null | undefined): string | null {
+  if (step.kind !== "split" || !place) return null;
+  const at = step.options.findIndex((option) => option.kind === place.kind && option.id === place.id);
+  return at < 0 ? null : splitVersion(at);
 }
 
 /**

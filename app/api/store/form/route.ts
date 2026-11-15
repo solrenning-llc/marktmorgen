@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     // A step of a funnel: counted as done there, and the person goes on.
     const here = page && mark ? await funnelHere(store, mark, "page", page.id).catch(() => null) : null;
     if (here && !(await isStorePeople(request, store).catch(() => false))) {
-      await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""));
+      await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""), here.place);
     }
     // A result, or the box's email, is said on a page of its own first; otherwise straight on.
     if (here?.next && !outcome && !joined) return go(here.next);

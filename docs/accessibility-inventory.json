@@ -1445,6 +1445,7 @@
     "components/funnel-next-check.tsx",
     "components/funnel-share-panel.tsx",
     "components/funnel-sharing-review.tsx",
+    "components/funnel-split-results.tsx",
     "components/funnel-starter-gallery.tsx",
     "components/funnel-type-picker.tsx",
     "components/google-searches.tsx",

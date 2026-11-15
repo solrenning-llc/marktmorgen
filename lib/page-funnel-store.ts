@@ -6,6 +6,10 @@
  *   nl:pfunnels:<statsId>                      -> hash: funnel id -> the funnel, as JSON
  *   nl:pfunnel:seen:<statsId>:<id>:<since>:<i> -> HyperLogLog: the people who opened step i
  *   nl:pfunnel:done:<statsId>:<id>:<since>:<i> -> HyperLogLog: those who signed up or paid there
+ *   nl:pfunnel:seen:<statsId>:<id>:<since>:<i>:<v>, nl:pfunnel:done:...:<i>:<v>
+ *                                              -> the same two, for version v (a-d) of a split
+ *                                                 step i; such a step has no count of its own,
+ *                                                 its people are its versions' together (526 [FN2])
  *
  * One hash field per funnel, so two people saving two funnels at once never
  * write over each other. Nobody is kept: a person is a fingerprint of their
@@ -33,17 +37,28 @@ import {
   STEP_WHY,
   funnelPlaces,
   nextOpen,
+  placeVersion,
   parsePageFunnels,
   productStepProblem,
   splitPick,
   stepIndex,
+  stepPlaces,
   withMark,
 } from "@/lib/page-funnel";
+import { splitVersion } from "@/lib/funnel-split-rules";
 
 const funnelsKey = (statsId: string) => `nl:pfunnels:${statsId}`;
 const seenKey = (statsId: string, funnel: PageFunnel, index: number) => `nl:pfunnel:seen:${statsId}:${funnel.id}:${funnel.since}:${index}`;
 const doneKey = (statsId: string, funnel: PageFunnel, index: number) => `nl:pfunnel:done:${statsId}:${funnel.id}:${funnel.since}:${index}`;
 const KEEP_SECONDS = 400 * 86_400;
+/** A split step's versions, a-d, in its order: the keys their counts are kept under. */
+const splitVersions = (step: PageFunnelStep): string[] =>
+  step.kind === "split" ? step.options.map((_, place) => splitVersion(place)).filter((version): version is string => version !== null) : [];
+/** The keys of step i's count: its own, or for a split every version's (read together with one PFCOUNT, each person once). */
+const stepKeys = (key: (statsId: string, funnel: PageFunnel, index: number) => string, statsId: string, funnel: PageFunnel, index: number): string[] => {
+  const versions = splitVersions(funnel.steps[index]);
+  return versions.length ? versions.map((version) => `${key(statsId, funnel, index)}:${version}`) : [key(statsId, funnel, index)];
+};
 
 /** Every funnel of a store, oldest first. */
 export async function readPageFunnels(statsId: string | null): Promise<PageFunnel[]> {
@@ -135,13 +150,16 @@ return 1`;
 
 /**
  * What a funnel's counts can weigh, in bytes: two HyperLogLogs a step (who
- * opened it, who signed up or paid there), each at most 12 KB with its key.
+ * opened it, who signed up or paid there), each at most 12 KB with its key;
+ * a split step has two for each of its versions instead (funnelCountsBytes).
  * Counted in the store's data room with the funnel, before it is saved, and
  * for KEEP_SECONDS once its steps change or it is removed: its counts are
  * kept that long after their last visitor, and from then on have none.
  */
 export const FUNNEL_COUNT_BYTES_PER_STEP = 2 * (12_304 + 128);
-const countsBytes = (funnel: Pick<PageFunnel, "steps">) => funnel.steps.length * FUNNEL_COUNT_BYTES_PER_STEP;
+/** What a funnel's counts can weigh: two counts for each page it can land a visitor on, so a split's for each version. */
+export const funnelCountsBytes = (funnel: Pick<PageFunnel, "steps">) => funnelPlaces(funnel).length * FUNNEL_COUNT_BYTES_PER_STEP;
+const countsBytes = funnelCountsBytes;
 const slotOf = (id: string) => `pf:${id}`;
 const countsLeft = (funnel: PageFunnel, now: number): DataChange => ({ until: now + KEEP_SECONDS * 1000, bytes: countsBytes(funnel) });
 
@@ -293,7 +311,7 @@ export async function funnelHere(
   kind: FunnelPlace["kind"],
   id: string,
   draw: () => number = visitDraw,
-): Promise<{ funnel: PageFunnel; index: number; next: string | null } | null> {
+): Promise<{ funnel: PageFunnel; index: number; place: FunnelPlace; next: string | null } | null> {
   if (!mark) return null;
   const funnel = await readPageFunnel(store.statsId, mark).catch(() => null);
   if (!funnel || !funnel.on) return null;
@@ -304,7 +322,7 @@ export async function funnelHere(
   const states = await stepStates(store, { steps: rest });
   const at = nextOpen({ steps: rest }, -1, placeOpenIn(states));
   const path = at >= 0 ? stepTarget(states[at], draw()) : null;
-  return { funnel, index, next: path ? withMark(path, funnel.id) : null };
+  return { funnel, index, place: { kind, id }, next: path ? withMark(path, funnel.id) : null };
 }
 
 /** A person, for one funnel only: a fingerprint of their connection and browser, never kept as it is. */
@@ -312,24 +330,43 @@ export function funnelVisitor(statsId: string, funnelId: string, ip: string, use
   return createHash("sha256").update(`funnel|${statsId}|${funnelId}|${ip}|${userAgent}`).digest("hex").slice(0, 24);
 }
 
-/** Counts a person opening step `index`. Never throws: a count must not stop a page. */
-export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<void> {
+/**
+ * The key a person is counted under at step `index`: the step's own, or for a
+ * split the key of the version `place` is (the page they are on). A split
+ * counted without one of its pages has no key: nothing is counted, never a
+ * guess at the version.
+ */
+function countKey(key: typeof seenKey, statsId: string, funnel: PageFunnel, index: number, place?: FunnelPlace): string | null {
+  const step = funnel.steps[index];
+  if (step.kind !== "split") return key(statsId, funnel, index);
+  const version = placeVersion(step, place);
+  return version ? `${key(statsId, funnel, index)}:${version}` : null;
+}
+
+/** Counts a person opening step `index`, on page `place` (which version, for a split). Never throws: a count must not stop a page. */
+export async function countFunnelStep(statsId: string, funnel: PageFunnel, index: number, visitor: string, place?: FunnelPlace): Promise<void> {
   if (!isRedisConfigured() || index < 0 || index >= funnel.steps.length) return;
-  const key = seenKey(statsId, funnel, index);
+  const key = countKey(seenKey, statsId, funnel, index, place);
+  if (!key) return;
   await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]).catch(() => {});
 }
 
-/** Counts a person signing up or paying at step `index`. Never throws. */
-export async function countFunnelDone(statsId: string, funnel: PageFunnel, index: number, visitor: string): Promise<void> {
+/** Counts a person signing up or paying at step `index`, on page `place` (which version, for a split). Never throws. */
+export async function countFunnelDone(statsId: string, funnel: PageFunnel, index: number, visitor: string, place?: FunnelPlace): Promise<void> {
   if (!isRedisConfigured() || index < 0 || index >= funnel.steps.length) return;
-  const key = doneKey(statsId, funnel, index);
+  const key = countKey(doneKey, statsId, funnel, index, place);
+  if (!key) return;
   await redisPipeline([["PFADD", key, visitor], ["EXPIRE", key, KEEP_SECONDS]]).catch(() => {});
 }
+
+/** Two reads a step, as always: a split's read counts its versions' people together, each once. */
+const countCommands = (statsId: string, funnel: PageFunnel) =>
+  funnel.steps.flatMap((_, i) => [["PFCOUNT", ...stepKeys(seenKey, statsId, funnel, i)], ["PFCOUNT", ...stepKeys(doneKey, statsId, funnel, i)]]);
 
 /** How many people opened each step, and how many signed up or paid at each product step, since the steps last changed. */
 export async function readFunnelCounts(statsId: string | null, funnel: PageFunnel): Promise<{ seen: number; done: number }[]> {
   if (!statsId || !isRedisConfigured()) return funnel.steps.map(() => ({ seen: 0, done: 0 }));
-  const commands = funnel.steps.flatMap((_, i) => [["PFCOUNT", seenKey(statsId, funnel, i)], ["PFCOUNT", doneKey(statsId, funnel, i)]]);
+  const commands = countCommands(statsId, funnel);
   const replies = await redisPipeline(commands).catch(() => [] as unknown[]);
   return funnel.steps.map((_, i) => ({ seen: Number(replies[i * 2] ?? 0) || 0, done: Number(replies[i * 2 + 1] ?? 0) || 0 }));
 }
@@ -337,15 +374,61 @@ export async function readFunnelCounts(statsId: string | null, funnel: PageFunne
 /** Studio analytics: failed, incomplete or malformed reads remain unknown. */
 export async function readFunnelCountsStrict(statsId: string | null, funnel: PageFunnel): Promise<{ seen: number; done: number }[]> {
   if (!statsId || !isRedisConfigured()) throw new Error("Funnel counts unavailable");
-  const commands = funnel.steps.flatMap((_, i) => [["PFCOUNT", seenKey(statsId, funnel, i)], ["PFCOUNT", doneKey(statsId, funnel, i)]]);
-  const replies = await redisPipeline(commands);
-  if (!Array.isArray(replies) || replies.length !== commands.length) throw new Error("Incomplete funnel counts");
+  const commands = countCommands(statsId, funnel);
+  const counts = strictCounts(await redisPipeline(commands), commands.length);
+  return funnel.steps.map((_, i) => ({ seen: counts[i * 2], done: counts[i * 2 + 1] }));
+}
+
+/** Every reply a whole count, as many as were asked; anything else throws (rule 24: unknown, never 0). */
+function strictCounts(replies: unknown, expected: number): number[] {
+  if (!Array.isArray(replies) || replies.length !== expected) throw new Error("Incomplete funnel counts");
   const counts: number[] = [];
   for (let index = 0; index < replies.length; index += 1) {
-    const reply = replies[index];
+    const reply: unknown = replies[index];
     const value = typeof reply === "number" ? reply : typeof reply === "string" && /^\d+$/.test(reply) ? Number(reply) : Number.NaN;
     if (!Number.isSafeInteger(value) || value < 0) throw new Error("Invalid funnel count");
     counts.push(value);
   }
-  return funnel.steps.map((_, i) => ({ seen: counts[i * 2], done: counts[i * 2 + 1] }));
+  return counts;
+}
+
+/** A split's figures for one version: the people who opened that page and those who signed up or paid there. */
+export type SplitCount = { version: string; seen: number; done: number };
+
+/**
+ * How many versions' counts one of the store's studio requests pays for: two
+ * reads a version, against the twenty commands a studio request is priced at
+ * (tests/plan-cost-registry.ts, UNIT_COST.studio; line studio).
+ */
+export const SPLIT_COUNTS_PER_UNIT = 10;
+
+/** The studio requests a funnel's reads per version take first: none for a funnel without a split. */
+export function splitCountUnits(funnel: Pick<PageFunnel, "steps">): number {
+  const versions = funnel.steps.reduce((sum, step) => sum + (step.kind === "split" ? stepPlaces(step).length : 0), 0);
+  return Math.ceil(versions / SPLIT_COUNTS_PER_UNIT);
+}
+
+/**
+ * Each split step's counts per version, in its order (versions a-d); null for
+ * a step that is not a split. The same counts the step's own read folds
+ * together, read one version at a time. Strict: a failed, short or odd reply
+ * throws, never 0. The studio takes splitCountUnits(funnel) of its requests
+ * before calling it.
+ */
+export async function readSplitCountsStrict(statsId: string | null, funnel: PageFunnel): Promise<(SplitCount[] | null)[]> {
+  if (!statsId || !isRedisConfigured()) throw new Error("Funnel counts unavailable");
+  const commands = funnel.steps.flatMap((step, i) =>
+    splitVersions(step).flatMap((version) => [["PFCOUNT", `${seenKey(statsId, funnel, i)}:${version}`], ["PFCOUNT", `${doneKey(statsId, funnel, i)}:${version}`]]),
+  );
+  if (!commands.length) return funnel.steps.map(() => null);
+  const counts = strictCounts(await redisPipeline(commands), commands.length);
+  let at = 0;
+  return funnel.steps.map((step) => {
+    if (step.kind !== "split") return null;
+    return splitVersions(step).map((version) => {
+      const count = { version, seen: counts[at], done: counts[at + 1] };
+      at += 2;
+      return count;
+    });
+  });
 }

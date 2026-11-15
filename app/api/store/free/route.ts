@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
       const statsId = store.statsId;
       after(async () => {
         if (await isStorePeople(request, store)) return;
-        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""));
+        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""), here.place);
       });
     }
     return away(`${page}&status=${result}${lead ? `&e=${lead}` : ""}`);

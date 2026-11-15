@@ -14,6 +14,8 @@ import { toast } from "@/components/toast";
 import { useLeaveGuard } from "@/components/leave-guard";
 import { readFunnelMutationResult, type FunnelMutation } from "@/lib/funnel-mutation-response";
 import { funnelReachRatioMetric, funnelStepMetrics } from "@/lib/funnel-metrics";
+import type { SplitView } from "@/lib/funnel-split-results";
+import { SplitResults } from "@/components/funnel-split-results";
 import { DIAGNOSIS_NOTE, funnelFindings } from "@/lib/funnel-diagnosis";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import {
@@ -36,7 +38,7 @@ export type StepChoice = { kind: FunnelPlace["kind"]; id: string; title: string;
 export type SavedFunnel = {
   funnel: PageFunnel;
   pageIssues?: FunnelLaunchIssue[];
-  steps: { editor?: FunnelStepEditorLink | null; title: string; open: boolean; why: string; free: boolean; product: boolean; seen: number | null; done: number | null }[];
+  steps: { editor?: FunnelStepEditorLink | null; title: string; open: boolean; why: string; free: boolean; product: boolean; seen: number | null; done: number | null; split?: SplitView | null }[];
 };
 
 type Draft = { id: string; name: string; slug: string; slugTouched: boolean; on: boolean; steps: PageFunnelStep[] };
@@ -394,6 +396,7 @@ export function PageFunnelEditor({
                       ) : (
                         <p className="mt-0.5 font-semibold text-ink">{step.why}</p>
                       )}
+                      {step.split ? <SplitResults view={step.split} step={index + 1} /> : null}
                       {step.editor ? (
                         <Link
                           href={step.editor.href}

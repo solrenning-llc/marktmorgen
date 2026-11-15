@@ -1537,6 +1537,9 @@ export const COST_LINES: CostLine[] = [
       // Explaining a funnel check reads that funnel's checks again: FUNNEL_EXPLAIN_READ_UNITS more studio requests first, a studio page's in all (26 [E9]).
       { file: "lib/funnel-explain.ts", names: ["FUNNEL_EXPLAIN_READ_UNITS", "STUDIO_PAGE_UNITS - 1"] },
       { file: "app/api/store/funnel-explain/route.ts", names: ["countStudio(store, null, FUNNEL_EXPLAIN_READ_UNITS)", "readFunnelChecks"] },
+      // A funnel's split test counts per version (526 [FN2], unit 3): two PFCOUNTs a version, SPLIT_COUNTS_PER_UNIT versions a studio request (its twenty commands), taken before they are read; refused, they show as unavailable.
+      { file: "lib/page-funnel-store.ts", names: ["SPLIT_COUNTS_PER_UNIT = 10", "splitCountUnits", "readSplitCountsStrict"] },
+      { file: "app/studio/funnels/page.tsx", names: ["countStudio(store, null, splitUnits)", "readSplitCountsStrict(store.statsId, funnel)"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
       // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).

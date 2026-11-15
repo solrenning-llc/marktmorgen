@@ -85,10 +85,11 @@ export async function POST(request: NextRequest) {
     // or product that is one of the funnel's steps.
     const funnel = await readPageFunnel(store.statsId, funnelMark(read("f", 10))).catch(() => null);
     const step = read("t", 1) === "g" ? "page" : "product";
-    const index = funnel?.on ? stepIndex(funnel, step, read("id", 40)) : -1;
+    const place = { kind: step, id: read("id", 40) } as const;
+    const index = funnel?.on ? stepIndex(funnel, step, place.id) : -1;
     const userAgent = request.headers.get("user-agent") ?? "";
     if (funnel && index >= 0 && store.statsId && !isBot(userAgent) && !(await isStorePeople(request, store))) {
-      await countFunnelStep(store.statsId, funnel, index, funnelVisitor(store.statsId, funnel.id, clientAddress(request), userAgent));
+      await countFunnelStep(store.statsId, funnel, index, funnelVisitor(store.statsId, funnel.id, clientAddress(request), userAgent), place);
     }
   } else if (kind === "a") {
     // A visit through an affiliate's link: counted for them, once a day.

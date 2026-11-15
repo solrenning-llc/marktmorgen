@@ -1499,8 +1499,13 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
       if (p.poll) out.pollPosts.push(p.id);
       if (isMember(replies[k * 3 + 1])) out.likedPosts.push(p.id);
       if (isMember(replies[k * 3 + 2])) out.reported.push(`post ${p.id}`);
+      // The post's comments read exactly too (#4780): a flat list of text pairs (or an object of texts); any other
+      // shape is unknown and fails the copy, never "no comments".
       const flat = replies[k * 3];
-      const values = Array.isArray(flat) ? flat.filter((_, n) => n % 2 === 1) : flat && typeof flat === "object" ? Object.values(flat as Record<string, string>) : [];
+      const pairs = Array.isArray(flat) && flat.length % 2 === 0 && flat.every((x) => typeof x === "string");
+      const record = !Array.isArray(flat) && flat !== null && typeof flat === "object" && Object.values(flat).every((x) => typeof x === "string");
+      if (!pairs && !record) throw new UnknownReplyError("a post's comments, for a member's copy");
+      const values = pairs ? (flat as string[]).filter((_, n) => n % 2 === 1) : Object.values(flat as Record<string, string>);
       for (const value of values) {
         const comment = parseComment(value);
         if (!comment) continue;

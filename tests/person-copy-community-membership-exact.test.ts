@@ -81,6 +81,12 @@ async function main(): Promise<void> {
     part(`Read from ${way}`);
     is("(control) the healthy copy holds her like, comment like and report", await copyWith(id, ada, (r) => r), whole);
     for (const [what, damage] of DAMAGES) is(`${what}: the copy fails, never complete without them`, await copyWith(id, ada, damage), "threw");
+    if (way === "the whole community") {
+      // The post's comments (HGETALL, first in each post's three) in a shape that is not text pairs: unknown, never none.
+      for (const [what, odd] of [["null", null], ["a number", 7], ["an odd-length list", ["c1"]], ["a list with a number", ["c1", 7]]] as [string, unknown][]) {
+        is(`a post's comments answered ${what}: the copy fails`, await copyWith(id, ada, (r, i) => ((r[i - 1] = odd), r)), "threw");
+      }
+    }
   }
   Date.now = realNow;
   done();

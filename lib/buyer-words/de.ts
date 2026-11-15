@@ -191,8 +191,9 @@ export const de: BuyerWords = {
   whoAnswers: (store) =>
     `${store} ist der Verkäufer und verantwortlich für das, was Sie kaufen, für Erstattungen und für ein etwaiges Widerrufsrecht. Marktmorgen stellt die Seiten des Shops bereit und ist nicht Partei des Kaufvertrags.`,
   noPaymentsTitle: "Dieser Shop kann noch keine Zahlungen annehmen.",
-  noPaymentsBody: (store) => `Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
-  noPaymentsBodyOne: (store) => `Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden. Um zu kaufen, schreiben Sie direkt an ${store}.`,
+  noPaymentsBody: "Die Preise oben sind echt, aber hier kann noch keine Karte belastet werden.",
+  noPaymentsBodyOne: "Der Preis oben ist echt, aber hier kann noch keine Karte belastet werden.",
+  noPaymentsWrite: (store) => `An ${store} schreiben`,
 
   notices: {
     soldout: { title: "Das ist gerade ausverkauft", body: "Das letzte Exemplar ging kurz vor Ihrem Klick auf Kaufen weg. Es wurde nichts berechnet." },

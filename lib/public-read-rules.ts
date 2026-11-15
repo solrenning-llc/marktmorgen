@@ -31,6 +31,22 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
  * while it works, and its counting.
  */
 export const AFFILIATE_PAGE_UNITS = 4;
+/**
+ * The picture a product's shared link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx), paid as public
+ * requests before anything is read or drawn: held above its worst case, PRODUCT_CARD_READ in
+ * tests/plan-cost-registry.ts (reviews of #4211): the call, a stated bound of PRODUCT_CARD_CPU_SECONDS of CPU held
+ * PRODUCT_CARD_HELD_SECONDS at 2 GB, its commands, the product's picture read from the file store (at most
+ * MAX_IMAGE_BYTES) and the largest PNG it can send (PRODUCT_CARD_MAX_BYTES). The CPU is a stated bound, not a measure:
+ * the decode is held to the pixels an upload keeps (PRODUCT_CARD_PICTURE_PIXELS) and the certificate's lighter card took
+ * 0.59 s cold (audit R41).
+ */
+export const PRODUCT_CARD_UNITS = 9;
+export const PRODUCT_CARD_CPU_SECONDS = 3;
+export const PRODUCT_CARD_HELD_SECONDS = 10;
+/** The largest card PNG: 1200 x 630 at four bytes a pixel, one filter byte a row, and 64 KB of headers and fonts. */
+export const PRODUCT_CARD_MAX_BYTES = 1200 * 630 * 4 + 630 + 65_536;
+/** The most pixels a product picture is decoded at for its card: the long side an upload keeps, squared (lib/product-image.ts). */
+export const PRODUCT_CARD_PICTURE_PIXELS = 1600 * 1600;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
 /** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */

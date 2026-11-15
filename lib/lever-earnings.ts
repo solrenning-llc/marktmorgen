@@ -106,7 +106,15 @@ export function leverEarnings(sales: readonly PaidRecord[], currency: string, pa
       }
       add("bump", code, cents !== null && total !== null && cents <= total ? cents : null);
     }
-    if (bundleFromMeta(meta, "bundle").length) add("bundle", code, total);
+    // A bundle in a cart (#4737), first or in any other place: the cart's total also holds the other products and may
+    // hold a discount and tax the record does not split per item, so the order is counted once with no exact share.
+    // A bundle sold in its own checkout keeps the whole paid order.
+    const mainBundle = bundleFromMeta(meta, "bundle").length > 0;
+    if (meta.cart === "yes") {
+      if (mainBundle || bumps.some(({ key }) => bundleFromMeta(meta, `${key}_bundle`).length > 0)) add("bundle", code, null);
+    } else if (mainBundle) {
+      add("bundle", code, total);
+    }
   }
 
   return {
@@ -129,7 +137,7 @@ const HOW: Record<LeverKey, string> = {
   bump: "Counted from each order bump's own price on paid checkouts, before tax. An order with a discount is not counted, because the bump's discounted share is not recorded.",
   upsell: "Counted from each one-click offer paid after checkout, as charged. Downsells are paid the same way and are included here.",
   downsell: "A downsell is paid like an upsell and its payment does not say it followed a No, so it is counted under Upsell.",
-  bundle: "Counted from each whole paid order for a bundle, as charged, including tax and any order bump on the same order.",
+  bundle: "Counted from each whole paid order for a bundle, as charged, including tax and any order bump on the same order. A bundle bought in a cart with other products is not counted, because its share of the cart is not recorded.",
   recovery: "A reminder links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
   next: "The next offer links to your product page, and the order placed from there is not tagged, so it cannot be told apart from other orders.",
 };

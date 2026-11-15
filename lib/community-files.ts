@@ -280,10 +280,20 @@ export async function untakeCommunityUpload(path: string, author: string, now = 
   await redisPipeline([["EVAL", UNTAKE_PICTURE, 2, uploadKey(path), DOORS_KEY, markOf(author), author, UPLOAD_TTL_SECONDS, Math.floor(now / 1000), path]]);
 }
 
-/** Deletes a picture a post no longer needs, and gives its place back. Best effort: never throws. */
+/**
+ * Deletes a picture a post no longer needs, and gives its place back. Never throws. A delete that fails (a timeout of
+ * the file store) is not lost: the path is listed for the daily sweep (sweepCommunityUploads), already past its day,
+ * which deletes it and gives its place back once. Every caller has taken the path off that list before
+ * (takeCommunityUpload), and its door is spent, so nobody can put it in a post again.
+ */
 export async function dropCommunityImage(path: string | undefined | null): Promise<void> {
   if (!path) return;
-  await removeCommunityImage(path);
+  // With nothing else naming it, false means only that the delete failed.
+  if (await removeCommunityImage(path)) return;
+  console.error("a community picture whose delete failed is listed for the daily sweep");
+  await redisPipeline([["ZADD", DOORS_KEY, 0, path]]).catch((listError: unknown) =>
+    console.error("could not list a community picture whose delete failed; it and its place are kept", listError),
+  );
 }
 
 /**

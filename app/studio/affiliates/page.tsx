@@ -13,7 +13,7 @@ import { AffiliateStudio } from "@/components/affiliate-studio";
 import { AffiliateSummary } from "@/components/affiliate-summary";
 import { SUMMARY_PERIODS, programSummary } from "@/lib/affiliate-summary";
 import { PayPalPayouts } from "@/components/paypal-payouts";
-import { onTheirWay, paypalChecks, paypalPayableLines, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
+import { onTheirWay, paypalChecks, paypalLeftOut, paypalLeftOutText, paypalPayableLines, readPayPal, settlePayPal } from "@/lib/paypal-payouts";
 import { batchTotal } from "@/lib/affiliate-payouts";
 import { codeOwners } from "@/lib/affiliate-codes";
 import { offerWords, waitingFor } from "@/lib/partner-invites";
@@ -209,6 +209,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
                 initial={paypal}
                 people={paypalPayableLines(book, away).length}
                 cents={batchTotal(paypalPayableLines(book, away))}
+                leftOutNote={paypalLeftOut(book, away) > 0 ? paypalLeftOutText(paypalLeftOut(book, away)) : ""}
                 currency={store.currency}
                 onTheirWay={away.size}
                 checking={checks.checking}

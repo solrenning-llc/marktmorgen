@@ -8,8 +8,9 @@
  * Synthetic records, PayPal and Redis stood in for.
  */
 import { readFileSync } from "node:fs";
-import { batchTotal } from "@/lib/affiliate-payouts";
-import { connectPayPal, onTheirWay, payWithPayPal, paypalPayableLines } from "@/lib/paypal-payouts";
+import { MAX_BATCH_ROWS, batchTotal } from "@/lib/affiliate-payouts";
+import { autoPayEmail } from "@/lib/affiliate-payday";
+import { PAYPAL_RECEIVER_MAX, connectPayPal, onTheirWay, payWithPayPal, paypalLeftOut, paypalLeftOutText, paypalPayableLines } from "@/lib/paypal-payouts";
 import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
@@ -70,6 +71,45 @@ async function main(): Promise<void> {
     const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
     const panel = page.slice(page.indexOf("<PayPalPayouts"), page.indexOf("/>", page.indexOf("<PayPalPayouts")));
     is("the panel's people and amount come from paypalPayableLines, the lines the batch sends", [/people=\{paypalPayableLines\(/.test(panel), /cents=\{batchTotal\(paypalPayableLines\(/.test(panel)], [true, true]);
+  }
+
+  part("PayPal's eligibility comes before the 5,000-row ceiling (Codex X5's MEDIUM on #4318)");
+  {
+    const book = await readBook(store);
+    const template = book.rows.find((r) => r.affiliate.id === "bbbbbbbbbbbb");
+    if (!template) throw new Error("fixture row missing");
+    const tooLong = `${"x".repeat(PAYPAL_RECEIVER_MAX + 1)}@example.test`;
+    const blocked = Array.from({ length: MAX_BATCH_ROWS }, (_, index) => ({
+      ...template,
+      affiliate: { ...template.affiliate, id: `blocked-${index}`, email: tooLong, paypal: tooLong },
+      payable: 20_000 - index,
+    }));
+    const eligible = { ...template, affiliate: { ...template.affiliate, id: "eligible", email: "paid@example.test", paypal: "" }, payable: 1 };
+    const big = { ...book, rows: [...blocked, eligible] };
+    is("the next affiliate PayPal can pay fills the batch", paypalPayableLines(big, new Set()).map((l) => l.affiliate.id), ["eligible"]);
+    is("and every one of the 5,000 is counted as owed outside PayPal", paypalLeftOut(big, new Set()), MAX_BATCH_ROWS);
+    const sent = { ...book, rows: [...blocked.map((r) => ({ ...r, affiliate: { ...r.affiliate, email: "x@example.test", paypal: "" } })), eligible] };
+    const away = new Set(blocked.map((r) => r.affiliate.id));
+    is("5,000 already on their way do not keep the next one out either", paypalPayableLines(sent, away).map((l) => l.affiliate.id), ["eligible"]);
+  }
+
+  part("The creator is told who PayPal cannot pay, never \"nobody is owed\" (Claude 7's MEDIUM on #4318)");
+  {
+    is("the affiliate with the long address is counted as owed outside PayPal", paypalLeftOut(await readBook(store), await onTheirWay(store)), 1);
+    const nothing = autoPayEmail({ ok: false, reason: "nothing" }, "usd", 1).text;
+    is("the payday email does not say nobody is owed", /nobody is owed/i.test(nothing), false);
+    is("it says one affiliate is owed and PayPal cannot take their address", nothing.includes(paypalLeftOutText(1)), true);
+    const sentEmail = autoPayEmail({ ok: true, batch: "BATCH1ABC", people: 1, cents: 3000 }, "usd", 1).text;
+    is("the email for a batch sent names the one left out too", sentEmail.includes(paypalLeftOutText(1)), true);
+    is("with nobody left out, the emails are as before", autoPayEmail({ ok: false, reason: "nothing" }, "usd").text.includes("nobody is owed anything that has cleared"), true);
+    is("the note says how to pay them", /batch download on your affiliate page/.test(paypalLeftOutText(2)) && /2 affiliates/.test(paypalLeftOutText(2)), true);
+    const page = readFileSync("app/studio/affiliates/page.tsx", "utf8");
+    const panel = page.slice(page.indexOf("<PayPalPayouts"), page.indexOf("/>", page.indexOf("<PayPalPayouts")));
+    is("the studio panel is given the note when someone is left out", /leftOutNote=\{paypalLeftOut\(book, away\) > 0 \? paypalLeftOutText\(paypalLeftOut\(book, away\)\) : ""\}/.test(panel), true);
+    const component = readFileSync("components/paypal-payouts.tsx", "utf8");
+    is("and shows it instead of \"nobody is owed\"", [/\) : leftOutNote \? null : \(\s*<p[^>]*>Nobody is owed/.test(component), /\{leftOutNote \? <p[^>]*>\{leftOutNote\}<\/p> : null\}/.test(component)], [true, true]);
+    const payday = readFileSync("lib/affiliate-payday.ts", "utf8");
+    is("the payday run passes the count left out to the email", /autoPayEmail\(paid, book\.currency, paypalLeftOut\(book, away\)\)/.test(payday), true);
   }
 
   part("Paying with PayPal");

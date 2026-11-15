@@ -32,8 +32,8 @@ import { createHmac } from "node:crypto";
 import { types } from "node:util";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { canSeal, deriveKey, seal, unseal } from "@/lib/secret-box";
-import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
-import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
+import { type Affiliate, type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference, payoutReferences, readBook } from "@/lib/affiliates";
+import { type BatchLine, batchTotal, owedLinesWhere, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -248,7 +248,7 @@ export async function onTheirWay(store: Store): Promise<Set<string>> {
 
 /** Who can be paid now: owed, cleared, and not already on their way through PayPal. */
 export function payableLines(book: Book, away: Set<string>): BatchLine[] {
-  return owedLines(book).filter((line) => !away.has(line.affiliate.id));
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id));
 }
 
 /**
@@ -257,7 +257,23 @@ export function payableLines(book: Book, away: Set<string>): BatchLine[] {
  * their way, and the payout file (lib/affiliate-payouts.ts), which carries the address whole, can pay them.
  */
 export function paypalPayableLines(book: Book, away: Set<string>): BatchLine[] {
-  return payableLines(book, away).filter(paypalCanReceive);
+  return owedLinesWhere(book, (affiliate) => !away.has(affiliate.id) && paypalCanReceive(affiliate));
+}
+
+/**
+ * How many affiliates are owed something cleared, not on their way, and left out of every PayPal batch because PayPal
+ * cannot take their address (Claude 7 on #4318). Counted over the whole book, not cut at the batch ceiling, so the
+ * creator is never told that nobody is owed while someone is.
+ */
+export function paypalLeftOut(book: Book, away: Set<string>): number {
+  return book.rows.filter((row) => row.payable > 0 && row.affiliate.status === "approved" && !away.has(row.affiliate.id) && !paypalCanReceive(row.affiliate)).length;
+}
+
+/** What the creator is told about them, in the studio's PayPal panel and in the payday email. */
+export function paypalLeftOutText(count: number): string {
+  const who = count === 1 ? "1 affiliate is" : `${count} affiliates are`;
+  const their = count === 1 ? "their PayPal address is" : "their PayPal addresses are";
+  return `${who} owed money PayPal cannot send: ${their} longer than PayPal takes (${PAYPAL_RECEIVER_MAX} characters). Pay them another way, such as Wise, with the batch download on your affiliate page.`;
 }
 
 /** The most characters PayPal's receiver field holds (payments_payouts_batch_v1, payout_item receiver: maxLength 127). */
@@ -268,8 +284,8 @@ export const PAYPAL_RECEIVER_MAX = 127;
  * and the book would say "paid" once PayPal reported it.
  */
 const receiverOf = (line: BatchLine) => payAddress(line.affiliate);
-/** Whether PayPal can take this line's address as a receiver at all: one longer than it holds is never sent. */
-const paypalCanReceive = (line: BatchLine) => receiverOf(line).length <= PAYPAL_RECEIVER_MAX;
+/** Whether PayPal can take this affiliate's address as a receiver at all: one longer than it holds is never sent. */
+const paypalCanReceive = (affiliate: Affiliate) => payAddress(affiliate).length <= PAYPAL_RECEIVER_MAX;
 /**
  * Its fingerprint, kept with a batch on its way instead of the address (review of Codex H2 on #2681): an HMAC
  * under a key derived from the server's own secret, so it cannot be turned back by guessing addresses (Revisor 2's

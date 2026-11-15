@@ -8,13 +8,14 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { countHit, isStorePeople } from "@/lib/visit";
 import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { readListing } from "@/lib/catalog";
+import { withinStore } from "@/lib/metered-limits";
 
 /** The copies of one store a connection (its /64) may ask for in an hour, the same as lib/free.ts IP_LIMIT. */
 const CONNECTION_PER_HOUR = 20;
 /** The copies of one store that a whole IPv6 /48 can ask for in an hour: ten connections' worth. */
 const NET_PER_HOUR = 200;
-import { readListing } from "@/lib/catalog";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -99,8 +100,10 @@ export async function POST(request: NextRequest) {
   const net = shareAddress(address) || "unknown";
   // The connection's own 20 first, so an ask its /64 is refused never reaches the /48's count: one phone asking 200
   // times can add at most 20 to it and never locks its carrier's other subscribers out (Claude 6 on #4636).
-  if (!(await withinLimit("free-conn", `${ip}|${store.handle}`, CONNECTION_PER_HOUR, 3_600))) return away(`${page}&status=limited`);
-  if (!(await withinLimit("free-net", `${net}|${store.handle}`, NET_PER_HOUR, 3_600))) return away(`${page}&status=limited`);
+  // Each count is one of the store's public requests (withinStore), so the commands an ask runs before requestCopy
+  // sit in the store's measured public-requests line, not in a guard with no price (Claude 7 on #4636).
+  if (!(await withinStore("free-conn", `${ip}|${store.handle}`, CONNECTION_PER_HOUR, 3_600, store))) return away(`${page}&status=limited`);
+  if (!(await withinStore("free-net", `${net}|${store.handle}`, NET_PER_HOUR, 3_600, store))) return away(`${page}&status=limited`);
 
   try {
     // Sent by an affiliate, where the store pays per free product claimed: credited only once the emailed link is used.

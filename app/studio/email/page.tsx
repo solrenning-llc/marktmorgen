@@ -9,17 +9,18 @@ import { WHO, type Who } from "@/lib/contacts";
 import { lookColours } from "@/lib/store-look";
 import type { Metadata } from "next";
 import { aiAvailableFor, aiLeft } from "@/lib/ai";
+import { aiOnValue } from "@/lib/ai-on-value";
 import { productLink } from "@/lib/checkout-recovery";
 import { idsOfKind, readTitles } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { PLANS_ON_SALE } from "@/lib/opening";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { listCounts } from "@/lib/contacts";
-import { listBroadcastsStrict } from "@/lib/broadcasts";
+import { type BroadcastHeads, readBroadcastHeads } from "@/lib/broadcasts";
 import { letterIdFor, publishedLetters } from "@/lib/letters";
 import { broadcastMoney, flowMoney, readMailRevenue, readMailVisits } from "@/lib/mail-revenue";
 import { sellsSomething } from "@/lib/mail-starters";
@@ -67,7 +68,14 @@ export default async function StudioEmailPage({ searchParams }: Params) {
 
   const allowance = monthlyAllowance(store);
   const monthWindow = windowId(store);
-  const [counts, used, loadedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
+  // The emails are read without their bodies, which this page never shows: the list first, inside this page's own
+  // studio requests; then what asking each one's size comes to is taken before it is asked, and what reading them
+  // comes to before any is read (lib/broadcasts.ts, readBroadcastHeads).
+  const payStudio = async (units: number) => {
+    const counted = await countStudio(store, null, units);
+    return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
+  };
+  const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
     listCounts(store.listId),
     // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
     // Reuse the same one-counter read. An absent window/configuration is
@@ -75,8 +83,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     store.listId && monthWindow && isRedisConfigured()
       ? usedThisMonthExact(store.listId, monthWindow).then(confirmedEmailUsage).catch(() => null)
       : Promise.resolve(null),
-    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever.
-    listBroadcastsStrict(store.listId, 30, { expired: "skip" }).catch(() => null),
+    // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).
+    readBroadcastHeads(store.listId, payStudio, 30, { expired: "skip" }).catch((): BroadcastHeads | null => null),
     readFlowListStrict(store.listId).catch(() => null),
     // The names of the products a flow or a broadcast can be about: one
     // command, where reading every card was one per product (lib/catalog.ts).
@@ -93,6 +101,9 @@ export default async function StudioEmailPage({ searchParams }: Params) {
   ]);
   const levels = health ? healthLevels(health) : null;
   const advice = levels ? healthAdvice(levels.worst, levels.measure) : null;
+  const loadedBroadcasts = listedBroadcasts?.ok ? listedBroadcasts.heads : null;
+  // Not read because the studio requests reading them comes to are not left: said in words, with why.
+  const emailsRefused = listedBroadcasts && !listedBroadcasts.ok ? listedBroadcasts.refused : null;
   const broadcasts = loadedBroadcasts ?? [];
   const flows = loadedFlows ?? [];
   const drafts = loadedDrafts ?? [];
@@ -252,6 +263,16 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">{HEALTH_NOTE}</p>
             </section>
           ) : null}
+          {emailsRefused !== null ? (
+            <p role="status" className="mt-6 max-w-2xl">
+              Your sent and scheduled emails could not be shown: reading them counts as studio requests, and there are not enough left. {emailsRefused}
+            </p>
+          ) : null}
+          {can(role, "send") && broadcasts.some((b) => b.sent > 0) ? (
+            <p className="mt-6">
+              <a href={studioPath(store, "", "email/links")} className="underline">Change where a link goes in an email you already sent</a>
+            </p>
+          ) : null}
           {(emailTemplate || query.sequenceTemplate) ? <p role="status" className="card mt-6 p-5 text-sm text-ink-soft">{emailTemplate ? "Library email opened as an unsaved draft. Replace every placeholder and review consent before saving or sending." : initialSequence ? "Library sequence opened as an unsaved paused draft. Review every step before saving; activation is a separate action." : "A new sequence could not be opened: its trigger may already be in use, your role may not allow it, or its records or products could not be confirmed. Existing sequences were preserved."}</p> : null}
           <EmailStudio
             initialTemplate={emailTemplate ? {label:emailTemplate.label,subject:"",body:serializeMailBlocks(emailTemplate.blocks)} : undefined}
@@ -313,7 +334,7 @@ export default async function StudioEmailPage({ searchParams }: Params) {
             draftsReadFailed={loadedDrafts === null}
             flows={flows.map((f) => ({ ...f, statsAvailable: stats?.has(f.id) ?? false, stats: stats?.get(f.id) ?? { started: 0, sent: 0, reached: 0, skipped: 0, acted: 0 }, money: flowMoney(revenue, f.id) }))}
             links={Object.fromEntries([...listings].map(([id]) => [id, productLink(store, id)]))}
-            ai={aiAvailableFor(store) && can(role, "draft") ? { on: true, left: await aiLeft(store).catch(() => 0) } : { on: false, left: 0 }}
+            ai={aiAvailableFor(store) && can(role, "draft") ? aiOnValue(true, await aiLeft(store).catch(() => null)) : aiOnValue(false, null)}
             segments={await listSegments(store.listId).catch(() => [])}
             preset={typeof query.who === "string" && (WHO as readonly string[]).includes(query.who) ? { who: query.who as Who } : undefined}
             courses={idsOfKind(store, "course")}

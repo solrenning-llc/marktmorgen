@@ -1,3 +1,4 @@
+import { shareAddress } from "@/lib/traffic-rules";
 import { type NextRequest, after } from "next/server";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -7,7 +8,7 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { countHit, isStorePeople } from "@/lib/visit";
 import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
-import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { readListing } from "@/lib/catalog";
 
 const MAX_BODY_BYTES = 2_000;
@@ -82,10 +83,11 @@ export async function POST(request: NextRequest) {
   // learns nothing, and no email goes anywhere.
   if (honeypot.trim()) return away(`${page}&status=sent`);
 
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip") ||
-    "unknown";
+  // One connection is its shareAddress (#4626): an IPv6 /48, an IPv4 address however it is spelled, as the calendar
+  // and join routes count it. The raw address let every address of a /48 have its own 20 copies an hour, and each
+  // copy is one of the month's orders that paid orders share (lib/order-rules.ts).
+  const address = clientAddress(request);
+  const ip = shareAddress(address) || "unknown";
 
   try {
     // Sent by an affiliate, where the store pays per free product claimed: credited only once the emailed link is used.
@@ -101,7 +103,7 @@ export async function POST(request: NextRequest) {
       const statsId = store.statsId;
       after(async () => {
         if (await isStorePeople(request, store)) return;
-        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, ip, request.headers.get("user-agent") ?? ""));
+        await countFunnelDone(statsId, here.funnel, here.index, funnelVisitor(statsId, here.funnel.id, address, request.headers.get("user-agent") ?? ""));
       });
     }
     return away(`${page}&status=${result}${lead ? `&e=${lead}` : ""}`);

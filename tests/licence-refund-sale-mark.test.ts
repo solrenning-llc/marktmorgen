@@ -258,6 +258,8 @@ async function main(): Promise<void> {
   await real([["HSET", otherHash, "cs_test_someone_else", "OTHER-AAAA"]]);
   is("its family is the license keys', counted in the room and erased on closing", [closingFamilyOf(saleHash), countedInRoom(saleHash), CLOSING[closingFamilyOf(saleHash)]?.how], ["nl:keys:", true, "erase"]);
   const closing = await prepareStore(store);
+  // prepareStore answers null when it prepared nothing (#3643): here the store must be prepared.
+  if (!closing) throw new Error("the closing store was not prepared");
   const owners = { byMark: new Map(closing.marks.map((mark) => [mark, closing.ref])), byHandle: new Map(closing.handles.map((handle) => [handle, closing.ref])), byRef: new Map([[closing.ref, closing.ref]]) };
   await walkPage([saleHash, otherHash], new Map([[closing.ref, closing]]), owners);
   is("the closing walk deletes this store's sales and their marks, and leaves another store's", [(await real([["EXISTS", saleHash]]))[0], (await real([["EXISTS", otherHash]]))[0]], [0, 1]);

@@ -264,6 +264,39 @@ export async function letGoWaitClock(flowId: string, emails: string[]): Promise<
 }
 
 /**
+ * Counts one more park for room at Amazon SES on each of these runs, lets go of the step's day clock (letGoWaitClock),
+ * and answers each run's parks so far and the second it was first parked at step `index` (lib/flows.ts, waitOrStop):
+ * the parks are bounded per run (SES_PARKS_PER_RUN), and a step parked again keeps its first place. Null for anyone
+ * whose answer was not read exactly (rule 24): an unknown count is never room for one more park.
+ */
+export async function countSesParks(flowId: string, emails: string[], index: number, nowSeconds: number): Promise<Map<string, { parks: number; since: number } | null>> {
+  const out = new Map<string, { parks: number; since: number } | null>();
+  if (!emails.length) return out;
+  const reply = await redisPipeline(emails.flatMap((email) => {
+    const run = runKey(flowId, personOf(email));
+    return [["HINCRBY", run, "sesParks", 1], ["HDEL", run, "waitAt"], ["HGET", run, "sesAt"]];
+  })).catch(() => null);
+  const firsts: (string | number)[][] = [];
+  emails.forEach((email, i) => {
+    const parks = replied(reply, emails.length * 3) ? reply[i * 3] : null;
+    const at = replied(reply, emails.length * 3) ? reply[i * 3 + 2] : undefined;
+    if (typeof parks !== "number" || !Number.isSafeInteger(parks) || parks < 1 || (at !== null && typeof at !== "string")) {
+      out.set(email, null);
+      return;
+    }
+    const [atIndex, atSince] = typeof at === "string" ? at.split(":").map(Number) : [NaN, NaN];
+    if (atIndex === index && Number.isSafeInteger(atSince) && atSince > 0 && atSince <= nowSeconds) {
+      out.set(email, { parks, since: atSince });
+      return;
+    }
+    firsts.push(["HSET", runKey(flowId, personOf(email)), "sesAt", `${index}:${nowSeconds}`]);
+    out.set(email, { parks, since: nowSeconds });
+  });
+  if (firsts.length) await redisPipeline(firsts).catch((error) => console.error("noting when a workflow step was first parked failed", error));
+  return out;
+}
+
+/**
  * Counts the creator's "try it again" on a run, and answers whether it is
  * within `limit`; one past it is taken back. False when it cannot be counted.
  */

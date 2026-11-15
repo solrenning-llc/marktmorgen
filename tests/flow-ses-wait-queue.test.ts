@@ -69,8 +69,11 @@ async function main(): Promise<void> {
   delete process.env.MARKETING_DAILY_CAP;
   process.env.STRIPE_SECRET_KEY = "sk_test_workflows_only_a_stand_in";
   process.env.RESEND_API_KEY = "re_test_workflows_only_a_stand_in";
-  // Amazon SES is set up but has no room for email sent many at a time.
-  await mail.setReady(true, { max24: 0, rate: 100 });
+  // Amazon SES is set up and ready, but has no room for email sent many at a time: its 24 hours are full. (Until
+  // 15 November 2026 this said max24: 0, which Amazon's state reads as not ready, lib/ses.ts accountMax: a step now
+  // parks without a bound only when SES is ready, #4246 review by cloud B, so the scenario is set as it says.)
+  await mail.setReady(true, { max24: 1_000, rate: 100 });
+  const full = () => redisPipeline([["SET", `nl:ses:h:${new Date(Date.now()).toISOString().slice(0, 13)}`, 1_000_000]]);
 
   const OWNER = "wren@example.com";
   await claimHandle(OWNER, "wrenfield", "Wrenfield Studio", "");
@@ -101,14 +104,13 @@ async function main(): Promise<void> {
   part("No SES room, run after run, far past the waits and days a run may otherwise wait");
   // Scheduled runs every hour for the first day, then once a day, to well past MAX_WAIT_DAYS_PER_STEP.
   const runs = 24 + MAX_WAIT_DAYS_PER_STEP + 5;
-  let most = 0;
   const perRun: number[] = [];
   for (let i = 0; i < runs; i += 1) {
+    await full();
     const before = commands;
     await run();
     const used = commands - before;
     perRun.push(used);
-    most = Math.max(most, used);
     shift += (i < 24 ? 3_600 : 86_400) * 1000;
   }
   const waiting = await readRun(flowId, ivy);
@@ -119,7 +121,10 @@ async function main(): Promise<void> {
   );
   is(`well past ${MAX_WAITS_PER_RUN} waits and ${MAX_WAIT_DAYS_PER_STEP} days`, (shift / 1000) > (MAX_WAIT_DAYS_PER_STEP + 1) * 86_400, true);
   is(`the ${MAX_WAITS_PER_RUN} waits a run may make for other reasons are not used up by it`, waiting?.run.waits, 0);
-  is(`every scheduled run stays within ${2 * WAIT_COMMANDS_PER_TRY} database commands`, most <= 2 * WAIT_COMMANDS_PER_TRY, true);
+  // The first run makes the step's one try that meets no room, which reads Amazon's state and its 24 hours in full
+  // now that the account is ready (SES_WAIT_COMMANDS_PER_TRY, as the dearest try below); every later run only looks.
+  is(`the run that tries stays within the queue's scans, the job's look and one try: ${2 + SES_WAKE_JOB_COMMANDS + SES_WAIT_COMMANDS_PER_TRY} commands`, perRun[0] <= 2 + SES_WAKE_JOB_COMMANDS + SES_WAIT_COMMANDS_PER_TRY, true);
+  is(`every later scheduled run stays within ${2 * WAIT_COMMANDS_PER_TRY} database commands`, Math.max(...perRun.slice(1)) <= 2 * WAIT_COMMANDS_PER_TRY, true);
   // The queue's two scans (the lease and the queue), and the job's look for parked steps with Amazon's room.
   const idle = perRun.slice(-10);
   is(`a scheduled run with nothing it can send spends only the job's own look, ${2 + SES_WAKE_JOB_COMMANDS} commands at the most`, Math.max(...idle) <= 2 + SES_WAKE_JOB_COMMANDS && Math.max(...idle) > 0, true);

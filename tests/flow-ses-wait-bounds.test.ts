@@ -47,12 +47,15 @@ const hourKey = (back = 0) => `nl:ses:h:${new Date(Date.now() - back * 3_600_000
 /** Amazon's last 24 hours emptied: room for list email is confirmed. */
 const giveRoom = async () => redisPipeline(Array.from({ length: 26 }, (_, h) => ["SET", hourKey(h), 0]));
 
-// After a parked step is woken (ZADD QUEUE XX), another send takes Amazon's room before the step's own try.
+// After the job confirms Amazon's room (and wakes parked steps), another send takes it before any step's own try.
 let takeRoomOnWake = false;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (list: (string | number)[][]) => {
   const out = await pipeline(list);
-  if (takeRoomOnWake && list.some((c) => c[0] === "ZADD" && c[1] === QUEUE && c[2] === "XX")) await pipeline([["SET", hourKey(), 1_000_000]]);
+  // The wake (ZADD XX) or, after it, the job's scan of due steps (ZRANGEBYSCORE from 0): the room is gone before any try.
+  const woke = list.some((c) => c[0] === "ZADD" && c[1] === QUEUE && c[2] === "XX");
+  const dueScan = list.some((c) => c[0] === "ZRANGEBYSCORE" && c[1] === QUEUE && String(c[2]) === "0");
+  if (takeRoomOnWake && (woke || dueScan)) await pipeline([["SET", hourKey(), 1_000_000]]);
   return out;
 }) as typeof redis.pipeline;
 
@@ -119,20 +122,35 @@ async function main(): Promise<void> {
   is("pip's place is the one it was first given", againPip, firstPip);
 
   part("1. Room confirmed at the wake and taken before the try, job after job: the run's parks are bounded");
-  const jobs = SES_WAITS_PER_RUN + MAX_WAITS_PER_RUN + 40;
-  for (let i = 0; i < jobs; i += 1) {
+  const parksOf = async (email: string) => Number(redis.run(["HGET", `nl:wf:run:${flowId}:${personOf(email)}`, "sesParks"]) ?? 0);
+  // Every job: room confirmed at the wake, taken by another send before the woken try (the loop the reviews found).
+  for (let i = 0; i < SES_WAITS_PER_RUN + 5; i += 1) {
     shift += 3_600_000;
-    if (i % 600 === 0) await renew();
+    if (i % 400 === 0) await renew();
     await giveRoom();
     takeRoomOnWake = true;
     await run();
     takeRoomOnWake = false;
+  }
+  const churned = await parksOf("pip@example.com");
+  // Every try that met no room is counted: SES_WAITS_PER_RUN parks, then the counted waits (MAX_WAITS_PER_RUN), the
+  // first try past the bound included; the step is never parked again past the bound.
+  is(`the tries that met no room reach the bound of ${SES_WAITS_PER_RUN} parks and never pass it plus the counted waits`, churned >= SES_WAITS_PER_RUN && churned <= SES_WAITS_PER_RUN + MAX_WAITS_PER_RUN + 1, true);
+  is("past the bound the step is no longer parked: it waits at a real time", ((await scoreOf("pip@example.com")) ?? 0) < 100_000_000_000, true);
+  is("nothing was sent while the room kept being taken", listSent().length, 0);
+  // Then no room at all: past the bound the step waits as any other wait does, and the run stops when that runs out.
+  await redisPipeline([["SET", hourKey(), 1_000_000]]);
+  for (let i = 0; i < MAX_WAITS_PER_RUN + 10; i += 1) {
+    shift += 6 * 3_600_000;
+    await renew();
+    await run();
   }
   const looped = await readRun(flowId, personOf("pip@example.com"));
   is("the run is no longer waiting: it stopped after its bounded waits", looped?.run.status, "ended");
   is("nothing was sent", listSent().length, 0);
   is("its history says it stopped at that step", looped?.events.some((e) => e.state === "failed") ?? false, true);
   is("it is out of the queue", await scoreOf("pip@example.com"), null);
+  is(`its tries that met no room stay within ${SES_WAITS_PER_RUN} parks and ${MAX_WAITS_PER_RUN} counted waits`, (await parksOf("pip@example.com")) <= SES_WAITS_PER_RUN + MAX_WAITS_PER_RUN + 1, true);
 
   part("2. Without SES set up, a step never parks for good and never says it goes out by itself");
   mail.disableSes();

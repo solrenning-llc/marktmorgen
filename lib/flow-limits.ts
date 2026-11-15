@@ -130,16 +130,31 @@ export const WAIT_COMMANDS_PER_TRY = 32;
  *     read and written back, the 25 hourly counts of the last 24 hours, the
  *     monthly notice's mark) instead of the wait counted, and the step's
  *     day clock let go (1). Measured in tests/flow-ses-wait-queue.test.ts.
+ *     Since 15 November 2026 the try also reads whether Amazon is ready (a
+ *     step parks without a bound only then) and counts the park on the run
+ *     with the time it was first parked (lib/flow-runs.ts, countSesParks):
+ *     measured at 61 with Amazon's 24 hours read in full; 64 with room.
  *   - SES_WAKE_COMMANDS_PER_TRY: the step woken (1).
  *   - SES_WAITS_PER_RUN: every try a run can make other than a woken one can
  *     meet no room once: each step's first try, each "try it again", each
- *     retry after an ordinary wait. A woken step meets no room again only
- *     when room confirmed for it was taken in between by another send; those
- *     tries are bounded by the job, SES_WAKE_PER_JOB a job, not by the run.
+ *     retry after an ordinary wait.
+ *   - SES_PARKS_PER_RUN: a woken step meets no room again when room confirmed
+ *     for it was taken in between by another send (nothing holds Amazon's room
+ *     for it), and is parked again. Since 15 November 2026 every park is
+ *     counted on the run (lib/flow-runs.ts, countSesParks), at most
+ *     SES_PARKS_PER_RUN, the same number WORST_COMMANDS_PER_RUN prices; past
+ *     it the step waits as any other wait does, counted against
+ *     MAX_WAITS_PER_RUN, and the run stops with a note that says why. Until
+ *     then such re-parks were uncounted (reviews of #4246, clouds F and G):
+ *     a run's commands had no ceiling while Amazon stayed near full.
+ *   - Parking without a bound only when Amazon SES is set up and its state is
+ *     read (lib/flows.ts, waitOrStop): otherwise nothing could ever wake the
+ *     step, and the wait is counted as before (review of #4246, cloud B).
  */
-export const SES_WAIT_COMMANDS_PER_TRY = 60;
+export const SES_WAIT_COMMANDS_PER_TRY = 64;
 export const SES_WAKE_COMMANDS_PER_TRY = 1;
 export const SES_WAITS_PER_RUN = MAX_STEPS + MAX_RETRIES_BY_YOU + MAX_WAITS_PER_RUN;
+export const SES_PARKS_PER_RUN = SES_WAITS_PER_RUN;
 /** Parked steps one scheduled job wakes at the most, and never more than Amazon's confirmed room. */
 export const SES_WAKE_PER_JOB = 300;
 /**
@@ -148,6 +163,11 @@ export const SES_WAKE_PER_JOB = 300;
  * the 25 hourly counts): a company cost of the five-minute job, not a run's.
  */
 export const SES_WAKE_JOB_COMMANDS = 1 + 2 + 25;
+/**
+ * The scheduled mail job's runs a day (vercel.json: /api/cron/mail every five minutes), each looking for parked steps
+ * at SES_WAKE_JOB_COMMANDS at the most: priced, whole, on every plan's workflows line (tests/plan-cost-registry.ts).
+ */
+export const SES_WAKE_JOBS_PER_DAY = 288;
 export const WORST_COMMANDS_PER_RUN =
   RUN_START_COMMANDS +
   (MAX_STEPS + MAX_RETRIES_BY_YOU) * (HISTORY_COMMANDS_PER_STEP + QUEUE_COMMANDS_PER_STEP) +

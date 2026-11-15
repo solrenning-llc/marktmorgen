@@ -1,11 +1,11 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
-import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, SES_WAKE_PER_JOB, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
+import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, SES_PARKS_PER_RUN, SES_WAKE_PER_JOB, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
 import { FIRST_DELAY_SECONDS, type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, letGoWaitClock, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countSesParks, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -45,7 +45,8 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { DataRoomError, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
-import { MAX_MAIL_BODY, MAX_SUBJECT, giveBackToMonth, monthlyAllowance, sendTo, senderRoom, takeFromMonth } from "@/lib/mail";
+import { MAX_MAIL_BODY, MAX_SUBJECT, SENDER_WAIT_NOTE, giveBackToMonth, monthlyAllowance, sendTo, senderRoom, takeFromMonth } from "@/lib/mail";
+import { isSesConfigured, sesReady } from "@/lib/ses";
 import type { Store } from "@/lib/store";
 import { hasProduct, idsOfKind } from "@/lib/catalog";
 import { stepCampaign } from "@/lib/mail-links";
@@ -1093,6 +1094,11 @@ async function actOnDeals(
   return out;
 }
 
+/** A step that waits for the sending service while Amazon SES is not set up or its state cannot be read (waitOrStop). */
+const SENDER_UNREADY_NOTE = "Waiting: the service that sends our email is not ready right now, so this step is tried again later. If it still cannot go, the run stops here and says so.";
+/** A step whose room at Amazon SES was taken before its try too many times (waitOrStop, SES_PARKS_PER_RUN). */
+const SENDER_PARKS_SPENT_NOTE = "Waiting: room at the service that sends our email was taken by other email before this step could go, too many times. It is tried a few more times; if it still cannot go, the run stops here and says so.";
+
 /** What a step waiting on a store switched off after notices says (sendDueSteps; when it is looked at again: lib/flow-retry.ts). */
 const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices about its content. This step is checked again by itself and goes on at the first check after your store is back on. If your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after this step began to wait, the run stops here, with nothing done at this step.`;
 
@@ -1103,10 +1109,13 @@ const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices abo
  * comes back is the queue's new entries and each person's outcome.
  *
  * Except a wait only for room at Amazon SES ("sender"; ALL-160, the owner's
- * rule LC: email waits in the Amazon queue and is never discarded): it is not
- * counted and never stops the run. The step stays in the queue, parked at
- * SES_PARK_SCORE, where no job takes it by time, and wakeSesWaits puts it back
- * when Amazon's room is confirmed (lib/flow-limits.ts).
+ * rule LC: email waits in the Amazon queue and is never discarded): while SES
+ * is set up and ready it is not counted against MAX_WAITS_PER_RUN. The step
+ * stays in the queue, parked at SES_PARK_SCORE plus the second it was first
+ * parked at this step, where no job takes it by time, and wakeSesWaits puts
+ * it back when Amazon's room is confirmed. Each park is counted on the run,
+ * at most SES_PARKS_PER_RUN; past it, or without SES set up and ready, the
+ * step waits as any other wait does (lib/flow-limits.ts).
  */
 async function waitOrStop(
   flowId: string,
@@ -1118,15 +1127,28 @@ async function waitOrStop(
 ): Promise<{ queue: (string | number)[][]; outcomes: Settled[] }> {
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
-  const parked = everyone.filter((p) => p.reason === "sender");
-  if (parked.length) {
-    await letGoWaitClock(flowId, parked.map((p) => p.email));
-    for (const p of parked) {
-      queue.push(["ZADD", QUEUE, SES_PARK_SCORE + nowSeconds + FIRST_DELAY_SECONDS, `${group}|${p.email}`]);
-      outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
+  const waitingForAmazon = everyone.filter((p) => p.reason === "sender");
+  // Parked without a bound only when Amazon SES is set up and its state is read: only then can room be confirmed and
+  // the step woken. Otherwise the wait is counted as any other, and its words never say it goes out by itself.
+  const parkable = waitingForAmazon.length > 0 && isSesConfigured() && (await sesReady().catch(() => null)) !== null;
+  const countedWaits: typeof everyone = everyone.filter((p) => p.reason !== "sender");
+  if (waitingForAmazon.length && !parkable) countedWaits.push(...waitingForAmazon.map((p) => ({ ...p, note: SENDER_UNREADY_NOTE })));
+  if (parkable) {
+    // Each park counted on the run, at most SES_PARKS_PER_RUN (lib/flow-limits.ts); a step parked again keeps the
+    // second it was first parked at this step, so the longest waiting email stays first. Past the bound, or with a
+    // count not read exactly, the step waits as any other wait does, and the run stops when that runs out.
+    const parks = await countSesParks(flowId, waitingForAmazon.map((p) => p.email), index, nowSeconds);
+    for (const p of waitingForAmazon) {
+      const park = parks.get(p.email) ?? null;
+      if (!park || park.parks > SES_PARKS_PER_RUN) {
+        countedWaits.push({ ...p, note: SENDER_PARKS_SPENT_NOTE });
+        continue;
+      }
+      queue.push(["ZADD", QUEUE, SES_PARK_SCORE + park.since + FIRST_DELAY_SECONDS, `${group}|${p.email}`]);
+      outcomes.push({ email: p.email, state: "deferred", note: SENDER_WAIT_NOTE, to: index });
     }
   }
-  const people = everyone.filter((p) => p.reason !== "sender");
+  const people = countedWaits;
   if (!people.length) return { queue, outcomes };
   const counted = await countWaits(flowId, people.map((p) => p.email), index, nowSeconds);
   for (const p of people) {

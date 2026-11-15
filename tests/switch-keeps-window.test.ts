@@ -549,11 +549,16 @@ async function main(): Promise<void> {
     // #4246 (claude7/decided-flow-ses-wait) counts the waits for room at Amazon SES in WORST_COMMANDS_PER_RUN
     // (SES_WAITS_PER_RUN × (SES_WAIT_COMMANDS_PER_TRY + SES_WAKE_COMMANDS_PER_TRY), lib/flow-limits.ts): a dearer
     // workflows line, so each plan keeps less, every figure still above zero (MR). Figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.11, 312.40 and 700.96 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "312.40", "700.96"]);
+    // #4246 again (15 November 2026, reviews by clouds F and G): the mail job's look for parked SES steps
+    // (SES_WAKE_JOBS_PER_DAY × SES_WAKE_JOB_COMMANDS) priced whole on every plan that can run workflows, and
+    // SES_WAIT_COMMANDS_PER_TRY 60 → 64: Studio 312.40 → 311.87 and Scale 700.96 → 700.37; Store, with no runs a day,
+    // unchanged; every figure above zero (MR).
+    is("11: Store, Studio and Scale keep 45.11, 311.87 and 700.37 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "311.87", "700.37"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
-    is("11: and 37.05, 257.27 and 577.69 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "257.27", "577.69"]);
+    // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
+    is("11: and 37.05, 256.74 and 577.10 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "256.74", "577.10"]);
   } finally {
     Date.now = realNow;
   }

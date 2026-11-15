@@ -14,6 +14,8 @@ type Claim = { token: string; n: number; fingerprint: string; dispatchToken: str
 type FixtureOptions = {
   credential: string; usageCredential?: string; cap?: number; sent?: number; received?: number;
   accountId?: string; fetch?: typeof fetch;
+  /** The account's attempt records, kept across this account's synthetic days as the real ones are in Redis. */
+  claims?: Map<string, Claim>;
 };
 /** Prepare the exact finite review/binding synchronously for the no-IO
  * proof predicate. Sending still awaits this fixture's initialization. */
@@ -37,7 +39,7 @@ export function prepareResendFallbackFixture(options: FixtureOptions) {
     protection: { kind: "inclusive_provider_hard_cap", sentAndReceived: true, overagesDisabled: true, capEmails: cap, evidence: "SYNTHETIC ONLY" },
     bootstrap: { noUnresolvedPriorAttempts: true, allPriorUsageIncluded: true, evidence: "Explicit synthetic fixture initialization" },
   };
-  const claims = new Map<string, Claim>();
+  const claims = options.claims ?? new Map<string, Claim>();
   const acknowledgements = new MemoryRedis();
   let initialized = false, held = 0, accepted = options.sent ?? 0, lost: string | null = null;
   const commands: (string | number)[][] = [], requests: { method: string; url: string; body?: string }[] = [];
@@ -128,34 +130,48 @@ export async function createResendFallbackFixture(options: FixtureOptions) {
 // account, usage HTTP response and ACK adapter. Tests of the real defaults
 // and guard import the product module by relative path and are not aliased.
 const worlds = new Map<string, ReturnType<typeof prepareResendFallbackFixture>>();
+// The attempt records of each synthetic account, shared by all its days: the real ones (lib/resend-fallback-budget.ts,
+// resendFallbackBudgetKeys) are keyed by the account and the attempt (path, body, idempotency key) with no day, and one
+// whose answer was dispatched or unknown has no expiry, so the same attempt is refused on any later day.
+const accountClaims = new Map<string, Map<string, Claim>>();
 const clearApplication = store.clear.bind(store);
-store.clear = () => { clearApplication(); worlds.clear(); };
+store.clear = () => { clearApplication(); worlds.clear(); accountClaims.clear(); };
 function applicationWorld(credential: SyntheticResendCredential, usageCredential: SyntheticResendCredential) {
   const name = `${usageCredential}\n${Math.floor(Date.now() / 86_400_000)}`;
   let world = worlds.get(name);
   // Restoring the clock after a future-time journey starts a new synthetic
   // context, never a live ledger reset. Retain the existing finite epoch.
   if (!world || Date.now() < world.runtime.binding!.checkedAtMs) {
-    world = prepareResendFallbackFixture({ credential, usageCredential, fetch: (request, init) => fetch(request, init) });
+    let claims = accountClaims.get(usageCredential);
+    if (!claims) accountClaims.set(usageCredential, claims = new Map<string, Claim>());
+    world = prepareResendFallbackFixture({ credential, usageCredential, fetch: (request, init) => fetch(request, init), claims });
     worlds.set(name, world);
   }
   const binding = world.runtime.binding!;
   if (!binding.sendingCredentialSha256s.includes(hash(credential))) binding.sendingCredentialSha256s.push(hash(credential));
   return world;
 }
+/** A caller that only watches its own requests (lib/stock-alert-send.ts) hands a runtime with `fetch` and nothing else:
+ * it gets the same synthetic account as one that hands none, its provider requests going through its own fetch. */
+function onlyFetch(runtime: ResendTransportRuntime): runtime is { fetch: typeof fetch } {
+  const keys = Object.keys(runtime);
+  return keys.length === 1 && keys[0] === "fetch" && typeof runtime.fetch === "function";
+}
 export function currentResendFallbackProofIsMissing(runtime: ResendTransportRuntime = {}) {
-  if (Object.keys(runtime).length) return realProofIsMissing(runtime);
+  if (Object.keys(runtime).length && !onlyFetch(runtime)) return realProofIsMissing(runtime);
   const credential = syntheticResendCredential(process.env.RESEND_API_KEY?.trim());
   const usageCredential = syntheticResendCredential(process.env.RESEND_READ_API_KEY?.trim() || credential);
   if (!credential || !usageCredential) return true;
   return realProofIsMissing(applicationWorld(credential, usageCredential).runtime);
 }
 export async function guardedResendPost(input: ResendPost, runtime: ResendTransportRuntime = {}) {
-  if (Object.keys(runtime).length) return realPost(input, runtime);
+  if (Object.keys(runtime).length && !onlyFetch(runtime)) return realPost(input, runtime);
   const credential = syntheticResendCredential(input.credential);
   const usageCredential = syntheticResendCredential(input.usageCredential);
   if (!credential || !usageCredential) return { kind: "blocked" as const };
   const world = applicationWorld(credential, usageCredential);
   await world.ready;
-  return realPost(input, world.runtime);
+  if (!onlyFetch(runtime)) return realPost(input, world.runtime);
+  const own = runtime.fetch, theirs = world.runtime.fetch!;
+  return realPost(input, { ...world.runtime, fetch: ((request, init) => new URL(String(request)).pathname === "/usage" ? theirs(request, init) : own(request, init)) as typeof fetch });
 }

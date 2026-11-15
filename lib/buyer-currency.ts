@@ -173,7 +173,11 @@ export function settlesIn(own: string, settlement: string | null): boolean | nul
 
 /**
  * The creator's account's settlement currency, read from its
- * `default_currency` (the currency its balance settles in), lowercase; null
+ * `default_currency`, lowercase (Stripe's Account object, read on 15 November
+ * 2026: "the default currency for the account"; it does not say every charge
+ * settles in it, so an account with several settlement currencies is read by
+ * its default only, and a mismatch keeps the store's currency; to be proven in
+ * test mode, Claude 7's LEVE 2 on #4577); null
  * when there is no account, it cannot be read or it says nothing. Asked only
  * while BUYER_CURRENCY_LIVE is true; before that key turns on, this read gets
  * its cache and its request units (docs/buyer-currency-and-language.md,

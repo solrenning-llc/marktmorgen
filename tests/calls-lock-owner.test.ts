@@ -35,6 +35,7 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
+import { runCallLockWaitsAtOnce } from "./calls-lock-wait";
 
 const HOUR = 3_600_000;
 const NY = "America/New_York";
@@ -92,6 +93,8 @@ redis.pipeline = async (commands) => {
   }
   return out;
 };
+// The 250 ms waits between a held lock's retries run at once; every retry still runs (tests/calls-lock-wait.ts).
+runCallLockWaitsAtOnce();
 function unhook(): void {
   delete hooks.afterGet;
   delete hooks.script;

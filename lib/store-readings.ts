@@ -30,6 +30,7 @@
 import { nextUtcMidnight } from "@/lib/local-clock";
 import { HEAVY_READINGS_PER_DAY, READING_FRESH_SECONDS, STORE_READINGS_PER_DAY } from "@/lib/store-reading-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { windowCountBy } from "@/lib/window-count";
 import { UnknownReplyError, countOf, replyList, repliesFor } from "@/lib/redis-reply";
 import { keyFor } from "@/lib/stripe-account";
 import { KEEP_UNLESS_ERASED, suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
@@ -153,15 +154,17 @@ export async function takeStoreReading(store: Pick<Store, "statsId">, now = Date
   const key = dayKey(store.statsId, utcDay(now));
   const heavyKey = `${key}:heavy`;
   try {
-    const [, raw, , , rawHeavy] = await redisPipeline([
+    const [, raw, , rawHeavy, heavyExpire] = await redisPipeline([
       ["SET", key, "0", "NX", "EX", 2 * 86_400],
       ["INCRBY", key, 1],
       ["EXPIRE", key, 2 * 86_400, "NX"],
-      ...(heavy ? [["SET", heavyKey, "0", "NX", "EX", 2 * 86_400], ["INCRBY", heavyKey, 1]] : []),
+      // The heavy count as lib/window-count.ts counts: INCRBY, then the expiry when the key has none, so a key that
+      // expires between two commands never comes back without one (Claude 7 on #3369).
+      ...(heavy ? windowCountBy(heavyKey, 2 * 86_400, 1) : []),
     ]);
     const n = Number(raw);
     const h = heavy ? Number(rawHeavy) : 0;
-    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && h < 1)) return false;
+    if (!Number.isSafeInteger(n) || n < 1 || !Number.isSafeInteger(h) || (heavy && (h < 1 || (heavyExpire !== 0 && heavyExpire !== 1)))) return false;
     if (n <= STORE_READINGS_PER_DAY && h <= HEAVY_READINGS_PER_DAY) return true;
     await redisPipeline([["DECRBY", key, 1], ...(heavy ? [["DECRBY", heavyKey, 1]] : [])]).catch(() => {});
     return false;

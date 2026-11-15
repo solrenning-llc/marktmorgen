@@ -68,6 +68,13 @@ const MAX_SOURCES = 40;
  * and the day's totals stay right. A day of a busy store names some 60.
  */
 export const DAY_FIELDS_MAX = 100;
+/**
+ * The most fields a day's record may have when a reach beacon adds one (#4608): below DAY_FIELDS_MAX, so the
+ * store page's reach fields, which any visitor can name through app/api/store/read, never take the last places of
+ * the day. Past this, a new reach field counts under "~"; views, sources, countries and answers keep their room, and
+ * the day's first view still gives the record its end.
+ */
+export const REACH_FIELDS_MAX = 70;
 /** The most fields the all-time record may have between the trims that read it (readLife): its own and LIFE_MAX_FIELDS of counts. */
 export const LIFE_WRITE_MAX = 2_100;
 
@@ -224,7 +231,7 @@ export async function recordHit(
  */
 export async function countReach(statsId: string, field: string, now = Date.now()): Promise<void> {
   if (!isRedisConfigured() || !field.startsWith("sr:")) return;
-  await cappedCount(countsKey(statsId, dayKey(now)), DAY_FIELDS_MAX, [{ field, by: 1 }]);
+  await cappedCount(countsKey(statsId, dayKey(now)), REACH_FIELDS_MAX, [{ field, by: 1 }]);
 }
 
 /** The all-time record's field for confirmed leads, which Marktmorgen Path reads its leads from (lib/path-facts.ts; 13 [D10]). */

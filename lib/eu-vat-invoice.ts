@@ -136,7 +136,7 @@ export function toEuroCents(cents: number, perEuro: string): number | null {
 /**
  * The ECB rate art. 91(2) asks for: the latest published before the sale's day. The sale's own day is never used,
  * because the ECB publishes around 16:00 CET and the code cannot know a sale came after it. Never older than
- * ECB_RATE_MOST_DAYS_OLD days (working days only, so a long weekend with a holiday still has one inside it). Null
+ * ECB_RATE_MOST_DAYS_OLD calendar days (enough that a long weekend with a holiday still has one inside it). Null
  * when none is there, a publication does not read, or a day is given twice with different rates.
  */
 function latestBefore(publications: EuInvoiceInput["ecb"], suppliedOn: string): { perEuro: string; day: string } | null {

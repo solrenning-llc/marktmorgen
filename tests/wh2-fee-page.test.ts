@@ -25,6 +25,7 @@ import {
 import { FeeSchedule } from "@/components/fee-schedule";
 import { feeWords } from "@/lib/fee-words";
 import { PLAN_NAMES, PUBLISHED_PLAN_PRICES, TIERS } from "@/lib/plan";
+import { PLANS_ON_SALE } from "@/lib/opening";
 import { done, is, part } from "./check";
 
 const day = 86_400_000;
@@ -82,6 +83,13 @@ is("an overdue notice, with Stripe's page, once older than 90 days", late.includ
 is("the figures stay visible beside the notice", late.includes(COUNTRY_FEES[0].domesticCard), true);
 is("a table caption names each table", (raw.match(/<caption/g) ?? []).length >= 2, true);
 is("header cells carry their scope", /<th scope="col"/.test(raw) && /<th scope="row"/.test(raw), true);
+
+part("What is true today, with sales closed");
+const closed = flat(renderToStaticMarkup(createElement(FeeSchedule, { now: checked, open: false })));
+is("closed: says no sale is made through Marktmorgen today", closed.includes("Paid plans and paid selling are not open yet") && closed.includes("none of these fees is charged"), true);
+const opened = flat(renderToStaticMarkup(createElement(FeeSchedule, { now: checked, open: true })));
+is("open: the closed sentence is gone", opened.includes("not open yet"), false);
+is("the page follows PLANS_ON_SALE by default", html.includes("not open yet"), !PLANS_ON_SALE);
 
 part("The pricing page points to it");
 is("/pricing links to /pricing/fees", readFileSync("app/pricing/page.tsx", "utf8").includes('href="/pricing/fees"'), true);

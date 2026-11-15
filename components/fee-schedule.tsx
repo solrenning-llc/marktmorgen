@@ -12,6 +12,7 @@ import Link from "next/link";
 import { COUNTRY_FEES, STANDARD_PAYOUT, REVIEW_DAYS, checkedOnWords, exampleSale, feeScheduleDue, usd } from "@/lib/fee-schedule";
 import { feeWords } from "@/lib/fee-words";
 import { COMMISSION_BPS, COMMISSION_PLANS_PUBLISHED, PLAN_NAMES, PUBLISHED_PLAN_PRICES, TIERS } from "@/lib/plan";
+import { PLANS_ON_SALE } from "@/lib/opening";
 
 const EXAMPLE_PRICE_CENTS = 5000;
 
@@ -20,7 +21,7 @@ const dollars = (cents: number) => `$${(cents / 100).toLocaleString("en-US")}`;
 const th = "border-b border-line px-3 py-2 text-left align-top font-semibold";
 const td = "border-b border-line px-3 py-2 align-top";
 
-export function FeeSchedule({ now }: { now?: number }) {
+export function FeeSchedule({ now, open = PLANS_ON_SALE }: { now?: number; open?: boolean }) {
   const due = feeScheduleDue(now);
   const checked = checkedOnWords();
   // What Marktmorgen takes from the example sale: the published share of the Store plan, which is none today.
@@ -34,6 +35,13 @@ export function FeeSchedule({ now }: { now?: number }) {
         This page lists every fee that comes with a sale made through Marktmorgen, who pays it, and where each figure
         comes from. Stripe&apos;s figures were read from Stripe&apos;s own pages on {checked}.
       </p>
+
+      {!open ? (
+        <p className="max-w-[70ch] font-semibold" role="note">
+          Paid plans and paid selling are not open yet, so no sale is made through Marktmorgen today and none of these
+          fees is charged. This page shows what each fee will be once they open.
+        </p>
+      ) : null}
 
       {due ? (
         <p className="notice notice-warn max-w-[70ch] text-ink" role="note">

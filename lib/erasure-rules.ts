@@ -80,9 +80,10 @@ export type ErasureSize = {
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
  * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it, 551 with it.
  * And (since #4808, 15 November 2026) the paths of the person's files kept for a repeat: one SMEMBERS, an SADD and an
- * EXPIRE, and an SREM, four more: 555.
+ * EXPIRE, and an SREM, four more: 555; and (3rjdf's review) their review photos' paths kept before the reviews go (an
+ * SADD and an EXPIRE) and the kept paths' time renewed on a repeat and when one is lost (two EXPIREs), four more: 559.
  */
-export const ERASE_FIXED_COMMANDS = 555;
+export const ERASE_FIXED_COMMANDS = 559;
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
 export const ERASE_FIXED_BYTES = 310_000;
 /** Per thing counted: [commands, bytes]. */

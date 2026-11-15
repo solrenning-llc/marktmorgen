@@ -630,8 +630,17 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
   const keys = [stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers];
   // Each DEL's own count read exactly (#4675, CX-123 rule 24): a whole number from 0 to the keys sent. A reply
   // that is missing or of another shape is unknown and throws, so the store's closing never counts it as done.
-  confirmDeleted(await redisPipeline([["DEL", ...keys]]), keys.length, "a store's CRM records");
-  confirmDeleted(await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]])), 1, "a store's CRM tasks");
+  // The first DEL's verdict is kept, and the DEL under the tasks' lock is sent all the same, so tasks written back by
+  // a change read before the first DEL still go when its reply could not be read; then the first failure is thrown
+  // (Claude 6 on #4693), as an unread fields record is (delete everything that can go, then say what could not).
+  let first: unknown = null;
+  try {
+    confirmDeleted(await redisPipeline([["DEL", ...keys]]), keys.length, "a store's CRM records");
+  } catch (error) { first = error; }
+  try {
+    confirmDeleted(await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]])), 1, "a store's CRM tasks");
+  } catch (error) { first ??= error; }
+  if (first) throw first;
   if (!fields) throw new CrmSchemaReadUnavailable();
 }
 

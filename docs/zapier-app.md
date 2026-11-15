@@ -24,6 +24,15 @@ not already.
   - Membership Canceled (`membership.canceled`)
   - New Booking (`call.booked`)
   - Booking Moved (`call.moved`)
+  - Membership Changed (`membership.changed`)
+  - New Dispute (`dispute.opened`) — like the webhook it rests on, it names no
+    buyer: the dispute, its payment, the product, the amount, the reason Stripe
+    gives and the date the answer is due.
+  - Sequence Step Reached (`sequence.step`)
+
+  Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
+  its trigger, and each example has exactly the fields its webhook sends
+  (`tests/zapier-app.test.ts` fails otherwise).
 - **Actions** (the API's own writes; each needs a key that may write):
   - Add Subscriber to List (`POST /api/v1/leads`) — requires the creator to
     confirm the person agreed; the API refuses anyone without it and never

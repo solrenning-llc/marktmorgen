@@ -9,15 +9,17 @@
  *   - the five endpoints a store may have count those added by Zapier too;
  *   - the examples Zapier shows are only messages the store's webhooks already
  *     sent, of the one event asked for;
- *   - each trigger stands for one of the events the webhooks send, and each
- *     action calls the API's own write, with the agreement the list requires;
+ *   - each trigger stands for one of the events the webhooks send, every
+ *     event the webhooks send has its trigger, each example has exactly the
+ *     fields that event's webhook sends, and each action calls the API's own
+ *     write, with the agreement the list requires;
  *   - the app names the platform version its package installs.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, setProductLink, setSubscription, storeForEmail } from "@/lib/store";
 import { makeKey } from "@/lib/api-keys";
-import { MAX_ENDPOINTS, emitEvent, webhooksView } from "@/lib/webhooks";
+import { MAX_ENDPOINTS, WEBHOOK_EVENTS, emitEvent, webhooksView } from "@/lib/webhooks";
 import { DELETE as deleteHook, POST as postHook } from "@/app/api/v1/hooks/route";
 import { GET as getEvents } from "@/app/api/v1/events/route";
 import { GET as getStore } from "@/app/api/v1/store/route";
@@ -129,6 +131,41 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 const read = (file: string) => readFileSync(join(process.cwd(), file), "utf8");
 
+/** The top-level fields of the object a source file passes to emitEvent for one event, sorted. */
+function sentFields(source: string, event: string): string[] {
+  const at = source.indexOf(`emitEvent(store, "${event}",`);
+  if (at < 0) throw new Error(`no emitEvent for ${event}`);
+  // The object follows the seed, which may be a template with its own "${...}": it is the first ", {" after the call.
+  const open = source.indexOf(", {", at) + 2;
+  if (open < 2) throw new Error(`no object for ${event}`);
+  let depth = 0;
+  let end = open;
+  for (; end < source.length; end += 1) {
+    if (source[end] === "{") depth += 1;
+    if (source[end] === "}") depth -= 1;
+    if (depth === 0) break;
+  }
+  // Top level only: a key is read up to its ":" (or its "," when written short, as `email,`), and its value is skipped to the next ",".
+  const keys: string[] = [];
+  depth = 0;
+  let token = "";
+  let inValue = false;
+  for (const ch of source.slice(open + 1, end) + ",") {
+    if (ch === "{" || ch === "(" || ch === "[") depth += 1;
+    if (ch === "}" || ch === ")" || ch === "]") depth -= 1;
+    if (depth !== 0) continue;
+    if (ch === ",") {
+      if (!inValue && /^[a-z_]+$/.test(token.trim())) keys.push(token.trim());
+      token = "";
+      inValue = false;
+    } else if (ch === ":" && !inValue) {
+      keys.push(token.trim());
+      inValue = true;
+    } else if (!inValue) token += ch;
+  }
+  return [...new Set(keys)].sort();
+}
+
 async function main(): Promise<void> {
   process.env.RESEND_API_KEY = "re_test_zapier_app_only_a_stand_in";
   redis.clear();
@@ -196,7 +233,36 @@ async function main(): Promise<void> {
 
   part("Every trigger is an event the webhooks send; every action is an API write");
   const triggerEvents = app.EVENTS.map((e) => e.event);
-  is("each hook trigger stands for a webhook event", triggerEvents.every((e) => (["sale.completed", "refund.issued", "lead.captured", "list.joined", "membership.started", "membership.canceled", "call.booked", "call.moved"] as string[]).includes(e)), true);
+  is("each hook trigger stands for a webhook event", triggerEvents.every((e) => (WEBHOOK_EVENTS as readonly string[]).includes(e)), true);
+  is("every event the webhooks send has its trigger, once", [...triggerEvents].sort(), [...WEBHOOK_EVENTS].sort());
+  is("each event's trigger is the one named for it", app.EVENTS.every((e) => app.triggers[e.key]?.operation.type === "hook" && e.key === e.event.replace(".", "_")), true);
+
+  part("Each example says what its webhook really sends, field by field");
+  for (const [event, file] of [["membership.changed", "lib/webhooks.ts"], ["dispute.opened", "lib/webhooks.ts"], ["sequence.step", "lib/flows.ts"]] as const) {
+    const spec = app.EVENTS.find((e) => e.event === event);
+    const sample = spec ? (app.triggers[spec.key].operation.sample as { type?: string; data?: Record<string, unknown> }) : null;
+    is(`${event}: the example is that event's message`, sample?.type, event);
+    is(`${event}: its fields are the ones ${file} sends`, Object.keys(sample?.data ?? {}).sort(), sentFields(read(file), event));
+  }
+  const disputeSample = app.triggers.dispute_opened.operation.sample as { data: Record<string, unknown> };
+  is("a dispute's example names no buyer, as a dispute's webhook names none", "buyer" in disputeSample.data || /@/.test(JSON.stringify(disputeSample.data)), false);
+
+  part("The triggers added for the other events subscribe to their own event and show only what was sent");
+  for (const [key, event, seed, data] of [
+    ["membership_changed", "membership.changed", "sub_Z1:1", { subscription: "sub_Z1", product: { id: guide.product.id, title: "The Weeknight Cookbook" }, option: null, from: null, to: null, changed_at: "2026-10-21T10:00:00.000Z" }],
+    ["dispute_opened", "dispute.opened", "dp_Z1", { dispute: "dp_Z1", charge: "ch_Z1", amount_cents: 2900, currency: "usd", reason: "fraudulent", status: "needs_response" }],
+    ["sequence_step", "sequence.step", "f1:s1:ada@example.com", { sequence: { id: "f1", name: "Welcome" }, step: 1, email: "ada@example.com" }],
+  ] as const) {
+    const op = app.triggers[key].operation as Op & { performList: (z: Z, b: Bundle) => Promise<{ type: string }[]> };
+    const zap = await op.performSubscribe!(makeZ(writer.key), bundle({ targetUrl: `https://hooks.zapier.com/hooks/catch/1/${key}` }));
+    is(`${event}: the Zap's endpoint hears that event and nothing else`, (await webhooksView(store)).endpoints.find((e) => e.id === zap.id)?.events, [event]);
+    is(`${event}: no example before one was sent, never a made-up one`, (await op.performList(makeZ(writer.key), bundle())).length, 0);
+    await emitEvent(store, event, seed, data);
+    const shown = await op.performList(makeZ(writer.key), bundle());
+    is(`${event}: the example is the message sent`, [shown.length, shown[0]?.type], [1, event]);
+    await op.performUnsubscribe!(makeZ(writer.key), bundle({ subscribeData: { id: zap.id } }));
+    is(`${event}: turning the Zap off removes its endpoint`, (await webhooksView(store)).endpoints.some((e) => e.id === zap.id), false);
+  }
   is("the product list is hidden from the trigger menu", app.triggers.product_list.display.hidden, true);
   is("adding a subscriber requires the agreement the list requires", app.creates.add_subscriber.operation.inputFields.some((f) => f.key === "agreed" && f.required === true), true);
   is("the four actions are the API's writes", Object.keys(app.creates).sort(), ["add_subscriber", "change_labels", "create_discount_code", "give_access"]);

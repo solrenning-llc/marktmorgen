@@ -326,6 +326,54 @@ const EVENTS = [
       buyer: { email: "ada@example.com", timezone: "America/New_York" },
     },
   },
+  {
+    key: "membership_changed",
+    event: "membership.changed",
+    noun: "Membership",
+    label: "Membership Changed",
+    description: "Triggers when a membership moves to another price or quantity on your Stripe account, such as an upgrade or a switch to yearly.",
+    data: {
+      subscription: "sub_a1b2c3",
+      product: { id: "p_3d9e7b", title: "The Supper Club" },
+      option: null,
+      from: { price: "price_a1b2c3", amount_cents: 900, interval: "month", interval_count: 1, quantity: 1 },
+      to: { price: "price_d4e5f6", amount_cents: 9000, interval: "year", interval_count: 1, quantity: 1 },
+      changed_at: "2026-10-21T10:00:00.000Z",
+    },
+  },
+  {
+    key: "dispute_opened",
+    event: "dispute.opened",
+    noun: "Dispute",
+    label: "New Dispute",
+    // lib/webhooks.ts sends no buyer's address or name with a dispute, so the example has none.
+    description: "Triggers when a buyer disputes a payment made at your checkout. It says the amount, the reason Stripe gives and, when Stripe gives one, the date your answer is due.",
+    data: {
+      dispute: "dp_a1b2c3",
+      charge: "ch_a1b2c3",
+      payment_intent: "pi_a1b2c3",
+      product,
+      option: null,
+      amount_cents: 2900,
+      currency: "usd",
+      reason: "product_not_received",
+      status: "needs_response",
+      evidence_due_by: "2026-11-02T23:59:59.000Z",
+      opened_at: "2026-10-22T08:15:00.000Z",
+    },
+  },
+  {
+    key: "sequence_step",
+    event: "sequence.step",
+    noun: "Sequence Step",
+    label: "Sequence Step Reached",
+    description: "Triggers when someone reaches a step of one of your sequences that is set to tell your webhooks. It says their email, the sequence and the step.",
+    data: {
+      sequence: { id: "5e0c7a2b9d14f386", name: "Welcome" },
+      step: 2,
+      email: "ada@example.com",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

@@ -609,12 +609,20 @@ export async function notYetTaken<T extends { to: string }>(batchKey: string, me
 /**
  * Marks each message of a wave as possibly taken, before it is handed to Amazon: true only when every mark is
  * confirmed new. Otherwise the marks this call may have written are taken off (best effort) and nothing is sent.
+ * `held` is the marks this call already wrote and still holds: the same address earlier in the batch, or twice in
+ * this wave (one review ask per order, lib/review-requests.ts), is this call's own mark, not somebody else's
+ * evidence, so it is not written again; SET NX would answer "already there" and stall the batch on every run
+ * (review of #4530, 15 November 2026).
  */
-async function markMaybe(batchKey: string, wave: { to: string }[]): Promise<boolean> {
-  const keys = wave.map((m) => maybeKey(batchKey, m.to));
+async function markMaybe(batchKey: string, wave: { to: string }[], held: Set<string>): Promise<boolean> {
+  const keys = [...new Set(wave.map((m) => maybeKey(batchKey, m.to)))].filter((key) => !held.has(key));
+  if (!keys.length) return true;
   try {
     const replies = repliesFor(await redisPipeline(keys.map((key) => ["SET", key, "1", "NX", "EX", DID_SECONDS])), keys.length);
-    if (replies && replies.every((reply) => reply === "OK")) return true;
+    if (replies && replies.every((reply) => reply === "OK")) {
+      for (const key of keys) held.add(key);
+      return true;
+    }
     // Taken off only where this call wrote, or may have: an existing mark (null) is somebody else's evidence.
     const ours = replies ? keys.filter((_, i) => replies[i] === "OK") : keys;
     if (ours.length) await redisPipeline(ours.map((key) => ["DEL", key])).catch(() => {});
@@ -626,10 +634,17 @@ async function markMaybe(batchKey: string, wave: { to: string }[]): Promise<bool
   }
 }
 
-/** Takes off the marks of messages Amazon said for certain it did not take; one that cannot be confirmed is logged. */
-async function unmarkMaybe(batchKey: string, messages: { to: string }[]): Promise<void> {
+/**
+ * Takes off the marks of messages Amazon said for certain it did not take, except where another email of this call
+ * to the same address was taken or may have been (`kept`); one that cannot be confirmed is logged. A mark taken off
+ * leaves `held`, so a later wave to that address writes it again before Amazon is asked.
+ */
+async function unmarkMaybe(batchKey: string, messages: { to: string }[], held: Set<string>, kept: Set<string>): Promise<void> {
+  const keys = [...new Set(messages.map((m) => maybeKey(batchKey, m.to)))].filter((key) => !kept.has(key));
+  if (!keys.length) return;
+  for (const key of keys) held.delete(key);
   try {
-    const replies = repliesFor(await redisPipeline(messages.map((m) => ["DEL", maybeKey(batchKey, m.to)])), messages.length);
+    const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
     if (!replies || replies.some((reply) => reply !== 1)) console.error("an email Amazon did not take could not be confirmed unmarked");
   } catch (error) {
     console.error("an email Amazon did not take could not be unmarked", error);
@@ -664,6 +679,10 @@ export async function sesBatch<T extends SesMessage>(
   let down = "";
   let uncertain = false;
   let stalled = false;
+  // The possibly-taken marks this call wrote and holds, and those that must stay because an email of this call to
+  // that address was taken or may have been (markMaybe, unmarkMaybe).
+  const held = new Set<string>();
+  const kept = new Set<string>();
   let queue = [...messages];
   for (let round = 0; round < 2 && queue.length && !down && !uncertain && !stalled; round += 1) {
     const again: T[] = [];
@@ -677,7 +696,7 @@ export async function sesBatch<T extends SesMessage>(
       // Written down before Amazon is asked (notMaybeTaken): if its answer is then lost, a retry of this batch leaves
       // these people out even when Redis cannot be written afterwards. A mark that is not confirmed sends nothing of
       // the wave: the rest waits, and nothing is left marked that was not asked (outage drill, 13 November 2026).
-      if (options.maybeMarks === true && !(await markMaybe(batchKey, wave))) {
+      if (options.maybeMarks === true && !(await markMaybe(batchKey, wave, held))) {
         again.push(...queue.slice(i));
         stalled = true;
         break;
@@ -687,6 +706,7 @@ export async function sesBatch<T extends SesMessage>(
       const notTaken: T[] = [];
       results.forEach((result, j) => {
         if (result.outcome !== "sent" && result.uncertain !== true) notTaken.push(wave[j]);
+        else if (options.maybeMarks === true) kept.add(maybeKey(batchKey, wave[j].to));
         if (result.uncertain === true) {
           // A provider may have accepted this email before losing its reply.
           // Keep it unresolved, with no second attempt in this call.
@@ -709,7 +729,7 @@ export async function sesBatch<T extends SesMessage>(
       }
       // Amazon said for certain it did not take these: their marks go, so a retry may send them. One that cannot be
       // taken off leaves that person out of a retry, as an answer that was lost does.
-      if (notTaken.length && options.maybeMarks === true) await unmarkMaybe(batchKey, notTaken);
+      if (notTaken.length && options.maybeMarks === true) await unmarkMaybe(batchKey, notTaken, held, kept);
       if (down || uncertain) again.push(...queue.slice(i + perSecond));
       else if (i + perSecond < queue.length) await pause(Math.max(0, 1_000 - (Date.now() - waveStarted)));
     }

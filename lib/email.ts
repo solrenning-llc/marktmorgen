@@ -726,6 +726,11 @@ async function dispatchBatch(
     else if (meter.by === "store") debited = going.length;
   }
   let idempotencyKey = batchKey;
+  // Whether Amazon took anyone in this call. Until it has, a "retry" further down (Amazon only, the Resend handoff
+  // mark, no Resend key) has handed nobody to either sender, so the store's figure is given back as above; once it
+  // has, the debit stays, as on a stall after somebody was taken (review of #4530, 15 November 2026).
+  let amazonTook = false;
+  const nothingYet = async (): Promise<"retry"> => (amazonTook ? "retry" : nothingSent("retry"));
   if (config && isSesConfigured() && only !== "resend") {
     const all = going.length;
     // Whoever Amazon already took under this key, in a batch that was then
@@ -786,6 +791,7 @@ async function dispatchBatch(
         { maybeMarks: !listOnly },
       );
       await countSesSent(result.taken.length);
+      if (result.taken.length > 0) amazonTook = true;
       if (result.down) {
         await sesDown(result.down);
         await tellAmazonIsDown(result.down);
@@ -828,18 +834,18 @@ async function dispatchBatch(
       going = result.left.map((m) => m.original);
     }
     if (going.length === 0) return "sent";
-    if (only === "amazon") return "retry";
+    if (only === "amazon") return nothingYet();
     if (!toResend) {
       try {
         const reply: unknown = await redisPipeline([["SET", handed, "1", "EX", 2 * 86_400]]);
-        if (!Array.isArray(reply)) return "retry";
+        if (!Array.isArray(reply)) return nothingYet();
         const length = Object.getOwnPropertyDescriptor(reply, "length");
-        if (!length || !("value" in length) || length.value !== 1) return "retry";
+        if (!length || !("value" in length) || length.value !== 1) return nothingYet();
         const acknowledgement = Object.getOwnPropertyDescriptor(reply, "0");
         // An unconfirmed handoff may already be stored. Keep it, and do not
         // post to Resend until the existing marker proves the provider choice.
-        if (!acknowledgement || !("value" in acknowledgement) || acknowledgement.value !== "OK") return "retry";
-      } catch { return "retry"; }
+        if (!acknowledgement || !("value" in acknowledgement) || acknowledgement.value !== "OK") return nothingYet();
+      } catch { return nothingYet(); }
     }
     // Resend answers a key it has seen with what it answered then, so a
     // different set of people must not go under the same key.
@@ -850,7 +856,8 @@ async function dispatchBatch(
   // A batch is one store's, so one address it is all from.
   const usageCredential = usageKey() ?? "";
   const key = going.length ? keyFor(going[0].from) : getKey();
-  if (!key) return "retry";
+  // Nothing has been posted to Resend yet: the first post is below.
+  if (!key) return nothingYet();
   const tagged = going.some((m) => cleanTags(m.tags).length > 0);
   let firstPost = true;
   const post = async (withTags: boolean, under: string, auth: string = key, fromSite = false): Promise<Response | "accepted_receipt" | null> => {

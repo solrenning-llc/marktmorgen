@@ -567,7 +567,9 @@ async function main(): Promise<void> {
     // (SES_COUNTED_WAIT_COMMANDS_PER_TRY, review by cloud AA): Studio 311.87 → 311.76, Scale 700.37 → 700.20; Store unchanged.
     // With main's erasure probe (#4542) and #4015 merged in: Store 45.10, Studio 311.76, Scale 700.19, every figure above
     // zero (MR); cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.10, 311.76 and 700.19 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "311.76", "700.19"]);
+    // Merge of main into #4246 (15 November 2026): this PR's costs and main's together cost Studio's monthly worst month
+    // one cent more (the sum crosses a rounding step): 311.75 where 311.76 was; still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 311.75 and 700.19 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "311.75", "700.19"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.

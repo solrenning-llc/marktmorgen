@@ -205,6 +205,8 @@ const indexKey = (courseId: string) => `nl:course:${courseId}:certs`;
 export const allKey = (courseId: string) => `nl:course:${courseId}:certs:all`;
 /** Every certificate one student was ever issued for a course, withdrawn ones too (added 17 October 2026), so deleting them finds each. */
 const byKey = (courseId: string, who: string) => `nl:course:${courseId}:certs:by:${who}`;
+/** A command answering 1 when this learner holds a certificate of a course: a dropped one's probe (lib/person-erasure.ts). */
+export const certificateProbe = (courseId: string, who: string): (string | number)[] => ["EXISTS", byKey(courseId, who)];
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
 const LEGACY_SCAN = 500;
 

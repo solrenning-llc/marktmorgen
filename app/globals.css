@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -251,6 +252,17 @@ body {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
   border-radius: 6px;
+}
+
+/* A file field kept visually hidden (sr-only) behind a label drawn as a button takes the Tab key, but its own ring is
+ * clipped to one pixel: the ring goes on the label that is seen, whether it wraps the field, comes just before it or
+ * just after it (WCAG 2.4.7, 2.4.13; tests/file-input-focus-ring.test.ts). In forced colors the outline keeps a system
+ * color of its own. */
+label:has(> input[type="file"].sr-only:focus-visible),
+label:has(+ input[type="file"].sr-only:focus-visible),
+input[type="file"].sr-only:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
 }
 
 /*
@@ -1212,7 +1224,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -1330,7 +1342,10 @@ a.chip {
    bar rather than by colour alone. */
 
 .toc-link {
-  display: block;
+  /* A 44 px tall target for each entry of a page index (2.5.5 AAA, tests/legal-pages-accessibility.test.ts). */
+  display: flex;
+  align-items: center;
+  min-height: 2.75rem;
   border-left: 2px solid var(--line);
   padding: 0.3rem 0 0.3rem 0.85rem;
   color: var(--ink-mute);
@@ -1970,6 +1985,11 @@ a.chip {
      whole page sideways, so they break wherever they must. */
   overflow-wrap: anywhere;
 }
+/* No block of a legal page's text is wider than 80 characters, at any width or with text spacing (1.4.8 AAA,
+   tests/legal-pages-accessibility.test.ts). */
+.legal-body :where(p, li, dd, blockquote) {
+  max-width: 46ch;
+}
 .legal-body a {
   color: var(--violet-deep);
   font-weight: 600;
@@ -1995,12 +2015,17 @@ a.chip {
   color: var(--ink);
 }
 
+/*
+ * WCAG 1.4.6 (AAA): white words on the delete button keep 7:1. --danger
+ * (#c2261f) gave 5.85:1; --danger-text gives 8.81:1, and the pointer darkens
+ * it further (tests/danger-button-contrast.test.ts).
+ */
 .btn-danger-solid {
-  background-color: var(--danger);
+  background-color: var(--danger-text);
   color: #fff;
 }
 .btn-danger-solid:hover {
-  background-color: #a8271f;
+  background-color: #741a15;
 }
 
 /* ------------------------------------------------------------------------
@@ -2485,7 +2510,8 @@ a.chip {
 .st-page .btn-secondary:focus-visible,
 .st-page .btn-primary:focus-visible,
 .st-page .st-footer-link:focus-visible,
-.st-social:focus-visible {
+.st-social:focus-visible,
+.sp-countdown-toggle:focus-visible {
   outline: 3px solid #000;
   outline-offset: 3px;
   box-shadow: 0 0 0 3px #fff !important;
@@ -2496,7 +2522,8 @@ a.chip {
   .st-page .btn-secondary:focus-visible,
   .st-page .btn-primary:focus-visible,
   .st-page .st-footer-link:focus-visible,
-  .st-social:focus-visible {
+  .st-social:focus-visible,
+  .sp-countdown-toggle:focus-visible {
     outline: 3px solid CanvasText;
     box-shadow: none !important;
     forced-color-adjust: auto;
@@ -2553,6 +2580,14 @@ select.st-field:not([multiple]),
    a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
    inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
 [data-store-layout] .st-footer-link:not(summary, figcaption > *) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
@@ -2690,6 +2725,9 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 .st-title-link {
   color: inherit;
   text-decoration: none;
+  /* A creator's title or name with one long word (a German compound, a run-together name) wraps inside its
+     card instead of running past it and being cut off on a phone (WCAG 1.4.10). */
+  overflow-wrap: anywhere;
   background-image: linear-gradient(currentColor, currentColor);
   background-size: 0% 2px;
   background-position: 0 100%;
@@ -2698,6 +2736,13 @@ form:has(input[name="pay"][value="plan"]:checked):has(input[data-bump="0"]:check
 }
 .st-title-link:hover {
   background-size: 100% 2px;
+}
+/* The embedded card's title: its click area covers the block of the title and the store's name, at least 44 px tall
+   (2.5.5 AAA, tests/embed-title-target.test.ts); the two-line clamp and the focus ring on the words stay. */
+.em-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
 }
 .st-title-link:focus-visible,
 .st-cover-link:focus-visible,
@@ -3394,6 +3439,24 @@ a.sp-product:focus-visible {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+/* Stops and starts the numbers (WCAG 2.2.2): a target of at least 44 × 44 px (2.5.5), its edge a border so it stays
+   drawn in forced colors, where a box-shadow is dropped. */
+.sp-countdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 /* A picture beside words: stacked on a phone, side by side once there is room, the picture on either side. */
 .sp-feature {
@@ -5104,6 +5167,19 @@ fieldset:disabled .cm-poll-row {
   gap: 0.5rem;
   max-width: calc(100vw - 1.5rem);
 }
+/*
+ * WCAG 2.4.12 (Focus Not Obscured, Enhanced): on a phone the cart's button
+ * sits over the top of the page, where nothing scrolls a link out from under
+ * it (the store's line of news, the store's name on a product's page). Once
+ * the button is there, the page starts below it: 0.75rem from the top, 44px
+ * tall, and 0.5rem of room. Lower down, html's scroll-padding-top (5.5rem)
+ * already keeps what has the focus clear of it.
+ */
+@media (max-width: 639.98px) {
+  body:has(#cart .st-cart-open) .st-page {
+    padding-top: calc(44px + 1.25rem + env(safe-area-inset-top));
+  }
+}
 .st-cart-open {
   min-height: 44px;
   gap: 0.5rem;
@@ -5226,3 +5302,38 @@ html:has([data-product-editor]) {
   }
 }
 /* end 654 [WG14] */
+
+/* 274 [AX1] dark mode, stage 1: dormant dark tokens (lib/dark-tokens.ts). */
+/* Nothing sets data-color-scheme yet, so no page changes. tests/dark-tokens.test.ts holds every pair to AAA. */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --paper: #10151d;
+  --sand: #161c26;
+  --sand-deep: #1e2531;
+  --line: #2a3240;
+  --line-strong: #3b4453;
+  --line-off: #7d8797;
+  --ink: #f4f2ed;
+  --ink-soft: #dad7d0;
+  --ink-mute: #c9c5bc;
+  --lilac: #1d1f3a;
+  --lilac-deep: #262a4d;
+  --action-bg: #b9b7f5;
+  --action-on: #10151d;
+  --action-border: #b9b7f5;
+  --link: #c3c1f7;
+  --focus-ring: #c3c1f7;
+  --accent-large: #9a97e0;
+  --mint-soft: #0f2a22;
+  --mint-text: #8fe8c6;
+  --mint: #4fd1a3;
+  --danger-soft: #331614;
+  --danger-text: #ffb4ab;
+  --danger: #ff7b6e;
+  --amber-soft: #2e2210;
+  --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
+  --background: var(--paper);
+  --foreground: var(--ink);
+}
+/* end dark tokens */

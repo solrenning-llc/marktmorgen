@@ -1,4 +1,4 @@
-## fix(a11y): colour utilities over a site class: the two that keep 7:1 apply, five keep the site colour (WCAG 1.4.6)
+## fix(a11y): colour utilities over a site class apply, except the two danger reds (WCAG 1.4.6)
 
 Asked by the Claude 4 coordinator on 15 November 2026 (AA → ALL), after the finding in #4765.
 - Most of `app/globals.css` is outside any `@layer`, and an unlayered rule beats Tailwind's layered utilities whatever their specificity.
@@ -16,14 +16,14 @@ The coordinator's conditions:
 | closing-refunds-confirm:96 (/studio/closing-refunds) | error, `notice-warn` + `text-ink` | 7.06:1 light; 2.00:1 dark | 16.12:1 light; 13.88:1 dark | **Applied** (`text-ink!`) |
 | blog-editor:267 (/studio/blog) | delete, `btn-ghost` + `text-danger` | 16.28 / 17.74:1 light | 5.37:1 on page, 5.85:1 in card, 4.96:1 hovered | Kept, reason in the source |
 | workflow-tools:326 (email studio) | "Failed" count, `tag` + `text-danger` | 9.31:1 | 4.96:1 | Kept; the word "Failed" carries the meaning |
-| call-editor:469 and :969 (/studio/community, product editor) | length hints, `field-hint` + `text-ink` | 9.42–10.26:1 light; 1.72:1 in a dark card | 16.28–17.74:1 light; 1.12:1 in a dark card | Kept, under 7:1 in a dark card |
-| feature-visuals:1104 (/platform, the "AI writing" picture) | sample field, `field` + `text-ink-mute` | 17.74:1 light; 1.12:1 dark | 10.26:1 light; 1.72:1 dark | Kept, under 7:1 dark |
+| call-editor:469 and :969 (/studio/community, product editor) | length hints, `field-hint` + `text-ink` | 9.42–10.26:1 light; 1.72:1 in a dark card | 16.28–17.74:1 light; 1.12:1 in a dark card | **Applied** (`text-ink!`), coordinator's decision: passes on the live light theme; in the dormant dark the card is the defect, and it fails before (1.72:1) and after (1.12:1) alike |
+| feature-visuals:1104 (/platform, the "AI writing" picture) | sample field, `field` + `text-ink-mute` | 17.74:1 light; 1.12:1 dark | 10.26:1 light; 1.72:1 dark | **Applied** (`text-ink-mute!`), coordinator's decision: passes light (10.26:1); dark fails before (1.12:1) and after (1.72:1) alike |
 
-**About the dark figures:** they use the **dormant** dark tokens (`:root[data-color-scheme="dark"]`, which nothing sets yet), applied to measure. Under them a `.card` stays white while the ink turns light, so several items fail **before** this change too. The live site is light only. The two kept for dark-card reasons (the call hints and the sample field) would apply cleanly on the live light theme. They follow the coordinator's letter, and the coordinator decides whether the dormant dark figures should count.
+**About the dark figures:** they use the **dormant** dark tokens (`:root[data-color-scheme="dark"]`, which nothing sets yet), applied to measure. Under them a `.card` stays white while the ink turns light, so several items fail **before** this change too. The live site is light only. The coordinator decided (15 Nov 2026, 13:43 UTC) that the call hints and the sample field apply: the dark-mode defect is the card, not the class. That is recorded in #4765 as a finding for dark mode stage 2.
 
 - `tests/colour-intents-apply.test.ts`:
   - RED commit cdf1d6b702, which fails on main (14 of 21 checks).
-  - Each applied item must carry `utility!`. Each kept item must carry no colour utility at all and must say why in the source.
+  - Each of the five applied items must carry `utility!`. The two kept danger reds must carry no colour utility at all and must say why in the source.
 - Not touched: the other 564 unlayered clashes, and the layer order of `app/globals.css` (left for Claude 1).
 
 ## Acessibilidade

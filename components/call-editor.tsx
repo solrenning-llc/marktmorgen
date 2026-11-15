@@ -156,7 +156,6 @@ function whereOf(draft: Pick<Draft, "video" | "meet" | "inPerson">): Where {
 }
 
 /** What choosing where does to a draft: in person turns every link off, and any other choice turns in person off. */
-/* Its two length hints are kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1 in a card under the dormant dark tokens, 1.12:1). */
 export function choose(draft: Draft, where: Where): Draft {
   return { ...draft, inPerson: where === "place", video: where === "video", meet: where === "google" || where === "zoom" ? where : null };
 }
@@ -467,7 +466,7 @@ export function OtherLengths({ draft, setDraft, currency, id, wrong, clearWrong,
           {/* Always in the page, so the line said when the call's own length grows past this one is announced (4.1.3). */}
           <div role="status" className="sm:col-span-3">
             {notLonger ? (
-              <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold">
+              <p id={`length-short-${id}-${row.id}`} className="field-hint font-semibold text-ink!">
                 {`${row.minutes} minutes is not longer than the call's own length of ${draft.minutes} minutes. Pick a longer one, or remove it.`}
               </p>
             ) : null}
@@ -967,7 +966,7 @@ export function CallEditor({ product, email, meetings = [] }: { product: Product
         <OtherLengths draft={draft} setDraft={setDraft} currency={currency} id={product.id} wrong={wrongLength} clearWrong={() => setWrongLength(null)} errorId={`call-error-${product.id}`} />
       ) : draft.extra.length ? (
         // A group shares one time, so it has one length: said before saving, never dropped in silence.
-        <p className="field-hint font-semibold" role="status">
+        <p className="field-hint font-semibold text-ink!" role="status">
           {`A group call has one length. Saving it as a group removes the other lengths: ${draft.extra.map((row) => `${row.minutes} minutes`).join(", ")}.`}
         </p>
       ) : null}

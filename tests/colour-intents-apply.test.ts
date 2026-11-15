@@ -6,9 +6,11 @@
  * delete button or a failure count, and the darker ink asked for on two warnings and two hints, were silently
  * replaced by the site class's own colour. Only the important variant ("!") applies over an unlayered rule.
  *
- * Each of the seven now carries the "!" variant, except where the colour asked for would draw text under 7:1;
- * those stay on the site class's colour, with the reason written beside them (the coordinator's condition,
- * 15 November 2026). The measured contrasts are in the branch's PR-BODY.md.
+ * Each of the seven now carries the "!" variant, except the two danger reds, which would draw text under 7:1 on
+ * the live (light) theme: those stay on the site class's colour, with the reason written beside them (the
+ * coordinator's condition and decision, 15 November 2026). The call hints and the sample field apply: they pass on
+ * the light theme, and under the dormant dark tokens they fail before and after alike, because the .card stays
+ * white there (a dark-mode stage 2 finding, #4765). The measured contrasts are in the branch's PR-BODY.md.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -28,9 +30,6 @@ const INTENTS: [string, string, string, string][] = [
 const KEPT: Record<string, string> = {
   "components/blog-editor.tsx btn-ghost text-danger question=\"Delete this post?": "The delete button is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
   "components/workflow-tools.tsx tag text-danger Failed ${n(counts.failed)}": "The failed count is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
-  "components/feature-visuals.tsx field text-ink-mute Who it is for, what makes it different": "The sample field's text is kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
-  "components/call-editor.tsx field-hint text-ink is not longer than the call's own length": "Its two length hints are kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
-  "components/call-editor.tsx field-hint text-ink A group call has one length": "Its two length hints are kept on the site class's colour (measured 15 Nov 2026: the colour asked for is under 7:1",
 };
 
 part("a colour asked for over a site class applies (the important variant), or is kept with its reason");

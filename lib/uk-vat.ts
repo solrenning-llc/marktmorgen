@@ -219,7 +219,8 @@ export function ukInvoice(input: {
   };
 }
 
-export type UkVatAdjustment = { date: string; exVatPence: number; vatPence: number; reason: string };
+/** A refund's entry: in the sale's currency, which what is left is checked in, and in pence, which the return adds up. */
+export type UkVatAdjustment = { date: string; exVatCents: number; vatCents: number; exVatPence: number; vatPence: number; reason: string };
 export type UkVatRecord = {
   v: 1;
   sale: string;
@@ -258,19 +259,27 @@ export function ukVatRecord(sale: { sale: string; store: string; invoice: UkInvo
 export function ukVatAdjustment(record: UkVatRecord, change: { at: number; exVatCents: number; vatCents: number; reason: string }): UkVatRecord | null {
   const date = dayOf(change?.at);
   if (!record || !date || date < record.date || !whole(change.exVatCents) || !whole(change.vatCents) || !text(change.reason, 100)) return null;
-  if (change.exVatCents > 0 || change.vatCents > 0 || (change.exVatCents === 0 && change.vatCents === 0)) return null;
-  // The VAT keeps the rate's proportion of the amount refunded: one cent either way is rounding, more is refused.
-  const expected = Math.floor((Math.abs(change.exVatCents) * record.rateBasisPoints + 5000) / 10000);
-  if (Math.abs(Math.abs(change.vatCents) - expected) > 1) return null;
-  const convert = (cents: number) => (record.currency === "GBP" ? cents : record.sterlingRate ? toPence(cents, record.sterlingRate.perPound) : null);
-  const exVatPence = convert(change.exVatCents);
-  const vatPence = convert(change.vatCents);
-  if (exVatPence === null || vatPence === null) return null;
-  const left = (field: "exVatPence" | "vatPence", now: number) => record[field] + record.adjustments.reduce((n, a) => n + a[field], 0) + now;
-  if (left("exVatPence", exVatPence) < 0 || left("vatPence", vatPence) < 0) return null;
+  // A refund gives value back: VAT given back with nothing refunded is refused (Claude 7 on #4574).
+  if (change.exVatCents >= 0 || change.vatCents > 0) return null;
+  if (!Array.isArray(record.adjustments) || record.adjustments.some((a) => !whole(a?.exVatCents) || !whole(a?.vatCents))) return null;
+  const sum = (field: "exVatCents" | "vatCents" | "exVatPence" | "vatPence") => record[field] + record.adjustments.reduce((n, a) => n + a[field], 0);
+  const exLeft = sum("exVatCents") + change.exVatCents;
+  const vatLeft = sum("vatCents") + change.vatCents;
+  if (!whole(exLeft) || !whole(vatLeft) || exLeft < 0 || vatLeft < 0) return null;
+  // What is left keeps the sale's own VAT proportion, within the one cent of its rounding. Checked on what is left, not
+  // on each entry, so one-cent entries cannot pile up and declare a full-value supply with less VAT (Claude 7 on #4574).
+  const expectedLeft = record.exVatCents > 0 ? Number((BigInt(2) * BigInt(exLeft) * BigInt(record.vatCents) + BigInt(record.exVatCents)) / (BigInt(2) * BigInt(record.exVatCents))) : 0;
+  if (!whole(expectedLeft) || Math.abs(vatLeft - expectedLeft) > 1) return null;
   // Nothing left to tax leaves no VAT behind.
-  if (left("exVatPence", exVatPence) === 0 && left("vatPence", vatPence) !== 0) return null;
-  return { ...record, adjustments: [...record.adjustments, { date, exVatPence, vatPence, reason: change.reason }] };
+  if (exLeft === 0 && vatLeft !== 0) return null;
+  const convert = (cents: number) => (record.currency === "GBP" ? cents : record.sterlingRate ? toPence(cents, record.sterlingRate.perPound) : null);
+  // An entry that takes what is left to nothing takes what is left in pence too, not a fresh conversion, whose rounding
+  // could pass below zero and refuse a full refund made in parts (Claude 7 on #4574, LEVE 2).
+  const exVatPence = exLeft === 0 ? -sum("exVatPence") : convert(change.exVatCents);
+  const vatPence = vatLeft === 0 ? -sum("vatPence") : convert(change.vatCents);
+  if (exVatPence === null || vatPence === null || !whole(exVatPence) || !whole(vatPence)) return null;
+  if (sum("exVatPence") + exVatPence < 0 || sum("vatPence") + vatPence < 0) return null;
+  return { ...record, adjustments: [...record.adjustments, { date, exVatCents: change.exVatCents, vatCents: change.vatCents, exVatPence, vatPence, reason: change.reason }] };
 }
 
 export type UkReturn = { start: string; end: string; deadline: string; nil: boolean; box1Pence: number; box6Pence: number; sales: number };

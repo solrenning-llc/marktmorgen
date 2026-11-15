@@ -548,10 +548,14 @@ async function main(): Promise<void> {
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
     // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
     // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.12, 313.83 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.12", "313.83", "703.26"]);
+    // With the line winback-commands (#4807, 15 November 2026: a come-back offer's Redis commands for each store
+    // email), Store keeps 45.11 where 45.12 was, Studio 313.82 where 313.83 was and Scale 703.23 where 703.26 was,
+    // still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.23 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.23"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 37.06, 258.71 and 579.99 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.71", "579.99"]);
+    // The same line (#4807): Studio's yearly month keeps 258.69 where 258.71 was, Scale's 579.96 where 579.99 was.
+    is("11: and 37.06, 258.69 and 579.96 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.69", "579.96"]);
   } finally {
     Date.now = realNow;
   }

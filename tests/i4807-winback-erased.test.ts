@@ -10,6 +10,7 @@ import { upsertContact } from "@/lib/contacts";
 import { suppressCommand } from "@/lib/suppression";
 import { forgetWinbackPerson, sendWinBacks } from "@/lib/winback-send";
 import { forgetNoted } from "@/lib/erasure-index";
+import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -141,7 +142,13 @@ async function main(): Promise<void> {
   {
     const email = "cal@example.com";
     await world("control", email, "sub_CalKept000001", "cus_CalKept0001");
-    const result = await sendWinBacks(Date.now() + 30_000, now);
+    // Every command counted, a script's own too (the in-memory Redis runs each through run()).
+    const run = redis.run.bind(redis);
+    let commands = 0;
+    redis.run = ((c: (string | number)[]) => { commands += 1; return run(c); }) as typeof redis.run;
+    const result = await sendWinBacks(Date.now() + 30_000, now).finally(() => { redis.run = run; });
+    console.log(`  one store's run with one offer sent: ${commands} commands`);
+    is(`at most WINBACK_OFFER_COMMANDS (${WINBACK_OFFER_COMMANDS}), with one left for the once-mark's read-back`, commands + 1 <= WINBACK_OFFER_COMMANDS, true);
     is("sent once", [result.sent, handed.filter((m) => m.to.includes(email)).length], [1, 1]);
     is("the once-mark and the link are kept", [winbackKeys().filter((k) => k.startsWith("nl:wb:once:")).length, winbackKeys().filter((k) => k.startsWith("nl:wb:link:")).length], [1, 1]);
   }

@@ -55,6 +55,7 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { WINBACK_OFFER_COMMANDS } from "@/lib/winback";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -1235,6 +1236,18 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
     basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+  },
+  {
+    id: "winback-commands",
+    feature: "A come-back offer's sending, in Redis commands: the membership's claim, the list token, the once-mark with the offer's link and its erasure note in one step only while the address was not erased, the print read again before the email (#4807), the count (15 November 2026)",
+    // Every store email of the plan sent as a come-back offer from a run of its own (the dearest way).
+    monthlyUsd: (tier) => STORE_ALLOWANCES[tier].email * WINBACK_OFFER_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/winback.ts", names: ["WINBACK_OFFER_COMMANDS"] },
+      { file: "lib/winback-send.ts", names: ["WINBACK_CLAIM", "claimOffer", "stillFree"] },
+      { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
+    ],
+    basis: "Each offer takes one of the store's emails before it goes (lib/email.ts EmailMeter), so the plan's store emails bound them; each is priced at WINBACK_OFFER_COMMANDS, a store's run that sends one, every script's own command counted (tests/i4807-winback-erased.test.ts). Offers that send nothing (came back, no consent, heard one lately, erased) take no email: their reads are a store's daily run, bounded by its ended memberships of the window and OFFERS_PER_RUN.",
   },
   {
     id: "transactional-email",

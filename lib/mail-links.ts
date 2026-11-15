@@ -19,7 +19,10 @@
  *
  *   - One per email, never one per reader. Everybody who gets the email gets
  *     the same link, so it says which email a sale came from and nothing
- *     about who bought. No pixel, no redirect through us, no profile. (An
+ *     about who bought. No pixel, no profile. (A one-off email made since
+ *     6 November 2026 sends each link through one redirect of ours, the
+ *     same for every reader and counting nothing, so its creator can change
+ *     where the link goes after it went out: lib/sent-links.ts.) (An
  *     email trying two subject lines has one per subject line instead, each
  *     shared by everybody who got that line: lib/mail-test.ts.)
  *   - Only on links to the creator's own store, here or on their own domain.
@@ -43,7 +46,17 @@ import type { Store } from "@/lib/store";
 /** The utm_source every email of this kind arrives with. */
 export const MAIL_SOURCE = "email";
 
-export type MailTag = { medium: "broadcast" | "sequence"; campaign: string };
+export type MailTag = {
+  medium: "broadcast" | "sequence";
+  campaign: string;
+  /**
+   * Where each link leads instead, given the address as written and the
+   * tagged one: a one-off email made since 6 November 2026 sends its links
+   * through one signed redirect each, the same for every reader, so the
+   * creator can change where they go after it went out (lib/sent-links.ts).
+   */
+  via?: (href: string, tagged: string) => string;
+};
 
 /** The campaign of a one-off email. Short enough to survive lib/came-from.ts's forty characters. */
 export const broadcastCampaign = (broadcastId: string) => `b-${broadcastId}`;

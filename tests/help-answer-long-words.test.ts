@@ -6,8 +6,9 @@
  * rounded corners). On a production build at 320 px, the end of two answers was cut off by 40 and 83 px. With the
  * text spacing of 1.4.12 (letters 0.12em, words 0.16em, lines 1.5), four sections were cut by 15 to 160 px.
  *
- * The help center's answers now break a long word where it has to (`wrap-anywhere`: overflow-wrap anywhere), and
- * break nowhere else.
+ * The help center's answers and questions now break a long word where they have to (`wrap-anywhere`: overflow-wrap
+ * anywhere), and break nowhere else. A question with a long word ("MarktmorgenOutreach") otherwise pushed its
+ * open/closed circle 14 px out of the box under 1.4.12's spacing.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -24,6 +25,11 @@ const page = readFileSync("app/help/page.tsx", "utf8");
 const answer = /<p key=\{paragraph\} className="([^"]*)"/.exec(page);
 is("the answer paragraph is found", Boolean(answer), true);
 is("it breaks a long word (wrap-anywhere)", /(?<![\w-])wrap-anywhere\b/.test(answer?.[1] ?? ""), true);
+const question = /<details key=\{item\.q\}[^>]*>\s*<summary className="([^"]*)"/.exec(page);
+is("the question (summary) is found", Boolean(question), true);
+// "I run a website and saw MarktmorgenOutreach in my logs": with 1.4.12's spacing at 320 px, the long word pushed
+// the open/closed circle 14 px out of the box.
+is("it breaks a long word too, so the open/closed circle stays in the box", /(?<![\w-])wrap-anywhere\b/.test(question?.[1] ?? ""), true);
 is("it still sits in the clipping box, so the break is what keeps the end of a word in view", /divide-y divide-line overflow-hidden/.test(page), true);
 
 done();

@@ -11,7 +11,7 @@
  */
 import { NextRequest } from "next/server";
 import { GET as back } from "@/app/api/billing/return/route";
-import { HELD_SLACK_DAYS, createBillingCheckout, ownedBy } from "@/lib/billing";
+import { HELD_SLACK_DAYS, createBillingCheckout, findStoreSubscriptions, ownedBy } from "@/lib/billing";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import { syncSubscriptions } from "@/lib/billing-sync";
 import { refusePlanIfClosing } from "@/lib/closing-plan-guard";
@@ -35,6 +35,8 @@ let lastCheckout: URLSearchParams | null = null;
 const ended: string[] = [];
 /** What Stripe's list of subscriptions holds, for the daily sync. */
 let listed: Reply[] = [];
+/** What Stripe's subscription search answers (observeStoreSubscriptions). */
+let searched: Reply[] = [];
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
@@ -53,6 +55,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ ...(subscriptions.get(sub[1]) ?? { id: sub[1] }), status: "canceled" });
   }
   if (sub && method === "GET") return subscriptions.has(sub[1]) ? json(subscriptions.get(sub[1])) : json({ error: { message: "No such subscription" } }, 404);
+  if (url.pathname === "/v1/subscriptions/search" && method === "GET") return json({ object: "search_result", data: searched, has_more: false, next_page: null });
   if (url.pathname === "/v1/subscriptions" && method === "GET") return json({ object: "list", data: listed, has_more: false, url: "/v1/subscriptions" });
   if (url.pathname.startsWith("/v1/prices") || url.pathname.startsWith("/v1/products") || url.pathname.startsWith("/v1/subscriptions") || url.pathname.startsWith("/v1/customers")) {
     return json({ object: "list", data: [], has_more: false });
@@ -194,6 +197,51 @@ async function main() {
       redis.pipeline = real;
     }
     is("an account read that does not read: unknown, and A's plan is not ended", [unknown, ended.includes(s.sub)], ["unknown", false]);
+  }
+
+  part("The store's own subscription, carrying its id, is found by the subscription search (review of 090840a90, HIGH)");
+  {
+    const owner = "sess-owner-find@example.com";
+    await claimHandle(owner, "sessownfind", "Find own", "");
+    await ensureStatsId(owner);
+    const store = (await storeForEmail(owner))!;
+    await setSubscription(owner, { customerId: "cus_SessOwnFind000", subscriptionId: null, active: false });
+    const mine = { ...subscription("sub_SessOwnFind0000", "cus_SessOwnFind000", { store: "sessownfind", store_sid: store.sid }, Math.floor(Date.now() / 1000)), customer: { id: "cus_SessOwnFind000", email: owner } };
+    searched = [mine];
+    listed = [];
+    const found = await findStoreSubscriptions((await storeForEmail(owner))!);
+    searched = [];
+    is("found live, so a lost way back never opens a second paid checkout beside it", found.live?.subscriptionId ?? null, "sub_SessOwnFind0000");
+  }
+
+  part("One customer for the account: the subscription search never gives B the plan A keeps (review of 090840a90)");
+  {
+    const s = await twoStores(9, () => ({ store: `sessownx9` }));
+    const own = "sub_SessOwnB90000000";
+    subscriptions.set(own, subscription(own, s.customer, { store: s.x }, Math.floor(Date.now() / 1000)));
+    await setSubscription(storeRef(s.b), { customerId: s.customer, subscriptionId: own, active: false, tier: "creator", cycle: "month", period: paidPeriod() });
+    const b = (await storeForId(s.b.sid))!;
+    searched = [{ ...subscriptions.get(s.sub)!, status: "past_due", customer: { id: s.customer, email: s.owner } }];
+    listed = [];
+    let found: Awaited<ReturnType<typeof findStoreSubscriptions>> | string;
+    try { found = await findStoreSubscriptions(b); } catch (error) { found = String(error); }
+    searched = [];
+    is("A's plan is neither B's live plan nor one B would end as lapsed", typeof found === "string" ? found : [found.live?.subscriptionId ?? null, found.lapsed], [null, []]);
+  }
+
+  part("The account's stores that do not read: the way back says unconfirmed and writes nothing (rule 24)");
+  {
+    const s = await twoStores(10, () => ({ store: `sessownx10` }));
+    const own = "sub_SessOwnB10000000";
+    subscriptions.set(own, subscription(own, s.customer, { store: s.x }, Math.floor(Date.now() / 1000)));
+    await setSubscription(storeRef(s.b), { customerId: s.customer, subscriptionId: own, active: false, tier: "creator", cycle: "month", period: paidPeriod() });
+    const b = (await storeForId(s.b.sid))!;
+    const real = redis.pipeline.bind(redis);
+    redis.pipeline = (async (commands: (string | number)[][]) => commands.some((c) => c[0] === "SMEMBERS") ? [] : real(commands)) as typeof redis.pipeline;
+    let answer: Response;
+    try { answer = await s.comeTo(b); } finally { redis.pipeline = real; }
+    const after = (await storeForId(s.b.sid))!;
+    is("unconfirmed, B unchanged", [billingOf(answer), after.subscriptionId, after.subscriptionActive], ["unconfirmed", own, false]);
   }
 
   part("A store with no id yet (an old record): its checkout carries no empty id, and an empty one reads as none");

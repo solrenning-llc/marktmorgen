@@ -3526,8 +3526,11 @@ async function recurringReferrals(store: Store, everyone: Affiliate[], since: nu
     if (after) query.set("starting_after", after);
     const wait = stripeWait(deadline);
     if (wait === null) break;
-    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { data?: unknown; has_more?: unknown };
-    const rows = (Array.isArray(listed.data) ? listed.data : []) as InvoiceLike[];
+    const listed = (await onAccount("GET", store.stripeAccountId as string, `/invoices?${query}`, undefined, AFF_SUB_STRIPE_VERSION, undefined, wait)) as { object?: unknown; data?: unknown; has_more?: unknown };
+    // A page in a shape not known is not "complete, no instalments" (rule 24; Claude 2 cloud C's MEDIUM on #3906): the
+    // read stops with complete false, so the idle sweep warns and removes nobody this run.
+    if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || typeof listed.has_more !== "boolean") break;
+    const rows = listed.data as InvoiceLike[];
     for (const invoice of rows) {
       const meta = invoice.parent?.subscription_details?.metadata ?? {};
       if (!meta.via || !AFFILIATE_ID_PATTERN.test(meta.via) || !handles.has(meta.store ?? "")) continue;

@@ -147,3 +147,77 @@ Os bytes são os da listing sintética, de cerca de 530 bytes. O pior caso usa o
   - O teste ganhou um check RED, que falhou antes do conserto: com 100 mil produtos, a busca não pode passar de 5 vezes a leitura sem ids. Por ser uma razão entre duas medidas da mesma execução, não depende da velocidade da máquina.
   - Antes: 16.856 ms contra 576 ms. Depois: 745 ms contra 598 ms. Com 2 mil produtos, 36 ms; com 10 mil, 120 ms.
   - Os 188 arquivos de teste que leem listings passam.
+
+---
+
+# Unidade 5, desenho detalhado do índice fora do registro (para revisão, sem construir)
+
+Decisão da sessão principal (15/11/2026, 01h50): desenho detalhado e testes, sem código de produção nem migração. A construção espera a revisão deste desenho. Conferido antes: `lib/store.ts` e `lib/catalog.ts` não estão reservados em `docs/reservations/` no main `e4dbb5e9b`.
+
+## Trava já em vigor
+
+`tests/catalog-whole-read-guard.test.ts` lista os **25 arquivos** que hoje leem o catálogo inteiro, com o número de leituras de cada um e o motivo, e falha:
+
+- se um caminho novo começar a ler tudo;
+- se um arquivo da lista passar a ler mais vezes;
+- se uma entrada deixar de ser verdade, para o inventário ficar exato.
+
+Uma leitura limitada (`.slice`) não conta. Escrever o teste revelou um caminho que o inventário acima não trazia: o apagamento de uma pessoa lê todos os cursos da loja (`lib/person-erasure.ts:233`, `readKindExact`).
+
+## Chaves novas
+
+Todas ficam sob o catálogo já existente, `nl:catalog:<id>:`:
+
+| Chave | Tipo | Conteúdo | Teto |
+| --- | --- | --- | --- |
+| `:o` | ZSET | id do produto, com a posição na ordem do criador como score | um membro por produto |
+| `:k:<tipo>` | SET | ids de cada tipo do índice de hoje (`KIND`: chamada, curso, pacote, funil, oculto, avulso limitado e os demais bits) | um membro por produto e tipo |
+| `:w:<palavra>` | SET | ids dos produtos visíveis cujo título ou resumo tem a palavra, normalizada por `searchWords` | `MAX_WORDS_PER_PRODUCT` palavras por produto; o número é decidido na construção, com preço no registro |
+| `:r:<produto>` | SET | ids de quem cita esse produto: funis, pacotes, ofertas no checkout (`bumpTargets`) | um membro por citação |
+
+O registro da loja continua com `catalog.id`, `catalog.head` (a primeira página) e passa a ter `catalog.count`. Durante a migração, também continua com `catalog.items`.
+
+## Gravação
+
+Toda gravação de produto (criar, editar, ocultar, reordenar, remover) roda **um** `EVAL` sobre as chaves do produto. Ele grava, de uma vez:
+
+- a listing;
+- o membro em `:o`;
+- os conjuntos de tipo;
+- as palavras, apagando as antigas e gravando as novas;
+- o índice reverso das citações que mudaram.
+
+Isso fecha o risco de consistência. Cada reescrita também acerta a contagem no registro da loja, sob o `withStore` de hoje. Reordenar reescreve os scores de `:o`, num lote por página.
+
+## Leituras
+
+Cada linha liga um caminho do inventário à leitura nova:
+
+| Caminho | Leitura nova | Comandos por operação |
+| --- | --- | --- |
+| página da loja, página N | `ZRANGE :o` da página e `GET` de 24 listings (a página 1 segue no `head`) | 1 + 24 |
+| busca (`searchStore`) | `SINTER` das palavras pedidas (até o teto de palavras da busca), depois a página de resultados | 1 + 24 |
+| mapa do site | `ZRANGE :o` por página do mapa | 1 + página |
+| salvar produto e estoque (`app/api/store/product/route.ts:88`, `lib/store.ts`) | `SMEMBERS :r:<produto>` e só esses produtos | 1 + citações |
+| telas por tipo (`readKind`) | `SSCAN :k:<tipo>` paginado | por página |
+| acesso de curso (file, vault, stream, captions, community, apagamento) | `SMEMBERS :k:course`: só os ids, sem ler as listings, quando só o id do curso importa | 1 |
+| tarefas (import, export, fechamento, recontagem, cópia, demo) | `ZRANGE :o` em páginas, com cursor e `withCutoff`, como #4583/#4584 pedem para os crons | por página |
+
+## Migração (unidade 5, não feita)
+
+1. **Escrever nos dois:** toda gravação passa a escrever também as chaves novas, e as leituras continuam no índice de hoje.
+2. **Copiar:** uma tarefa com cursor copia as lojas existentes e confere, loja por loja, que `:o` tem exatamente os ids e a ordem de `catalog.items`. Uma divergência é registrada e não avança.
+3. **Ler dos novos:** cada leitura passa às chaves novas atrás de uma flag `CATALOG_INDEX_READS` (false por padrão), caminho por caminho, com a trava acima diminuindo a cada um.
+4. **Tirar o índice antigo:** só depois de todos os caminhos lerem das chaves novas, `catalog.items` sai do registro. Até lá, `MAX_PRODUCTS` não muda.
+
+## Apagamento e fechamento
+
+`:o`, `:k:`, `:w:` e `:r:` entram em `lib/data-families.ts` e no fechamento da loja (`CLOSING`), apagados com o catálogo. As famílias guardam só ids e palavras do próprio texto do criador, nunca dado de comprador. Por isso não entram em `lib/person-data.ts`, e uma pessoa apagada não deixa nada nelas.
+
+## Custos que ainda faltam (custo desconhecido reprova)
+
+- Memória do índice de palavras e de `:o`/`:k:` por produto, a US$0,25 por GB por mês: precisa de linha no registro de custos com o teto de palavras.
+- Comandos de cada gravação no `EVAL` (cada palavra é um `SADD`/`SREM`): precisa de teto por produto salvo.
+- A tarefa de cópia da migração: lotes com cursor, custo por loja medido no teste de carga.
+
+Só com essas três linhas medidas as duas propostas da unidade 3 podem ir ao dono.

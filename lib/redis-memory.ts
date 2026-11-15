@@ -129,6 +129,17 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/assistant-reminder.ts FORGET_PERSON: a person's reminder sessions read, checked and deleted in one step.
+        if (key.startsWith("-- marktmorgen:assist-reminder-forget:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, who, prefix] = args;
+          // As Redis does: a list that is not there reads as none and deletes nothing (SMEMBERS here would leave an empty set).
+          const members = this.run(["EXISTS", who]) === 1 ? (this.run(["SMEMBERS", who]) as string[]) : [];
+          if (members.some((session) => !/^cs_(test|live)_[A-Za-z0-9]{10,200}$/.test(session))) return [-1, members.length];
+          let gone = 0;
+          for (const session of members) gone += Number(this.run(["DEL", prefix + session]));
+          if (members.length) gone += Number(this.run(["DEL", who]));
+          return [gone, members.length];
+        }
         // lib/request-guard.ts ESSENTIAL_BELOW: one more on an essential counter only while fewer than ARGV[1] were taken.
         if (key.startsWith("-- marktmorgen:essential-below:v1\n") && args[0] === "1" && args.length === 4) {
           const [, counter, below, window] = args;

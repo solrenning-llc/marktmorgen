@@ -3,7 +3,7 @@
  * whenever it was not an array, deleted only the index, and answered the DEL count as success: the consent still
  * holding the erased address stayed, and the reminder queue (which reads the consent by its session) could send
  * to it. Now the member list and the DEL count are read exactly; anything else throws UnknownReplyError, so the
- * erasure stays open and is run again.
+ * erasure stays open and is run again. Since the review of #4483 both are one script, whose answer is read exactly.
  *
  * Synthetic in-memory Redis only.
  */
@@ -45,24 +45,18 @@ async function main(): Promise<void> {
   const ok = await run(null);
   is("resolved with both deleted", [ok.outcome, ok.consent], ["resolved 2", null]);
 
-  part("Rule 24: an unreadable member list is unknown, never no reminders");
+  // The list is read, checked and deleted in one script (FORGET_PERSON, review of #4483): its answer is read exactly.
+  part("Rule 24: the erasure's answer read exactly, never as no reminders");
   for (const [what, reply] of [
-    ["a number instead of the list", [42]],
+    ["a number instead of the pair", [42]],
     ["no reply", []],
-    ["a list holding a number", [[1]]],
-    ["two replies", [[session], [session]]],
+    ["a pair holding text", [["OK", 1]]],
+    ["two replies", [[2, 1], [2, 1]]],
+    ["one number in the pair", [[2]]],
+    ["more deleted than it was sent", [[9, 1]]],
+    ["a member that is not a session", [[-1, 1]]],
   ] as const) {
-    const r = await run({ command: "SMEMBERS", reply: reply as unknown as unknown[] });
-    is(`${what}: rejected`, r.outcome, "rejected");
-  }
-
-  part("Rule 24: the DEL's count read exactly");
-  for (const [what, reply] of [
-    ["not a number", ["OK"]],
-    ["more than it was sent", [9]],
-    ["no reply", []],
-  ] as const) {
-    const r = await run({ command: "DEL", reply: reply as unknown as unknown[] });
+    const r = await run({ command: "EVAL", reply: reply as unknown as unknown[] });
     is(`${what}: rejected`, r.outcome, "rejected");
   }
 

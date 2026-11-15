@@ -52,6 +52,13 @@ async function main(): Promise<void> {
   is("up to the ceiling: within", last, "within");
   is("one more: over", await siteLinksAnswer(), "over");
   const real = redis.pipeline.bind(redis);
+  const sent: (string | number)[][][] = [];
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sent.push(commands);
+    return real(commands);
+  }) as typeof redis.pipeline;
+  await siteLinksAnswer();
+  is("one pipeline of two commands a request: INCR and EXPIRE NX on the site's one key", sent.map((commands) => commands.map((c) => [c[0], c[1], ...c.slice(2)])), [[["INCR", "nl:rl:signin-site"], ["EXPIRE", "nl:rl:signin-site", 3600, "NX"]]]);
   redis.pipeline = (async () => ["not a count"]) as typeof redis.pipeline;
   try {
     is("a count that cannot be read is unknown, never room", await siteLinksAnswer(), "unknown");

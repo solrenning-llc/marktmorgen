@@ -6,7 +6,8 @@ import { forVisitor } from "@/lib/visitor";
 import { activeIntro } from "@/lib/intro-price";
 import { salePrice } from "@/lib/store-sale";
 import { offNow, pricePill, productPath } from "@/components/store-product";
-import { shelfShown } from "@/lib/course-shelf";
+import { courseOffers } from "@/lib/course-shelf";
+import { CourseNextBox, NEXT_DISMISS_COOKIE } from "@/components/course-next-box";
 import { paypalReady } from "@/lib/paypal-sales";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -128,7 +129,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
 
   // The "More from" shelf (628 [HN4](b), lib/course-shelf.ts): only for a student, never on a guess about what they have.
-  const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];
+  // With it, once the student has finished, the one product the creator suggests next (299 [H5-2]), in the same reading.
+  const offers = studying ? await courseOffers(store, course, product.id, access.learner.email, finished) : { shelf: [], next: null };
+  const shelf = offers.shelf;
+  // Hidden once the student dismissed it, in this browser (components/course-next-box.tsx); nothing is kept on the server.
+  const dismissed = jar.get(NEXT_DISMISS_COOKIE(course.id))?.value === "1";
 
   // What the code knows of the course, never what anyone typed (292 [SQ3], lib/course-facts.ts).
   const facts = await readCourseFacts(course);
@@ -378,6 +383,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
             <CourseOutline course={course} base={base} start={start} done={known} held={held} language={store.language} />
           </div>
         </div>
+
+        {finished && offers.next && !dismissed ? (
+          <CourseNextBox
+            courseId={course.id}
+            store={store.name}
+            product={{ id: offers.next.id, title: offers.next.title, price: pricePill(store, offers.next), href: productPath(store, offers.next), image: null }}
+            language={store.language}
+          />
+        ) : null}
 
         {shelf.length ? (
           <section className="st-card mt-6 p-6 sm:p-8" aria-labelledby="course-shelf-title">

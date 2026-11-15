@@ -36,13 +36,13 @@ is("a product id", readNext("abcdef12", "course0001"), "abcdef12");
 is("the course itself is never its own next", readNext("course0001", "course0001"), "");
 is("not an id", readNext("<script>", "course0001"), "");
 is("not a string", readNext(42, "course0001"), "");
-const course = { id: "c1", modules: [], certificate: false, startsAt: null } as unknown as Course;
+const course = { id: "0123456789abcdef0123456789abcdef", modules: [], certificate: false, startsAt: null } as unknown as Course;
 const set = editCourse(course, { op: "next", product: "abcdef12", courseProductId: "course0001" });
 is("set by an edit", set.ok && set.course.next, "abcdef12");
 const cleared = set.ok ? editCourse(set.course, { op: "next", product: "", courseProductId: "course0001" }) : set;
 is("cleared by an empty edit", cleared.ok && !("next" in cleared.course), true);
-is("kept when the course is read back", parseCourse(JSON.parse(JSON.stringify({ ...course, next: "abcdef12" })))?.next, "abcdef12");
-is("an invalid pick is dropped when read back", parseCourse(JSON.parse(JSON.stringify({ ...course, next: "<x>" })))?.next, undefined);
+is("kept when the course is read back", parseCourse(JSON.stringify({ ...course, next: "abcdef12" }))?.next, "abcdef12");
+is("an invalid pick is dropped when read back", parseCourse(JSON.stringify({ ...course, next: "<x>" }))?.next, undefined);
 
 part("What is offered, and what never");
 const sold = new Map([["abcdef12", listing("abcdef12")]]);
@@ -72,7 +72,7 @@ is("a way to dismiss it", /<button[^>]*type="button"/.test(html) && text.include
 is("no focus taken, no video, no autoplay", /autofocus|autoFocus|<video|autoplay/i.test(html), false);
 is("nothing urgent, scarce, counted or quoted", /% off|only \d|left|hurry|ends in|countdown|\d+ (students|buyers)|"[^"]{20,}"/i.test(text), false);
 const box = readFileSync("components/course-next-box.tsx", "utf8");
-is("dismissing remembers it in this browser only, never on the server", box.includes(`document.cookie = \`\${NEXT_DISMISS_COOKIE}`) && !/fetch\(/.test(box), true);
+is("dismissing remembers it in this browser only, never on the server", box.includes(`document.cookie = \`\${NEXT_DISMISS_COOKIE(`) && !/fetch\(/.test(box), true);
 is("the cookie is the course's own", NEXT_DISMISS_COOKIE("c1"), "nl_next_off_c1");
 
 part("Every buyer language has the words");

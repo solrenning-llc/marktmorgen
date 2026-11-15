@@ -102,7 +102,8 @@ export async function GET(request: NextRequest) {
  * verdict, feedback }` approves a student's work or asks for another try;
  * `{ action: "template", id, template }` gives a new course one of the ready
  * structures (lib/course-templates.ts) by its id, applied here to the course
- * as it is kept, in one write; `{ action: "shelf", id, products }` sets the
+ * as it is kept, in one write; `{ action: "next", id, product }` sets the product suggested once the course is
+ * finished (299 [H5-2]); `{ action: "shelf", id, products }` sets the
  * course's "More from" shelf (628 [HN4](b)) to up to six of the store's own
  * products, in that order, and `products: []` takes it off.
  *
@@ -375,6 +376,17 @@ export async function POST(request: NextRequest) {
         const asked = Array.isArray(body.products) ? body.products.filter((p: unknown) => typeof p === "string" && hasProduct(store, p)) : null;
         if (!asked) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
         const result = editCourse(course, { op: "shelf", products: asked, courseProductId: product.id });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      // The one product suggested to a student who finished (299 [H5-2]): one of the store's own products, or "" for
+      // none; anything the store does not have, and the course itself, are refused here.
+      if (action === "next") {
+        const asked = typeof body.product === "string" ? body.product : null;
+        if (asked === null || (asked !== "" && !hasProduct(store, asked))) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+        const result = editCourse(course, { op: "next", product: asked, courseProductId: product.id });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });

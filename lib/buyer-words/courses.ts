@@ -64,6 +64,10 @@ const en = {
   seeSample: "See the certificate students get",
   /** The heading of the course page's shelf of the store's other products (628 [HN4](b)). */
   shelfTitle: (store: string) => `More from ${store}`,
+  /** The one product suggested once the course is finished (299 [H5-2]). */
+  nextTitle: (store: string) => `Next from ${store}`,
+  nextLine: "You finished this course. If you want to keep going, this is what the creator suggests next.",
+  nextDismiss: "Hide this suggestion",
   endedTitle: "Your membership has ended",
   endedBody:
     "This course came with your membership, which is no longer running, so its lessons are closed now. Renew and it opens right away, with your progress where you left it.",
@@ -404,6 +408,9 @@ const es: CoursesWords = {
   ownBody: "Ves todas las lecciones, como un estudiante ve una que ya está abierta. Nada de lo que hagas aquí cuenta como progreso.",
   seeSample: "Ver el certificado que reciben los estudiantes",
   shelfTitle: (store) => `Más de ${store}`,
+  nextTitle: (store) => `Lo siguiente de ${store}`,
+  nextLine: "Has terminado este curso. Si quieres seguir, esto es lo que sugiere el creador.",
+  nextDismiss: "Ocultar esta sugerencia",
   endedTitle: "Tu membresía terminó",
   endedBody:
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
@@ -715,6 +722,9 @@ const fr: CoursesWords = {
   ownBody: "Vous voyez toutes les leçons, comme un participant voit une leçon ouverte. Rien de ce que vous faites ici n'est compté comme progression.",
   seeSample: "Voir le certificat que reçoivent les participants",
   shelfTitle: (store) => `Plus de ${store}`,
+  nextTitle: (store) => `La suite chez ${store}`,
+  nextLine: "Vous avez terminé ce cours. Si vous voulez continuer, voici ce que le créateur suggère.",
+  nextDismiss: "Masquer cette suggestion",
   endedTitle: "Votre abonnement a pris fin",
   endedBody:
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
@@ -1020,6 +1030,9 @@ const de: CoursesWords = {
   ownBody: "Sie sehen jede Lektion so, wie Teilnehmende eine freigeschaltete sehen. Nichts, was Sie hier tun, zählt als Fortschritt.",
   seeSample: "Das Zertifikat ansehen, das Teilnehmende erhalten",
   shelfTitle: (store) => `Mehr von ${store}`,
+  nextTitle: (store) => `Als Nächstes von ${store}`,
+  nextLine: "Du hast diesen Kurs abgeschlossen. Wenn du weitermachen möchtest, schlägt der Creator das hier vor.",
+  nextDismiss: "Diesen Vorschlag ausblenden",
   endedTitle: "Ihre Mitgliedschaft ist beendet",
   endedBody:
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
@@ -1330,6 +1343,9 @@ const it: CoursesWords = {
   ownBody: "Vedi ogni lezione come uno studente vede una lezione aperta. Niente di ciò che fai qui viene contato come progresso.",
   seeSample: "Vedi l'attestato che ricevono gli studenti",
   shelfTitle: (store) => `Altro da ${store}`,
+  nextTitle: (store) => `Il prossimo da ${store}`,
+  nextLine: "Hai completato questo corso. Se vuoi continuare, ecco cosa suggerisce il creatore.",
+  nextDismiss: "Nascondi questo suggerimento",
   endedTitle: "La tua iscrizione è terminata",
   endedBody:
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
@@ -1638,6 +1654,9 @@ const nl: CoursesWords = {
   ownBody: "Je ziet elke les zoals een cursist een geopende les ziet. Niets wat je hier doet, telt als voortgang.",
   seeSample: "Bekijk het certificaat dat cursisten krijgen",
   shelfTitle: (store) => `Meer van ${store}`,
+  nextTitle: (store) => `Hierna van ${store}`,
+  nextLine: "Je hebt deze cursus afgerond. Wil je verder, dan raadt de maker dit aan.",
+  nextDismiss: "Deze suggestie verbergen",
   endedTitle: "Je lidmaatschap is afgelopen",
   endedBody:
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
@@ -1947,6 +1966,9 @@ const pt: CoursesWords = {
   ownBody: "Vê todas as aulas, tal como um aluno vê uma aula aberta. Nada do que fizer aqui conta como progresso.",
   seeSample: "Ver o certificado que os alunos recebem",
   shelfTitle: (store) => `Mais de ${store}`,
+  nextTitle: (store) => `A seguir, de ${store}`,
+  nextLine: "Concluiu este curso. Se quiser continuar, é isto que o criador sugere.",
+  nextDismiss: "Ocultar esta sugestão",
   endedTitle: "A sua subscrição terminou",
   endedBody:
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",

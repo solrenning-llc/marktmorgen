@@ -102,7 +102,7 @@ async function main(): Promise<void> {
   const callsBefore = stripeCalls;
   is("a shelf with no pick the store lists shows nothing", [await shown([draft, "zzzz9999"]), await shown([]), (await shelfShown(store, undefined, course, STUDENT)).length], [[], [], 0]);
   is("and never asks Stripe", stripeCalls, callsBefore);
-  is("counted before it is read, then what the student has read", /takeBuyerRead\(store, SHELF_REQUEST_UNITS\)\)\) return \[\];\s*try \{\s*const \[stripeOwned, listings\] = await Promise\.all\(\[ownedHere\(store, email\)/.test(read("lib/course-shelf.ts")), true);
+  is("counted before it is read, then what the student has read", /takeBuyerRead\(store, SHELF_REQUEST_UNITS\)\)\) return NONE;\s*try \{\s*const \[stripeOwned, listings\] = await Promise\.all\(\[ownedHere\(store, email\)/.test(read("lib/course-shelf.ts")), true);
   for (const key of redis.keys().filter((k) => k.startsWith("nl:traffic:r:"))) await redis.pipeline([["INCRBY", key, 100_000_000]]);
   const usedBefore = stripeCalls;
   is("the store's month of requests used: nothing is shown", await shown(), []);
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   is("after Save or Undo, whose buttons go away: the shelf itself", focusAfter({ kind: "saved" }, row("a"), 1), { to: "shelf" });
   is("the editor moves the focus there once the result is drawn, and the shelf can take it", [editor.includes("setPending(focusAfter("), editor.includes('ref={shelf} tabIndex={-1} role="group"'), (editor.match(/ data-focus=/g) ?? []).length], [true, true, 4]);
   const page = read("app/[handle]/course/[product]/page.tsx");
-  is("the page reads it only for a student, never for the owner or a visitor", page.includes("const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];"), true);
+  is("the page reads it only for a student, never for the owner or a visitor", page.includes("const offers = studying ? await courseOffers(store, course, product.id, access.learner.email, finished) : { shelf: [], next: null };"), true);
   is("under a heading of its own, each pick a link named by its title", /aria-labelledby="course-shelf-title"[\s\S]{0,200}<h2 id="course-shelf-title"[\s\S]{0,700}href=\{productPath\(store, item\)\}[\s\S]{0,300}\{item\.title\}/.test(page), true);
   is("its heading in every buyer language, with the store's name", Object.values(COURSES_WORDS).every((w) => w.shelfTitle("Shelf Shop").includes("Shelf Shop")), true);
 

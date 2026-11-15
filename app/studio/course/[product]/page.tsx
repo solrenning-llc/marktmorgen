@@ -31,6 +31,7 @@ import {
 } from "@/components/course-editor";
 import { readListing, readTitles, visibleIds } from "@/lib/catalog";
 import { CourseShelfStudio } from "@/components/course-shelf-studio";
+import { CourseNextStudio } from "@/components/course-next-studio";
 import { templateById } from "@/lib/course-templates";
 import { isStreamConfigured, streamCaptions, streamStates } from "@/lib/stream";
 import { autoRefundsOwed, autoWriting } from "@/lib/auto-captions";
@@ -276,6 +277,19 @@ export default async function StudioCoursePage({
             <CourseShelfStudio productId={product.id} saved={shelfSaved} options={shelfOptions} />
           )}
         </section>
+
+        {/* 299 [H5-2]: the one product suggested once a student finishes, from the same products the shelf offers. */}
+        {shelfTitles !== null && shelfOptions.length > 0 ? (
+          <section className="card mt-8 p-6 sm:p-8" aria-labelledby="course-next-title">
+            <h2 id="course-next-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">After a student finishes</h2>
+            <p className="mt-2 text-ink-soft">
+              Suggest one of your products on the course page once a student has finished every lesson. They see it only if it is
+              on sale and they do not have it already, and nothing when that cannot be checked. They can hide it, and it stays
+              hidden. No email is sent for it.
+            </p>
+            <CourseNextStudio productId={product.id} saved={course.next && shelfTitles.has(course.next) ? course.next : ""} options={shelfOptions} />
+          </section>
+        ) : null}
 
         <section className="card mt-8 p-6 sm:p-8" aria-labelledby="certificate-title">
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -973,6 +973,8 @@ function OptionsBlock({
         setError(
           reason === "fast_money"
             ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
+            : reason === "brand_imitation"
+            ? fastMoneyMessage((data as { passage?: unknown }).passage, "save")
             : reason === "too_many"
             ? `A product carries up to ${MAX_OPTIONS} prices.`
             : reason === "label"

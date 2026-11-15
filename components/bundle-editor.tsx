@@ -1,6 +1,7 @@
 "use client";
 
 import { PRODUCT_OUTLINE_LEFT } from "@/lib/product-outline";
+import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
@@ -150,13 +151,13 @@ export function BundleEditor({
     say(movedWords(name, to, items.length));
   }
 
-  async function post(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; id?: string }> {
+  async function post(payload: Record<string, unknown>): Promise<{ ok?: boolean; error?: string; id?: string; passage?: unknown }> {
     const response = await fetch("/api/store/bundle", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; id?: string };
+    return (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; id?: string; passage?: unknown };
   }
 
   async function save() {
@@ -185,7 +186,10 @@ export function BundleEditor({
           ? await post({ action: "create", title, summary, price, items: ids, pick: sentPick })
           : await post({ action: "save", id: owner?.id, items: ids, pick: sentPick });
       if (!data.ok) {
-        setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
+        // What the Terms forbid (fast money, 567 [GD1] (d); posing as Marktmorgen, 568 [GD2] (c)) is said with the
+        // passage, why and the fix the route sent, never as an unknown error.
+        if (data.error === "fast_money" || data.error === "brand_imitation") setError(fastMoneyMessage(data.passage, "add"));
+        else setError(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
         return;
       }
       toast(mode === "create" ? "Bundle added to your store." : "Bundle saved.");

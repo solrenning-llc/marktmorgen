@@ -1,4 +1,5 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { brandImitation } from "@/lib/brand-imitation-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import type { NextRequest } from "next/server";
 import {
@@ -93,6 +94,9 @@ export async function POST(request: NextRequest) {
       // A bundle is on the store at once: never with a part of the products' ready outline in its words (lib/product-outline.ts).
       const promptLeft = productPromptsLeft({ title: text(body.title, MAX_TITLE_LENGTH), summary: text(body.summary, MAX_SUMMARY_LENGTH), about: "" })[0];
       if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft }, { status: 409 });
+      // Never posing as Marktmorgen itself (568 [GD2] (c), unit 2).
+      const posing = brandImitation({ title: text(body.title, MAX_TITLE_LENGTH), summary: text(body.summary, MAX_SUMMARY_LENGTH), about: "" });
+      if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: posing }, { status: 409 });
       // And what the Terms forbid is refused before it is made (567 [GD1] (d)).
       const refused = fastMoneyRefusal({ title: text(body.title, MAX_TITLE_LENGTH), summary: text(body.summary, MAX_SUMMARY_LENGTH), about: "" });
       if (refused) return Response.json({ ok: false, error: "fast_money", passage: refused }, { status: 409 });

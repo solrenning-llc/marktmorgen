@@ -1,4 +1,5 @@
 import { fastMoneyRefusal } from "@/lib/terms-check-rules";
+import { brandImitation } from "@/lib/brand-imitation-rules";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
 import {
@@ -66,6 +67,9 @@ export async function POST(request: NextRequest) {
     if (action === "add" || action === "edit") {
       const refused = fastMoneyRefusal({ title: label, summary: details ?? "", about: "" });
       if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, field: "option" } }, { status: 409 });
+      // Nor posing as Marktmorgen itself (568 [GD2] (c), unit 2).
+      const posing = brandImitation({ title: label, summary: details ?? "", about: "" });
+      if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: { ...posing, field: "option" } }, { status: 409 });
     }
     if (action === "add") {
       result = await addOption(ref, id, label, price, { details, best, sku });

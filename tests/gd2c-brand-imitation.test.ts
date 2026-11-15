@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     "Markt-Morgen official partner pack.",
     "Your Marktmorgen account has been suspended until you verify it.",
     "Verify your account with Marktmorgen to keep your purchases.",
+    "Verify your Marktmorgen account to unlock it.",
     "Enter your Marktmorgen password to open the course.",
     "Unusual activity on your MARKTMORGEN library: click here.",
     "Download it at https://marktmorgen-login.com/files",

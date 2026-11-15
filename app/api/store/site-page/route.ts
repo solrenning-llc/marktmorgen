@@ -17,6 +17,8 @@ import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
 import { templateLeft } from "@/lib/template-text";
+import { brandImitationOnPage, pageLinks } from "@/lib/brand-imitation-rules";
+import { pageWords } from "@/lib/page-translate";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, parseSitePages, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
 /** Thirty full blocks as JSON, with room to spare; a page is held to MAX_PAGE_BYTES. */
@@ -293,6 +295,10 @@ export async function POST(request: NextRequest) {
       // refused once shown or scheduled, saying the block and the part (754 [STN1], unit 1).
       const left = outFrom(page) !== -1 ? templateLeft(page) : null;
       if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
+      // Nor, once shown or scheduled, words or links posing as Marktmorgen itself (568 [GD2] (c), unit 2): a store's
+      // own page is where a fake sign-in would sit. Kept while hidden, as a draft product's page is.
+      const posing = outFrom(page) !== -1 ? brandImitationOnPage(pageWords(page), pageLinks(page)) : null;
+      if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: posing }, { status: 409 });
       if (!store.statsId) {
         // A store written before it had one is given its id, and nothing else is written with it.
         const marked = await ensureStatsId(ref);

@@ -7,6 +7,7 @@ import { SAVED_BLOCK_ID, type SalesPage, oversized, pageProblem } from "@/lib/sa
 import { readPage, writePage } from "@/lib/sales-page-store";
 import { SITE_KINDS, isSiteKey, outFrom } from "@/lib/site-page-rules";
 import { fastMoneyMessage, fastMoneyOnPage } from "@/lib/terms-check-rules";
+import { brandImitationOnPage, pageLinks } from "@/lib/brand-imitation-rules";
 import { pageWords } from "@/lib/page-translate";
 import { templateLeft } from "@/lib/template-text";
 import { templateLeftMessage } from "@/lib/template-text-rules";
@@ -57,6 +58,9 @@ async function saveProblem(store: Store, key: string, page: SalesPage): Promise<
     const refused = fastMoneyOnPage(pageWords(page));
     if (refused) return fastMoneyMessage(refused, "save");
   }
+  // Posing as Marktmorgen is refused on both kinds of page while visitors see it (568 [GD2] (c), unit 2).
+  const posing = brandImitationOnPage(pageWords(page), pageLinks(page));
+  if (posing) return fastMoneyMessage(posing, "save");
   const left = templateLeft(page);
   if (left) return templateLeftMessage(left, left.kind ? (BLOCK_KINDS.find((k) => k.kind === left.kind)?.label ?? null) : null, site ? "site" : "product");
   return null;

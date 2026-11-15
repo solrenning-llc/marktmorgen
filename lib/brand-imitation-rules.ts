@@ -38,7 +38,7 @@ export const MAX_LINKS = 500;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type ImitationField = "title" | "summary" | "about" | "page";
+export type ImitationField = "title" | "summary" | "about" | "page" | "option";
 /** Where a product is stopped: the field, the passage, why and the fix, in the shape the studio's refusals read. */
 export type BrandImitation = { field: ImitationField; excerpt: string; why: string; fix: string; product?: string };
 
@@ -62,7 +62,7 @@ const SPEAKING_AS = /\b(?:we|us)\s*,?\s*(?:(?:here\s+)?at|from)?\s*(?:the\s+)?$|
 const OFFICIAL_BEFORE = /\bofficial\s+$/i;
 const OFFICIAL_AFTER = /^\s+official\b/i;
 /** The account in trouble, anywhere in the sentence with the name. */
-const TROUBLE = /\b(?:suspend(?:ed|s|ing)?|suspension|locked|deactivat(?:ed|e|ion)|disabled|terminated|unusual\s+(?:activity|sign[\s-]?in|login)|security\s+alert|verify\s+your\s+(?:account|identity|payment|card|details|information)|confirm\s+your\s+(?:identity|account|payment|card|billing|details)|update\s+your\s+(?:payment|billing|card)\s+(?:details|information|method))\b/i;
+const TROUBLE = /\b(?:suspend(?:ed|s|ing)?|suspension|locked|deactivat(?:ed|e|ion)|disabled|terminated|unusual\s+(?:activity|sign[\s-]?in|login)|security\s+alert|verify\s+your\s+(?:markt[\s-]?morgen\s+)?(?:account|identity|payment|card|details|information)|confirm\s+your\s+(?:markt[\s-]?morgen\s+)?(?:identity|account|payment|card|billing|details)|update\s+your\s+(?:markt[\s-]?morgen\s+)?(?:payment|billing|card)\s+(?:details|information|method))\b/i;
 /** A password, anywhere in the sentence with the name: Marktmorgen has none. */
 const PASSWORD = /\bpass(?:word|code)s?\b/i;
 /** A "no" before the words in the same sentence makes it the protective opposite. */

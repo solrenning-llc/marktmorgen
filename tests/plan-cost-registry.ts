@@ -1180,6 +1180,9 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "stopWriting(store.listId as string, r.to, \"refused\")"] },
       { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS"] },
+      // A community announcement batch reads its members' list rows once (one HMGET of at most CHECKED_BATCH_SIZE fields), far
+      // inside what the batch's emails cost at PER_EMAIL (14 November 2026).
+      { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
     basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
@@ -1448,6 +1451,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/[handle]/affiliates/page.tsx", names: ["admitAffiliatePage(store, affiliate)"] },
       { file: "lib/store-sitemap.ts", names: ["sitemapSize(store)", "takePublicRequest(store, \"public\", now, sitemapUnits(size))"] },
       { file: "app/[handle]/store-sitemap/route.ts", names: ["paidStoreSitemap(store)"] },
+      // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
+      // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
+      // before it is read (lib/store-search-index.ts, c1-cost-store-search).
+      { file: "app/[handle]/page.tsx", names: ["searchStorePaid(store, wantedSearch)"] },
+      { file: "lib/store-search-index.ts", names: ["takePublicRequest(store, \"public\", undefined, units, { shared: true })", "takePublicRequest(store, \"public\", undefined, 1)", "paidRead(store, shownIds)", "paidRead(store, missing)", "takePublicRequest(store, \"public\", undefined, units)"] },
       // The open cart counts what is left of each limited product in it, as a product's page does (513 [PF1], unit 3, 2 November 2026): one read each, at most MAX_CART.
       { file: "app/api/store/cart/route.ts", names: ["withinStore(\"cart-read\"", "stockLeft(store, p)"] },
       { file: "lib/stock.ts", names: ["MAX_CHECKS"] },

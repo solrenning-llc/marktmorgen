@@ -364,6 +364,8 @@ const quizKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:q
 const triesKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:tries:${who}`;
 const resultKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:result:${who}`;
 const passedKey = (courseId: string, who: string) => `nl:course:${courseId}:passed:${who}`;
+/** A command answering 1 when this learner passed a quiz in a course: a dropped one's probe (lib/person-erasure.ts). */
+export const passedProbe = (courseId: string, who: string): (string | number)[] => ["EXISTS", passedKey(courseId, who)];
 
 export async function readQuizFor(courseId: string, lessonId: string): Promise<Quiz | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;

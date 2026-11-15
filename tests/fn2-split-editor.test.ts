@@ -86,8 +86,9 @@ async function main(): Promise<void> {
   is("the same destination twice is refused", twice && !twice.ok ? twice.problems.map((p) => [p.field, p.index]) : null, [["option", 1]]);
 
   part("Twenty pages at most, each destination counted");
-  const full: PageFunnelStep[] = Array.from({ length: MAX_FUNNEL_PAGES - 1 }, (_, i) => page(`f${i}`));
-  const many = [...full.map((s) => ({ kind: s.kind, id: (s as { id: string }).id, title: (s as { id: string }).id, note: "" })), ...choices];
+  const fullIds = Array.from({ length: MAX_FUNNEL_PAGES - 1 }, (_, i) => `f${i}`);
+  const full: PageFunnelStep[] = fullIds.map(page);
+  const many = [...fullIds.map(choice), ...choices];
   const tooMany = { at: full.length, editing: null, id: "", options: ["page:p1", "page:p2"], equal: true, shares: ["50", "50"] };
   const over = checkSplitDraft(tooMany, full, many);
   is("a split that takes the funnel past 20 pages is refused with the count", over.ok ? null : over.problems.find((p) => p.field === "pages")?.message, `This funnel would have ${MAX_FUNNEL_PAGES + 1} pages. A funnel can have ${MAX_FUNNEL_PAGES} at most. Remove a step or a destination.`);
@@ -113,12 +114,12 @@ async function main(): Promise<void> {
   redis.clear();
   await claimHandle(OWNER, "spliteditor", "Split Editor", "");
   await ensureStatsId(OWNER);
-  await setSitePages(OWNER, ["p1", "p2", "p3"].map((id) => ({ id: `${id}aaaaaaa`, slug: `${id}-x`, title: id, nav: false, target: "", from: 0 })));
+  await setSitePages(OWNER, ["p1", "p2", "p3"].map((id) => ({ id: `${id}aaaaaaaa`, slug: `${id}-x`, title: id, nav: false, target: "", from: 0 })));
   const session = await openSession(OWNER);
   const save = async (funnel: unknown) =>
     (await saveRoute(new NextRequest("https://marktmorgen.com/api/store/page-funnels", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${session}` }, body: JSON.stringify({ funnel }) }))).json();
-  const real = ["p1", "p2", "p3"].map((id) => ({ kind: "page" as const, id: `${id}aaaaaaa`, title: id, note: "" }));
-  const start: PageFunnelStep[] = [{ kind: "page", id: "p1aaaaaaa" }];
+  const real = ["p1", "p2", "p3"].map((id) => ({ kind: "page" as const, id: `${id}aaaaaaaa`, title: id, note: "" }));
+  const start: PageFunnelStep[] = [{ kind: "page", id: "p1aaaaaaaa" }];
   const made = newSplitDraft(start, real, 1);
   const madeSteps = made ? checkSplitDraft({ ...setEqual(made, false), shares: ["65", "35"] }, start, real) : null;
   const first1 = madeSteps?.ok ? await save({ name: "Round trip", steps: stepsForSave(madeSteps.steps) }) : null;

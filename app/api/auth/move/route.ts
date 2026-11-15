@@ -187,7 +187,8 @@ async function finishMove(from: string, to: string, away: (path: string) => Resp
     const [there, here] = await Promise.all([storeForEmail(to).catch(() => undefined), storeForEmail(from).catch(() => undefined)]);
     if (there === null && here) await undo();
     else if (!(there && here === null)) {
-      console.error("a failed move left in an unknown state", { from, to });
+      // Neither address goes into the log (MM-SA-51): the move's own record (markBrokenMove) keeps them until it is repaired.
+      console.error("a failed move left in an unknown state");
       broke();
     }
     return away("/signin?status=move-error");

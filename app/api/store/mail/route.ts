@@ -33,11 +33,27 @@ import { setUpStarters } from "@/lib/mail-starters";
 import { readListings } from "@/lib/catalog";
 import { CrmSchemaReadUnavailable } from "@/lib/crm";
 import type { Permission } from "@/lib/team-roles";
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
 
 export const maxDuration = 60;
 
 /** Refusals of "keep sending" that have words of their own in the studio. */
 const KEEP_REFUSALS = new Set(["unsent", "excludes", "money", "already", "full"]);
+
+/** The part of a broadcast a buyer reads that poses as Marktmorgen, with the passage, why and the fix; null when none does. */
+function broadcastImitation(body: Record<string, unknown>): { field: "subject" | "test_subject" | "body"; excerpt: string; why: string; fix: string } | null {
+  const test = body.test && typeof body.test === "object" ? (body.test as Record<string, unknown>) : {};
+  const parts = [
+    ["subject", text(body.subject, 400)],
+    ["test_subject", text(test.subjectB, 400)],
+    ["body", text(body.body, MAX_MAIL_BODY * 2)],
+  ] as const;
+  for (const [field, words] of parts) {
+    const found = imitationIn(words);
+    if (found) return { field, excerpt: excerptAt(words.slice(0, MAX_TEXT), found.at, found.length), why: imitationWhy("the email cannot be sent with it"), fix: IMITATION_FIX };
+  }
+  return null;
+}
 
 /**
  * Which part of a role each action needs (lib/team-roles.ts): writing and
@@ -251,6 +267,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "broadcast") {
+      // An email to the whole list in Marktmorgen's name ("Marktmorgen Support: verify your account") is a phishing
+      // email sent from our servers: neither sent nor scheduled while its subject, its second subject or its words
+      // pose as Marktmorgen itself (568 [GD2] (c), lib/brand-imitation-rules.ts). Nothing is counted or written, and
+      // the creator's text is left as typed; a draft may keep it.
+      const posing = broadcastImitation(body);
+      if (posing) return Response.json({ ok: false, error: "brand_imitation", passage: posing }, { status: 409 });
       // A narrowed email reads the store's buyers again when their copy ran out: counted first, nothing written when not.
       // It also holds, in the month it goes out, what the scheduled job's readings then cost at the most: without
       // room for them in that month it is refused now, with the sentence saying why, and nothing is written.

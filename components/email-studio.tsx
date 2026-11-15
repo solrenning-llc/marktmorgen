@@ -33,7 +33,8 @@ import { MIN_TEST_REACH, TEST_HOURS, TEST_SHARES, type SubjectTest, type TestBy 
 import { type Currency, plainAmount } from "@/lib/money";
 import { mailAudienceWords, type MailAudienceSelection } from "@/lib/mail-audience-summary";
 import { campaignHistoryView, HISTORY_STATUSES, type HistoryStatus } from "@/lib/broadcast-history-view";
-import { broadcastAnswer, cancellationAnswer } from "@/lib/broadcast-response";
+import { broadcastAnswer, broadcastImitationPart, cancellationAnswer } from "@/lib/broadcast-response";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import type { DraftSubjectTest } from "@/lib/mail-draft-test";
 import { subjectTestPreview, type SubjectTestPreview } from "@/lib/mail-test-preview";
 import { readMailSchedule } from "@/lib/mail-schedule";
@@ -926,6 +927,11 @@ function Compose(props: {
     setConfirming(false);
     if (!a.ok) {
       if (payload.action === "broadcast" && a.error === "broadcast_write_unconfirmed") props.onBroadcastUnconfirmed();
+      // Posing as Marktmorgen (568 [GD2] (c)): where, the passage, why and the fix from the server; the text stays as typed.
+      if (payload.action === "broadcast" && a.error === "brand_imitation") {
+        setError(imitationMessage(a.passage, broadcastImitationPart(a.passage), later ? "Your email was not scheduled" : "Your email was not sent"));
+        return false;
+      }
       setError(message(a));
       return false;
     }

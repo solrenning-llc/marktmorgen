@@ -14,6 +14,8 @@ export const metadata: Metadata = {
 };
 
 const NOTICES: Record<string, string> = {
+  unknown: "Your code could not be checked just now, and nothing was opened. Wait a moment, then type the code your app shows now.",
+  "reset-unknown": "We could not let you in just now, and nothing was changed. Wait a moment, then try again.",
   wrong: "That code is not right. Type the six digits your app shows now, or one of your recovery codes.",
   limited: "That is a lot of codes in an hour. Wait a while, then try again, or log in with a passkey.",
   unreadable:
@@ -32,11 +34,19 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
   const params = await searchParams;
   const held = (await cookies()).get(TWO_STEP_COOKIE)?.value ?? "";
   const email = await heldFor(held);
-  if (!email) redirect("/signin?status=expired");
   const status = typeof params.status === "string" ? params.status : "";
-  const notice = NOTICES[status] ?? null;
+  // An unknown reply can come after the wait was spent (lib/two-step.ts finishSignIn): said as a login not finished,
+  // never as a link that expired.
+  if (!email) redirect(["unknown", "reset-unknown"].includes(status) ? "/signin?status=login-unknown" : "/signin?status=expired");
+  const notice = Object.hasOwn(NOTICES, status) ? NOTICES[status] : null;
   // A request to turn it off without a code, waiting its days (lib/two-step.ts askReset).
-  const { reset, backup } = await twoStepStatus(email);
+  // Unreadable just now (CX-123 rule 24): said so, and no day or address is made up for it.
+  const read = await twoStepStatus(email).catch((error: unknown) => {
+    console.error("reading two-step login for the code page failed", error);
+    return null;
+  });
+  const { reset, backup } = read ?? { reset: 0, backup: "" };
+  const shownNotice = read ? notice : "Your login settings could not be read just now. Wait a moment, then reload this page.";
   const resetDay = reset ? new Date(reset).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" }) : "";
 
   return (
@@ -48,9 +58,9 @@ export default async function CodePage({ searchParams }: { searchParams: Promise
         <p className="mt-4 text-lg text-ink-soft">Your link was good. Now type the code your authenticator app shows for Marktmorgen.</p>
 
         <div className="card mt-8 p-6 sm:p-8">
-          {notice ? (
+          {shownNotice ? (
             <p className="notice notice-error mb-5" role="alert">
-              {notice}
+              {shownNotice}
             </p>
           ) : null}
           <form method="post" action="/api/auth/code" className="space-y-4">

@@ -34,6 +34,7 @@ import {
   MAX_PITCH_SUBJECT,
   MAX_PITCHES,
   type OutreachGoal,
+  PITCH_STATUSES,
   READER_NAME,
   STOP_LINK,
   type Pitch,
@@ -57,7 +58,7 @@ import {
 import { storeBase } from "@/lib/purchase-email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SafeFetchError, checkUrl, safeFetch } from "@/lib/safe-fetch";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
@@ -208,16 +209,44 @@ export async function saveSender(store: Store, raw: { name?: unknown; address?: 
   if (!store.statsId || !isRedisConfigured()) return null;
   const sender = cleanSender(raw);
   if (!sender.name || !sender.address) return null;
-  await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]);
+  // Said saved only on the exact receipt (Claude 1 on #2870, LOW): an unknown answer throws, the route answers 503.
+  wroteSet(await redisPipeline([["SET", key(store.statsId, "me"), JSON.stringify(sender)]]), [["SET"]], "the sender");
   return sender;
 }
 
-/** Every pitch a store keeps, the newest first. */
+/**
+ * Every pitch a store keeps, the newest first. Read exactly (CX-123 rule 24):
+ * the hash's field/value list, each value a pitch that reads. An unknown
+ * reply or a kept pitch that does not read throws (UnknownReplyError), never
+ * "no pitches": what is kept is what holds the wait before the same business
+ * is written to again, a business's stop and MAX_PITCHES (startPitch). An
+ * empty list is a store that keeps none.
+ */
 export async function listPitches(store: Store): Promise<Pitch[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [all] = await redisPipeline([["HGETALL", key(store.statsId, "pitches")]]);
-  const values = Array.isArray(all) ? (all as unknown[]).filter((_, i) => i % 2 === 1) : all && typeof all === "object" ? Object.values(all as Record<string, unknown>) : [];
-  return values.map(parsePitch).filter((p): p is Pitch => p !== null).sort((a, b) => b.createdAt - a.createdAt);
+  const all = stringList(repliesFor(await redisPipeline([["HGETALL", key(store.statsId, "pitches")]]), 1)?.[0]);
+  if (!all || all.length % 2 !== 0) throw new UnknownReplyError("a store's pitches");
+  const pitches: Pitch[] = [];
+  for (let i = 1; i < all.length; i += 2) {
+    const pitch = parsePitch(all[i]);
+    // Every writer keeps when a pitch was made, and when a sent or stopped one went out (Codex Q on #2870): one kept
+    // without them would count as written long ago and let the same business be written to again before its wait.
+    if (!pitch || !(pitch.createdAt > 0) || (pitch.status !== "draft" && !(pitch.sentAt > 0))) throw new UnknownReplyError("a store's pitches");
+    // A status this code never writes ("Sent", or none) is unknown, never a draft with no wait (Claude 6 on #2870).
+    if (!keptStatusKnown(all[i])) throw new UnknownReplyError("a store's pitches");
+    pitches.push(pitch);
+  }
+  return pitches.sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Whether a kept pitch's own status is one this code writes (parsePitch reads any other as a draft). */
+function keptStatusKnown(raw: string): boolean {
+  try {
+    const status = (JSON.parse(raw) as { status?: unknown }).status;
+    return PITCH_STATUSES.includes(status as PitchStatus);
+  } catch {
+    return false;
+  }
 }
 
 export type StartResult =
@@ -261,7 +290,11 @@ export async function startPitch(
   // makes it with the first). Anything else refuses, never "not stopped" or "0 written today".
   const [sender, pitches, replies] = await Promise.all([
     readSender(store),
-    listPitches(store),
+    // Kept pitches that cannot be read are not "none" (CX-123 rule 24): refused below, like the stop lists.
+    listPitches(store).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return null;
+      throw error;
+    }),
     redisPipeline([
       ["SISMEMBER", key(store.statsId, "stop"), pageDomain],
       ["GET", key(store.statsId, `day:${dayOf(now)}`)],
@@ -272,7 +305,7 @@ export async function startPitch(
   const mine = answered ? stopOf(answered[0]) : null;
   const all = answered ? stopOf(answered[2]) : null;
   const today = answered ? textCountOf(answered[1]) : null;
-  if (mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
+  if (pitches === null || mine === null || all === null || today === null) return { ok: false, reason: "unavailable" };
   // The country was asked already; a stop is the next thing pitchProblem would refuse for.
   if (mine || all) return { ok: false, reason: "stopped" };
 
@@ -379,16 +412,20 @@ export async function startPitch(
     sentAt: 0,
   };
   const pushedOut = pitches.length - replaced.length >= MAX_PITCHES && spare.some((p) => !replaced.includes(p)) ? spare.find((p) => !replaced.includes(p))! : null;
-  await redisPipeline([
+  const commands: (string | number)[][] = [
     ["HSET", key(store.statsId, "pitches"), pitch.id, JSON.stringify(pitch)],
     ["INCR", key(store.statsId, `day:${dayOf(now)}`)],
     ["EXPIRE", key(store.statsId, `day:${dayOf(now)}`), 3 * 86_400],
     ["SET", linkKey(stop), JSON.stringify({ s: store.statsId, id: pitch.id, d: domain, n: (store.mail?.fromName || store.name).slice(0, 80) })],
     ...replaced.flatMap((p) => [["HDEL", key(store.statsId!, "pitches"), p.id], ...(p.stop ? [["DEL", linkKey(p.stop)]] : [])]),
     ...(pushedOut ? [["HDEL", key(store.statsId, "pitches"), pushedOut.id]] : []),
-  ]);
-  // The pitches let go give their room back; their stop links stay counted (OUTREACH_TRACE_BYTES).
-  const gone = replaced.length + (pushedOut ? 1 : 0);
+  ];
+  // Said written only on the exact receipt (Claude 1 on #2870): a draft shown with a stop link that may not open, or
+  // with no wait held before the same business, is never answered done. The room taken stays taken (fails safe).
+  const receipt = wroteSet(await redisPipeline(commands), commands, "a new pitch");
+  // The pitches let go give their room back; their stop links stay counted (OUTREACH_TRACE_BYTES). Only those this
+  // write removed, on their own HDEL's 1: a 0 is a drop that got there first and gave the room back already.
+  const gone = commands.filter((command, i) => command[0] === "HDEL" && receipt[i] === 1).length;
   if (gone > 0) await giveData(store, [{ slot: PITCHES_SLOT, bytes: gone * PITCH_BYTES }]);
   return { ok: true, pitch, left: written.left, replaced: replaced.map((p) => p.id) };
 }
@@ -396,16 +433,41 @@ export async function startPitch(
 /** The creator's own changes to a pitch they have not sent yet. The footer is not theirs to change. */
 export async function editPitch(store: Store, id: string, subject: string, body: string): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch || pitch.status !== "draft") return null;
   const next: Pitch = {
     ...pitch,
     subject: subject.replace(/\s+/g, " ").trim().slice(0, MAX_PITCH_SUBJECT) || pitch.subject,
     body: body.replace(/\r\n?/g, "\n").trim().slice(0, MAX_PITCH_BODY) || pitch.body,
   };
-  await redisPipeline([["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)]]);
+  wrote(await redisPipeline([["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)]]), 1, "a pitch's edit");
   return next;
+}
+
+/**
+ * One kept pitch, read exactly (Claude 6 on #2870, rule 24): nil (not there) or its text; any other answer throws,
+ * never "no such pitch".
+ */
+async function keptPitch(statsId: string, id: string): Promise<string | null> {
+  const raw = repliesFor(await redisPipeline([["HGET", key(statsId, "pitches"), id]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("a kept pitch");
+  return raw;
+}
+
+/** A write's receipt: one count for each command, or it throws, so a change is never said done on an unknown answer. */
+function wrote(replies: unknown, length: number, what: string): number[] {
+  const receipt = repliesFor(replies, length);
+  const counts = receipt?.map((reply) => countOf(reply));
+  if (!counts || counts.some((count) => count === null)) throw new UnknownReplyError(what);
+  return counts as number[];
+}
+
+/** A write's receipt where a SET answers "OK" and every other command a count, read in order; anything else throws. */
+function wroteSet(replies: unknown, commands: (string | number)[][], what: string): (number | "OK")[] {
+  const receipt = repliesFor(replies, commands.length);
+  const read = receipt?.map((reply, i) => (commands[i][0] === "SET" ? (reply === "OK" ? "OK" : null) : countOf(reply)));
+  if (!read || read.some((reply) => reply === null)) throw new UnknownReplyError(what);
+  return read as (number | "OK")[];
 }
 
 /**
@@ -415,26 +477,31 @@ export async function editPitch(store: Store, id: string, subject: string, body:
  */
 export async function setPitchStatus(store: Store, id: string, status: PitchStatus, now = Math.floor(Date.now() / 1000)): Promise<Pitch | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch) return null;
   // Once they asked to stop, it stays stopped.
   if (pitch.status === "stopped") return pitch;
   const next: Pitch = { ...pitch, status, sentAt: status === "draft" ? 0 : pitch.sentAt || now };
-  await redisPipeline([
+  // Said done only on the exact receipt (Claude 6 on #2870): "stopped" is a business's opt-out and "sent" starts the
+  // wait before the same business is written to again, so neither is answered done on a write not known to land.
+  const commands: (string | number)[][] = [
     ["HSET", key(store.statsId, "pitches"), id, JSON.stringify(next)],
     ...(status === "stopped" ? [["SADD", key(store.statsId, "stop"), pitch.domain]] : []),
-  ]);
+  ];
+  wrote(await redisPipeline(commands), commands.length, "a pitch's status");
   return next;
 }
 
 /** Takes a draft away. Only a draft: what was sent stays, so the same business is not written to twice. */
 export async function dropPitch(store: Store, id: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["HGET", key(store.statsId, "pitches"), id]]);
-  const pitch = parsePitch(raw);
+  const pitch = parsePitch(await keptPitch(store.statsId, id));
   if (!pitch || pitch.status !== "draft") return false;
-  await redisPipeline([["HDEL", key(store.statsId, "pitches"), id], ...(pitch.stop ? [["DEL", linkKey(pitch.stop)]] : [])]);
+  const commands: (string | number)[][] = [["HDEL", key(store.statsId, "pitches"), id], ...(pitch.stop ? [["DEL", linkKey(pitch.stop)]] : [])];
+  // The room is given back only for a drop known to have removed it (Claude 6 on #2870); another drop that got
+  // there first gave it back already.
+  const [removed] = wrote(await redisPipeline(commands), commands.length, "a pitch's drop");
+  if (removed !== 1) return false;
   await giveData(store, [{ slot: PITCHES_SLOT, bytes: PITCH_BYTES }]);
   return true;
 }
@@ -492,12 +559,18 @@ export async function readStopLink(token: string): Promise<{ domain: string; sto
 export async function stopFromLink(token: string, everyone: boolean, now = Math.floor(Date.now() / 1000)): Promise<boolean> {
   const link = await readLink(token);
   if (!link) return false;
-  const [raw] = await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]);
+  // Read and written exactly (CX-123 rule 24; J and Codex Q on #2870): the pitch is nil or a string, and the write
+  // answers one count for each command. Anything else throws, so the stop is never said done on a write whose answer
+  // is not known (the route then answers done=0, and pressing again only adds what may already be there).
+  const raw = repliesFor(await redisPipeline([["HGET", key(link.s, "pitches"), link.id]]), 1)?.[0];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("the pitch a stop link names");
   const pitch = parsePitch(raw);
-  await redisPipeline([
+  const writes: (string | number)[][] = [
     ["SADD", key(link.s, "stop"), link.d],
     ...(everyone ? [["SADD", STOP_ALL, link.d]] : []),
     ...(pitch && pitch.status !== "stopped" ? [["HSET", key(link.s, "pitches"), link.id, JSON.stringify({ ...pitch, status: "stopped", sentAt: pitch.sentAt || now } satisfies Pitch)]] : []),
-  ]);
+  ];
+  const receipt = repliesFor(await redisPipeline(writes), writes.length);
+  if (!receipt || !receipt.every((reply) => countOf(reply) !== null)) throw new UnknownReplyError("a business's stop");
   return true;
 }

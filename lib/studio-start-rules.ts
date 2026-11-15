@@ -30,6 +30,13 @@ export const FIRST_SALE_KEYS = ["product", "publish", "stripe", "plan", "share"]
 /** Steps never shown: done the moment the store exists. */
 export const ALWAYS_DONE_KEYS = ["address"] as const;
 
+/**
+ * Said under a step whose check mark could not be read just now (its read
+ * failed): such a step is never marked done, never left out and never the next
+ * step, so the list never looks complete over it (components/studio-start.tsx).
+ */
+export const START_STEP_UNKNOWN = "Could not be checked just now, so it is not marked done. Open this page again in a moment.";
+
 /** The most steps the list shows at once. */
 export const MAX_START_STEPS = 5;
 

@@ -18,13 +18,14 @@ const flat = (file: string) => readFileSync(file, "utf8").replace(/\s+/g, " ");
 const calls = flat("lib/calls.ts");
 
 part("A paid call's currency");
-is("read from the checkout session, lowercased, empty when it says none", calls.includes('currency: typeof row.currency === "string" && row.currency ? row.currency.toLowerCase() : "",'), true);
-is("the phone alert says the amount in it", calls.includes("formatMoney(input.amountCents, input.currency || store.currency)"), true);
+// Read exactly since the R48 follow-up (CX-123 rule 24; tests/r48-amount-followups.test.ts): three lowercase letters, or not known.
+is("read from the checkout session exactly, empty when it says none or another shape", calls.includes('currency: chargedIn(row.currency) ?? "",'), true);
+is("the phone alert says the amount in it, and none when it is not known", [calls.includes("const paidIn = chargedIn(input.currency);"), calls.includes("formatMoney(Number(input.amountCents), paidIn)"), /input\.currency \|\| store\.currency/.test(calls)], [true, true, false]);
 is("the bookings API says it", flat("lib/api-read.ts").includes("currency: c.currency || store.currency,"), true);
 const confirmations = ["app/[handle]/thanks/page.tsx", "lib/calls.ts", "lib/call-reminders.ts"];
 is("every place a booking is confirmed (the thanks page, a move, the reminders) passes it on", [
   confirmations.every((f) => flat(f).includes("confirmBooking(")),
-  flat("app/[handle]/thanks/page.tsx").includes("amountCents: order.amount, currency: order.currency,"),
+  flat("app/[handle]/thanks/page.tsx").includes("amountCents: order.amount, currency: order.record.currency,"),
   calls.includes("amountCents: call.amount, currency: call.currency,"),
   flat("lib/call-reminders.ts").includes("amountCents: call.amount, currency: call.currency,"),
 ], [true, true, true, true]);

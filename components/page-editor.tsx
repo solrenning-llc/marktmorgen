@@ -1,6 +1,7 @@
 "use client";
 
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
+import { templateLeftMessage } from "@/lib/template-text-rules";
 import { TestCountsNotice } from "@/components/test-counts-notice";
 import { pasteExceedsLimit } from "@/lib/paste-limit";
 
@@ -8,7 +9,7 @@ import { PageAnswers } from "@/components/page-answers";
 import type { WhyNot } from "@/lib/why-not-rules";
 import type { VideoReach } from "@/lib/page-depth";
 
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { SavedSections } from "@/components/saved-sections";
 import { useRouter } from "next/navigation";
 import { refusalOf, uploadMessage, uploadThroughDoor } from "@/lib/upload-refusal";
@@ -121,6 +122,7 @@ import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
+import { serverNote } from "@/lib/server-note";
 import { PreviewFrame, ScreenSwitch, usePreviewScreen } from "@/components/preview-frame";
 import { SidePanelSwitch, useSidePanel } from "@/components/side-panel-switch";
 import { COMPUTER_BODY_MAX, type PreviewScreen, screenFor } from "@/lib/preview-screen";
@@ -166,7 +168,7 @@ export const MESSAGES: Record<string, string> = {
   booking: `A page holds one booking block, with one of your calls chosen and a heading of up to ${MAX_HEADING} characters. Nothing was saved.`,
   same_version: "Version B shows just what version A does, or one of them has no blocks. Change something in version B, or end the test.",
   too_big: "The page is too long to save. Shorten some of the text.",
-  placeholder: "This page still has parts marked ⟦like this⟧ for you to write. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
+  placeholder: "This page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Replace each one with your own words, or keep the page hidden, before saving. Nothing was saved.",
   next: "After a sign-up, only another product that costs money can be shown.",
   unknown: "That product is no longer in your store. Reload the page.",
   store_full: "Your store is full. Remove something before adding more.",
@@ -565,6 +567,20 @@ export function PageEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  // The focus through the clear question (WCAG 2.4.3): opening it puts the focus on Keep it, the choice that changes
+  // nothing; Keep it puts it back on Clear the page. After Yes, clear it, focusAfterClear sends it on instead.
+  const clearKeep = useRef<HTMLButtonElement>(null);
+  const clearOpen = useRef<HTMLButtonElement>(null);
+  const clearBack = useRef(false);
+  // The question's own id, unique per editor, so a second editor on one screen never names its group by this one's.
+  const clearQuestionId = useId();
+  useEffect(() => {
+    if (confirmClear) clearKeep.current?.focus();
+    else if (clearBack.current) {
+      clearBack.current = false;
+      clearOpen.current?.focus();
+    }
+  }, [confirmClear]);
   // Which template the empty page would start from, and the block being dragged.
   const templates = site ? [] : PAGE_TEMPLATES.filter((t) => t.free === product.free);
   const [dragged, setDragged] = useState<number | null>(null);
@@ -936,22 +952,30 @@ export function PageEditor({
   const [versionNote, setVersionNote] = useState<string | null>(null);
   async function loadVersions() {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; versions?: { index: number; at: number; blocks: number; headline: string }[] };
-      if (!data.ok || !data.versions) throw new Error("unread");
+      if (!data.ok || !data.versions) {
+        refused = data;
+        throw new Error("unread");
+      }
       setVersions(data.versions);
     } catch {
       setVersions(null);
-      setVersionNote("The earlier versions could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "The earlier versions could not be read just now. Try again in a moment."));
     }
   }
   async function bringBack(index: number) {
     setVersionNote(null);
+    let refused: unknown = null;
     try {
       const response = await fetch(`/api/store/page-versions?id=${encodeURIComponent(pageKey)}&n=${index}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; at?: number; page?: SalesPage; dropped?: number };
-      if (!data.ok || !data.page) throw new Error("unread");
+      if (!data.ok || !data.page) {
+        refused = data;
+        throw new Error("unread");
+      }
       const page = data.page;
       putVersions(page, false);
       setSeoTitle(page.seoTitle);
@@ -969,7 +993,7 @@ export function PageEditor({
         `Loaded the version from ${whenSaved(data.at ?? 0)}. Press Save to put it back live${dropped ? `; ${dropped === 1 ? "one picture was" : `${dropped} pictures were`} deleted since, so add ${dropped === 1 ? "it" : "them"} again if you want ${dropped === 1 ? "it" : "them"}` : ""}.`,
       );
     } catch {
-      setVersionNote("That version could not be read just now. Try again in a moment.");
+      setVersionNote(serverNote(refused, "That version could not be read just now. Try again in a moment."));
     }
   }
 
@@ -996,7 +1020,7 @@ export function PageEditor({
       const response = await fetch(`/api/store/page?id=${encodeURIComponent(copyFrom)}`, { cache: "no-store" });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; blocks?: PageBlock[]; picturesLeft?: number; style?: PageStyle };
       if (!data.ok || !data.blocks?.length) {
-        setCopyNote("That page could not be read just now. Try again in a moment.");
+        setCopyNote(serverNote(data, "That page could not be read just now. Try again in a moment."));
         return;
       }
       const blocks = data.blocks;
@@ -1113,6 +1137,17 @@ export function PageEditor({
         // The page as it was a moment ago is now the newest earlier version.
         if (versions !== null) void loadVersions();
         return;
+      }
+      if (data.error === "placeholder") {
+        // A part a template left to write (754 [STN1], unit 1): said with where it is, and that block opened.
+        const left = data as { field?: unknown; block?: unknown; kind?: unknown; part?: unknown };
+        const field = left.field === "block" || left.field === "search" || left.field === "test" ? left.field : null;
+        const block = typeof left.block === "string" && all.some((b) => b.id === left.block) ? all.find((b) => b.id === left.block)! : null;
+        if (field && typeof left.part === "string" && left.part && (field !== "block" || block)) {
+          setError(templateLeftMessage({ field, part: left.part }, block ? kindLabel(block.kind) : null, site ? "site" : "product"));
+          if (block) show(block.id);
+          return;
+        }
       }
       setError(data.error === "fast_money" ? fastMoneyMessage((data as { passage?: unknown }).passage, "save") : refusalWords(data.error, page === null));
     } catch {
@@ -2588,7 +2623,7 @@ export function PageEditor({
                           productId={product.id}
                           block={block}
                           page={pageToSend}
-                          onChange={(next) => setDrafts((all) => all.map((d, i) => (i === index ? { ...d, block: next } : d)))}
+                          onChange={(next) => setDrafts((all) => all.map((d) => (d.block.id === block.id ? { ...d, block: next } : d)))}
                         />
                       )}
                     </div>
@@ -2849,17 +2884,27 @@ export function PageEditor({
         ) : null}
         {initial.blocks.length > 0 && !dirty && !site ? (
           confirmClear ? (
-            <span className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
-              Back to the plain page?
+            <span role="group" aria-labelledby={clearQuestionId} className="flex flex-wrap items-center gap-2 text-sm text-ink-soft">
+              <span id={clearQuestionId}>
+                Back to the plain page?
+              </span>
               <button type="button" className="btn btn-danger btn-sm" aria-disabled={busy || undefined} onClick={clearNow}>
                 Yes, clear it
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setConfirmClear(false)}>
+              <button
+                ref={clearKeep}
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => {
+                  clearBack.current = true;
+                  setConfirmClear(false);
+                }}
+              >
                 Keep it
               </button>
             </span>
           ) : (
-            <button type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
+            <button ref={clearOpen} type="button" className="btn btn-ghost" onClick={() => setConfirmClear(true)}>
               Clear the page
             </button>
           )

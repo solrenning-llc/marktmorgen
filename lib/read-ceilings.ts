@@ -192,7 +192,7 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
  * kind: its visits (readStats and readLife), its sales (readSales) or its
  * memberships, as TOTALS_STORE_SHAPE counts each; with the copy kept looked
  * at first (GET), the day's count (SET NX, INCRBY, EXPIRE NX: 3, and for a
- * heavy one its own SET NX and INCRBY: 5) and the reading kept (SET: at most
+ * heavy one its own INCRBY and EXPIRE NX: 5) and the reading kept (SET: at most
  * READING_COPY_MAX_BYTES). A refused count's DECRBY is in
  * KEPT_READINGS_SHAPE, where nothing is read. Priced, every reading of every
  * day, in the store-readings line (tests/plan-cost-registry.ts).

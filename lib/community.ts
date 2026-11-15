@@ -83,6 +83,7 @@ import { type Poll, parsePoll, pollKeys } from "@/lib/community-polls";
 import { type DmSetting, NO_DM, parseDmSetting } from "@/lib/community-dm";
 import { type ChatSetting, NO_CHAT, parseChatSetting } from "@/lib/community-chat";
 import { claimHandle } from "@/lib/community-mentions";
+import { WRITE_ABOUT_IF } from "@/lib/product-about";
 
 /** The author of what the creator writes. Never a member key, which is hex. */
 export const CREATOR = "creator";
@@ -107,6 +108,15 @@ export type Space = {
    * opens the right to start a conversation, never the right to take part.
    */
   level: number;
+  /**
+   * For a space kept for some buyers: whether a member without one of those
+   * products sees it in the list, locked, with its name, its one line and the
+   * way to buy in (542 [CM1], "Visible and locked"), instead of no sign of it
+   * ("Hidden", the default, and every space made before there was a choice).
+   * Never its posts, comments, members or any count: that is still only
+   * maySeeSpace's to open (lib/community-access.ts, lib/community-locked.ts).
+   */
+  shown?: true;
 };
 
 export type CommunityConfig = {
@@ -289,6 +299,8 @@ function parseConfig(raw: unknown): CommunityConfig | null {
         only: ids(entry.only, 50).filter((p) => p.length <= 40),
         // Spaces made before there were levels need none.
         level: Number.isInteger(entry.level) && entry.level >= 2 && entry.level <= 9 ? entry.level : 0,
+        // And before a kept space could be shown locked: hidden, as it always was.
+        ...(entry.shown === true ? { shown: true as const } : {}),
       });
       if (spaces.length >= MAX_SPACES) break;
     }
@@ -324,11 +336,25 @@ export async function readConfig(id: string): Promise<CommunityConfig | null> {
 }
 
 /**
+ * A setup that Redis did answer, as text, but that is not settings: stored
+ * damaged, so asking again gives the same answer. Still an unknown reply to
+ * anyone who catches UnknownReplyError; only a caller that knows what such a
+ * setup means for it may tell the two apart (lib/community-erasure.ts).
+ */
+export class DamagedConfigError extends UnknownReplyError {
+  constructor() {
+    super("a community setup stored damaged");
+    this.name = "DamagedConfigError";
+  }
+}
+
+/**
  * The settings, read before anything is written over them: null only when
  * the GET answered exactly nil, so there is no setup yet. A lost reply, one
  * in another shape or a value that does not parse throws, and the caller
  * writes nothing; a fresh setup over the creator's spaces and access would
- * lock every paying member out.
+ * lock every paying member out. A text value that does not parse throws
+ * DamagedConfigError.
  */
 export async function readConfigExact(id: string): Promise<CommunityConfig | null> {
   if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
@@ -336,12 +362,40 @@ export async function readConfigExact(id: string): Promise<CommunityConfig | nul
   if (!replies) throw new UnknownReplyError("a community setup");
   if (replies[0] === null) return null;
   const config = parseConfig(replies[0]);
-  if (!config) throw new UnknownReplyError("a community setup");
+  if (!config) throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
   return config;
 }
 
+/**
+ * The settings as readConfigExact reads them, with the exact stored text, for a write that must land only over what
+ * was read (saveConfigIfSame): null only when there is no setup yet; anything unknown throws.
+ */
+export async function readConfigExactRaw(id: string): Promise<{ config: CommunityConfig; raw: string } | null> {
+  if (!COMMUNITY_ID.test(id)) throw new UnknownReplyError("a community id");
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(id)]]), 1);
+  if (!replies) throw new UnknownReplyError("a community setup");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config || typeof replies[0] !== "string") throw typeof replies[0] === "string" ? new DamagedConfigError() : new UnknownReplyError("a community setup");
+  return { config, raw: replies[0] };
+}
+
+/**
+ * The settings written only while the stored text is still `read` (Codex X5's review of #3007): true when written,
+ * false when another save landed in between and nothing was written; any other answer throws UnknownReplyError. The
+ * same compare-and-set script as a product's description (lib/product-about.ts, modeled in lib/redis-memory.ts).
+ */
+export async function saveConfigIfSame(id: string, read: string, config: CommunityConfig): Promise<boolean> {
+  const reply = repliesFor(await redisPipeline([["EVAL", WRITE_ABOUT_IF, 1, cfgKey(id), read, JSON.stringify(config)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === 1) return true;
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === 0) return false;
+  throw new UnknownReplyError("a community's setup save");
+}
+
 export async function saveConfig(id: string, config: CommunityConfig): Promise<void> {
-  await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]);
+  // Its own answer read (review of #3007, L2): a save not confirmed throws, so no route says it saved.
+  const replies = repliesFor(await redisPipeline([["SET", cfgKey(id), JSON.stringify(config)]]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError("a community's setup save");
 }
 
 // ------------------------------------------------------------------ members
@@ -459,6 +513,28 @@ export async function readMembers(id: string, keys: string[]): Promise<Map<strin
   unique.forEach((key, i) => {
     const member = parseMember(list[i]);
     if (member) out.set(key, member);
+  });
+  return out;
+}
+
+/**
+ * The members of `keys`, read exactly (rules 24 and 30), for deciding who an email goes to: one left out of the map
+ * only when its row answered exactly nil, so it is gone. A reply lost, cut short or in another shape, or a row that is
+ * not that member's record, throws UnknownReplyError: a member who did not read is not one who is gone, and an email
+ * meant for them is not counted as sent (lib/community-event-mail.ts).
+ */
+export async function readMembersExact(id: string, keys: string[]): Promise<Map<string, Member>> {
+  const out = new Map<string, Member>();
+  const unique = [...new Set(keys)].filter((k) => k !== CREATOR);
+  if (!unique.length) return out;
+  const replies = repliesFor(await redisPipeline([["HMGET", membersKey(id), ...unique]]), 1);
+  const rows = replies && repliesFor(replies[0], unique.length);
+  if (!rows) throw new UnknownReplyError("community members");
+  unique.forEach((key, i) => {
+    if (rows[i] === null) return;
+    const member = parseMember(rows[i]);
+    if (!member || member.k !== key) throw new UnknownReplyError("a community member record");
+    out.set(key, member);
   });
   return out;
 }
@@ -831,6 +907,12 @@ export type NewPost = {
   img: CommunityImage | null;
   kind: "post" | "announcement";
   poll: Poll | null;
+  /**
+   * The post's id, when it is fixed beforehand: a held post is published
+   * under its own item's id (lib/community-approval.ts, 543 [CM2]), so a
+   * write whose reply was lost can be found, and never made twice.
+   */
+  id?: string;
 };
 
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
@@ -839,7 +921,7 @@ export async function createPost(id: string, input: NewPost, room: DataStore): P
   if (Number(count) >= MAX_POSTS) return { ok: false, reason: "full" };
   const [n] = await redisPipeline([["INCR", seqKey(id)]]);
   const post: Post = {
-    id: newItemId(),
+    id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
     n: Number(n),
     sp: input.space,
     a: input.author,
@@ -1109,7 +1191,7 @@ export async function readComment(id: string, post: string, comment: string): Pr
 export async function addComment(
   id: string,
   post: string,
-  input: { parent: string; author: string; text: string },
+  input: { parent: string; author: string; text: string; id?: string },
   room: DataStore,
 ): Promise<{ ok: true; comment: Comment } | { ok: false; reason: "full" | "parent" }> {
   const [size] = await redisPipeline([["HLEN", commentsKey(id, post)]]);
@@ -1120,7 +1202,8 @@ export async function addComment(
     if (!above) return { ok: false, reason: "parent" };
     parent = above.parent || above.id;
   }
-  const comment: Comment = { id: newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
+  // A fixed id: a held comment is published under its item's id (543 [CM2]), as a held post is.
+  const comment: Comment = { id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(), parent, a: input.author, text: input.text, at: now(), hid: false, ed: 0 };
   const traced = comment.a !== CREATOR;
   await needData(room, [{ slot: POST_SLOT(post), bytes: commentBytes(comment) }, ...(traced ? [TRACE_ENTRY] : [])]);
   await redisPipeline([["HSET", commentsKey(id, post), comment.id, JSON.stringify(comment)], ...(traced ? [["SADD", traceKey(id, comment.a), `c:${post}:${comment.id}`]] : [])]);

@@ -11,6 +11,7 @@
  *   nl:health:<statsId>   JSON Health, ten minutes
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { readListings } from "@/lib/catalog";
@@ -20,6 +21,7 @@ import { lastSeenMany } from "@/lib/learn";
 import { lastSeenIn, readConfig } from "@/lib/community";
 import { normaliseEmail } from "@/lib/auth";
 import { type Band, type HealthFactor, bandOf, scoreOf } from "@/lib/member-health-rules";
+import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 const MAX_PAGES = 10;
 const CACHE_SECONDS = 10 * 60;
@@ -69,6 +71,8 @@ type Raw = PauseSub & {
   cancel_at_period_end?: unknown;
   cancel_at?: unknown;
   current_period_end?: unknown;
+  trial_end?: unknown;
+  billing_cycle_anchor?: unknown;
   metadata?: Record<string, string> | null;
   customer?: { email?: unknown } | string | null;
   items?: { data?: { quantity?: unknown; current_period_end?: unknown; price?: { unit_amount?: unknown; metadata?: Record<string, string> | null; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] };
@@ -183,7 +187,8 @@ async function scoredMembers(store: Store, rows: Raw[], now = Date.now()): Promi
       const course = listing?.course?.id ?? "";
       const meta = raw.metadata ?? {};
       // A membership sold to end after a set number of payments has its end from the start: that is not a choice to leave.
-      const ending = !meta.ends_after && (raw.cancel_at_period_end === true || num(raw.cancel_at) > 0);
+      // Set to stop before that end, it is (lib/fixed-end-rules.ts).
+      const ending = meta.ends_after ? stopsBeforeSoldEnd(raw) : raw.cancel_at_period_end === true || num(raw.cancel_at) > 0;
       const { score, factors } = scoreOf(
         {
           status: String(raw.status),
@@ -255,6 +260,10 @@ export async function memberHealth(store: Store, fresh = false, now = Date.now()
 /** Lets the ten-minute copy of the members' scores go, so a deleted person is not in it (lib/person-erasure.ts). */
 export async function forgetHealthCopy(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", cacheKey(store)]]);
-  return Number(gone) || 0;
+  const replies = repliesFor(await redisPipeline([["DEL", cacheKey(store)]]), 1);
+  const gone = countOf(replies?.[0]);
+  // One key: 0 (it was not there) or 1 (deleted). Any other reply is unknown, so the step is not done and the
+  // erasure says so, never a copy with the person in it counted as gone (CX-123 rule 24).
+  if (gone === null || gone > 1) throw new UnknownReplyError("the deletion of the members' scores copy");
+  return gone;
 }

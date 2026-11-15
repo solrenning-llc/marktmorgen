@@ -100,6 +100,16 @@ async function main(): Promise<void> {
   is("two pages, the second the last: paid, checked, two reads", [r.shown.state, r.shown.refundsChecked, r.reads], ["paid", true, 2]);
   is("the second page starts after the first one's last row", asked[1]?.includes("starting_after=re_other_99"), true);
 
+  part("A row of /refunds that is not a refund is never counted or kept (Codex X5, Claude 2 H on #3160; rule 24)");
+  // Everything a refund of ours would say but its object: missing, a charge, a dispute or null. Counted, it would be
+  // written upward for good (changeRequest only raises), so a later correct reading could never undo it.
+  for (const [label, object] of [["no object", undefined], ["a charge", "charge"], ["a dispute", "dispute"], ["object null", null]] as const) {
+    const row: Record<string, unknown> = { id: `re_notrefund_${label.replace(/\s/g, "_")}`, payment_intent: INTENT, status: "succeeded", amount: PAID, currency: "usd" };
+    if (object !== undefined) row.object = object;
+    r = await reading([list([row], false)]);
+    is(`${label}: nothing counted, nothing kept, not checked`, [r.kept.refunded, r.kept.state, r.shown.refundsChecked], [0, "paid", false]);
+  }
+
   part("A list cut off after the pages read is not checked");
   r = await reading([list(hundred(0), true), list(hundred(100), true), list(hundred(200), true), list([ours("re_ours_late", 10_000)], false)]);
   is("three pages read, more on Stripe: not checked, nothing made up", [r.shown.state, r.shown.refunded, r.shown.refundsChecked, r.reads], ["paid", 0, false, 3]);

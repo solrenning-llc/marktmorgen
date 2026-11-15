@@ -1066,6 +1066,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/email/links/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/email/links",
+      "parameters": []
+    },
+    {
       "source": "app/studio/email/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/email",
@@ -1290,6 +1296,10 @@
       "status": "not yet reviewed for this programme"
     },
     {
+      "source": "app/global-error.tsx",
+      "status": "AAA review not completed"
+    },
+    {
       "source": "app/not-found.tsx",
       "status": "not yet reviewed for this programme"
     }
@@ -1321,6 +1331,7 @@
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
     "components/audio-embed.tsx",
+    "components/automation-draft.tsx",
     "components/beside-stores.tsx",
     "components/block-picker.tsx",
     "components/block-rewrite.tsx",
@@ -1591,6 +1602,8 @@
     "components/sales-levers.tsx",
     "components/save-offer-editor.tsx",
     "components/saved-sections.tsx",
+    "components/screen-help.tsx",
+    "components/sent-links-editor.tsx",
     "components/sequence-import-box.tsx",
     "components/server-events-editor.tsx",
     "components/session-picker.tsx",
@@ -1601,6 +1614,7 @@
     "components/side-panel-switch.tsx",
     "components/signin-form.tsx",
     "components/site-footer.tsx",
+    "components/site-nav-server.tsx",
     "components/site-nav.tsx",
     "components/site-pages-editor.tsx",
     "components/skip-link.tsx",
@@ -1643,6 +1657,7 @@
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
+    "components/studio-search.tsx",
     "components/studio-start.tsx",
     "components/studio-store-pin.tsx",
     "components/studio-tools.tsx",
@@ -1787,6 +1802,7 @@
     "app/api/store/assistant/route.ts",
     "app/api/store/attribution/route.ts",
     "app/api/store/audience/route.ts",
+    "app/api/store/automation-draft/route.ts",
     "app/api/store/blog/route.ts",
     "app/api/store/book/move/route.ts",
     "app/api/store/book/route.ts",
@@ -1903,6 +1919,7 @@
     "app/api/store/links/route.ts",
     "app/api/store/live/route.ts",
     "app/api/store/look/route.ts",
+    "app/api/store/mail/links/route.ts",
     "app/api/store/mail/picture/route.ts",
     "app/api/store/mail/route.ts",
     "app/api/store/manage/cancel/route.ts",
@@ -1986,6 +2003,7 @@
     "app/api/store/stream/captions/route.ts",
     "app/api/store/stream/route.ts",
     "app/api/store/students/route.ts",
+    "app/api/store/studio-search/route.ts",
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
@@ -2118,6 +2136,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 145
+    "pageTemplates": 146
   }
 }

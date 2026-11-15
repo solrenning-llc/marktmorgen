@@ -470,6 +470,33 @@ async function ownDoor(pathname: string, folder: string, courseId: string, lesso
 
 export type DoorWhere = { store: UploadStore; folder: string; courseId: string; lessonId: string; who: string };
 
+/**
+ * A door that a close or an abort took off (GETDEL) is put back after a refused vault step only while the buyer still
+ * holds its place: their index entry with this file's path and the lesson's live entry, checked in the same step as
+ * the SET NX (Codex N1 on #3570, fix from Codex U and X4). An erasure that ran while the vault was asked removed both,
+ * so nothing that names the buyer comes back. 0: not put back (erased, or the place is gone); 1: put back; 2: a door
+ * was already there. Anything else is not known and throws (rule 24).
+ */
+const SUBMISSION_DOOR_PUT_BACK = [
+  "-- marktmorgen:submission-door-put-back:v1",
+  'if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return 0 end',
+  'if not redis.call("ZSCORE", KEYS[3], ARGV[2]) then return 0 end',
+  'if redis.call("SET", KEYS[1], ARGV[3], "EX", ARGV[4], "NX") then return 1 end',
+  "return 2",
+].join("\n");
+
+async function putBackSubmissionDoor(door: Door, pathname: string, nowSeconds: number): Promise<void> {
+  // Nothing was kept: the door comes back for the rest of its day, so the buyer can close or give it up again.
+  const left = door.at + UPLOAD_SECONDS - nowSeconds;
+  if (left <= 0) return;
+  const back = repliesFor(await redisPipeline([[
+    "EVAL", SUBMISSION_DOOR_PUT_BACK, 3,
+    doorKey(door.folder, door.id), whoKey(door.folder, door.who), liveKey(door.folder, door.courseId, door.lessonId, door.who),
+    entryOf(door.courseId, door.lessonId, door.id, pathname), door.id, JSON.stringify(door), left,
+  ]]), 1);
+  if (!back || (back[0] !== 0 && back[0] !== 1 && back[0] !== 2)) throw new UnknownReplyError("a submission upload put back");
+}
+
 /** Addresses for pieces of the buyer's own open upload; null when it is not theirs or not open. */
 export async function signSubmissionDoor(
   where: DoorWhere,
@@ -519,13 +546,6 @@ export async function closeSubmissionDoor(
   // deleted when that time ends. A record written later sets the same entry again; an upload never completed costs
   // the sweep one delete.
   const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
-  const putBack = async () => {
-    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
-    const left = door.at + UPLOAD_SECONDS - nowSeconds;
-    if (left <= 0) return;
-    const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
-    if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
-  };
   const taken = repliesFor(
     await redisPipeline([
       ["GETDEL", doorKey(door.folder, door.id)],
@@ -537,12 +557,12 @@ export async function closeSubmissionDoor(
   if (taken[0] === null) return { ok: false, reason: "unknown" };
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to close");
   if (countOf(taken[1]) === null) {
-    await putBack();
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     throw new UnknownReplyError("a submission file put on the sweep's list");
   }
   const closed = await steps.closeReservedVault(pathname, etags);
   if (!closed.ok) {
-    await putBack();
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     return { ok: false, reason: closed.reason };
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
@@ -659,12 +679,8 @@ export async function abortSubmissionDoor(
   if (taken[0] === null) return "unknown";
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to give up");
   if (!(await steps.abortReservedVault(pathname))) {
-    // Not given up at the vault: the door is put back for the rest of its day, so the buyer can try again.
-    const left = door.at + UPLOAD_SECONDS - nowSeconds;
-    if (left > 0) {
-      const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
-      if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
-    }
+    // Not given up at the vault: the door is put back for the rest of its day, only while the buyer still holds it.
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     return "unavailable";
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };

@@ -10,6 +10,7 @@ import { isSenderConfigured, sendQueuedShipmentMail } from "@/lib/email";
 import { runShipmentMail } from "@/lib/shipment-mail-outbox";
 import { runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
 import { storeForHandle } from "@/lib/store";
+import { storeForScheduledWork } from "@/lib/store-exact";
 import { advanceAll } from "@/lib/broadcasts";
 import { advanceAnnouncements } from "@/lib/community-mail";
 import { advanceUpdates } from "@/lib/product-updates";
@@ -167,14 +168,16 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     const deadline = started + 30_000;
     // Each kept apart: one failing never skips the others for this run.
     let broadcasts = 0;
+    // Broadcasts, sequence steps and product updates read their store exactly: one read out of shape leaves the send
+    // in line for a later run instead of ending it as if the store were gone (lib/store-exact.ts).
     try {
-      broadcasts = await advanceAll(storeForHandle, deadline);
+      broadcasts = await advanceAll(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending broadcasts failed", error);
     }
     let steps = { sent: 0, dropped: 0, later: 0 };
     try {
-      steps = await sendDueSteps(storeForHandle, deadline);
+      steps = await sendDueSteps(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending sequence steps failed", error);
     }
@@ -187,7 +190,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     // A product's buyers told it was updated (lib/product-updates.ts).
     let updates = 0;
     try {
-      updates = await advanceUpdates(storeForHandle, deadline);
+      updates = await advanceUpdates(storeForScheduledWork, deadline);
     } catch (error) {
       console.error("sending product updates failed", error);
     }

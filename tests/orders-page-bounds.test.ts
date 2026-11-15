@@ -743,14 +743,24 @@ test("a page drawn at every limit the store has stays under ORDERS_PAGE_BYTES, w
         assert.ok(await setLanguage(OWNER, language));
         const { html, size } = await openSize((await storeForEmail(OWNER))!);
         const words = ordersWords(language);
-        const count = (text: string) => html.split(text).length - 1;
+        // The times `text` occurs, one after another, as html.split(text).length - 1 counts them, without the copies.
+        const count = (text: string) => {
+          let n = 0;
+          for (let at = html.indexOf(text); at >= 0; at = html.indexOf(text, at + text.length)) n++;
+          return n;
+        };
         // As React writes text and attributes into the HTML.
         const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#x27;");
         const at = `${shape}, keys ${keys}, ${language}`;
         assert.equal(count(`>${escaped(words.keptAt(COSTLY_HOST))}</span>`), MAX_LISTED * 4, `${at}: forty purchases, each with three checked at checkout, each named by its host`);
         // An address too long to show is sent once, in its button's address: never again as text, cut or whole, and the
         // button says what it opens by name (WCAG 2.4.9; C3-90).
-        for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(count(`href="${escaped(costlyLink(i))}"`), 1, `${at}: link ${i}`);
+        // The same count for each of the 160 links, from one pass over the page instead of 160: every `href="` starts an
+        // attribute whose value runs to the next `"`, and an escaped link holds no `"`, so the times `href="<link>"`
+        // occurs are exactly the times one such attribute holds the link.
+        const hrefs = new Map<string, number>();
+        for (const [, value] of html.matchAll(/href="([^"]*)"/g)) hrefs.set(value, (hrefs.get(value) ?? 0) + 1);
+        for (let i = 0; i < MAX_LISTED * 4; i++) assert.equal(hrefs.get(escaped(costlyLink(i))) ?? 0, 1, `${at}: link ${i}`);
         assert.equal(count(`>${escaped(words.openTitle(`1`.padEnd(MAX_TITLE_LENGTH, "&")))}<`), 1, `${at}: the button named by the product it opens`);
         assert.equal(count(escaped(words.alsoIn("&".repeat(MAX_OPTION_LABEL_LENGTH)))), shape === "plain" ? 0 : MAX_LISTED, `${at}: a course or podcast at a price option`);
         // Each course says how far the buyer is, in words and a bar (560 [AS1]), measured with the rest.

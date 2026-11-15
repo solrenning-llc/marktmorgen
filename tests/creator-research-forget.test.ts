@@ -209,6 +209,9 @@ const badAnswers: [string, string][] = [
   ["no email", JSON.stringify({ id: "synthetic-x", name: "Synthetic" })],
   ["number email", JSON.stringify({ id: "synthetic-y", email: 7 })],
   ["empty email", JSON.stringify({ id: "synthetic-z", email: "  " })],
+  ["email not an address", JSON.stringify({ id: "synthetic-w", email: "not-an-address" })],
+  ["email without a domain dot", JSON.stringify({ id: "synthetic-v", email: "ana@example" })],
+  ["email with a space inside", JSON.stringify({ id: "synthetic-u", email: "ana smith@example.com" })],
 ];
 
 for (const [name, bad] of badAnswers) {

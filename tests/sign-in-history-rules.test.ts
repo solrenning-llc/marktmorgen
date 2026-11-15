@@ -115,6 +115,8 @@ const ACCOUNT_LOCKS: Record<string, RegExp> = {
   "app/api/auth/two-step/route.ts": /\bchange two-step login\b/,
   "app/api/auth/recovery-address/route.ts": /\bchange your recovery address\b/,
   "app/api/store/address/route.ts": /\byour sign-in address\b/,
+  // The operator's own Search Console connection is a site setting; the note's "settings" covers it.
+  "app/api/operator/search-console/route.ts": /\bsettings\b/,
 };
 is("each account action the note names really refuses a locked session in its route", Object.keys(ACCOUNT_LOCKS).map((file) => [file, /lockedUntil\([^)]*\)\)\s*>\s*0/.test(source(file))]), Object.keys(ACCOUNT_LOCKS).map((file) => [file, true]));
 is("each is named in the note", Object.entries(ACCOUNT_LOCKS).map(([file, words]) => [file, words.test(note)]), Object.keys(ACCOUNT_LOCKS).map((file) => [file, true]));

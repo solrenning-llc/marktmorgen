@@ -6,13 +6,14 @@ import { openLinkWords } from "@/lib/buyer-words/open-link";
 import type { Store } from "@/lib/store";
 
 /**
- * The page an emailed community or course link lands on (MM-SA-41): landing
+ * The page an emailed community, course or letter link lands on (MM-SA-41,
+ * MM-SA-53): landing
  * here spends nothing, and the one button posts the link's token back to its
  * route, which spends one open and gives this browser the store's pass. Mail
  * filters open every link in a message to check it; only a person's tap
  * makes the POST. One heading, one sentence, one button, and why it is asked.
  */
-export function OpenLinkTap({ store, token, kind }: { store: Store; token: string; kind: "community" | "course" }) {
+export function OpenLinkTap({ store, token, kind }: { store: Store; token: string; kind: "community" | "course" | "letters" }) {
   const say = speech(store);
   const words = openLinkWords(store.language);
   const complete = /^[0-9a-f]{64}$/.test(token);
@@ -26,7 +27,7 @@ export function OpenLinkTap({ store, token, kind }: { store: Store; token: strin
               <p className="st-muted mt-4 text-lg">{words.lead(store.name)}</p>
               <form method="post" action={`/api/store/${kind}/open`} className="mt-7">
                 <input type="hidden" name="token" value={token} />
-                <PendingSubmit label={kind === "community" ? words.community : words.course} pending={words.pending} className="btn st-btn btn-lg btn-block" />
+                <PendingSubmit label={kind === "community" ? words.community : kind === "course" ? words.course : words.letter} pending={words.pending} className="btn st-btn btn-lg btn-block" />
               </form>
               <p className="st-muted mt-6 text-sm">{words.why}</p>
             </>

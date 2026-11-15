@@ -39,7 +39,7 @@ import LetterPage, { generateMetadata } from "@/app/[handle]/letters/[letter]/pa
 import LettersPage from "@/app/[handle]/letters/page";
 import { POST as publishRoute } from "@/app/api/store/letters/route";
 import { POST as linkRoute } from "@/app/api/store/letters/link/route";
-import { GET as openRoute } from "@/app/api/store/letters/open/route";
+import { POST as openRoute } from "@/app/api/store/letters/open/route";
 import { PublishControl } from "@/components/letter-publish-control";
 import { LinkRequestForm } from "@/components/link-request-form";
 import { cookieValues } from "./letter-members-world";
@@ -47,6 +47,16 @@ import { afterTasks } from "./next-server-after-world";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+
+/** The tap on the page an emailed letter link lands on (MM-SA-53): the link's token posted back from this site. */
+function asTap(get: NextRequest): NextRequest {
+  const headers = new Headers(get.headers);
+  headers.set("Host", get.nextUrl.host);
+  headers.set("Origin", get.nextUrl.origin);
+  headers.set("content-type", "application/x-www-form-urlencoded");
+  return new NextRequest(`${get.nextUrl.origin}${get.nextUrl.pathname}`, { method: "POST", headers, body: new URLSearchParams([["token", get.nextUrl.searchParams.get("token") ?? ""]]) });
+}
+
 
 process.env.STRIPE_SECRET_KEY = "sk_test_letter_members_only";
 process.env.RESEND_API_KEY = "re_test_a_stand_in_key_for_tests_only"; // one of the synthetic credentials the Resend fallback fixture knows (tests/resend-fixture-credentials.ts)
@@ -474,9 +484,9 @@ async function main(): Promise<void> {
   is("the window does not slide: ten minutes on, it ends when it would have", [firstTtl, laterTtl <= firstTtl - 600 && laterTtl > 0], [3600, true]);
   const token = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
   const keysBefore = redis.keys().length;
-  const stranger = await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${"f".repeat(64)}`, { headers: { "accept-language": "es-MX,es;q=0.9" } }));
+  const stranger = await openRoute(asTap(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${"f".repeat(64)}`, { headers: { "accept-language": "es-MX,es;q=0.9" } })));
   is("a token that is no link: gone, in the browser's language, and nothing written", [stranger.status, (await stranger.text()).startsWith("Este enlace caducó"), redis.keys().length], [410, true, keysBefore]);
-  const opened = await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${token}`));
+  const opened = await openRoute(asTap(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${token}`)));
   const set = opened.headers.get("set-cookie") ?? "";
   is("opening it lets this browser in and goes back to the email", [opened.status, (opened.headers.get("location") ?? "").endsWith(`/@${HANDLE}/letters/${letter.id}`), set.startsWith(`${cookieName}=`)], [303, true, true]);
   const minted = /=([0-9a-f]{64})/.exec(set)![1];
@@ -509,7 +519,7 @@ async function main(): Promise<void> {
   is("a fresh link for the holder", mails.length, mailsBeforeOpens + 1);
   const fresh = /token=([0-9a-f]{64})/.exec(mails.at(-1)!.text)![1];
   const opens: number[] = [];
-  for (let i = 1; i <= 11; i += 1) opens.push((await openRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${fresh}`))).status);
+  for (let i = 1; i <= 11; i += 1) opens.push((await openRoute(asTap(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${fresh}`)))).status);
   is("a link opens 10 times; the 11th is gone", opens, [...Array(10).fill(303), 410]);
 
   part("The email service known to be down: said honestly, the same for everyone");

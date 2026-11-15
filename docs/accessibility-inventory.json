@@ -389,6 +389,17 @@
       ]
     },
     {
+      "source": "app/[handle]/letters/open/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/letters/open",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/letters/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/letters",
@@ -2152,6 +2163,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 148
+    "pageTemplates": 149
   }
 }

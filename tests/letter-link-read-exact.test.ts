@@ -12,7 +12,7 @@ import { store as redis } from "./redis-stub";
 import { readLetterGrant } from "@/lib/letter-access";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { letterWords } from "@/lib/buyer-words/letters";
-import { GET } from "@/app/api/store/letters/open/route";
+import { POST } from "@/app/api/store/letters/open/route";
 
 const TOKEN = "a".repeat(64);
 const real = redis.pipeline.bind(redis);
@@ -31,7 +31,7 @@ beforeEach(() => {
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
 });
 
-const open = () => GET(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${TOKEN}`, { headers: { "accept-language": "en-US" } }));
+const open = () => POST(asTap(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${TOKEN}`, { headers: { "accept-language": "en-US" } })));
 
 for (const reply of [1, {}, ["x"], true, "LOST"]) {
   test(`a link whose grant reads ${JSON.stringify(reply)} is unknown, never gone`, async () => {
@@ -59,6 +59,16 @@ test("a link that is not one still writes nothing and is gone", async () => {
 // The store the link names is read exactly too (Claude 1 and H2 on #3779): the handle's reply lost or in another
 // shape is "try again" (503), never "expired" (410), and nothing is spent; nil (the handle gone) is still gone.
 import { createHash } from "node:crypto";
+
+/** The tap on the page an emailed letter link lands on (MM-SA-53): the link's token posted back from this site. */
+function asTap(get: NextRequest): NextRequest {
+  const headers = new Headers(get.headers);
+  headers.set("Host", get.nextUrl.host);
+  headers.set("Origin", get.nextUrl.origin);
+  headers.set("content-type", "application/x-www-form-urlencoded");
+  return new NextRequest(`${get.nextUrl.origin}${get.nextUrl.pathname}`, { method: "POST", headers, body: new URLSearchParams([["token", get.nextUrl.searchParams.get("token") ?? ""]]) });
+}
+
 async function grantFor(handle: string): Promise<void> {
   const key = `nl:letters:link:${createHash("sha256").update(`nimbus-letter:${TOKEN}`).digest("hex").slice(0, 40)}`;
   await real([["SET", key, JSON.stringify({ e: "reader@example.com", k: "anykey", h: handle, l: "0123456789abcdef0123" })]]);

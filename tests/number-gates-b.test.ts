@@ -28,7 +28,7 @@
 import { NextRequest } from "next/server";
 import { GET as exportRoute } from "@/app/api/store/export/route";
 import { GET as licenceRoute } from "@/app/api/store/licence/route";
-import { GET as letterOpenRoute } from "@/app/api/store/letters/open/route";
+import { POST as letterOpenRoute } from "@/app/api/store/letters/open/route";
 import { createHash } from "node:crypto";
 import { storeKey } from "@/lib/learn";
 import { letterWords } from "@/lib/buyer-words/letters";
@@ -41,6 +41,16 @@ import { withinEventWrites } from "@/lib/community-events";
 import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+/** The tap on the page an emailed letter link lands on (MM-SA-53): the link's token posted back from this site. */
+function asTap(get: NextRequest): NextRequest {
+  const headers = new Headers(get.headers);
+  headers.set("Host", get.nextUrl.host);
+  headers.set("Origin", get.nextUrl.origin);
+  headers.set("content-type", "application/x-www-form-urlencoded");
+  return new NextRequest(`${get.nextUrl.origin}${get.nextUrl.pathname}`, { method: "POST", headers, body: new URLSearchParams([["token", get.nextUrl.searchParams.get("token") ?? ""]]) });
+}
+
 
 // A synthetic stand-in key, so the letter link reaches "sent" now that mail with no route says error (main, 8aa1f20a); see tests/resend-fixture-credentials.ts.
 process.env.RESEND_API_KEY ??= "re_test_a_stand_in_key_for_tests_only";
@@ -262,7 +272,7 @@ async function main(): Promise<void> {
   const grantKey = `nl:letters:link:${createHash("sha256").update(`nimbus-letter:${routeToken}`).digest("hex").slice(0, 40)}`;
   await redis.pipeline([["SET", grantKey, JSON.stringify({ e: "reader@example.com", k: storeKey(store), h: store.handle, l: "0123456789abcdef0123" })]]);
   const openCall = async () => {
-    const response = await settled(() => letterOpenRoute(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${routeToken}`)));
+    const response = await settled(() => letterOpenRoute(asTap(new NextRequest(`https://marktmorgen.com/api/store/letters/open?token=${routeToken}`))));
     if (response === "threw") return { status: 500, body: "threw", cookie: false };
     return { status: response.status, body: await response.text(), cookie: (response.headers.get("Set-Cookie") ?? "") !== "" };
   };

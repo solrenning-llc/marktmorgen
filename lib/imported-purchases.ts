@@ -272,8 +272,9 @@ export async function takeGiven(statsId: string, email: string, productId: strin
  */
 export async function forgetImportedPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  // Counted exactly (rule 24): a reply cut short or in another shape throws, never 0 standing for "erased".
+  // Read exactly (CX-123 rule 24): a reply cut short or in another shape is unknown, never "0 deleted", so the
+  // erasure records this part as not finished instead of reporting the purchases gone.
   const counts = repliesFor(await redisPipeline([["DEL", importedKey(statsId, email)], ["HDEL", importedWhoKey(statsId), normaliseEmail(email)]]), 2)?.map(countOf);
-  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("a person's imported purchases deleted");
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's imported purchases");
   return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }

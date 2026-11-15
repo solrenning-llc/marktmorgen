@@ -580,27 +580,74 @@ export async function readPaidExact(order: string): Promise<Paid | null | "unkno
  */
 export async function paypalOrdersOf(statsId: string | null, productIds: string[], email: string): Promise<Paid[]> {
   if (!statsId || !productIds.length || !isRedisConfigured()) return [];
-  const sets = await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)]));
-  const orders = [...new Set(sets.flatMap((set) => (Array.isArray(set) ? set.map(String) : [])))].filter((o) => ORDER_ID.test(o));
+  // Read exactly (rule 24): a reply cut short or of another shape, or a paid record that does not read, throws, so the
+  // copy of the person's data fails whole and is tried again, never handed over without their PayPal orders.
+  const sets = repliesFor(await redisPipeline(productIds.map((p) => ["SMEMBERS", ownKey(statsId, email, p)])), productIds.length);
+  const lists = sets?.map((set) => stringList(set));
+  if (!lists || lists.some((list) => list === null)) throw new UnknownReplyError("a person's PayPal orders");
+  const orders = [...new Set((lists as string[][]).flat())].filter((o) => ORDER_ID.test(o));
   const out: Paid[] = [];
   for (const order of orders) {
-    const paid = await readPaid(order);
+    const paid = await readPaidExact(order);
+    if (paid === "unknown") throw new UnknownReplyError("a person's PayPal order");
     if (paid) out.push(paid);
   }
   return out;
 }
 
-async function readOpened(order: string): Promise<Opened | null> {
-  const [raw] = await redisPipeline([["GET", orderKey(order)]]);
+/**
+ * An order's own record, read exactly (rule 24): null only when GET answers exactly null (never opened here, or its
+ * 30 days are over); a reply cut short or of another shape, or a record that does not read, is "unknown", never
+ * expired: the watch keeps such an order and the capture refuses it, both for now.
+ */
+async function readOpened(order: string): Promise<Opened | null | "unknown"> {
+  const read = repliesFor(await redisPipeline([["GET", orderKey(order)]]), 1);
+  if (!read) return "unknown";
+  const raw = read[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
   try {
-    const opened = JSON.parse(String(raw)) as Opened | null;
-    return opened && typeof opened.s === "string" ? opened : null;
+    const opened = JSON.parse(raw) as Opened | null;
+    return opened && typeof opened === "object" && typeof opened.s === "string" ? opened : "unknown";
   } catch {
-    return null;
+    return "unknown";
   }
 }
 
-type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown } };
+type CaptureRow = { id?: unknown; status?: unknown; amount?: { value?: unknown; currency_code?: unknown }; links?: unknown };
+
+/**
+ * Whether an Orders v2 answer is this order's own (#4444, Codex X8): its `id` is the order asked about, and every
+ * capture in it whose `up` link names an order names this one. Amount, currency and payee alone do not tell two orders
+ * of the same price apart, so an answer holding another order's completed record would otherwise confirm this one with
+ * that order's capture and buyer. An `up` link that is there but does not name exactly this order's Orders v2 path
+ * (no href, not text, another URL) is not proof either. An answer that is not this order's says nothing about it: its
+ * outcome is unknown.
+ */
+function ownAnswer(done: Record<string, unknown>, order: string): boolean {
+  if (done.id !== order) return false;
+  const units = Array.isArray(done.purchase_units) ? (done.purchase_units as { payments?: { captures?: unknown } }[]) : [];
+  for (const unit of units) {
+    const captures = Array.isArray(unit?.payments?.captures) ? (unit.payments.captures as CaptureRow[]) : [];
+    for (const capture of captures) {
+      const links = Array.isArray(capture?.links) ? (capture.links as { rel?: unknown; href?: unknown }[]) : [];
+      for (const link of links) {
+        if (link?.rel !== "up") continue;
+        // A capture with no links at all is allowed by the API's shape; an `up` link present is declared evidence, so
+        // it must be text whose path is exactly this order's (Codex g's MÉDIO on #4453). Anything else is unknown.
+        if (typeof link.href !== "string") return false;
+        let path: string;
+        try {
+          path = new URL(link.href).pathname;
+        } catch {
+          return false;
+        }
+        if (path !== `/v2/checkout/orders/${order}`) return false;
+      }
+    }
+  }
+  return true;
+}
 
 /** The capture an order holds, and who paid it, as PayPal describes an order (checkout_orders_v2, order). */
 function captureIn(done: Record<string, unknown>): { capture: CaptureRow | null; payee: unknown; email: string } {
@@ -699,7 +746,7 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
   const already = await readPaid(order);
   if (already) return { ok: true, paid: already, fresh: false };
   const opened = await readOpened(order);
-  if (!opened || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
+  if (!opened || opened === "unknown" || opened.s !== store.statsId) return { ok: false, reason: "unknown" };
   // Watched first: no capture is asked for an order the sweep could not find (watchFirst throws on anything unknown).
   const watchedHere = await watchFirst(order, opened);
   let done: Record<string, unknown>;
@@ -727,6 +774,13 @@ export async function captureOrder(store: Store, order: string): Promise<Capture
       await watchLater(order, opened);
       return { ok: false, reason: "error" };
     }
+  }
+  // An answer that is not this order's own (another order's record) proves nothing about this one: unknown, kept in
+  // pending for the sweep to ask PayPal again, nothing written down or handed over (#4444, rule 30).
+  if (!ownAnswer(done, order)) {
+    console.error("a PayPal answer named another order", order);
+    await watchLater(order, opened);
+    return { ok: false, reason: "error" };
   }
   const { capture, payee, email } = captureIn(done);
   // Taken, but the answer does not say how: the buyer may have paid, so the sweep asks PayPal again (CX-123 rule 24).
@@ -944,6 +998,8 @@ export async function watchPayPal(
         (error: unknown) => console.error("putting a pending PayPal order back in line failed; it stays where it was", error),
       );
     const opened = await readOpened(order);
+    // Not read just now: kept, and asked about on a later run (rule 24), never dropped as expired.
+    if (opened === "unknown") continue;
     // Thirty days without PayPal settling it: no longer asked about.
     if (!opened || (await readPaid(order))) {
       await redisPipeline([["ZREM", pendingKey(statsId), order]]);
@@ -957,6 +1013,9 @@ export async function watchPayPal(
       await later();
       continue;
     }
+    // Another order's record (completed, voided or anything else) says nothing about this one: kept and asked again
+    // (#4444, rule 30). A kept order is let go when its record ends (30 days).
+    if (!ownAnswer(done, order)) continue;
     const { capture, payee, email } = captureIn(done);
     // No capture in the answer. Only PayPal's word that the order was voided means nothing will be charged; any
     // other answer (approved, created, saved, completed without its captures, no status) is kept and asked again

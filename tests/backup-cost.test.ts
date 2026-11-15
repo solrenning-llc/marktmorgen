@@ -34,7 +34,7 @@ import { done, is, part } from "./check";
 // The design as built since 9 November 2026 (C1-20261109-1525-C4-68): one key a request (BACKUP_DUMP_BATCH 1), a copy
 // that stops at its deadline and goes on in the day's next run. 10,000 keys; 4 MiB copied in at most two parts (one
 // by size, and the part a pause closes: a copy spans at most the day's two runs); 20,212 commands (20,000 for the copy,
-// 200 SCAN pages, the run's twelve: the lock, the day's count (SET NX and INCRBY), the progress's GET, the last good
+// 200 SCAN pages, the run's twelve: the lock, the day's count (INCRBY and EXPIRE NX), the progress's GET, the last good
 // copy's GET, its outcome, four at the most with the progress kept or let go, and the lock let go only if it is its
 // own, a script and the GET and DEL inside it); 30 days kept. One set's stored bound: 4,194,304 + two parts' seal room
 // 131,072 + the manifest's 2 × 160 + 65,536 = 4,391,232 bytes; 30 + 2 + 3 = 35 sets (lib/backup-run.ts,

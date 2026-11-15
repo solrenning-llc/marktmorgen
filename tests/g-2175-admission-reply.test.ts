@@ -18,8 +18,9 @@ test("G positive: exact admission permits the first run and caps a repeat",async
 for(const value of [true,[1],"01"])test(`G unknown ${JSON.stringify(value)} admission cannot authorize any copy`,async()=>{
  const f=fixture(),base=redis.pipeline.bind(redis);let intercepted=0;
  (redis as unknown as {pipeline:typeof redis.pipeline}).pipeline=(async commands=>{
-  if(commands.length===2&&commands[0][0]==="SET"&&String(commands[0][1]).startsWith("nl:backup:ran:")&&commands[1][0]==="INCRBY"){intercepted++;return [null,value];}
+  // The day's admission is INCRBY then EXPIRE NX (lib/window-count.ts): the count is the unknown value, the EXPIRE a good 1.
+  if(commands.length===2&&commands[0][0]==="INCRBY"&&String(commands[0][1]).startsWith("nl:backup:ran:")&&commands[1][0]==="EXPIRE"){intercepted++;return [value,1];}
   return base(commands);
  }) as typeof redis.pipeline;
- try {const results=[];for(let i=0;i<4;i++)results.push(await runBackup({now,review,store:f.bucket,key:Buffer.alloc(32,9)}));console.log(JSON.stringify({value,intercepted,writes:f.writes(),lists:f.lists(),results}));assert.equal(f.writes(),0,"unknown admission never authorizes writing paid objects");assert.equal(f.lists(),0,"unknown admission never authorizes paid listing");assert.ok(results.every(x=>!x.ok&&x.reason==="mark_error"));}finally{(redis as unknown as {pipeline:typeof redis.pipeline}).pipeline=base;}
+ try {const results=[];for(let i=0;i<4;i++)results.push(await runBackup({now,review,store:f.bucket,key:Buffer.alloc(32,9)}));console.log(JSON.stringify({value,intercepted,writes:f.writes(),lists:f.lists(),results}));assert.equal(f.writes(),0,"unknown admission never authorizes writing paid objects");assert.equal(f.lists(),0,"unknown admission never authorizes paid listing");assert.ok(intercepted>0,"the admission was intercepted");assert.ok(results.every(x=>!x.ok&&x.reason==="mark_error"));}finally{(redis as unknown as {pipeline:typeof redis.pipeline}).pipeline=base;}
 });

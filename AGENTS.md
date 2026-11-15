@@ -70,6 +70,10 @@ Autorização do dono, nas palavras dele: "faça o correto. e tambem quero mais 
 
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
+## AC — Regras anticonflito (dono, 15/11/2026)
+
+Pedido do dono, nas palavras dele: "resolva todos os conflitos. procure e resolva todos os conflitos. gere regras para que novos conflitos nao sejam criados" e "faça regras para nao ocorrer mais conflitos". Vale para todo agente deste repositório, em toda sessão, junto com MV, CV e PV acima. As nove regras completas estão em [docs/anti-conflict-rules.md](docs/anti-conflict-rules.md). Em resumo: cada agente confere os próprios PRs de hora em hora só com git e começa a junção na mesma hora em que acha um conflito; PR de produto não mexe em reservas, na fila nem em arquivo gerado; registros de custo mudam um PR por vez; pilha de no máximo 1 nível; `git merge-tree` limpo contra a base antes de cada envio; PRs pequenos e poucos; junção só com o histórico completo, por merge, sem rebase nem force push. Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
+
 ## TX — Política tributária vigente (dono,27/10/2026 12h34 Fortaleza)
 
 Esta decisão substitui a regra19 e toda instrução anterior conflitante, inclusive MR/SR, Hazelsong, AX274,FX275,VR e Pedidos repetidos. Texto antigo permanece histórico. Usar a interpretação juridicamente mais correta, fundamentada em lei, regulamentação e decisões oficiais, conferidas e citadas com artigo/data; não escolher automaticamente a hipótese que dá mais imposto nem somar regimes/países inaplicáveis. ISS5% não é fato certificado.

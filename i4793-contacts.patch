@@ -1,0 +1,64 @@
+diff --git a/lib/contacts.ts b/lib/contacts.ts
+index ccf311639..f074a5640 100644
+--- a/lib/contacts.ts
++++ b/lib/contacts.ts
+@@ -559,9 +559,12 @@ export async function importContacts(
+   let full = false;
+   for (let i = 0; i < emails.length; i += 500) {
+     const chunk = emails.slice(i, i + 500);
+-    const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
+-    const found = Array.isArray(rows) ? rows : [];
+-    const deleted = Array.isArray(prints) ? prints : [];
++    // Read only whole (#4793): a reply in any other shape throws UnknownReplyError before anything is written,
++    // never "nobody was deleted" nor "nobody is on the list".
++    const replies = repliesFor(await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]), 2);
++    if (!replies) throw new UnknownReplyError("contacts and deleted people for a pasted import");
++    const found = fieldsOf(replies[0], chunk.length, "contacts for a pasted import");
++    const deleted = wholeErasedReply(replies[1], chunk.length);
+     const pairs: string[] = [];
+     const sizes: { before: Contact | null; next: Contact }[] = [];
+     let newlyAgreed = 0;
+@@ -718,13 +721,16 @@ export async function previewContactRows(
+   // A store whose list is made when its first import starts: everything is new.
+   if (!isRedisConfigured() || !listId) return { outcomes: rows.map((row) => decide(null, row)), room: MAX_LEADS };
+   const key = leadsKey(listId);
+-  const [size, found, prints] = await redisPipeline([
++  const replies = repliesFor(await redisPipeline([
+     ["HLEN", key],
+     ["HMGET", key, ...rows.map((r) => r.email)],
+     suppressedAmongCommand(listId, rows.map((r) => r.email)),
+-  ]);
+-  const existing = Array.isArray(found) ? found : [];
+-  const deleted = Array.isArray(prints) ? prints : [];
++  ]), 3);
++  // Read only whole (#4793): a reply in any other shape throws UnknownReplyError, never "nobody was deleted".
++  if (!replies) throw new UnknownReplyError("contacts and deleted people for an import");
++  const [size] = replies;
++  const existing = fieldsOf(replies[1], rows.length, "contacts for an import");
++  const deleted = wholeErasedReply(replies[2], rows.length);
+   return {
+     outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
+     room: Math.max(0, MAX_LEADS - (Number(size) || 0)),
+@@ -757,15 +763,18 @@ export async function previewContactRows(
+ export async function importContactRows(listId: string, rows: ImportedContact[], data: DataStore): Promise<ContactOutcome[]> {
+   if (!isRedisConfigured() || !listId || rows.length === 0) return rows.map(() => "full");
+   const key = leadsKey(listId);
+-  const [size, found, prints] = await redisPipeline([
++  const replies = repliesFor(await redisPipeline([
+     ["HLEN", key],
+     ["HMGET", key, ...rows.map((r) => r.email)],
+     suppressedAmongCommand(listId, rows.map((r) => r.email)),
+-  ]);
++  ]), 3);
++  // Read only whole (#4793): a reply in any other shape throws UnknownReplyError, never "nobody was deleted".
++  if (!replies) throw new UnknownReplyError("contacts and deleted people for an import");
++  const [size] = replies;
+   let room = MAX_LEADS - (Number(size) || 0);
+   const now = new Date().toISOString();
+-  const existing = Array.isArray(found) ? found : [];
+-  const deleted = Array.isArray(prints) ? prints : [];
++  const existing = fieldsOf(replies[1], rows.length, "contacts for an import");
++  const deleted = wholeErasedReply(replies[2], rows.length);
+   // Each write, with the fingerprint of what its address held when read.
+   const writes: { email: string; value: string; was: string; row: number }[] = [];
+   const sizes: { before: Contact | null; next: Contact }[] = [];

@@ -28,7 +28,7 @@ for (const fine of [
   "Mr.Smith Woodwork", "Harbor Kitchen Support", "Help Desk Heroes", "Customer Service Academy", "Café Ñandú",
   "Wise Owl Tutoring", "Visa Consulting", "Apple Support Group", "Microsoft Excel Training", "Google Ads Masterclass",
   "Jo.Me", "Studio.Live", "Ricardo.Dev", "Support", "Billing", "Admin", "Chase Photography", "Learn With Ana",
-  "Ana 👩\u200D💻 Studio", "کتاب\u200Cفروشی", "Studio \u200FRTL", "Анна Иванова", "Αθηνά Studio", "Ice Cream Lab",
+  "Phase Security Systems", "Phase Security", "Chase the Sun Tours", "Bank of Ana", "Ana 👩\u200D💻 Studio", "کتاب\u200Cفروشی", "Studio \u200FRTL", "Анна Иванова", "Αθηνά Studio", "Ice Cream Lab",
 ]) {
   is(`"${fine}" is a name, kept`, safeSenderName(fine, "x"), fine.normalize("NFKC"));
 }
@@ -83,6 +83,7 @@ const DISGUISES: [string, string][] = [
   ["a platform brand", "Instagram"],
   ["a platform brand", "Netflix Billing"],
   ["an exchange", "Binance"],
+  ["a tax office with its staff words", "IRS Tax Help"],
   ["a scam title", "Security Alert"],
   ["a scam title", "Fraud Department"],
   ["a scam title", "Account Services"],

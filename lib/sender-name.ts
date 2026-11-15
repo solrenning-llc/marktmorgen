@@ -4,12 +4,12 @@
  *
  * Refused: an address ("@"), an encoded word ("=?"), a direction override or isolate, letters of two alphabets in one
  * word, a link ("://", "www."), an IP address, a domain under a top-level domain of the IANA root zone (written in
- * lower or upper case: "paypal.com", "PAYPAL.COM"; "Ricardo.Dev" or "Jo.Me", written as a name, is kept); anything
- * read as Marktmorgen or Solrenning, a mail system (postmaster, mailer-daemon), or within one letter of "marktmorgen";
- * a payment, bank, delivery or platform brand standing alone or only with words that pass for its staff ("PayPal
- * Security", "Stripe Billing", "Apple ID", "UPS"), never a brand inside a real business's name ("Wise Owl Tutoring",
- * "Apple Support Group", "Google Ads Masterclass"); and the phrases only a scam uses ("Security Alert", "Fraud
- * Department", "Account Services", "Trust & Safety", "noreply", "Your Bank").
+ * lower or upper case: "paypal.com", "PAYPAL.COM"; "Ricardo.Dev" or "Jo.Me", written as a name, is kept); anything read
+ * as Marktmorgen or Solrenning, a mail system (postmaster, mailer-daemon), or within one letter of "marktmorgen"; a
+ * payment, bank, delivery or platform brand (one letter off for brands of six letters or more) standing alone or only
+ * with words that pass for its staff ("PayPal Security", "Stripe Billing", "Apple ID", "UPS"), never a brand inside a
+ * real business's name ("Wise Owl Tutoring", "Apple Support Group", "Google Ads Masterclass"); and the phrases only a
+ * scam uses ("Security Alert", "Fraud Department", "Account Services", "Trust & Safety", "noreply", "Your Bank").
  *
  * Kept on purpose (decision recorded in the commit): generic words a real business uses alone, such as "Support",
  * "Billing", "Admin", "Help Desk" or "Customer Service", and dotted names that are not domains ("Node.js", "Mr.Smith").
@@ -107,7 +107,7 @@ const STAFF = new Set([
   "official", "noreply", "no", "reply", "department", "fraud", "safety", "trust", "customer", "customers", "care", "pay",
   "wallet", "inc", "llc", "corp", "com", "net", "org", "io", "co", "the", "and", "of", "desk", "helpdesk", "online",
   "login", "signin", "secure", "update", "updates", "mail", "email", "admin", "refund", "refunds", "dispute", "disputes",
-  "store", "shop", "prime", "bank", "banking", "card", "cards", "express", "delivery", "tracking", "shipping",
+  "store", "shop", "prime", "bank", "banking", "card", "cards", "express", "delivery", "tracking", "shipping", "tax",
 ]);
 
 /** A brand alone, or a brand only with words that pass for its staff. */
@@ -118,7 +118,7 @@ function claimsBrand(words: string[]): boolean {
     let taken = 0;
     for (let count = 1; count <= 3 && at + count <= words.length && !taken; count += 1) {
       const joined = words.slice(at, at + count).join("");
-      if (BRANDS.some((name) => joined === name || (name.length >= 5 && count === 1 && nearlySame(joined, name)))) taken = count;
+      if (BRANDS.some((name) => joined === name || (name.length >= 6 && count === 1 && nearlySame(joined, name)))) taken = count;
     }
     if (taken) {
       brand = true;

@@ -49,6 +49,7 @@
  */
 import { onAccount } from "@/lib/stripe-account";
 import type { Store } from "@/lib/store";
+import type { MayComeOff } from "@/lib/platform-share";
 import { takeBuyerRead } from "@/lib/buyer-actions";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
@@ -61,7 +62,15 @@ export type BuyerCurrencyMode = "automatic" | "manual";
 /** What a store does when its creator chose nothing: (a). */
 export const DEFAULT_BUYER_CURRENCY_MODE: BuyerCurrencyMode = "automatic";
 
-export type BuyerCurrencyWhy = "off" | "mode-unknown" | "fee" | "settlement" | "automatic" | "manual" | "manual-none";
+export type BuyerCurrencyWhy = "off" | "mode-unknown" | "held" | "fee" | "settlement" | "automatic" | "manual" | "manual-none";
+
+/**
+ * What a session may hold that waits for its own test-mode proof before it converts (the coordinator's care item 4,
+ * docs/buyer-currency-and-language.md): a coupon that takes a fixed amount off (or may, being of unknown kind or
+ * typed at the checkout), pay what you want's minimum, a checkout box, a membership's introductory price, a manual
+ * capture. Until each is proven, a session holding any of them stays in the store's currency.
+ */
+export type BuyerCurrencyHold = "fixed-coupon" | "pwyw" | "bump" | "intro" | "manual-capture";
 
 /** What one session does: Stripe's conversion on or off, and whether the creator's own prices go on it. */
 export type BuyerCurrencyPlan = { adaptive: boolean; manual: boolean; why: BuyerCurrencyWhy };
@@ -83,13 +92,37 @@ export function buyerCurrencyPlan(input: {
   settles: boolean | null;
   manualPrices: boolean;
   taxRates: boolean;
+  /** What the session holds that waits for its proof (heldReasons); none when not given. */
+  held?: readonly BuyerCurrencyHold[];
 }): BuyerCurrencyPlan {
   if (!input.live) return STORE_CURRENCY("off");
   if (input.mode !== "automatic" && input.mode !== "manual") return STORE_CURRENCY("mode-unknown");
+  if (input.held && input.held.length > 0) return STORE_CURRENCY("held");
   if (input.fee) return STORE_CURRENCY("fee");
   if (input.settles !== true) return STORE_CURRENCY("settlement");
   if (input.mode === "automatic") return { adaptive: true, manual: false, why: "automatic" };
   return input.manualPrices && !input.taxRates ? { adaptive: true, manual: true, why: "manual" } : { adaptive: true, manual: false, why: "manual-none" };
+}
+
+/**
+ * What the session being made holds that waits for its proof (BuyerCurrencyHold), in that order. `mayComeOff` is what
+ * the checkout says may come off (lib/platform-share.ts): anything but a percentage may be a fixed amount, which would
+ * not convert with the price. Pure.
+ */
+export function heldReasons(input: {
+  body: URLSearchParams;
+  pwyw: boolean;
+  bumps: number;
+  intro: boolean;
+  mayComeOff: readonly MayComeOff[];
+}): BuyerCurrencyHold[] {
+  const held: BuyerCurrencyHold[] = [];
+  if (input.mayComeOff.some((off) => off.kind !== "percent") || input.body.get("allow_promotion_codes") === "true") held.push("fixed-coupon");
+  if (input.pwyw) held.push("pwyw");
+  if (input.bumps > 0) held.push("bump");
+  if (input.intro) held.push("intro");
+  if (input.body.get("payment_intent_data[capture_method]") === "manual") held.push("manual-capture");
+  return held;
 }
 
 /** Every field by which a session or a payment can carry an application fee, or an amount kept back by the platform. */

@@ -14,6 +14,11 @@
  */
 import { execFileSync } from "node:child_process";
 import { done, is } from "./check";
+import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
+
+// Merged with main of 15 November 2026 (Claude 1 cloud O): main's SiteNav takes the plans' state as a prop, read on the server
+// (components/site-nav-server.tsx); the browser gets the same three values here, read from lib/opening.ts, never typed.
+const opening = JSON.stringify({ onSale: PLANS_ON_SALE, line: PREVIEW_LINE, link: PREVIEW_LINK });
 
 // Resolve browser/build tools at runtime rather than bundling their internals into this test (as tests/checkout-focus-browser.test.ts).
 const browserScript = String.raw`
@@ -26,7 +31,7 @@ const nav=await build({stdin:{contents:[
  'import React from "react";',
  'import {createRoot} from "react-dom/client";',
  'import {SiteNav} from "@/components/site-nav";',
- 'createRoot(document.getElementById("root")).render(React.createElement(React.Fragment,null,React.createElement(SiteNav),React.createElement("main",null,React.createElement("a",{href:"/after",id:"after"},"After the header"))));'
+ 'createRoot(document.getElementById("root")).render(React.createElement(React.Fragment,null,React.createElement(SiteNav,{opening:${opening}}),React.createElement("main",null,React.createElement("a",{href:"/after",id:"after"},"After the header"))));'
 ].join('\n'),loader:'tsx',resolveDir:root},bundle:true,platform:'browser',write:false,alias:{'@':root},define:{'process.env.NODE_ENV':JSON.stringify('production')},logLevel:'error',plugins:[shell]});
 // Same installed-browser selection as tests/e2e/agreements.mjs; never download a browser.
 async function launch() {

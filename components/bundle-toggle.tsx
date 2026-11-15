@@ -31,7 +31,7 @@ export function BundleToggle({ product }: { product: Product }) {
   if (bundleOwnerProblem(product) !== null) return null;
   return (
     <p className="mt-3">
-      <Link href={href} className="text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
+      <Link href={href} className="inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep">
         Sell this as a bundle of your products
       </Link>
     </p>

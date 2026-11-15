@@ -15,7 +15,7 @@
  *   nl:wb:<account>:<subscription>     that membership's email went
  *   nl:wb:once:<statsId>:<hash>        that person heard about that product lately
  *   nl:wb:link:<token>                 who a link in an email is for
- *   nl:wb:n:<statsId>                  how many have been sent, for the studio
+ *   nl:wb:n:<statsId>                  how many have been sent, for the studio (all time, no expiry; erased with the store)
  */
 import { type DigitalConsent, DigitalConsentMissing } from "@/lib/digital-consent";
 import { OrdersPausedError } from "@/lib/order-admission";
@@ -323,7 +323,10 @@ export async function sendWinBacks(deadline: number, now = Date.now()): Promise<
         continue;
       }
       if (Date.now() >= deadline) break;
-      if (winbackOn(store) && store.stripeAccountId && store.statsId && store.listId) {
+      // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+      // 24): nothing is read from its Stripe account, no mark is taken and nothing is sent (canSellProduct already
+      // refused each offer), so a membership still in its window is offered once the store is back on.
+      if (winbackOn(store) && store.stripeAccountId && store.statsId && store.listId && !store.suspended) {
         counts.stores += 1;
         try {
           counts.sent += await sweepStore(store, deadline, now);

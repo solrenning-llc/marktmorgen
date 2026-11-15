@@ -8,6 +8,7 @@ import { type Door, doorFields, openDoor, readDoor, reviewPagePath } from "@/lib
 import { MAX_REVIEW_PHOTO_BYTES, type ReviewPhoto, deleteReview, markOneRefunded, readRating, readReview, reviewId, saveReview, setReviewPhoto } from "@/lib/reviews";
 import { checkReviewPhoto, dropReviewPhoto, putReviewPhoto } from "@/lib/review-photo";
 import { newCostCode } from "@/lib/plan-standing";
+import { forgetReviewWords, forgetVoicePerson } from "@/lib/customer-voice";
 
 /** The words, and a photo shrunk by the buyer's browser (lib/review-photo.ts) sent as text. */
 const MAX_BODY_BYTES = 6_000 + Math.ceil(MAX_REVIEW_PHOTO_BYTES * 1.6);
@@ -96,6 +97,15 @@ export async function POST(request: NextRequest) {
       if (done === "deleted") {
         after(() => refreshStoreQuotes(store));
         await dropReviewPhoto(before?.photo);
+        // Nor quoted in the studio's summary of what customers said (lib/customer-voice.ts) once deleted; a try that
+        // failed is made again after the answer.
+        if (before?.text) {
+          const words = before.text;
+          await forgetReviewWords(statsId, words).catch((error: unknown) => {
+            console.error("removing a deleted review's words from the customer summary failed", error);
+            after(() => forgetReviewWords(statsId, words).then(() => undefined));
+          });
+        }
       }
       return answer(done === "busy" ? "busy" : "deleted");
     }
@@ -124,6 +134,9 @@ export async function POST(request: NextRequest) {
     // The words are written first, and that same write grants the photo one of the review's MAX_REVIEW_PHOTOS
     // slots (C4-20261106-2720-C5-160): the put, a paid operation, is made only after a write that granted it.
     // A write that failed, was busy or had no room never puts.
+    // The words before this save, so words rewritten leave the studio's summary of what customers said too. A read
+    // that fails is unknown (null), never "no words": the save goes on, and every kept summary goes after it.
+    const wordsBefore = await readReview(statsId, productId, id).then((review) => review?.text ?? "", () => null);
     const saved = await saveReview(statsId, {
       productId,
       email: proof.email,
@@ -164,6 +177,15 @@ export async function POST(request: NextRequest) {
     }
     // "What buyers say" on the store page, kept on the store's record (lib/store-quotes.ts).
     if (saved.state === "created" || saved.state === "updated") after(() => refreshStoreQuotes(store));
+    // Rewritten words are no longer quoted in the studio's summary of what customers said (lib/customer-voice.ts).
+    if (saved.state === "updated" && wordsBefore === null) {
+      await forgetVoicePerson(statsId).catch((error: unknown) => console.error("removing the customer summary failed", error));
+    } else if (saved.state === "updated" && wordsBefore && wordsBefore !== saved.review.text) {
+      await forgetReviewWords(statsId, wordsBefore).catch((error: unknown) => {
+        console.error("removing a review's old words from the customer summary failed", error);
+        after(() => forgetReviewWords(statsId, wordsBefore).then(() => undefined));
+      });
+    }
     if (written && photoFailed) return answer("photoFailed");
     if (photoLimit) return answer("photoLimit");
     if (written && photoPaused) return answer("photoPaused");

@@ -180,7 +180,8 @@ export async function POST(request: NextRequest) {
   }
 
   // What the Terms forbid ("anything that promises fast or easy money, or income
-  // for little effort") is not published (567 [GD1] (d)): a new product, which
+  // for little effort", 567 [GD1] (d); "sexual content", 568 [GD2] (b): every
+  // kind in BLOCKING_KINDS) is not published: a new product, which
   // is on the store at once, and a published one, are refused with the passage,
   // why and the fix. A draft may be saved with it; it is checked again when it
   // is published, below. The creator's words are never changed for them.
@@ -429,7 +430,7 @@ export async function POST(request: NextRequest) {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       if (body.hidden === false) {
-        // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
+        // Published only when nothing a buyer reads is what the Terms forbid (fast or easy money, 567 [GD1] (d); sexual content, 568 [GD2] (b)).
         const draft = await readListing(guarded.store, id);
         if (draft) {
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";

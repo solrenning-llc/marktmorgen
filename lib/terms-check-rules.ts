@@ -20,7 +20,10 @@
  *   - urgency or scarcity with no real deadline or stock limit behind it;
  *   - resale or private label rights, which the Terms allow only under a
  *     license the creator keeps (app/terms/page.tsx, "Content sold with
- *     resale rights").
+ *     resale rights");
+ *   - sexual content, which the Terms' "What you may not sell" forbids (568
+ *     [GD2] (b)): words that plainly describe it block, like fast money;
+ *     words that only may be adult content are a warning to reread.
  * A sentence that says the opposite is never warned, because the fix would
  * tell the creator to delete a protective sentence: a negation in the same
  * clause before the words ("No resale rights", "we do not guarantee any
@@ -41,14 +44,23 @@ export const MAX_WARNINGS = 30;
 /** Characters shown on each side of a passage. */
 const AROUND = 40;
 
-export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights";
+export type TermsWarningKind = "other_company" | "price_mismatch" | "no_refunds" | "earnings_claim" | "fast_money" | "false_urgency" | "resale_rights" | "sexual_content" | "adult_content";
 
 /**
  * The kinds that stop a product from being published, not only warn (567 [GD1] (d)): what the Terms already forbid.
  * "What you may not sell" (app/terms/page.tsx) includes "anything that promises fast or easy money, or income for
- * little effort". Every other kind is a warning the creator may act on or not.
+ * little effort" and "sexual content" (568 [GD2] (b)). Every other kind is a warning the creator may act on or not.
  */
-export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money"]);
+export const BLOCKING_KINDS: ReadonlySet<TermsWarningKind> = new Set<TermsWarningKind>(["fast_money", "sexual_content"]);
+
+/** What keeps a product off the store, in words for the start of a sentence; "" when nothing blocks. */
+export function blockingWhat(kinds: readonly TermsWarningKind[]): string {
+  const money = kinds.includes("fast_money");
+  const sexual = kinds.includes("sexual_content");
+  if (money && sexual) return "A promise of fast or easy money and sexual content";
+  if (money) return "A promise of fast or easy money";
+  return sexual ? "Sexual content" : "";
+}
 
 /**
  * `at` and `length` place the words in the text read (the first MAX_TEXT characters), for the studio to offer the
@@ -158,6 +170,60 @@ function fastMoneyExcused(text: string, index: number, length: number): boolean 
   return WARNS_AGAINST.test(clause);
 }
 
+
+/**
+ * Words that plainly describe sexual content, which the Terms forbid (568 [GD2] (b)): they block publication unless
+ * the sentence is plainly about something else (sexualContentExcused), and then they are only a warning. Kept narrow
+ * on purpose: a word that has an everyday meaning too ("nude" lipstick, "adult" learners) is never here.
+ */
+const SEXUAL_CONTENT: readonly RegExp[] = [
+  /\bporn(?:o|ography|ographic|s)?\b/gi,
+  /\bhentai\b/gi,
+  /\bsex\s+tapes?\b/gi,
+  /\bsexually\s+explicit\b/gi,
+  /\bexplicit\s+sex(?:ual)?\s+(?:content|videos?|photos?|scenes?|images?|pictures?|pics|clips?|stories)\b/gi,
+  /\b(?:xxx|x-rated)\s+(?:videos?|movies?|content|photos?|pics|pictures?|images?|clips?)\b/gi,
+  /\bonlyfans\s+leaks?\b/gi,
+  /\bleaked\s+nudes\b/gi,
+];
+/** Words before it that make the sentence about something else: quitting it, recovery, protection, the law, research. */
+const SEXUAL_ABOUT_BEFORE = /\b(?:quit|quitting|stop|stopping|overcome|overcoming|beat|beating|recover|recovering|recovery|free from|freedom from|break free|addict|addicts|addiction|addicted|sobriety|resist|avoid|avoiding|block|blocking|filter|filtering|protect|protecting|safety|safe from|dangers? of|harms? of|effects? of|research|study|studies|history of|laws?|legal|revenge|deepfake|victims?|report|reporting|talk to your (?:kids|children|teens))\b/i;
+/** Words after it that do the same. */
+const SEXUAL_ABOUT_AFTER = /^(?:-free\b|[\s"'\u201d\u2019:-]*(?:addiction|addict|addicts|addicted|recovery|habits?|use|detox|filters?|blockers?|blocking|literacy|awareness|education|prevention|laws?|research|studies|victims?)\b)/i;
+/** A first word that makes "porn" the everyday slang for beautiful pictures of a thing ("food porn", "cabin porn"). */
+const SLANG_BEFORE = /\b(?:food|earth|cabin|ruin|book|plant|travel|interior|design|gear|tool|map|architecture|space|sky|city|desk|cake|coffee|car|bike|garden|kitchen)\s*$/i;
+
+/**
+ * Said in the negative, right before the words ("no pornographic images", "nothing erotic", "without any explicit
+ * sexual content") or right after them ("porn is not allowed"). Narrower than `negated`, because here a negation lets
+ * words through a block: a "no" further back in the clause ("No paywall, porn clips") does not count.
+ */
+const SEXUAL_NEGATION_BEFORE = /\b(?:no|not|never|without|nothing|zero|free of)\s+(?:(?:any|such|explicit|sexual|graphic|adult)\s+){0,2}$/i;
+function sexualNegated(text: string, index: number, length: number): boolean {
+  return SEXUAL_NEGATION_BEFORE.test(text.slice(Math.max(0, index - 60), index)) || NEGATED_AFTER.test(text.slice(index + length, index + length + 60));
+}
+
+/** The sentence is plainly about the subject (recovery, the law, protection) or the word is slang: a warning, not a block. */
+function sexualContentExcused(text: string, index: number, length: number): boolean {
+  const before = text.slice(Math.max(0, index - 80), index);
+  const after = text.slice(index + length, index + length + 40);
+  if (SEXUAL_ABOUT_AFTER.test(after) || SLANG_BEFORE.test(before)) return true;
+  const clause = before.split(/[.!?;\n]/).pop() ?? "";
+  return SEXUAL_ABOUT_BEFORE.test(clause);
+}
+
+/** Words that may describe adult content but may not: a warning to reread, never a block. */
+const ADULT_DOUBTFUL = /\b(?:erotic|erotica|nsfw|nude|nudes|nudity|x-rated|xxx|onlyfans|fansly|fetish|escorts?|escorting|cam\s?girls?|striptease|sexting)\b/gi;
+/** After "nude", words of make-up, clothes and colors ("nude lipstick", "nude heels", "a nude palette"). */
+const NUDE_COLOR_AFTER = /^[\s-]*(?:lip\w*|palettes?|shades?|colou?rs?|tones?|heels|shoes|sandals|nails?|polish|makeup|make-up|eyeshadows?|beige|pinks?|bras?|underwear|tights|stockings|foundation|blush|gloss)\b/i;
+
+const SEXUAL_WHY =
+  "This describes sexual content. The Terms do not allow selling sexual content, so the product cannot be published with it.";
+const SEXUAL_FIX =
+  "Remove these words. If the product is not sexual content, for example a course on recovery or on the law, say so plainly in the same sentence.";
+const ADULT_WHY =
+  "This may describe adult content. The Terms do not allow selling sexual content; if this product is not sexual content, it is fine.";
+const ADULT_FIX = "Reread it: describe what the product contains, so that no reader takes it for sexual content.";
 
 /** Between the words of a phrase: spaces or a hyphen ("last-chance", "limited  time"). */
 const W = String.raw`[\s-]+`;
@@ -368,6 +434,24 @@ export function checkCreatorTerms(input: TermsCheckInput): TermsWarning[] {
     }
   }
 
+  const sexual: [number, number][] = [];
+  for (const pattern of SEXUAL_CONTENT) {
+    for (const m of text.matchAll(pattern)) {
+      const at = m.index ?? 0;
+      sexual.push([at, at + m[0].length]);
+      if (sexualNegated(text, at, m[0].length)) continue;
+      if (sexualContentExcused(text, at, m[0].length)) add("adult_content", at, m[0].length, ADULT_WHY, ADULT_FIX);
+      else add("sexual_content", at, m[0].length, SEXUAL_WHY, SEXUAL_FIX);
+    }
+  }
+  for (const m of text.matchAll(ADULT_DOUBTFUL)) {
+    const at = m.index ?? 0;
+    if (sexual.some(([from, to]) => at >= from && at < to)) continue;
+    if (/^nude$/i.test(m[0]) && NUDE_COLOR_AFTER.test(text.slice(at + m[0].length, at + m[0].length + 30))) continue;
+    if (sexualNegated(text, at, m[0].length)) continue;
+    add("adult_content", at, m[0].length, ADULT_WHY, ADULT_FIX);
+  }
+
   if (!input.resaleLicense) {
     for (const m of text.matchAll(RESALE)) {
       if (negated(text, m.index ?? 0, m[0].length)) continue;
@@ -477,7 +561,7 @@ export function fastMoneyMessage(passage: unknown, mode: "add" | "save" | "publi
   const where = FIELD_NAMES[String(p.field)] ?? "the product's words";
   const words = typeof p.excerpt === "string" ? p.excerpt.trim().replace(/[.,;:!?]+$/, "") : "";
   const quoted = words ? `: \u201c${words}\u201d` : "";
-  const why = typeof p.why === "string" && p.why ? p.why : "The Terms do not allow selling anything that promises fast or easy money.";
+  const why = typeof p.why === "string" && p.why ? p.why : "The Terms do not allow selling it.";
   const fix = typeof p.fix === "string" && p.fix ? p.fix : "Remove the promise and say what the product contains.";
   const named = typeof p.product === "string" && p.product.trim() ? `\u201c${p.product.trim()}\u201d` : "This product";
   const lead = mode === "publish" ? `${named} was not published` : mode === "add" ? "It was not added" : "Your changes were not saved";

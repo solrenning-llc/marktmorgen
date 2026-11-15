@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $135.90 | $1,420.20 | $69 / $690 |
-| Studio | $217.93 | $2,373.73 | $449 / $4,490 |
-| Scale | $402.35 | $4,549.55 | $999 / $9,990 |
+| Store | $135.90 | $1,420.25 | $69 / $690 |
+| Studio | $217.93 | $2,373.95 | $449 / $4,490 |
+| Scale | $402.35 | $4,550.00 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -43,7 +43,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $149 / $1,490 **(recommended)** | 15.0% | 60.29% | 60.05% | $89.84 | 0.42 |
+| $149 / $1,490 **(recommended)** | 15.0% | 60.29% | 60.04% | $89.84 | 0.42 |
 | $169 / $1,690 | 67.6% | 60.30% | 60.05% | $101.92 | 0.37 |
 | $199 / $1,990 | 100.0% | 60.58% | 60.34% | $120.57 | 0.31 |
 
@@ -55,8 +55,8 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $249 / $2,490 | 0.0% | 60.38% | 60.04% | $150.37 | 1.77 |
-| $299 / $2,990 **(recommended)** | 15.0% | 60.41% | 60.05% | $180.64 | 1.47 |
+| $249 / $2,490 | 0.0% | 60.38% | 60.03% | $150.37 | 1.77 |
+| $299 / $2,990 **(recommended)** | 15.0% | 60.41% | 60.04% | $180.64 | 1.47 |
 | $449 / $4,490 | 57.8% | 60.38% | 60.01% | $271.15 | 0.98 |
 
 ### Scale
@@ -91,7 +91,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Access emails a month: included · #553 · before #553 | **22** · 150 · 150 | **59** · 400 · 400 | **680** · 1,000 · 1,000 |
 | Store emails a month: included · #553 · before #553 | **11** · 75 · 75 | **44** · 300 · 300 | **540** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.29% | 60.41% | 60.44% |
-| Net at full included use, yearly (sizing reading) | 60.05% | 60.05% | 60.00% |
+| Net at full included use, yearly (sizing reading) | 60.04% | 60.04% | 60.00% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.10% | 12.14% | 12.16% |
 | Net a customer, a month, at full included use | $89.84 | $180.64 | $603.83 |
 | The same at #553's price | $37.77 | $266.21 | $595.66 |

@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$189 / $1,890** | every #553 figure, none cut | 60.41% / 60.16% | 12.14% | 375 | $69 / $690 |
+| Store | **$189 / $1,890** | every #553 figure, none cut | 60.41% / 60.16% | 12.14% | 377 | $69 / $690 |
 | Studio | **$809 / $8,090** | every #553 figure, none cut | 61.24% / 60.96% | 12.47% | 16 | $449 / $4,490 |
 | Scale | **$1,699 / $16,990** | every #553 figure, none cut | 61.30% / 60.98% | 12.49% | 8 | $999 / $9,990 |
 
@@ -142,7 +142,7 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 **Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).
 
-**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 3¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
+**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 4¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
 
 **Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 375 |
+| Store | $189 | 2.8% | 2.8% / 0.3% / 0.0% / 0.0% | 377 |
 | Studio | $809 | 23.7% | 23.5% / 1.6% / 12.1% / 23.7% | 16 |
 | Scale | $1,699 | 25.9% | 25.9% / 1.7% / 13.0% / 25.4% | 8 |
 
@@ -185,7 +185,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | ε -0.5: C over A | ε -1: C over A | ε -1.5: C over A | ε -2: C over A |
 | --- | --- | --- | --- | --- |
-| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.12× ($149 against $189) | 1.27× ($149 against $189) |
+| Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.13× ($149 against $189) | 1.27× ($149 against $189) |
 | Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.48× ($279 against $609) | 2.18× ($279 against $609) |
 | Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.52× ($539 against $1,249) | 2.32× ($539 against $1,249) |
 

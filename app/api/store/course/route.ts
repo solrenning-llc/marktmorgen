@@ -45,6 +45,7 @@ import { type StreamState, isStreamPath } from "@/lib/stream-rules";
 import { noteIfFinished } from "@/lib/course-finish";
 import { applyTemplate, templateById } from "@/lib/course-templates";
 import { NEXT_STEP_PROBLEMS, readNextStep } from "@/lib/course-next-step-rules";
+import { neverNextStep } from "@/lib/course-next-step";
 
 const OPS = new Set([
   "outline",
@@ -336,6 +337,14 @@ export async function POST(request: NextRequest) {
           { courseProductId: id, products: new Set(productIds(store)) },
         );
         if (!read.ok) return Response.json({ ok: false, error: "next_step", reason: read.why, message: NEXT_STEP_PROBLEMS[read.why] }, { status: 400 });
+        // A product whose shape keeps it from ever being shown is refused now, with its reason, so the studio never says
+        // students see a card they never will (review of #3530, MEDIUM). Unreadable is not known, so nothing is saved.
+        if (read.step) {
+          const listing = await readListing(store, read.step.productId).catch(() => "unknown" as const);
+          if (listing === "unknown") return Response.json({ ok: false, error: "unread" }, { status: 503 });
+          if (!listing) return Response.json({ ok: false, error: "next_step", reason: "product", message: NEXT_STEP_PROBLEMS.product }, { status: 400 });
+          if (neverNextStep(listing)) return Response.json({ ok: false, error: "next_step", reason: "never", message: NEXT_STEP_PROBLEMS.never }, { status: 400 });
+        }
         const result = editCourse(course, { op: "next-step", step: read.step });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);

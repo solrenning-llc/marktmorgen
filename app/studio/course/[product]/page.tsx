@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import { storeFolder } from "@/lib/store";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { StudioEmptyState } from "@/components/empty-state";
 import { productSegment } from "@/lib/product-slug";
@@ -84,8 +85,9 @@ export default async function StudioCoursePage({
   // And those being written by AI (lib/auto-captions.ts), which only somebody
   // who may spend on the plan's card, on a store with a plan, may ask for.
   const writing = await autoWriting(videoPaths).catch(() => ({}));
-  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card.
-  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => []) : [];
+  // Refunds for AI captions Stripe has not confirmed yet, shown to whoever may see the plan's card. A read that
+  // failed is null and is said on the page, never shown as no refund owed (CX-123 rule 30).
+  const owedRows: Awaited<ReturnType<typeof autoRefundsOwed>> | null = can(view.role, "billing") ? await autoRefundsOwed(folder).catch(() => null) : [];
   const autoCan =
     can(view.role, "billing") && store.subscriptionActive && Boolean(store.subscriptionId && store.stripeCustomerId) && isBillingConfigured() && isStreamConfigured();
   // Null when the students could not be read (rule 24): the page says so instead of "No students yet" or counts of 0.
@@ -164,7 +166,7 @@ export default async function StudioCoursePage({
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Course</p>
+        <StudioTrail store={store} path={[{ label: "Products", href: `${studioPath(store)}#products` }]} here="Course" />
         <h1 className="t-h2 mt-3 break-words">{product.title}</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Modules hold lessons. A lesson can have a video, text, downloads, a link, and a quiz or an assignment, and any lesson can be a
@@ -189,7 +191,16 @@ export default async function StudioCoursePage({
           </span>
         </div>
 
-        {owedRows.length ? (
+        {owedRows === null ? (
+          <section aria-labelledby="captions-refunds-unread" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds-unread>
+            <h2 id="captions-refunds-unread" className="text-base font-bold text-ink">
+              Refunds for AI captions could not be checked
+            </h2>
+            <p className="mt-2 text-sm text-ink">
+              We could not read whether a refund for AI captions is still waiting for Stripe. Reload this page to try again. If this keeps happening, write to {SUPPORT_EMAIL}.
+            </p>
+          </section>
+        ) : owedRows.length ? (
           <section aria-labelledby="captions-refunds" className="mt-5 rounded-2xl border border-line bg-paper p-4" data-captions-refunds>
             <h2 id="captions-refunds" className="text-base font-bold text-ink">
               Refunds for AI captions not confirmed yet
@@ -369,6 +380,11 @@ export default async function StudioCoursePage({
           <p className="mt-2 text-ink-soft">
             Everyone who has opened the course since buying it, with how many lessons they marked done. Buyers are
             read from your own Stripe account; this list is what they did here.
+          </p>
+          <p className="mt-2 text-sm">
+            <Link href={studioPath(store, `product=${encodeURIComponent(product.id)}`, "students")} className="inline-flex min-h-11 items-center underline">
+              Filter students and change many at once
+            </Link>
           </p>
           {studentsRead === null ? null : (
             <div className="mt-5 grid grid-cols-3 gap-3 text-center">

@@ -28,7 +28,7 @@ import { editCourse, emptyCourse, parseCourse, readCourse } from "@/lib/course";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, ensureStoreId, setProductExtras, setProductHidden, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
 import { POST as courseRoute } from "@/app/api/store/course/route";
 import { POST as noThanksRoute } from "@/app/api/store/course/no-thanks/route";
@@ -144,6 +144,26 @@ test("the studio's field saves through the route with the body it sends; the rou
   const route = readFileSync("app/api/store/course/route.ts", "utf8");
   const limit = Number(/const action = text\(body\.action, (\d+)\)/.exec(route)?.[1] ?? 0);
   assert.ok("next-step".length <= limit, "the action fits the length the route reads");
+});
+
+test("a product that is never shown as a next step is refused when it is saved, with its sentence (review of #3530 @e6311695a5, MEDIUM)", async () => {
+  const { course, advanced, guide, courseId, post } = await shop();
+  // A limited number: the next step's card never offers a product whose remaining count it would have to leave unsaid.
+  assert.ok((await setProductExtras(OWNER, advanced, { stock: 20 })).ok);
+  const limited = await post({ id: course, action: "next-step", productId: advanced, line: "" });
+  assert.deepEqual([limited.status, limited.body.error, limited.body.reason, limited.body.message], [400, "next_step", "never", NEXT_STEP_PROBLEMS.never]);
+  assert.equal((await readCourse(courseId))?.nextStep, undefined, "nothing kept: the studio never says students see it");
+  // A free product: never sold, so never offered next.
+  const free = await addProduct(OWNER, "Free palette", "", "0", null);
+  assert.ok(free.ok, JSON.stringify(free));
+  const freeSaved = await post({ id: course, action: "next-step", productId: free.product.id, line: "" });
+  assert.deepEqual([freeSaved.status, freeSaved.body.reason], [400, "never"]);
+  // A product that can be shown is still taken (control).
+  const fine = await post({ id: course, action: "next-step", productId: guide, line: "" });
+  assert.deepEqual([fine.status, fine.body.ok], [200, true]);
+  assert.equal((await readCourse(courseId))?.nextStep?.productId, guide);
+  const field = readFileSync("components/course-next-step.tsx", "utf8");
+  assert.match(field, /limited number, free products and bundles the student builds are never shown/, "the studio says which products are never shown, before the save");
 });
 
 test("the studio's field: labeled, its count said, the product list the store's own", () => {

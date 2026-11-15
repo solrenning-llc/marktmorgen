@@ -257,10 +257,15 @@ export async function votesOf(id: string, who: string, postIds: string[]): Promi
   const out: { post: string; picked: string[] }[] = [];
   for (let i = 0; i < postIds.length; i += 500) {
     const batch = postIds.slice(i, i + 500);
-    const replies = await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who]));
+    // Read exactly (rule 24): only null is no vote. A vote is kept with at least one choice (vote() deletes the field
+    // otherwise), so any other reply, an empty one or a pipeline of another length is unknown, never "did not vote".
+    const replies = repliesFor(await redisPipeline(batch.map((post) => ["HGET", votesKey(id, post), who])), batch.length);
+    if (!replies) throw new UnknownReplyError("a member's poll votes");
     batch.forEach((post, k) => {
       const raw = replies[k];
-      if (typeof raw === "string" && raw) out.push({ post, picked: raw.split(",").filter(Boolean) });
+      if (raw === null) return;
+      if (typeof raw !== "string" || !raw) throw new UnknownReplyError("a member's poll votes");
+      out.push({ post, picked: raw.split(",").filter(Boolean) });
     });
   }
   return out;

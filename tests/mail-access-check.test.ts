@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { bodyHtml } from "@/lib/mail-body";
 import { pictureLine } from "@/lib/mail-picture-rules";
-import { addressToButton, describePicture, mailAccessNotes, MAIL_ACCESS_DONE_FOR_YOU, renameButton } from "@/lib/mail-access-check";
+import { addressToButton, decoratePicture, describePicture, mailAccessNotes, MAIL_ACCESS_DONE_FOR_YOU, renameButton } from "@/lib/mail-access-check";
 import { MailAccessReview } from "@/components/mail-access-review";
 import { done, is, part } from "./check";
 
@@ -126,6 +126,20 @@ part("The panel");
   is("no word is invented: the description box starts empty", /<input[^>]*value=""/.test(html), true);
   const clear = renderToStaticMarkup(createElement(MailAccessReview, { body: "Hello", onChange: () => undefined, onShow: () => undefined }));
   is("a clear email: says so", clear.includes("Nothing to fix"), true);
+}
+
+part("\"It is only decoration\" on a picture with vague words takes the words off the email (Claude 7, Claude 3 on #4414)");
+{
+  const line = pictureLine("IMG_2041", pic(3));
+  const body = ["Hello", line, "Bye"].join("\n\n");
+  const [note] = mailAccessNotes(body);
+  is("the vague picture is named", note?.kind, "picture");
+  const result = decoratePicture(body, note);
+  is("it is written, not only kept on the page", result.ok, true);
+  const after = result.ok ? result.body : body;
+  is("only the picture's words go: the rest is as it was", after, ["Hello", pictureLine("", pic(3)), "Bye"].join("\n\n"));
+  is("the email draws it with alt=\"\", so a screen reader skips it", /<img[^>]*alt=""/.test(bodyHtml(after)) && !bodyHtml(after).includes("IMG_2041"), true);
+  is("text changed since: refused, nothing written", decoratePicture(`X${body}`, note), { ok: false, why: "changed" });
 }
 
 done();

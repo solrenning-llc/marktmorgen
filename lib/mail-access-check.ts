@@ -116,6 +116,16 @@ export function describePicture(body: string, note: MailAccessNote, words: strin
   return replaceAt(body, note, pictureLine(words, note.url));
 }
 
+/**
+ * A picture the creator says is only decoration, with words that say nothing ("IMG_2041"): those words taken off the
+ * email, so it is drawn with alt="" and a screen reader skips it, as the panel then says. Kept only on the page, the
+ * email went out with the vague words read aloud (Claude 7, confirmed by Claude 3, on #4414; 1.1.1, 4.1.3).
+ */
+export function decoratePicture(body: string, note: MailAccessNote): FixResult {
+  if (note.kind !== "picture") return { ok: false, why: "changed" };
+  return replaceAt(body, note, pictureLine("", note.url));
+}
+
 /** The button with the words the creator typed, to the same address. */
 export function renameButton(body: string, note: MailAccessNote, words: string): FixResult {
   if (note.kind !== "button") return { ok: false, why: "changed" };

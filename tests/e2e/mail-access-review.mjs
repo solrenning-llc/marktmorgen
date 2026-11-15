@@ -4,7 +4,7 @@
 // control at least 44 × 44 px (2.5.5); real Tab presses reach every control with a visible focus; a fix pressed
 // with typed words changes only that place, is said in the status region and can be undone; vague words are
 // refused with the error tied to the field; "Show it in the text" selects the place; marking a picture as
-// decoration leaves the text as it is; the studio's own editor (components/mail-designer.tsx), left in Design, opens
+// decoration leaves the text of a picture with no words as it is and takes vague words off; the studio's own editor (components/mail-designer.tsx), left in Design, opens
 // Write and selects the place it is asked to show. Not a conformity claim; no assistive technology was run here.
 // node tests/e2e/mail-access-review.mjs  (E2E_BROWSER=chromium|firefox|webkit; CHROMIUM=<path> for a local browser)
 import { createRequire } from "node:module";
@@ -155,6 +155,20 @@ try {
     }
     is(at + "a repeated sentence is said again", [heard[0].trim() === heard[1].trim(), heard[0] !== heard[1], heard[0].trim()], [true, true, "Marked as decoration: screen readers skip it."]);
     is(at + "both pictures marked, text unchanged", [await page.locator("section ol > li").count(), await text()], [0, TWO]);
+
+    // Vague words marked as decoration are taken off the email itself, so what is said is true; undo brings them back
+    // and names the picture again (Claude 7, confirmed by Claude 3, on #4414).
+    const VAGUE = ["Hello", `![IMG_2041](${PIC})`].join("\n\n");
+    await page.evaluate((body) => window.harness.mount(body), VAGUE);
+    await page.getByRole("button", { name: "It is only decoration" }).click();
+    await settled();
+    is(at + "vague words marked as decoration are taken off the email", await text(), ["Hello", `![](${PIC})`].join("\n\n"));
+    is(at + "and that is what is said", await status(), "Marked as decoration: its words are taken off, so screen readers skip it. You can undo it.");
+    is(at + "nothing left to check", await page.locator("section ol > li").count(), 0);
+    await page.getByRole("button", { name: /^Undo/ }).click();
+    await settled();
+    is(at + "undo brings the vague words back", await text(), VAGUE);
+    is(at + "and names the picture again", await page.locator("section ol > li").count(), 1);
 
     // A long address with no place to break stays inside the panel at 320 px (1.4.10).
     await page.evaluate((body) => window.harness.mount(body), `Hello\n\nhttps://example.com/${"a".repeat(160)}`);

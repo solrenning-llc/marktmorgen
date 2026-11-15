@@ -6,11 +6,12 @@
  * text and, where it is safe, a fix the creator does in one press with words they type. Nothing is changed
  * until they press, every change can be undone, and nothing here stops the email from going out.
  *
- * A picture the creator says is only decoration is left as it is: an email already draws a picture with no
- * words as one a screen reader skips (alt=""). That choice is kept on this page only, not with the email.
+ * A picture the creator says is only decoration: one with no words is left as it is, since an email already draws
+ * it as one a screen reader skips (alt=""), and that choice is kept on this page only. One with words that say
+ * nothing has them taken off the email (decoratePicture), with undo, so what the panel says is true of the email.
  */
 import { useId, useRef, useState } from "react";
-import { addressToButton, describePicture, mailAccessNotes, MAIL_ACCESS_DONE_FOR_YOU, renameButton, type FixResult, type MailAccessNote } from "@/lib/mail-access-check";
+import { addressToButton, decoratePicture, describePicture, mailAccessNotes, MAIL_ACCESS_DONE_FOR_YOU, renameButton, type FixResult, type MailAccessNote } from "@/lib/mail-access-check";
 import { MAX_MAIL_BUTTON } from "@/lib/mail-body";
 import { MAX_PICTURE_ALT } from "@/lib/mail-picture-rules";
 
@@ -57,8 +58,10 @@ export function MailAccessReview({
   const [undo, setUndo] = useState<{ before: string; after: string; what: string } | null>(null);
 
   const all = mailAccessNotes(body);
-  const notes = all.filter((note) => !(note.kind === "picture" && decoration.includes(note.url)));
-  const decorative = all.filter((note) => note.kind === "picture" && decoration.includes(note.url)).length;
+  // Only a picture with no words is hidden by the page's mark: one whose vague words came back (an undo) is named again.
+  const marked = (note: MailAccessNote) => note.kind === "picture" && !note.alt && decoration.includes(note.url);
+  const notes = all.filter((note) => !marked(note));
+  const decorative = all.filter(marked).length;
   const keyOf = (note: MailAccessNote, i: number) => `${note.kind}-${i}-${note.source}`;
 
   function apply(key: string, result: FixResult, done: string) {
@@ -173,6 +176,13 @@ export function MailAccessReview({
                         type="button"
                         className={link}
                         onClick={() => {
+                          if (note.alt) {
+                            // Its words are taken off the email itself, or a screen reader would still read them.
+                            const result = decoratePicture(body, note);
+                            if (result.ok) setDecoration((was) => [...was, note.url]);
+                            apply(key, result, "Marked as decoration: its words are taken off, so screen readers skip it.");
+                            return;
+                          }
                           setDecoration((was) => [...was, note.url]);
                           setSaid("Marked as decoration: screen readers skip it.");
                         }}

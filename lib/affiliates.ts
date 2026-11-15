@@ -123,6 +123,7 @@ import { leadWords } from "@/lib/buyer-words/affiliate-leads";
 import { formatMoney } from "@/lib/money";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { idleStep, readIdleDays } from "@/lib/affiliate-idle-rules";
+import { limitAddress } from "@/lib/request-guard";
 
 /** How long the emailed link to apply or sign in keeps working. */
 export const AFFILIATE_LINK_SECONDS = 24 * 60 * 60;
@@ -170,8 +171,10 @@ const sharesKey = (id: string) => `nl:aff:${id}:shares`;
 const linkKey = (token: string) => `nl:aff:link:${sha(`nimbus-aff-link:${token}`).slice(0, 40)}`;
 const sessionKey = (token: string) => `nl:aff:session:${sha(`nimbus-aff-session:${token}`).slice(0, 40)}`;
 const seenKey = (parts: string) => `nl:aff:seen:${sha(`nimbus-aff-seen:${parts}`).slice(0, 40)}`;
-const clickIpKey = (ip: string, id: string) => `nl:rl:aff:click:${sha(`nimbus-aff-click:${ip}:${id}`).slice(0, 32)}`;
-const applyIpKey = (ip: string, handle: string) => `nl:rl:aff:ip:${sha(`nimbus-aff-ip:${ip}:${handle}`).slice(0, 32)}`;
+// Counted by the address's connection, as every limit is (lib/request-guard.ts, limitAddress; #4628, Claude 7 on
+// #4637): an IPv6 client that steps through its own /64 is one counter, so it cannot add clicks or apply again.
+const clickIpKey = (ip: string, id: string) => `nl:rl:aff:click:${sha(`nimbus-aff-click:${limitAddress(ip)}:${id}`).slice(0, 32)}`;
+const applyIpKey = (ip: string, handle: string) => `nl:rl:aff:ip:${sha(`nimbus-aff-ip:${limitAddress(ip)}:${handle}`).slice(0, 32)}`;
 const applyAddressKey = (email: string) => `nl:rl:aff:addr:${sha(`nimbus-aff-addr:${email}`).slice(0, 32)}`;
 
 export type AffiliateStatus = "pending" | "approved" | "declined" | "removed";
@@ -2535,7 +2538,8 @@ export async function notePartners(
     (a) => a.status === "approved" && lines.some((line) => shareOn(a.share, line.product) > 0),
   );
   if (!holders.length) return;
-  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched.
+  // One inbox however it is written (canonicalEmail), as an affiliate's own purchase is matched: the partner's inbox or
+  // their payout address (payAddress), as an own lead is (lib/affiliate-leads.ts isOwn; issue #4046, part 2).
   const buyer = sale.buyer ? canonicalEmail(sale.buyer) : "";
   const commands: (string | number)[][] = [];
   for (const partner of holders) {
@@ -2555,7 +2559,7 @@ export async function notePartners(
       currency: readCurrencyCode(sale.currency),
       percent: shareOn(partner.share, theirs[0].product),
       // A 50% partner buying their own product at 50% off is not a sale.
-      self: Boolean(buyer) && canonicalEmail(partner.email) === buyer,
+      self: Boolean(buyer) && (canonicalEmail(partner.email) === buyer || canonicalEmail(payAddress(partner)) === buyer),
       // The account a Stripe sale was paid into, as writeReferral writes it (readBook).
       ...(!sale.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
       ...(whole ? {} : { whole: sale.base }),

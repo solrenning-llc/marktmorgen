@@ -6,14 +6,17 @@ import type { CreatorCard } from "@/lib/creator-card";
  * The card as the creator typed it: each way to reach them a link, and the
  * file to save it. As a preview in the studio (`preview`), the same card
  * under a third-level heading, with its links as plain text, so nothing in
- * it leaves the studio or saves a card that is not the one kept yet.
+ * it leaves the studio or saves a card that is not the one kept yet; its
+ * Save contact is drawn dashed and says "(preview)", so it does not look
+ * like a button that works. A phone's link keeps only its digits and +, so
+ * every phone dials it. Every link is at least 44px tall (2.5.5).
  */
 export function CreatorCardView({ card, handle, storeName, words, preview = false }: { card: CreatorCard; handle: string; storeName: string; words: ContactWords["card"]; preview?: boolean }) {
   const Heading = preview ? "h3" : "h1";
   const id = preview ? "card-preview-name" : "card-name";
   const ways: { label: string; text: string; href: string }[] = [];
   if (card.email) ways.push({ label: words.email, text: card.email, href: `mailto:${card.email}` });
-  if (card.phone) ways.push({ label: words.phone, text: card.phone, href: `tel:${card.phone}` });
+  if (card.phone) ways.push({ label: words.phone, text: card.phone, href: `tel:${card.phone.replace(/[^\d+]/g, "")}` });
   if (card.website) ways.push({ label: words.website, text: card.website.replace(/^https:\/\//, "").replace(/\/$/, ""), href: card.website });
   return (
     <article className="st-card p-7 sm:p-10" aria-labelledby={id}>
@@ -43,7 +46,12 @@ export function CreatorCardView({ card, handle, storeName, words, preview = fals
       ) : null}
       <div className="mt-8">
         {preview ? (
-          <span className="btn st-btn inline-flex min-h-11 items-center">{words.save}</span>
+          <span className="inline-flex min-h-11 items-center gap-2 rounded-full border-2 border-dashed border-current px-5 font-semibold">
+            {words.save}
+            <span lang="en" className="text-sm font-normal">
+              (preview)
+            </span>
+          </span>
         ) : (
           <a href={`/@${handle}/contact/vcard`} download className="btn st-btn inline-flex min-h-11 items-center" aria-describedby="card-save-hint">
             {words.save}
@@ -55,9 +63,9 @@ export function CreatorCardView({ card, handle, storeName, words, preview = fals
       </div>
       <p className="mt-8">
         {preview ? (
-          <span className="st-footer-link text-sm font-semibold">{words.store(storeName)}</span>
+          <span className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">{words.store(storeName)}</span>
         ) : (
-          <Link href={`/@${handle}`} className="st-footer-link text-sm font-semibold">
+          <Link href={`/@${handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {words.store(storeName)}
           </Link>
         )}

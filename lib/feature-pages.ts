@@ -37,6 +37,7 @@ import { liveEventsBeginnerQuestions } from "@/lib/live-events-faq";
 import { emailBeginnerQuestions } from "@/lib/email-faq";
 import { outreachBeginnerQuestions } from "@/lib/outreach-faq";
 import { switchingBeginnerQuestions } from "@/lib/switching-faq";
+import { MIGRATION_GUIDES, MIGRATION_GUIDE_PAGES } from "@/lib/migration-guides";
 import { clickFunnelsBeginnerQuestions } from "@/lib/clickfunnels-faq";
 import { crmBeginnerQuestions } from "@/lib/crm-faq";
 import { aiWritingBeginnerQuestions } from "@/lib/ai-writing-faq";
@@ -82,9 +83,20 @@ import { storageWords } from "@/lib/storage-quota";
 import { MAX_AUTO_REMINDERS, MAX_LINES, OPEN_DAYS, REQUEST_LIMITS } from "@/lib/payment-request-rules";
 import { MAX_VERSIONS as AGREEMENT_VERSIONS, SIGN_DAYS } from "@/lib/agreement-rules";
 import { PLAN_TITLES, TIERS } from "@/lib/plan";
+import { IMPORT_ALLOWANCES, IMPORT_ROWS_KEPT_DAYS } from "@/lib/import-limits";
+import { CLOSING_DAYS, ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
+import { uploadBackendOpen } from "@/lib/upload-budget-policy";
 
 /** Whether stores can be put on their own domain on this deployment. */
 const DOMAINS = isDomainsConfigured();
+/**
+ * Whether a new lesson video can be kept by the video service: the same door
+ * the studio's video upload asks (reserveStoreUpload, app/api/store/stream).
+ * Captions and video made into several sizes exist only for such a video;
+ * while the door is closed a lesson video is a plain file, played at its own
+ * size with no captions, and the pages say only that.
+ */
+const LESSON_VIDEO_SERVICE = uploadBackendOpen("stream");
 /** What Studio and the trial send in a month, as the pages say it: read from the limit the code enforces, never typed. */
 const PRO_EMAILS = PRO_MONTHLY_EMAILS.toLocaleString("en-US");
 const TRIAL_EMAILS = TRIAL_MONTHLY_EMAILS.toLocaleString("en-US");
@@ -317,7 +329,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "Courses your students",
     highlight: "open without a password",
     intro:
-      "Modules and lessons with video that plays in the size each student's connection can carry, text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
+      (LESSON_VIDEO_SERVICE ? "Modules and lessons with video that plays in the size each student's connection can carry," : "Modules and lessons with video,") + " text and downloads, free preview lessons on your store, and modules that open on the day you choose. Students get in with the email they paid with.",
     badge: WORKING,
     accent: "from-sky-brand to-violet-brand",
     visual: "course",
@@ -339,11 +351,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         kind: "features",
         title: "What a course holds",
         items: [
-          { icon: "play", title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." },
-          { icon: "video", title: "A player students control", body: "Students can pick a size and a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device." },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "play" as const, title: "Video that does not stop to load", body: "Each video is made into up to five sizes, from 240p to 1080p and never larger than the video itself. The player sends the size the student's connection can carry and changes it as the connection changes." }] : []),
+          { icon: "video", title: "A player students control", body: `Students can pick ${LESSON_VIDEO_SERVICE ? "a size and " : ""}a playback speed, watch full screen or in a small window, and the video goes on from where they stopped on that device.` },
           { icon: "phone", title: "Video that stays upright", body: "Up to 5 GB a lesson. A video filmed upright on a phone plays upright, in a frame of its own shape." },
-          { icon: "type", title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
-          { icon: "sparkle", title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` },
+          ...(LESSON_VIDEO_SERVICE ? [{ icon: "type" as const, title: "Captions in up to 12 languages", body: "Upload a .vtt or .srt file for a language and the player shows a captions button. Bold, italics and where a caption sits are kept; a file that is not captions is refused instead of shown as nothing." },
+          { icon: "sparkle" as const, title: "Captions written by AI", body: `One press writes a lesson's captions from what is said in it, in the language spoken and, if you like, translated into up to two more. ${dollars(CENTS_PER_MINUTE)} a minute of video for each language, shown before you press and charged then to the card your plan is paid with; anything not delivered within ${GIVE_UP_HOURS} hours is refunded.` }] : []),
           { icon: "lock", title: "A video address that expires", body: "The player on a lesson page is signed for a few hours. Without that signature, the video and its files are refused." },
           { icon: "eye", title: "Free preview lessons", body: "Any lesson can be watched from your store before buying, so the buyer knows what they are paying for." },
           { icon: "calendar", title: "Modules that open over time", body: "A module can open a set number of days after each student joins, and the student gets an email the day it does." },
@@ -376,8 +388,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           "No live lessons inside the course itself. Hold them as live events in your community, or put a link in a lesson to where you hold them.",
           `Stream video has a finite threshold of ${paidVideoWords()} a month across your store. New playback pauses at the recorded threshold. The meter is read about once an hour; existing player links may remain valid until they expire. Your studio shows the recorded hours.`,
           `Without a paid plan, lesson videos pause past the store's hours until the plan is paid (for a store with no plan, until the month turns): ${hoursWords(TRIAL_VIDEO_SECONDS)} a month in the free trial, and ${hoursWords(SETUP_VIDEO_SECONDS)} a month before a plan starts and after one ends.`,
-          "Video is kept up to 1080p: a 4K file plays at 1080p.",
-          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`,
+          ...(LESSON_VIDEO_SERVICE ? ["Video is kept up to 1080p: a 4K file plays at 1080p.",
+          `Captions written by AI are machine transcription: read them before you rely on them, and replace a language with your own file whenever you like. They are for videos of up to ${MAX_AUTO_MINUTES / 60} hours, need a paid plan, and come as captions in the player, not as a separate transcript.`] : []),
           "A signed address stops a link from being passed around. It does not stop a student from recording their own screen; nothing does.",
         ],
       },
@@ -387,7 +399,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 2: what someone starting out asks, answered by what the code does (lib/course-faq.ts).
           ...courseBeginnerQuestions(),
-          { q: "How long until a video I upload can be watched?", a: "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." },
+          { q: "How long until a video I upload can be watched?", a: LESSON_VIDEO_SERVICE ? "It plays as soon as its first size is made, and the larger sizes follow by themselves. Your studio says when it is ready, and a student who opens the lesson before that is told the video is being prepared." : "As soon as its upload finishes. It plays in the student's browser at the size you uploaded it." },
           { q: "How does a student come back next week?", a: "On the device they paid on, the course simply opens. On any other, they ask for a link on the course page and it is emailed to the address they paid with. No account, no password." },
           { q: "Can I sell a course monthly?", a: "Yes. Sold as a membership, the course stays open while the member pays and closes when the membership ends." },
           { q: "Can students pay in installments?", a: "Yes. A course with one price can be offered in two to twelve weekly or monthly payments. The student gets in after the first." },
@@ -495,7 +507,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         title: "How it works",
         items: [
           { title: "Set your hours once", body: "How long a call lasts, your time zone, and the hours you take calls each day — up to two stretches a day." },
-          { title: "The buyer picks a time", body: "Free times are shown in the buyer's own time zone. The time is held for them for 30 minutes while they pay." },
+          { title: "The buyer picks a time", body: "Free times are shown in the buyer's own time zone. The time is held for them for about 30 minutes while they pay." },
           { title: "Paid, then booked", body: "The buyer gets an email with a calendar file and the link to meet, or a note that you will send it. You get one too, or the host does on a team call. If the call is already in that person's Google Calendar, their email has no file. The call appears in your studio under Upcoming calls, and in the buyer's list of purchases." },
         ],
       },
@@ -549,7 +561,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           // 534 [FQ1], unit 4: what someone starting out asks, answered by the code (lib/call-faq.ts).
           ...callBeginnerQuestions(),
-          { q: "What if two people try to book the same time?", a: "The first to reach payment holds it for 30 minutes. The second no longer sees it. If the first does not pay, the time comes back." },
+          { q: "What if two people try to book the same time?", a: "The first to reach payment holds it for about 30 minutes. The second no longer sees it. If the first does not pay, the time comes back." },
           { q: "Can a call be paid in installments?", a: "No. A call is paid in full when it is booked. Installments are for products with one price." },
           { q: "Can I hold a free session for my members instead?", a: "Yes, as a live event in your community: members RSVP, get reminders and join from the event's page. Paid calls and live sessions are for selling seats; live events are for the people already let into your community." },
           { q: "Is sales tax added to calls?", a: "When you switch Stripe Tax on, it is added to calls as it is to everything else, on your own account." },
@@ -817,7 +829,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "pin", title: "Your postal address", body: "In every email, as US law (CAN-SPAM) requires of commercial email, with a line on why the reader is getting it." },
           { icon: "shield", title: "Dead addresses taken off for you", body: "An address that cannot be delivered to, or whose owner reports an email as spam, is taken off your list by itself and never written to again. Mail apps judge a sender by exactly those two things." },
           { icon: "download", title: "Your list is yours", body: "Download it as a CSV any time, from any plan. Bring one in from a spreadsheet, up to 50,000 addresses a file, confirming each time that those people agreed.", href: "/platform/switching-to-marktmorgen" },
-          { icon: "download", title: "Your store's main data as one file", body: "Your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and a summary of your orders, downloaded as one file from your studio: from your studio's requests by its size while a plan runs, and up to five times once it has ended, before your store closes 30 days later. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio." },
+          { icon: "download", title: "Your store's main data as one file", body: "Your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and a summary of your orders, downloaded as one file from your studio: from your studio's requests by its size while a plan runs, and " + (ENDED_STORE_EXPORTS === 1 ? "once" : ENDED_STORE_EXPORTS + " times") + " once it has ended, before your store closes " + CLOSING_DAYS + " days later. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio." },
           { icon: "target", title: "Sequences that stop selling to buyers", body: "End a sequence for anyone who buys, or gets one product, checked before each email, so a launch sequence never pitches the course to somebody who already owns it. And send any email of it only to those who have a product or do not, who have bought or not yet, or who carry a label, from your import or from a sequence; everyone else skips it or leaves the sequence there. Or only to those who used a link in the email before, or did not: counted only for readers who allowed it with a box of their own when they joined, and never from opens." },
           { icon: "ladder", title: "Steps that act, not only emails", body: "A step can give someone a label, take one off, start them on another sequence or tell your webhooks, with the same conditions an email has, and a sequence can split its people into halves A and B to try two versions on one list. “If they used the link and have not bought, label them interested”, and a sequence that starts with that label takes it from there: automations, in the sequences you already have." },
           { icon: "ladder", title: "Workflows that branch, with a goal and a history", body: "Any step can be an IF/ELSE: those its condition holds for do it and go on to a later step you choose, everyone else goes to another, or the run ends. A goal (bought anything, got one product, carries a label) ends a run before its next step. Before switching a workflow on, preview the exact path someone would take: describe them, or pick someone from your list. New workflows are saved paused. Every run keeps its history: each step attempted, then confirmed, failed or uncertain. An uncertain step is never repeated by itself; the run waits for you to say it went through, try it again or end it." },
@@ -864,7 +876,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           // 534 [FQ1], unit 30: what someone starting out asks, answered by the code (lib/email-faq.ts).
           ...emailBeginnerQuestions(),
           { q: `Why is email on Studio and not on the ${PLAN_AT.creator} plan?`, a: `Because every email sent costs us money, and the ${PLAN_AT.creator} plan is priced to cover a store, not a mailing list. Stan puts email on its $99 plan as well — read on its pricing page on September 20, 2026.` },
-          { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
+          { q: "Can I import the list I already have?", a: "Yes, on every plan, from a CSV file of up to 50,000 rows, as long as those people agreed to hear from you. Each billing month your imports bring in up to " + IMPORT_ALLOWANCES.creator.rows.toLocaleString("en-US") + " rows on Store, " + IMPORT_ALLOWANCES.pro.rows.toLocaleString("en-US") + " on Studio and " + IMPORT_ALLOWANCES.scale.rows.toLocaleString("en-US") + " on Scale. You confirm that each time, a consent column in the file narrows it further, and anyone who unsubscribed here stays unsubscribed. Nobody is emailed because of the import." },
           { q: `What if my list needs more than ${PRO_EMAILS} emails a month?`, a: PLANS_ON_SALE ? `Move up to Scale from your studio: the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year. You are charged the difference for the rest of the period you already paid for, and you can go back to Studio whenever you like. Without it, an email that passes the month's number waits and goes out by itself when the month turns.` : `Scale is the same plan with up to ${SCALE_MONTHLY_EMAILS.toLocaleString("en-US")} emails a month, at $${PLAN_PRICES.scale.month / 100} a month or $${(PLAN_PRICES.scale.year / 100).toLocaleString("en-US")} a year, but plans are not on sale yet, so no store can move to it today. An email that passes the month's number waits and goes out by itself when the month turns.` },
           { q: `Can I email people on the ${PLAN_AT.creator} plan at all?`, a: `Your list downloads as a CSV on every plan, and on the ${PLAN_AT.creator} plan your store can send the people who agree straight to your own Mailchimp, Kit, beehiiv or MailerLite. Writing to them from Marktmorgen is what Studio adds.` },
         ],
@@ -2344,7 +2356,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
     title: "A sale, and your phone",
     highlight: "tells you",
     intro:
-      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, and a comment under a lesson.",
+      "Turn notifications on in your studio, on your phone or your computer: every sale, every booking, a report in your community, a new affiliate application, a live event about to start, a comment under a lesson, and a buyer's message in your inbox.",
     visual: "phone",
     badge: WORKING,
     accent: "from-pink-brand to-amber-brand",
@@ -2371,6 +2383,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "alert", title: "Reports", body: "A member reported a post or a comment in your community." },
           { icon: "handshake", title: "Affiliate applications", body: "Someone confirmed an application to your program." },
           { icon: "chat", title: "Course comments", body: "A student commented under a lesson: which lesson, and the start of what they wrote." },
+          { icon: "mail", title: "Buyer messages", body: "A buyer wrote in your inbox: once until you read it, never what they wrote. Tap it to open the conversation." },
           { icon: "video", title: "Live events", body: "One of your community's live events starts in 15 minutes: time to open the room.", href: "/platform/live-events" },
           { icon: "lock", title: "Written for a lock screen", body: "Amounts, titles, times and the start of a lesson comment, as the student wrote it. We never add a buyer's name or email address." },
           { icon: "users", title: "Each person their own", body: `Up to ${MAX_DEVICES} devices each. Your team members see only their own devices, and hear only what their role may see.` },
@@ -2435,7 +2448,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "users", title: "Past buyers, up to 20,000 a file", body: "Each gets what they bought (the file, the link, the course or each product of a bundle) on your store's list of purchases, marked as brought over from another platform. No payment is taken and no receipt is sent." },
           { icon: "repeat", title: "Members, up to 20,000 a file", body: "Each member gets one email with their own link to keep their membership here, on your Stripe account. Their card is first charged on the day the membership would have renewed where it was, the date in your file, so nobody pays twice for the same weeks; one reminder goes three days before that date to those who have not kept it. You stop the renewals on the other platform yourself, and the studio asks you to confirm you will." },
           { icon: "chat", title: "Into your community", body: "A buyer brought over for a product that opens your community is let in, like anyone who bought it here.", href: "/platform/community" },
-          { icon: "gift", title: "One email, if you choose", body: "Check it, and each buyer gets one email from your store's name saying what moved and how to open it. Up to 20,000 buyers per store in 30 days, and nothing else is sent because of it." },
+          { icon: "gift", title: "One email, if you choose", body: "Check it, and each buyer gets one email from your store's name saying what moved and how to open it. On Studio and Scale these emails count in your plan's monthly emails. On Store, up to " + IMPORT_ALLOWANCES.creator.movedEmails + " go out a month. Nothing else is sent because of it." },
           { icon: "shield", title: "Checked row by row", body: "Every row is checked again on our side, the way the studio checks a product or an address, and importing the same file twice gives nobody anything twice." },
         ],
       },
@@ -2454,6 +2467,11 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         ],
       },
       {
+        kind: "features",
+        title: "Guides for one platform",
+        items: MIGRATION_GUIDES.map((g) => ({ icon: "door" as const, title: `Move from ${g.platform}`, body: g.summary, href: `/platform/${g.slug}` })),
+      },
+      {
         kind: "faq",
         title: "Questions about moving",
         items: [
@@ -2462,7 +2480,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { q: "In what order should I bring things over?", a: "Products first, because the buyers' file names them by their title or their ID here. Then add each product's file or lessons, then your list and your buyers." },
           { q: "Which plan does a move need, and who can run it?", a: "Every plan. You and your Admins can import; Editors and Support cannot. The one email to past buyers, and the emails to members, are sent only while your plan or its trial is running." },
           { q: "How do my members move without paying twice?", a: "Make the membership here first, at the same price. Export your members with the date each would next renew, import them under Your members, and stop the renewals where they are now. Each member keeps theirs with their own link: the card is taken then and first charged on that date. A date less than two days away is charged when they keep it, and their page says so before they press." },
-          { q: "Is my file kept?", a: "The file itself never reaches us: your browser reads it and sends the columns you matched. Those rows, the report of what was left out and the import's counts are deleted two weeks after the import began, so download the report before then. What the import added (contacts, drafts and purchases) stays." },
+          { q: "Is my file kept?", a: "The file itself never reaches us: your browser reads it and sends the columns you matched. Rows not brought in yet are deleted " + IMPORT_ROWS_KEPT_DAYS + " days after their upload. The report of what was left out and the import's counts are deleted two weeks after the import began, so download the report before then. What the import added (contacts, drafts and purchases) stays." },
           { q: "What does Stan offer here?", a: "According to its help center, read on September 27, 2026, Stan imports up to 5,000 contacts per store in all, and has you send them an email to opt in again; it gives a customer a download, a course or the community one customer at a time, with no way to undo that in bulk. We found no import for products there. Here you confirm your contacts agreed instead of us emailing them, and buyers come in from a file." },
         ],
       },
@@ -2499,7 +2517,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
         items: [
           { icon: "mail", title: "Contacts, up to 50,000 a file", body: "With their names and tags. Only those ClickFunnels marks Subscribed, after you confirm they agreed, can be emailed here. Everyone else comes in as a contact you cannot email, and those marked Unsubscribed or Undeliverable stay unsubscribed here: no later import can make them people you email.", href: "/platform/email" },
           { icon: "tag", title: "Products, up to 500 a file", body: "Each one a draft in your studio with its name, price in your store's currency and description, until you publish it. A product already in your store by the same name is not made again." },
-          { icon: "users", title: "Past buyers, up to 20,000 rows", body: "From your Orders export: each buyer is given what they bought, matched to your products by name. Orders its Billing status marks refunded, failed, canceled or pending are left out. No payment is taken, and one email to each buyer is sent only if you choose it." },
+          { icon: "users", title: "Past buyers, up to 20,000 a file", body: "From your Orders export: each buyer is given what they bought, matched to your products by name. Orders its Billing status marks refunded, failed, canceled or pending are left out. No payment is taken, and one email to each buyer is sent only if you choose it." },
           { icon: "layout", title: "Funnel pages, up to 10 at a time", body: "Each saved page's headings, paragraphs, lists, buttons, YouTube, Vimeo and Loom videos and its form become blocks of one of your store's own pages, kept from visitors until you let it out, and the pages a funnel of pages, switched off.", href: "/platform/funnels" },
           { icon: "card", title: "Checkouts and order bumps", body: "A page you say was an order form becomes your product's own page and checkout in the funnel. Each order bump it had becomes a box at that checkout for the product you pick, at that product's own price." },
           { icon: "ladder", title: "Upsells and downsells", body: "A page you say was an upsell becomes an offer after paying for the checkout before it, in one click, with the page's headline and first lines. A downsell is shown to whoever says no to the upsell just before it." },
@@ -2541,6 +2559,8 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       ] },
     ],
   },
+  // 239 [CF2]: one guide per source platform, out of the menu (lib/migration-guides.ts).
+  ...MIGRATION_GUIDE_PAGES,
   {
     slug: "security",
     section: "platform",

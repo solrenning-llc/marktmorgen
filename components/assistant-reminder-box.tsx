@@ -1,6 +1,6 @@
 import { EmailField } from "@/components/email-field";
 import { assistReminderWords } from "@/lib/buyer-words/assistant-reminder";
-import { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-rules";
+import { ASSIST_REMIND_VERSION } from "@/lib/assistant-reminder-version";
 
 /**
  * The Store assistant's box at checkout (lib/assistant-reminder-rules.ts):
@@ -13,7 +13,7 @@ export function AssistReminderBox({ id, lang, store, className = "" }: { id: str
   const r = assistReminderWords(lang);
   return (
     <div className={`text-sm ${className}`}>
-      <label htmlFor={id} className="st-muted flex cursor-pointer items-start gap-3">
+      <label htmlFor={id} className="st-muted flex min-h-11 cursor-pointer items-start gap-3">
         <input id={id} type="checkbox" name="remind" value="yes" data-remind="" className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           {r.box}

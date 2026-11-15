@@ -28,9 +28,29 @@ const whole = (n: number) => (Number.isFinite(n) && n > 0 ? Math.ceil(n) : 0);
  * Working out the book, beside what scales: its fixed commands (the book
  * counted, its seven hashes, the PayPal refunds' set, two reads of
  * listings, the parts written back and the lock), the request itself held
- * while it works, and its counting.
+ * while it works, and its counting. Each record's refund kept on it
+ * (lib/affiliates.ts, AFFILIATE_REFUND_MARK: three scripts, at most
+ * REFUND_MARKS_PER_READ records a reading, REFUND_MARK_BYTES each) is held against
+ * these units in tests/plan-cost-registry.test.ts (affiliatePageRead).
  */
-export const AFFILIATE_PAGE_UNITS = 4;
+// 4 until 13 November 2026; one more for the refunds kept on the records (REFUND_MARKS_PER_READ at REFUND_MARK_BYTES).
+export const AFFILIATE_PAGE_UNITS = 5;
+/**
+ * The picture a product's shared link unfolds into (app/[handle]/p/[product]/opengraph-image.tsx), paid as public
+ * requests before anything is read or drawn: held above its worst case, PRODUCT_CARD_READ in
+ * tests/plan-cost-registry.ts (reviews of #4211): the call, a stated bound of PRODUCT_CARD_CPU_SECONDS of CPU held
+ * PRODUCT_CARD_HELD_SECONDS at 2 GB, its commands, the product's picture read from the file store (at most
+ * MAX_IMAGE_BYTES) and the largest PNG it can send (PRODUCT_CARD_MAX_BYTES). The CPU is a stated bound, not a measure:
+ * the decode is held to the pixels an upload keeps (PRODUCT_CARD_PICTURE_PIXELS) and the certificate's lighter card took
+ * 0.59 s cold (audit R41).
+ */
+export const PRODUCT_CARD_UNITS = 9;
+export const PRODUCT_CARD_CPU_SECONDS = 3;
+export const PRODUCT_CARD_HELD_SECONDS = 10;
+/** The largest card PNG: 1200 x 630 at four bytes a pixel, one filter byte a row, and 64 KB of headers and fonts. */
+export const PRODUCT_CARD_MAX_BYTES = 1200 * 630 * 4 + 630 + 65_536;
+/** The most pixels a product picture is decoded at for its card: the long side an upload keeps, squared (lib/product-image.ts). */
+export const PRODUCT_CARD_PICTURE_PIXELS = 1600 * 1600;
 /** Each page of the creator's Stripe account read for the book, its body up to a megabyte worked through: one request each. */
 export const AFFILIATE_STRIPE_PAGES_PER_UNIT = 1;
 /** Fields of the program's records (affiliates, clicks, sales, payouts, shares, paid clicks, leads), read in one go, per request. */
@@ -114,3 +134,13 @@ export type SitemapSize = {
 export function sitemapUnits(size: SitemapSize): number {
   return Math.min(MAX_UNITS, SITEMAP_BASE_UNITS + whole(size.listings / PUBLIC_LISTINGS_PER_UNIT + size.carried / SITEMAP_LINES_PER_UNIT + size.postPages / SITEMAP_POST_PAGES_PER_UNIT));
 }
+
+/**
+ * What a store's card in the buyer's library takes of that store's buyer
+ * requests before it reads what waits on them there (app/library,
+ * lib/buyer-waiting.ts waitingFor; Codex J on #1969): the person's two sets
+ * and their records (four commands, at most MAX_PER_PERSON records of each
+ * kind) and the text of each agreement listed (WAITING_SHOWN). Held against
+ * that read at its largest in tests/plan-cost-registry.test.ts (libraryWaitingRead).
+ */
+export const LIBRARY_WAITING_UNITS = 4;

@@ -131,7 +131,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
           const owners = await codeOwners(store).catch(() => new Map<string, string>());
           const mine = [...owners].filter(([, id]) => id === affiliate.id).map(([promo]) => promo);
           if (!mine.length) return [];
-          const listed = await listCodes(store.stripeAccountId as string).catch(() => ({ state: "error" as const }));
+          // The live codes alone, so one behind newer switched-off codes is still found.
+          const listed = await listCodes(store.stripeAccountId as string, { active: true }).catch(() => ({ state: "error" as const }));
           if (listed.state !== "ok") return [];
           return listed.codes
             .filter((code) => code.active && code.off !== null && mine.includes(code.id))
@@ -280,7 +281,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-sm">{a.recruitNote(store.affiliates.secondTier, store.name)}</p>
                     </>
                   ) : null}
-                  <AffiliateCampaignLinks products={promotionProducts} />
+                  <AffiliateCampaignLinks products={promotionProducts} language={store.language} />
                   <AffiliateKit handle={store.handle} language={store.language} products={aiAvailableFor(store) ? kitProducts : []} />
                   {/*
                     A code of the store's own, given to this affiliate
@@ -390,7 +391,7 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
                     </p>
                   ) : null}
 
-                  <AffiliatePromotionResults book={book} />
+                  <AffiliatePromotionResults book={book} language={store.language} />
                   {/* Each lead with where it stands (lib/affiliate-lead-rules.ts), the person's address masked. */}
                   {book.lines.some((line) => line.how === "lead") ? (
                     <>

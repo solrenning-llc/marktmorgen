@@ -110,6 +110,8 @@ export function standIns(stripe: StripeWorld, sent: Sent[], passThrough: ((input
         const since = Number(url.searchParams.get("created[gte]") ?? 0), until = Number(url.searchParams.get("created[lt]") ?? Infinity);
         return json({ object: "list", data: stripe.sessions.filter((s) => s.account === account && Number(s.created) >= since && Number(s.created) < until), has_more: false });
       }
+      // A closing day expires the store's open plan checkouts on the platform (lib/closing-plan-guard.ts); none is open here.
+      if (path === "/checkout/sessions" && !account) return json({ object: "list", data: [], has_more: false });
       if (path === "/payment_intents/search") return json({ object: "search_result", data: [], has_more: false, next_page: null });
       if (path === "/subscriptions/search" && account) {
         const query = url.searchParams.get("query") ?? "";

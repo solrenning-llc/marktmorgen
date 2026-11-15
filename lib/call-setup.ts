@@ -192,6 +192,40 @@ export function isMeetProvider(value: unknown): value is MeetProvider {
 /** What each is called where a creator or a buyer reads it. */
 export const MEET_NAMES: Record<MeetProvider, string> = { google: "Google Meet", zoom: "Zoom" };
 
+/**
+ * What a creator is told when a connection was disconnected here but the
+ * provider did not confirm that it took our access back (lib/meet-connect.ts
+ * disconnect, `providerAccessRemoved: false`): the studio notice and the
+ * email. `link` is the provider's own page, given only where its exact
+ * address is already in this site's help (app/help/zoom); none for Google.
+ */
+export const MEET_ACCESS_UNCONFIRMED: Record<MeetProvider, { company: string; lead: string; before: string; link?: { href: string; text: string }; after: string }> = {
+  google: {
+    company: "Google",
+    lead: "We disconnected your Google account here, but Google did not confirm that it removed our access.",
+    before: "You can remove it yourself: in your Google Account, open Security, then the list of third-party apps and services, and remove Marktmorgen.",
+    after: "",
+  },
+  zoom: {
+    company: "Zoom",
+    lead: "We disconnected your Zoom account here, but Zoom did not confirm that it removed our access.",
+    before: "You can remove it yourself: sign in at ",
+    link: { href: "https://marketplace.zoom.us/", text: "marketplace.zoom.us" },
+    after: ", open Manage, then Added Apps, and click Remove next to Marktmorgen.",
+  },
+};
+
+/** How to remove the access at the provider, as plain text. */
+export function meetAccessRemoveWords(provider: MeetProvider): string {
+  const w = MEET_ACCESS_UNCONFIRMED[provider];
+  return `${w.before}${w.link ? w.link.text : ""}${w.after}`;
+}
+
+/** The whole notice as plain text. */
+export function meetAccessUnconfirmedWords(provider: MeetProvider): string {
+  return `${MEET_ACCESS_UNCONFIRMED[provider].lead} ${meetAccessRemoveWords(provider)}`;
+}
+
 /** Whether the platform knows this time zone. */
 export function isTimeZone(tz: unknown): tz is string {
   if (typeof tz !== "string" || !tz || tz.length > 64) return false;
@@ -520,6 +554,19 @@ export function zonedToUtc(year: number, month: number, day: number, minuteOfDay
 }
 
 /**
+ * The first instant whose clock in `tz` shows this time or later: the time
+ * itself, or, when the clocks skip it, the moment they jump forward. Null
+ * only when nothing exists for three hours after it.
+ */
+export function firstInstantFrom(year: number, month: number, day: number, minuteOfDay: number, tz: string): number | null {
+  for (let m = minuteOfDay; m <= minuteOfDay + 180; m += 1) {
+    const at = zonedToUtc(year, month, day, m, tz);
+    if (at !== null) return at;
+  }
+  return null;
+}
+
+/**
  * One seat taken, or one stretch of the creator's time spoken for.
  *
  * `product` and `session` are known for every booking and hold made since
@@ -596,11 +643,18 @@ export function openSlots(setup: CallSetup, now: number, busy: Busy[], productId
     const weekday = cursor.getUTCDay();
     const starts: number[] = [];
     for (const [from, to] of setup.weekly[weekday] ?? []) {
+      // The stretch's end as an instant: on the day the clocks go forward a
+      // call may not run past it in real time, nor overlap the call before.
+      const until = firstInstantFrom(y, m, d, to, setup.tz);
+      if (until === null) continue;
+      let free = -Infinity;
       for (let t = from; t + setup.minutes <= to; t += setup.minutes + setup.bufferMinutes) {
         const start = zonedToUtc(y, m, d, t, setup.tz);
         if (start === null) continue;
-        if (start < earliest || start > latest) continue;
         const end = start + length;
+        if (end > until || start < free) continue;
+        free = end + gap;
+        if (start < earliest || start > latest) continue;
         const mine = (b: Busy) => productId !== undefined && b.product === productId && b.start === start;
         if (productId !== undefined && seatsTaken(busy, productId, start) >= setup.seats) continue;
         const clash = busy.some((b) => !mine(b) && start < b.end + gap && end + gap > b.start);

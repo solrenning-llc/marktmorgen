@@ -1,4 +1,6 @@
-import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
+import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
+import { noteRemovedCourse } from "@/lib/removed-courses";
+import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
@@ -29,7 +31,12 @@ import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
-import { dropPage } from "@/lib/sales-page-store";
+import { lockRead } from "@/lib/two-step-unknown";
+import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
+import { finishLandingsDrop } from "@/lib/campaign-landing-store";
+
+/** A product's id, as the catalog makes it (lib/sales-page.ts PRODUCT_ID_PATTERN). */
+const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -240,6 +247,8 @@ export async function POST(request: NextRequest) {
 
   try {
     let result: Outcome;
+    // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
+    let cleanupPending = false;
     if (action === "add" || action === "edit") {
       const done =
         action === "add"
@@ -275,7 +284,15 @@ export async function POST(request: NextRequest) {
     } else if (action === "remove") {
       // Paid pre-orders wait for it (lib/preorders.ts): it stays until they
       // are handed over or refunded, so nobody paid for something deleted.
-      if ((await waitingCount(guarded.store, id)) > 0) {
+      // A count that cannot be read is unknown, never "nobody waits" (sweep APP3): 503, and the product is kept.
+      let waiting: number;
+      try {
+        waiting = await waitingCount(guarded.store, id);
+      } catch (error) {
+        console.error("could not read a product's pre-orders before removing it", error);
+        return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      if (waiting > 0) {
         return Response.json({ ok: false, error: "preorders" }, { status: 409 });
       }
       // The product comes back as it was, so the storage its files used can
@@ -304,6 +321,9 @@ export async function POST(request: NextRequest) {
           if (found) {
             if (!preparedCourse || JSON.stringify(found) !== JSON.stringify(preparedCourse)) return false;
             course = found;
+            // Noted as dropped before anything goes (lib/removed-courses.ts), so its learners' records stay reachable
+            // by their erasure; a list that is full or a note not confirmed keeps the product.
+            if ((await noteRemovedCourse(store.statsId, { productId: going.id, courseId: found.id, lessonIds: lessonsInOrder(found).map(({ lesson }) => lesson.id), moduleIds: found.modules.map((m) => m.id) })) !== "noted") return false;
             await dropComments(found.id, lessonsInOrder(found).map(({ lesson }) => lesson.id), store);
           } else {
             if (preparedCourse) return false;
@@ -315,6 +335,14 @@ export async function POST(request: NextRequest) {
         }
       });
       result = removed.ok ? { ok: true, product: null } : removed;
+      // Asked again for a product already removed whose campaign landings were not confirmed gone then (Codex G,
+      // #1947): they are deleted now; not confirmed again, it is said, and can be asked again.
+      // Only a product's own id (never "<product>:gone" or any other key of the family: Codex G, #1947).
+      if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
+        const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
+        if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped") result = { ok: true, product: null };
+      }
       if (removed.ok) {
         const going = removed.product;
         const removedCourse = course as Awaited<ReturnType<typeof readCourseExact>>;
@@ -332,10 +360,17 @@ export async function POST(request: NextRequest) {
         }
         if (going.about) await dropAbout(removed.store.statsId, id, removed.store).catch(() => {});
         if (going.note) await dropThanksNote(removed.store.statsId, id, removed.store).catch(() => {});
-        // Its page of blocks, and the reviews of a product nobody can buy any more.
-        if (going.page) {
+        // Its page of blocks, and the reviews of a product nobody can buy any more. Dropped whether or not the
+        // product still shows a page: one emptied first keeps its versions and its campaigns' landings, which are
+        // kept by the product, not by its page (Claude 5 on #1947).
+        {
           // And the pictures on that page (lib/sales-page-store.ts).
-          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch(() => [] as string[]);
+          // Anything not confirmed gone is said to the caller (cleanupPending), never a removal finished: the same
+          // removal asked again finishes its landings (finishLandingsDrop below), and a closed store's walk erases them.
+          const pictures = await dropPage(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+            cleanupPending = true;
+            return picturesOfFailedDrop(error);
+          });
           had.push(...pictures.map((pathname) => ({ pathname })));
         }
         // And the photos buyers added to them (lib/reviews.ts).
@@ -347,13 +382,19 @@ export async function POST(request: NextRequest) {
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
         if (removedCourse) {
-          await dropCourse(removedCourse, removed.store).catch((error: unknown) => console.error("could not drop a removed course", error));
+          await dropCourse(removedCourse, removed.store, id).catch((error: unknown) => console.error("could not drop a removed course", error));
         }
         for (const file of had) {
           // A lesson video the video service keeps is taken away there (lib/stream.ts).
           if (await dropStream(file.pathname, removed.store).catch(() => false)) continue;
-          await del(file.pathname).catch((error: unknown) => {
-            console.error("could not delete the file of a removed product", error);
+          // A delete that fails is not lost: nothing points at the file any more, so the creator could never delete it
+          // and it would count against the store's storage for good. It goes to the daily job that deletes uploads
+          // nobody keeps (sweepTaskUploads, app/api/cron/courses), as a deleted person's files do (lib/person-erasure.ts).
+          await del(file.pathname).catch(async (error: unknown) => {
+            console.error("could not delete the file of a removed product; it goes to the daily job", error);
+            await noteTaskUpload(file.pathname, 0).catch((noteError: unknown) =>
+              console.error("could not hand a removed product's file to the daily job; it is kept until the store closes", noteError),
+            );
           });
         }
         for (const file of filesOnProduct(going)) await dropStamped(file);
@@ -364,7 +405,9 @@ export async function POST(request: NextRequest) {
       // A link over the file deletes the file and the buyers' stamped copies: a session let in
       // without its second step waits (lib/two-step.ts). The id may name a price option, whose file
       // is its own, so the file is read where the id points (readDelivery), not on a product only.
-      if ((await lockedFor(request, "products", "replace")) && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "products", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && deliveredFile(await readDelivery(guarded.store, id))) return refusedJson("locked");
       const read = readLink(link);
       if (!read.ok) {
         return Response.json(
@@ -401,11 +444,17 @@ export async function POST(request: NextRequest) {
             if (!course) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
             if (exampleTitlesLeft(course) > 0) return Response.json({ ok: false, error: "course_examples" }, { status: 409 });
           }
+          // Published only once it hands something over by the checkout's own rule (754 [STN1]).
+          if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
     } else if (action === "unlink") {
+      // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
+      // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.
+      const found = await readDelivery(guarded.store, id);
+      if (found && takesLastDelivery(found.product, id, "link")) return Response.json({ ok: false, error: "last_delivery", product: found.product.title }, { status: 409 });
       const cleared = await setProductLink(ref, id, null);
       result = cleared.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(cleared.reason) };
     } else {
@@ -426,7 +475,7 @@ export async function POST(request: NextRequest) {
     // everything that offered it does).
     const quiet =
       (action === "edit" || action === "visibility" || action === "remove") && id ? await silenced(ref, id) : [];
-    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined });
+    return Response.json({ ok: true, product: result.product, quiet: quiet.length ? quiet : undefined, cleanupPending: cleanupPending || undefined });
   } catch (error) {
     if (error instanceof StoreFullError) {
       return Response.json({ ok: false, error: "store_full" }, { status: 409 });

@@ -12,7 +12,7 @@
 type ToolDraft = {
   name: string;
   description: string;
-  inputSchema: { type: string; properties: Record<string, unknown>; additionalProperties: boolean };
+  inputSchema: { type: string; properties: Record<string, unknown>; required?: string[]; additionalProperties: boolean };
   annotations: { readOnlyHint: boolean };
 };
 
@@ -43,6 +43,9 @@ const TITLES: Readonly<Record<string, string>> = {
   get_page_reading: "How far the page is read",
   get_page_versions: "Earlier page versions",
   list_saved_blocks: "Saved sections",
+  list_bundle_choices: "Products for a bundle",
+  get_imports: "Imports",
+  propose_product_description: "Propose a product description",
   get_store: "Which store",
 };
 
@@ -83,13 +86,13 @@ const DRAFTS: readonly ToolDraft[] = [
   })),
   {
     name: "get_memberships",
-    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast.",
+    description: "Memberships as the Membership numbers page shows them: MRR and ARR, paying and trialing members, churn, trials that converted, each membership, each channel's members and how long they stay, why members left (counted), MRR month by month by what moved it, ARPU, net revenue retention and a three-month forecast. mrr_by_month and by_channel are null when they could not be read; null is not an empty list.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
   {
     name: "get_emails",
-    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue.",
+    description: "The store's list (how many people, how many agreed to hear) and what each email and each sequence did: how many it went to, and the sales and revenue its links brought, in the store's currency, with sales_in_another_currency counted apart and never added to revenue. A sequence's started, emails_sent and reached_the_end are null, with counts_unavailable true, when they could not be read just now; null is not zero.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
   },
@@ -160,6 +163,43 @@ const DRAFTS: readonly ToolDraft[] = [
     description: "The sections the creator saved to reuse on any page, each with its name and its blocks, newest change first. Testimonials are counted, never quoted. It counts as a few of the store's API requests, more as more sections are saved.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: "list_bundle_choices",
+    description:
+      "The store's products a bundle may be made of, 20 a page in the creator's order, each with whether it can go in and why it cannot (a membership, a call, several prices, free, a limited number, nothing to hand over yet), by the same rule as the creator's bundle picker. Each call reads one page; pass cursor: next_cursor from the last answer for the next one, until next_cursor is null. It counts as a few of the store's API requests, set by the most a page could read.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        search: { type: "string", description: "Words in the product's name; left out, every product." },
+        cursor: { type: "string", description: "Where the page starts: next_cursor from the previous answer; left out, the first page." },
+        bundle: { type: "string", description: "The bundle being made, from list_products, left out of its own list." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "get_imports",
+    description:
+      "The store's latest imports from another platform (contacts, products, purchases or members), newest first: how far each is and what its rows came to, as counts. Never the file's name, who started it or the rows themselves. It counts as a few of the store's API requests, set by the most it could read.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true },
+  },
+  {
+    name: "propose_product_description",
+    description:
+      "Prepares a new long description for one product, for the creator to read beside the current one and confirm in their studio (What the AI proposes). Nothing on the store changes until they confirm; they can undo it afterward. Needs a key that may prepare changes. A newer proposal for the same product replaces a waiting one. It counts as a few of the store's API requests, more as more proposals wait or are kept.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        product: { type: "string", description: "The product's id, from list_products." },
+        description: { type: "string", description: "The whole new description as plain text: a blank line starts a paragraph, a line starting with \"- \" is a point in a list." },
+      },
+      required: ["product", "description"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: false },
   },
   {
     name: "get_store",

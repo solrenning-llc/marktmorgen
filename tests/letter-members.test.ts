@@ -142,14 +142,28 @@ function filesUnder(dir: string): string[] {
 }
 
 /**
- * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST
- * service that does not take it would: the code keeps to SET NX EX and INCR,
- * the pattern every counter already uses.
+ * EXPIRE with an option (NX, XX, GT, LT) is refused here, as a Redis or REST service that does not take it would:
+ * lib/letter-access.ts keeps to SET NX EX and INCR, and repairs a key left with no expiry itself.
+ *
+ * One exception, written out (#4698): the store's monthly allowances that this path takes (lib/store-allowance.ts,
+ * nl:allow:studio:<store>:<window> for the creator's actions and nl:allow:transactional:<store>:<window> for the
+ * emailed link) count with INCRBY then EXPIRE … NX (lib/window-count.ts, windowCountBy), so a key that expires between
+ * the two never comes back without an expiry. Only those two key shapes, and only NX, are let through; each is
+ * counted, and the checks below hold that the emailed link took exactly one and that no letter's key ever got an
+ * option.
  */
 let expireOptions = 0;
+const allowanceNx: Record<"studio" | "transactional", number> = { studio: 0, transactional: 0 };
+const ALLOWANCE_NX = /^nl:allow:(studio|transactional):[^:]+:[^:]+$/;
 const realPipeline = redis.pipeline.bind(redis);
 (redis as unknown as { pipeline: typeof realPipeline }).pipeline = (commands) => {
-  if (commands.some((c) => String(c[0]).toUpperCase() === "EXPIRE" && c.length > 3)) {
+  for (const c of commands) {
+    if (String(c[0]).toUpperCase() !== "EXPIRE" || c.length <= 3) continue;
+    const allowance = c.length === 4 && c[3] === "NX" ? ALLOWANCE_NX.exec(String(c[1])) : null;
+    if (allowance) {
+      allowanceNx[allowance[1] as "studio" | "transactional"] += 1;
+      continue;
+    }
     expireOptions += 1;
     return Promise.reject(new Error("ERR syntax error"));
   }
@@ -431,7 +445,9 @@ async function main(): Promise<void> {
   await runAfter();
   is("and after it, no email", mails.length, before);
   is("a holder: the very same answer, the same nothing done before it", await atAnswer("ana@example.com", "203.0.113.7"), [303, true, 0, 0, 0, 1]);
+  const transactionalBefore = allowanceNx.transactional;
   await runAfter();
+  is("the emailed link took the store's transactional allowance with exactly one EXPIRE NX", allowanceNx.transactional - transactionalBefore, 1);
   is("and after it, one email to it", [mails.length, mails.at(-1)?.to], [before + 1, "ana@example.com"]);
   is("the email holds a link to open, never the words", [/\/api\/store\/letters\/open\?token=[0-9a-f]{64}/.test(mails.at(-1)?.text ?? ""), (mails.at(-1)?.text ?? "").includes(SECRET)], [true, false]);
   mailDown = true;
@@ -548,8 +564,8 @@ async function main(): Promise<void> {
   is("the studio's route takes the products", [viaRoute.status, routeBody.ok, (await readLetter(store, letter.id))?.products], [200, true, [club]]);
   const badRoute = await publishRoute(new NextRequest("https://marktmorgen.com/api/store/letters", { method: "POST", headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${owner}` }, body: JSON.stringify({ action: "publish", id: kept.id, products: ["nope_not_a_product"] }) }));
   is("and refuses one the store does not have", badRoute.status, 409);
-  is("no EXPIRE with an option was ever sent", expireOptions, 0);
-  is("the store lists all four", (await listLetters(store)).length, 4);
+  is("no EXPIRE with an option was ever sent, besides the allowances' NX written out above", expireOptions, 0);
+  is("the store lists all four", (await listLetters(store))?.length, 4);
 
   part("The feature page says what is true of an email kept for members");
   // lib/help-content.ts says the same and waits: it is reserved by another agent (Claude 2, 513 [PF1]).

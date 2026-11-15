@@ -5,7 +5,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { within } from "@/lib/community";
 import { communityViewer } from "@/lib/community-access";
-import { noteCommunityUpload, takePicturePlace } from "@/lib/community-files";
+import { openCommunityDoor, takePicturePlace } from "@/lib/community-files";
 import { takeBuyerAction } from "@/lib/buyer-actions";
 import { picturesLimitFor } from "@/lib/community-picture-rules";
 import { ownsCommunityImage } from "@/lib/community-image";
@@ -58,8 +58,10 @@ export async function POST(request: NextRequest) {
         if (!(await takeBuyerAction(store, viewer.owner ? "owner" : "buyer"))) throw new Error("resting");
         if (!(await takePicturePlace(pathname, picturesLimitFor(store)))) throw new Error("pictures");
 
-        // Only the member given this door may put the picture in a post.
-        await noteCommunityUpload(pathname, viewer.key);
+        // Only the member given this door may put the picture in a post, and only a door noted for them and listed
+        // for the sweep is given (CX-123 rule 24): a path that already had a door is refused, and a note that cannot
+        // be confirmed throws (lib/community-files.ts openCommunityDoor).
+        if (!(await openCommunityDoor(pathname, viewer.key))) throw new Error("invalid");
 
         const rules = {
           allowedContentTypes: [...IMAGE_CONTENT_TYPES],

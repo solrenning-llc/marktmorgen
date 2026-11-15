@@ -25,6 +25,7 @@
  * Progress is kept per course and per student: which lessons they marked done
  * and when they last came back. That is all, and the creator sees it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -33,16 +34,18 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, norma
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
 import { onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import { isLiveSub } from "@/lib/membership-access";
 import { purchaseRefunded } from "@/lib/refunds";
-import { folderFromPathname, recordDelivery } from "@/lib/delivery";
+import { folderFromPathname, freeDeliveryPause, recordDelivery } from "@/lib/delivery";
 import { playerFor } from "@/lib/stream";
 import { isStreamPath } from "@/lib/stream-rules";
 import { opened, watchedForAdmission } from "@/lib/watch";
@@ -50,7 +53,7 @@ import { calendarWindow } from "@/lib/allowance-window";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import type { ProductFile } from "@/lib/product-file";
 import type { Listing, Store } from "@/lib/store";
-import { readKind, readListing } from "@/lib/catalog";
+import { readKind, readKindExact, readListing } from "@/lib/catalog";
 import { type Course, type CourseModule, lessonsInOrder, opensAt, readCourse } from "@/lib/course";
 import { BLOCKED_READ_MAX } from "@/lib/api-read-rules";
 import { deliveredIds } from "@/lib/bundle-rules";
@@ -191,13 +194,15 @@ export async function forgetPaid(store: Store, email: string): Promise<void> {
  * Takes a course off an address's ledger: a gift, pre-order, group place or PayPal sale taken back by a refund. Both
  * replies are read exactly (CX-123 rule 24; Codex G on #2781): the HDEL and the DEL each answer 0 or 1, or this
  * throws UnknownReplyError, so the caller keeps the refund to be tried again and never reads "taken away" from a
- * reply it could not read. Running it again is harmless.
+ * reply it could not read. Running it again is harmless. With `startedAt`, only the course written down as begun then
+ * (recordEnrollment's whole seconds) is taken off, so one a later purchase wrote with its own start is kept.
  */
-export async function dropEnrollment(store: Store, email: string, productId: string): Promise<void> {
+export async function dropEnrollment(store: Store, email: string, productId: string, startedAt?: number): Promise<void> {
   if (!isRedisConfigured()) return;
+  const ledger = ledgerKey(store, email);
   const replies = repliesFor(
     await redisPipeline([
-      ["HDEL", ledgerKey(store, email), productId],
+      startedAt === undefined ? ["HDEL", ledger, productId] : ["EVAL", HDEL_IF_EQUAL, 1, ledger, productId, String(Math.floor(startedAt))],
       ["DEL", paidCacheKey(store, email)],
     ]),
     2,
@@ -205,7 +210,12 @@ export async function dropEnrollment(store: Store, email: string, productId: str
   if (!replies || !replies.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("taking a course off a ledger");
 }
 
-type Listed = { data?: unknown };
+/**
+ * Pages of a hundred checkouts read for one spelling of an address before its list is unknown: far past any buyer of
+ * one store, and bounded (each one request to the creator's Stripe account, only for an address with more than a
+ * hundred checkouts there, and the answer kept PAID_SECONDS).
+ */
+const PAID_PAGES = 3;
 
 /** What Stripe says about one address's courses here. */
 type Ledger = {
@@ -218,27 +228,47 @@ type Ledger = {
    * sale written down on the thanks page does not outlive its refund.
    */
   refunded: Set<string>;
+  /**
+   * Courses with a purchase refunded in full and another that stands: the start written down on the thanks page may
+   * be the refunded one's, so the standing purchase's start counts (C7 courses hunt). Absent from a copy cached before.
+   */
+  again: Set<string>;
 };
 
 /** Asks the creator's Stripe account what this address paid for here. */
-async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
+async function paidAtStripe(store: Store, email: string, exact = false): Promise<Ledger> {
   const found = new Map<string, number>();
   const ended = new Set<string>();
   const refunded = new Set<string>();
+  const again = new Set<string>();
   const account = store.stripeAccountId;
-  if (!account) return { paid: found, ended, refunded };
+  if (!account) return { paid: found, ended, refunded, again };
   const handles = saleHandles(store);
-  const courses = new Map((await readKind(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
-  if (courses.size === 0) return { paid: found, ended, refunded };
+  const courses = new Map((await (exact ? readKindExact : readKind)(store, "course")).filter((p) => p.course).map((p) => [p.id, p]));
+  if (courses.size === 0) return { paid: found, ended, refunded, again };
 
   // Stripe keeps the address as it was typed at checkout.
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
-    const listed = (await onAccount("GET", account, `/checkout/sessions?${query}`)) as Listed;
-    const rows = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // In Stripe's exact list shape and to its end (CX-123 rules 24 and 30, lib/stripe-list.ts): a list in another
+    // shape, a row not readable or more pages than PAID_PAGES is unknown and throws, never "no checkouts" (so never
+    // "not refunded": a course written down on the thanks page and refunded since would open again on it).
+    const rows: Record<string, unknown>[] = [];
+    let after = "";
+    for (let page = 0; ; page += 1) {
+      if (page === PAID_PAGES) throw new StripeListUnreadable(`more than ${PAID_PAGES} pages of checkouts for one address`);
+      if (after) query.set("starting_after", after);
+      const listed = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`));
+      if (listed.unreadable) throw new StripeListUnreadable("a checkout not readable");
+      rows.push(...listed.rows);
+      if (!listed.hasMore) break;
+      if (!listed.lastId) throw new StripeListUnreadable("more checkouts and no readable last one");
+      after = listed.lastId;
+    }
     for (const session of rows) {
       // A membership switched to another tier hands over what it is on now (lib/tier-rules.ts).
       const meta = currentMeta((session.metadata ?? {}) as Record<string, string>, session);
@@ -275,9 +305,15 @@ async function paidAtStripe(store: Store, email: string): Promise<Ledger> {
   // purchase that stands is what counts.
   for (const id of found.keys()) {
     ended.delete(id);
-    refunded.delete(id);
+    if (refunded.delete(id)) again.add(id);
   }
-  return { paid: found, ended, refunded };
+  return { paid: found, ended, refunded, again };
+}
+
+/** When a course written down on the thanks page began: whole seconds from zero up, as recordEnrollment writes them; otherwise null. */
+function wholeSeconds(value: unknown): number | null {
+  if (typeof value === "number") return countOf(value);
+  return typeof value === "string" && /^\d{1,15}$/.test(value) ? Number(value) : null;
 }
 
 /** The cached answer, in the shape written before ended memberships were kept too. */
@@ -289,9 +325,10 @@ function parseLedger(cached: string): Ledger | null {
         paid: new Map(Object.entries(value.p as Record<string, number>)),
         ended: new Set(Array.isArray(value.x) ? (value.x as string[]) : []),
         refunded: new Set(Array.isArray(value.r) ? (value.r as string[]) : []),
+        again: new Set(Array.isArray(value.a) ? (value.a as string[]) : []),
       };
     }
-    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set() };
+    return { paid: new Map(Object.entries(value as Record<string, number>)), ended: new Set(), refunded: new Set(), again: new Set() };
   } catch {
     return null;
   }
@@ -306,35 +343,72 @@ export async function paidCourses(store: Store, email: string): Promise<Map<stri
   return (await courseLedger(store, email)).paid;
 }
 
-/** The same answer, with the memberships that ended kept apart. */
-async function courseLedger(store: Store, email: string): Promise<Ledger> {
+/**
+ * The same, read exactly: it throws when Stripe, the address's own record, the
+ * store's courses or the levels a community hands courses at do not read, so
+ * a course that only Stripe knows of is never taken for one not bought (rule 24;
+ * review of #3724). The course page keeps paidCourses and its own rule.
+ */
+export async function paidCoursesExact(store: Store, email: string): Promise<Map<string, number>> {
+  return (await courseLedger(store, email, true)).paid;
+}
+
+/**
+ * The same answer, with the memberships that ended kept apart, and the courses left shut only because Stripe's answer
+ * could not be had whole (`undecided`): said to the student as "could not check", never as not bought. `exact` throws
+ * where the lenient read goes on.
+ */
+async function courseLedger(store: Store, email: string, exact = false): Promise<Ledger & { undecided: Set<string>; unknown: boolean }> {
   const result = new Map<string, number>();
-  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set() };
+  if (!isRedisConfigured()) return { paid: result, ended: new Set(), refunded: new Set(), again: new Set(), undecided: new Set(), unknown: false };
   // A store that brought buyers over from another platform reads theirs in
   // the same round trip (lib/imported-purchases.ts); any other asks nothing more.
   const imported = importedRead(store, email);
-  const [cached, ledger, broughtOver] = await redisPipeline([
+  const commands: (string | number)[][] = [
     ["GET", paidCacheKey(store, email)],
     ["HGETALL", ledgerKey(store, email)],
     ...(imported ? [imported] : []),
-  ]);
-  let asked: Ledger | null = typeof cached === "string" ? parseLedger(cached) : null;
+  ];
+  const replies = await redisPipeline(commands);
+  if (exact && !repliesFor(replies, commands.length)) throw new UnknownReplyError("an address's course record");
+  const [cached, ledger, broughtOver] = replies;
+  // The exact read never takes the cached answer: the lenient read keeps it even when readKind left a listing out, so
+  // it can lack a course only Stripe knows of (review of #3724). It asks Stripe itself, and keeps what it read whole.
+  let asked: Ledger | null = !exact && typeof cached === "string" ? parseLedger(cached) : null;
+  // Stripe's answer could not be had whole: which purchases were refunded is unknown, never "none" (CX-123 rule 24).
+  // A course whose opening depends on that answer (a membership, or a one-off written down on the thanks page and
+  // perhaps refunded since) is not opened on it, as the community and the downloads do; nothing is kept, so the next
+  // page asks again. What does not depend on it (brought over from another platform, earned in the community) opens.
+  let unknown = false;
   if (!asked) {
     try {
-      asked = await paidAtStripe(store, email);
-      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded] });
+      asked = await paidAtStripe(store, email, exact);
+      const kept = JSON.stringify({ p: Object.fromEntries(asked.paid), x: [...asked.ended], r: [...asked.refunded], a: [...asked.again] });
       await redisPipeline([["SET", paidCacheKey(store, email), kept, "EX", PAID_SECONDS]]);
     } catch (error) {
+      if (exact) throw error;
       console.error("reading course purchases failed", error);
-      asked = { paid: new Map(), ended: new Set(), refunded: new Set() };
+      asked = { paid: new Map(), ended: new Set(), refunded: new Set(), again: new Set() };
+      unknown = true;
     }
   }
   const fromStripe = asked.paid;
   const recorded = new Map<string, number>();
+  // Each course written down with when it began, in whole seconds (CX-123 rule 24): a value of another shape, or
+  // fields and values that do not pair up, is unknown, never 0 (1970, every drip module open) or "not written down".
+  const pairs: [unknown, unknown][] = [];
   if (Array.isArray(ledger)) {
-    for (let i = 0; i + 1 < ledger.length; i += 2) recorded.set(String(ledger[i]), Number(ledger[i + 1]));
+    if (ledger.length % 2 !== 0) throw new UnknownReplyError("the courses written down for an address");
+    for (let i = 0; i + 1 < ledger.length; i += 2) pairs.push([ledger[i], ledger[i + 1]]);
   } else if (ledger && typeof ledger === "object") {
-    for (const [k, v] of Object.entries(ledger as Record<string, string>)) recorded.set(k, Number(v));
+    pairs.push(...Object.entries(ledger as Record<string, unknown>));
+  } else if (exact && ledger !== null) {
+    throw new UnknownReplyError("the courses written down for an address");
+  }
+  for (const [field, value] of pairs) {
+    const began = wholeSeconds(value);
+    if (typeof field !== "string" || began === null) throw new UnknownReplyError("the courses written down for an address");
+    recorded.set(field, began);
   }
 
   // Brought over from another platform: the course itself, or a course in a
@@ -347,14 +421,17 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
     }
   }
 
-  const courses = await readKind(store, "course");
+  const courses = await (exact ? readKindExact : readKind)(store, "course");
   for (const product of courses) {
     if (!product.course) continue;
     // A one-off sale written down on the thanks page stands on its own,
-    // unless Stripe now says it was refunded in full.
-    const start = product.recurring || asked.refunded.has(product.id)
-      ? fromStripe.get(product.id)
-      : recorded.get(product.id) ?? fromStripe.get(product.id);
+    // unless Stripe now says it was refunded in full, or bought again after a
+    // refund: then the purchase that stands says when it began.
+    const start = unknown
+      ? undefined
+      : product.recurring || asked.refunded.has(product.id) || asked.again.has(product.id)
+        ? fromStripe.get(product.id)
+        : recorded.get(product.id) ?? fromStripe.get(product.id);
     const opens = start ?? (product.recurring ? undefined : given.get(product.id));
     if (opens !== undefined && Number.isFinite(opens)) result.set(product.id, opens);
   }
@@ -370,21 +447,30 @@ async function courseLedger(store: Store, email: string): Promise<Ledger> {
         if (product.course && !result.has(product.id) && at !== undefined) result.set(product.id, at);
       }
     } catch (error) {
+      if (exact) throw error;
       console.error("reading courses earned by level failed", error);
     }
   }
+
+  // Shut only for want of Stripe's answer: Stripe alone might have opened it (a membership, a one-off bought, or written
+  // down on the thanks page and perhaps refunded since). Known before anyone is taken off below, which stays "closed".
+  const undecided = new Set(unknown ? courses.filter((p) => p.course && !result.has(p.id)).map((p) => p.id) : []);
 
   // A student the creator took off the course stays off it.
   const withCourse = [...result.keys()]
     .map((id) => courses.find((p) => p.id === id))
     .filter((p): p is Listing => Boolean(p?.course));
   if (withCourse.length) {
-    const flags = await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)]));
+    const flags = repliesFor(await redisPipeline(withCourse.map((p) => ["SISMEMBER", blockedKey(p.course!.id), emailKey(email)])), withCourse.length);
+    // One 0 or 1 for each course asked (CX-123 rule 24): any other reply is unknown, never "not taken off", so a
+    // student the creator removed is never let back in on a reply that could not be read.
+    const taken = flags?.map(countOf);
+    if (!taken || taken.some((n) => n === null || n > 1)) throw new UnknownReplyError("whether a student was taken off a course");
     withCourse.forEach((p, i) => {
-      if (flags[i] === 1 || flags[i] === "1") result.delete(p.id);
+      if (taken[i] === 1) result.delete(p.id);
     });
   }
-  return { paid: result, ended: asked.ended, refunded: asked.refunded };
+  return { paid: result, ended: asked.ended, refunded: asked.refunded, again: asked.again, undecided, unknown };
 }
 
 export type CourseAccess =
@@ -392,7 +478,12 @@ export type CourseAccess =
   | { state: "preview"; learner: Learner | null }
   | { state: "closed"; learner: Learner | null }
   /** A membership that gave this course has ended: said as such, with the way back. */
-  | { state: "ended"; learner: Learner };
+  | { state: "ended"; learner: Learner }
+  /**
+   * Not open, because whether it opens could not be checked just now (Stripe's answer could not be had whole,
+   * CX-123 rule 24): said as such, with a way to load the page again, never as not bought (lib/course-door.ts).
+   */
+  | { state: "unknown"; learner: Learner };
 
 /** Whether this browser may take this course, and from when. */
 export async function courseAccess(store: Store, product: Listing, cookies: CookieJar): Promise<CourseAccess> {
@@ -400,9 +491,10 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
   if (!learner || !product.course) return { state: "closed", learner };
   if (learner.owner) return { state: "open", learner, start: Math.floor(Date.now() / 1000) - 400 * 86_400 };
   if (learner.scope !== "all" && !learner.scope.includes(product.course.id)) return { state: "closed", learner };
-  const { paid, ended } = await courseLedger(store, learner.email);
+  const { paid, ended, undecided } = await courseLedger(store, learner.email);
   const start = paid.get(product.id);
   if (start !== undefined) return { state: "open", learner, start };
+  if (undecided.has(product.id)) return { state: "unknown", learner };
   return ended.has(product.id) ? { state: "ended", learner } : { state: "closed", learner };
 }
 
@@ -410,6 +502,9 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
 
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
+
+/** Commands answering 1 when this learner (emailKey) has a student row or lessons done in a course: a dropped one's probe (lib/person-erasure.ts). */
+export const learnerProbes = (courseId: string, learner: string): (string | number)[][] => [["HEXISTS", studentsKey(courseId), learner], ["EXISTS", `nl:course:${courseId}:done:${learner}`]];
 
 type StudentRow = { e: string; s: number; l: number };
 
@@ -454,6 +549,16 @@ export async function studentDates(courseId: string, email: string): Promise<{ s
   return { since: row.s, lastSeen: row.l };
 }
 
+/**
+ * Whether `raw` is the row the course keeps for `email`: JSON with both times as whole seconds and that address. Any
+ * other value is not this learner's record, read as unknown by whoever asks (lib/student-bulk.ts accessStates; Codex G
+ * on #3035, CX-123 rule 24), never as a student.
+ */
+export function isStudentRowOf(raw: unknown, email: string): boolean {
+  const row = studentTimes(raw);
+  return row !== null && typeof row.e === "string" && normaliseEmail(row.e) === normaliseEmail(email);
+}
+
 /** A kept student row's address (as kept) and times, only when the row is JSON with both times as whole seconds; otherwise null. */
 function studentTimes(raw: unknown): { e: unknown; s: number; l: number } | null {
   if (typeof raw !== "string") return null;
@@ -489,10 +594,56 @@ export async function lastSeenMany(courseId: string, emails: string[]): Promise<
   return out;
 }
 
+/**
+ * The lessons one student marked done. An empty list is a student who marked
+ * none; any other reply than one list of names is unknown, never "no lesson
+ * done": it would refuse a finished student's certificate, show 0% and leave
+ * the lessons out of the person's data copy (CX-123 rule 24).
+ */
 export async function doneLessons(courseId: string, email: string): Promise<Set<string>> {
   if (!isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const names = stringList(repliesFor(await redisPipeline([["SMEMBERS", doneKey(courseId, email)]]), 1)?.[0]);
+  if (!names) throw new UnknownReplyError("a student's lessons done");
+  return new Set(names);
+}
+
+/** For a course page: the lessons done, or null when they could not be read just now, said as such on the page (rule 24). */
+export async function doneLessonsOrUnknown(courseId: string, email: string): Promise<Set<string> | null> {
+  try {
+    return await doneLessons(courseId, email);
+  } catch (error) {
+    if (error instanceof UnknownReplyError) return null;
+    throw error;
+  }
+}
+
+/**
+ * How far one person is in each of these courses, for their list of purchases
+ * (560 [AS1]): the lessons done among the lessons each course has now, all in
+ * one round trip. Each course asks only about its own lessons (SMISMEMBER),
+ * so what comes back is one 0 or 1 a lesson, MAX_LESSONS at the most, however
+ * many marks were kept for lessons since taken out. A course with no lessons
+ * is left out: there is nothing to count. A reply that is not exactly one 0 or
+ * 1 for each lesson asked is null for that course, said as "could not be
+ * checked", never as 0 done (CX-123 rule 24).
+ */
+export async function lessonsDoneIn(courses: Course[], email: string): Promise<Map<string, { done: number; total: number } | null>> {
+  const out = new Map<string, { done: number; total: number } | null>();
+  const asked = courses.flatMap((course) => {
+    const ids = lessonsInOrder(course).map(({ lesson }) => lesson.id);
+    return ids.length ? [{ course, ids }] : [];
+  });
+  if (!asked.length || !isRedisConfigured()) return out;
+  const rows = repliesFor(await redisPipeline(asked.map(({ course, ids }) => ["SMISMEMBER", doneKey(course.id, email), ...ids])), asked.length);
+  asked.forEach(({ course, ids }, i) => {
+    const flags = rows ? repliesFor(rows[i], ids.length) : null;
+    if (!flags || flags.some((flag) => flag !== 0 && flag !== 1)) {
+      out.set(course.id, null);
+      return;
+    }
+    out.set(course.id, { done: flags.filter((flag) => flag === 1).length, total: ids.length });
+  });
+  return out;
 }
 
 /** Where lessons marked done are counted in the store's data room (lib/store-data.ts). */
@@ -531,15 +682,22 @@ export async function courseProgress(store: Store, productId: string, emails: st
   const course = listing?.course ? await readCourse(listing.course.id) : null;
   if (!course) return out;
   const lessons = lessonsInOrder(course).map(({ lesson }) => lesson.id);
-  const rows = await redisPipeline([
-    ["HMGET", studentsKey(course.id), ...emails.map(emailKey)],
-    ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)]),
-  ]);
-  const seen = Array.isArray(rows[0]) ? (rows[0] as unknown[]) : [];
+  const rows = repliesFor(
+    await redisPipeline([["HMGET", studentsKey(course.id), ...emails.map(emailKey)], ...emails.map((email) => ["SMEMBERS", doneKey(course.id, email)])]),
+    emails.length + 1,
+  );
+  // One row for each address (null for one who never opened the course) and one list of lessons done for each; any
+  // other answer is unknown, never "not started" or "not finished": a workflow would send a student who finished the
+  // "hasn't finished" email on a guess (CX-123 rule 24). Thrown, the workflow step is put back for a later run.
+  const seen = rows ? repliesFor(rows[0], emails.length) : null;
+  if (!rows || !seen) throw new UnknownReplyError("where students are in a course");
   emails.forEach((email, i) => {
-    const done = new Set(Array.isArray(rows[i + 1]) ? (rows[i + 1] as string[]) : []);
+    const row = seen[i];
+    const names = stringList(rows[i + 1]);
+    if ((row !== null && (typeof row !== "string" || !row)) || !names) throw new UnknownReplyError("where students are in a course");
+    const done = new Set(names);
     out.set(email, {
-      started: typeof seen[i] === "string" && Boolean(seen[i]),
+      started: row !== null,
       finished: lessons.length > 0 && lessons.every((id) => done.has(id)),
     });
   });
@@ -554,20 +712,32 @@ export type Student = {
   blocked: boolean;
 };
 
-/** Everyone who has opened the course, with how far they got. */
-export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number }> {
+/**
+ * Everyone who has opened the course, with how far they got; null when Redis
+ * answered in a shape that cannot be read (rule 24), so a page never says
+ * "nobody" and the drip schedule never acts on an unknown list of blocked
+ * students. Only Redis's own empty answer is none; a row that is itself not
+ * JSON is skipped, as before.
+ */
+export async function studentsOf(course: Course, limit = 500): Promise<{ students: Student[]; total: number } | null> {
   if (!isRedisConfigured()) return { students: [], total: 0 };
-  const [raw, blockedRaw] = await redisPipeline([
-    ["HGETALL", studentsKey(course.id)],
-    ["SMEMBERS", blockedKey(course.id)],
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HGETALL", studentsKey(course.id)],
+      ["SMEMBERS", blockedKey(course.id)],
+    ]),
+    2,
+  );
+  if (!replies) return null;
+  const [raw, blockedRaw] = replies;
   const rows: StudentRow[] = [];
   const pairs: [string, string][] = [];
-  if (Array.isArray(raw)) {
-    for (let i = 0; i + 1 < raw.length; i += 2) pairs.push([String(raw[i]), String(raw[i + 1])]);
-  } else if (raw && typeof raw === "object") {
-    for (const [k, v] of Object.entries(raw as Record<string, string>)) pairs.push([k, v]);
-  }
+  // HGETALL answers a flat list of strings (the REST client and lib/redis-memory.ts alike); anything else is unknown.
+  const flat = stringList(raw);
+  if (!flat || flat.length % 2 !== 0) return null;
+  for (let i = 0; i + 1 < flat.length; i += 2) pairs.push([flat[i], flat[i + 1]]);
+  const blockedList = stringList(blockedRaw);
+  if (!blockedList) return null;
   for (const [, value] of pairs) {
     try {
       rows.push(JSON.parse(value) as StudentRow);
@@ -576,17 +746,18 @@ export async function studentsOf(course: Course, limit = 500): Promise<{ student
   rows.sort((a, b) => b.l - a.l);
   const shown = rows.slice(0, limit);
   const lessonIds = new Set(lessonsInOrder(course).map(({ lesson }) => lesson.id));
-  const done = shown.length
-    ? await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)]))
-    : [];
-  const blocked = new Set(Array.isArray(blockedRaw) ? (blockedRaw as string[]) : []);
+  const done = shown.length ? repliesFor(await redisPipeline(shown.map((row) => ["SMEMBERS", doneKey(course.id, row.e)])), shown.length) : [];
+  if (!done) return null;
+  const doneLists = done.map(stringList);
+  if (doneLists.some((list) => list === null)) return null;
+  const blocked = new Set(blockedList);
   return {
     total: rows.length,
     students: shown.map((row, i) => ({
       email: row.e,
       since: row.s,
       lastSeen: row.l,
-      done: Array.isArray(done[i]) ? (done[i] as string[]).filter((id) => lessonIds.has(id)).length : 0,
+      done: (doneLists[i] as string[]).filter((id) => lessonIds.has(id)).length,
       blocked: blocked.has(emailKey(row.e)),
     })),
   };
@@ -700,7 +871,10 @@ export type LessonVideo =
   | { kind: "stream"; src: string; width: number; height: number }
   | { kind: "preparing" }
   | { kind: "failed" }
-  | { kind: "paused" };
+  | { kind: "paused" }
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts freeDeliveryPause),
+  // whatever the plan: never told as the no-plan hours being used up.
+  | { kind: "free_paused" };
 
 /**
  * The video of a lesson, for somebody who may watch it; null when it cannot
@@ -716,10 +890,18 @@ export type LessonVideo =
  * including for paid plans. Missing, invalid or unreadable limits never mint
  * a player token. This meter does not bound provider bytes, replay or buffering.
  */
-export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store): Promise<LessonVideo | null> {
+export async function lessonVideo(file: ProductFile, limit: number | null = null, window: string | null = calendarWindow().id, store?: Store, { free = false }: { free?: boolean } = {}): Promise<LessonVideo | null> {
   // The creator contract funds each new media admission before signing a URL or querying a player.
   if (store?.period?.funded === true && !(await reservePaidResourceWindow(store))) return null;
   if (!isStreamPath(file.pathname)) {
+    // A preview played to somebody who does not hold the course is a free copy of the file: it pauses with the
+    // store's other free downloads (lib/serve-file.ts), and a count that cannot be read signs nothing (rule 24).
+    if (free) {
+      const folder = folderFromPathname(file.pathname);
+      const pause = folder ? await freeDeliveryPause(folder) : "open";
+      if (pause === "over") return { kind: "free_paused" };
+      if (pause === "unknown") return null;
+    }
     const src = await signedMedia(file, VIDEO_URL_SECONDS);
     return src ? { kind: "file", src } : null;
   }
@@ -776,12 +958,8 @@ function senderAddress(): string {
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): no course link is emailed on it.
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count !== null && count <= limit;
 }
 
@@ -808,7 +986,11 @@ export async function requestCourseLink(input: {
   // False is unknown; the original rights and final sender checks still apply.
   if (serviceMailKnownUnavailable()) return "error";
 
-  const paid = await paidCourses(store, raw);
+  const { paid, unknown } = await courseLedger(store, raw);
+  // Stripe's answer could not be had whole (courseLedger): whether this address bought the course is unknown, so the
+  // request is said as not sent, never "sent" with no link sent, which would leave a buyer who paid waiting for an
+  // email that never comes. "error" for every address, whatever it bought, so it says nothing about who bought what.
+  if (unknown) return "error";
   if (!paid.has(product.id)) return "sent";
   return (await sendCourseLink(store, product, raw, origin)) ? "sent" : "error";
 }
@@ -833,14 +1015,10 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
 /** Spends one open of an emailed link, and says who and what it was for. */
 export async function openCourseLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const replies = repliesFor(await redisPipeline([
-    ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
-    ["INCR", opensKey(token)],
-  ]), 3);
-  const raw = replies?.[0];
+  const replies = await redisPipeline([["GET", linkKey(token)], ...windowCount(opensKey(token), LINK_SECONDS)]);
+  const raw = repliesFor(replies, 3)?.[0];
   // The opens in their exact shape (CX-123 rule 24): an unknown count opens nothing.
-  const opens = countOf(replies?.[2]);
+  const opens = windowCountOf(replies, 1, 3);
   if (typeof raw !== "string" || opens === null || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;
@@ -889,18 +1067,36 @@ export async function sendDripEmails(
     }
     const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
     if (dripping.length === 0) continue;
+    const read = await studentsOf(course, 5000);
+    if (!read) {
+      // Unknown, not none: this course waits for the next run, which reads it again.
+      console.error("reading a course's students for its drip emails failed", course.id);
+      continue;
+    }
     counts.courses += 1;
-    const { students } = await studentsOf(course, 5000);
+    const { students } = read;
     for (const student of students) {
       if (student.blocked) continue;
       for (const unit of dripping) {
         const at = opensAt(course, unit, student.since);
         if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
-        const [claimed] = await redisPipeline([["SET", dripMailKey(course.id, student.email, unit.id), "1", "NX", "EX", 400 * 86_400]]);
-        if (claimed === null) continue;
+        // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
+        // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
+        // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
+        const mark = dripMailKey(course.id, student.email, unit.id);
+        const value = claimValue();
+        const claimed = await claimMark(mark, 400 * 86_400, value);
+        if (claimed === "unknown") {
+          console.error("a drip email's mark could not be confirmed; not sent this run", course.id, unit.id);
+          await releaseMark(mark, value);
+        }
+        if (claimed !== "ours") continue;
         const ok = await sendDripEmail(store, product, unit, student.email, origin);
         if (ok) counts.sent += 1;
-        else await redisPipeline([["DEL", dripMailKey(course.id, student.email, unit.id)]]);
+        // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
+        // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
+        // 2, open): sendEmail's false is also an SES answer lost after the POST, which a later pass may send again.
+        else await releaseMark(mark, value);
       }
     }
   }

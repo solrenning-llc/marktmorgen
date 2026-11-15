@@ -178,6 +178,12 @@ export class MemoryRedis {
           }
           return null;
         }
+        // lib/community-mentions.ts FORGET_HANDLE: a handle deleted only while it still points at the member.
+        if (key.startsWith("-- marktmorgen:community-handle-forget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          return this.run(["HDEL", handles, handle]);
+        }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
           const [, members, handles, handle, who] = args;
@@ -918,6 +924,17 @@ export class MemoryRedis {
           }
           this.scriptCalls += 1;
           this.run(["SET", copy, value, "EX", seconds]);
+          return 1;
+        }
+        // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
+        // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).
+        if (key.startsWith("-- marktmorgen:calendar-config-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, settings, present, expected, value] = args;
+          this.scriptCalls += 1;
+          const now = this.run(["GET", settings]);
+          if (present === "1" ? now !== expected : now !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", settings, value]);
           return 1;
         }
         // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
@@ -2059,11 +2076,14 @@ export class MemoryRedis {
         return held;
       }
       case "DEL": {
-        // DEL takes several keys.
+        // DEL takes several keys. An empty list, set, sorted set or hash does not exist in Redis (it goes with its last
+        // member), so one this stand-in left behind on a read is removed here without being counted, as Redis answers.
         let gone = 0;
         // Its expiry goes with it, as in Redis: a key made again under the same name starts with none (C7 TTL hunt).
         for (const one of [key, ...args]) {
-          if (this.data.delete(one)) gone += 1;
+          const held = this.data.get(one);
+          const empty = (Array.isArray(held) && held.length === 0) || ((held instanceof Set || held instanceof Map) && held.size === 0);
+          if (this.data.delete(one) && !empty) gone += 1;
           this.until.delete(one);
         }
         return gone;

@@ -116,7 +116,10 @@ try {
  for(let page=0;page<3;page++)assert.equal((await observed(Array.from({length:100},(_,i)=>row(page*100+i+100)),wide)).state,"recorded");
  const measuredCommands=commandCount(await one(["INFO","commandstats"]))-commandsBefore;
  const measuredRequestBytes=journalRequestBytes-bytesBefore;
- assert.ok(measuredCommands>100&&measuredCommands<=wide.maxChargedCommandsPerPass);
+ // The first pass alone reads each of the 32 listed months inside the Lua, so a count missing the script's own
+ // commands stays at or under 3 EVALs + 32. Changed (rule 23) from >100: TAKE_DATA now takes the 32 expired months
+ // off with one HMGET and one HDEL instead of two commands a month, 144 measured before and 82 after.
+ assert.ok(measuredCommands>3+32&&measuredCommands<=wide.maxChargedCommandsPerPass);
  assert.ok(measuredRequestBytes+3*1024<wide.maxTransferredBytesPerPass); // replies fit in 1KiB each
  const full=String(await one(["GET",journal]));
  assert.equal(JSON.parse(full).order.length,300);assert.equal(JSON.parse(full).bytes,Buffer.byteLength(full));

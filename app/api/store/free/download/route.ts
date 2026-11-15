@@ -59,7 +59,9 @@ export async function POST(request: NextRequest) {
   // on the strength of an old email.
   const product = await readListing(store, claim.p);
   const g = givingWords(store.language);
-  if (!product || !isFree(product)) {
+  // A product put back to draft since the email (hidden), or a store switched off after notices about its content
+  // (suspended, lib/takedown.ts), hands nothing over and adds nobody to the list, as one that is gone (MM-SA-39).
+  if (!product || !isFree(product) || product.hidden || store.suspended) {
     return plain(410, g.freeGone);
   }
   if (!product.file && !product.link) {

@@ -175,7 +175,7 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   if (!isRedisConfigured()) return true;
   let reply: unknown;
   try {
-    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+    const key = await limitKey(scope, who);
     reply = await redisPipeline([
       ["SET", key, "0", "EX", windowSeconds, "NX"],
       ["INCR", key],
@@ -199,9 +199,35 @@ function countWithin(reply: unknown, limit: number): boolean {
   }
 }
 
-/** The counter's key for a scope and whoever it counts, hashed: one place, so every reader of a counter reads the same one. */
+/**
+ * An IPv6 address as the connection it belongs to (#4628): its first three groups, a /48, which is what one site is
+ * handed, as shareAddress in lib/traffic-rules.ts counts it; an IPv4 address written the new way ("::ffff:203.0.113.9")
+ * is that IPv4 address. Anything that is not a whole IPv6 address is answered as it is.
+ */
+function connectionOf(part: string): string {
+  const address = part.trim().toLowerCase();
+  if (!address.includes(":")) return part;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (mapped) return mapped[1];
+  if ((address.match(/::/g) ?? []).length > 1) return part;
+  const [head, tail = ""] = address.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const missing = 8 - front.length - back.length;
+  const groups = address.includes("::") ? (missing > 0 ? [...front, ...Array<string>(missing).fill("0"), ...back] : []) : front;
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return part;
+  return `${groups.slice(0, 3).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/48`;
+}
+
+/**
+ * The counter of a limit. Every part of `who` (an address and a store, usually, joined by "|") that is an IPv6
+ * address is counted as its /48 (#4628): one IPv6 customer holds at least a /64, so counting the exact address let
+ * every request of theirs come from a new address and find a new allowance. An IPv4 address counts by itself. Hashed,
+ * and one place, so every reader of a counter (withinLimit, essentialLimitState and the rest) reads the same one.
+ */
 async function limitKey(scope: string, who: string): Promise<string> {
-  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
+  const counted = who.split("|").map(connectionOf).join("|");
+  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${counted}`)).slice(0, 32)}`;
 }
 
 /**

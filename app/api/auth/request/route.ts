@@ -5,7 +5,9 @@ import {
   EMAIL_PATTERN,
   MAX_EMAIL_LENGTH,
   isAuthConfigured,
+  SIGN_IN_BUSY_MESSAGE,
   addressLimitAnswer,
+  blockLimitAnswer,
   rateLimitAnswer,
   sendSignInLink,
   siteLinksAnswer,
@@ -15,6 +17,7 @@ import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
 import { isAutomated } from "@/lib/bot-check";
 import { serviceMailKnownUnavailable } from "@/lib/email";
 import { isHouseAddress } from "@/lib/house-store";
+import { hasAccount } from "@/lib/account-exists";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -69,6 +72,10 @@ export async function POST(request: NextRequest) {
     if (machine === "over") {
       return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     }
+    // The connection's IPv6 /48 (lib/auth.ts SIGN_IN_LINKS_PER_BLOCK): one network cannot spend the site's hour alone.
+    const block = await blockLimitAnswer(ip);
+    if (block === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
+    if (block === "over") return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
     // A program typing other people's addresses into this form would send
     // each of them an email nobody asked for (lib/bot-check.ts). It is told
     // so plainly, whatever the address: the answer depends on the browser
@@ -93,10 +100,24 @@ export async function POST(request: NextRequest) {
       return Response.json({ ok: false, error: "server_error" }, { status: 503 });
     }
     // The whole site's sign-in emails in the hour (lib/auth.ts SIGN_IN_LINKS_PER_HOUR), counted last, just before one
-    // goes: past it is the same "too many tries" for every address; a count that could not be read sends nothing.
+    // goes; a count that could not be read sends nothing.
     const site = await siteLinksAnswer();
     if (site === "unknown") return Response.json({ ok: false, error: "server_error" }, { status: 503 });
-    if (site === "over") return Response.json({ ok: false, error: "rate_limited" }, { status: 429 });
+    if (site === "over") {
+      // Past it, a flood must not stop the creators' own logins: an address that already has an account is still sent
+      // its email, a new one waits, and both get the same "busy" answer and a request id, so nothing tells them apart.
+      // An account that cannot be read is sent nothing (CX-123 rule 24), under the same answer.
+      let issued = unusedSignInRequest();
+      try {
+        if (await hasAccount(email)) issued = (await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle))).request;
+      } catch (error) {
+        console.error("sign-in past the site's ceiling: nothing was sent", error);
+      }
+      return Response.json(
+        { ok: false, error: "busy", message: SIGN_IN_BUSY_MESSAGE, request: issued },
+        { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "3600" } },
+      );
+    }
     const asked = await sendSignInLink(email, linkOrigin(request), prefillHandle(body.handle));
     // Sign-in mail is attempted equally for existing and unknown addresses.
     // The public demo owner is deliberately ignored by sendSignInLink and

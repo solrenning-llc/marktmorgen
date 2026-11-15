@@ -76,10 +76,20 @@ const ADDRESS_LIMIT = 8;
  * Sign-in emails the whole site sends in an hour, from every machine to every address together. RATE_LIMIT bounds one
  * connection (an IPv6 one by its /64) and ADDRESS_LIMIT one inbox; neither stops a range of connections typing a
  * hundred thousand other people's addresses, each a first email, which would bring complaints and bounces on the
- * sending account until it is paused and no email of the site goes out. Past it, every request is told "too many
- * tries" for the rest of the hour, whatever the address, so it says nothing about who has an account.
+ * sending account until it is paused and no email of the site goes out. Past it, for the rest of the hour, the email
+ * still goes to an address that already has an account (lib/account-exists.ts hasAccount), so a flood can never stop
+ * the creators' own logins, and a new address waits; every request gets the same "busy" answer (SIGN_IN_BUSY_MESSAGE),
+ * whatever the address, so it says nothing about who has an account.
  */
 export const SIGN_IN_LINKS_PER_HOUR = 600;
+/**
+ * Sign-in emails one IPv6 /48 asks for in an hour, between RATE_LIMIT (one /64) and SIGN_IN_LINKS_PER_HOUR (the site):
+ * one network holding a /48 has 65,536 /64s, and without this it alone could spend the site's hour.
+ */
+export const SIGN_IN_LINKS_PER_BLOCK = 30;
+/** What the sign-in form is told past SIGN_IN_LINKS_PER_HOUR: the same words for every address. */
+export const SIGN_IN_BUSY_MESSAGE =
+  "We are getting more login requests than usual, so for up to an hour we send login emails only to addresses that already have an account. If you have one, check your email. If you are new here, please try again in an hour.";
 const RATE_WINDOW_SECONDS = 60 * 60;
 
 export function isAuthConfigured(): boolean {
@@ -119,8 +129,9 @@ const codeTriesKey = async (address: string) =>
   `nl:rl:code-addr:${(await sha256Hex(`nimbus-auth-code-tries:${address}`)).slice(0, 32)}`;
 const codeDayKey = async (address: string) =>
   `nl:rl:code-day:${(await sha256Hex(`nimbus-auth-code-day:${address}`)).slice(0, 32)}`;
+// By its /64 for IPv6, as every limit counts a connection (lib/request-guard.ts limitAddress).
 const codeIpKey = async (ip: string) =>
-  `nl:rl:code-ip:${(await sha256Hex(`nimbus-auth-code-ip:${ip}`)).slice(0, 32)}`;
+  `nl:rl:code-ip:${(await sha256Hex(`nimbus-auth-code-ip:${limitAddress(ip)}`)).slice(0, 32)}`;
 /**
  * The code as kept: an HMAC of the request's id and the code under a key
  * derived from the deployment's own secret (lib/secret-box.ts), which the
@@ -374,6 +385,18 @@ const rateKey = async (ip: string) =>
 /** The hour's one counter for the whole site's sign-in emails (SIGN_IN_LINKS_PER_HOUR). */
 const SITE_LINKS_KEY = "nl:rl:signin-site";
 
+/**
+ * The IPv6 /48 a connection belongs to ("2001:db8:1::/48"), or null for an IPv4 address or anything that is not an
+ * address: an IPv4 connection is already bounded by itself, and one address's sharers must not be pooled with a range.
+ */
+export function limitBlock(ip: string): string | null {
+  const net = /^([0-9a-f]{1,4}):([0-9a-f]{1,4}):([0-9a-f]{1,4}):[0-9a-f]{1,4}::\/64$/.exec(limitAddress(ip));
+  return net ? `${net[1]}:${net[2]}:${net[3]}::/48` : null;
+}
+
+const blockKey = async (block: string) =>
+  `nl:rl:signin-block:${(await sha256Hex(`nimbus-signin-block:${block}`)).slice(0, 32)}`;
+
 const moveKey = async (token: string) =>
   `nl:auth:move:${(await sha256Hex(`nimbus-auth-move:${token}`)).slice(0, 40)}`;
 
@@ -384,8 +407,10 @@ const addressKey = async (email: string) =>
 export type LimitAnswer = "within" | "over" | "unknown";
 
 /** Counts one more in the hour's window at `key`; a count in any other shape is unknown, and nothing is sent on it. */
-async function hourCount(key: string, limit: number): Promise<LimitAnswer> {
+async function hourCount(key: string, limit: number, firstOver?: () => void): Promise<LimitAnswer> {
   const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
+  // INCR answers each number once, so exactly one request of the window sees limit + 1.
+  if (count === limit + 1) firstOver?.();
   return count === null ? "unknown" : count <= limit ? "within" : "over";
 }
 
@@ -401,7 +426,21 @@ export async function rateLimitAnswer(ip: string): Promise<LimitAnswer> {
  */
 export async function siteLinksAnswer(): Promise<LimitAnswer> {
   if (!isRedisConfigured()) return "unknown";
-  return hourCount(SITE_LINKS_KEY, SIGN_IN_LINKS_PER_HOUR);
+  return hourCount(SITE_LINKS_KEY, SIGN_IN_LINKS_PER_HOUR, () =>
+    // Once a window, with no address and no connection in it: the log says the ceiling was reached, not by whom.
+    console.warn(`sign-in: the site's ${SIGN_IN_LINKS_PER_HOUR} emails an hour were reached; until the hour ends, only existing accounts are sent one`),
+  );
+}
+
+/**
+ * The connection's IPv6 /48 against SIGN_IN_LINKS_PER_BLOCK: within, over or unknown. An IPv4 connection has no /48
+ * and is within without a command (its own RATE_LIMIT bounds it).
+ */
+export async function blockLimitAnswer(ip: string): Promise<LimitAnswer> {
+  const block = limitBlock(ip);
+  if (block === null) return "within";
+  if (!isRedisConfigured()) return "unknown";
+  return hourCount(await blockKey(block), SIGN_IN_LINKS_PER_BLOCK);
 }
 
 /** Five sign-in emails an hour from one address on the internet. */

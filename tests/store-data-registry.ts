@@ -321,6 +321,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:sessions:@lib/auth.ts": company("An account's sessions", "An account's."),
   "nl:rl:address:@lib/auth.ts": company("Sign-in links per address", "An account's, an hour."),
   "nl:rl:signin:@lib/auth.ts": company("Sign-ins per connection", "An account's, an hour."),
+  "nl:rl:signin-block:@lib/auth.ts": company("Sign-in emails asked for from one IPv6 /48", "A network's count under a one-way hash of its /48, an hour (SIGN_IN_LINKS_PER_BLOCK)."),
+  "nl:rl:signin-site@lib/auth.ts": company("Sign-in emails the whole site sent in the hour", "One counter for the whole site, an hour (SIGN_IN_LINKS_PER_HOUR)."),
   "nl:stream:auto:@lib/auto-captions.ts": { what: "Captions being written for a video, and their charge", parts: [per("upload", 400, KB, "One record a video asked for: seven days, or up to 400 days while a refund Stripe has not confirmed is owed or the charge's order is not settled from Stripe's invoice.")] },
   "nl:stream:autoowed:@lib/auto-captions.ts": short("The videos of a store with a captions refund owed", "upload", 400),
   "nl:stream:autoq@lib/auto-captions.ts": company("Videos to ask about", "One sorted set, its members gone within days."),

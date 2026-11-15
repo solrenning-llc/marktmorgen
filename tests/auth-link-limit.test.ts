@@ -6,18 +6,41 @@
  * whole, so a range of connections could send sign-in links to a hundred thousand other people's addresses, enough
  * complaints and bounces to pause the sending account and stop every email of the site. Now the connection is counted
  * as every limit counts it (lib/request-guard.ts limitAddress: an IPv6 one by its /64), and the site's sign-in emails
- * stop at SIGN_IN_LINKS_PER_HOUR an hour, with the same "too many tries" for every address; a count that cannot be
- * read sends nothing.
+ * stop at SIGN_IN_LINKS_PER_HOUR an hour for new addresses; a count that cannot be read sends nothing.
+ *
+ * Reworked after 3rjdf's reading (CHANGES): a ceiling that refused every address let 120 /64s stop every creator's
+ * login each hour. Past it now, an address that already has an account is still sent its email, a new one waits, and
+ * both get the same honest "busy" answer; an IPv6 /48 has its own count between the /64 and the site (so one network
+ * cannot spend the hour); the log says once a window that the ceiling was reached; the code tries' counter takes a
+ * connection by its /64 too; and the commands a request runs are counted here.
  *
  * Synthetic only: Redis is tests/redis-stub.ts; nothing is sent.
  */
 import { NextRequest } from "next/server";
 import { POST as signIn } from "@/app/api/auth/request/route";
-import { SIGN_IN_LINKS_PER_HOUR, rateLimitAnswer, siteLinksAnswer } from "@/lib/auth";
+import { createHash } from "node:crypto";
+import {
+  EMAIL_CODE_TRIES_PER_IP_HOUR,
+  SIGN_IN_BUSY_MESSAGE,
+  SIGN_IN_LINKS_PER_BLOCK,
+  SIGN_IN_LINKS_PER_HOUR,
+  blockLimitAnswer,
+  codeRateAnswer,
+  limitBlock,
+  rateLimitAnswer,
+  siteLinksAnswer,
+} from "@/lib/auth";
 import { store as redis } from "./redis-stub";
+import { installSesMailFixture } from "./ses-mail-fixture";
 import { done, is, part } from "./check";
 
 const ORIGIN = "https://marktmorgen.com";
+const SITE = "nl:rl:signin-site";
+type Command = (string | number)[];
+const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+/** Makes `email` the owner of a store, as lib/account-exists.ts ownsStore reads it. */
+const ownStore = (email: string) => redis.run(["SET", `nl:store:owner:${sha(`nimbus-store:${email}`).slice(0, 40)}`, "store-synthetic-1"]);
+const links = () => redis.keys().filter((key) => key.startsWith("nl:auth:link:")).length;
 const request = (address: string, email: string) =>
   new NextRequest(`${ORIGIN}/api/auth/request`, {
     method: "POST",
@@ -28,9 +51,9 @@ const request = (address: string, email: string) =>
 async function main(): Promise<void> {
   redis.clear();
   process.env.RESEND_API_KEY = "re_SYNTHETIC_AUTH_LINK_LIMIT_ONLY";
-  globalThis.fetch = async () => {
-    throw Error("No external I/O");
-  };
+  // Amazon SES and every other endpoint are the synthetic fixture (tests/ses-mail-fixture.ts): no external I/O.
+  const mail = installSesMailFixture();
+  mail.configure();
 
   part("One IPv6 connection is one machine, whichever of its addresses asks");
   const answers: string[] = [];
@@ -65,6 +88,122 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = real;
   }
+
+  part("Past the site's ceiling a flood cannot stop the creators' own logins, and says nothing about who has one");
+  redis.clear();
+  const creator = "creator@example.test";
+  ownStore(creator);
+  redis.run(["SET", SITE, SIGN_IN_LINKS_PER_HOUR]);
+  const warned: string[] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+  let forCreator: Response;
+  let forNew: Response;
+  let again: Response;
+  try {
+    forCreator = await signIn(request("203.0.113.10", creator));
+    const linksForCreator = links();
+    forNew = await signIn(request("203.0.113.11", "newcomer@example.test"));
+    is("an address with an account is still sent its email past the ceiling", [linksForCreator, mail.sent.filter((m) => m.to.includes(creator)).length], [1, 1]);
+    is("a new address is sent nothing past the ceiling", [links(), mail.sent.filter((m) => m.to.includes("newcomer@example.test")).length], [1, 0]);
+    again = await signIn(request("203.0.113.12", "another@example.test"));
+  } finally {
+    console.warn = warn;
+  }
+  const [a, b] = [await forCreator.json(), await forNew.json()];
+  is("both are told the same: busy, with the honest message", [forCreator.status, a.ok, a.error, a.message, forNew.status, b.ok, b.error, b.message], [503, false, "busy", SIGN_IN_BUSY_MESSAGE, 503, false, "busy", SIGN_IN_BUSY_MESSAGE]);
+  is("both are given a request id of the same shape", [typeof a.request, typeof b.request, String(a.request).length === String(b.request).length], ["string", "string", true]);
+  is("never \"too many tries\", which is false for one who asked once", [a.error, b.error].includes("rate_limited"), false);
+  is("the same headers for both", [forCreator.headers.get("Retry-After"), forNew.headers.get("Retry-After"), forCreator.headers.get("Cache-Control")], ["3600", "3600", "no-store"]);
+  is("the log says once a window that the ceiling was reached, with no address in it", [warned.filter((line) => line.includes("emails an hour were reached")).length, warned.some((line) => /@|203\.0\.113/.test(line))], [1, false]);
+  is("and a third request past it is still busy", again.status, 503);
+  is("the message says nothing about the address it answers", /creator|newcomer|example/.test(SIGN_IN_BUSY_MESSAGE), false);
+
+  part("An account that cannot be read past the ceiling is sent nothing, under the same answer");
+  redis.clear();
+  redis.run(["SET", SITE, SIGN_IN_LINKS_PER_HOUR + 5]);
+  redis.pipeline = (async (commands: Command[]) => (commands.some((c) => String(c[1]).startsWith("nl:store:owner:")) ? ["not a reply"] : real(commands))) as typeof redis.pipeline;
+  mail.clearCaptured();
+  const error = console.error;
+  console.error = () => {};
+  try {
+    const unreadable = await signIn(request("203.0.113.20", creator));
+    is("busy, nothing sent", [unreadable.status, (await unreadable.json()).error, links(), mail.sent.length], [503, "busy", 0, 0]);
+  } finally {
+    redis.pipeline = real;
+    console.error = error;
+  }
+
+  part("The route: a count it cannot read sends nothing; mail known down is answered before the site is counted");
+  redis.clear();
+  redis.pipeline = (async (commands: Command[]) => (commands.some((c) => c[1] === SITE) ? ["not a count"] : real(commands))) as typeof redis.pipeline;
+  try {
+    const unknown = await signIn(request("203.0.113.30", "person@example.test"));
+    is("the site's count unreadable: 503 server_error, nothing sent", [unknown.status, (await unknown.json()).error, links()], [503, "server_error", 0]);
+  } finally {
+    redis.pipeline = real;
+  }
+  redis.clear();
+  // Amazon off and Resend's fallback without its proof: lib/email.ts serviceMailKnownUnavailable is true.
+  mail.disableSes();
+  try {
+    const down = await signIn(request("203.0.113.31", "person@example.test"));
+    is("mail known down: 503 server_error, and the site's ceiling is not spent", [down.status, (await down.json()).error, redis.keys().includes(SITE)], [503, "server_error", false]);
+  } finally {
+    mail.configure();
+  }
+  redis.clear();
+  const sentBefore = mail.sent.length;
+  const fine = await signIn(request("203.0.113.32", "person@example.test"));
+  is("below the ceiling, mail up: sent, and the site counted once", [fine.status, (await fine.json()).ok, mail.sent.length - sentBefore, redis.run(["GET", SITE])], [200, true, 1, "1"]);
+
+  part("An IPv6 /48 has its own count, between the /64 and the site");
+  is("an IPv6 address's /48", [limitBlock("2001:db8:1:2::9"), limitBlock("[2001:DB8:1:FFFF::1]:443"), limitBlock("::ffff:203.0.113.9"), limitBlock("203.0.113.9"), limitBlock("unknown")], ["2001:db8:1::/48", "2001:db8:1::/48", null, null, null]);
+  redis.clear();
+  const blockAnswers: string[] = [];
+  for (let i = 1; i <= SIGN_IN_LINKS_PER_BLOCK + 1; i += 1) blockAnswers.push(await blockLimitAnswer(`2001:db8:5:${i.toString(16)}::1`));
+  is("thirty /64s of one /48 are within, the next is over", [blockAnswers.slice(0, -1).every((answer) => answer === "within"), blockAnswers.at(-1)], [true, "over"]);
+  is("another /48 has its own", await blockLimitAnswer("2001:db8:6:1::1"), "within");
+  redis.clear();
+  for (let i = 1; i <= SIGN_IN_LINKS_PER_BLOCK; i += 1) await blockLimitAnswer(`2001:db8:7:${i.toString(16)}::1`);
+  const blocked = await signIn(request("2001:db8:7:ffff::1", "person@example.test"));
+  is("the route refuses a new /64 of a spent /48 as too many tries from one place", [blocked.status, (await blocked.json()).error], [429, "rate_limited"]);
+
+  part("The commands a request runs for these ceilings: two on the site's key, two on the /48's for IPv6 only");
+  const counted = async (address: string, siteBefore = 0): Promise<Command[]> => {
+    redis.clear();
+    if (siteBefore) redis.run(["SET", SITE, siteBefore]);
+    const seen: Command[] = [];
+    redis.pipeline = (async (commands: Command[]) => {
+      seen.push(...commands);
+      return real(commands);
+    }) as typeof redis.pipeline;
+    try {
+      await signIn(request(address, "person@example.test"));
+    } finally {
+      redis.pipeline = real;
+    }
+    return seen;
+  };
+  const v6 = await counted("2001:db8:8:1::1");
+  is("IPv6: INCR and EXPIRE NX on the site's key, once each", v6.filter((c) => c[1] === SITE).map((c) => c[0]), ["INCR", "EXPIRE"]);
+  is("IPv6: INCR and EXPIRE NX on its /48's key, once each", v6.filter((c) => String(c[1]).startsWith("nl:rl:signin-block:")).map((c) => c[0]), ["INCR", "EXPIRE"]);
+  const v4 = await counted("203.0.113.40");
+  is("IPv4: the site's two, and none for a /48", [v4.filter((c) => c[1] === SITE).length, v4.filter((c) => String(c[1]).startsWith("nl:rl:signin-block:")).length], [2, 0]);
+  const warn2 = console.warn;
+  console.warn = () => {};
+  try {
+    const pastIt = await counted("203.0.113.41", SIGN_IN_LINKS_PER_HOUR + 1);
+    is("past the ceiling the site's two still run on every request: it bounds emails, not commands", pastIt.filter((c) => c[1] === SITE).map((c) => c[0]), ["INCR", "EXPIRE"]);
+  } finally {
+    console.warn = warn2;
+  }
+
+  part("The code tries' counter takes a connection by its /64 too");
+  redis.clear();
+  const tries: string[] = [];
+  for (let i = 1; i <= EMAIL_CODE_TRIES_PER_IP_HOUR + 1; i += 1) tries.push(await codeRateAnswer(`2001:db8:a:b::${i.toString(16)}`));
+  is("thirty tries from addresses of one /64, then over", [tries.slice(0, -1).every((answer) => answer === "within"), tries.at(-1)], [true, "over"]);
 
   done();
 }

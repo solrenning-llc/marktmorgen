@@ -1437,22 +1437,43 @@ async function tracedOf(id: string, who: string): Promise<MemberTraces> {
     ...commentLikes.map(([, post, comment]) => ["SISMEMBER", commentLikesKey(id, post, comment), who]),
     ...reports.map((target) => ["SISMEMBER", reportersKey(id, target), who]),
   ];
+  // Each batch read exactly, and each SISMEMBER 0 or 1 (issue #4780): a missing, null, cut or odd reply fails the copy.
   const replies: unknown[] = [];
-  for (let i = 0; i < commands.length; i += TRACE_BATCH) replies.push(...(await redisPipeline(commands.slice(i, i + TRACE_BATCH))));
+  for (let i = 0; i < commands.length; i += TRACE_BATCH) replies.push(...(await exactBatch(commands.slice(i, i + TRACE_BATCH))));
   let at = 0;
   for (const [, post] of comments) {
-    const comment = parseComment(replies[at++]);
+    const reply = replies[at++];
+    if (reply !== null && typeof reply !== "string") throw new UnknownReplyError("a member's comment, for their copy");
+    const comment = parseComment(reply);
     if (comment && comment.a === who) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
   }
-  for (const [, post] of likes) if (Number(replies[at++]) === 1) out.likedPosts.push(post);
-  for (const [, post, comment] of commentLikes) if (Number(replies[at++]) === 1) out.likedComments.push({ post, comment });
+  for (const [, post] of likes) if (isMember(replies[at++])) out.likedPosts.push(post);
+  for (const [, post, comment] of commentLikes) if (isMember(replies[at++])) out.likedComments.push({ post, comment });
   for (const target of reports) {
-    if (Number(replies[at++]) !== 1) continue;
+    if (!isMember(replies[at++])) continue;
     const [kind, post, comment] = target.split(":");
     out.reported.push(kind === "p" ? `post ${post}` : `comment ${comment} under post ${post}`);
   }
   out.pollPosts = [...new Set(parts.filter((p) => p[0] === "v" && p.length === 2).map((p) => p[1]))];
   return out;
+}
+
+/**
+ * One batch of a member's copy read exactly (issue #4780): one reply for each command, or UnknownReplyError, so the
+ * copy fails closed rather than come out complete without what a lost or cut reply held (CX-123 rule 24).
+ */
+async function exactBatch(commands: (string | number)[][]): Promise<unknown[]> {
+  if (!commands.length) return [];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
+  if (!replies) throw new UnknownReplyError("a member's community records for their copy");
+  return replies;
+}
+
+/** A SISMEMBER read exactly for a member's copy: 1 there, 0 confirmed not there, anything else UnknownReplyError (#4780). */
+function isMember(reply: unknown): boolean {
+  const n = countOf(reply);
+  if (n !== 0 && n !== 1) throw new UnknownReplyError("whether a member liked or reported something, for their copy");
+  return n === 1;
 }
 
 /** The whole community, read for one member: for a community with posts from before the trace began. */
@@ -1464,7 +1485,7 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
   for (let i = 0; i < ids.length; i += TRACE_BATCH) {
     const batch = ids.slice(i, i + TRACE_BATCH);
     const posts = await readPosts(id, batch);
-    const replies = await redisPipeline(
+    const replies = await exactBatch(
       posts.flatMap((p) => [
         ["HGETALL", commentsKey(id, p.id)],
         ["SISMEMBER", likesKey(id, p.id), who],
@@ -1476,8 +1497,8 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
     posts.forEach((p, k) => {
       if (p.a === who) out.posts.push({ post: p.id, space: p.sp, title: p.title, text: p.text, at: p.at, edited: p.ed, hidden: p.hid });
       if (p.poll) out.pollPosts.push(p.id);
-      if (Number(replies[k * 3 + 1]) === 1) out.likedPosts.push(p.id);
-      if (Number(replies[k * 3 + 2]) === 1) out.reported.push(`post ${p.id}`);
+      if (isMember(replies[k * 3 + 1])) out.likedPosts.push(p.id);
+      if (isMember(replies[k * 3 + 2])) out.reported.push(`post ${p.id}`);
       const flat = replies[k * 3];
       const values = Array.isArray(flat) ? flat.filter((_, n) => n % 2 === 1) : flat && typeof flat === "object" ? Object.values(flat as Record<string, string>) : [];
       for (const value of values) {
@@ -1490,10 +1511,10 @@ async function scanTraces(id: string, who: string): Promise<MemberTraces> {
     for (const { post, comment } of theirComments) out.comments.push({ post, comment: comment.id, text: comment.text, at: comment.at, edited: comment.ed, hidden: comment.hid });
     for (let c = 0; c < everyComment.length; c += TRACE_BATCH) {
       const slice = everyComment.slice(c, c + TRACE_BATCH);
-      const marks = await redisPipeline(slice.flatMap(({ post, comment }) => [["SISMEMBER", commentLikesKey(id, post, comment.id), who], ["SISMEMBER", reportersKey(id, `c:${post}:${comment.id}`), who]]));
+      const marks = await exactBatch(slice.flatMap(({ post, comment }) => [["SISMEMBER", commentLikesKey(id, post, comment.id), who], ["SISMEMBER", reportersKey(id, `c:${post}:${comment.id}`), who]]));
       slice.forEach(({ post, comment }, k) => {
-        if (Number(marks[k * 2]) === 1) out.likedComments.push({ post, comment: comment.id });
-        if (Number(marks[k * 2 + 1]) === 1) out.reported.push(`comment ${comment.id} under post ${post}`);
+        if (isMember(marks[k * 2])) out.likedComments.push({ post, comment: comment.id });
+        if (isMember(marks[k * 2 + 1])) out.reported.push(`comment ${comment.id} under post ${post}`);
       });
     }
   }

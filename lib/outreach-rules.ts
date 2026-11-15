@@ -200,15 +200,56 @@ function decodeEntities(text: string): string {
   });
 }
 
+/**
+ * How much of a page is read for its words and links (#4592): a business prints where to write near the top or in
+ * its menu and footer, never past half a megabyte of markup, and every pattern below stays linear in this much.
+ */
+export const PAGE_READ_CHARS = 500_000;
+
+/**
+ * The page with every block from `open` to `close` (as "<script" and "</script>", any letter case) put out, in one
+ * pass with indexOf (#4592). A lazy regex to a closing mark that is not there backtracked over the rest of the page
+ * from every opening, so a page of "<script" or "<!--" with no end took time with the square of its length. A block
+ * that never closes runs to the end of the page, as the regex did not: what follows it was the block's own text.
+ */
+function dropBlocks(html: string, open: string, close: string): string {
+  const lower = html.toLowerCase();
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const start = lower.indexOf(open, at);
+    if (start < 0) return out + html.slice(at);
+    // "<script" must be the whole name: "<scripts" is another tag.
+    const next = lower.charCodeAt(start + open.length);
+    if (open[1] !== "!" && start + open.length < lower.length && !/[\s>/]/.test(String.fromCharCode(next))) {
+      out += html.slice(at, start + open.length);
+      at = start + open.length;
+      continue;
+    }
+    const end = lower.indexOf(close, start + open.length);
+    out += `${html.slice(at, start)} `;
+    if (end < 0) return out;
+    at = end + close.length;
+  }
+}
+
+/**
+ * The tags of a page put out, each with " ", in linear time (#4592): `<[^>]+>` backtracked over the rest of the page
+ * from every "<" with no ">" after it; `<[^<>]*>` stops at the next "<", so each "<" is looked at once. A "<" that
+ * opens nothing is left as text.
+ */
+export const stripTags = (html: string): string => html.replace(/<[^<>]*>/g, " ");
+
 /** A page's HTML as the words a reader sees, with what a mailto: link points at kept beside it. */
 export function pageText(html: string): string {
-  const stripped = html
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    // The whole opening tag gives way to the address, or it would go with the tag.
-    .replace(/<a\b[^>]*\bhref\s*=\s*["']mailto:([^"'?]+)[^"']*["'][^>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `)
-    .replace(/<[^>]+>/g, " ");
+  let page = html.slice(0, PAGE_READ_CHARS);
+  page = dropBlocks(page, "<script", "</script>");
+  page = dropBlocks(page, "<style", "</style>");
+  page = dropBlocks(page, "<!--", "-->");
+  const stripped = stripTags(
+    // The whole opening tag gives way to the address, or it would go with the tag. [^<>] keeps each try to one tag.
+    page.replace(/<a\b[^<>]*\bhref\s*=\s*["']mailto:([^"'?<>]+)[^"'<>]*["'][^<>]*>/gi, (_, to: string) => ` ${to.replace(/%40/gi, "@")} `),
+  );
   return decodeEntities(stripped).replace(/\s+/g, " ").trim();
 }
 
@@ -268,7 +309,9 @@ function contactRank(path: string, text: string): number {
 export function contactPages(html: string, base: string): string[] {
   const home = new URL(base);
   const found = new Map<string, number>();
-  for (const match of html.matchAll(/<a\b[^>]*href\s*=\s*["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
+  // Each try kept to one tag and a link's words to 2,000 characters, so a page of "<a " with no ">" or of links with
+  // no "</a>" is read in linear time (#4592).
+  for (const match of html.slice(0, PAGE_READ_CHARS).matchAll(/<a\b[^<>]*href\s*=\s*["']([^"'#<>]+)["'][^<>]*>([\s\S]{0,2000}?)<\/a>/gi)) {
     let url: URL;
     try {
       url = new URL(match[1], home);
@@ -277,7 +320,7 @@ export function contactPages(html: string, base: string): string[] {
     }
     if (url.protocol !== "https:" || siteDomain(url.hostname) !== siteDomain(home.hostname)) continue;
     if (NOT_A_CONTACT_PAGE.test(url.pathname)) continue;
-    const text = match[2].replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
+    const text = stripTags(dropBlocks(dropBlocks(match[2], "<script", "</script>"), "<style", "</style>")).replace(/\s+/g, " ").trim().toLowerCase().slice(0, 80);
     const rank = contactRank(url.pathname.toLowerCase(), text);
     if (rank === 0) continue;
     const key = `${url.origin}${url.pathname}`;

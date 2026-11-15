@@ -114,13 +114,40 @@ function readEmail(raw: unknown): string | null {
 }
 
 /**
- * Writes a conversation, and its new message. Its room is taken first: what
- * the message adds in the month the conversation is counted in, or the
- * whole conversation in a later one. `refusable` for what someone wrote,
- * which then is not written (DataRoomError); a change of state is always
- * counted, never refused.
+ * A conversation's write, in one step and only over exactly the record read (`expected`; "" for a new one, which
+ * must not exist yet): the record, its index entry, its new message, the messages' expiry, the visitor's chat
+ * token and the end of its unread episode. A record deleted meanwhile (a buyer's erasure, forgetInboxPerson) or
+ * changed meanwhile is never written over or re-created, and nothing of it comes back: 1 written, 0 not.
+ * KEYS: record, index, messages, unread episode[, chat token]. ARGV: expected, record, KEEP seconds, index score,
+ * id, message ("" for none), MAX_MESSAGES, token value, "1" to end the unread episode. Modelled by lib/redis-memory.ts.
  */
-async function write(store: Store, statsId: string, handle: string, conversation: Kept, add: Message | null, refusable: boolean, now = Date.now()): Promise<Kept> {
+export const INBOX_WRITE = `-- marktmorgen:inbox-write:v1
+local current = redis.call('GET', KEYS[1])
+if ARGV[1] == '' then
+  if current then return 0 end
+elseif current ~= ARGV[1] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+redis.call('ZADD', KEYS[2], ARGV[4], ARGV[5])
+if ARGV[6] ~= '' then
+  redis.call('RPUSH', KEYS[3], ARGV[6])
+  redis.call('LTRIM', KEYS[3], -tonumber(ARGV[7]), -1)
+end
+redis.call('EXPIRE', KEYS[3], ARGV[3])
+if #KEYS >= 5 then redis.call('SET', KEYS[5], ARGV[8], 'EX', ARGV[3]) end
+if ARGV[9] == '1' then redis.call('DEL', KEYS[4]) end
+return 1`;
+
+/**
+ * Writes a conversation, and its new message, only over `expected`: the exact record text it was read from ("" for
+ * a new conversation). Its room is taken first: what the message adds in the month the conversation is counted in,
+ * or the whole conversation in a later one. `refusable` for what someone wrote, which then is not written
+ * (DataRoomError); a change of state is always counted, never refused. Null when the record is no longer the one
+ * read (deleted by an erasure, or changed meanwhile): nothing is written, and the room taken stays counted (never
+ * less than what is kept). An answer of unknown shape throws UnknownReplyError (rule 24).
+ */
+async function write(store: Store, statsId: string, handle: string, conversation: Kept, add: Message | null, refusable: boolean, expected: string, now = Date.now()): Promise<Kept | null> {
   const [length, oldest] = add ? await redisPipeline([["LLEN", msgKey(statsId, conversation.id)], ["LINDEX", msgKey(statsId, conversation.id), 0]]) : [0, null];
   const dropped = add && Number(length) >= MAX_MESSAGES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const messages = Math.max(0, (conversation.b ?? 0) + (add ? dataBytes([JSON.stringify(add)], 1) : 0) - dropped);
@@ -134,26 +161,75 @@ async function write(store: Store, statsId: string, handle: string, conversation
     else await noteData(store, changes, now);
   }
   conversation = next;
-  const commands: (string | number)[][] = [
-    ["SET", convKey(statsId, conversation.id), JSON.stringify(conversation), "EX", KEEP],
-    ["ZADD", indexKey(statsId), conversation.lastAt, conversation.id],
+  const keys = [
+    convKey(statsId, conversation.id),
+    indexKey(statsId),
+    msgKey(statsId, conversation.id),
+    messageEpisodeKey(statsId, conversation.id),
+    ...(conversation.token ? [tokenKey(conversation.token)] : []),
   ];
-  if (add) {
-    commands.push(["RPUSH", msgKey(statsId, conversation.id), JSON.stringify(add)]);
-    commands.push(["LTRIM", msgKey(statsId, conversation.id), -MAX_MESSAGES, -1]);
+  const written = repliesFor(
+    await redisPipeline([
+      [
+        "EVAL",
+        INBOX_WRITE,
+        keys.length,
+        ...keys,
+        expected,
+        JSON.stringify(conversation),
+        KEEP,
+        conversation.lastAt,
+        conversation.id,
+        add ? JSON.stringify(add) : "",
+        MAX_MESSAGES,
+        conversation.token ? `${statsId}|${conversation.id}|${handle}` : "",
+        // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
+        conversation.unread === 0 ? "1" : "0",
+      ],
+    ]),
+    1,
+  )?.[0];
+  if (written !== 0 && written !== 1) throw new UnknownReplyError("an inbox conversation's write");
+  return written === 1 ? conversation : null;
+}
+
+/** A conversation and the exact record text it was read from, which a write must find unchanged. */
+async function readRecord(statsId: string, id: string): Promise<{ kept: Kept; raw: string } | null> {
+  if (!CONVERSATION_ID.test(id)) return null;
+  const [raw] = await redisPipeline([["GET", convKey(statsId, id)]]);
+  const kept = typeof raw === "string" ? parseKept(raw) : null;
+  return kept && typeof raw === "string" ? { kept, raw } : null;
+}
+
+/**
+ * A change to a kept conversation, read and written over exactly what was read: a record changed meanwhile is read
+ * again and the change made on it (at most three times); one deleted meanwhile (a buyer's erasure) answers null and
+ * nothing is written. `change` answers null to leave it as it is. `first` is the caller's read of it.
+ */
+async function update(
+  store: Store,
+  statsId: string,
+  id: string,
+  first: { kept: Kept; raw: string },
+  change: (c: Kept) => Kept | null,
+  add: Message | null,
+  refusable: boolean,
+  now = Date.now(),
+): Promise<{ before: Kept; after: Kept } | null> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // The caller's own read first: no read more than before when nothing changed in between.
+    const read = attempt === 0 ? first : await readRecord(statsId, id);
+    if (!read) return null;
+    const changed = change(read.kept);
+    if (!changed) return { before: read.kept, after: read.kept };
+    const after = await write(store, statsId, store.handle, changed, add, refusable, read.raw, now);
+    if (after) return { before: read.kept, after };
   }
-  commands.push(["EXPIRE", msgKey(statsId, conversation.id), KEEP]);
-  if (conversation.token) commands.push(["SET", tokenKey(conversation.token), `${statsId}|${conversation.id}|${handle}`, "EX", KEEP]);
-  // Read (or answered, or closed): the unread episode ends in this same write, so the next message tells the phones again.
-  if (conversation.unread === 0) commands.push(["DEL", messageEpisodeKey(statsId, conversation.id)]);
-  await redisPipeline(commands);
-  return conversation;
+  throw new UnknownReplyError("an inbox conversation that kept changing while it was written");
 }
 
 async function readKept(statsId: string, id: string): Promise<Kept | null> {
-  if (!CONVERSATION_ID.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", convKey(statsId, id)]]);
-  return parseKept(raw);
+  return (await readRecord(statsId, id))?.kept ?? null;
 }
 
 async function readMessages(statsId: string, id: string): Promise<Message[]> {
@@ -204,7 +280,9 @@ async function open(input: NewInput): Promise<{ ok: true; conversation: Kept; me
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "visitor", text };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, now);
+  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  // A new random id that is already taken is not written over: said as an error, never as kept.
+  if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
   return { ok: true, conversation: kept, messages: [message] };
 }
@@ -309,21 +387,33 @@ export async function visitorSend(
   if (store.suspended) return { ok: false, reason: "closed" };
   const text = messageText(textRaw);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  const conversation = await readKept(found.statsId, found.id);
-  if (!conversation || conversation.token !== token) return { ok: false, reason: "gone" };
+  const read = await readRecord(found.statsId, found.id);
+  if (!read || read.kept.token !== token) return { ok: false, reason: "gone" };
   if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
   const message: Message = { at: now, from: "visitor", text };
-  let next: Kept;
+  let written: { before: Kept; after: Kept } | null;
   try {
-    next = await write(store, found.statsId, store.handle, { ...conversation, status: "open", lastAt: now, lastFrom: "visitor", unread: conversation.unread + 1 }, message, true, now);
+    // Over exactly the record read: a conversation erased meanwhile is gone, never written back.
+    written = await update(
+      store,
+      found.statsId,
+      found.id,
+      read,
+      (c) => (c.token === token ? { ...c, status: "open", lastAt: now, lastFrom: "visitor", unread: c.unread + 1 } : null),
+      message,
+      true,
+      now,
+    );
   } catch (error) {
     if (error instanceof DataRoomError) return { ok: false, reason: "closed" };
     throw error;
   }
+  if (!written || written.after === written.before) return { ok: false, reason: "gone" };
+  const next = written.after;
   await tellTeam(store, next, text).catch((error) => console.error("telling a store of a chat failed", error));
-  await tellPhones(store, next, conversation.unread, now);
+  await tellPhones(store, next, written.before.unread, now);
   return { ok: true, thread: forVisitor(next, await readMessages(found.statsId, found.id)) };
 }
 
@@ -474,11 +564,14 @@ export type Thread = { conversation: Conversation; messages: Message[] };
 
 /** One conversation and its messages, marked as read. */
 export async function openConversation(statsId: string, id: string, store?: Store): Promise<Thread | null> {
-  const conversation = await readKept(statsId, id);
-  if (!conversation) return null;
+  const read = await readRecord(statsId, id);
+  if (!read) return null;
+  const conversation = read.kept;
   if (conversation.unread && store) {
-    const next = await write(store, statsId, store.handle, { ...conversation, unread: 0 }, null, false);
-    return { conversation: shown(next), messages: await readMessages(statsId, id) };
+    // Marked read only over the record as it is: one erased meanwhile is gone, never written back.
+    const next = await update(store, statsId, id, read, (c) => (c.unread ? { ...c, unread: 0 } : null), null, false);
+    if (!next) return null;
+    return { conversation: shown(next.after), messages: await readMessages(statsId, id) };
   }
   return { conversation: shown(conversation), messages: await readMessages(statsId, id) };
 }
@@ -491,11 +584,14 @@ export async function replyTo(store: Store, id: string, by: string, textRaw: unk
   if (!statsId) return { ok: false, reason: "none" };
   const text = messageText(textRaw);
   if (text.length < MIN_MESSAGE) return { ok: false, reason: "short" };
-  const conversation = await readKept(statsId, id);
-  if (!conversation) return { ok: false, reason: "none" };
+  const read = await readRecord(statsId, id);
+  if (!read) return { ok: false, reason: "none" };
   if (!(await withinLimit("inbox-reply", statsId, 400, 86_400))) return { ok: false, reason: "limited" };
   const message: Message = { at: now, from: "store", text, by };
-  const next = await write(store, statsId, store.handle, { ...conversation, lastAt: now, lastFrom: "store", unread: 0 }, message, true, now);
+  const written = await update(store, statsId, id, read, (c) => ({ ...c, lastAt: now, lastFrom: "store", unread: 0 }), message, true, now);
+  // Erased meanwhile (a buyer's erasure): nothing written back, nothing emailed.
+  if (!written) return { ok: false, reason: "none" };
+  const next = written.after;
   const w = chatWords(store.language);
   const link = chatOpen(store) && next.token ? `${SITE_URL}/@${store.handle}?chat=${next.token}` : "";
   const emailed = isSenderConfigured()
@@ -572,7 +668,8 @@ export async function writeToAffiliate(
     token: randomBytes(24).toString("base64url"),
   };
   const message: Message = { at: now, from: "store", text, by };
-  const kept = await write(store, statsId, store.handle, conversation, message, true, now);
+  const kept = await write(store, statsId, store.handle, conversation, message, true, "", now);
+  if (!kept) throw new UnknownReplyError("a new inbox conversation whose id was already taken");
   await trim(statsId);
   const w = chatWords(store.language);
   const link = chatOpen(store) && kept.token ? `${SITE_URL}/@${store.handle}?chat=${kept.token}` : "";
@@ -592,10 +689,10 @@ export async function writeToAffiliate(
 /** Closes a conversation, or opens it again. */
 export async function setStatus(store: Store, id: string, status: unknown): Promise<Conversation | null> {
   if (!store.statsId || (status !== "open" && status !== "closed")) return null;
-  const conversation = await readKept(store.statsId, id);
-  if (!conversation) return null;
-  const next = await write(store, store.statsId, store.handle, { ...conversation, status, unread: status === "closed" ? 0 : conversation.unread } as Kept, null, false);
-  return shown(next);
+  const read = await readRecord(store.statsId, id);
+  if (!read) return null;
+  const next = await update(store, store.statsId, id, read, (c) => ({ ...c, status, unread: status === "closed" ? 0 : c.unread }) as Kept, null, false);
+  return next ? shown(next.after) : null;
 }
 
 /** Gives a conversation to one of the people who may answer, or to nobody (""). */
@@ -603,10 +700,10 @@ export async function assignTo(store: Store, id: string, email: unknown, allowed
   if (!store.statsId || typeof email !== "string") return null;
   const who = email ? normaliseEmail(email) : "";
   if (who && !allowed.includes(who)) return null;
-  const conversation = await readKept(store.statsId, id);
-  if (!conversation) return null;
-  const next = await write(store, store.statsId, store.handle, { ...conversation, assigned: who }, null, false);
-  return shown(next);
+  const read = await readRecord(store.statsId, id);
+  if (!read) return null;
+  const next = await update(store, store.statsId, id, read, (c) => ({ ...c, assigned: who }), null, false);
+  return next ? shown(next.after) : null;
 }
 
 /**

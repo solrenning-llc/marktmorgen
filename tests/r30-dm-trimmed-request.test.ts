@@ -32,10 +32,17 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { ROOM } from "./data-room";
 
-/** send, its sender a member of the community: a message is written only while its sender's record is there (#4672). */
-const send = (...args: Parameters<typeof sendDm>) => {
-  memberStub.run(["HSET", `nl:cm:${args[0]}:m`, args[2], "{}"]);
-  return sendDm(...args);
+/** send, its sender and recipient members of the community: a message is written only while their records are there (#4672). */
+// The records last only for the send: this file checks that nothing anywhere names a person after forgetDmPerson,
+// which forgets their messages, not their membership (a whole erasure deletes that first, lib/community-erasure.ts).
+const send = async (...args: Parameters<typeof sendDm>) => {
+  const who = [args[2], args[3]].filter((w) => w !== "creator");
+  for (const w of who) memberStub.run(["HSET", `nl:cm:${args[0]}:m`, w, "{}"]);
+  try {
+    return await sendDm(...args);
+  } finally {
+    for (const w of who) memberStub.run(["HDEL", `nl:cm:${args[0]}:m`, w]);
+  }
 };
 
 

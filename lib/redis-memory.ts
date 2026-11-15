@@ -346,10 +346,12 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
-        // lib/community-dm.ts DM_SEND_IF_MEMBER: a private message's final write only while its sender's record is there.
-        if (key.startsWith("-- marktmorgen:dm-send-if-member:v1\n") && args[0] === "5" && args.length === 13) {
-          const [, chat, fromInbox, toList, read, members, from, message, most, at, pair, how, any] = args;
+        // lib/community-dm.ts DM_SEND_IF_MEMBER: a private message's final write only while its sender's and its
+        // recipient's records are there (the creator, "any", has none).
+        if (key.startsWith("-- marktmorgen:dm-send-if-member:v2\n") && args[0] === "5" && args.length === 15) {
+          const [, chat, fromInbox, toList, read, members, from, message, most, at, pair, how, any, to, toAny] = args;
           if (any !== "any" && this.run(["HEXISTS", members, from]) === 0) return 0;
+          if (toAny !== "any" && this.run(["HEXISTS", members, to]) === 0) return 2;
           this.run(["RPUSH", chat, message]);
           this.run(["LTRIM", chat, -Number(most), -1]);
           this.run(["ZADD", fromInbox, at, pair]);

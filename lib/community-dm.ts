@@ -85,8 +85,9 @@ const membersKey = (id: string) => `${base(id)}:m`;
  * no member record. 1 when written, 0 when the sender's record is gone: an erasure deletes it before the
  * conversations (lib/community-erasure.ts), so a message it overtook recreates none of them.
  */
-export const DM_SEND_IF_MEMBER = `-- marktmorgen:dm-send-if-member:v1
+export const DM_SEND_IF_MEMBER = `-- marktmorgen:dm-send-if-member:v2
 if ARGV[7] ~= "any" and redis.call("HEXISTS", KEYS[5], ARGV[1]) == 0 then return 0 end
+if ARGV[9] ~= "any" and redis.call("HEXISTS", KEYS[5], ARGV[8]) == 0 then return 2 end
 redis.call("RPUSH", KEYS[1], ARGV[2])
 redis.call("LTRIM", KEYS[1], -tonumber(ARGV[3]), -1)
 redis.call("ZADD", KEYS[2], ARGV[4], ARGV[5])
@@ -180,7 +181,7 @@ function parseMessage(raw: unknown): Message | null {
 
 export type SendResult =
   | { ok: true; asked: boolean }
-  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" | "out" };
+  | { ok: false; reason: "off" | "between" | "self" | "declined" | "empty" | "full" | "slow" | "out" | "gone" };
 
 /**
  * Whether these two may exchange messages at all, before anything is written.
@@ -290,17 +291,21 @@ export async function send(
   }
 
   // The message, both lines and the sender's read mark (they have read what they just wrote), only while the sender is
-  // still in, in one step (#4672). For a request, NX: one already in the list keeps its first place, and one a trim took
-  // out while this was on its way is put back, so what is stored stays in the recipient's list for their copy and their
-  // erasure (rule 30). A sender erased meanwhile writes nothing, and the room taken for it comes back.
+  // still in, and the recipient too (the creator has no member record and always passes), in one step (#4672; a
+  // recipient erased meanwhile or already, review 5bNDa). For a request, NX: one already in the list keeps its first
+  // place, and one a trim took out while this was on its way is put back, so what is stored stays in the recipient's list for their copy and their
+  // erasure (rule 30). A sender or recipient erased writes nothing, and the room taken for it comes back.
   const wrote = repliesFor(await redisPipeline([
     ["EVAL", DM_SEND_IF_MEMBER, 5, chatKey(id, pair), inboxKey(id, from), asking ? askedKey(id, to) : inboxKey(id, to), readKey(id, pair), membersKey(id),
-      from, JSON.stringify(message), MAX_MESSAGES, message.at, pair, asking ? "ask" : "inbox", from === CREATOR ? "any" : "member"],
+      from, JSON.stringify(message), MAX_MESSAGES, message.at, pair, asking ? "ask" : "inbox", from === CREATOR ? "any" : "member",
+      to, to === CREATOR ? "any" : "member"],
   ]), 1)?.[0];
-  if (wrote === 0) {
+  if (wrote === 0 || wrote === 2) {
     await giveData(room, [{ slot: PAIR_SLOT(pair), bytes: taken }]);
-    return { ok: false, reason: "out" };
+    return { ok: false, reason: wrote === 0 ? "out" : "gone" };
   }
+  // Anything else is unknown (rule 24), never a message sent: the room stays taken, since the write may have been made.
+  if (wrote !== 1) throw new UnknownReplyError("a private message's write");
   if (asking && (await acceptedMeanwhile(id, to, pair))) return { ok: true, asked: false };
   return { ok: true, asked: asking };
 }

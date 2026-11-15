@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForPage } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 import { originFrom } from "@/lib/request-origin";
 import { nextOpen, withMark } from "@/lib/page-funnel";
 import { readPageFunnelsStrict, stepStates } from "@/lib/page-funnel-store";
@@ -28,6 +29,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) return new Response("Not found", { status: 404 });
   if (store.suspended) return away(`/@${store.handle}`);
+  // An entry page like the store's others: one of its public requests, taken before its funnels are read (MM-SA-53).
+  // Measured at its worst (every funnel at every step, tests/funnel-go-units.test.ts), a fifth of a later page. Past
+  // the month, the front page says the store is resting.
+  if (!(await takePublicRequest(store, "public"))) return away(`/@${store.handle}`);
 
   // A store without a stats id has never kept a funnel; any other reading is exact or unknown.
   const later = () =>

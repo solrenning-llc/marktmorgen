@@ -17,13 +17,13 @@ const OWNER = "thanks-unknown@example.com";
 const BASE = "https://marktmorgen.com";
 globalThis.fetch = (async () => new Response(JSON.stringify({ error: "unexpected" }), { status: 404 })) as typeof fetch;
 
-/** Which counter answers `reply` instead: the page's own window (SET NX + INCR) or the store's public requests (INCRBY). */
+/** Which counter answers `reply` instead: the page's own window (INCR + EXPIRE NX, lib/window-count.ts) or the store's public requests (INCRBY). */
 let target: "" | "window" | "requests" = "";
 let reply: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const [command, key] = [String(commands[0]?.[0] ?? ""), String(commands[0]?.[1] ?? "")];
-  if (target === "window" && command === "SET" && key.startsWith("nl:rl:thanks-view:")) return reply;
+  if (target === "window" && command === "INCR" && key.startsWith("nl:rl:thanks-view:")) return reply;
   if (target === "requests" && command === "INCRBY" && key.startsWith("nl:traffic:r:")) return reply;
   return pipeline(commands);
 }) as typeof redis.pipeline;
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   await setSubscription(OWNER, { customerId: "cus_thanks0001", subscriptionId: "sub_thanks0001", active: true, tier: "creator", period: paidPeriod() });
 
   for (const [label, on, value] of [
-    ["the page's window answered in another shape", "window", ["OK", "seven"]],
+    ["the page's window answered in another shape", "window", ["seven", 1]],
     ["the page's window answered with no reply", "window", []],
   ] as [string, "window" | "requests", unknown][]) {
     part(label);
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
 
   part("control: a confirmed spent window still says to wait");
   target = "window";
-  reply = ["OK", 9_999_999];
+  reply = [9_999_999, 1];
   const spent = await open({ session_id: "cs_test_thanks_unknown" });
   target = "";
   is("the Stripe page says it was opened many times", spent.includes("opened many times"), true);

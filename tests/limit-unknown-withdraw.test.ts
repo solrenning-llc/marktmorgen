@@ -41,7 +41,7 @@ const receipts = () => world.emails.filter((e) => e.to === ADDRESS && e.subject.
 let reply: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
-  if (reply !== null && commands[0]?.[0] === "SET" && String(commands[0]?.[1] ?? "").startsWith("nl:rl:plan-withdraw:")) return reply;
+  if (reply !== null && commands[0]?.[0] === "INCR" && String(commands[0]?.[1] ?? "").startsWith("nl:rl:plan-withdraw:")) return reply;
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
@@ -55,7 +55,7 @@ async function main() {
   const unread = await paidShop({ at: REAL - 2 * DAY });
   who.store = await unread.store();
   world.emails = [];
-  reply = ["OK", "1"];
+  reply = ["1", 1];
   const unreadState = await post();
   reply = null;
   const unreadAt = (await redisPipeline([["HGET", planWithdrawKey(who.store.sid, unread.subId), "at"]]))[0];
@@ -66,7 +66,7 @@ async function main() {
   const over = await paidShop({ at: REAL - 3 * DAY });
   who.store = await over.store();
   world.emails = [];
-  reply = [null, 9_999];
+  reply = [9_999, 0];
   const overState = await post();
   reply = null;
   is("too many today", [overState, receipts().length], ["later", 0]);

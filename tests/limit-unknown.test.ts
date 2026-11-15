@@ -31,15 +31,15 @@ let reply: unknown = null;
 const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const key = String(commands[0]?.[1] ?? "");
-  if (target && commands[0]?.[0] === "SET" && key.startsWith(`nl:rl:${target}:`)) {
+  if (target && commands[0]?.[0] === "INCR" && key.startsWith(`nl:rl:${target}:`)) {
     if (reply === "throw") throw new Error("the database did not answer");
     if (reply !== null) return reply;
   }
   return pipeline(commands);
 }) as typeof redis.pipeline;
 
-const UNREADABLE = ["OK", "1"];
-const OVER = [null, 9_999];
+const UNREADABLE = ["1", 1];
+const OVER = [9_999, 0];
 
 function answering(scope: string, value: unknown): void {
   target = scope;
@@ -80,11 +80,11 @@ async function main(): Promise<void> {
   part("withinLimit: an unreadable count is unknown, never past the limit and never room");
   answering("unit-scope", UNREADABLE);
   is("an unreadable count is unknown", await outcome(() => withinLimit("unit-scope", "who", 5, 60)), "unknown");
-  answering("unit-scope", ["OK"]);
+  answering("unit-scope", [1]);
   is("a cut-short reply is unknown", await outcome(() => withinLimit("unit-scope", "who", 5, 60)), "unknown");
   answering("unit-scope", OVER);
   is("a count past the limit is still a no", await outcome(() => withinLimit("unit-scope", "who", 5, 60)), "answered false");
-  answering("unit-scope", [null, 5]);
+  answering("unit-scope", [5, 0]);
   is("the last count within is still a yes", await outcome(() => withinLimit("unit-scope", "who", 5, 60)), "answered true");
   answering("unit-scope", "throw");
   is("Redis that cannot be asked still lets the request through", await outcome(() => withinLimit("unit-scope", "who", 5, 60)), "answered true");

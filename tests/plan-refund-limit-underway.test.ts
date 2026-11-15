@@ -13,12 +13,12 @@ import { ENDING_KEY, issueReview } from "@/lib/plan-refund-flow";
 import { who } from "./plan-refund-route-world";
 import { paidShop } from "./plan-refund-stripe-world";
 
-/** How the day's refund counter (SET NX + INCR of nl:rl:plan-refund:…) answers: as Redis does, lost, or spent. */
+/** How the day's refund counter (INCR + EXPIRE NX of nl:rl:plan-refund:…, lib/window-count.ts) answers: as Redis does, lost, or spent. */
 let counter: "real" | "lost" | "spent" = "real";
 const real = redis.pipeline.bind(redis);
 redis.pipeline = (async (commands: (string | number)[][]) => {
   const first = commands[0] ?? [];
-  if (counter !== "real" && first[0] === "SET" && String(first[1]).startsWith("nl:rl:plan-refund:")) return counter === "lost" ? [] : ["OK", 999];
+  if (counter !== "real" && first[0] === "INCR" && String(first[1]).startsWith("nl:rl:plan-refund:")) return counter === "lost" ? [] : [999, 1];
   return real(commands);
 }) as typeof redis.pipeline;
 

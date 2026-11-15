@@ -289,7 +289,7 @@ async function main(): Promise<void> {
   const realPipe = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const first = commands[0] ?? [];
-    if (first[0] === "SET" && String(first[1]).startsWith("nl:rl:creator-inbound:")) return [];
+    if (first[0] === "INCR" && String(first[1]).startsWith("nl:rl:creator-inbound:")) return [];
     return realPipe(commands);
   }) as typeof redis.pipeline;
   const countUnread = newMailLike(E);

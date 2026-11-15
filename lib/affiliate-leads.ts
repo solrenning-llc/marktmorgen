@@ -48,6 +48,7 @@ import {
   leadsKey,
   parseLead,
   parseLeadExact,
+  REFUND_MARK_MAX_BYTES,
   settleLeads,
 } from "@/lib/affiliate-lead-rules";
 
@@ -213,10 +214,14 @@ export async function recordLead(
       state: "open",
       d: 0,
       why: "",
+      // A booking paid on Stripe names the account it was paid into, so its refund is never looked for on another one
+      // (lib/affiliates.ts readBook), as a sale does (writeReferral).
+      ...(input.pi && !input.pi.startsWith("paypal:") && store.stripeAccountId ? { acct: store.stripeAccountId } : {}),
     };
     const json = JSON.stringify(lead);
-    // A decision later writes its time and reason into the same record: room for them is taken now.
-    const bytes = dataBytes([lead.id, json, "0000000000other"], 1);
+    // A decision later writes its time and reason into the same record, and the book its refund mark
+    // (REFUND_MARK_MAX_BYTES, lib/affiliates.ts AFFILIATE_REFUND_MARK): room for them is taken now.
+    const bytes = dataBytes([lead.id, json, "0000000000other", "0".repeat(REFUND_MARK_MAX_BYTES)], 1);
     try {
       await needData(store, [{ slot: LEADS_SLOT, bytes }]);
     } catch (error) {

@@ -396,9 +396,14 @@ export async function forgetChatPerson(id: string, who: string): Promise<number>
     }
   });
   const commands: (string | number)[][] = [["DEL", spokeKey(id, who)], ...(theirs.length ? [["ZREM", roomKey(id), ...theirs]] : [])];
-  // Each deletion answered with its count, or the erasure is not said done.
+  // Each deletion answered with its count, within what it could delete (#4796): DEL of one key 0..1, ZREM of the rows
+  // sent 0..that many. A count above it confirms nothing, so the erasure is not said done and is repeated.
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+  const most = [1, ...(theirs.length ? [theirs.length] : [])];
+  if (!replies || replies.some((reply, i) => {
+    const n = countOf(reply);
+    return n === null || n > most[i];
+  })) throw new UnknownReplyError(what);
   return theirs.length;
 }
 

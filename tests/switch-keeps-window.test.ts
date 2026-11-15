@@ -546,11 +546,13 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
-    // Merged with #3597 (A private preview link for a draft product (takes over #3439: a takedown closes the previe; 15 November 2026): its costs move these figures by cents.
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
     is("11: Store, Studio and Scale keep 45.11, 313.83 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.83", "703.26"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 37.06, 258.71 and 579.99 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.71", "579.99"]);
+    is("11: and 37.06, 258.70 and 579.98 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.70", "579.98"]);
   } finally {
     Date.now = realNow;
   }

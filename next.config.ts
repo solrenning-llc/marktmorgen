@@ -12,6 +12,14 @@ const nextConfig: NextConfig = {
    */
   env: { NEXT_PUBLIC_BROWSER_CHECK: process.env.VERCEL === "1" ? "1" : "0" },
   /**
+   * No image optimizer. Nothing renders next/image: every picture is served
+   * as the file itself. Left on, /_next/image took any local address with any
+   * query string, so anyone could mint new billed transformations in a loop
+   * (/og.png?n=1, ?n=2 …). With this, Vercel publishes no optimizer and
+   * /_next/image answers 404 (tests/c1-cost-image-optimizer.test.ts).
+   */
+  images: { unoptimized: true },
+  /**
    * The letters a certificate's PDF is drawn with (lib/certificate-pdf.ts),
    * read from disk by the one route that needs them, so only its function
    * carries them.
@@ -187,6 +195,19 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
+  },
+
+  /**
+   * Next's TypeScript check runs in every build except the CI browser legs that
+   * scripts/ci-build.mjs names (scripts/ci-build-args.mjs, TYPES_CHECKED_IN_VERIFY):
+   * product-checks' verify job runs the identical check on the same commit, and each
+   * of those legs spent about a minute repeating it. Vercel's build, verify's and any
+   * build outside GitHub Actions check types as before. It skips only the check; what
+   * is built and served does not change.
+   */
+  typescript: {
+    ignoreBuildErrors:
+      process.env.GITHUB_ACTIONS === "true" && process.env.MARKTMORGEN_CI_TYPES_CHECKED_IN_VERIFY === "1",
   },
 };
 

@@ -26,6 +26,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const ORIGIN = "https://marktmorgen.com";
+/** The "at least 18" box of claude6/gd2i-adult-box, sent as its form sends it, so this holds with or without that branch. */
+const ADULT = { adult: true, adultVersion: 1 };
 
 async function main(): Promise<void> {
   part("The rule alone");
@@ -55,9 +57,9 @@ async function main(): Promise<void> {
     const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; field?: string };
     return [response.status, data.ok === true ? "ok" : data.error ?? "", data.field ?? ""];
   };
-  const named = await answer(await claim(post("/api/store/claim", { handle: "adabakes", name: "Marktmorgen Support", bio: "" })));
+  const named = await answer(await claim(post("/api/store/claim", { handle: "adabakes", name: "Marktmorgen Support", bio: "", ...ADULT })));
   is("a store named as Marktmorgen is refused, saying the field", named, [409, "brand_imitation", "name"]);
-  const lined = await answer(await claim(post("/api/store/claim", { handle: "adabakes", name: "Ada Bakes", bio: "Your Marktmorgen account has been suspended." })));
+  const lined = await answer(await claim(post("/api/store/claim", { handle: "adabakes", name: "Ada Bakes", bio: "Your Marktmorgen account has been suspended.", ...ADULT })));
   is("so is one whose line poses", lined, [409, "brand_imitation", "bio"]);
   is("no store was made and the address is still free", [await storeForEmail(owner), await storeForHandle("adabakes")], [null, null]);
 

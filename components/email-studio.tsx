@@ -162,7 +162,7 @@ export function MonthUsage({ used, allowance, trial }: { used: number | null; al
       <p className="mt-1 text-sm text-ink-soft">
         {trial
           ? `emails sent. During the free trial a month holds ${TRIAL_MONTHLY_EMAILS.toLocaleString("en-US")}; the full ${PRO_MONTHLY_EMAILS.toLocaleString("en-US")} opens with your first payment.`
-          : "emails sent, one-off and sequences together. The count starts again on the day your plan's month renews."}
+          : "emails sent, one-off and sequences together. The count starts again when your next billing month begins."}
       </p>
     </>
   );

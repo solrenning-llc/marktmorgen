@@ -18,6 +18,7 @@ import { previewable } from "@/lib/pdf-preview";
 import { after } from "next/server";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
 import { planLine, speech, worthLine } from "@/lib/buyer-words";
+import { contactOpen } from "@/lib/store-contact";
 import { readAllTimeSales } from "@/lib/stats";
 import { paypalReady } from "@/lib/paypal-sales";
 import { saleClock, salePrice } from "@/lib/store-sale";
@@ -427,8 +428,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
       <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
     </>
   ) : (
-    <p className="st-note mt-6 text-sm">
-      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne(store.name)}
+    <p className="st-note mt-6 text-sm" data-no-payments>
+      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne}
+      {/* A way to the creator only where there is one: the contact form on the store page, while it is open. */}
+      {contactOpen(store) ? <> <a href={`/@${store.handle}#contact`} className="underline underline-offset-2">{w.noPaymentsWrite(store.name)}</a></> : null}
     </p>
   );
 

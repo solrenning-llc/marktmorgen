@@ -546,15 +546,25 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
+    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
+    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
+    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
     // #4026 (adopted by Claude 7, 15 November 2026): the companies' deletion marks read and checked on each change
     // (COMPANIES_REQUEST, two commands and their bytes more) and the companies' mark lifted inside a sign-up's checked
     // write (CONTACT_WRITE_CALLS 8 to 9) cost a little more: one cent less kept on Store, two on Scale, and every figure
     // still far above zero (MR). Figures follow the model; no cost line is lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.83 and 703.25 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.83", "703.25"]);
+    // Merge of main into #4026 (15 November 2026, Claude 6 conflict sweep): main's #4542 erasure probe and #4026's
+    // companies' costs together; figures as the model computes them, each still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.24 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.24"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
+    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
+    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // The same #4026 costs take one cent from Studio's and Scale's yearly month.
-    is("11: and 37.06, 258.70 and 579.98 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.06", "258.70", "579.98"]);
+    is("11: and 37.05, 258.70 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.97"]);
   } finally {
     Date.now = realNow;
   }

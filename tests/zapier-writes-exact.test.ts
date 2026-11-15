@@ -49,7 +49,7 @@ async function outcome(call: () => Promise<unknown>): Promise<{ ok: unknown } | 
   }
 }
 
-const bundle = { authData: { api_key: "nl_live_" + "0".repeat(40) }, inputData: { email: "ada@example.com", product: "abc123", agreed: true, notify: true, add: "vip" }, meta: { page: 0 } };
+const bundle = { authData: { api_key: "nl_live_" + "0".repeat(40) }, inputData: { email: "ada@example.com", product: "abc123", agreed: true, notify: true, add: "vip", code: "SPRING20", percent: "20" }, meta: { page: 0 } };
 const ok = (data: unknown): Reply => ({ status: 200, data: { data } });
 
 /** Answers that are 2xx but are not what the API gives. */
@@ -95,6 +95,22 @@ const WRITES: { key: string; healthy: Record<string, unknown>[]; near: [string, 
       ["no email", { product: "abc123", status: "given", emailed: false }],
     ],
   },
+  {
+    key: "create_discount_code",
+    healthy: [
+      { id: "promo_1", code: "SPRING20", off: { kind: "percent", percent: 20 }, times_redeemed: 0, max_redemptions: null, expires_at: null, active: true, minimum: null, first_order: false, duration: null, other_rules: false },
+      { id: "promo_2", code: "TENOFF", off: { kind: "amount", amount_cents: 1000, currency: "usd" }, times_redeemed: 0, max_redemptions: 50, expires_at: null, active: true, minimum: { amount_cents: 2000, currency: "usd" }, first_order: false, duration: null, other_rules: false },
+    ],
+    near: [
+      ["no id", { code: "SPRING20", off: { kind: "percent", percent: 20 }, active: true }],
+      ["no code", { id: "promo_1", off: { kind: "percent", percent: 20 }, active: true }],
+      ["a code that is not text", { id: "promo_1", code: 20, off: { kind: "percent", percent: 20 }, active: true }],
+      ["switched off", { id: "promo_1", code: "SPRING20", off: { kind: "percent", percent: 20 }, active: false }],
+      ["active not a boolean", { id: "promo_1", code: "SPRING20", off: { kind: "percent", percent: 20 }, active: "true" }],
+      ["no amount off", { id: "promo_1", code: "SPRING20", off: null, active: true }],
+      ["an unknown kind off", { id: "promo_1", code: "SPRING20", off: { kind: "free" }, active: true }],
+    ],
+  },
 ];
 
 async function main(): Promise<void> {
@@ -113,6 +129,23 @@ async function main(): Promise<void> {
     }
     is("a refusal is still the API's own message", await outcome(() => perform(fakeZ({ status: 403, data: { error: "read_only_key", message: "This key may only read." } }), bundle)), { error: "read_only_key" });
   }
+
+  part("create_discount_code: what is asked of the API is what the creator typed, as the studio would ask it");
+  const asked: unknown[] = [];
+  const recordZ: Z = {
+    errors: { Error: ZapierError },
+    request: async (r: unknown) => {
+      asked.push(r);
+      return app.afterResponse[0](ok(WRITES[3].healthy[0]), recordZ);
+    },
+  };
+  const make = app.creates.create_discount_code.operation.perform;
+  await make(recordZ, { ...bundle, inputData: { code: "spring20", percent: "20" } });
+  await make(recordZ, { ...bundle, inputData: { code: "TENOFF", kind: "amount", amount: "10", uses: 50, minimum: "20" } });
+  await make(recordZ, { ...bundle, inputData: { code: "HALF", kind: "percent", percent: 50, amount: "10" } });
+  is("a percent off, the letters as typed (the API reads them)", asked[0], { url: "https://marktmorgen.com/api/v1/codes", method: "POST", body: { code: "spring20", percent: "20" } });
+  is("an amount off with its uses and minimum, as text", asked[1], { url: "https://marktmorgen.com/api/v1/codes", method: "POST", body: { code: "TENOFF", kind: "amount", amount: "10", uses: "50", minimum: "20" } });
+  is("a percent off never carries an amount typed beside it", asked[2], { url: "https://marktmorgen.com/api/v1/codes", method: "POST", body: { code: "HALF", percent: "50" } });
 
   part("reads: an answer that is not a list or the store is unknown, never empty or nobody");
   const reads: [string, Run, unknown[]][] = [

@@ -338,8 +338,8 @@ const HISTORY_PAGES = 10;
  * but has no rows, or a history still going on after the last page read, is not "not sent": it throws
  * UnknownReplyError before any credit is sent, the credit stays owed, and the next run reads again.
  */
-async function creditedAt(customer: string): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+async function creditedAt(customer: string): Promise<Map<string, HistoryRow>> {
+  const found = new Map<string, HistoryRow>();
   let after = "";
   for (let page = 0; page < HISTORY_PAGES; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
@@ -352,12 +352,12 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
     let last = "";
     for (const row of rows) {
       if (!row || typeof row !== "object") throw new UnknownReplyError("invite credits: a balance history row");
-      const { id, metadata } = row as { id?: unknown; metadata?: unknown };
+      const { id, metadata, object, amount, currency, customer: owner } = row as { id?: unknown; metadata?: unknown; object?: unknown; amount?: unknown; currency?: unknown; customer?: unknown };
       if (typeof id !== "string" || !id) throw new UnknownReplyError("invite credits: a balance history row");
       if (metadata !== null && (typeof metadata !== "object" || Array.isArray(metadata))) throw new UnknownReplyError("invite credits: a balance history row");
       const credit = metadata ? (metadata as Record<string, unknown>).nimbus_invite_credit : undefined;
       if (credit !== undefined && typeof credit !== "string") throw new UnknownReplyError("invite credits: a balance history row");
-      if (credit) found.set(credit, id);
+      if (credit) found.set(credit, { id, object, amount, currency, customer: owner });
       last = id;
     }
     if (list.has_more === false) return found;
@@ -367,8 +367,26 @@ async function creditedAt(customer: string): Promise<Map<string, string>> {
   throw new UnknownReplyError("invite credits: a balance history longer than read");
 }
 
+/** A balance history row that carries an invite credit's mark, as Stripe answered it. */
+type HistoryRow = { id: string; object: unknown; amount: unknown; currency: unknown; customer: unknown };
+
+/**
+ * Whether a row carrying a credit's mark is that very credit (#4717): a balance transaction on this customer, in the
+ * credit's currency, for exactly the credit's amount taken off. A debit, another currency, another customer or another
+ * kind of row is not proof the credit was given: it throws, the credit stays owed and listed, and nothing is sent.
+ */
+function isTheCredit(row: HistoryRow, customer: string, credit: { cents: number; cur: string }): boolean {
+  return (
+    row.object === "customer_balance_transaction" &&
+    row.customer === customer &&
+    typeof row.currency === "string" &&
+    row.currency.toLowerCase() === credit.cur.toLowerCase() &&
+    row.amount === -credit.cents
+  );
+}
+
 /** Step 2 for one credit. True when it is now on the plan. */
-async function putOnPlan(id: string, history: Map<string, Map<string, string>>, nowSeconds: number): Promise<boolean> {
+async function putOnPlan(id: string, history: Map<string, Map<string, HistoryRow>>, nowSeconds: number): Promise<boolean> {
   // Read exactly (CX-123 rule 24, audit round 7): only a record confirmed absent (an exact null) or read back and no
   // longer owed leaves the owed list here. Anything else throws: the credit stays listed and the next run tries again.
   const read = repliesFor(await redisPipeline([["GET", creditKey(id)]]), 1);
@@ -397,7 +415,9 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     known = await creditedAt(customer);
     history.set(customer, known);
   }
-  let txn = known.get(id) ?? "";
+  const row = known.get(id);
+  if (row && !isTheCredit(row, customer, credit)) throw new UnknownReplyError(`invite credits: a balance history row marked ${id} that is not the credit`);
+  let txn = row?.id ?? "";
   if (!txn) {
     const body = new URLSearchParams({
       amount: String(-credit.cents),
@@ -407,7 +427,7 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
     });
     const made = await onPlatformAt(INVITE_STRIPE_VERSION, "POST", `/customers/${customer}/balance_transactions`, body, `nimbus-invite-${id}`);
     txn = typeof made.id === "string" ? made.id : "";
-    known.set(id, txn);
+    known.set(id, { id: txn, object: "customer_balance_transaction", amount: -credit.cents, currency: credit.cur, customer });
   }
   await redisPipeline([
     ["SET", creditKey(id), JSON.stringify({ ...credit, state: "done", txn, doneAt: nowSeconds })],
@@ -453,7 +473,7 @@ export async function settleInvites(deadline: number, now = Date.now()): Promise
   }
 
   const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", OWED_KEY]]), 1)?.[0]);
-  const history = new Map<string, Map<string, string>>();
+  const history = new Map<string, Map<string, HistoryRow>>();
   let pushedAll = ids !== null;
   if (!ids) {
     counts.failed += 1;

@@ -17,6 +17,13 @@ is("inside a sentence", of({ note: "Write to pat@example.com, or to sam@example.
 is("in a list, each once", of({ to: ["a@example.com", "A@example.com", "b@example.com"] }), ["a@example.com", "b@example.com"]);
 is("as an object key", of({ "kim@example.com": 1 }), ["kim@example.com"]);
 
+part("RED (Claude 2 on #4562): an address glued to other characters is still found whole");
+const has = (note: string, address: string) => of({ note }).includes(address);
+is("RED: between emoji", has("📧ana@example.com🙂", "ana@example.com"), true);
+is("RED: in a link's query", has("https://shop.example/?email=ana@example.com", "ana@example.com"), true);
+is("RED: after a slash", has("contact/ana@example.com", "ana@example.com"), true);
+is("RED: a non-ASCII domain", has("ana@münchen.de", "ana@münchen.de"), true);
+
 part("Not an address");
 is("an @ handle or a bare domain", of({ note: "@pat on example.com" }), []);
 is("no message, no address", addressesIn("not json"), []);

@@ -157,7 +157,7 @@ async function main(): Promise<void> {
   await listens(into);
   is("Stripe is asked about the new address and its old ones only", asked.length <= MAX_MOVED_INTO + 1, true);
 
-  part("A feed and an episode are asked by the app maker's servers: the store's shared room, never one connection's share (Claude 1 and Codex H2 on #3717)");
+  part("A feed and an episode count against the asking connection's share (coordinator's decision on #3717): an app server whose share is spent gets unknown for a moved buyer, never a definite no");
   sessions["dee.old@example.com"] = [paid("3", show.product.id)];
   is("dee moved", (await applyPurchaseMove(store, await move("dee.old@example.com", "dee.new@example.com"))).state, "moved");
   const app = new Request("https://example.com/feed", { headers: { "x-forwarded-for": "198.51.100.7" } });
@@ -171,11 +171,11 @@ async function main(): Promise<void> {
   for (const key of redis.keys().filter((k) => k.startsWith("nl:pod:ok:"))) redis.run(["DEL", key]);
   let feed: boolean | "unknown";
   try {
-    feed = await mayListen(store, show.product.id, "dee.new@example.com", { shared: true });
+    feed = await mayListen(store, show.product.id, "dee.new@example.com");
   } catch {
     feed = "unknown";
   }
-  is("the moved buyer's feed through that server still lists the podcast", feed, true);
+  is("the moved buyer's feed through that server is unknown (the app asks again), never \"not listening\"", feed, "unknown");
   answering(null);
 
   part("The \"send me the link\" form answers the same for a buyer and a stranger when the room runs out (Claude 1 and Codex H2 on #3717)");

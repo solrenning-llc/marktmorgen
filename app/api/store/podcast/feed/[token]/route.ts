@@ -44,7 +44,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!store || !product?.podcast) return new Response("This podcast is no longer here.", { status: 410, headers: { "Cache-Control": "no-store" } });
   let allowed: boolean;
   try {
-    allowed = await mayListen(store, product.id, grant.e, { shared: true });
+    allowed = await mayListen(store, product.id, grant.e);
   } catch (error) {
     // Whether this buyer may listen could not be read (move evidence, the store's room, a Stripe reading): the app is
     // told to come back, kept by nobody, never "ended" and never a bare 500 (Claude 3 nuvem L on #3717).

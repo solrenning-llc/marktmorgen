@@ -22,7 +22,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   if (!store || !product?.podcast) return new Response("Not available.", { status: 403 });
   let allowed: boolean;
   try {
-    allowed = await mayListen(store, product.id, grant.e, { shared: true });
+    allowed = await mayListen(store, product.id, grant.e);
   } catch (error) {
     // Unknown, never a "no" and never a bare 500: the app is told to come back (Claude 3 nuvem L on #3717).
     console.error("a podcast episode could not read whether its buyer may listen", error);

@@ -158,14 +158,14 @@ export async function readFeedToken(token: string): Promise<FeedGrant | null> {
  * so does an old address whose purchases cannot be read (holdsProductsOrThrow,
  * as holdsLetter asks them).
  *
- * `shared` is for the feed and the episodes: they are asked by the podcast
- * app maker's servers, which many subscribers share, so the requests taken
- * here count against the store's window only, as the feed route's own
- * reading does (isResting with `shared`), never against that server's share
- * of the day; FEED_READS_A_DAY still bounds each feed. The form keeps the
- * asking connection's share (Claude 1 and Codex H2 on #3717).
+ * The requests taken here count against the asking connection's share, the
+ * feed and the episodes included (the coordinator's decision of 15/11/2026,
+ * on #3717): only the reads listed in tests/public-reads-ceiling.test.ts may
+ * pass { shared }. A podcast app's server whose share of the day is spent gets
+ * an unknown answer for a moved buyer (its app asks again later), never
+ * "ended"; FEED_READS_A_DAY still bounds each feed.
  */
-export async function mayListen(store: Store, productId: string, email: string, from: { shared?: boolean } = {}): Promise<boolean> {
+export async function mayListen(store: Store, productId: string, email: string): Promise<boolean> {
   if (!store.statsId) return false;
   if (normaliseEmail(email) === normaliseEmail(store.email)) return true;
   const statsId = store.statsId;
@@ -180,14 +180,13 @@ export async function mayListen(store: Store, productId: string, email: string, 
   if (await holds(email)) return true;
   // The index read for an address that does not hold the product is paid with one of the store's public requests
   // first, as the old addresses' readings are (Claude 1 on #3717, cost note): no room is unknown.
-  const shared = { shared: from.shared === true };
-  if (!(await takePublicRequest(store, "buyer", Date.now(), 1, shared))) throw new UnknownReplyError("the store's room to read moved purchases");
+  if (!(await takePublicRequest(store, "buyer", Date.now(), 1))) throw new UnknownReplyError("the store's room to read moved purchases");
   const moved = await readMovedIndex(sid, email);
   if (moved.movedFrom.length > MAX_MOVED_INTO) throw new UnknownReplyError("too many moved addresses to read completely");
   const olds = moved.movedFrom;
   if (!olds.length) return false;
   // Each old address is one more reading, paid before it is made: no room is unknown, never "holds none".
-  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length, shared))) throw new UnknownReplyError("the store's room to read moved purchases");
+  if (!(await takePublicRequest(store, "buyer", Date.now(), olds.length))) throw new UnknownReplyError("the store's room to read moved purchases");
   // Strict for the old addresses (Claude 1 and Codex H2 on #3717, LEVE): a reading that fails is unknown, never "holds none".
   for (const old of olds) if (await holdsProductsOrThrow(store, [productId], old, okKey(statsId, productId, old), "1")) return true;
   return false;

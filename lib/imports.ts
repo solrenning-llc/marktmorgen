@@ -277,7 +277,9 @@ export const IMPORT_END_EXTRA_COMMANDS = END_TRIES * (1 + JOB_WRITE_IF_EXTRA_COM
  */
 export const HELD_UPLOAD_SWEEP_COMMANDS = 1 + (Math.ceil(RECEIVING_MS / (5 * 60_000)) + 1) + 16 + IMPORT_END_EXTRA_COMMANDS;
 const LOCK_SECONDS = 70;
-const LIST_SIZE = 10;
+/** Imports a store's history keeps: the newest, most first (the MCP tool get_imports reads them all, lib/api-read-rules.ts importsWork). */
+export const IMPORTS_LIST_SIZE = 10;
+const LIST_SIZE = IMPORTS_LIST_SIZE;
 
 export const IMPORT_ID_PATTERN = /^[0-9a-f]{24}$/;
 
@@ -457,6 +459,47 @@ export async function storeImports(store: Store): Promise<ImportJob[]> {
   return raws.map(parseJob).filter((job): job is ImportJob => job !== null && job.sid === store.sid);
 }
 
+/**
+ * The store's imports for the MCP tool get_imports (631 [AA1] (a)), read only
+ * on Redis's exact answers (Codex A3 and G2 on #1933): one list from LRANGE,
+ * every entry an import's id before anything is read, then a text or nil for
+ * each GET, each text an import. A record gone (nil) has expired and is left
+ * out; one that names another store is never shown. Anything else (an answer
+ * not in its shape, an entry that is not an id, a kept record that is not an
+ * import, an import whose store is missing, empty or not text) is `unknown`,
+ * never an empty or shorter history; so is a record that names another import
+ * than the id it was read under. `bytes` is what it read, to settle what
+ * it was paid for at.
+ */
+export async function storeImportsRead(store: Store): Promise<{ jobs: ImportJob[]; ids: number; bytes: number } | "unknown"> {
+  if (!store.sid || !isRedisConfigured()) return "unknown";
+  // One command, one answer: a reply with more or fewer is not Redis's, so it is unknown (Codex A3 on #1933).
+  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", listKey(store.sid), 0, LIST_SIZE - 1]]), 1)?.[0]);
+  // Every entry an import's id before anything is read: one that is not is unknown, never left out of the history (Codex G2, #1933).
+  if (ids === null || ids.length > LIST_SIZE || !ids.every((id) => IMPORT_ID_PATTERN.test(id))) return "unknown";
+  let bytes = ids.reduce((n, id) => n + Buffer.byteLength(id, "utf8"), 0);
+  if (!ids.length) return { jobs: [], ids: 0, bytes };
+  const raws = repliesFor(await redisPipeline(ids.map((id) => ["GET", jobKey(id)])), ids.length);
+  if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) return "unknown";
+  const jobs: ImportJob[] = [];
+  for (const [i, raw] of raws.entries()) {
+    if (raw === null) continue;
+    bytes += Buffer.byteLength(raw as string, "utf8");
+    // A record kept that is not an import at all is unknown, never left out of the history (Codex A3 on #1933).
+    const job = parseJob(raw);
+    if (!job) return "unknown";
+    // The record GET nl:import:A answers is import A's only when it says so: one naming another import is unknown,
+    // never shown as A's (Codex V on #3661).
+    if (job.id !== ids[i]) return "unknown";
+    // Another store's only when it names one: an import whose store is missing, null, empty or not text says nothing of
+    // whose it is, so it is unknown, never left out as another store's (Codex G on #1933).
+    const sid: unknown = (job as { sid?: unknown }).sid;
+    if (typeof sid !== "string" || !sid) return "unknown";
+    if (sid === store.sid) jobs.push(job);
+  }
+  return { jobs, ids: ids.length, bytes };
+}
+
 export type StartProblem = "busy" | "too_many" | "consent" | "email" | "list" | "store" | "unavailable" | "stripe" | "stopped";
 
 /** What an import is started with, as the studio sends it. */
@@ -621,7 +664,9 @@ export function readBatch(kind: ImportKind, raw: unknown): string[][] | null {
   for (const entry of raw) {
     // A page loaded before a kind gained a column sends one cell fewer: the missing ones read as empty.
     if (!Array.isArray(entry) || entry.length < 2 || entry.length > caps.length + 1) return null;
-    const line = Number(entry[0]);
+    // The page sends String(line); Number() would also read true, "1e1", "0x10", " 3" or [5] as one (input fuzz, Claude 7).
+    const first: unknown = entry[0];
+    const line = typeof first === "number" ? first : typeof first === "string" && /^[1-9][0-9]{0,7}$/.test(first) ? Number(first) : NaN;
     if (!Number.isInteger(line) || line < 1 || line > 10_000_000) return null;
     const cells: string[] = [String(line)];
     for (let i = 0; i < caps.length; i += 1) {

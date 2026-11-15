@@ -8,9 +8,9 @@ import { CAMPAIGN_MEDIA, POST_PLACES, type CampaignMedium } from "@/lib/share-li
 import { formatMoney } from "@/lib/money";
 import { channelName } from "@/lib/channel-names";
 import { copyCampaignLink } from "@/lib/campaign-copy";
-import { NO_CAMPAIGN_RESULTS, showCampaignResults } from "@/lib/campaign-results-jump";
+import { campaignResultsNote, showCampaignResults } from "@/lib/campaign-results-jump";
 
-export function PromotionPlanner({ data, range, products }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[] }) {
+export function PromotionPlanner({ data, range, products, spendsUnread = false }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[]; spendsUnread?: boolean }) {
   const id = useId();
   const plan = promotionChoices(data, range, products);
   const [selected, setSelected] = useState("");
@@ -19,7 +19,7 @@ export function PromotionPlanner({ data, range, products }: { data: StatsData; r
   const [mediumOverride, setMediumOverride] = useState<CampaignMedium | null>(null);
   const [variant, setVariant] = useState("");
   const [copied, setCopied] = useState("");
-  const [noResults, setNoResults] = useState(false);
+  const [resultsNote, setResultsNote] = useState("");
   const linkInput = useRef<HTMLInputElement>(null);
   const copyRequest = useRef(0);
   const product = plan.products.find(item => item.id === selected) ?? plan.products[0];
@@ -73,9 +73,9 @@ export function PromotionPlanner({ data, range, products }: { data: StatsData; r
     {!link ? <p className="mt-1 text-xs text-ink-soft">Enter a campaign name with letters or numbers to create the link.</p> : null}
     <div className="mt-3 flex flex-wrap gap-2">
       <button type="button" className="btn btn-primary" disabled={!link} onClick={() => void copy()}>Copy campaign link</button>
-      <button type="button" className="btn btn-secondary" aria-describedby={id + "-results-status"} onClick={() => setNoResults(!showCampaignResults(target => document.getElementById(target), matchMedia("(prefers-reduced-motion: reduce)").matches))}>See campaign results</button>
+      <button type="button" className="btn btn-secondary" aria-describedby={id + "-results-status"} onClick={() => setResultsNote(campaignResultsNote(showCampaignResults(target => document.getElementById(target), matchMedia("(prefers-reduced-motion: reduce)").matches), spendsUnread))}>See campaign results</button>
     </div>
-    <p id={id + "-results-status"} className="mt-2 text-xs text-ink-soft" role="status">{noResults ? NO_CAMPAIGN_RESULTS : ""}</p>
+    <p id={id + "-results-status"} className="mt-2 text-xs text-ink-soft" role="status">{resultsNote}</p>
     <p id={id + "-copy-status"} className="mt-2 text-xs text-ink-soft" role="status">{copied === link && link ? "Campaign link copied." : copied === "selected:" + link ? "The campaign link is selected. Copy it using your keyboard or device menu." : copied === "failed:" + link ? "Select the campaign link above and copy it." : "Share this link, then review its recorded visits and payments in Campaigns. Results are not guaranteed; gross revenue excludes refunds, fees and other costs."}</p>
   </section>;
 }

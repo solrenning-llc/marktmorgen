@@ -9,7 +9,7 @@
  */
 import { addProduct, setProductCourse, storeForEmail, ensureStatsId } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
-import { type Quiz, saveQuiz, setupOf } from "@/lib/quiz";
+import { readQuiz, saveQuiz, setupOf } from "@/lib/quiz";
 import { type FormDef, newFormId, parseForm } from "@/lib/forms";
 import { writeForm } from "@/lib/form-store";
 import { type PageFunnel, newFunnelId } from "@/lib/page-funnel";
@@ -23,7 +23,7 @@ function must<T extends { ok: boolean }>(result: T, what: string): Extract<T, { 
 }
 
 async function main(): Promise<void> {
-  const statsId = await ensureStatsId(OWNER);
+  const statsId = (await ensureStatsId(OWNER))?.statsId;
   if (!statsId) throw new Error("the store has no statsId");
 
   // A product with a course: it has no file or link, so a course can be its delivery.
@@ -38,15 +38,18 @@ async function main(): Promise<void> {
   course = must(editCourse(course, { op: "lesson-add", moduleId: first.id, title: "Feeding a starter" }), "lesson 2").course;
   course = must(editCourse(course, { op: "lesson-add", moduleId: second.id, title: "Mixing and shaping" }), "lesson 3").course;
   const lessonId = course.modules[0].lessons[1].id;
-  const quiz: Quiz = {
+  // Read the way the studio route reads what the quiz editor sends (app/api/store/course).
+  const read = readQuiz({
     passPercent: 70,
-    attempts: 0,
+    attempts: 3,
     required: false,
     questions: [
-      { id: "q1", text: "How often do you feed a starter kept on the counter?", kind: "single", choices: ["Once a week", "Once or twice a day", "Never"], correct: [1], explanation: "On the counter it eats fast." },
-      { id: "q2", text: "Which of these go into a starter?", kind: "multiple", choices: ["Flour", "Water", "Salt"], correct: [0, 1], explanation: "Salt slows the yeast." },
+      { text: "How often do you feed a starter kept on the counter?", kind: "single", choices: ["Once a week", "Once or twice a day", "Never"], correct: [1], explanation: "On the counter it eats fast." },
+      { text: "Which of these go into a starter?", kind: "multiple", choices: ["Flour", "Water", "Salt"], correct: [0, 1], explanation: "Salt slows the yeast." },
     ],
-  };
+  });
+  if (!read.ok) throw new Error(`the quiz was refused: ${JSON.stringify(read)}`);
+  const quiz = read.quiz;
   const store = await storeForEmail(OWNER);
   if (!store) throw new Error("the owner's store is gone");
   await saveQuiz(course.id, lessonId, quiz, store);

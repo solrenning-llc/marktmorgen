@@ -13,6 +13,10 @@ process.env.STRIPE_SECRET_KEY = "sk_test_o6_readorder";
 const OWNER = "maker@example.com";
 const ACCOUNT = "acct_1TestReadOrder01";
 const NOW = Math.floor(Date.now() / 1000);
+// The clock held half a second past NOW for the whole test, so a window's seconds left never depend on how long the
+// test took to get there (a slow run read 172798 for 172799): readOrder reads Date.now().
+const FROZEN_MS = NOW * 1000 + 500;
+Date.now = () => FROZEN_MS;
 const oneSession: Record<string, Record<string, unknown>> = {};
 // A body sent as Stripe wrote it, for the values JSON.stringify cannot write (1e999 parses to Infinity).
 const rawBody: Record<string, string> = {};

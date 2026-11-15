@@ -20,8 +20,11 @@ import { toMajor } from "@/lib/money";
  * that account connected and working (lib/meet-connect.ts).
  */
 export async function POST(request: NextRequest) {
-  // Fifty dated sessions, each with its own meeting link, fit well inside this.
-  const guarded = await guardStoreWrite(request, "products", 40_000);
+  // Fifty dated sessions, each with its own meeting link, fit well inside this. Turning a call back into a product
+  // deletes its whole setup (hours, dated sessions with their meeting links, place) and its team of hosts for good,
+  // so it is named "remove" to the guard: a locked session (lib/two-step.ts LOCKED_ACTIONS.products) waits for it.
+  // Adding and editing a call stay open.
+  const guarded = await guardStoreWrite(request, "products", 40_000, (sent) => (sent.remove === true ? "remove" : ""));
   if (!guarded.ok) return guarded.response;
 
   const id = text(guarded.body.id, 40);

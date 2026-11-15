@@ -48,7 +48,8 @@ test("the browser is first warmed once, unmeasured, in a throwaway context", () 
     "nothing from the warm-up is recorded or judged");
 
   const measured = runner.slice(measuredLoop);
-  assert.match(measured, /^for\(const path of PATHS\)for\(let sample=1;sample<=3;sample\+\+\)\{\n  const context=await browser\.newContext\(PHONE\);/,
+  // Main's measure-again-once loop (tests/e2e/mobile-render-judge.mjs): each attempt of each sample starts in a new context.
+  assert.match(measured, /^for\(const path of PATHS\)for\(let sample=1;sample<=3;sample\+\+\)for\(let attempt=1;attempt<=2;attempt\+\+\)\{\n  let again=false;\n  const context=await browser\.newContext\(PHONE\);/,
     "every measured sample still starts in a new context");
   assert.match(measured, /openPhone\(context,path,counts\)/);
   assert.match(measured, /loadAndSettle\(page,path\)/);
@@ -66,5 +67,14 @@ test("the mobile render coverage and strict thresholds stay unchanged", () => {
   assert.match(runner, /before\.lcp<2500/);
   assert.match(runner, /before\.cls<0\.1/);
   assert.match(runner, /interactionMs<200/);
-  assert.match(runner, /Object\.values\(result\.targets\)\.some\(value=>!value\)/);
+  // Every sample is judged with the same bounds (tests/e2e/mobile-render-judge.mjs); only a missed interaction is
+  // measured again, once, and a second miss fails (Claude 2, 13 November 2026). Held exactly by
+  // tests/mobile-render-judge.test.ts; here, that the runner uses it and fails on its verdict.
+  assert.match(runner, /judgeSample\(\{label,apiWrites:writes,lcpMs:before\.lcp,cls:before\.cls,interactionToPaintMs:interactionMs\},attempt\)/);
+  assert.match(runner, /if\(judged\.verdict==="fail"\)\{failed=true;/);
+  assert.match(runner, /for\(let attempt=1;attempt<=2;attempt\+\+\)/);
+  const judge = readFileSync("tests/e2e/mobile-render-judge.mjs", "utf8");
+  assert.match(judge, /LCP_BOUND_MS = 2500;/);
+  assert.match(judge, /CLS_BOUND = 0\.1;/);
+  assert.match(judge, /INTERACTION_BOUND_MS = 200;/);
 });

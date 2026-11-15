@@ -21,6 +21,17 @@ async function main(): Promise<void> {
     matchesSearch({ title: "Pancakes", summary: "" }, "cake"),
     matchesSearch({ title: "Pancakes", summary: "" }, "   "),
   ], [true, false, true, false, false]);
+  is("an apostrophe or a hyphen in a title never hides it from the words typed without them, nor with them", [
+    matchesSearch({ title: "Beginner’s Guide to Bread", summary: "" }, "beginners guide"),
+    matchesSearch({ title: "Mom's Recipes", summary: "" }, "moms"),
+    matchesSearch({ title: "Mom's Recipes", summary: "" }, "mom’s recipes"),
+    matchesSearch({ title: "The E-book Pack", summary: "" }, "ebook"),
+    matchesSearch({ title: "The E-book Pack", summary: "" }, "e-book"),
+    matchesSearch({ title: "The Ebook Pack", summary: "" }, "e-book"),
+    matchesSearch({ title: "Straße Photos", summary: "" }, "strasse"),
+    matchesSearch({ title: "Łódź walking tour", summary: "" }, "lodz"),
+    matchesSearch({ title: "Mom's Recipes", summary: "" }, "dad"),
+  ], [true, true, true, true, true, true, true, true, false]);
 
   part("A store's products");
   const owner = "search@example.com";

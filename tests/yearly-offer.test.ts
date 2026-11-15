@@ -16,7 +16,8 @@
 import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, isSale, noteFirstSale, offerYearly, yearlyOfferEmail } from "@/lib/yearly-offer";
 import { NextRequest } from "next/server";
-import { OFFERS_STOP_PER_HOUR, POST as stopOffersRoute } from "@/app/api/store/offers/route";
+import { GET as stopOffersPage, POST as stopOffersRoute } from "@/app/api/store/offers/route";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -207,6 +208,7 @@ async function main() {
     const stop = mail?.text.match(/https:\/\/\S+\/api\/store\/offers\?s=[0-9a-f]{32}&t=[A-Za-z0-9_-]+/)?.[0] ?? "";
     is("it carries a link that stops the offers", stop !== "", true);
     is("and the company's postal address", mail?.text.includes(POSTAL), true);
+    is("it says plainly it is an advertisement (15 U.S.C. 7704(a)(5)(A)(i))", /This email is an advertisement/.test(mail?.text ?? ""), true);
     is("a mail app can stop it in one click (RFC 8058)", [mail?.headers?.["List-Unsubscribe"], mail?.headers?.["List-Unsubscribe-Post"]], [`<${stop}>`, "List-Unsubscribe=One-Click"]);
 
     part("Stopped in one click, no offer is sent again");
@@ -219,22 +221,48 @@ async function main() {
     is("a new subscription of a stopped store is offered nothing", [await offerYearly(again, true), emails.length - after], [false, 0]);
   }
 
-  part("The stop: only stops, needs its signed token, says nothing about whether a store exists, limited per connection");
+  part("The stop: only stops, needs its signed token, read by CPU first, no limit per connection (RFC 8058)");
   {
     const offersUrl = (s: string, t: string) => `https://marktmorgen.com/api/store/offers?s=${s}&t=${t}`;
-    const post = (url: string, ip: string, body = "List-Unsubscribe=One-Click") =>
-      stopOffersRoute(new NextRequest(url, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": ip } }));
+    const post = (url: string, ip: string, body = "List-Unsubscribe=One-Click", headers: Record<string, string> = {}) =>
+      stopOffersRoute(new NextRequest(url, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": ip, ...headers } }));
     const store = await seller("stop-only@example.com", "stoponly", null);
+    const realPipeline = redis.pipeline.bind(redis);
+    let reads = 0;
+    redis.pipeline = ((commands: (string | number)[][]) => {
+      reads += 1;
+      return realPipeline(commands);
+    }) as typeof redis.pipeline;
     const wrongReal = await post(offersUrl(store.sid, "x".repeat(32)), "198.51.100.20");
     const wrongNone = await post(offersUrl("f".repeat(32), "x".repeat(32)), "198.51.100.20");
+    const wrongPage = await stopOffersPage(new NextRequest(offersUrl(store.sid, "y".repeat(32))));
+    redis.pipeline = realPipeline;
     is("a wrong token: refused, and the same answer for a store that exists or not", [wrongReal.status, await wrongReal.text()], [wrongNone.status, await wrongNone.text()]);
     is("refused as 400", wrongReal.status, 400);
+    is("a wrong token reads nothing stored (no Redis call), pressed or opened", reads, 0);
+    is("its page offers the studio's way, not a reply handled by hand", [wrongPage.status, /via=studio/.test(await wrongPage.text())], [400, true]);
     is("nothing stopped by it", (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0], 0);
     const stop = (await import("@/lib/offer-stop")).offersStopUrl(store.sid)!;
     is("a press asking to start again only stops", (await post(stop, "198.51.100.21", "do=on")).status, 200);
     is("stopped, never started", (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0], 1);
-    for (let i = 0; i < OFFERS_STOP_PER_HOUR; i += 1) await post(stop, "203.0.113.60");
-    is("one connection past its hour is told to wait", (await post(stop, "203.0.113.60")).status, 429);
+    const presses: number[] = [];
+    for (let i = 0; i < 60; i += 1) presses.push((await post(stop, "203.0.113.60")).status);
+    is("one mail provider's address pressing 60 times in an hour is never told to wait", presses.every((status) => status === 200), true);
+  }
+
+  part("The studio's way: signed in, the creator stops their own store's offers; never from another site");
+  {
+    const store = await seller("stop-studio@example.com", "stopstudio", null);
+    const studio = "https://marktmorgen.com/api/store/offers?via=studio";
+    const cookie = `${SESSION_COOKIE}=${await openSession("stop-studio@example.com")}`;
+    const signedOut = await stopOffersPage(new NextRequest(studio, { headers: { "x-forwarded-for": "198.51.100.40" } }));
+    is("signed out: asked to sign in", [signedOut.status, /\/signin/.test(await signedOut.text())], [200, true]);
+    const shown = await stopOffersPage(new NextRequest(studio, { headers: { cookie, "x-forwarded-for": "198.51.100.41" } }));
+    is("signed in: the button", [shown.status, /Stop these offers/.test(await shown.text())], [200, true]);
+    const crossSite = await stopOffersRoute(new NextRequest(studio, { method: "POST", headers: { cookie, origin: "https://elsewhere.example", host: "marktmorgen.com", "x-forwarded-for": "198.51.100.42" } }));
+    is("from another site: refused, nothing stopped", [crossSite.status, (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0]], [403, 0]);
+    const pressed = await stopOffersRoute(new NextRequest(studio, { method: "POST", headers: { cookie, origin: "https://marktmorgen.com", host: "marktmorgen.com", "x-forwarded-for": "198.51.100.43" } }));
+    is("pressed in the studio: stopped", [pressed.status, (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0]], [200, 1]);
   }
 
   part("Without the company's postal address, nothing commercial is sent");

@@ -33,8 +33,8 @@ export type BulkSaleRow = {
   email: string | null;
   /** Seconds since the epoch. */
   paidAt: number;
-  /** In the currency's smallest unit, as Stripe gives it. */
-  amount: number;
+  /** In the currency's smallest unit, as Stripe gives it; null when the list could not read it (Sale.amount, rule 24). */
+  amount: number | null;
   currency: string;
   isCall: boolean;
   isTip: boolean;
@@ -203,7 +203,8 @@ const KIND: (row: BulkSaleRow) => string = (row) => (row.trial ? "trial" : row.i
 export function selectedSalesCsv(rows: readonly BulkSaleRow[]): string {
   const lines = [csvLine(["paid_at_utc", "stripe_id", "product", "kind", "amount", "currency", "buyer_email"])];
   for (const row of rows) {
-    const known = Number.isSafeInteger(row.amount) && row.amount >= 0 && /^[a-z]{3}$/i.test(row.currency);
+    const amount = row.amount;
+    const known = amount !== null && Number.isSafeInteger(amount) && amount >= 0 && /^[a-z]{3}$/i.test(row.currency);
     const at = Number.isFinite(row.paidAt) ? new Date(row.paidAt * 1000) : null;
     lines.push(
       csvLine([
@@ -211,7 +212,7 @@ export function selectedSalesCsv(rows: readonly BulkSaleRow[]): string {
         row.reference,
         row.title,
         KIND(row),
-        known ? plainAmount(row.amount, row.currency) : "",
+        known ? plainAmount(amount, row.currency) : "",
         /^[a-z]{3}$/i.test(row.currency) ? row.currency.toUpperCase() : "",
         row.email ?? "",
       ]),

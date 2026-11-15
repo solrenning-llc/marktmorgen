@@ -296,7 +296,7 @@ export function SalesBulkActions({ sales, canLabel, canExport, defaultOpen = fal
                       <th scope="row" className="px-2 py-2 font-normal text-ink [overflow-wrap:anywhere]">{sale.title}</th>
                       <td className="px-2 py-2 text-ink [overflow-wrap:anywhere]">{sale.email ?? "No email address"}</td>
                       <td className="px-2 py-2 text-ink">{day}</td>
-                      <td className="px-2 py-2 text-ink">{Number.isSafeInteger(sale.amount) && sale.amount >= 0 ? formatMoney(sale.amount, sale.currency) : "Not known"}</td>
+                      <td className="px-2 py-2 text-ink">{sale.amount !== null && Number.isSafeInteger(sale.amount) && sale.amount >= 0 ? formatMoney(sale.amount, sale.currency) : "Not known"}</td>
                     </tr>
                   );
                 })}

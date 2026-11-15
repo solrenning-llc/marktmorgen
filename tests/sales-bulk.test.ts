@@ -145,6 +145,8 @@ async function main(): Promise<void> {
   is("a header and one line a row, ended", [lines[0], lines.length], ['"paid_at_utc","stripe_id","product","kind","amount","currency","buyer_email"', 4]);
   is("a row", lines[1], `"2026-11-02T15:00:00.000Z","${ref(1)}","Course","product","27.00","USD","jane@example.com"`);
   is("a formula kept as text, an unknown amount left blank", lines[2], `"2026-11-02T15:00:00.000Z","${ref(2)}","'=SUM(1)","trial","","USD",""`);
+  // An amount the list could not read (lib/store-checkout.ts Sale.amount null, rule 24): blank, never 0.00.
+  is("an unread amount (null) left blank too", selectedSalesCsv([row({ amount: null })]).split("\r\n")[1].split(",")[4], '""');
 
   part("The screen: a table to choose in, a live count, only the actions the role allows, none that moves money");
   const screen = (canLabel: boolean, canExport: boolean) => renderToStaticMarkup(createElement(SalesBulkActions, { sales: [row(), row({ reference: ref(2), email: null })], canLabel, canExport, defaultOpen: true }));

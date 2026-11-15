@@ -1089,7 +1089,9 @@ async function main(): Promise<void> {
     is("the deletion completes while the try is held after its purchase write", erased.ok, true);
   });
   undoN3();
-  is("the reply not read: the bond stays for now, and the order is still owed", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), (await listed()).includes(n3)], [1, true]);
+  // rememberBuyer never ties a buyer deleted at or after the sale to an affiliate (lib/affiliate-bond.ts, #3927), so no
+  // bond is written here for the take-back to leave; what its unread reply still decides is that the order stays owed.
+  is("the reply not read: no bond is written for the deleted buyer, and the order is still owed", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), (await listed()).includes(n3)], [0, true]);
   is("nothing was sent to them", copies(buyerN3).length, 0);
   await sweep(11 / 60);
   is("the next try, its purchase already gone, takes the bond and the course back and the order leaves the list", [redis.run(["HEXISTS", bondKeyN, bondOf(buyerN3)]), redis.run(["HEXISTS", await ledgerOf(buyerN3), addedN.product.id]), (await listed()).includes(n3), purchasesOf(buyerN3)], [0, 0, false, 0]);

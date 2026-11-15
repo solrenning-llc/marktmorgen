@@ -81,7 +81,7 @@ import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOL
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
-import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORES_PER_ACCOUNT, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
@@ -1059,6 +1059,24 @@ export const PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD = PLATFORM_SUBSCRIPTION_SEAR
 export const ASSISTANT_START_EXTRA_SECONDS = Math.max(0,
   Math.min(ASSISTANT_START_STRIPE_CALLS * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds + ASSISTANT_IN_PROGRESS_WAIT_MS / 1000, ASSISTANT_START_CUTOFF_MS / 1000) -
     PLATFORM_SUBSCRIPTION_SEARCH.maxGets * PLATFORM_SUBSCRIPTION_SEARCH.waitSeconds);
+/**
+ * The account's stores read exactly before a plan is written on a store or ended for it (lib/store.ts keptElsewhere,
+ * money HIGH of 15 November 2026): its GET and SMEMBERS, then one GET for each other store, at most
+ * MAX_STORES_PER_ACCOUNT. An essential billing event reads it twice (the subscription search of the checkout or the
+ * deletion, and the way back); a closing pass twice (its search, and once for every plan it asks to end, passed to
+ * each: lib/plan-closing.ts refuseLatePlans). Upstash's $2 a million commands. The daily sync's reads, one for each
+ * plan it would write down on a store, are the company's job, outside a plan: not priced here and not zero (null).
+ */
+export const ACCOUNT_STORES_GUARD = {
+  commandsPerRead: 2 + MAX_STORES_PER_ACCOUNT,
+  essentialReadsPerEvent: 2,
+  closingReadsPerEvent: 2,
+  usdPerCommand: 2 / 1_000_000,
+  syncCompanyUsd: null,
+} as const;
+export const ACCOUNT_STORES_GUARD_MONTHLY_USD = ACCOUNT_STORES_GUARD.commandsPerRead * ACCOUNT_STORES_GUARD.usdPerCommand *
+  (ACCOUNT_STORES_GUARD.essentialReadsPerEvent * PLATFORM_SUBSCRIPTION_SEARCH.essentialEventsPerWindow +
+    ACCOUNT_STORES_GUARD.closingReadsPerEvent * PLATFORM_SUBSCRIPTION_SEARCH.closingEventsPerWindow);
 export const UTC_DAYS = 31;
 
 /** CX-67 company exposure, deliberately outside paid-unit COST_LINES. These
@@ -1135,6 +1153,19 @@ export const COST_LINES: CostLine[] = [
       { file: "vercel.json", names: ["/api/cron/closing", "30 9 * * *"] },
     ],
     basis: "CX-61, sources read 2026-11-04: at most two GETs (one Search over at most MAX_ADDRESSES current names, one captured-customer List), each waited on for STRIPE_TIMEOUT_MS at 2 GB and the highest regional memory rate $0.0183/GB-hour (https://vercel.com/docs/functions/usage-and-pricing). Billing and deletion share ESSENTIAL_PER_DAY, not that many each; scheduled closing is counted at DAY_WINDOWS. Never multiplied by visits. This is a function-memory ceiling; existing CPU, invocation and other costs remain. Stripe GET tariff stays null (https://stripe.com/pricing does not establish an endpoint-specific zero); deployment region and financed post-cancellation exposure remain unverified. No sale, price, quota or gate is activated.",
+  },
+  {
+    id: "account-stores-guard",
+    feature: "The account's stores read exactly before a plan is written on a store or ended for it (keptElsewhere, 15 November 2026)",
+    monthlyUsd: ALL_TIERS_SAME(ACCOUNT_STORES_GUARD_MONTHLY_USD),
+    sources: [
+      { file: "lib/store.ts", names: ["MAX_STORES_PER_ACCOUNT", "accountStoresExact", "keptElsewhere"] },
+      { file: "lib/billing.ts", names: ["keptElsewhere(observedStore)", "keptElsewhere(store)"] },
+      { file: "lib/closing-plan-guard.ts", names: ["keptElsewhere(input.store)"] },
+      { file: "lib/plan-closing.ts", names: ["keptElsewhere(store)", "elsewhere, onStopped"] },
+      { file: "lib/billing-sync.ts", names: ["keptElsewhere(store)"] },
+    ],
+    basis: "At most 2 + MAX_STORES_PER_ACCOUNT Redis commands a read (ACCOUNT_STORES_GUARD.commandsPerRead, counted in tests/account-stores-guard-cost.test.ts), twice for every essential billing event (the subscription search, the way back) and twice for each closing pass (its search, and once for all the plans it asks to end), at Upstash's $2 a million. The daily sync's reads are the company's job, not a plan's: unknown (null), never zero. No sale, price, quota or gate is activated.",
   },
   {
     id: "assistant-start-reads",

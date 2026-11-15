@@ -306,14 +306,15 @@ export type Refused = "no" | "returned" | "returned-early" | "returning";
  * when everything is done, "returning" when a step is left for a later run.
  * The caller must never write it down as the store's plan unless "no".
  */
-export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; onStopped?: () => void }): Promise<Refused> {
+export async function refusePlanIfClosing(input: { store: Store | null; handle: string; subscriptionId: string; customerId: string; onStopped?: () => void; elsewhere?: ReadonlySet<string> }): Promise<Refused> {
   if (!SUBSCRIPTION_PATTERN.test(input.subscriptionId)) return "no";
   const times = input.store ? await closingSince(input.store) : await shutOf(input.handle);
   if (times === null) return "no";
   // The account's one Stripe customer cannot tell its stores apart (money HIGH, 15 November 2026): a plan another
   // store of the account keeps is that store's, never ended for this one's closing. "no", so a closing pass counts it
   // as not done and the sync never writes it down here; an account read that does not read throws (fail closed).
-  if (input.store && (await keptElsewhere(input.store)).has(input.subscriptionId)) {
+  // A closing pass reads the account once for all its plans and passes it in (`elsewhere`).
+  if (input.store && (input.elsewhere ?? (await keptElsewhere(input.store))).has(input.subscriptionId)) {
     console.error(`closing-plan-guard: ${input.subscriptionId} is kept by another store of the account; not ended for this one`);
     return "no";
   }

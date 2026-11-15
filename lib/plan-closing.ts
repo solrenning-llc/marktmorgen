@@ -83,7 +83,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
+import { type Store, keptElsewhere, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -1147,10 +1147,19 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
     complete = false;
     console.error("listing plans paid for a closing store failed", error);
   }
+  // The account's stores read once for every plan of the pass (keptElsewhere): one another store keeps is never ended
+  // here. One that does not read leaves the pass not done, and nothing is ended (fail closed).
+  let elsewhere: ReadonlySet<string>;
+  try {
+    elsewhere = ids.size ? await keptElsewhere(store) : new Set();
+  } catch (error) {
+    console.error("reading a closing store's account failed; its late plans are looked at again", error);
+    return false;
+  }
   for (const [id, customerId] of ids) {
     try {
       let stopped = false;
-      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, onStopped: () => { stopped = true; } });
+      const result = await refusePlanIfClosing({ store, handle: store.handle, subscriptionId: id, customerId, elsewhere, onStopped: () => { stopped = true; } });
       // A pending refund is self-contained in UNDO_KEY and retried after the
       // store is gone. Only a proved cancellation may hand it over: merely
       // returning "returning" can also mean an unreadable queue or live plan.

@@ -1099,8 +1099,16 @@ export async function watchPayPal(
       }
       const { paid, fresh } = settled;
       if (fresh) {
-        await on.handOver(paid);
-        result.cleared += 1;
+        // Written down with every list (PAYPAL_SETTLE): off pending and owed in the hand-over list, so a hand-over that
+        // throws is retried there (handOverAgain, lib/paypal-delivery.ts) and stops nothing else in this pass: the next
+        // pending order and the store's refund watch below still run (Claude 1 on #2895). Counted cleared only once
+        // handed over, so a retry that succeeds later is not counted twice (Claude 2's and Claude 7's LEVE on #2895).
+        try {
+          await on.handOver(paid);
+          result.cleared += 1;
+        } catch (error) {
+          console.error("handing over a PayPal purchase failed; owed in the hand-over list", order, error);
+        }
       }
       continue;
     }

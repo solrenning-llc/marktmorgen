@@ -7,11 +7,11 @@ import {
   createStore,
 } from "@/lib/store";
 import { storeCookie } from "@/lib/studio-route";
+import { storeImitation } from "@/lib/brand-imitation-rules";
 import { isRedisConfigured } from "@/lib/redis";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { recordInvite } from "@/lib/creator-invites";
 import { INVITE_COOKIE, INVITE_CODE_PATTERN } from "@/lib/creator-invite-rules";
-import { storeImitation } from "@/lib/brand-imitation-rules";
 
 const MAX_BODY_BYTES = 2_000;
 
@@ -56,14 +56,14 @@ export async function POST(request: NextRequest) {
   const bio =
     typeof body.bio === "string" ? body.bio.slice(0, MAX_BIO_LENGTH) : "";
 
+  if (!isRedisConfigured()) {
+    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+  }
+
   // A store's name and description never read as Marktmorgen's own (568 [GD2] (c), unit 3): refused before
   // anything is written, the address included.
   const posing = storeImitation({ name, bio });
   if (posing) return Response.json({ ok: false, error: "brand_imitation", field: posing.field }, { status: 409 });
-
-  if (!isRedisConfigured()) {
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
-  }
 
   try {
     const result =

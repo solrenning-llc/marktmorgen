@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   part("Both forms say why");
   const message = STORE_IMITATION_MESSAGE;
   is("the words say what and what to do", [/reads as Marktmorgen's own/.test(message), /Use a name of your own/.test(message)], [true, true]);
-  is("the store form says no store was made", /brand_imitation: `\$\{STORE_IMITATION_MESSAGE\} No store was made\.`/.test(readFileSync("components/handle-form.tsx", "utf8")), true);
+  is("the store form says the same words, and that no store was made", readFileSync("components/handle-form.tsx", "utf8").includes(`brand_imitation: "${STORE_IMITATION_MESSAGE} No store was made.",`), true);
   is("the details form says nothing was saved", /brand_imitation: `\$\{STORE_IMITATION_MESSAGE\} Nothing was saved\.`/.test(readFileSync("components/details-form.tsx", "utf8")), true);
 
   done();

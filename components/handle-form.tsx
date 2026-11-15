@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { STORE_IMITATION_MESSAGE } from "@/lib/brand-imitation-rules";
 
 type State =
   | { kind: "idle" }
@@ -16,10 +15,11 @@ const MESSAGES: Record<string, string> = {
   reserved: "That name belongs to the site itself. Pick another one.",
   taken: "Someone already has that address. Pick another one.",
   already: "This account already has a store.",
+  // STORE_IMITATION_MESSAGE (lib/brand-imitation-rules.ts), written out here; tests/gd2c-store-name.test.ts holds them equal.
+  brand_imitation: "Your store's name or the line under it reads as Marktmorgen's own, so buyers would take your store for us. Use a name of your own; you may still say your store runs on Marktmorgen. No store was made.",
   too_many: "An account runs five stores at most.",
   first: "Make your first store before another one.",
   signed_out: "Your session ended. Log in again.",
-  brand_imitation: `${STORE_IMITATION_MESSAGE} No store was made.`,
   unavailable: "Stores are not switched on yet, so nothing was saved.",
   server_error: "We could not confirm whether your store was created. Check the studio before trying again.",
 };

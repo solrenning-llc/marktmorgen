@@ -576,8 +576,14 @@ export async function sweepPayPal(store: Store, deadline: number): Promise<{ cle
     refunded: async (paid) => {
       const product = await readListing(store, paid.product).catch(() => null);
       // A person deleted from the store at their own request at or after the payment is not named (second review of
-      // #3449); a mark that does not read exactly is taken as such a deletion. A store with no list deleted nobody.
-      const erased = store.listId && isRedisConfigured() ? await erasedSincePaid(store.listId, paid, true).catch(() => true) : false;
+      // #3449); a mark that does not read exactly is taken as such a deletion. The list is the store's current one,
+      // never only this sweep's snapshot: an erasure may have made the list after the sweep began (#4757). A list that
+      // cannot be read or made is taken as such a deletion too, and the address is left out.
+      const erased = isRedisConfigured()
+        ? await deletionListId(store)
+            .then((listId) => erasedSincePaid(listId, paid, true))
+            .catch(() => true)
+        : false;
       await emitEvent(store, "refund.issued", `paypal:${paid.capture}`, {
         paypal_capture: paid.capture,
         paid_with: "paypal",

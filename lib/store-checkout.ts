@@ -51,6 +51,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
+import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -725,6 +726,22 @@ export async function createCheckout(
   // The share of the sale, when the store's plan has one. A choose-your-price
   // line is still at its floor here, which is the least it can be.
   applyShare(body, store, { recurring, least: leastPaid(linesTotal(body).cents, mayComeOff) });
+
+  // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
+  // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
+  // inTheCurrencyShown set it above. Judged here, after the share, on the
+  // session as it will be sent. The creator's choice and own prices arrive
+  // with their fields in unit 3b; until then a store is (a), automatic.
+  if (BUYER_CURRENCY_LIVE) {
+    applyBuyerCurrency(body, buyerCurrencyPlan({
+      live: BUYER_CURRENCY_LIVE,
+      mode: DEFAULT_BUYER_CURRENCY_MODE,
+      fee: hasApplicationFee(body),
+      settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId)),
+      manualPrices: false,
+      taxRates: hasTaxRates(body),
+    }));
+  }
 
   // The yes, with its version, its kind and its time, written last before the
   // order is admitted, with a field held back for the admitted mark: refused

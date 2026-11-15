@@ -86,8 +86,9 @@ export default async function LeavePage({ params, searchParams }: Params) {
         <div className="st-card mt-6 p-6 sm:p-9" data-leave-page>
           {!memberships ? (
             <>
+              {/* The page's one heading, also when nothing can be canceled from it (WCAG 1.3.1, 2.4.6, 2.4.10). */}
               <div className="st-note mb-6">
-                <p className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</p>
+                <h1 className="font-bold" style={{ color: "var(--st-text)" }}>{m.manageNotices.expired.title}</h1>
                 <p className="mt-1 text-sm">{m.manageNotices.expired.body}</p>
               </div>
               <Link href={manage} className="btn st-btn btn-block">
@@ -96,7 +97,8 @@ export default async function LeavePage({ params, searchParams }: Params) {
             </>
           ) : !one || one.endsAt !== null ? (
             <>
-              <p className="st-muted text-lg leading-relaxed">{m.leaveGone}</p>
+              <h1 className="font-display text-3xl font-semibold leading-tight tracking-[-0.02em]">{m.yourMembership}</h1>
+              <p className="st-muted mt-4 text-lg leading-relaxed">{m.leaveGone}</p>
               <Link href={manage} className="btn st-btn btn-block mt-6">
                 {m.yourMembership}
               </Link>

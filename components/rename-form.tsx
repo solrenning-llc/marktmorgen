@@ -107,7 +107,7 @@ export function RenameForm({ current }: { current: string }) {
           disabled={state.kind === "saving"}
           onChange={(event) => setHandle(event.target.value)}
           placeholder={current}
-          className="min-w-0 flex-[1_1_6rem] rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+          className="min-w-0 flex-[1_1_6rem] rounded-r-2xl bg-transparent px-1 py-3 text-ink outline-none placeholder:text-ink-mute"
         />
       </div>
 

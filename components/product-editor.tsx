@@ -604,7 +604,7 @@ function ProductForm({
               })
             }
             placeholder={currency === "jpy" ? "2700" : "27"}
-            className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+            className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-mute"
           />
         </div>
         <p className="mt-1 text-sm text-ink-soft">
@@ -654,7 +654,7 @@ function ProductForm({
                   value={draft.suggested}
                   onChange={(event) => setDraft({ ...draft, suggested: event.target.value })}
                   placeholder={currency === "jpy" ? "1500" : "15"}
-                  className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+                  className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-mute"
                 />
               </div>
               <p className="mt-2 text-sm text-ink-soft">
@@ -761,7 +761,7 @@ function ProductForm({
                     onChange={(event) => setDraft({ ...draft, introPrice: event.target.value })}
                     placeholder="None"
                     aria-describedby={`product-intro-hint-${id}`}
-                    className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+                    className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-mute"
                   />
                 </div>
                 {draft.every === "month" ? (
@@ -806,7 +806,7 @@ function ProductForm({
                       onChange={(event) => setDraft({ ...draft, yearlyPrice: event.target.value })}
                       placeholder="None"
                       aria-describedby={`product-yearly-hint-${id}`}
-                      className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-soft/50"
+                      className="w-full rounded-r-2xl bg-transparent px-2 py-3 text-ink outline-none placeholder:text-ink-mute"
                     />
                   </div>
                   <span className="text-sm text-ink-soft">a year</span>

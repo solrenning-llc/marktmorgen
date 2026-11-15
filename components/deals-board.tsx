@@ -544,7 +544,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
               </button>
             ) : null}
           </div>
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Totals by pipeline, as a table">
             <table className="w-full min-w-[32rem] text-left text-sm">
               <caption className="sr-only">What each pipeline&apos;s deals add up to</caption>
               <thead><tr className="text-ink-soft">{["Pipeline", "Open", "Won", "Lost"].map(label => <th key={label} scope="col" className="py-2 pr-4 font-semibold">{label}</th>)}</tr></thead>

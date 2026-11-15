@@ -29,7 +29,8 @@ export async function POST(request: NextRequest) {
   if (!store) return new Response("No such store.", { status: 404 });
   const product = productId ? await readListing(store, productId) : null;
   const away = (path: string) => new Response(null, { status: 303, headers: { Location: `${origin}${path}`, "Cache-Control": "no-store" } });
-  if (!product || !isCallProduct(product) || product.call.kind !== "weekly" || !product.callPackage) return away(`/@${store.handle}`);
+  // A draft is answered as an id the store does not have: where a visitor lands never tells them one exists (MM-SA-52).
+  if (!product || product.hidden || !isCallProduct(product) || product.call.kind !== "weekly" || !product.callPackage) return away(`/@${store.handle}`);
   if (!canSellProduct(store, product)) return away(`/@${store.handle}/book/${product.id}?status=unavailable`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);
   if (comingSoon === null) return away(`/@${store.handle}/book/${product.id}?status=error`);

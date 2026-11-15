@@ -45,7 +45,8 @@ export async function POST(request: NextRequest) {
   const store = await storeForHandle(handle);
   if (!store) return new Response("No such store.", { status: 404 });
   const product = await readProduct(store, productId);
-  if (!product) return away(`/@${store.handle}`);
+  // A draft is answered as an id the store does not have: where a visitor lands never tells them one exists (MM-SA-52).
+  if (!product || product.hidden) return away(`/@${store.handle}`);
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
   if (!paypalReady(store, product)) return away(`/@${store.handle}/p/${product.id}`);
   const comingSoon = await isComingSoon(store, product.id).catch(() => null);

@@ -145,6 +145,12 @@ async function main(): Promise<void> {
     ["0020", "another subscription under parent", { subscription: undefined, parent: { subscription_details: { subscription: "sub_RtfOther0004" } } }],
     ["0021", "top level and parent disagreeing", { parent: { subscription_details: { subscription: "sub_RtfOther0005" } } }],
     ["0022", "naming no customer", { customer: undefined }],
+    // Codex P on claude2/fix-4419-reminder-balance @7555c107e: a name that is present but cannot be read may hide
+    // another subscription, so it is never dropped in favour of the other place (rule 30).
+    ["0024", "an unreadable subscription at the top, its own under parent", { subscription: { object: "subscription" }, parent: { subscription_details: { subscription: "sub_RtfFail0024" } } }],
+    ["0025", "its own at the top, an unreadable one under parent", { parent: { subscription_details: { subscription: { object: "subscription" } } } }],
+    ["0026", "a parent of another shape", { parent: "sub_RtfFail0026" }],
+    ["0027", "subscription details of another shape", { parent: { subscription_details: 7 } }],
   ];
   state.pastDue = foreign.map(([n, , invoice]) => failing(n, invoice));
   await run();

@@ -202,7 +202,9 @@ test("a partner never earns on their own purchase", () => {
   const at = aff.indexOf("export async function notePartners");
   assert.ok(at > 0, "notePartners should exist");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /self: Boolean\(buyer\) && normaliseEmail\(partner\.email\) === buyer/);
+  // As one inbox however it is written (tests/partner-share-own-purchase.test.ts runs it).
+  assert.match(body, /const buyer = sale\.buyer \? canonicalEmail\(sale\.buyer\) : "";/);
+  assert.match(body, /self: Boolean\(buyer\) && canonicalEmail\(partner\.email\) === buyer/);
 });
 
 test("a share is written for every sale, not only the referred ones", () => {
@@ -212,7 +214,7 @@ test("a share is written for every sale, not only the referred ones", () => {
   const at = aff.indexOf("export async function noteSession");
   const body = aff.slice(at, aff.indexOf("export async function noteCharge"));
   const partners = body.indexOf("notePartners");
-  const bails = body.indexOf("if (!found) return;");
+  const bails = body.indexOf("if (!found) return settle();");
   assert.ok(partners > 0 && bails > 0, "both should be in noteSession");
   assert.ok(partners < bails, "the partner lines must be written before any path that gives up on finding an affiliate");
 
@@ -224,7 +226,7 @@ test("a sale already made keeps the share it was made at", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function notePartners");
   const body = aff.slice(at, aff.indexOf("async function isSelf"));
-  assert.match(body, /percent: shareOn\(partner\.share, sale\.product, sale\.at\)/, "the percentage is frozen onto the line, read at the sale's own time");
+  assert.match(body, /percent: shareOn\(partner\.share, theirs\[0\]\.product, sale\.at\)/, "the percentage is frozen onto the line, read at the sale's own time");
   assert.match(
     aff,
     /Shares already earned are untouched by a change here/,
@@ -253,8 +255,8 @@ test("nothing is written down until the invitation is opened", () => {
   const aff = readFileSync(join(process.cwd(), "lib/affiliates.ts"), "utf8");
   const at = aff.indexOf("export async function invitePartner");
   const body = aff.slice(at, aff.indexOf("export async function acceptPartnership"));
-  // Rule 23: the writers are now writeNewAffiliate and changeAffiliate; none of them, nor the old name, may be here.
-  assert.doesNotMatch(body, /writeAffiliate|writeNewAffiliate|changeAffiliate/, "the record is made when they open the link, not when it is sent");
+  // Rule 23: the writers are now makeAffiliate and changeAffiliate; none of them, nor the old names, may be here.
+  assert.doesNotMatch(body, /writeAffiliate|writeNewAffiliate|makeAffiliate|changeAffiliate/, "the record is made when they open the link, not when it is sent");
   // The reason belongs in the comment over it, which is above `at`.
   assert.match(
     aff.slice(Math.max(0, at - 1_200), at),
@@ -276,8 +278,9 @@ test("an invitation arrives already approved, with the share the email stated", 
   const record = body.slice(0, body.indexOf("export async function openAffiliateLink"));
   assert.ok(record.indexOf("partnerShareProblem(") > 0, "accepting re-checks the cap");
   // Rule 23: writeAffiliate became changeAffiliate (a record already there, written over exactly what was read) and
-  // writeNewAffiliate (a record just made). The check still has to come before EACH of them, so this is as strict.
-  for (const writer of ["changeAffiliate(", "writeNewAffiliate("]) {
+  // makeAffiliate (a record just made, with its address, in one script; it replaced writeNewAffiliate). The check
+  // still has to come before EACH of them, so this is as strict.
+  for (const writer of ["changeAffiliate(", "makeAffiliate("]) {
     assert.ok(record.indexOf(writer) > 0, `the record is written by ${writer}`);
     assert.ok(record.indexOf("partnerShareProblem(") < record.indexOf(writer), "before the share is written");
   }

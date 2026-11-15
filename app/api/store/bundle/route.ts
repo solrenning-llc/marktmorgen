@@ -9,14 +9,12 @@ import {
   removeProduct,
   setProductBundle,
 } from "@/lib/store";
-import { BUMP_CHOICES, idsOfKind, readCards, readListings } from "@/lib/catalog";
-import { MAX_BUNDLE_ITEMS, bundleOwnerProblem, itemsProblem, parsePick, pickProblem, whyNotInBundle } from "@/lib/bundle-rules";
+import { readListings } from "@/lib/catalog";
+import { bundleChoices, choicePage, choiceQuery } from "@/lib/bundle-choices";
+import { MAX_BUNDLE_ITEMS, bundleOwnerProblem, itemsProblem, parsePick, pickProblem } from "@/lib/bundle-rules";
 import { jsonAccess } from "@/lib/studio-route";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit } from "@/lib/request-guard";
-
-/** Products one page of the picker shows. */
-const PICKER_PAGE = 20;
 
 /**
  * The products a bundle can be made of, found by name, a page at a time: the
@@ -33,44 +31,9 @@ export async function GET(request: NextRequest) {
     return Response.json({ ok: false, error: "slow" }, { status: 429 });
   }
   const params = request.nextUrl.searchParams;
-  const query = (params.get("q") ?? "").replace(/\s+/g, " ").trim().slice(0, 80).toLowerCase();
-  const page = Math.max(1, Math.min(200, Number(params.get("page")) || 1));
-  const owner = params.get("for") ?? "";
   try {
-    /*
-     * Whether a product can go in a bundle needs things the card does not
-     * carry, but the store's own index rules most of a catalogue out before a
-     * single read: a membership, a call and a product with price options can
-     * never go in one. Names come from the card hash, so the search is one
-     * command, and only what survives both is read — at most BUMP_CHOICES,
-     * which is far more than a picker showing PICKER_PAGE at a time can reach.
-     * This used to read every product in the store on every keystroke.
-     */
-    const store = access.store;
-    const cards = await readCards(store);
-    const ruledOut = new Set([...idsOfKind(store, "recurring"), ...idsOfKind(store, "call")]);
-    const withOptions = new Set(store.catalog.items.filter((item) => item.options.length > 0).map((item) => item.id));
-    const narrowed = [...cards.values()].filter(
-      (card) => card.id !== owner && !ruledOut.has(card.id) && !withOptions.has(card.id),
-    );
-    const named = query ? narrowed.filter((card) => card.title.toLowerCase().includes(query)) : narrowed;
-    const listings = await readListings(store, named.slice(0, BUMP_CHOICES).map((card) => card.id));
-    const matches = listings;
-    // What can go in first, then the rest, each in the creator's own order.
-    const sorted = [...matches.filter((p) => !whyNotInBundle(p)), ...matches.filter((p) => whyNotInBundle(p))];
-    const from = (page - 1) * PICKER_PAGE;
-    const shown = sorted.slice(from, from + PICKER_PAGE).map((p) => ({
-      id: p.id,
-      title: p.title,
-      priceCents: p.priceCents,
-      what: p.course ? `Course, ${p.course.lessons} ${p.course.lessons === 1 ? "lesson" : "lessons"}` : p.file ? "Download" : p.link ? "Link" : "",
-      hidden: p.hidden,
-      why: whyNotInBundle(p),
-    }));
-    return Response.json(
-      { ok: true, products: shown, matches: matches.length, more: from + PICKER_PAGE < sorted.length, page },
-      { headers: { "Cache-Control": "private, no-store" } },
-    );
+    const listed = await bundleChoices(access.store, { owner: params.get("for") ?? "", query: choiceQuery(params.get("q")), page: choicePage(params.get("page")) });
+    return Response.json({ ok: true, ...listed }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("listing products for a bundle failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

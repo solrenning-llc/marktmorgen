@@ -81,8 +81,9 @@ test("a share with an end earns nothing on a sale paid at or after it", () => {
 test("the earnings record reads the end at the sale's own time", async () => {
   const { readFileSync } = await import("node:fs");
   const source = readFileSync("lib/affiliates.ts", "utf8");
-  assert.match(source, /shareOn\(a\.share, sale\.product, sale\.at\) > 0/);
-  assert.match(source, /percent: shareOn\(partner\.share, sale\.product, sale\.at\)/);
+  // Since main's orders of several lines (each partner on the lines of their own products), read per line.
+  assert.match(source, /shareOn\(a\.share, line\.product, sale\.at\) > 0/);
+  assert.match(source, /percent: shareOn\(partner\.share, theirs\[0\]\.product, sale\.at\)/);
 });
 
 test("the creator cannot change an agreed share alone, except ending one that runs until revoked", () => {

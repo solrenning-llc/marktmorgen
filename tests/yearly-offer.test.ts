@@ -16,7 +16,7 @@
 import { claimHandle, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { firstSaleAt, isSale, noteFirstSale, offerYearly, yearlyOfferEmail } from "@/lib/yearly-offer";
 import { NextRequest } from "next/server";
-import { POST as stopOffersRoute } from "@/app/api/store/offers/route";
+import { OFFERS_STOP_PER_HOUR, POST as stopOffersRoute } from "@/app/api/store/offers/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -217,6 +217,24 @@ async function main() {
     const again = (await storeForEmail("canspam@example.com"))!;
     const after = emails.length;
     is("a new subscription of a stopped store is offered nothing", [await offerYearly(again, true), emails.length - after], [false, 0]);
+  }
+
+  part("The stop: only stops, needs its signed token, says nothing about whether a store exists, limited per connection");
+  {
+    const offersUrl = (s: string, t: string) => `https://marktmorgen.com/api/store/offers?s=${s}&t=${t}`;
+    const post = (url: string, ip: string, body = "List-Unsubscribe=One-Click") =>
+      stopOffersRoute(new NextRequest(url, { method: "POST", body, headers: { "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": ip } }));
+    const store = await seller("stop-only@example.com", "stoponly", null);
+    const wrongReal = await post(offersUrl(store.sid, "x".repeat(32)), "198.51.100.20");
+    const wrongNone = await post(offersUrl("f".repeat(32), "x".repeat(32)), "198.51.100.20");
+    is("a wrong token: refused, and the same answer for a store that exists or not", [wrongReal.status, await wrongReal.text()], [wrongNone.status, await wrongNone.text()]);
+    is("refused as 400", wrongReal.status, 400);
+    is("nothing stopped by it", (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0], 0);
+    const stop = (await import("@/lib/offer-stop")).offersStopUrl(store.sid)!;
+    is("a press asking to start again only stops", (await post(stop, "198.51.100.21", "do=on")).status, 200);
+    is("stopped, never started", (await redis.pipeline([["SISMEMBER", "nl:offers:off", store.sid]]))[0], 1);
+    for (let i = 0; i < OFFERS_STOP_PER_HOUR; i += 1) await post(stop, "203.0.113.60");
+    is("one connection past its hour is told to wait", (await post(stop, "203.0.113.60")).status, 429);
   }
 
   part("Without the company's postal address, nothing commercial is sent");

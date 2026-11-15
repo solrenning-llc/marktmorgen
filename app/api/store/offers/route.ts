@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { offersTokenOk, stopOffers } from "@/lib/offer-stop";
+import { clientAddress, withinLimit } from "@/lib/request-guard";
 
 /**
  * Stops the offers Marktmorgen emails a creator (lib/offer-stop.ts), from the link at the foot of such an email. The
@@ -21,7 +22,17 @@ function read(request: NextRequest): { sid: string; token: string } | null {
   return offersTokenOk(sid, token) ? { sid, token } : null;
 }
 
+/** Requests of this stop one connection may make in an hour, page and press together: enough for a person, never a scan. */
+export const OFFERS_STOP_PER_HOUR = 30;
+
+async function tooMany(request: NextRequest): Promise<Response | null> {
+  if (await withinLimit("offers-stop", clientAddress(request), OFFERS_STOP_PER_HOUR, 3_600).catch(() => false)) return null;
+  return page("Try again later", "<h1>Try again later</h1><p>Too many requests from here in the last hour. Please try again later.</p>", 429);
+}
+
 export async function GET(request: NextRequest) {
+  const waited = await tooMany(request);
+  if (waited) return waited;
   const asked = read(request);
   if (!asked) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize. You can also stop these emails by replying to one of them.</p>", 400);
   const action = `/api/store/offers?s=${encodeURIComponent(asked.sid)}&t=${encodeURIComponent(asked.token)}`;
@@ -32,6 +43,10 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  // Before anything is read (a mail app's one-click POST included). A POST only ever stops: there is no way to start
+  // the offers again from here, from this site or another.
+  const waited = await tooMany(request);
+  if (waited) return waited;
   const asked = read(request);
   if (!asked) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize.</p>", 400);
   try {

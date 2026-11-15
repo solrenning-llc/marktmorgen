@@ -7,7 +7,7 @@
  * Synthetic store; the creator's Stripe account is a stand-in for `fetch`; nothing real is reached.
  */
 import { NextRequest } from "next/server";
-import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductBundle, setProductExtras, setProductLink, setStripeAccount, setSubscription } from "@/lib/store";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
 import { withConsent } from "./digital-consent-fixture";
@@ -26,6 +26,8 @@ const STRIPE_REQUESTS_MOST = 1;
 /** Unit 2: the cart's Buy with two plain products (POST /api/store/cart), measured the same day. */
 const CART_ROUND_TRIPS_MOST = 8;
 const CART_COMMANDS_MOST = 12;
+/** Unit 3, measured the same day: a box checked at checkout, a gift and a fixed bundle, each [round trips, commands]. */
+const MORE_MOST: Record<"bump" | "gift" | "bundle", [number, number]> = { bump: [7, 10], gift: [8, 11], bundle: [7, 10] };
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
@@ -100,6 +102,31 @@ async function main(): Promise<void> {
   is(`at most ${CART_ROUND_TRIPS_MOST} database round trips before the cart's redirect`, roundTrips <= CART_ROUND_TRIPS_MOST, true);
   is(`at most ${CART_COMMANDS_MOST} database commands before the cart's redirect`, commands <= CART_COMMANDS_MOST, true);
   is("one request to Stripe: the session itself", [stripeCalls.length <= STRIPE_REQUESTS_MOST, stripeCalls[0]], [true, "POST /checkout/sessions"]);
+  part("Unit 3: a box checked at checkout, a gift and a bundle");
+  const measure = async (label: "bump" | "gift" | "bundle", fill: (f: FormData) => void) => {
+    roundTrips = 0;
+    commands = 0;
+    stripeCalls.length = 0;
+    const f = new FormData();
+    f.set("handle", "speedshop");
+    fill(f);
+    const response = await checkoutRoute(new NextRequest("https://marktmorgen.com/api/store/checkout", { method: "POST", body: withConsent(f), headers: { host: "marktmorgen.com" } }));
+    const [tripsMost, commandsMost] = MORE_MOST[label];
+    is(`${label}: on to Stripe's page`, response.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+    is(`${label}: at most ${tripsMost} round trips and ${commandsMost} commands, one request to Stripe`, [roundTrips <= tripsMost, commands <= commandsMost, stripeCalls.length <= STRIPE_REQUESTS_MOST], [true, true, true]);
+  };
+  const added = await addProduct(owner, "Recipe Cards", "", "6", null);
+  if (!added.ok) throw new Error("no extra product");
+  await setProductLink(owner, added.product.id, "https://example.com/cards");
+  const extra = await setProductExtras(owner, second.product.id, { bump: { productId: added.product.id, priceCents: 500, pitch: "Add it." }, slot: 0 });
+  if (!extra.ok) throw new Error(`no box: ${extra.reason}`);
+  await measure("bump", (f) => { f.set("product", second.product.id); f.append("bump", "yes"); });
+  await measure("gift", (f) => { f.set("product", second.product.id); f.set("gift_to", "friend@example.com"); f.set("gift_from", "Ana"); });
+  const set = await addProduct(owner, "Starter Set", "", "19", null);
+  if (!set.ok) throw new Error("no bundle");
+  const bundled = await setProductBundle(owner, set.product.id, [made.product.id, second.product.id]);
+  if (!bundled.ok) throw new Error(`no bundle: ${bundled.reason}`);
+  await measure("bundle", (f) => { f.set("product", set.product.id); });
   done();
 }
 

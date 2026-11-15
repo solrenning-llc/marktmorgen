@@ -1,6 +1,6 @@
 # Checkout speed (277 [H3-2])
 
-What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 and 2, 15 November 2026.
+What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 to 3, 15 November 2026.
 
 ## The path
 
@@ -18,9 +18,17 @@ What happens between a buyer's click on **Buy** and Stripe's payment page, which
 | Database commands | 10 | 12 |
 | Requests to Stripe | 1 (`POST /checkout/sessions`) | 1 (`POST /checkout/sessions`) |
 
+Unit 3 holds three more cases of `POST /api/store/checkout` the same way, each with one request to Stripe:
+
+| Case | Database round trips | Database commands |
+| --- | --- | --- |
+| A box checked at checkout (an extra product) | 7 | 10 |
+| Bought as a gift | 8 | 11 |
+| A fixed bundle | 7 | 10 |
+
 The work the route leaves for after its answer (`after()`: counting the visit, the A/B tests) runs while the buyer is already on the way to Stripe, so it is not in the budget. A change that adds a wait before the redirect fails this test, and whoever raises a figure says why in the same change. A lower figure is welcome, and the budget is then lowered to it.
 
-Units 1 and 2 cover a plain product and a cart of plain products. Options, bundles, gifts and the boxes ticked at checkout (extras) go through more checks and are left for a later unit, measured the same way.
+Units 1 to 3 cover a plain product, a cart of plain products, an extra, a gift and a fixed bundle. A product with options is left for a later unit: its options need their own delivery before the checkout opens, which the test does not set up yet. A bundle the buyer builds (picks) and payment plans are left for later too.
 
 ## What is not ours
 

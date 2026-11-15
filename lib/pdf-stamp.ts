@@ -227,6 +227,12 @@ export async function stampedCopy(
         return null;
       }
     }
+    // A copy is kept only up to STAMP_COPY_MAX_BYTES, the weight its cost line prices (tests/plan-cost-registry.ts,
+    // stamped-copies): a heavier one is not written, and the original is handed over, as for one too big to stamp.
+    if (stamped.byteLength > STAMP_COPY_MAX_BYTES) {
+      await noteProblem(file.pathname, "too_big");
+      return null;
+    }
     const contentType = epub ? "application/epub+zip" : "application/pdf";
     // In the store that charges nothing to send, a path is plain characters
     // only (lib/vault-rules.ts); the name the buyer saves it under is kept
@@ -395,3 +401,14 @@ export async function forgetStampedPerson(statsId: string | null | undefined, em
   }
   return paths.length;
 }
+
+/**
+ * What one new copy sends to Redis at its worst, measured in tests/c7-stamp-path-cost.test.ts: the record's and the
+ * note's reads, the deletion mark before and after, the data room's take (keepFor), the record and its note, and the
+ * retry of DROP_QUEUE deleting RETRY_PER_CALL folders. Priced per copy in tests/plan-cost-registry.ts (stamped-copies).
+ */
+export const STAMP_COPY_COMMANDS = 12;
+/** The most a kept copy may weigh: twice the largest file stamped (MAX_STAMP_BYTES). A heavier one is not kept. */
+export const STAMP_COPY_MAX_BYTES = 2 * MAX_STAMP_BYTES;
+/** The longest a download that stamps may run: the download route's maxDuration (app/api/store/download/route.ts). */
+export const STAMP_COPY_SECONDS = 60;

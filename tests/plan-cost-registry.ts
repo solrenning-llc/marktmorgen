@@ -91,7 +91,9 @@ import { PERSON_RECORD_MONTHS } from "@/lib/joined-stores";
 import { FOLLOWED_FAMILIES } from "@/lib/data-families";
 import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { SALE_TEXT_LIMITS, SALES_ID_LENGTH, SALES_PAGE, SALES_SAFE_ID_LENGTH, SALES_TITLE_IDS } from "@/lib/api-sales";
-import { BUMP_KEYS, MAX_BUNDLE_ITEMS } from "@/lib/bundle-rules";
+import { BUMP_KEYS, MAX_BUNDLE_ITEMS, MAX_DELIVERED } from "@/lib/bundle-rules";
+import { STAMP_COPY_COMMANDS, STAMP_COPY_MAX_BYTES, STAMP_COPY_SECONDS } from "@/lib/pdf-stamp";
+import { MAX_STAMP_BYTES } from "@/lib/product-file";
 import { MAX_TITLE_LENGTH as SALES_LISTING_TITLE } from "@/lib/catalog-rules";
 import { STRIPE_TIMEOUT_MS } from "@/lib/fetch-timeout";
 import { MAX_LESSONS } from "@/lib/course";
@@ -1117,6 +1119,17 @@ export type CostLine = {
 
 const ALL_TIERS_SAME = (usd: number) => () => usd;
 
+/**
+ * One new stamped copy of a PDF or an EPUB (lib/pdf-stamp.ts, stampedCopy), made once per sale and file on its first
+ * download, at its worst: the download's whole run at STAMP_COPY_SECONDS of CPU and memory, its call, the Redis
+ * commands it sends (STAMP_COPY_COMMANDS, measured, which hold STAMP_ERASURE_COMMANDS), the original read from the
+ * file store (MAX_STAMP_BYTES) and the copy written to it (STAMP_COPY_MAX_BYTES, held in code), each at the host's
+ * dearer transfer and its operation.
+ */
+export const STAMP_COPY_COST =
+  CALL + STAMP_COPY_SECONDS * (CPU_SECOND + MEMORY_SECOND) + STAMP_COPY_COMMANDS * COMMAND
+  + (MAX_STAMP_BYTES + STAMP_COPY_MAX_BYTES) * BLOB_TRANSFER_PER_BYTE + BLOB_SIMPLE_OPERATION + BLOB_ADVANCED_OPERATION;
+
 export const COST_LINES: CostLine[] = [
   {
     id: "platform-subscription-search",
@@ -1259,6 +1272,18 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+  },
+  {
+    id: "stamped-copies",
+    feature: "Stamped PDFs and EPUBs: the buyer's copy, made on the first download of each sale and file (lib/pdf-stamp.ts, since 26 September 2026; measured 15 November 2026)",
+    monthlyUsd: (tier) => ORDERS_INCLUDED[tier] * MAX_DELIVERED * STAMP_COPY_COST,
+    sources: [
+      { file: "lib/pdf-stamp.ts", names: ["stampedCopy", "STAMP_COPY_COMMANDS", "STAMP_COPY_MAX_BYTES", "STAMP_COPY_SECONDS", "STAMP_ERASURE_COMMANDS", "if (stamped.byteLength > STAMP_COPY_MAX_BYTES)"] },
+      { file: "lib/product-file.ts", names: ["MAX_STAMP_BYTES"] },
+      { file: "lib/bundle-rules.ts", names: ["MAX_DELIVERED"] },
+      { file: "app/api/store/download/route.ts", names: ["export const maxDuration = 60", "stampedCopy(file"] },
+    ],
+    basis: "Every order of the plan's figure, each handing over at most MAX_DELIVERED files (a bundle of MAX_BUNDLE_ITEMS products, their boxes ticked at checkout and an affiliate's extras), each stamped once at its worst (STAMP_COPY_COST); a later download of the same sale is served from the copy. Not in this figure: the copies' storage over the months, since a copy is kept beside its original for as long as the original is, and nothing counts it in the plan's storage or bounds how long it lives. That is an open gap until the owner chooses how copies are kept, never zero; the line prices the copies made in a month, not what they weigh afterwards.",
   },
   {
     id: "ai",

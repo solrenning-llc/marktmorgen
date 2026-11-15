@@ -86,6 +86,7 @@ async function main(): Promise<void> {
   const privacy = readFileSync("app/privacy/page.tsx", "utf8").replace(/\s+/g, " ");
   is("the privacy policy says the yes is in the store's export file", /version of that sentence you saw and when[^.]*\. It is in the file you can download with your store&apos;s data\./.test(privacy), true);
 
+  is("the privacy policy's date is the day it first said so", /<LegalPage title="Privacy Policy" lastUpdated="November 15, 2026">/.test(readFileSync("app/privacy/page.tsx", "utf8")), true);
   const AGE = "the age box you checked when you made it (if any)";
   const count = (file: string) => readFileSync(file, "utf8").replace(/",\s*"\s*/g, " ").replace(/\s+/g, " ").split(AGE).length - 1;
   is("the studio, the feature pages and the closing email list it among the file's contents", [count("app/studio/page.tsx"), count("lib/feature-pages.ts"), count("lib/plan-closing.ts")], [2, 2, 1]);

@@ -1,10 +1,10 @@
 # Checkout speed (277 [H3-2])
 
-What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 to 6, 15 November 2026.
+What happens between a buyer's click on **Buy** and Stripe's payment page, which part of it is ours, and how CI keeps our part from growing. Units 1 to 7, 15 November 2026.
 
 ## The path
 
-1. The buyer presses Buy on the product page, the checkout link or the embedded checkout. Each is a plain form posted to `POST /api/store/checkout` (`app/api/store/checkout/route.ts`). The cart's Buy posts to `POST /api/store/cart` (`app/api/store/cart/route.ts`).
+1. The buyer presses Buy on the product page, the checkout link or the embedded checkout. Each is a plain form posted to `POST /api/store/checkout` (`app/api/store/checkout/route.ts`). The cart's Buy posts to `POST /api/store/cart` (`app/api/store/cart/route.ts`), and a call's chosen time to `POST /api/store/book` (`app/api/store/book/route.ts`).
 2. **Our part.** The route checks the request, reads the store and the product, makes the Stripe Checkout Session on the creator's own account, and answers with a redirect (303) to Stripe's page.
 3. **Stripe's part.** The buyer's browser loads Stripe's hosted payment page from Stripe's servers.
 
@@ -48,9 +48,19 @@ Unit 6, one request to Stripe each; the test checks that the physical product's 
 | A course | 7 | 10 |
 | A physical product (shipped to North America) | 7 | 10 |
 
+Unit 7, a paid call booked at a chosen time (`POST /api/store/book`), does more before its redirect: it holds the time for the buyer first and reads the paid calls already booked from Stripe.
+
+| Case | Database round trips | Database commands | Requests to Stripe |
+| --- | --- | --- | --- |
+| A paid call | 15 | 17 | 2 (`GET /checkout/sessions`, then `POST /checkout/sessions`) |
+
 The work the route leaves for after its answer (`after()`: counting the visit, the A/B tests) runs while the buyer is already on the way to Stripe, so it is not in the budget. A change that adds a wait before the redirect fails this test, and whoever raises a figure says why in the same change. A lower figure is welcome, and the budget is then lowered to it.
 
-Units 1 to 6 cover a plain product, a cart of plain products, an extra, a gift, a fixed bundle, a price option, a bundle the buyer builds, a payment plan, a monthly subscription, a pre-order, a course and a physical product. A call is booked through its own route (`POST /api/store/book`, with the chosen time) and is left for a later unit, measured the same way.
+## Summary (277 [H3-2], units 1 to 7)
+
+Every way a buyer pays is held to a budget in CI: a plain product, a cart, an extra checked at checkout, a gift, a fixed bundle, a price option, a bundle the buyer builds, a payment plan, a monthly subscription, a pre-order, a course, a physical product and a paid call. For each, `tests/checkout-speed-budget.test.ts` (37 checks) counts the database round trips, commands and requests to Stripe before the redirect, checks that the case took its own path where that path differs, and fails if any figure grows. Lowering each ceiling by one was checked to fail.
+
+Not in the budget: the work after the answer (`after()`), Stripe's own page, and the buyer's device and network. Not done: looking up Stripe's address ahead of the click (below), left for when the Buy-button files are free.
 
 ## What is not ours
 

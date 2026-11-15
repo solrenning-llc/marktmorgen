@@ -7,7 +7,7 @@
  * Synthetic store; the creator's Stripe account is a stand-in for `fetch`; nothing real is reached.
  */
 import { NextRequest } from "next/server";
-import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductCourse, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
+import { addOption, addProduct, claimHandle, ensureStatsId, setProductBundle, setProductCall, setProductCourse, setProductExtras, setProductLink, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import { parseShipping } from "@/lib/shipping";
 import { readProduct } from "@/lib/catalog";
@@ -15,6 +15,9 @@ import { setSoon } from "@/lib/waitlist";
 import { setExpectedDay } from "@/lib/preorders";
 import { POST as checkoutRoute } from "@/app/api/store/checkout/route";
 import { POST as cartRoute } from "@/app/api/store/cart/route";
+import { POST as bookRoute } from "@/app/api/store/book/route";
+import type { CallSetup } from "@/lib/call-setup";
+import { NY, weekdayAt } from "./weekday";
 import { withConsent } from "./digital-consent-fixture";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -39,6 +42,13 @@ const UNIT4_MOST: Record<"option" | "pick" | "plan", [number, number]> = { optio
 const UNIT5_MOST: Record<"subscription" | "preorder", [number, number]> = { subscription: [7, 10], preorder: [7, 10] };
 /** Unit 6, measured the same day: a course and a physical product, each [round trips, commands]. */
 const UNIT6_MOST: Record<"course" | "physical", [number, number]> = { course: [7, 10], physical: [7, 10] };
+/**
+ * Unit 7, measured the same day: a paid call booked at a chosen time (POST /api/store/book). It does more before its
+ * redirect, because the time is held for the buyer first and the paid calls already booked are read from Stripe.
+ */
+const CALL_ROUND_TRIPS_MOST = 15;
+const CALL_COMMANDS_MOST = 17;
+const CALL_STRIPE_MOST = ["GET /checkout/sessions", "POST /checkout/sessions"];
 import { paidPeriod } from "./billing-period-fixture";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_checkout_speed_only";
@@ -52,6 +62,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const method = init?.method ?? "GET";
   stripeCalls.push(`${method} ${path}`);
   if (path === "/checkout/sessions" && method === "POST") lastSession = new URLSearchParams(String(init?.body));
+  // The paid calls already booked, read before a time is held (unit 7): none here.
+  if (path === "/checkout/sessions" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (path === "/checkout/sessions" && method === "POST") return new Response(JSON.stringify({ id: `cs_test_${"s".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" }));
   return new Response(JSON.stringify({ error: { message: `no stand-in for ${method} ${path}` } }), { status: 404 });
 }) as typeof fetch;
@@ -224,6 +236,19 @@ async function main(): Promise<void> {
   const shipped = await setProductShipping(owner, book.product.id, parseShipping({ cents: 600, region: "na", note: "" })!);
   if (!shipped.ok) throw new Error(`no shipping: ${shipped.reason}`);
   await unit6("physical", (f) => { f.set("product", book.product.id); });
+  part("Unit 7: a call, booked at a chosen time through its own route");
+  const hours = { kind: "weekly", minutes: 60, tz: NY, weekly: [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []], noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] } as unknown as CallSetup;
+  const call = await addProduct(owner, "Baking Call", "", "80", null);
+  if (!call.ok) throw new Error("no call product");
+  if (!(await setProductCall(owner, call.product.id, hours)).ok) throw new Error("no call");
+  roundTrips = 0;
+  commands = 0;
+  stripeCalls.length = 0;
+  const booking = new URLSearchParams({ handle: "speedshop", product: call.product.id, start: String(weekdayAt(3, 600)), tz: NY });
+  const booked = await bookRoute(new NextRequest("https://marktmorgen.com/api/store/book", { method: "POST", headers: { host: "marktmorgen.com", origin: "https://marktmorgen.com", "content-type": "application/x-www-form-urlencoded" }, body: booking.toString() }));
+  is("call: on to Stripe's page", booked.headers.get("location"), "https://checkout.stripe.com/c/pay/test");
+  is(`call: at most ${CALL_ROUND_TRIPS_MOST} round trips and ${CALL_COMMANDS_MOST} commands`, [roundTrips <= CALL_ROUND_TRIPS_MOST, commands <= CALL_COMMANDS_MOST], [true, true]);
+  is("call: two requests to Stripe, the paid calls read and the session", stripeCalls, CALL_STRIPE_MOST);
   done();
 }
 

@@ -30,7 +30,7 @@ import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
 import { type Grant, MANAGE_TOKEN_PATTERN, grantOf, subsOf } from "@/lib/membership-manage";
 import { dueNow, productOfSub } from "@/lib/tier-rules";
-import { chargedOf, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
+import { chargedOf, confirmSwitchInvoiceVoid, keepWhileUnconfirmed, previewBody, previewKnown, refusedUnapplied, switchBody, switchKey, switchReply, PREVIEW_SECONDS, SWITCH_STRIPE_VERSION } from "@/lib/tier-switch";
 import { type YearlyChoice, type YearlySub, yearlyChoice } from "@/lib/yearly-switch-rules";
 import { formatMoney } from "@/lib/money";
 import { membershipLine } from "@/lib/buyer-words";
@@ -251,13 +251,9 @@ export async function switchYearly(store: Store, token: string, subscription: st
         return { ok: false, reason: "unconfirmed" };
       }
       if (answered === "pending") {
-        const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
-        if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
-          await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, new URLSearchParams()).catch((error) =>
-            console.error("voiding a declined move to yearly failed", error),
-          );
-        }
-        return { ok: false, reason: "declined" };
+        // Declined only once its invoice is confirmed void, as a switch between tiers (#4739); else unconfirmed, locked.
+        const voided = await confirmSwitchInvoiceVoid(account, updated.latest_invoice);
+        return { ok: false, reason: voided ? "declined" : "unconfirmed" };
       }
       // As a membership bought yearly says it (lib/store-checkout.ts).
       await onAccount(

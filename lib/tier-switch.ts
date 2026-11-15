@@ -346,6 +346,28 @@ export async function previewSwitch(store: Store, token: string, subscription: s
   }
 }
 
+/**
+ * Whether a pending switch was undone: true only when Stripe confirms the same invoice is void (#4739, CX-123 rule 24).
+ * An invoice already void needs no call; an open one is voided once, and the answer must name that invoice as void.
+ * No invoice, another shape, a lost answer, an invoice still open or another invoice is not a confirmation, so the
+ * switch is "unconfirmed" and its lock is kept (keepWhileUnconfirmed). Stripe: a pending update is canceled by voiding
+ * its invoice (docs.stripe.com/billing/subscriptions/pending-updates, docs.stripe.com/api/invoices/void).
+ */
+export async function confirmSwitchInvoiceVoid(account: string, invoice: unknown): Promise<boolean> {
+  if (!invoice || typeof invoice !== "object" || Array.isArray(invoice)) return false;
+  const { id, status } = invoice as { id?: unknown; status?: unknown };
+  if (typeof id !== "string" || !/^in_[A-Za-z0-9]{6,200}$/.test(id)) return false;
+  if (status === "void") return true;
+  if (status !== "open") return false;
+  try {
+    const result = await onAccount("POST", account, `/invoices/${encodeURIComponent(id)}/void`, new URLSearchParams());
+    return result?.id === id && result.status === "void";
+  } catch (error) {
+    console.error("confirming the void of a pending subscription switch failed", error);
+    return false;
+  }
+}
+
 export type SwitchResult =
   | { ok: true; title: string }
   | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
@@ -398,15 +420,11 @@ export async function switchTier(store: Store, token: string, subscription: stri
         return { ok: false, reason: "unconfirmed" };
       }
       if (answered === "pending") {
-        // Declined, or the bank asked for a step the member was not there to
-        // take: nothing changed. The invoice left open is voided so nothing is owed.
-        const invoice = updated.latest_invoice as { id?: unknown; status?: unknown } | null;
-        if (invoice && typeof invoice.id === "string" && invoice.status === "open") {
-          await onAccount("POST", account, `/invoices/${encodeURIComponent(invoice.id)}/void`, new URLSearchParams()).catch((error) =>
-            console.error("voiding a declined tier switch failed", error),
-          );
-        }
-        return { ok: false, reason: "declined" };
+        // Declined, or the bank asked for a step the member was not there to take: nothing changed, once the invoice
+        // left open is confirmed void, so nothing is owed. Not confirmed, it may still be charged: "unconfirmed", and
+        // the lock is kept (#4739).
+        const voided = await confirmSwitchInvoiceVoid(account, updated.latest_invoice);
+        return { ok: false, reason: voided ? "declined" : "unconfirmed" };
       }
       // The price already says the tier; the subscription's own record follows,
       // for Stripe's dashboard and for anything that reads it there.

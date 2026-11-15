@@ -142,7 +142,9 @@ const withReply = async <T>(rewrite: (command: unknown[], reply: unknown) => unk
   try { return await run(); } finally { redis.pipeline = original; }
 };
 const isRange = (c: unknown[]) => c[0] === "LRANGE" && c[1] === listKey;
-const isRecord = (c: unknown[]) => c[0] === "GET" && c[1] === `nl:mail:bc:${sentId}`;
+// The marks read the emails' records without their bodies (lib/broadcasts.ts, readBroadcastHeads): one EVAL over the
+// record's key, its "read" call answering one slot for the record's text; a faulty slot is that reply rewritten.
+const isRecord = (c: unknown[]) => c[0] === "EVAL" && c.includes(`nl:mail:bc:${sentId}`) && c.includes("read");
 const sentRecord = JSON.stringify({
   id: sentId, listId: store.listId, handle: store.handle, subject: "Fictional spring letter", body: "Hello from a fictional store.",
   productId: null, status: "sent", createdAt: 1772409600, sendAt: 1772409600, finishedAt: 1772413200, total: 3, sent: 3, failures: 0, listed: true, note: "",
@@ -164,8 +166,8 @@ for (const [name, rewrite] of [
   ["a campaign list reply of another type", (c: unknown[], r: unknown) => (isRange(c) ? 42 : r)],
   ["a campaign list with a nil slot", (c: unknown[], r: unknown) => (isRange(c) ? [null] : r)],
   ["a campaign list member that is not a campaign id", (c: unknown[], r: unknown) => (isRange(c) ? ["not-an-id"] : r)],
-  ["a campaign record reply of another type", (c: unknown[], r: unknown) => (isRecord(c) ? 42 : r)],
-  ["a campaign record that is not JSON", (c: unknown[], r: unknown) => (isRecord(c) ? "{broken" : r)],
+  ["a campaign record reply of another type", (c: unknown[], r: unknown) => (isRecord(c) ? [42] : r)],
+  ["a campaign record that is not JSON", (c: unknown[], r: unknown) => (isRecord(c) ? ["{broken"] : r)],
 ] as const) {
   test(`${name} makes the marks unavailable, never none`, async () => {
     await seeded;
@@ -188,7 +190,7 @@ test("a campaign pipeline that answers with too few replies makes the marks unav
 test("a campaign whose record expired (its own nil) is left out, known", async () => {
   await seeded;
   await withCampaign(async () => {
-    const body = await withReply((c, r) => (isRecord(c) ? null : r), answer);
+    const body = await withReply((c, r) => (isRecord(c) ? [-1] : r), answer);
     assert.deepEqual(body.marks, []);
   });
 });

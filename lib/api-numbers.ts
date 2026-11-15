@@ -193,7 +193,9 @@ function statsData(value: unknown): value is StatsData {
   if (value.cashflowComplete !== undefined && typeof value.cashflowComplete !== "boolean") return false;
   if (value.paymentsComplete !== undefined && typeof value.paymentsComplete !== "boolean") return false;
   if (value.discounts !== undefined && value.discounts !== null && (!fields(value.discounts, [], [], ["refundsRead"]) ||
-      (value.discounts.rows !== null && !rows(value.discounts.rows, (row) => fields(row, ["kind"], ["sales", "cents", "off", "refunded", "buyers", "again"]))))) return false;
+      (value.discounts.rows !== null && !rows(value.discounts.rows, (row) => fields(row, ["kind"], ["sales", "cents", "off", "refunded", "buyers", "again"]))) ||
+      // Sales in another currency, per currency (22 [E5] unit 2); a figure kept before it was added has none.
+      (value.discounts.elsewhere !== undefined && !rows(value.discounts.elsewhere, (row) => fields(row, ["currency"], ["sales", "cents", "discounted", "off"]))))) return false;
   if (value.hours !== undefined && value.hours !== null && (!fields(value.hours) || !rows(value.hours.sales, safeInteger) || !rows(value.hours.cents, safeInteger))) return false;
   if (value.topBuyers !== undefined && !rows(value.topBuyers, (row) => fields(row, ["email", "reference"], ["cents", "orders", "last"]))) return false;
   return true;

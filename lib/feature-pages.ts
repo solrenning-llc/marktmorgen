@@ -2221,7 +2221,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "lead",
-        text: "Stan has no tool for writing to a sponsor, and Beacons writes a pitch without finding who to send it to or checking where it may be sent (both read on October 5, 2026). Here the contact, the rules of each country and the email are one tool, inside the plan you already pay for.",
+        text: "Stan has no tool for writing to a sponsor, and Beacons writes a pitch without finding who to send it to or checking where it may be sent (both read on November 15, 2026). Here the contact, the rules of each country and the email are one tool, inside the plan you already pay for.",
       },
       {
         kind: "features",

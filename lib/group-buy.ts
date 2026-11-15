@@ -948,15 +948,19 @@ export async function revokeRefundedGroups(
     }
   }
 
-  // The disputes closed as lost since the anchor, read from Stripe's closing events as lib/gifts.ts reads them. A read
-  // that fails, does not reach the end, or leaves a row not handled keeps the anchor where it is, so they are read
-  // again next run (lostCursorKey keeps the place inside them when there are more than one run reads).
+  // The disputes closed as lost since the anchor, read from Stripe's closing events as lib/gifts.ts reads them. Every
+  // row read and handled keeps the place inside them (lostCursorKey, confirmLostRead), whether or not the read reached
+  // the end, so a run that reads only the newest pages leaves the next run to go on from there instead of reading them
+  // again (Claude 1 on #4774, M1; lib/gifts.ts does the same). A row not handled keeps that place where it was. The
+  // anchor moves only once the read reached the end and every row was handled: the closings are read from the anchor,
+  // so while one is unread the anchor waits, and it stays in the window.
   const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("group", sid));
-  let lostUnsure = !lost.complete;
+  let rowsUnsure = false;
   for (const row of lost.rows) {
     if (Date.now() >= deadline) return revoked;
-    if (!(await handle(row))) lostUnsure = true;
+    if (!(await handle(row))) rowsUnsure = true;
   }
+  const lostDone = !rowsUnsure && (await confirmLostRead(lost, seenKey(sid))) && lost.complete;
 
   let pages = REFUND_PAGES;
   if (after) {
@@ -984,9 +988,12 @@ export async function revokeRefundedGroups(
     if (!whole) return revoked;
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
-      // The anchor moves only once every lost dispute read was handled, and the closing events' place with it
-      // (lib/refunds.ts, confirmLostRead): the closings are read from the anchor, so it waits while they are not all read.
-      if (lostUnsure || !(await confirmLostRead(lost, seenKey(sid)))) return revoked;
+      // The anchor moves only once the closing events were read to their end and every lost dispute read was handled
+      // (above): the closings are read from the anchor, so it waits while they are not all read. A read that went on
+      // from a place an earlier run kept did not read the closings made since that run, newer than its newest one,
+      // so the anchor goes no further than that one (lib/gifts.ts): the next run reads them from there.
+      if (!lostDone) return revoked;
+      if (lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
       const ended = repliesFor(await redisPipeline([["SET", anchorKey(sid), String(newest)], ["DEL", passKey(sid)]]), 2);
       if (!ended) console.error("ending a pass over group refunds was left unknown");
       return revoked;

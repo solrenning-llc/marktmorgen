@@ -23,7 +23,7 @@ async function request() {
   return req;
 }
 
-for (const mode of ["false-set", "null-count", "text-count", "timeout"]) {
+for (const mode of ["false-expire", "null-count", "text-count", "timeout"]) {
   test("Meta unknown " + mode + " stops before consent and provider work", async () => {
     reset(); const req = await request(); state.counter = mode;
     const response = await finishMetaConnect(req);
@@ -35,9 +35,10 @@ for (const mode of ["false-set", "null-count", "text-count", "timeout"]) {
     assert.equal(destination.hash, "#numbers");
     assert.equal(await response.text(), "", "a full-page return must not display raw JSON");
     assert.deepEqual([state.accessCalls, state.fundingCalls, state.commands.length], [0, 0, 2]);
-    assert.deepEqual(state.commands.map(command => command[0]), ["SET", "INCR"]);
-    assert.equal(state.commands[0][3], "EX");
-    assert.equal(state.commands[0][4], 600);
+    // The window's count, then its expiry set only when it has none (lib/window-count.ts).
+    assert.deepEqual(state.commands.map(command => command[0]), ["INCR", "EXPIRE"]);
+    assert.equal(state.commands[1][2], 600);
+    assert.equal(state.commands[1][3], "NX");
   });
 }
 
@@ -79,7 +80,8 @@ test("Meta keeps a confirmed counter, one-use state and its original TTL", async
   assert.equal(response.status, 303);
   assert.deepEqual([state.providerCalls, state.accessCalls, state.fundingCalls, state.commands.length], [1, 1, 1, 3]);
   assert.equal(state.commands[2][0], "GETDEL");
-  assert.equal(state.commands[0][4], 600);
+  // Its original TTL, now on the EXPIRE NX that follows the count (lib/window-count.ts).
+  assert.deepEqual([state.commands[1][0], state.commands[1][2]], ["EXPIRE", 600]);
   await finishMetaConnect(req);
   assert.equal(state.providerCalls, 1, "a healthy replay cannot reuse consumed consent");
 });

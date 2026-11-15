@@ -156,11 +156,15 @@ test("Meta: 51 kept stores ahead of an old one: a later pass still reaches and f
   assert.equal(kept.filter((s) => redis.run(["EXISTS", metaConnKey(s)]) === 1).length, 51, "every kept store is kept");
 });
 
-test("Meta: a pass's start is a place in id order, wrapping around", async () => {
+test("Meta: a pass goes on in id order from where the notice's last pass left off (Claude 6 on #4819)", async () => {
   redis.clear();
   const user = "10150000000000054";
   const stores = ids(60, "wr");
-  for (const s of stores) seedMeta(user, s);
-  const out = await settle(() => forgetMetaUser(user, Number.POSITIVE_INFINITY, 55));
-  assert.deepEqual(forgotOf(out.error).sort(), [...stores.slice(55), ...stores.slice(0, 45)].sort());
+  for (const s of [...stores].reverse()) seedMeta(user, s);
+  const first = await settle(() => forgetMetaUser(user));
+  assert.deepEqual(forgotOf(first.error), stores.slice(0, 50), "the first pass walks the first fifty in id order");
+  const second = await settle(() => forgetMetaUser(user));
+  assert.equal(second.error, undefined, "the next pass walks the rest and is done");
+  assert.deepEqual((second.value ?? []).map((one) => one.statsId), stores.slice(50));
+  assert.equal(redis.run(["EXISTS", metaUserKey(user)]), 0, "the index is gone");
 });

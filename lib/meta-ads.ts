@@ -40,7 +40,7 @@
  *   nl:metaads:user:<hash>        the stores a Meta user connected
  *   nl:metaads:stores             the stores connected, for the daily read
  */
-import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -126,6 +126,10 @@ const GEN_KEY = "nl:metaads:gen";
 /** The longest a pass mark lasts while a store is paused (its payment may be recorded at any time). */
 export const PAUSED_PASS_SECONDS = 3600;
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
+/** Where one deletion notice's passes left off in the user's stores, in id order (forgetMetaUser). */
+const forgetKey = (user: string, cutoff: number) => `nl:metaads:forget:${hash(`metaads-forget:${user}:${cutoff}`)}`;
+/** How long a deletion notice's place is kept after its last pass; once gone, the next pass starts again from the first store. */
+export const META_FORGET_PLACE_SECONDS = 7 * 86_400;
 const context = (statsId: string) => `metaads|${statsId}|token`;
 
 // ---- The app's keys and addresses ------------------------------------------------
@@ -571,31 +575,41 @@ async function exactConnection(statsId: string): Promise<Connection | null> {
  * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
  * user connected is left without a way to find it.
  *
- * One pass walks at most META_FORGET_PASS stores, from a random place in id
- * order, wrapping around. With more, the stores of this pass leave the index and the pass is not answered as done, so the next
- * callback walks the rest; the index goes only once every store was walked
- * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
- * stores it already forgot, so their owners are still told (Claude 5 on #2869).
+ * One pass walks at most META_FORGET_PASS stores, in id order, from where the
+ * last pass of the same notice left off (its place, kept under forgetKey). With
+ * more left, the stores of this pass leave the index, the place moves past
+ * them and the pass is not answered as done, so the next callback walks the
+ * rest; a store kept (connected after the notice) stays in the index and is
+ * walked once a round, so a round ends after ceil(stores / META_FORGET_PASS)
+ * passes however many are kept (Claude 6 on #4819); the place then expires
+ * (META_FORGET_PLACE_SECONDS). The index goes only when
+ * one pass walked all of it and kept none (Codex H2 on #2869). A pass that
+ * stops throws MetaIncompleteForget with the stores it already forgot, so
+ * their owners are still told (Claude 5 on #2869).
  */
 export async function forgetMetaUser(
   user: string,
   cutoff = Number.POSITIVE_INFINITY,
-  /** Where in the user's stores, in id order, this pass starts; a random place by default (Claude 7 on #4647). */
-  start?: number,
 ): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
   // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
   const kept: string[] = [];
-  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
-  if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
+  const place = forgetKey(user, cutoff);
+  const read = repliesFor(await redisPipeline([["SMEMBERS", userKey(user)], ["GET", place]]), 2);
+  const stores = stringList(read?.[0]);
+  if (!read || !stores) throw new UnknownReplyError("the stores a Meta user connected");
+  // Read exactly (rule 24): a place that is neither absent nor a store id is unknown, never "start again" or "done".
+  const after = read[1];
+  if (after !== null && typeof after !== "string") throw new UnknownReplyError("where a Meta deletion left off");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
-  // A store kept (connected after the notice) stays in the index, so a pass that always took the same first
-  // META_FORGET_PASS stores could meet only kept ones and never reach an older store behind them: the deletion would
-  // never finish. Each pass starts at a random place in id order and wraps around, so every store left is reached by
-  // some pass (Claude 7 on #4647). With no more than one pass's worth, the start does not matter: every store is walked.
+  // A kept store stays in the index, so a pass that could not tell "only kept stores left" from "more to walk" was
+  // never answered as done with more than one pass's worth kept (Claude 6 on #4819): each pass goes on from the
+  // notice's place in id order instead, and the pass that reaches the last store ends the round. A store that joins the
+  // index behind the place was connected while the notice was being handled, after it, so it is not this notice's to
+  // forget. With no more than one pass's worth, every store is walked, wherever the place is.
   const ordered = [...stores].sort();
-  const from = ordered.length > META_FORGET_PASS ? (start ?? randomInt(ordered.length)) % ordered.length : 0;
-  const pass = [...ordered.slice(from), ...ordered.slice(0, from)].slice(0, META_FORGET_PASS);
+  const rest = ordered.length > META_FORGET_PASS && after !== null ? ordered.filter((statsId) => statsId > after) : ordered;
+  const pass = rest.slice(0, META_FORGET_PASS);
   try {
     for (const statsId of pass) {
       const c = await exactConnection(statsId);
@@ -608,13 +622,18 @@ export async function forgetMetaUser(
       forgot.push({ statsId, owner: c.owner });
     }
     const walked = pass.filter((statsId) => !kept.includes(statsId));
-    if (stores.length > pass.length) {
-      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
+    const leave: (string | number)[][] = walked.length ? [["SREM", userKey(user), ...walked]] : [];
+    if (rest.length > pass.length) {
+      // More after this pass: the place moves past it, written and confirmed before the pass is left unfinished.
+      const replies = repliesFor(await redisPipeline([...leave, ["SET", place, pass[pass.length - 1], "EX", META_FORGET_PLACE_SECONDS]]), leave.length + 1);
+      if (!replies || replies[leave.length] !== "OK") throw new UnknownReplyError("where a Meta deletion left off");
+      if (leave.length) confirmDeleted(replies.slice(0, leave.length), leave.length, "a Meta user's walked stores");
       throw new MetaIncompleteForget(forgot, "more stores than one pass walks; the next callback walks the rest");
     }
-    if (kept.length) {
-      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
-    } else confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
+    // The round is walked: the index goes when this pass walked all of it and kept none; else only the walked stores
+    // leave. The place is left to expire, so the same notice sent again walks only this last stretch and is done at once.
+    if (pass.length === ordered.length && !kept.length) confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
+    else if (leave.length) confirmDeleted(await redisPipeline(leave), 1, "a Meta user's walked stores");
   } catch (error) {
     throw error instanceof MetaIncompleteForget ? error : new MetaIncompleteForget(forgot, error);
   }

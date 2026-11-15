@@ -719,6 +719,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:save:@lib/membership-manage.ts": { what: "A save offer made to a member", parts: [item(MARK, "One per membership.", "membership")] },
   "nl:mnum:@lib/membership-numbers.ts": { what: "Membership numbers, cached", parts: [capped(512 * KB, "One cached view.")] },
   "nl:metaads:conn:@lib/meta-ads.ts": { what: "The Meta ads connection", parts: [capped(4 * KB, "One a store.")] },
+  "nl:metaads:forget:@lib/meta-ads.ts": short("Where a Meta deletion notice's passes left off in a person's connected stores, when there were more than one pass walks", "integration", 7, 128),
   "nl:metaads:gen@lib/meta-ads.ts": company("The Meta daily pass's generation", "One counter for every store, moved on by a connection or a chosen account."),
   "nl:metaads:pass@lib/meta-ads.ts": company("The Meta daily pass's mark", "One key for every store, gone by the next UTC day."),
   "nl:metaads:read:@lib/meta-ads.ts": { what: "When Meta was last read", parts: [capped(KB, "One a store.")] },

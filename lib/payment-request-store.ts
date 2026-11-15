@@ -408,14 +408,21 @@ export async function deleteRequest(store: Store, id: string, now = Date.now()):
   return "deleted";
 }
 
+/**
+ * Deletes a request's record and takes it off its four lists, each removal confirmed by a reply of its own (issue
+ * #4775): a DEL of one key, ZREM and SREM of one member answer 0 or 1. Anything else throws UnknownReplyError, so the
+ * delete is never said to be done while the person's data may still be kept; the record stays to be deleted again.
+ */
 async function forget(request: PaymentRequest): Promise<void> {
-  await redisPipeline([
+  const removals: (string | number)[][] = [
     ["DEL", recordKey(request.id)],
     ["ZREM", storeKey(request.sid), request.id],
     ["ZREM", openKey(request.sid), request.id],
     ["ZREM", DUE, `${request.sid}|${request.id}`],
     ["SREM", personSet(request.sid, request.email), request.id],
-  ]);
+  ];
+  const done = repliesFor(await redisPipeline(removals), removals.length);
+  if (!done || !done.every((reply) => reply === 0 || reply === 1)) throw new UnknownReplyError("the deletion of a payment request");
 }
 
 /**

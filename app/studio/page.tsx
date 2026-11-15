@@ -192,6 +192,7 @@ import { paidVideoSeconds, TRIAL_VIDEO_SECONDS } from "@/lib/video-admission-rul
 import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, standingOf, videoLimitFor } from "@/lib/plan-standing";
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closingOf } from "@/lib/plan-closing";
 import { ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, closesStore, keptRoomFor } from "@/lib/plan-closing-rules";
+import { BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
 import { MAX_LEADS, listSize } from "@/lib/free";
 import { readableSize } from "@/lib/product-file";
 import {
@@ -726,7 +727,11 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   },
   paying: {
     title: "This store still has a plan running",
-    body: "Cancel its plan below, and delete it once the plan has ended. Nothing was deleted.",
+    body: "Cancel its plan below. Once the plan has ended, its buyers are told and the store is removed for you. Nothing was deleted.",
+  },
+  closing: {
+    title: "This store is closing",
+    body: `Its plan has ended, so it closes on its own and you do not need to delete it. Everyone who bought from it is emailed at least ${BUYER_NOTICE_DAYS} days before its closing day, which is at least ${CLOSING_DAYS} days after the plan ended. On that day, each member's renewal ends and they get back the part of their last payment they did not use. The store and its records are then removed within ${ERASE_WITHIN_DAYS} days. Your studio shows its closing day. Nothing was deleted.`,
   },
   domain: {
     title: "This store still has its own domain",
@@ -3395,9 +3400,15 @@ export default async function StudioPage({
                         >
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="font-bold text-ink">{sale.title}</p>
-                            <p className="font-display font-semibold text-ink">
-                              {formatMoney(sale.amount, sale.currency)}
-                            </p>
+                            {sale.amount === null ? (
+                              <p role="status" className="text-sm font-semibold text-ink">
+                                Amount could not be loaded
+                              </p>
+                            ) : (
+                              <p className="font-display font-semibold text-ink">
+                                {formatMoney(sale.amount, sale.currency)}
+                              </p>
+                            )}
                           </div>
                           <p className="mt-1 text-sm text-ink-soft">
                             {sale.email ? (
@@ -3465,7 +3476,7 @@ export default async function StudioPage({
                             </p>
                           ) : null}
                           {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
-                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                          {sale.oneTime && sale.amount !== null && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
                             <p className="mt-2">
                               <a
                                 href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}

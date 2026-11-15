@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 553 [DB1] units 1 and 2, closing a deal from the board or the deal editor asks first, and each column says how many deals | claude1/db1-editor-close (unit 1 on claude1/db1-stage-counts) | `lib/deal-close.ts` (new), `tests/deal-close.test.ts` (new), `tests/aliases/deal-close.test.ts.json` (new), `components/deals-board.tsx` (stageEvent, saveDeal's closing check, the two closing questions and the column count only), `tests/e2e/deals-board-focus.mjs` (the moves into a won stage only), `components/feature-visuals.tsx` (the deals card's column count only), `tests/feature-visual-cards.test.ts` (the deals count lines only) | 12/11/2026 15h30 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

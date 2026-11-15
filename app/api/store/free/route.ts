@@ -1,4 +1,4 @@
-import { shareAddress } from "@/lib/traffic-rules";
+import { shareAddress, visitorAddress } from "@/lib/traffic-rules";
 import { type NextRequest, after } from "next/server";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
@@ -8,7 +8,10 @@ import { leadAffiliate, visitCookies } from "@/lib/affiliate-leads";
 import { countHit, isStorePeople } from "@/lib/visit";
 import { markFromReferer } from "@/lib/page-funnel";
 import { countFunnelDone, funnelHere, funnelVisitor } from "@/lib/page-funnel-store";
-import { clientAddress, fromAnotherSite, limited } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+
+/** The copies of one store that a whole IPv6 /48 can ask for in an hour: ten connections' worth (lib/free.ts IP_LIMIT). */
+const NET_PER_HOUR = 200;
 import { readListing } from "@/lib/catalog";
 
 const MAX_BODY_BYTES = 2_000;
@@ -83,11 +86,16 @@ export async function POST(request: NextRequest) {
   // learns nothing, and no email goes anywhere.
   if (honeypot.trim()) return away(`${page}&status=sent`);
 
-  // One connection is its shareAddress (#4626): an IPv6 /48, an IPv4 address however it is spelled, as the calendar
-  // and join routes count it. The raw address let every address of a /48 have its own 20 copies an hour, and each
-  // copy is one of the month's orders that paid orders share (lib/order-rules.ts).
+  // Two counts, as each copy is one of the month's orders that paid orders share (lib/order-rules.ts; #4626). The
+  // raw address let every address of an IPv6 network have its own 20 copies an hour. One connection is its /64
+  // (visitorAddress), the least one customer is handed: its 20 copies an hour (lib/free.ts). Not a /48, which a mobile
+  // carrier shares among thousands of subscribers, so one of them would use up every other's copies (Claude 7 on
+  // #4636). And a whole /48, which a tunnel hands one person with 65,536 /64s in it, at most NET_PER_HOUR copies of
+  // this store an hour, counted before anything else is read. An IPv4 address counts by itself in both.
   const address = clientAddress(request);
-  const ip = shareAddress(address) || "unknown";
+  const ip = visitorAddress(address) || "unknown";
+  const net = shareAddress(address) || "unknown";
+  if (!(await withinLimit("free-net", `${net}|${store.handle}`, NET_PER_HOUR, 3_600))) return away(`${page}&status=limited`);
 
   try {
     // Sent by an affiliate, where the store pays per free product claimed: credited only once the emailed link is used.

@@ -1,12 +1,14 @@
 /**
- * The free-copy form counts one connection by its share address, an IPv6 /48 (#4626, first part).
+ * The free-copy form counts one connection by its /64, and a whole IPv6 /48 by a looser count of its own (#4626,
+ * first part; Claude 7 on #4636).
  *
  * app/api/store/free/route.ts handed requestCopy the raw x-forwarded-for, and lib/free.ts paces 20 copies an hour
- * per address and store. Every address of a /48 is then its own allowance, so one machine with a /48 of its own (a
- * free tunnel hands one out) asked for copies as fast as it liked: each counted on the month's orders figure the paid
- * orders share (lib/order-rules.ts), and each sent an email from Marktmorgen's account to an address it chose. The
- * route now counts the connection as the calendar and join routes do (shareAddress: an IPv6 /48, an IPv4 as it is).
- * The per-store cap on free copies is the owner's decision (it touches the plan's orders figure) and is not here.
+ * per address and store. Every address of an IPv6 network was then its own allowance, so one machine with a network
+ * of its own asked for copies as fast as it liked: each counted on the month's orders figure the paid orders share
+ * (lib/order-rules.ts), and each sent an email to an address it chose. The 20 an hour now count a connection's /64
+ * (the least one customer is handed), never a /48, which a mobile carrier shares among thousands of subscribers; and
+ * a whole /48, which a tunnel hands one person with 65,536 /64s in it, at most 200 copies of a store an hour. The
+ * per-store cap on free copies is the owner's decision (it touches the plan's orders figure) and is not here.
  *
  * Synthetic store and product; Resend is a stand-in; MemoryRedis. The route's answer (status=limited) is what is
  * checked: the pace is taken before any email is sent or any order counted.
@@ -47,30 +49,49 @@ async function main(): Promise<void> {
   await setSubscription(owner, { customerId: "cus_FreeCopyConnection01", subscriptionId: "sub_FreeCopyConnection01", active: true, period: paidPeriod() });
   const made = await addProduct(owner, "The Free Guide", "", "0", null);
   if (!made.ok) throw new Error("no product");
-  const product = made.product.id;
+  let product = made.product.id;
   await setProductLink(owner, product, "https://example.com/free-guide.pdf");
 
-  part("Thirty asks from thirty addresses of one /48, each with a new email");
   const status = (response: Response) => new URL(response.headers.get("location") ?? "https://x/").searchParams.get("status");
   const quiet = console.error;
-  console.error = () => {};
-  const answers: (string | null)[] = [];
-  try {
-    for (let i = 0; i < 30; i += 1) answers.push(status(await ask(product, `reader${i}@example.com`, `2001:db8:77:${(i + 1).toString(16)}::1`)));
-  } finally {
-    console.error = quiet;
-  }
+  const asks = async (ips: string[]): Promise<(string | null)[]> => {
+    console.error = () => {};
+    try {
+      const out: (string | null)[] = [];
+      for (const [i, ip] of ips.entries()) out.push(status(await ask(product, `reader${mails}-${i}-${ip.length}@example.com`, ip)));
+      return out;
+    } finally {
+      console.error = quiet;
+    }
+  };
+
+  part("Thirty asks from thirty addresses of one /64, each with a new email");
+  const one = await asks(Array.from({ length: 30 }, (_, i) => `2001:db8:77:1:${(i + 1).toString(16)}::1`));
   // lib/free.ts allows one connection 20 asks an hour, counted before anything is sent or counted on the month.
-  is("the first 20 are let through to the copy", answers.slice(0, 20).every((a) => a !== "limited"), true);
-  is("and the next 10 from the same /48 are limited", answers.slice(20).every((a) => a === "limited"), true);
+  is("the first 20 are let through to the copy", one.slice(0, 20).every((a) => a !== "limited"), true);
+  is("and the next 10 from the same /64 are limited", one.slice(20).every((a) => a === "limited"), true);
+
+  part("Another subscriber of the same carrier /48");
+  is("another /64 of that /48 keeps its own 20 (Claude 7 on #4636)", (await asks(["2001:db8:77:beef::9"]))[0] !== "limited", true);
+
+  part("A whole /48 asking from a new /64 each time");
+  redis.clear();
+  await claimHandle(owner, "freeharbor", "Free Harbor", "");
+  await ensureStoreId(owner);
+  await ensureStatsId(owner);
+  await ensureListId(owner);
+  await setSubscription(owner, { customerId: "cus_FreeCopyConnection01", subscriptionId: "sub_FreeCopyConnection01", active: true, period: paidPeriod() });
+  const remade = await addProduct(owner, "The Free Guide", "", "0", null);
+  if (!remade.ok) throw new Error("no product");
+  product = remade.product.id;
+  await setProductLink(owner, product, "https://example.com/free-guide.pdf");
+  const net = await asks(Array.from({ length: 205 }, (_, i) => `2001:db8:99:${(i + 1).toString(16)}::1`));
+  is("200 of the store's copies an hour for the whole /48, then limited", [net.slice(0, 200).filter((a) => a === "limited").length, net.slice(200).every((a) => a === "limited")], [0, true]);
 
   part("Control: another connection is not limited");
-  console.error = () => {};
-  try {
-    is("an ask from another address", status(await ask(product, "someone-else@example.com", "198.51.100.7")) !== "limited", true);
-  } finally {
-    console.error = quiet;
-  }
+  is("an ask from another address", (await asks(["198.51.100.7"]))[0] !== "limited", true);
+  const v4 = await asks([...Array.from({ length: 20 }, () => "::ffff:198.51.100.9"), "198.51.100.9"]);
+  is("an IPv4 address written the new way is the same connection", [v4.slice(0, 20).every((a) => a !== "limited"), v4[20]], [true, "limited"]);
 
   done();
 }

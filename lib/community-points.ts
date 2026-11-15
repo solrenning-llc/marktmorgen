@@ -28,8 +28,8 @@
  *   nl:cm:<id>:rw             what each level opens: { level, product }[]
  *   nl:cm:<id>:unl:<member>   when each reward reached this member (hash)
  */
-import { UnknownReplyError } from "@/lib/redis-reply";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { LEVELS, MAX_LEVEL, MAX_REWARDS, type Reward, levelOf, parseRewards, toNextLevel } from "@/lib/community-levels";
 
@@ -102,13 +102,23 @@ export async function award(id: string, who: string, delta: 1 | -1, owner: DataO
   }
 }
 
-/** Each member's all-time points; 0 for anybody with none. */
+/**
+ * Each member's all-time points; 0 for anybody with none. Read exactly (CX-123 rule 24): ZSCORE answers nil for no
+ * points or the score; any other answer throws UnknownReplyError, never 0 points, since points set the level that
+ * opens a community's spaces.
+ */
 export async function pointsOf(id: string, keys: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   const unique = [...new Set(keys)].filter((k) => MEMBER.test(k));
   if (!unique.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(unique.map((k) => ["ZSCORE", allKey(id), k]));
-  unique.forEach((k, i) => out.set(k, Math.max(0, Number(rows[i]) || 0)));
+  const rows = repliesFor(await redisPipeline(unique.map((k) => ["ZSCORE", allKey(id), k])), unique.length);
+  if (!rows) throw new UnknownReplyError("a community's points");
+  unique.forEach((k, i) => {
+    const row = rows[i];
+    const score = row === null ? 0 : (typeof row === "string" && row.trim() !== "") || typeof row === "number" ? Number(row) : Number.NaN;
+    if (!Number.isFinite(score)) throw new UnknownReplyError("a member's community points");
+    out.set(k, Math.max(0, score));
+  });
   return out;
 }
 

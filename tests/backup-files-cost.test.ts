@@ -1,7 +1,7 @@
 /**
  * The backup files route's worst month, a company cost (273 [BK1] files part 1; Claude 7's MÉDIO on #3313): every
  * admitted page is a function call held to the route's maxDuration, its answer of up to BACKUP_FILES_PAGE_BYTES, the
- * day's count (SET NX EX + INCRBY), one provider listing and, for Blob, one signing token, each at the dearest price
+ * day's count (INCR + EXPIRE NX, lib/window-count.ts), one provider listing and, for Blob, one signing token, each at the dearest price
  * read in docs/backup-costs-2026-11-08.md section 2, with no free quota, R2's billing rounded up a block, and 10% room.
  * The ceiling is the owner's review: maxPagesPerDay pages a UTC day for each source that is on, 32 UTC days a billing
  * month. With no review the route answers 404 before any command, so nothing is spent; a source turned on whose

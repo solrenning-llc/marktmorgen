@@ -117,7 +117,7 @@ async function main(): Promise<void> {
   is("each entry is the listed object, its etag and size, and its signed URL", full.entries[7], { source: "blob", key: `${PREFIX}file-00007.pdf`, etag: '"e7"', size: 107, url: full.entries[7].url, expiresAt: full.entries[7].expiresAt });
   is("each URL expires when the token does, or sooner", full.entries.every((e) => e.expiresAt <= until && e.url.startsWith("https://")), true);
   is("no clientSigningToken, Blob write token or route secret in the answer", [answer.text.includes("client-signing-secret-synthetic"), answer.text.includes("vercel_blob_rw_"), answer.text.includes(SECRET)], [false, false, false]);
-  is("the database: the day's count only (SET NX EX, INCRBY)", commands.map((c) => c[0]), ["SET", "INCRBY"]);
+  is("the database: the day's count only (INCR, EXPIRE NX: lib/window-count.ts)", commands.map((c) => c[0]), ["INCR", "EXPIRE"]);
 
   part("a key with spaces, brackets, a bar and accents: signed, its address leads back to it");
   reset();
@@ -264,7 +264,7 @@ async function main(): Promise<void> {
   is("each expires within 15 minutes", r2Page.entries.every((e) => e.expiresAt > r2Before && e.expiresAt <= Date.now() + BACKUP_FILES_URL_SECONDS * 1000), true);
   is("one provider call: a signed ListObjectsV2 of the store's folder with the read-only key", r2Calls.map((c) => [c.method, new URL(c.url).searchParams.get("list-type"), new URL(c.url).searchParams.get("prefix"), c.auth.startsWith("AWS4-HMAC-SHA256 Credential=route-read-only-key-id-0000/")]), [["GET", "2", R2_PREFIX, true]]);
   is("no secret of the site or of the route in the answer", [r2Env.R2_SECRET_ACCESS_KEY, r2Env.BACKUP_FILES_R2_READ_SECRET, r2Env.R2_ACCESS_KEY_ID, SECRET].map((s) => answer.text.includes(s)), [false, false, false, false]);
-  is("the database: the day's count only", commands.map((c) => c[0]), ["SET", "INCRBY"]);
+  is("the database: the day's count only", commands.map((c) => c[0]), ["INCR", "EXPIRE"]);
   r2Body = r2Result(`<Contents><Key>${R2_PREFIX}owner/c.pdf</Key><Size>1</Size></Contents>`);
   answer = await call(`?source=r2&store=${STORE}&cursor=${r2Page.cursor}`);
   is("an entry without its ETag: 503, never a page", [answer.status, (answer.json as { error?: string }).error, new URL(r2Calls[1].url).searchParams.get("continuation-token")], [503, "listing_unavailable", "tok1"]);

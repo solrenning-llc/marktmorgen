@@ -1149,6 +1149,81 @@ export class DeliveriesUnreadable extends Error {
 }
 
 /**
+ * The deliveries `ids`, each read only up to its bound (READ_DELIVERIES), and
+ * the answer only as it is exactly: a value or nothing (null, gone) for each,
+ * never a missing or extra one, with the bytes they were read at. Anything
+ * else, or a delivery larger than its bound, is DeliveriesUnreadable.
+ */
+async function readDeliveriesBounded(ids: string[], bounds: readonly number[]): Promise<{ raws: (string | null)[]; readBytes: number }> {
+  if (bounds.length !== ids.length || bounds.some((b) => !Number.isSafeInteger(b) || b < 0)) throw new DeliveriesUnreadable();
+  const reply: unknown = await redisPipeline([["EVAL", READ_DELIVERIES, ids.length, ...ids.map(deliveryKey), ...bounds.map(String)]]);
+  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
+  if (!Array.isArray(answer) || answer[0] !== 1 || answer.length !== 2 || !Array.isArray(answer[1])) throw new DeliveriesUnreadable();
+  const raws = answer[1] as unknown[];
+  // One value or nothing for each delivery, as long as its bound: a missing, extra or other answer is not a history.
+  if (raws.length !== ids.length || raws.some((raw, i) => raw !== null && (typeof raw !== "string" || Buffer.byteLength(raw) > bounds[i]))) throw new DeliveriesUnreadable();
+  const readBytes = raws.reduce((n: number, raw) => n + (typeof raw === "string" ? Buffer.byteLength(raw) : 0), 0);
+  return { raws: raws as (string | null)[], readBytes };
+}
+
+/** One delivery as the API's list sends it (GET /api/v1/hooks/deliveries): what it was and how it went, never its message. */
+export type DeliveryRow = {
+  id: string;
+  endpoint: string;
+  type: WebhookEvent | "test";
+  event: string;
+  state: Delivery["state"];
+  attempts: number;
+  status: number;
+  error: string | null;
+  created_at: string;
+  last_at: string | null;
+  next_at: string | null;
+};
+
+/**
+ * The store's deliveries among `ids` (its log, as recentDeliverySizes read
+ * it), newest first, each read only up to its bound (readDeliveriesBounded),
+ * as DeliveryRow: never the message, so no buyer's address or name is read
+ * out of them. `endpoint` keeps only that endpoint's. One gone since the log
+ * was read is left out, as it is from the studio's list; one kept that cannot
+ * be read, or that is another store's, is counted in `unreadable`, never left
+ * out without a word (rule 24).
+ */
+export async function deliveryRowsOf(store: Store, ids: string[], bounds: readonly number[], endpoint: string | null = null): Promise<{ rows: DeliveryRow[]; unreadable: number; readBytes: number }> {
+  if (!store.statsId || !ids.length || !isRedisConfigured()) return { rows: [], unreadable: 0, readBytes: 0 };
+  const { raws, readBytes } = await readDeliveriesBounded(ids, bounds);
+  const rows: DeliveryRow[] = [];
+  let unreadable = 0;
+  const at = (ms: unknown) => (typeof ms === "number" && Number.isSafeInteger(ms) && ms > 0 ? new Date(ms).toISOString() : null);
+  for (const raw of raws) {
+    if (raw === null) continue;
+    const d = parseDelivery(raw);
+    const created = d ? at(d.createdAt) : null;
+    if (!d || d.statsId !== store.statsId || typeof d.endpoint !== "string" || typeof d.eventId !== "string" || !created || !["queued", "delivered", "retrying", "failed"].includes(d.state) ||
+        !(d.type === "test" || isWebhookEvent(d.type)) || !Number.isSafeInteger(d.attempts) || !Number.isSafeInteger(d.lastStatus)) {
+      unreadable += 1;
+      continue;
+    }
+    if (endpoint && d.endpoint !== endpoint) continue;
+    rows.push({
+      id: d.id,
+      endpoint: d.endpoint,
+      type: d.type,
+      event: d.eventId,
+      state: d.state,
+      attempts: d.attempts,
+      status: d.lastStatus,
+      error: d.state === "delivered" ? null : d.lastError || null,
+      created_at: created,
+      last_at: at(d.lastAt),
+      next_at: d.state === "queued" || d.state === "retrying" ? at(d.next) : null,
+    });
+  }
+  return { rows, unreadable, readBytes };
+}
+
+/**
  * The messages of one event among the deliveries `ids` (the store's log, as
  * recentDeliverySizes read it), newest first, each once, at most `most`; and
  * the bytes the deliveries were read at, which a reading that pays for them
@@ -1159,14 +1234,7 @@ export class DeliveriesUnreadable extends Error {
  */
 export async function recentMessagesOf(store: Store, type: WebhookEvent, ids: string[], bounds: readonly number[], most: number): Promise<{ messages: Record<string, unknown>[]; readBytes: number }> {
   if (!store.statsId || !ids.length || !isRedisConfigured()) return { messages: [], readBytes: 0 };
-  if (bounds.length !== ids.length || bounds.some((b) => !Number.isSafeInteger(b) || b < 0)) throw new DeliveriesUnreadable();
-  const reply: unknown = await redisPipeline([["EVAL", READ_DELIVERIES, ids.length, ...ids.map(deliveryKey), ...bounds.map(String)]]);
-  const answer = Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
-  if (!Array.isArray(answer) || answer[0] !== 1 || answer.length !== 2 || !Array.isArray(answer[1])) throw new DeliveriesUnreadable();
-  const raws = answer[1] as unknown[];
-  // One value or nothing for each delivery, as long as its bound: a missing, extra or other answer is not a history.
-  if (raws.length !== ids.length || raws.some((raw, i) => raw !== null && (typeof raw !== "string" || Buffer.byteLength(raw) > bounds[i]))) throw new DeliveriesUnreadable();
-  const readBytes = raws.reduce((n: number, raw) => n + (typeof raw === "string" ? Buffer.byteLength(raw) : 0), 0);
+  const { raws, readBytes } = await readDeliveriesBounded(ids, bounds);
   const seen = new Set<string>();
   const messages: Record<string, unknown>[] = [];
   for (const delivery of raws.map(parseDelivery)) {

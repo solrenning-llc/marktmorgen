@@ -30,10 +30,10 @@ import { BOOK_STRIPE_PAGES, bookSizes, readBook } from "@/lib/affiliates";
 import { paidCalls } from "@/lib/calls";
 import { productLink } from "@/lib/checkout-recovery";
 import {
-  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, EVENTS_PROBE_MOST, eventsSentMost, eventsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits,
+  type ReadWork, API_PAGE_ROWS, addWork, apiReadUnits, bookWork, bookingsWork, deliveryRowsSentMost, EVENTS_PROBE_MOST, eventsSentMost, eventsWork, listPageMost, numbersWork, productsPageWork, scannedPageWork, settledUnits,
   studentsPageWork,
 } from "@/lib/api-read-rules";
-import { type WebhookEvent, deliveryReadBound, recentDeliverySizes, recentLimit, recentMessagesOf } from "@/lib/webhooks";
+import { type DeliveryRow, type WebhookEvent, deliveryReadBound, deliveryRowsOf, recentDeliverySizes, recentLimit, recentMessagesOf } from "@/lib/webhooks";
 import { readsSales } from "@/lib/stats";
 import { paypalCounts } from "@/lib/paypal-sales";
 
@@ -193,6 +193,44 @@ export async function recentEvents(store: Store, type: WebhookEvent, limit: numb
   const refusedProbe = await settleProbe(Math.min(due, probeHeld));
   const refused = await settleRest(Math.max(0, due - probeHeld));
   return refusedProbe ?? refused ?? messages;
+}
+
+/**
+ * The store's recent webhook deliveries (GET /api/v1/hooks/deliveries), what
+ * each was and how it went, never its message (lib/webhooks.ts,
+ * deliveryRowsOf), paid for as the recent events are (recentEvents), each
+ * part before it is done: the measuring at its most (EVENTS_PROBE_MOST)
+ * before the log is read; then the rest at each delivery's bound and the most
+ * the rows can send; then the whole settled at what was read and sent, before
+ * it is sent. The refusal, as it is, when a part is not left, with nothing of
+ * it done. A log that cannot be measured throws (502 in the route), never an
+ * empty history.
+ */
+export async function recentDeliveries(store: Store, endpoint: string | null, hold: Hold): Promise<{ data: DeliveryRow[]; unreadable?: number } | Response> {
+  const probeHeld = apiReadUnits(EVENTS_PROBE_MOST);
+  const settleProbe = await hold(probeHeld);
+  if (settleProbe instanceof Response) return settleProbe;
+  const sized = await recentDeliverySizes(store);
+  if (!sized) throw new Error("the recent deliveries could not be measured");
+  const bounds = sized.sizes.map(deliveryReadBound);
+  const whole = apiReadUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + bounds.reduce((n, b) => n + b, 0), sent: deliveryRowsSentMost(bounds) }));
+  const restHeld = Math.max(0, whole - probeHeld);
+  const settleRest = await hold(restHeld);
+  if (settleRest instanceof Response) {
+    // Nothing more is read: the measuring done is settled at what it was.
+    await settleProbe(settledUnits({ commands: 1 + sized.ids.length, bytes: sized.logBytes, roundTrips: sized.ids.length ? 2 : 1 }, probeHeld));
+    // Said with the whole the reading may take, not only the rest of it.
+    const words = settleRest.status === 429 ? ((await settleRest.clone().json().catch(() => null)) as { error?: string } | null) : null;
+    return words?.error === "monthly_limit"
+      ? apiError(429, "monthly_limit", `This read may take up to ${(whole + 1).toLocaleString("en-US")} of your store's API requests, more than your store has left, so no delivery was read. The requests used to measure them stay counted.`)
+      : settleRest;
+  }
+  const { rows, unreadable, readBytes } = await deliveryRowsOf(store, sized.ids, bounds, endpoint);
+  const out = { data: rows, ...(unreadable ? { unreadable } : {}) };
+  const due = settledUnits(eventsWork({ deliveries: sized.ids.length, bytes: sized.logBytes + readBytes, sent: sentBytes(out) }), probeHeld + restHeld);
+  const refusedProbe = await settleProbe(Math.min(due, probeHeld));
+  const refused = await settleRest(Math.max(0, due - probeHeld));
+  return refusedProbe ?? refused ?? out;
 }
 
 /** A page set aside at `most`, read, and settled at what it did before it is sent (lib/api-guard.ts, holdMoreApi). */

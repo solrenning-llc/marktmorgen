@@ -24,7 +24,7 @@ import {
   API_UNIT_BYTES, API_UNIT_COMMANDS, API_UNIT_ROUND_TRIPS, API_UNIT_SENT_BYTES, API_UNIT_STRIPE_PAGES, BOOKING_PAGES, BOOK_INVOICES, BOOK_MOVES,
   BOOK_PAYPAL_REFUNDS, MORE_TAKE_COMMANDS, type BookSizes, type ReadWork, apiReadUnits, bookWork, bookingsWork, studentsPageWork, withTaking,
   DISPUTE_READ_PAGES, EMAILS_BROADCASTS, MAIL_REVENUE_PAGES, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_PAGES, REFUND_READ_PAGES, RENEWAL_PAGES, SALES_PAGES,
-  codesWork, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
+  codesWork, DELIVERIES_MOST, deliveryRowsSentMost, emailsSizesWork, emailsWork, eventsWork, listingsWork, mailRevenueColdWork, membershipsWork, numbersWork, productsPageWork, scannedPageWork,
   API_PAGE_ROWS, EMAILS_PROBE_WORK, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, boughtNextWork, keptNumbersWork, listPageMost, settledUnits,
   EVENTS_PROBE_MOST, LOG_ENTRY_BYTES, codeMakeWork, codeStopWork, eventsSentMost,
   BUNDLE_CHOICES_MOST, BUNDLE_PAGE_LISTINGS, BUNDLE_SEARCH_STRETCH, IMPORTS_MOST, IMPORTS_READ, bundleChoicesWork, importsWork,
@@ -619,6 +619,19 @@ test("an API reading that reads more than a page takes further requests that cov
     assert.equal(settledUnits(w, held), apiReadUnits(w) > held ? apiReadUnits(w) + 1 : apiReadUnits(w));
   }
   covers(eventsWork(), "events at their most");
+  // The list of recent deliveries (GET /api/v1/hooks/deliveries): eventsWork with its own most sent, at its most and at every log size.
+  covers(eventsWork(DELIVERIES_MOST), "deliveries at their most");
+  for (let deliveries = 0; deliveries <= LOG_SIZE; deliveries += 10) for (const each of [0, 1_000, DELIVERY_MAX_BYTES]) {
+    const bounds = Array<number>(deliveries).fill(each);
+    covers(eventsWork({ deliveries, bytes: deliveries * (LOG_ENTRY_BYTES + each), sent: deliveryRowsSentMost(bounds) }), `deliveries ${deliveries}/${each}`);
+  }
+  assert.ok(apiReadUnits(eventsWork(DELIVERIES_MOST)) >= apiReadUnits(eventsWork({ deliveries: LOG_SIZE, bytes: LOG_SIZE * (LOG_ENTRY_BYTES + DELIVERY_MAX_BYTES), sent: deliveryRowsSentMost(Array(LOG_SIZE).fill(DELIVERY_MAX_BYTES)) })), "the deliveries' most holds every measured reading");
+  {
+    // Measured and set aside before any delivery is read; settled before it is sent.
+    const body = read("lib/api-read.ts").split("export async function recentDeliveries")[1]?.split("\n}\n")[0] ?? "";
+    const order = ["await hold(probeHeld)", "await recentDeliverySizes(store)", "await hold(restHeld)", "await deliveryRowsOf(store,", "await settleRest("];
+    assert.ok(order.every((needle, i) => body.indexOf(needle) >= 0 && (i === 0 || body.indexOf(needle) > body.indexOf(order[i - 1]))), "recentDeliveries holds before it reads and settles before it sends");
+  }
   // The recent events at every size they can be measured at: up to LOG_SIZE deliveries, each up to DELIVERY_MAX_BYTES.
   for (const deliveries of [0, 1, 7, LOG_SIZE]) for (const each of [0, 300, 31_267, DELIVERY_MAX_BYTES]) for (const sentShare of [0, 0.2, 1]) {
     const bytes = deliveries * (LOG_ENTRY_BYTES + each);

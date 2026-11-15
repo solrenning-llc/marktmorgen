@@ -12,7 +12,7 @@ import { SALE_TEXT_LIMITS, SALES_PAGE, SALES_TITLE_IDS } from "@/lib/api-sales";
 import { PLAN_TITLES } from "@/lib/plan";
 import {
   BLOCKED_READ_MAX, BOOKINGS_READ, MEMBERSHIPS_COLD_WORK, MEMBERSHIP_NUMBERS_BYTES, NUMBERS_KEEP_WORK, NUMBERS_KEPT_BYTES, NUMBERS_SENT_BYTES, addWork, apiReadUnits, bookWork,
-  bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
+  bookingsWork, codeMakeWork, codeStopWork, codesWork, DELIVERIES_MOST, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_CODES } from "@/lib/discount";
@@ -45,6 +45,8 @@ const CODE_STOP_COUNT = 1 + apiReadUnits(codeStopWork());
 /** The recent events, measured first: an empty log, and the most, LOG_SIZE deliveries at the most each is kept at. */
 const EVENTS_LEAST = 1 + apiReadUnits(eventsWork({ deliveries: 0, bytes: 0, sent: 0 }));
 const EVENTS_MOST_COUNT = 1 + apiReadUnits(eventsWork());
+/** The recent deliveries (GET /api/v1/hooks/deliveries), measured first like the events: an empty log, and the most. */
+const DELIVERIES_MOST_COUNT = 1 + apiReadUnits(eventsWork(DELIVERIES_MOST));
 const MEMBERSHIPS_COUNT = 1 + apiReadUnits(membershipsWork(MEMBERSHIP_NUMBERS_BYTES));
 const MEMBERSHIPS_COUNT_COLD = 1 + apiReadUnits(addWork(membershipsWork(0), MEMBERSHIPS_COLD_WORK));
 const n = (count: number) => count.toLocaleString("en-US");
@@ -653,6 +655,34 @@ export default function DevelopersPage() {
 200  {"data": {"delivery": "dlv_…", "endpoint": "we_0123456789abcdef", "type": "test", "delivered": true, "status": 200, "error": null, "sent_at": "2026-11-15T14:05:00.000Z"}}
 200  {"data": {"delivery": "dlv_…", "endpoint": "we_0123456789abcdef", "type": "test", "delivered": false, "status": 500, "error": "…", "sent_at": "2026-11-15T14:05:00.000Z"}}
 404  {"error": "not_found", "message": "No endpoint with that id on this store."}`}</Code>
+        <Endpoint path="/api/v1/hooks/deliveries">
+          Your store&apos;s recent deliveries, newest first, the same ones your studio&apos;s Webhooks page lists (the last
+          50, each kept up to seven days): what each was (its event type and event id, or a test), which address it went
+          to, its state (<code className="font-mono">queued</code>, <code className="font-mono">retrying</code>,{" "}
+          <code className="font-mono">delivered</code> or <code className="font-mono">failed</code>), how many times it
+          was tried, the status the address last answered and, when it did not go, why. Never the message itself. Add{" "}
+          <code className="font-mono">?endpoint=we_…</code> for one address&apos;s. Any key can read it. If a delivery
+          could not be read, it is left out and counted in <code className="font-mono">unreadable</code>; a list without
+          that field left nothing out.
+        </Endpoint>
+        <p>{`It is measured first, like the recent events: it counts as ${n(EVENTS_LEAST)} to ${n(DELIVERIES_MOST_COUNT)} of your API requests by the size of the deliveries it reads, needs what it may take free before it reads them, and gives back at once what it did not use.`}</p>
+        <Code>{`{
+  "data": [
+    {
+      "id": "dlv_0123456789abcdef01234567",
+      "endpoint": "we_0123456789abcdef",
+      "type": "sale.completed",
+      "event": "evt_0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+      "state": "retrying",
+      "attempts": 2,
+      "status": 500,
+      "error": "Answered 500.",
+      "created_at": "2026-11-15T14:05:00.000Z",
+      "last_at": "2026-11-15T14:06:00.000Z",
+      "next_at": "2026-11-15T14:36:00.000Z"
+    }
+  ]
+}`}</Code>
       </LegalSection>
 
       <LegalSection title="Sales and refunds">

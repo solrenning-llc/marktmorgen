@@ -498,6 +498,24 @@ export function eventsWork(s: EventsSize = EVENTS_MOST): ReadWork {
 }
 
 /**
+ * The most the list of recent deliveries (GET /api/v1/hooks/deliveries,
+ * lib/api-read.ts recentDeliveries) can send, from the bounds of the
+ * deliveries measured first: never more than each delivery is kept at (a row
+ * is a part of its delivery, without its message), with room for each row's
+ * own field names and times. Its reading is eventsWork with this as `sent`.
+ */
+export const DELIVERY_ROW_ROOM_BYTES = 256;
+export function deliveryRowsSentMost(bounds: readonly number[]): number {
+  return bounds.reduce((n, b) => n + b + DELIVERY_ROW_ROOM_BYTES, 0);
+}
+/** The list of recent deliveries at its most: every delivery the log keeps, each at its largest. */
+export const DELIVERIES_MOST: EventsSize = {
+  deliveries: LOG_SIZE,
+  bytes: LOG_SIZE * (LOG_ENTRY_BYTES + DELIVERY_MAX_BYTES),
+  sent: LOG_SIZE * (DELIVERY_MAX_BYTES + DELIVERY_ROW_ROOM_BYTES),
+};
+
+/**
  * The measuring alone at its most, set aside before the log is read (Codex
  * G2, #2192: fifty sizes were looked up before any request beyond the first
  * was taken): the log and a size for each delivery it can hold. Part of

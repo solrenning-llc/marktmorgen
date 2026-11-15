@@ -24,7 +24,8 @@
  * try it again, knowing it may arrive twice; or end the run.
  *
  *   nl:wf:run:<flowId>:<person>   hash: email, status, step, note, startedAt, updatedAt, open,
- *                                 waits, waitAt ("<step>:<first wait>"), retries (lib/flow-retry.ts)
+ *                                 waits, offLooks (looks while the store was switched off), waitAt
+ *                                 ("<step>:<first wait>"), retries (lib/flow-retry.ts)
  *   nl:wf:log:<flowId>:<person>   list of JSON events, oldest first, at most MAX_RUN_EVENTS
  *   nl:wf:runs:<flowId>           zset: person → last change, every run of the last 400 days
  *                                 (complete, so a person or a store can be erased in full)
@@ -273,41 +274,60 @@ export async function claimAttempts(flowId: string, emails: string[], index: num
 /**
  * Counts one more wait for each of these people at step `index`, and says,
  * for each, how many waits their run has had and since when this step has
- * been waiting (lib/flow-retry.ts decides). Null for anyone whose count could
- * not be read: an unknown count is not room for one more wait.
+ * been waiting (lib/flow-retry.ts decides). `switchedOff` counts a look while
+ * the store is switched off, in its own field (`offLooks`, half a wait each),
+ * and reads the whole waits with it; otherwise a whole wait, read with the
+ * looks. Null for anyone whose count could not be read, the other field
+ * included (rule 24: only a missing field is none): an unknown count is not
+ * room for one more wait.
  */
-export async function countWaits(flowId: string, emails: string[], index: number, nowSeconds = Math.floor(Date.now() / 1000), gens?: Map<string, string>): Promise<Map<string, { waits: number; since: number } | null>> {
-  const out = new Map<string, { waits: number; since: number } | null>();
+export async function countWaits(
+  flowId: string,
+  emails: string[],
+  index: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+  switchedOff = false,
+  gens?: Map<string, string>,
+): Promise<Map<string, { waits: number; offLooks: number; since: number } | null>> {
+  const out = new Map<string, { waits: number; offLooks: number; since: number } | null>();
   if (!emails.length) return out;
-  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN])).catch(() => null);
+  const [counted, other] = switchedOff ? ["offLooks", "waits"] : ["waits", "offLooks"];
+  // One command a person: counted only while the run is there and is the run this step was taken for (its
+  // generation, Codex L's MEDIUM on #4234), with the other field and this step's clock read in the same step.
+  const reply = await redisPipeline(emails.map((email) => ["EVAL", WAIT_IF_RUN, 1, runKey(flowId, personOf(email)), index, nowSeconds, gens?.get(email) ?? ANY_GEN, counted, other])).catch(() => null);
   emails.forEach((email, i) => {
     const one = Array.isArray(reply) && reply.length === emails.length ? reply[i] : null;
-    const [waits, since] = Array.isArray(one) && one.length === 2 ? one : [null, null];
-    // A run that is gone (-1) or a reply in another shape: unknown, never room for one more wait.
-    if (typeof waits !== "number" || !Number.isSafeInteger(waits) || waits < 1 || typeof since !== "number" || !Number.isSafeInteger(since) || since < 1) {
+    const [added, kept, since] = Array.isArray(one) && one.length === 3 ? one : [null, undefined, null];
+    // The other field: only a missing one is none (the script answers "" for it); anything else unreadable is unknown.
+    const keptCount = kept === "" ? 0 : typeof kept === "string" && /^(0|[1-9]\d{0,15})$/.test(kept) ? Number(kept) : NaN;
+    // A run that is gone or another run ({-1}) or a reply in another shape: unknown, never room for one more wait.
+    if (typeof added !== "number" || !Number.isSafeInteger(added) || added < 1 || !Number.isSafeInteger(keptCount) || typeof since !== "number" || !Number.isSafeInteger(since) || since < 1) {
       out.set(email, null);
       return;
     }
-    out.set(email, { waits, since });
+    out.set(email, { waits: switchedOff ? keptCount : added, offLooks: switchedOff ? added : keptCount, since });
   });
   return out;
 }
 
 /**
  * One more wait counted on one run, only while the run is there (KEYS: the run's record; ARGV: the step, now, the
- * run's generation or ANY_GEN): {waits, since}, the step's clock started now on its first wait; {-1} when the run is
- * gone or is another run (another generation), so a wait counted after an erasure makes no record again (Defect
- * 4083) and never counts on the run the person started again (Codex L on #4234). Modelled by lib/redis-memory.ts.
+ * run's generation or ANY_GEN, the field counted ("waits", or "offLooks" for a look while the store is switched off)
+ * and the other field): {counted, other, since}, the other field's raw value ("" when it is missing) and the step's
+ * clock, started now on its first wait; {-1} when the run is gone or is another run (another generation), so a wait
+ * counted after an erasure makes no record again (Defect 4083) and never counts on the run the person started again
+ * (Codex L on #4234). Modelled by lib/redis-memory.ts.
  */
-export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v2
+export const WAIT_IF_RUN = `-- marktmorgen:flow-wait:v3
 if redis.call("EXISTS", KEYS[1]) == 0 then return {-1} end
 if ARGV[3] ~= "*" and (redis.call("HGET", KEYS[1], "gen") or "") ~= ARGV[3] then return {-1} end
-local waits = redis.call("HINCRBY", KEYS[1], "waits", 1)
+local counted = redis.call("HINCRBY", KEYS[1], ARGV[4], 1)
+local other = redis.call("HGET", KEYS[1], ARGV[5]) or ""
 local at = redis.call("HGET", KEYS[1], "waitAt") or ""
 local step, since = string.match(at, "^(%-?%d+):(%d+)$")
-if step == ARGV[1] and tonumber(since) > 0 then return {waits, tonumber(since)} end
+if step == ARGV[1] and tonumber(since) > 0 then return {counted, other, tonumber(since)} end
 redis.call("HSET", KEYS[1], "waitAt", ARGV[1] .. ":" .. ARGV[2])
-return {waits, tonumber(ARGV[2])}`;
+return {counted, other, tonumber(ARGV[2])}`;
 
 /**
  * The creator's retries counted on one run, only while the run is there (KEYS: the run's record; ARGV: 1 or -1):

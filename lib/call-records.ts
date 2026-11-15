@@ -37,8 +37,18 @@ export type Move = {
 export const movedKey = (session: string) => `nl:call:moved:${session}`;
 export const REMINDER_QUEUE = "nl:call:remindq";
 
-/** A move is kept well past any call it could be about. */
+/**
+ * A move is kept this long after the call it moved to has ended (and never
+ * less): a dated session may be any distance ahead, so a flat time could run
+ * out before the call and leave the booking read as never moved.
+ */
 const MOVE_SECONDS = 200 * 86_400;
+
+/**
+ * And never longer than this, whatever the call's date: the privacy policy
+ * (app/privacy/page.tsx), lib/data-families.ts and the cost registry state it.
+ */
+const MOVE_MAX_SECONDS = 730 * 86_400;
 
 /** Reminders due sooner than this after the booking is made are not sent. */
 export const REMINDER_MIN_LEAD_MS = 60 * 60_000;
@@ -107,7 +117,8 @@ export async function readMoves(sessions: string[]): Promise<Map<string, Move>> 
  */
 export async function writeMove(session: string, move: Move): Promise<void> {
   const value = JSON.stringify(move);
-  const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", MOVE_SECONDS]]), 1);
+  const keep = Math.min(MOVE_MAX_SECONDS, Math.max(0, Math.ceil((move.e - Date.now()) / 1000)) + MOVE_SECONDS);
+  const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", keep]]), 1);
   if (replies?.[0] === "OK") return;
   const kept = repliesFor(await redisPipeline([["GET", movedKey(session)]]), 1);
   if (kept?.[0] !== value) throw new UnknownReplyError("a booking's move");
@@ -124,10 +135,15 @@ export function reminderMember(callsId: string, handle: string, session: string,
 }
 
 export function parseMember(member: string) {
-  const [callsId, handle, session, mark, start] = member.split("|");
+  const fields = member.split("|");
+  // Exactly the five fields reminderMember writes, the start a whole number of milliseconds: a blank start read as 0,
+  // a negative one or an extra field was taken for a member before (Claude 7, 13 November 2026).
+  if (fields.length !== 5) return null;
+  const [callsId, handle, session, mark, start] = fields;
   if (!callsId || !handle || !session || !["c", "24", "1"].includes(mark)) return null;
+  if (!/^\d{1,16}$/.test(start)) return null;
   const at = Number(start);
-  if (!Number.isFinite(at)) return null;
+  if (!Number.isSafeInteger(at)) return null;
   return { callsId, handle, session, mark: mark as Mark, start: at };
 }
 

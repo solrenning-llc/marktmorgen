@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   const [endedStatus] = (await redisPipeline([["HGET", run(kept), "status"]])) as [unknown];
   const counted = await countWaits(FLOW, [deferred], 0, now);
   const again = await countWaits(FLOW, [deferred], 0, now + 60);
-  is("waits on a run that is there are counted as before, the step's clock kept", [counted.get(deferred), again.get(deferred)], [{ waits: 1, since: now }, { waits: 2, since: now }]);
+  is("waits on a run that is there are counted as before, the step's clock kept", [counted.get(deferred), again.get(deferred)], [{ waits: 1, offLooks: 0, since: now }, { waits: 2, offLooks: 0, since: now }]);
   is("and a retry within its limit is allowed, one past it refused", [await countRetry(FLOW, personOf(deferred), 1), await countRetry(FLOW, personOf(deferred), 1)], [true, false]);
   const [retries] = (await redisPipeline([["HGET", run(deferred), "retries"]])) as [unknown];
   is("the refused one taken back", retries, "1");
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     if (lateWrite === "note") {
       await noteRuns(FLOW, [{ email, index: 0, stepId: "s1", kind: "run", state: "ended", note: "A's late note.", to: -1, status: "ended", gen: genA }], now + 120);
     } else if (lateWrite === "wait") {
-      is("wait: A's late wait is not counted on B", (await countWaits(FLOW, [email], 0, now + 120, new Map([[email, genA]]))).get(email), null);
+      is("wait: A's late wait is not counted on B", (await countWaits(FLOW, [email], 0, now + 120, false, new Map([[email, genA]]))).get(email), null);
     } else if (lateWrite === "claim") {
       const lateClaim = await claimAttempts(FLOW, [email], 0, "s1", "email", now + 120, new Map([[email, genA]]));
       is("claim: A's late claim finds no run of its own", [lateClaim.claimed, lateClaim.open, lateClaim.gone], [[], [], [email]]);

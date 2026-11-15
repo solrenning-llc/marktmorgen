@@ -54,7 +54,7 @@ import { sellsMemberships } from "@/lib/membership-manage";
 import { LANGUAGES, type LanguageCode, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { CARD_NOTICE_DAYS, cardNoticeDue, reminderDue } from "@/lib/dunning-rules";
-import { cardLink, finishCardUpdate, openKey } from "@/lib/card-update";
+import { cardLink, finishCardUpdate, openKey, waitingCardPage } from "@/lib/card-update";
 import { countSent, sentKey } from "@/lib/dunning-keys";
 
 const CURSOR_KEY = "nl:dun:cursor";
@@ -549,9 +549,16 @@ async function noticeCards(store: Store, deadline: number): Promise<Swept> {
       notHandled(from);
       continue;
     }
-    const pending = open[0];
+    // A page already finished is not waiting (lib/card-update.ts, waitingCardPage).
+    const pending = waitingCardPage(open[0]);
     if (typeof pending === "string") {
       const finished = await finishCardUpdate(store, pending);
+      // Unsure whether the card was set: no notice on a guess either way; the page stays open and is finished again,
+      // so this member is not handled and the cursor does not move past it (the next run reads it again).
+      if (finished === "unsure") {
+        notHandled(from);
+        continue;
+      }
       if (finished === "updated" || finished === "paid" || finished === "declined") continue;
     }
     const key = cardKey(account, subId, card.id);

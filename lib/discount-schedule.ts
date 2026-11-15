@@ -31,6 +31,7 @@ import {
   ACTIVATION_TRIES,
   MAX_SCHEDULED_CODES,
   RETRY_SECONDS,
+  STOP_TRIES,
   type ScheduleEntry,
   type ScheduleWindow,
 } from "@/lib/discount-schedule-rules";
@@ -78,14 +79,14 @@ function readRecord(id: string, raw: string): ScheduleEntry | null {
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { c, s, e, t, f } = value as Record<string, unknown>;
+  const { c, s, e, t, f, u } = value as Record<string, unknown>;
   const int = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
-  if (typeof c !== "string" || !c || !int(s) || !int(e) || e <= s || !int(t) || (f !== 0 && f !== 1)) return null;
-  return { id, code: c, start: s, end: e, tries: t, failed: f === 1 };
+  if (typeof c !== "string" || !c || !int(s) || !int(e) || e <= s || !int(t) || (f !== 0 && f !== 1) || (u !== undefined && u !== 1)) return null;
+  return { id, code: c, start: s, end: e, tries: t, failed: f === 1, ...(u === 1 ? { stopUnconfirmed: true } : {}) };
 }
 
 const writeRecord = (entry: ScheduleEntry) =>
-  JSON.stringify({ c: entry.code, s: entry.start, e: entry.end, t: entry.tries, f: entry.failed ? 1 : 0 });
+  JSON.stringify({ c: entry.code, s: entry.start, e: entry.end, t: entry.tries, f: entry.failed ? 1 : 0, ...(entry.stopUnconfirmed ? { u: 1 } : {}) });
 
 /** Runs `work` holding the store's lock: "busy" when another hand holds it, "unknown" when that cannot be told. */
 async function holding<T>(statsId: string, work: () => Promise<T>): Promise<T | "busy" | "unknown"> {
@@ -288,12 +289,23 @@ async function missed(shop: Shop, statsId: string, entry: ScheduleEntry, nowSeco
  * is final, so a schedule kept as failed never leaves a code a link can still
  * apply. A stop Stripe does not confirm may not have happened, so it is never
  * taken for one: the try is counted and the schedule stays due, and the next
- * run asks Stripe to switch it off again (activateOne), until its end, when
- * Stripe's own expiry stops it.
+ * run asks Stripe to switch it off again (activateOne), at most STOP_TRIES
+ * times, all paid for at scheduling (SCHEDULE_UNITS). Past them it leaves the
+ * due list, kept as failed with its stop unconfirmed, and the studio says it
+ * may still be live on the creator's Stripe account (Claude 6 on #4522).
+ * Stripe's own expiry still stops it at its end.
  */
 async function offThenFailed(shop: Shop, account: string, statsId: string, entry: ScheduleEntry, nowSeconds: number): Promise<Outcome> {
   // Asked twice, as in scheduleCode: a stop Stripe answers in an unclear way is tried once more at once.
   if ((await stopCode(account, entry.id)) || (await stopCode(account, entry.id))) return missed(shop, statsId, entry, nowSeconds, true);
+  const tries = entry.tries + 1;
+  if (tries >= ACTIVATION_TRIES + STOP_TRIES) {
+    const kept = await counted([
+      ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries, failed: true, stopUnconfirmed: true })],
+      ["ZREM", DUE_KEY, memberOf(shop.sid, statsId, entry.id)],
+    ]);
+    return kept ? "failed" : "unknown";
+  }
   await counted([
     ["HSET", scheduleKey(statsId), entry.id, writeRecord({ ...entry, tries: entry.tries + 1 })],
     ["ZADD", DUE_KEY, nowSeconds + RETRY_SECONDS, memberOf(shop.sid, statsId, entry.id)],

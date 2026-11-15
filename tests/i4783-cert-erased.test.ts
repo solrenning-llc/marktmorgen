@@ -76,6 +76,16 @@ async function main(): Promise<void> {
     redis.clear();
     const OWNER = "nolist-owner@example.com";
     await claimHandle(OWNER, "nolistschool", "No List School", "");
+    // A store from before lists: its record kept without a list id.
+    const given = (await storeForEmail(OWNER))!.listId!;
+    for (const key of redis.keys()) {
+      const [raw] = await original([["GET", key]]).catch(() => [null]);
+      if (typeof raw !== "string" || !raw.includes(given)) continue;
+      const record = JSON.parse(raw) as Record<string, unknown>;
+      if (record.listId !== given) continue;
+      delete record.listId;
+      await original([["SET", key, JSON.stringify(record)]]);
+    }
     const shop = (await storeForEmail(OWNER))!;
     is("the store has no list id", shop.listId ?? null, null);
     const student = "late@example.com";

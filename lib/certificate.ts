@@ -287,8 +287,12 @@ export async function issueCertificate(input: {
   name: unknown;
   /** The store whose data room it takes from (DataRoomError when it does not fit). */
   room: DataStore;
-  /** The store's list id, whose deletion prints say the student was erased (lib/suppression.ts); none, none read. */
-  listId?: string | null;
+  /**
+   * The store's list id, whose deletion prints say the student was erased (lib/suppression.ts), read after the press's
+   * writes: a store with none yet gets one from the erasure itself (lib/person-erasure.ts erasureScope), so it is read
+   * then, not when the press began. Null when it cannot be had: not known, so nothing is issued. Not given, none read.
+   */
+  listId?: () => Promise<string | null>;
 }): Promise<IssueResult> {
   const name = cleanName(input.name);
   if (!name) return { ok: false, reason: "name" };
@@ -353,7 +357,9 @@ export async function issueCertificate(input: {
   if (input.listId) {
     let erased: boolean;
     try {
-      erased = (await suppressedAmong(input.listId, [input.email])).size > 0;
+      const listId = await input.listId();
+      if (!listId) throw new Error("the store's list of deleted people could not be had");
+      erased = (await suppressedAmong(listId, [input.email])).size > 0;
     } catch (error) {
       await takeBackIssued(input.course.id, input.who, id, input.room, bytes);
       throw error;

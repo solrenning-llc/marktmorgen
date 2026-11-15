@@ -4,7 +4,7 @@ import { DATA_FULL_BUYER_WORDS } from "@/lib/store-data-rules";
 import { cookies } from "next/headers";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
-import { normaliseHandle, storeForHandle } from "@/lib/store";
+import { ensureListId, normaliseHandle, storeForHandle, storeRef } from "@/lib/store";
 import { readCourse } from "@/lib/course";
 import { courseAccess, doneLessons, emailKey, storeKey } from "@/lib/learn";
 import { passedForGate } from "@/lib/quiz";
@@ -71,7 +71,9 @@ export async function POST(request: NextRequest) {
       who,
       name,
       room: store,
-      listId: store.listId,
+      // Read after the press's writes (#4783): a store with no list yet gets one from an erasure meanwhile, so it is
+      // read again then, and made once here when there is still none (ensureListId writes only a store that has none).
+      listId: async () => (await storeForHandle(store.handle))?.listId ?? (await ensureListId(storeRef(store)))?.listId ?? null,
     });
   } catch (error) {
     // No room in the store's data room: no certificate was written (lib/store-data.ts).

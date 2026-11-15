@@ -73,7 +73,9 @@ function onlyHuman(product: EuSupplyFields, members?: ReadonlyMap<string, EuSupp
 }
 
 /** A two-letter country code as Vercel's edge or the buyer's choice names one, or null for anything else. */
-const country = (value: string | null): string | null => (value && /^[A-Z]{2}$/.test(value) && !/^(AA|Q[M-Z]|X[A-Z]|ZZ)$/.test(value) ? value : null);
+// XK (Kosovo) is user-assigned but is a place the billing field offers (lib/shipping.ts SHIP_COUNTRIES): read as a
+// country, never asked for again (Claude 7 on #4572). Every other user-assigned code is not a country.
+const country = (value: string | null): string | null => (value && /^[A-Z]{2}$/.test(value) && !/^(AA|Q[M-Z]|X[A-JL-Z]|ZZ)$/.test(value) ? value : null);
 
 /**
  * The checkout's question before any charge (C2-20261113-1320-ABRIR-1, 2b): may this buyer go on to pay for this
@@ -85,12 +87,25 @@ const country = (value: string | null): string | null => (value && /^[A-Z]{2}$/.
  * unless the IP already places them where the sale is refused. A business with an EU or UK VAT number is refused the
  * same way until the reverse charge is built with the "collect" treatment (2c).
  */
-export function consumerGate(input: { product: EuSupplyFields; members?: ReadonlyMap<string, EuSupplyFields>; headers: Headers; form: URLSearchParams | FormData }): ConsumerGate {
-  const supply = euSupplyOf(input.product, input.members);
-  if (supply === "free") return { ok: true };
-  // A live service goes on; a bundle goes on as one only when every member is one (euSupplyOf ranks a bundle by its
-  // "worst" member, so a download beside a call would otherwise pass as the call).
-  if (supply === "human" && onlyHuman(input.product, input.members)) return { ok: true };
+export function consumerGate(input: {
+  product: EuSupplyFields;
+  members?: ReadonlyMap<string, EuSupplyFields>;
+  /**
+   * The checkout boxes the buyer ticked (lib/store-checkout.ts), each its own line of the same order: the order is
+   * read whole, so a download in a box beside a bundle of calls is gated as a download (Claude 7 on #4572).
+   */
+  boxes?: readonly { product: EuSupplyFields; members?: ReadonlyMap<string, EuSupplyFields> }[];
+  headers: Headers;
+  form: URLSearchParams | FormData;
+}): ConsumerGate {
+  // A free line, or a live service, goes on wherever the buyer is; a bundle goes on as one only when every member is
+  // one (euSupplyOf ranks a bundle by its "worst" member, so a download beside a call would otherwise pass as the call).
+  // The order goes on that way only when every line of it does.
+  const exempt = (line: { product: EuSupplyFields; members?: ReadonlyMap<string, EuSupplyFields> }): boolean => {
+    const supply = euSupplyOf(line.product, line.members);
+    return supply === "free" || (supply === "human" && onlyHuman(line.product, line.members));
+  };
+  if ([{ product: input.product, members: input.members }, ...(input.boxes ?? [])].every(exempt)) return { ok: true };
   const items = checkoutEvidence(input.headers, input.form);
   const ip = country(items.ip);
   const billing = country(items.billing);

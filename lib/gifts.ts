@@ -273,13 +273,13 @@ export async function deliverGift(input: {
 }): Promise<GiftOutcome> {
   const { store, session, product } = input;
   const id = session.metadata?.gift ?? "";
-  const gift = await readGiftExactly(id);
-  if (!gift || gift.s !== store.statsId || gift.p !== product.id) return "skip";
+  const seen = await readGiftExactly(id);
+  if (!seen || seen.s !== store.statsId || seen.p !== product.id) return "skip";
   // Given already. Its emails come after the write that marks it given, so a run whose reply to that write came back
   // in another shape threw before sending them (#2872 review M1): a later run with no "sent" mark (the caller checked)
   // still tells, once (the emails' own idempotency keys), while that is recent. Taken back by a refund, or given
   // longer ago than a run is retried, there is nothing to tell.
-  if (gift.given && (gift.revoked || now() - gift.given >= TELL_WITHIN_SECONDS)) return "already";
+  if (seen.given && (seen.revoked || now() - seen.given >= TELL_WITHIN_SECONDS)) return "already";
   // The mark read exactly (lib/claim-mark.ts; CX-123 rules 24 and 25): somebody else's is "already"; an unknown one
   // gives nothing and says so, as when Redis does not answer, so no "sent" mark is kept and the next run tries again.
   const mark = `${giftKey(id)}:giving`;
@@ -293,13 +293,36 @@ export async function deliverGift(input: {
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
+  // Read again now that the mark is ours, as handOverPreorder does (Claude 7's race hunt): a run that read the gift
+  // before another run gave it, and took the mark once that run let it go, must not give it again from its old copy.
+  // A refund taken back in between would be undone: the purchase granted again, {...gift, given} written over the
+  // revoked mark, and the refund, already read, never read again. Read exactly (CX-123 rule 24): unknown throws.
+  let kept: Gift | null;
+  try {
+    const reply = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
+    if (reply === undefined || (reply !== null && typeof reply !== "string")) throw new UnknownReplyError("a gift");
+    kept = typeof reply === "string" ? parseKeptGift(reply, id) : null;
+  } catch (error) {
+    await releaseMark(mark, value);
+    throw error;
+  }
+  if (!kept || kept.s !== store.statsId || kept.p !== product.id) {
+    await releaseMark(mark, value);
+    return "skip";
+  }
+  // Taken back by a refund, or given longer ago than a run is retried: nothing to give or tell.
+  if (kept.revoked || (kept.given && now() - kept.given >= TELL_WITHIN_SECONDS)) {
+    await releaseMark(mark, value);
+    return "already";
+  }
   // The mark is kept, not let go, once the gift is given: it runs out by itself, after the caller has kept its
   // "sent" mark, so a run that comes in meanwhile reads "taken" and given and says "already" instead of telling and
   // confirming a second time (#2872 review M1).
-  if (gift.given) {
-    await tellGift(input, gift, gift.session ?? (typeof session.id === "string" ? session.id : ""));
+  if (kept.given) {
+    await tellGift(input, kept, kept.session ?? (typeof session.id === "string" ? session.id : ""));
     return "given";
   }
+  const gift = kept;
 
   const sessionId = typeof session.id === "string" ? session.id : "";
   const pi = typeof session.payment_intent === "string" ? session.payment_intent : "";
@@ -315,8 +338,8 @@ export async function deliverGift(input: {
   // given last, each answered exactly "OK" (sweep A3; CX-123 rules 24 and 30): a write left unknown lets go of the
   // mark and throws, so confirmGift keeps no "sent" mark and the next run does it again, never "already" on a gift
   // whose payment a refund could not find.
-  const kept: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
-  const keptReplies = repliesFor(await redisPipeline(kept), kept.length);
+  const records: (string | number)[][] = [...(pi ? [["SET", piKey(pi), gift.id, "EX", GIFT_KEPT_SECONDS]] : []), ["SET", anyKey(gift.s), "1"]];
+  const keptReplies = repliesFor(await redisPipeline(records), records.length);
   if (!keptReplies || !keptReplies.every((reply) => reply === "OK")) {
     await releaseMark(mark, value);
     throw new UnknownReplyError("a given gift's payment record");

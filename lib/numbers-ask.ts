@@ -193,6 +193,16 @@ export function numbersContext(data: StatsData, spends?: AdSpend[]): Record<stri
       buyers_who_bought_again: r.again,
     }));
   }
+  // Sales paid in another currency, each currency on its own line, never added to the store's (LOW 2 of #4576).
+  if (known && data.discounts?.elsewhere?.length) {
+    out.discounts_other_currencies_last_90_days = data.discounts.elsewhere.map((r) => ({
+      currency: r.currency.toUpperCase(),
+      sales: r.sales,
+      revenue: formatMoney(r.cents, r.currency),
+      discounted_sales: r.discounted,
+      given_off: formatMoney(r.off, r.currency),
+    }));
+  }
   if (known && data.buyerChannels?.weekly) {
     out.weekly_repurchase_cohorts = {
       as_of_utc: data.buyerChannels.weekly.asOf,

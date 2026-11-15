@@ -165,7 +165,7 @@ async function main(): Promise<void> {
 
   part("The sentence alone when the store's own currency has no discounted sale (LOW 1 of #4576)");
   const alone = renderToStaticMarkup(createElement(DiscountImpact, { rows: null, refundsRead: false, currency: "usd", elsewhere: [{ currency: "eur", sales: 2, cents: 9000, discounted: 1, off: 500 }] }));
-  is("no table, the sentence kept", [alone.includes("<table"), alone.includes("data-discount-elsewhere"), alone.includes("€90.00 from 2 sales, 1 with a discount taking €5.00 off")], [false, true, true]);
+  is("no table, the sentence kept", [alone.includes("<table"), alone.includes("data-discount-elsewhere"), alone.includes("€90 from 2 sales, 1 with a discount taking €5 off")], [false, true, true]);
   is("it does not speak of a table that is not there", alone.includes("not added to the table"), false);
   is("nothing at all with nothing to say", renderToStaticMarkup(createElement(DiscountImpact, { rows: null, refundsRead: false, currency: "usd", elsewhere: [] })), "");
   const panel = readFileSync("components/stats-panel.tsx", "utf8");

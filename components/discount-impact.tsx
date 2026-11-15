@@ -10,7 +10,16 @@ const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part 
  * refunded, and how many of those buyers bought again. Sales paid in another
  * currency are said under it, each in its own money, never added in.
  */
-export function DiscountImpact({ rows, refundsRead, currency, elsewhere = [] }: { rows: DiscountRow[]; refundsRead: boolean; currency: string; elsewhere?: DiscountElsewhere[] }) {
+export function DiscountImpact({ rows, refundsRead, currency, elsewhere = [] }: { rows: DiscountRow[] | null; refundsRead: boolean; currency: string; elsewhere?: DiscountElsewhere[] }) {
+  // No discounted sale in the store's own currency: no table, and the sales paid elsewhere said on their own (LOW 1 of #4576).
+  if (!rows) {
+    const alone = elsewhereWords(elsewhere, false);
+    return alone ? (
+      <p className="mt-6 text-xs text-ink-soft" data-discount-elsewhere>
+        {alone}
+      </p>
+    ) : null;
+  }
   const money = (cents: number) => formatMoney(cents, currency);
   const given = rows.reduce((sum, row) => sum + row.off, 0);
   const discounted = rows.filter((row) => row.kind !== "full");

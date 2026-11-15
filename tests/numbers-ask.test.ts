@@ -107,7 +107,7 @@ async function main(): Promise<void> {
 
   part("Discounts on sales paid in another currency (LOW 2 of #4576)");
   const elsewhere = numbersContext({ ...data, discounts: { rows: null, refundsRead: false, elsewhere: [{ currency: "eur", sales: 2, cents: 9000, discounted: 1, off: 500 }] } } as StatsData);
-  is("each other currency on its own line, never added to the store's", elsewhere.discounts_other_currencies_last_90_days, [{ currency: "EUR", sales: 2, revenue: "€90.00", discounted_sales: 1, given_off: "€5.00" }]);
+  is("each other currency on its own line, never added to the store's", elsewhere.discounts_other_currencies_last_90_days, [{ currency: "EUR", sales: 2, revenue: "€90", discounted_sales: 1, given_off: "€5" }]);
   is("none when there are none", numbersContext({ ...data, discounts: { rows: null, refundsRead: false, elsewhere: [] } } as StatsData).discounts_other_currencies_last_90_days, undefined);
 
   done();

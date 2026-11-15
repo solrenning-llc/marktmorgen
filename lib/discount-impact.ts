@@ -171,13 +171,15 @@ export function discountElsewhere(sales: DiscountSale[], currency: string, now: 
 }
 
 /** The sentence under the table for sales in another currency, each in its own money; null when there are none. Pure. */
-export function elsewhereWords(rows: DiscountElsewhere[]): string | null {
+export function elsewhereWords(rows: DiscountElsewhere[], table = true): string | null {
   if (rows.length === 0) return null;
   const parts = rows.map((row) => {
     const money = (cents: number) => formatMoney(cents, row.currency);
     const sold = `${money(row.cents)} from ${row.sales.toLocaleString("en-US")} ${row.sales === 1 ? "sale" : "sales"}`;
     return row.discounted > 0 ? `${sold}, ${row.discounted.toLocaleString("en-US")} with a discount taking ${money(row.off)} off` : sold;
   });
+  // With no table beside it (no discounted sale in the store's own currency), it says what it counts on its own.
+  if (!table) return `Sales paid in another currency over the last 90 days, each currency on its own, because amounts in two currencies do not add up: ${parts.join("; ")}.`;
   return `Sales paid in another currency are not added to the table, because amounts in two currencies do not add up: ${parts.join("; ")}.`;
 }
 

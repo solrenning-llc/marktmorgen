@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin, type StoreJoin } from "@/lib/store-field-rules";
+import { MAX_JOIN_HEADING, MAX_JOIN_LINE, MAX_RECOMMEND, parseJoinBox, type StoreJoinBox } from "@/lib/store-field-rules";
 import { joinWords } from "@/lib/buyer-words/join";
 
 /**
@@ -17,7 +17,7 @@ export function JoinBoxEditor({
   language,
   blocked,
 }: {
-  join: StoreJoin;
+  join: StoreJoinBox;
   storeName: string;
   language: string;
   /** Why it would not show yet: "" when it would. */
@@ -27,10 +27,13 @@ export function JoinBoxEditor({
   const [on, setOn] = useState(join.on);
   const [heading, setHeading] = useState(join.heading);
   const [line, setLine] = useState(join.line);
+  // 119 [F2-FREE-RECOMMENDATIONS]: up to MAX_RECOMMEND other stores shown after someone confirms, one field each.
+  const [recommend, setRecommend] = useState<string[]>(() => Array.from({ length: MAX_RECOMMEND }, (_, i) => join.recommend[i] ?? ""));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const w = joinWords(language);
-  const changed = on !== join.on || heading !== join.heading || line !== join.line;
+  const picks = parseJoinBox({ recommend }).recommend;
+  const changed = on !== join.on || heading !== join.heading || line !== join.line || picks.join(" ") !== join.recommend.join(" ");
 
   async function save(event: React.FormEvent) {
     event.preventDefault();
@@ -41,13 +44,19 @@ export function JoinBoxEditor({
       const response = await fetch("/api/store/signup-box", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ on, heading, line }),
+        body: JSON.stringify({ on, heading, line, recommend }),
       });
       const raw: unknown = await response.json();
       const data: Record<string, unknown> = raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
       const saved = data.join && typeof data.join === "object" && !Array.isArray(data.join) ? data.join as Record<string, unknown> : {};
-      const expected = parseJoin({on,heading,line});
-      if (response.ok && data.ok === true && data.error === undefined && saved.on === expected.on && saved.heading === expected.heading && saved.line === expected.line) {
+      const expected = parseJoinBox({ on, heading, line, recommend });
+      const savedPicks = Array.isArray(saved.recommend) ? saved.recommend : [];
+      if (response.status === 400 && data.error === "recommend" && Array.isArray(data.refused)) {
+        const names = data.refused.filter((h): h is string => typeof h === "string").map((h) => `@${h}`).join(", ");
+        setError(`Nothing was saved. We cannot recommend ${names}: a store you recommend has to be another store on Marktmorgen, not your own, and not switched off. Check the address and try again.`);
+        return;
+      }
+      if (response.ok && data.ok === true && data.error === undefined && saved.on === expected.on && saved.heading === expected.heading && saved.line === expected.line && JSON.stringify(savedPicks) === JSON.stringify(expected.recommend)) {
         toast("Email sign-up settings saved.");
         router.refresh();
         return;
@@ -110,6 +119,39 @@ export function JoinBoxEditor({
           <p className="mt-1 text-sm text-ink-soft">Left empty, both are written for you in your store&apos;s language. Say what people get, and how often.</p>
         </div>
       </div>
+
+      <fieldset className="mt-6">
+        <legend className="field-label">Recommend other stores (optional)</legend>
+        <p className="mt-1 text-sm text-ink-soft" id="join-recommend-help">
+          After someone confirms, they see up to {MAX_RECOMMEND} other Marktmorgen stores you recommend, as links to those stores&apos; pages.
+          It is free, nobody is paid, and nobody is signed up to another list: they visit a store and decide there. Type a store&apos;s
+          address, the part after marktmorgen.com/@.
+        </p>
+        <div className="mt-3 grid gap-3">
+          {recommend.map((value, i) => (
+            <div key={i}>
+              <label htmlFor={`join-recommend-${i}`} className="text-sm font-semibold text-ink">{`Store address ${i + 1}`}</label>
+              <div className="mt-1 flex items-center gap-2">
+                <span aria-hidden="true" className="text-ink-soft">@</span>
+                <input
+                  id={`join-recommend-${i}`}
+                  disabled={saving}
+                  type="text"
+                  inputMode="url"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  maxLength={25}
+                  aria-describedby="join-recommend-help"
+                  value={value}
+                  onChange={(e) => setRecommend((all) => all.map((v, k) => (k === i ? e.target.value : v)))}
+                  className="field"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </fieldset>
 
       <div className="mt-5 rounded-2xl bg-paper p-5 ring-1 ring-line" role="group" aria-label="Preview">
         <p className="text-xs font-bold uppercase tracking-wide text-ink-soft">Preview</p>

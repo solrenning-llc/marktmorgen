@@ -32,8 +32,8 @@
  * it `email` for the first kind and works the same for the second.
  */
 import { type PlanDispute, parsePlanDispute, parsePlanDisputes, withPlanDispute } from "@/lib/plan-dispute-rules";
-import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
-export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin } from "@/lib/store-field-rules";
+import { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, type StoreJoinBox, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin, parseJoinBox } from "@/lib/store-field-rules";
+export { MAX_NAME_LENGTH, MAX_BIO_LENGTH, MAX_ADDRESSES, isFree, type StoreJoin, type StoreJoinBox, MAX_JOIN_HEADING, MAX_JOIN_LINE, parseJoin, parseJoinBox } from "@/lib/store-field-rules";
 import { MAX_LINKS, type NumbersLink, parseLinks } from "@/lib/numbers-links";
 import { type ShipProblem, type Shipping, shipProblem, readShippingSku } from "@/lib/shipping";
 import { type CartDeal, NO_DEAL, parseCartDeal } from "@/lib/cart-rules";
@@ -662,7 +662,7 @@ export type Store = {
    * and the creator's own heading and line for it ("" means the store
    * language's words, lib/buyer-words/join.ts). Off on stores written before.
    */
-  join: StoreJoin;
+  join: StoreJoinBox;
   /** The newest reviews with words, for "What buyers say" on the store page (lib/store-quotes.ts). */
   quotes: StoreQuote[];
   /** The contact form on the store page (lib/store-contact.ts), with the same shape as the sign-up box's settings. */
@@ -1093,7 +1093,7 @@ function parseStore(raw: unknown): Store | null {
       // Stores written before reviews existed have none.
       reviewed: value.reviewed === true,
       socials: parseSocials(value.socials),
-      join: parseJoin(value.join),
+      join: parseJoinBox(value.join),
       quotes: parseQuotes(value.quotes),
       contact: parseJoin(value.contact),
       tips: parseTips(value.tips),
@@ -1475,7 +1475,7 @@ async function freshStore(fields: {
     reviewed: false,
     posts: 0,
     socials: [],
-    join: { on: false, heading: "", line: "" },
+    join: { on: false, heading: "", line: "", recommend: [] },
     quotes: [],
     contact: { on: false, heading: "", line: "" },
     tips: { ...NO_TIPS },
@@ -4304,7 +4304,7 @@ export async function dropQuotes(email: string, gone: (quote: StoreQuote) => boo
 
 /** Switches the store page's sign-up box and saves its words. */
 export async function setJoin(email: string, raw: unknown): Promise<Store | null> {
-  const join = parseJoin(raw);
+  const join = parseJoinBox(raw);
   return patchStore(email, () => ({ join }));
 }
 

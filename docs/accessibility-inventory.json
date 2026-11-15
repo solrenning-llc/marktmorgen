@@ -1462,6 +1462,7 @@
     "components/intro-editor.tsx",
     "components/invite-link-box.tsx",
     "components/join-box-editor.tsx",
+    "components/join-recommendations.tsx",
     "components/kept-by-currency.tsx",
     "components/kit-editor.tsx",
     "components/leave-editor.tsx",

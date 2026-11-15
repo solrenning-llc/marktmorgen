@@ -9,6 +9,8 @@ import { JOIN_TOKEN, readJoinToken } from "@/lib/store-join";
 import { speech } from "@/lib/buyer-words";
 import { joinWords } from "@/lib/buyer-words/join";
 import { leadIdOf } from "@/lib/ad-consent";
+import { readRecommended } from "@/lib/join-recommend";
+import { JoinRecommendations } from "@/components/join-recommendations";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -76,11 +78,14 @@ export default async function JoinPage({ params, searchParams }: Params) {
       </>
     );
   } else if (status === "joined") {
+    // The stores the creator recommends (119 [F2-FREE-RECOMMENDATIONS]), paid for as public requests before they are read.
+    const recommended = await readRecommended(store).catch(() => []);
     body = (
       <>
         <p className="st-price text-sm">{w.doneBadge}</p>
         <h1 className={`${title} mt-5`}>{w.doneTitle(store.name)}</h1>
         <p className="st-muted mt-4 text-lg">{w.doneBody}</p>
+        <JoinRecommendations from={store.name} stores={recommended} language={store.language} />
       </>
     );
   } else {

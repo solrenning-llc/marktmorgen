@@ -26,6 +26,9 @@ const en = {
   doneBadge: "You are on the list",
   doneTitle: (store: string) => `Welcome to ${store}'s list`,
   doneBody: "You will hear when there is something new. To stop, use the link at the bottom of any email.",
+  /** Over the stores the creator recommends after a sign-up (lib/join-recommend.ts). */
+  recommendHeading: (store: string) => `${store} recommends`,
+  recommendNote: "Nobody paid to be listed here. You are not signed up to these stores: visit one, and sign up there only if you want to.",
   notices: {
     email: { title: "That does not look like an email address", body: "Check it and try again. The confirmation goes to the address you type, so it has to be one you can open." },
     limited: { title: "Too many sign-ups for now", body: "To keep this form from being used to flood somebody's inbox, it takes a limited number an hour. Try again in an hour." },
@@ -60,6 +63,8 @@ const es: JoinWords = {
   doneBadge: "Ya estás en la lista",
   doneTitle: (store) => `Bienvenido a la lista de ${store}`,
   doneBody: "Te enterarás cuando haya algo nuevo. Para dejar de recibirlos, usa el enlace al final de cualquier email.",
+  recommendHeading: (store) => `${store} recomienda`,
+  recommendNote: "Nadie pagó por aparecer aquí. No te hemos suscrito a estas tiendas: visita una y suscríbete allí solo si quieres.",
   notices: {
     email: { title: "Eso no parece una dirección de email", body: "Revísala y vuelve a intentarlo. La confirmación va a la dirección que escribas, así que tiene que ser una que puedas abrir." },
     limited: { title: "Demasiadas inscripciones por ahora", body: "Para que este formulario no se use para llenar el buzón de nadie, acepta un número limitado por hora. Inténtalo dentro de una hora." },
@@ -92,6 +97,8 @@ const fr: JoinWords = {
   doneBadge: "Vous êtes inscrit",
   doneTitle: (store) => `Bienvenue sur la liste de ${store}`,
   doneBody: "Vous serez prévenu quand il y aura du nouveau. Pour arrêter, utilisez le lien en bas de n'importe quel e-mail.",
+  recommendHeading: (store) => `${store} recommande`,
+  recommendNote: "Personne n'a payé pour figurer ici. Vous n'êtes pas inscrit à ces boutiques : visitez-en une, et inscrivez-vous seulement si vous le souhaitez.",
   notices: {
     email: { title: "Cela ne ressemble pas à une adresse e-mail", body: "Vérifiez-la et réessayez. La confirmation part à l'adresse tapée : il faut donc pouvoir l'ouvrir." },
     limited: { title: "Trop d'inscriptions pour le moment", body: "Pour que ce formulaire ne serve pas à inonder la boîte de quelqu'un, il en accepte un nombre limité par heure. Réessayez dans une heure." },
@@ -124,6 +131,8 @@ const de: JoinWords = {
   doneBadge: "Du stehst auf der Liste",
   doneTitle: (store) => `Willkommen auf der Liste von ${store}`,
   doneBody: "Du erfährst es, wenn es etwas Neues gibt. Zum Abmelden nutze den Link unten in jeder E-Mail.",
+  recommendHeading: (store) => `${store} empfiehlt`,
+  recommendNote: "Niemand hat dafür bezahlt, hier zu stehen. Du bist bei diesen Shops nicht angemeldet: Besuche einen und melde dich dort nur an, wenn du möchtest.",
   notices: {
     email: { title: "Das sieht nicht nach einer E-Mail-Adresse aus", body: "Prüfe sie und versuche es noch einmal. Die Bestätigung geht an die eingegebene Adresse, du musst sie also öffnen können." },
     limited: { title: "Gerade zu viele Anmeldungen", body: "Damit niemand mit diesem Formular ein fremdes Postfach flutet, nimmt es pro Stunde nur eine begrenzte Zahl an. Versuche es in einer Stunde wieder." },
@@ -156,6 +165,8 @@ const it: JoinWords = {
   doneBadge: "Sei nella lista",
   doneTitle: (store) => `Benvenuto nella lista di ${store}`,
   doneBody: "Saprai quando c'è qualcosa di nuovo. Per smettere, usa il link in fondo a qualsiasi email.",
+  recommendHeading: (store) => `${store} consiglia`,
+  recommendNote: "Nessuno ha pagato per comparire qui. Non sei iscritto a questi negozi: visitane uno e iscriviti lì solo se vuoi.",
   notices: {
     email: { title: "Non sembra un indirizzo email", body: "Controllalo e riprova. La conferma va all'indirizzo che scrivi, quindi deve essere uno che puoi aprire." },
     limited: { title: "Troppe iscrizioni per ora", body: "Perché questo modulo non serva a riempire la casella di qualcuno, ne accetta un numero limitato all'ora. Riprova tra un'ora." },
@@ -188,6 +199,8 @@ const nl: JoinWords = {
   doneBadge: "Je staat op de lijst",
   doneTitle: (store) => `Welkom op de lijst van ${store}`,
   doneBody: "Je hoort het wanneer er iets nieuws is. Stoppen kan via de link onderaan elke e-mail.",
+  recommendHeading: (store) => `${store} raadt aan`,
+  recommendNote: "Niemand heeft betaald om hier te staan. Je bent niet aangemeld bij deze winkels: bezoek er een en meld je daar alleen aan als je dat wilt.",
   notices: {
     email: { title: "Dat lijkt geen e-mailadres", body: "Controleer het en probeer het opnieuw. De bevestiging gaat naar het adres dat je typt, dus het moet er een zijn dat je kunt openen." },
     limited: { title: "Even te veel aanmeldingen", body: "Zodat dit formulier niet gebruikt wordt om iemands inbox te overspoelen, neemt het er per uur maar een beperkt aantal aan. Probeer het over een uur opnieuw." },
@@ -221,6 +234,8 @@ const pt: JoinWords = {
   doneBadge: "Está na lista",
   doneTitle: (store) => `Bem-vindo à lista de ${store}`,
   doneBody: "Vai saber quando houver algo novo. Para deixar de receber, use a ligação no fim de qualquer email.",
+  recommendHeading: (store) => `${store} recomenda`,
+  recommendNote: "Ninguém pagou para aparecer aqui. Não foi inscrito nestas lojas: visite uma e inscreva-se lá só se quiser.",
   notices: {
     email: { title: "Isso não parece um endereço de email", body: "Verifique-o e tente novamente. A confirmação é enviada para o endereço que introduzir, por isso tem de ser um a que tenha acesso." },
     limited: { title: "Demasiadas inscrições por agora", body: "Para que este formulário não seja usado para inundar a caixa de entrada de alguém, aceita um número limitado por hora. Tente novamente dentro de uma hora." },

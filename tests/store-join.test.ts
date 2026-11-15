@@ -44,7 +44,7 @@ async function main(): Promise<void> {
 
   part("Only when switched on");
   let store = await fresh();
-  is("a new store has no box", [store.join, joinOpen(store)], [{ on: false, heading: "", line: "" }, false]);
+  is("a new store has no box", [store.join, joinOpen(store)], [{ on: false, heading: "", line: "", recommend: [] }, false]);
   is("and takes no sign-ups", await askToJoin({ store, email: "dana@example.com", ip: "1.1.1.1", origin }), "closed");
   is("switched on without a subscription in good standing, it still takes none", await setJoin("owner@example.com", { on: true }).then((s) => joinOpen(s!)), false);
   await setSubscription("owner@example.com", { customerId: "cus_Owner00001", subscriptionId: "sub_Owner00001", active: true, tier: "creator", trialEnds: 0, period: paidPeriod() });

@@ -19,7 +19,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { claimHandle, setJoin, storeForEmail, type Store } from "@/lib/store";
-import { MAX_RECOMMEND, parseJoin } from "@/lib/store-field-rules";
+import { MAX_RECOMMEND, parseJoinBox } from "@/lib/store-field-rules";
 import { checkRecommended, readRecommended } from "@/lib/join-recommend";
 import { JoinRecommendations } from "@/components/join-recommendations";
 import { joinWords } from "@/lib/buyer-words/join";
@@ -29,10 +29,10 @@ import { done, is, part } from "./check";
 
 async function main(): Promise<void> {
   part("The picks, as saved");
-  is("none by default", parseJoin({ on: true }).recommend, []);
-  is("addresses tidied, an @ dropped, repeats and non-addresses dropped", parseJoin({ recommend: ["@Harbor", "harbor", "not an address!", "  quill-press "] }).recommend, ["harbor", "quill-press"]);
-  is(`at most ${MAX_RECOMMEND}`, parseJoin({ recommend: ["aa1", "bb2", "cc3", "dd4"] }).recommend, ["aa1", "bb2", "cc3"]);
-  is("not a list: none", parseJoin({ recommend: "harbor" }).recommend, []);
+  is("none by default", parseJoinBox({ on: true }).recommend, []);
+  is("addresses tidied, an @ dropped, repeats and non-addresses dropped", parseJoinBox({ recommend: ["@Harbor", "harbor", "not an address!", "  quill-press "] }).recommend, ["harbor", "quill-press"]);
+  is(`at most ${MAX_RECOMMEND}`, parseJoinBox({ recommend: ["aa1", "bb2", "cc3", "dd4"] }).recommend, ["aa1", "bb2", "cc3"]);
+  is("not a list: none", parseJoinBox({ recommend: "harbor" }).recommend, []);
 
   redis.clear();
   await claimHandle("me@example.com", "mykitchen", "My Kitchen", "");
@@ -42,7 +42,7 @@ async function main(): Promise<void> {
   // A suspended store (lib/takedown.ts) is never recommended.
   const shut = (await storeForEmail("c@example.com"))!;
   const { ownerKey } = await import("@/lib/store");
-  await redis.pipeline([["SET", await ownerKey("c@example.com"), JSON.stringify({ ...shut, suspended: true })]]);
+  await redis.pipeline([["SET", await ownerKey("c@example.com"), JSON.stringify({ ...shut, suspended: "2026-11-15T00:00:00.000Z" })]]);
   const me = (await storeForEmail("me@example.com"))!;
 
   part("Checked at saving");

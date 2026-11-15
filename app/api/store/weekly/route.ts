@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
   // Another site may only stop these emails (proxy.ts lets a mail app's one-click POST in), never start them again:
   // starting is a press on this site's own page.
   if (!off && fromAnotherSite(request)) {
-    return page("Not from another site", "<h1>Not turned on</h1><p>Only our own page can turn these emails back on. Open the link from the email in your browser and, once it has stopped them, press Start it again.</p>", 403);
+    return page("Not turned on", "<h1>Not turned on</h1><p>Only our own page can turn these emails back on. Open the link from the email in your browser and, once it has stopped them, press Start it again.</p>", 403);
   }
   try {
     await setWeeklyOff(asked.handle, off);

@@ -59,6 +59,7 @@ async function main(): Promise<void> {
   const refusedPage = await refused.text();
   is("refused", refused.status, 403);
   is("saying the truth: the link is known, only our own page turns them on", [/not one we recognize/.test(refusedPage), /Only our own page can turn these emails back on/.test(refusedPage)], [false, true]);
+  is("its title and its heading say the same", [/<title>Not turned on<\/title>/.test(refusedPage), /<h1>Not turned on<\/h1>/.test(refusedPage)], [true, true]);
   is("still off", await weeklyOff(store.handle), true);
 
   part("A link that does not read, for a store that exists or not, says the same");

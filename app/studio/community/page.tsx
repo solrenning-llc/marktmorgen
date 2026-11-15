@@ -3,7 +3,8 @@ import { type Reward, pointsOf, readRewards } from "@/lib/community-points";
 import { idsOfKind, readCards } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { unlocksOf } from "@/lib/community-locked";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
@@ -23,6 +24,8 @@ import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
 import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
+import { CommunityApprovalStudio, type HeldRow, type SpaceRule } from "@/components/community-approval-studio";
+import { approvalsOf, heldDaysLeft, heldQueue } from "@/lib/community-approval";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
 import { meetView } from "@/lib/meet-connect";
@@ -75,6 +78,9 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   const config = id ? await readConfig(id) : null;
 
   let queue: QueueRow[] | null = [];
+  // 543 [CM2]: each space's approval rule and what waits for it; null when not read.
+  let rules: SpaceRule[] | null = [];
+  let held: HeldRow[] | null = [];
   let members: StudioMember[] = [];
   let totals = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
@@ -172,6 +178,33 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
     }));
     totals = { members: first.total, listed, posts, reach };
 
+    rules = await approvalsOf(id, config.spaces.map((s) => s.id)).then(
+      (found) =>
+        config.spaces.map((s) => {
+          const rule = found.get(s.id)!;
+          return { id: s.id, name: s.name, posts: { mode: rule.posts.mode, n: rule.posts.n }, comments: { mode: rule.comments.mode, n: rule.comments.n } };
+        }),
+      () => null,
+    );
+    held = await (async () => {
+      const waiting = await heldQueue(id);
+      const names = await readMembers(id, waiting.map((h) => h.a));
+      return waiting.map((h) => ({
+        id: h.id,
+        kind: h.kind,
+        author: names.get(h.a)?.n || "A member",
+        authorEmail: names.get(h.a)?.e ?? "",
+        at: h.at,
+        daysLeft: heldDaysLeft(h),
+        space: config.spaces.find((s) => s.id === h.sp)?.name ?? "a removed space",
+        title: h.title,
+        text: h.text,
+        picture: Boolean(h.img),
+        poll: Boolean(h.poll),
+        href: h.kind === "comment" ? `/@${store.handle}/community/post/${h.post}` : "",
+      }));
+    })().catch(() => null);
+
     queue = reports === null ? null : await (async () => {
       const rows = await Promise.all(
         reports.map(async (r) => {
@@ -220,6 +253,13 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             : formatMoney(p.priceCents, store.currency),
   }));
 
+  // "View as a member" draws a space shown Visible and locked as a member sees it (542 [CM1]): its way in worked out
+  // by the real page's own unlocksOf, its reads paid in studio requests first; refused or failed, each says it is not known.
+  const unlocks =
+    config && can(view.role, "settings")
+      ? await unlocksOf(store, config, (units) => countStudio(store, null, units).then((counted) => counted.ok, () => false))
+      : null;
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader
@@ -253,7 +293,9 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           canEmail={canAnnounceByEmail(store)}
           canSettings={can(view.role, "settings")}
           isOwner={view.role === "owner"}
+          approval={config ? <CommunityApprovalStudio rules={rules} queue={held} canSettings={can(view.role, "settings")} /> : null}
           rewards={rewards}
+          lockedPreview={config ? { unlocks, language: store.language, look: store.look } : null}
           courses={[...course].flatMap((id) => {
             const card = cards.get(id);
             return card ? [{ id, title: card.title }] : [];

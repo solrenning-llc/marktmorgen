@@ -1,6 +1,14 @@
 # Drip emails: an index of the pairs that fall due (design, unit 0)
 
-Status: design only, for the coordinator's review before any code (15 November 2026, Claude 4 cloud V). Nothing here is built.
+Status: built on a local branch, tested in synthetic tests only (15 November 2026, Claude 4 cloud V); not merged, not published. The design below was refined as built:
+
+- The run never reads a course outline: each drip course has a small card (`nl:drip:card:<courseId>`: its product, cohort start and the modules that open over time), written by `registerDrip` and by `touchStudent`, its bytes in the room.
+- A schedule change (a card whose schedule differs) puts the course in its store's pending set (`nl:drip:pending:<statsId>`); the run walks pending courses into the index, `DRIP_INDEX_PAGES_PER_RUN` (10) pages a store a run and `DRIP_INDEX_PAIRS_PER_RUN` (4,000) pairs, from a cursor per course (`nl:drip:walk:<statsId>`). The old set's courses are moved there once (the migration) and the old walk is gone.
+- A pair's bytes are taken from the room until its window ends (`until`), so nothing has to give them back.
+- The run reads at most a third of the store's email figure of pairs due a run (`dripIndexEntriesPerRun`: Store 25, Studio 100, Scale 267), one pair of each course in turn; `DRIP_REFUSALS_PER_STORE` is 5.
+- Each pair read costs its row (for the address and the start, from which its opening is computed again from the card), its blocked check and its mark.
+- Cost (tests/plan-cost-registry.ts, course-drip-run): Store $0.0155, Studio $0.0320, Scale $0.0691 a month; the migration once a store (course-drip-index-migration, a first-payment line). A refunded Store first year: $64.9912, under the $65 ceiling, which is unchanged.
+- Known limits: a course larger than about 30 pages (6,000 students) whose schedule changes is walked over more than one window, so some of its students may miss an email for a module that opens during the walk; past a third of the email figure of pairs due at once, the rest wait for the next run inside the window (and past three runs, leave unsent, as the email figure would refuse them anyway).
 
 ## Why
 

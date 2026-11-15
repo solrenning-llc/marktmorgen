@@ -15,11 +15,15 @@
  * go) leaves the next run to begin with the course after it, so one slow page never holds back every course after
  * it (Claude 2 on #3344); what is sent is never sent twice, and what failed is sent once the sends go again.
  *
+ * Since the drip index (docs/drip-due-index.md; tests/drip-due-index.test.ts) a run goes store by store, each store's
+ * pending courses walked into its index and its pairs due sent, one of each course in turn: the same bounds, fairness
+ * and honesty hold, the cursor now naming the store a run stopped at.
+ *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, setMailSettings, setProductCourse, setSubscription, storeForEmail, type Store } from "@/lib/store";
-import { emailKey, sendDripEmails } from "@/lib/learn";
+import { emailKey, registerDrip, sendDripEmails } from "@/lib/learn";
 import { type Course, editCourse, emptyCourse, saveCourse } from "@/lib/course";
 import * as coursesRoute from "@/app/api/cron/courses/route";
 import { paidPeriod } from "./billing-period-fixture";
@@ -36,7 +40,15 @@ type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
 /** A test's hand on the pipeline: answers a batch itself when it returns a promise, else Redis answers. */
 let inject: ((commands: Cmd[]) => Promise<unknown[]> | null) | null = null;
-redis.pipeline = (async (commands: Cmd[]) => (inject?.(commands) ?? original(commands))) as typeof redis.pipeline;
+/** A test's hand on single commands: the batch runs, and each command it picks answers `reply` instead. */
+let replace: { pick: (c: Cmd) => boolean; reply: unknown } | null = null;
+redis.pipeline = (async (commands: Cmd[]) => {
+  const own = inject?.(commands);
+  if (own) return own;
+  const out = await original(commands);
+  const r = replace;
+  return r ? commands.map((c, n) => (r.pick(c) ? r.reply : out[n])) : out;
+}) as typeof redis.pipeline;
 
 const realNow = Date.now;
 let skew = 0;
@@ -69,7 +81,15 @@ async function student(course: Course, email: string, seen = NOW): Promise<strin
   return email;
 }
 const to = (email: string) => mail.sent.filter((m) => m.to.includes(email)).length;
-const inSet = async (member: string) => (await original([["SISMEMBER", DRIP, member]]))[0] === 1;
+/**
+ * A drip course kept (docs/drip-due-index.md): still in the old set, in its store's pending set (moved there, waiting
+ * for its walk), or walked into the index with its card. Taken out is none of the three.
+ */
+const inSet = async (member: string, statsId?: string | null) => {
+  const [courseId] = member.split("|");
+  const [old, pending, card] = await original([["SISMEMBER", DRIP, member], ["SISMEMBER", `nl:drip:pending:${statsId ?? ""}`, member], ["GET", `nl:drip:card:${courseId}`]]);
+  return old === 1 || pending === 1 || typeof card === "string";
+};
 type Counts = Record<string, unknown>;
 const quiet = async <T>(work: () => Promise<T>): Promise<{ value: T | "rejected"; errors: string[] }> => {
   const errors: string[] = [];
@@ -93,31 +113,49 @@ async function main(): Promise<void> {
     const late = await student(A, "late-a@example.com");
     const run = await sendDripEmails(async () => store, async (id) => (id === A.id ? A : id === B.id ? B : null), "https://marktmorgen.com", NOW, realNow() - 1);
     is("nothing sent past the deadline", to(late), 0);
-    is("both courses wait for the next run", (run as Counts).pending, 2);
+    // The run's unit is now the store (docs/drip-due-index.md): its courses wait in its pending set.
+    is("the store waits for the next run, its two courses kept", [(run as Counts).pending, await inSet(memberOf(store, A, PA), store.statsId), await inSet(memberOf(store, B, PB), store.statsId)], [1, true, true]);
   }
 
-  part("(a) A run cut by its deadline: the next run starts at the course it stopped at, not at the head again");
+  part("(a) A run cut by its deadline: the next run starts at the store it stopped at, not at the head again");
   {
     const store = await setup();
-    await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(store, B, PB)]]);
+    // A second store, its own course and student (docs/drip-due-index.md: a run walks stores, each from its index).
+    const otherOwner = "drip-bounded-2@example.com";
+    await claimHandle(otherOwner, "drip-bounded-two", "Drip Bounded Two", "");
+    await setSubscription(otherOwner, { customerId: "cus_DripBounded02", subscriptionId: "sub_DripBounded02", active: true, tier: "pro", cycle: "month", trialEnds: 0, period: paidPeriod() });
+    const realOther = (await storeForEmail(otherOwner))!;
+    const other = { ...realOther, catalog: { ...realOther.catalog, items: [{ id: PB.id }], inline: [PB] } } as unknown as Store;
+    await original([["SADD", DRIP, memberOf(store, A, PA), memberOf(other, B, PB)]]);
     const first = await student(A, "first-a@example.com");
     const second = await student(B, "second-b@example.com");
     const loads: string[][] = [[], []];
     let pass = 0;
-    const loadCourse = async (id: string) => {
-      loads[pass].push(id);
-      // The second course of the first run is where the run's time runs out.
-      if (pass === 0 && loads[0].length === 2) skew = 10 * 60_000;
-      return id === A.id ? A : id === B.id ? B : null;
+    const load = async (handle: string) => {
+      const found = handle === store.handle ? store : handle === other.handle ? other : null;
+      if (found) loads[pass].push(handle);
+      return found;
     };
-    const one = await sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 60_000);
-    is("the first run walks the first course, and stops in the second", [to(first), to(second)], [1, 0]);
-    is("it says one course waits", (one as Counts).pending, 1);
+    const loadCourse = async (id: string) => (id === A.id ? A : id === B.id ? B : null);
+    // Stores are run in the order of their members (statsId|handle).
+    const [firstStore, secondStore] = [store, other].sort((x, y) => (`${x.statsId}|${x.handle}` < `${y.statsId}|${y.handle}` ? -1 : 1));
+    const firstEmail = firstStore === store ? first : second;
+    const secondEmail = firstStore === store ? second : first;
+    // The first run's time runs out as it emails the first store's student.
+    sesHooks.onSes = (message) => {
+      if (pass === 0 && message.to.includes(firstEmail)) skew = 10 * 60_000;
+      return undefined;
+    };
+    const loadTimed = load;
+    const one = await sendDripEmails(loadTimed, loadCourse, "https://marktmorgen.com", NOW, realNow() + 60_000);
+    is("the first run emails the first store's student, and stops before the second store", [to(firstEmail), to(secondEmail)], [1, 0]);
+    is("it says one store waits", (one as Counts).pending, 1);
+    sesHooks.onSes = undefined;
     skew = 0;
     pass = 1;
-    await sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW, realNow() + 60_000);
-    is("the next run starts at the course the first one stopped at", loads[1][0], loads[0][1]);
-    is("its student is emailed once, the first course's not twice", [to(first), to(second)], [1, 1]);
+    await sendDripEmails(load, loadCourse, "https://marktmorgen.com", NOW, realNow() + 60_000);
+    is("the next run starts at the store the first one stopped at", loads[1][0], secondStore.handle);
+    is("its student is emailed once, the first store's not twice", [to(firstEmail), to(secondEmail)], [1, 1]);
   }
 
   part("(b) A course that throws is counted and logged; the courses after it still get their emails");
@@ -139,7 +177,7 @@ async function main(): Promise<void> {
     is("the course after it is emailed", to(after), 1);
     is("the failure is counted", value === "rejected" ? null : (value as Counts).failed, 1);
     is("and logged", errors.some((e) => e.includes("drip")), true);
-    is("the failing course stays in the drip set", await inSet(memberOf(store, A, PA)), true);
+    is("the failing course stays in the drip set", await inSet(memberOf(store, A, PA), store.statsId), true);
     await quiet(() => sendDripEmails(async () => store, loadCourse, "https://marktmorgen.com", NOW));
     is("and is tried again the next run", tries, 2);
   }
@@ -158,22 +196,29 @@ async function main(): Promise<void> {
     is("the course after it is emailed", to(after), 1);
   }
 
-  part("(b) A page of students or a blocked list answered in another shape: that course is failed and kept, never 'nobody'");
-  for (const [label, pick] of [
-    ["a page of students", (c: Cmd) => c[0] === "HSCAN" && String(c[1]).startsWith(`nl:course:${A.id}:`)],
-    ["the blocked list", (c: Cmd) => c[0] === "SMEMBERS" && String(c[1]) === `nl:course:${A.id}:blocked`],
-  ] as [string, (c: Cmd) => boolean][]) {
+  part("(b) A page of students or a blocked check answered in another shape: that course is failed and kept, never 'nobody'");
+  // Since the drip index (docs/drip-due-index.md): a page is read by the walk into the index, which fails that course;
+  // a pair's blocked check (SISMEMBER) answered in another shape keeps the pair, unsent, and the store's run is
+  // counted failed, while every other course's pair goes on.
+  for (const [label, pick, walked] of [
+    ["a page of students", (c: Cmd) => c[0] === "HSCAN" && String(c[1]).startsWith(`nl:course:${A.id}:`), 1],
+    ["the blocked check", (c: Cmd) => c[0] === "SISMEMBER" && String(c[1]) === `nl:course:${A.id}:blocked`, 2],
+  ] as [string, (c: Cmd) => boolean, number][]) {
     const store = await setup();
     await original([["SADD", DRIP, memberOf(store, A, PA)]]);
     await original([["SADD", DRIP, memberOf(store, B, PB)]]);
     const tag = label.replace(/\W+/g, "-");
     const unread = await student(A, `unread-${tag}@example.com`);
     const after = await student(B, `after-${tag}@example.com`);
-    inject = (commands) => (commands.some(pick) ? Promise.resolve(commands.map(() => "QUEUED")) : null);
+    replace = { pick, reply: "QUEUED" };
     const { value } = await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : id === B.id ? B : null), "https://marktmorgen.com", NOW));
-    inject = null;
-    is(`${label} unknown: failed and not counted walked, the other course walked`, value === "rejected" ? null : [(value as Counts).failed, (value as Counts).courses], [1, 1]);
-    is(`${label} unknown: nobody of that course emailed, the other course's student emailed, the course kept`, [to(unread), to(after), await inSet(memberOf(store, A, PA))], [0, 1, true]);
+    replace = null;
+    is(`${label} unknown: failed, and walked only where its page read`, value === "rejected" ? null : [(value as Counts).failed, (value as Counts).courses], [1, walked]);
+    is(`${label} unknown: nobody of that course emailed, the other course's student emailed, the course kept`, [to(unread), to(after), await inSet(memberOf(store, A, PA), store.statsId)], [0, 1, true]);
+    const due = (await original([["ZRANGEBYSCORE", `nl:drip:due:${store.statsId}`, "-inf", "+inf"]]))[0] as string[];
+    if (walked === 2) is(`${label} unknown: its pair kept in the index for the next run`, due.some((m) => m.startsWith(`${A.id}|${emailKey(unread)}|`)), true);
+    await quiet(() => sendDripEmails(async () => store, async (id) => (id === A.id ? A : id === B.id ? B : null), "https://marktmorgen.com", NOW));
+    is(`${label} answered again: the next run emails that course's student once`, [to(unread), to(after)], [1, 1]);
   }
 
   part("(c) A course past 5,000 students: the least active student is emailed too, and an unreadable row is said");
@@ -276,7 +321,8 @@ async function main(): Promise<void> {
     await saveCourse(course, ROOM);
     const linked = await setProductCourse(owner, made.product.id, { id: course.id, lessons: 1 });
     if (!linked.ok) throw Error("Synthetic course was not linked");
-    const handle = (await storeForEmail(owner))!.handle;
+    const routeStore = (await storeForEmail(owner))!;
+    const handle = routeStore.handle;
     const member = `${course.id}|${handle}|${made.product.id}`;
     await original([["SADD", DRIP, member]]);
     const routeStudent = await student(course, "route-student@example.com");
@@ -296,7 +342,7 @@ async function main(): Promise<void> {
       await call();
       inject = null;
       is(`${label}: the answer was given to the walk's own read`, hits > 0, true);
-      is(`${label}: the course stays in the drip set`, await inSet(member), true);
+      is(`${label}: the course stays in the drip set`, await inSet(member, routeStore.statsId), true);
     }
     inject = (commands) => (commands.some((c) => c[0] === "SMEMBERS" && c[1] === DRIP) ? Promise.resolve(commands.map(() => "QUEUED")) : null);
     const unknown = await call();
@@ -305,10 +351,17 @@ async function main(): Promise<void> {
     // Put back for the controls, whatever an earlier step did to it.
     await original([["SADD", DRIP, member]]);
     const healthy = await call();
-    is("healthy control: the student is emailed once, the course kept", [to(routeStudent), await inSet(member), healthy.dripsFailed], [1, true, undefined]);
+    is("healthy control: the student is emailed once, the course kept", [to(routeStudent), await inSet(member, routeStore.statsId), healthy.dripsFailed], [1, true, undefined]);
+    // Confirmed absence, as the studio removes a course (app/api/store/course/route.ts): its record deleted and
+    // registerDrip told nothing opens over time, which deletes its card; a pair of it still in the index is dropped
+    // by the run, never emailed.
     await original([["DEL", `nl:course:${course.id}`]]);
+    await registerDrip(routeStore, made.product as never, { ...course, modules: [] } as Course);
+    const late = await student(course, "route-late@example.com");
+    await original([["ZADD", `nl:drip:due:${routeStore.statsId}`, NOW - 12 * 3600, `${course.id}|${emailKey(late)}|${course.modules[0].id}`]]);
     await call();
-    is("confirmed absence control: a course whose record is gone leaves the drip set", await inSet(member), false);
+    const left = (await original([["ZRANGEBYSCORE", `nl:drip:due:${routeStore.statsId}`, "-inf", "+inf"]]))[0] as string[];
+    is("confirmed absence control: a course whose record is gone leaves the drip set, its pair dropped unsent", [await inSet(member, routeStore.statsId), to(late), left.some((m) => m.startsWith(course.id))], [false, 0, false]);
   }
 
   Date.now = realNow;

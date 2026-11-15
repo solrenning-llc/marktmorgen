@@ -27,16 +27,17 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
-import { saleHandles } from "@/lib/store";
+import { ensureStatsId, saleHandles, storeRef } from "@/lib/store";
+import { allowanceFor } from "@/lib/store-allowance-rules";
 import { createHash, randomBytes } from "node:crypto";
 import { fileUrl } from "@/lib/file-store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, emailForSession, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendEmail, serviceMailKnownUnavailable } from "@/lib/email";
 import { coursesWords } from "@/lib/buyer-words/courses";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
+import { type DataChange, type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { orderWrite } from "@/lib/order-data";
 import { earnedCourses } from "@/lib/community-points";
@@ -495,30 +496,70 @@ export async function courseAccess(store: Store, product: Listing, cookies: Cook
 const studentsKey = (courseId: string) => `nl:course:${courseId}:students`;
 const doneKey = (courseId: string, email: string) => `nl:course:${courseId}:done:${emailKey(email)}`;
 
-type StudentRow = { e: string; s: number; l: number };
+/** A student's row: their address, when they began (`s`) and last came back (`l`); `i` once their drip pairs are in the store's index. */
+type StudentRow = { e: string; s: number; l: number; i?: 1 };
 
 /**
  * Notes that a student opened the course, keeping when they began. A new
  * student's row takes its room in the store's data room first
  * (lib/store-data.ts); when there is none it is not written, and the course
  * opens all the same: the row is what the studio shows, not their access.
+ *
+ * With `drip` (the course's outline and its product, which the course page has), the same write puts the student's
+ * pairs in the store's drip index (dueKey, docs/drip-due-index.md): one ZADD of every module that
+ * opens over time, scored when it opens for them, in the same pipeline as the row, its bytes taken from the room with
+ * the row's (a full room writes neither). Once, marked on the row (`i`), and again when their start moves earlier.
  */
-export async function touchStudent(courseId: string, email: string, startSeconds: number, room: DataStore): Promise<void> {
+export async function touchStudent(
+  courseId: string,
+  email: string,
+  startSeconds: number,
+  room: DataStore,
+  drip?: { course: Course; productId: string },
+): Promise<void> {
   if (!isRedisConfigured()) return;
   const key = studentsKey(courseId);
   const field = emailKey(email);
   const [raw] = await redisPipeline([["HGET", key, field]]);
   let row: StudentRow = { e: normaliseEmail(email), s: Math.floor(startSeconds), l: 0 };
+  let indexed = false;
   if (typeof raw === "string") {
     try {
       const old = JSON.parse(raw) as StudentRow;
-      row = { e: old.e || row.e, s: Math.min(old.s || row.s, row.s), l: 0 };
+      const s = Math.min(old.s || row.s, row.s);
+      indexed = old.i === 1 && old.s === s;
+      row = { e: old.e || row.e, s, l: 0 };
     } catch {}
   }
-  row.l = Math.floor(Date.now() / 1000);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  row.l = nowSeconds;
+  const card = drip && drip.course.id === courseId ? dripCardOf(drip.course, drip.productId) : null;
+  const index = card && room.statsId && room.handle && !indexed ? { statsId: room.statsId, handle: room.handle, card } : null;
+  const pairs = index ? duePairs(courseId, field, row.s, index.card, nowSeconds) : [];
+  // Marked once its pairs are written, and kept marked by a visit that writes none (the course start, with no outline).
+  if (index || indexed) row.i = 1;
   const json = JSON.stringify(row);
-  if (typeof raw !== "string" && !(await takeData(room, [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }])).ok) return;
-  await redisPipeline([["HSET", key, field, json]]);
+  const changes: DataChange[] = [
+    ...(typeof raw !== "string" ? [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }] : []),
+    ...(index && pairs.length > 0 ? [...pairRoom(pairs), cardRoom(courseId, index.card)] : []),
+  ];
+  if (changes.length > 0 && !(await takeData(room, changes)).ok) {
+    // A new row and its pairs together or neither; a row already kept is written without its pairs, and without its
+    // mark, so a later visit tries them again.
+    if (typeof raw !== "string") return;
+    delete row.i;
+    await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
+    return;
+  }
+  const commands: Cmd[] = [["HSET", key, field, json]];
+  if (index && pairs.length > 0) {
+    commands.push(
+      ["ZADD", dueKey(index.statsId), ...pairs.flatMap(([score, member]) => [score, member])],
+      ["SADD", DRIP_STORES, `${index.statsId}|${index.handle}`],
+      ["SET", cardKey(courseId), JSON.stringify(index.card), "NX"],
+    );
+  }
+  await redisPipeline(commands);
 }
 
 /**
@@ -1008,71 +1049,204 @@ export async function openCourseLink(token: string): Promise<LinkGrant | null> {
 
 // ------------------------------------------------------------ drip emails
 
-const DRIP_SET = "nl:courses:drip";
 /**
- * Where the next run starts when a run's deadline stopped it: the course it stopped at and the page of that course's
- * students it was on (`{ m, h }`), so the courses after it are not always the ones left for later. Gone after a run
- * that walked every course, and in thirty days by itself.
+ * The old global set of drip courses (`course|handle|product`), read only to move each course into its store's pending
+ * set (the migration; docs/drip-due-index.md). Nothing adds to it any more.
  */
-const DRIP_CURSOR = "nl:courses:cursor";
+const DRIP_SET = "nl:courses:drip";
+/** The stores with a drip index (`statsId|handle`): the run's only global read besides the old set and its cursor. */
+const DRIP_STORES = "nl:drip:stores";
+/**
+ * Where the next run starts when a run's deadline stopped it: the store it stopped at (`{ s }`), so the stores after it
+ * are not always the ones left for later. Gone after a run that reached every store, and in thirty days by itself.
+ */
+const DRIP_CURSOR = "nl:drip:cursor";
 const DRIP_CURSOR_SECONDS = 30 * 86_400;
+/** A store's sorted set of the pairs that fall due: member `course|emailKey|module`, score when the module opens for them. */
+const dueKey = (statsId: string) => `nl:drip:due:${statsId}`;
+/** A course's drip card: its product, its cohort start and the modules that open over time (id, title, days, lessons). */
+const cardKey = (courseId: string) => `nl:drip:card:${courseId}`;
+/** A store's courses waiting to be walked into its index (`course|handle|product`): a new schedule, or the migration. */
+const pendingKey = (statsId: string) => `nl:drip:pending:${statsId}`;
+/** Where each pending course's walk stopped, a field a course: the next page of its students. */
+const walkKey = (statsId: string) => `nl:drip:walk:${statsId}`;
+/** A course's card in the store's data room. */
+const CARD_SLOT = (courseId: string) => `dc:${courseId}`;
 /** Students read at a time (HSCAN COUNT, a hint): every one of them is read, page after page, never a first few thousand. */
 const DRIP_PAGE = 200;
-/** How long a run walks the courses when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
+/** How long a run goes on when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
 const DRIP_RUN_MS = 40_000;
+/** A pair's window: a module that opened more than three days ago is never emailed about, so a new module does not email about months gone by. */
+const DRIP_WINDOW_SECONDS = 3 * 86_400;
 /**
  * The ceiling on a run's marks before they are spent (the MR rule; found under Claude 7's MÉDIO on #3344): a mark is a
- * SET NX for each student and module due, and a send that does not go lets it go, so without a ceiling a course
- * whose sends are refused (the store's email figure spent) would spend a mark on every one of its students, every run.
- * A run stops trying marks in a course after this many sends that did not go, and in a store after
- * DRIP_REFUSALS_PER_STORE, until the next run: the rest wait inside the same three-day window, never sent twice.
+ * SET NX for each pair due, and a send that does not go lets it go. A run stops trying a course's pairs after
+ * DRIP_REFUSALS_PER_COURSE sends that did not go, and a store's after DRIP_REFUSALS_PER_STORE, until the next run: the
+ * rest wait in the index inside the same three-day window, never sent twice.
  */
 export const DRIP_REFUSALS_PER_COURSE = 3;
-/** The same ceiling for all of one store's courses in a run, so many courses cannot multiply it. */
-export const DRIP_REFUSALS_PER_STORE = 20;
+/**
+ * The same ceiling for a whole store in a run: five sends that did not go in a day already say the store's sends are
+ * not going (its email figure spent, or the provider refusing). A course with refusals does not hold back the store's
+ * other courses: the per-course ceiling stops that course and the run goes on to the next pair of another course; only
+ * this one stops the store, for this run.
+ */
+export const DRIP_REFUSALS_PER_STORE = 5;
+/**
+ * The pages of students a store's walk into its index reads a run (a course whose schedule changed, or one of the old
+ * set): a page is DRIP_PAGE students, read once and written as their pairs. A course larger than this many pages a run
+ * is walked over several runs from where it stopped; the store's other courses wait their turn. Its cost is a line of
+ * every plan (tests/plan-cost-registry.ts, course-drip-run).
+ */
+export const DRIP_INDEX_PAGES_PER_RUN = 10;
+/** The pairs a store's walk writes a run before it stops at the next page (a page itself is written whole). */
+export const DRIP_INDEX_PAIRS_PER_RUN = 4_000;
+/** The runs inside a pair's window: what a store's email figure is spread over (dripIndexEntriesPerRun). */
+export const DRIP_WINDOW_RUNS = 3;
+
+/**
+ * The pairs due that a store's run reads at most: a third of the store's email figure a month (lib/store-allowance-
+ * rules.ts), so a whole month's emails fit inside one pair's three-day window. Each costs its row, its blocked check
+ * and its mark (tests/plan-cost-registry.ts, course-drip-run); what is due past it waits for the next run.
+ */
+export function dripIndexEntriesPerRun(store: Parameters<typeof allowanceFor>[0], nowSeconds = Date.now() / 1000): number {
+  return Math.max(0, Math.ceil(allowanceFor(store, "email", nowSeconds) / DRIP_WINDOW_RUNS));
+}
+
 type Cmd = (string | number)[];
 const dripMailKey = (courseId: string, email: string, moduleId: string) =>
   `nl:course:${courseId}:dripmail:${emailKey(email)}:${moduleId}`;
 
-/** Remembers that this course opens modules over time, for the daily job. */
-export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
-  const member = `${course.id}|${store.handle}|${product.id}`;
-  const drips = course.modules.some((m) => m.dripDays > 0);
-  await redisPipeline([[drips ? "SADD" : "SREM", DRIP_SET, member]]);
+/** A course's drip card as kept: product `p`, cohort start `s`, modules `m` ([id, title, days, lessons]), schedule `g`. */
+type DripCard = { p: string; s: number | null; m: [string, string, number, number][]; g: string };
+
+/** The card of a course, or null when nothing in it opens over time. */
+function dripCardOf(course: Course, productId: string): DripCard | null {
+  const dripping = course.modules.filter((m) => m.dripDays > 0);
+  if (dripping.length === 0) return null;
+  // The schedule alone: what moves a pair's score. A new title or lesson does not walk the course again.
+  const g = JSON.stringify([course.startsAt, dripping.map((m) => [m.id, m.dripDays])]);
+  return { p: productId, s: course.startsAt, m: dripping.map((m) => [m.id, m.title, m.dripDays, m.lessons.length]), g };
+}
+
+/** A kept card, exactly: null for none, "unknown" for anything that is not one this code writes (rule 24). */
+function readCard(reply: unknown): DripCard | null | "unknown" {
+  if (reply === null) return null;
+  if (typeof reply !== "string") return "unknown";
+  try {
+    const card = JSON.parse(reply) as Partial<DripCard>;
+    const modules = Array.isArray(card.m) ? card.m : null;
+    const ok =
+      typeof card.p === "string" && (card.s === null || countOf(card.s) !== null) && typeof card.g === "string" && modules !== null &&
+      modules.every((m) => Array.isArray(m) && m.length === 4 && typeof m[0] === "string" && typeof m[1] === "string" && countOf(m[2]) !== null && countOf(m[3]) !== null);
+    return ok ? (card as DripCard) : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/** A module of a card as the outline's, for opensAt and the email. */
+function cardModule(row: [string, string, number, number]): CourseModule {
+  return { id: row[0], title: row[1], dripDays: row[2], lessons: Array.from({ length: row[3] }, () => null as never) };
+}
+
+/** A student's pairs not yet past their window, [score, member], one a module of the card. */
+function duePairs(courseId: string, field: string, start: number, card: DripCard, nowSeconds: number): [number, string][] {
+  return card.m
+    .map((row): [number, string] => [opensAt({ startsAt: card.s }, cardModule(row), start), `${courseId}|${field}|${row[0]}`])
+    .filter(([score]) => score >= nowSeconds - DRIP_WINDOW_SECONDS);
 }
 
 /**
- * What a run did: `sent` emails; `courses` walked to their last student; `failed` courses that could not be read or
- * threw, logged and tried again the next run (never taken out); `pending` courses the deadline left for the next run,
- * which starts with them; `unreadStudents` rows of a student that are not a student's record, logged, never read as
- * "nobody to email".
+ * The room a list of pairs takes, each counted until its window is over (lib/store-data.ts, `until`): one change a
+ * month, so the run that removes them is never needed to give the room back.
  */
-export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number; held: number };
+function pairRoom(pairs: [number, string][]): DataChange[] {
+  const months = new Map<string, { until: number; bytes: number }>();
+  for (const [score, member] of pairs) {
+    const until = (score + DRIP_WINDOW_SECONDS + 86_400) * 1000;
+    const month = new Date(until).toISOString().slice(0, 7);
+    const held = months.get(month) ?? { until, bytes: 0 };
+    held.until = Math.max(held.until, until);
+    held.bytes += dataBytes([member, String(score)], 1);
+    months.set(month, held);
+  }
+  return [...months.values()];
+}
 
-/** The cursor as kept: our own `{ m, h }`, null when there is none. A reply of another shape is unknown (rule 24). */
-function dripCursor(reply: unknown): { m: string; h: string } | null {
+/** A course's card in the room, its slot set to the card's bytes. */
+function cardRoom(courseId: string, card: DripCard): DataChange {
+  return { slot: CARD_SLOT(courseId), bytes: dataBytes([cardKey(courseId), JSON.stringify(card)], 1), set: true };
+}
+
+/**
+ * Keeps this course's drip card for the daily job, and when its schedule changed (a module that opens over time added,
+ * removed or moved, its cohort's start set or moved), puts it in its store's pending set: the next runs walk its
+ * students into the index again. A course with nothing that opens over time has no card and no pairs read.
+ */
+export async function registerDrip(store: Store, product: Listing, course: Course): Promise<void> {
+  if (!isRedisConfigured()) return;
+  const member = `${course.id}|${store.handle}|${product.id}`;
+  const card = dripCardOf(course, product.id);
+  if (!card) {
+    // Nothing opens over time: no card (its pairs left in the index are dropped as the run reads them), nothing pending.
+    const commands: Cmd[] = [["DEL", cardKey(course.id)], ["SREM", DRIP_SET, member]];
+    if (store.statsId) commands.push(["SREM", pendingKey(store.statsId), member], ["HDEL", walkKey(store.statsId), course.id]);
+    await redisPipeline(commands);
+    await giveData(store, [{ slot: CARD_SLOT(course.id), bytes: 0, set: true }]);
+    return;
+  }
+  // The store's index is kept under its statsId: a store written before there was one is given it here, from its studio.
+  const statsId = store.statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
+  if (!statsId) throw new Error("the store's drip index could not be named");
+  const json = JSON.stringify(card);
+  const before = readCard(repliesFor(await redisPipeline([["GET", cardKey(course.id)]]), 1)?.[0]);
+  const changed = before === null || before === "unknown" || before.g !== card.g || before.p !== card.p;
+  await noteData(store, [cardRoom(course.id, card)]);
+  await redisPipeline([
+    ["SET", cardKey(course.id), json],
+    ["SREM", DRIP_SET, member],
+    ...(changed ? [["SADD", pendingKey(statsId), member], ["SADD", DRIP_STORES, `${statsId}|${store.handle}`], ["HDEL", walkKey(statsId), course.id]] : []),
+  ] as Cmd[]);
+}
+
+/**
+ * What a run did: `sent` emails; `courses` walked into their store's index to their last student; `failed` stores or
+ * courses that could not be read or threw, logged and tried again the next run (never taken out); `pending` stores the
+ * deadline left for the next run, which starts with them; `unreadStudents` rows of a student that are not a student's
+ * record, logged, never read as "nobody to email"; `held` stores whose pairs due a ceiling of refused sends or the
+ * deadline left for the next run;
+ * `indexed` pairs written by the walk; `dropped` pairs taken out of the index unsent (past their window, a module or a
+ * course gone, a student blocked or gone).
+ */
+export type DripCounts = { sent: number; courses: number; failed: number; pending: number; unreadStudents: number; held: number; indexed: number; dropped: number };
+
+/** The cursor as kept: our own `{ s }`, null when there is none. A reply of another shape is unknown (rule 24). */
+function dripCursor(reply: unknown): string | null {
   if (reply === null) return null;
   if (typeof reply !== "string") throw new UnknownReplyError("where the drip emails' last run stopped");
   try {
-    const kept = JSON.parse(reply) as { m?: unknown; h?: unknown };
-    if (typeof kept.m === "string" && typeof kept.h === "string" && /^[0-9]+$/.test(kept.h)) return { m: kept.m, h: kept.h };
+    const kept = JSON.parse(reply) as { s?: unknown };
+    if (typeof kept.s === "string") return kept.s;
   } catch {}
-  // Our own text, not in our shape: only where to start is lost, never an email or a course; it starts at the head.
-  console.error("the drip emails' cursor is not one this job writes; this run starts at the first course");
+  // Our own text, not in our shape: only where to start is lost, never an email; it starts at the first store.
+  console.error("the drip emails' cursor is not one this job writes; this run starts at the first store");
   return null;
 }
 
 /**
- * Tells each student when a module opens for them. Once per student and
- * unit, and only for modules that opened in the last three days, so a
- * course that gains a drip module does not email about months gone by.
+ * Tells each student when a module opens for them. Once per student and module, and only for modules that opened in
+ * the last three days.
  *
- * Bounded and fair: nothing new starts after `deadline`, and the next run starts at the course (and the page of its
- * students) this one stopped at, or at the course after it when this run got no further on the course it began with.
- * One course that throws is counted and logged and the rest go on; it is tried again the next run. `load` and
+ * From each store's index (docs/drip-due-index.md): the run reads only the pairs due now, at most
+ * dripIndexEntriesPerRun(store) a store, so its cost follows the store's email figure, never its courses or students.
+ * Courses whose schedule changed, and the courses of the old global set, are walked into the index first,
+ * DRIP_INDEX_PAGES_PER_RUN pages a store a run.
+ *
+ * Bounded and fair: nothing new starts after `deadline`, and the next run starts at the store this one stopped at. A
+ * store or a course that throws is counted and logged and the rest go on; it is tried again the next run. `load` and
  * `loadCourse` answer null only for a store or a course confirmed absent, and throw when they cannot tell (the route
- * passes the exact readers): only then, or when the product is confirmed gone or no longer holds this course, is the
- * course taken out of the drip set.
+ * passes the exact readers): only a confirmed absence takes anything out.
  */
 export async function sendDripEmails(
   load: (handle: string) => Promise<Store | null>,
@@ -1082,76 +1256,43 @@ export async function sendDripEmails(
   deadline = Date.now() + DRIP_RUN_MS,
   loadCourses?: (ids: string[]) => Promise<Map<string, Course | null | "unknown">>,
 ): Promise<DripCounts> {
-  const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0, held: 0 };
-  // A store read once a run, not once a course: its record is read whole (lib/store-exact.ts).
+  const counts: DripCounts = { sent: 0, courses: 0, failed: 0, pending: 0, unreadStudents: 0, held: 0, indexed: 0, dropped: 0 };
+  if (!isRedisConfigured()) return counts;
+  // A store read once a run: its record is read whole (lib/store-exact.ts).
   const stores = new Map<string, Promise<Store | null>>();
   const loadOnce = (handle: string) => {
     if (!stores.has(handle)) stores.set(handle, load(handle));
     return stores.get(handle)!;
   };
-  // The sends that did not go, by store, this run (DRIP_REFUSALS_PER_STORE).
-  const refused = new Map<string, number>();
-  if (!isRedisConfigured()) return counts;
-  // The set in its exact shape (CX-123 rule 24): a reply of another shape is unknown, never "no course".
-  const replies = repliesFor(await redisPipeline([["SMEMBERS", DRIP_SET], ["GET", DRIP_CURSOR]]), 2);
-  const listed = stringList(replies?.[0]);
-  if (!replies || !listed) throw new UnknownReplyError("the courses with drip emails");
-  const cursor = dripCursor(replies[1]);
-  const members = [...new Set(listed)].sort();
-  const first = cursor ? Math.max(0, members.findIndex((member) => member >= cursor.m)) : 0;
-  const order = members.map((_, i) => members[(first + i) % members.length]);
-  // Courses and listings read a hundred at a command ahead of the walk (the route passes readCoursesEach; the cost
-  // ceiling under Claude 7's MÉDIO on #3344), never one GET each: a course's entry is its own answer ("unknown" keeps
-  // it for another run), and a read that fails whole leaves its courses unknown for this run, nothing sent on them.
-  const courses = new Map<string, Promise<Course | null | "unknown">>();
-  const courseOf = (at: number, id: string): Promise<Course | null | "unknown"> => {
-    if (!courses.has(id)) {
-      if (loadCourses) {
-        const ids = [...new Set(order.slice(at).map((m) => m.split("|")[0]).filter((c) => c && !courses.has(c)))].slice(0, 100);
-        const read = loadCourses(ids);
-        // The exact null (no such course) is kept as null: only a missing answer is unknown.
-        for (const one of ids) courses.set(one, read.then((map) => (map.has(one) ? (map.get(one) as Course | null | "unknown") : "unknown"), () => "unknown" as const));
-      } else courses.set(id, loadCourse(id).catch(() => "unknown" as const));
-    }
-    return courses.get(id)!;
-  };
-  const listings = new Map<string, Promise<Map<string, Listing | null | "unknown"> | null>>();
-  const listingOf = async (store: Store, handle: string, productId: string): Promise<Listing | null | "unknown"> => {
-    if (!listings.has(handle)) {
-      const ids = [...new Set(order.filter((m) => m.split("|")[1] === handle).map((m) => m.split("|")[2]).filter(Boolean))];
-      listings.set(handle, readListingsExactly(store, ids).catch(() => null));
-    }
-    const read = await listings.get(handle)!;
-    return read && read.has(productId) ? (read.get(productId) as Listing | null | "unknown") : "unknown";
-  };
-  let stopped: { m: string; h: string } | null = null;
-  for (let i = 0; i < members.length; i += 1) {
-    const member = members[(first + i) % members.length];
-    const from = cursor && member === cursor.m ? cursor.h : "0";
+  // Each set in its exact shape (CX-123 rule 24): a reply of another shape is unknown, never "no course", "no store".
+  const replies = repliesFor(await redisPipeline([["SMEMBERS", DRIP_SET], ["SMEMBERS", DRIP_STORES], ["GET", DRIP_CURSOR]]), 3);
+  const old = stringList(replies?.[0]);
+  const listed = stringList(replies?.[1]);
+  if (!replies || !old || !listed) throw new UnknownReplyError("the stores with drip emails");
+  const cursor = dripCursor(replies[2]);
+  const members = new Set(listed);
+  // The migration: each course of the old set into its store's pending set, then out of the old set.
+  if (old.length > 0) for (const member of await migrateDrip(old, loadOnce, counts)) members.add(member);
+  const order = [...members].sort();
+  const first = cursor ? Math.max(0, order.findIndex((member) => member >= cursor)) : 0;
+  let stopped: string | null = null;
+  for (let i = 0; i < order.length; i += 1) {
+    const member = order[(first + i) % order.length];
     if (Date.now() >= deadline) {
-      stopped = { m: member, h: from };
-      counts.pending = members.length - i;
+      stopped = member;
+      counts.pending = order.length - i;
       break;
     }
     try {
-      const left = await dripCourse(member, from, { load: loadOnce, course: (id) => courseOf(i, id), listing: listingOf, origin, nowSeconds, deadline, counts, refused });
-      if (left !== null) {
-        // No further on the course this run began with than where it began (a page whose sends are slow and fail,
-        // their marks let go): the next run begins with the course after it, and this one comes in its turn, from its
-        // first page (what was sent is marked, never sent twice), so one slow page never holds back every course
-        // after it (Claude 2 on #3344).
-        stopped = i === 0 && left === from && members.length > 1 ? { m: members[(first + 1) % members.length], h: "0" } : { m: member, h: left };
-        counts.pending = members.length - i;
-        break;
-      }
+      await dripStore(member, { load: loadOnce, loadCourse, loadCourses, origin, nowSeconds, deadline, counts });
     } catch (error) {
-      // Not this course's turn to stop the others (rule 24: unknown is never "gone"): kept in the set, read again tomorrow.
+      // Rule 24: unknown is never "gone": the store keeps its index and is read again tomorrow.
       counts.failed += 1;
-      console.error("a course's drip emails failed; it stays and is tried again the next run", member.split("|")[0], error);
+      console.error("a store's drip emails failed; it is tried again the next run", member.split("|")[0], error);
     }
   }
   // Only where to start next is written: a write that does not land starts the next run where this one started.
-  const write: Cmd | null = stopped ? ["SET", DRIP_CURSOR, JSON.stringify(stopped), "EX", DRIP_CURSOR_SECONDS] : cursor ? ["DEL", DRIP_CURSOR] : null;
+  const write: Cmd | null = stopped ? ["SET", DRIP_CURSOR, JSON.stringify({ s: stopped }), "EX", DRIP_CURSOR_SECONDS] : cursor ? ["DEL", DRIP_CURSOR] : null;
   if (write) {
     const kept = await redisPipeline([write]).then((r) => repliesFor(r, 1), () => null);
     if (!kept || (stopped ? kept[0] !== "OK" : countOf(kept[0]) === null)) console.error("where the drip emails' run stopped could not be confirmed kept");
@@ -1160,110 +1301,286 @@ export async function sendDripEmails(
 }
 
 /**
- * One course's drip emails from page `from` of its students: null when every student was read to the end (or the
- * course has nothing that opens over time, or it is confirmed gone and taken out), else the page to start from next
- * run, because the deadline came. Throws when anything it reads is unknown.
+ * Moves the old set's courses (`course|handle|product`) into their stores' pending sets: a store confirmed gone takes
+ * its courses out; one that cannot be read keeps them in the old set for the next run. Answers the stores' members.
  */
-async function dripCourse(
-  member: string,
-  from: string,
-  run: {
-    load: (handle: string) => Promise<Store | null>;
-    course: (id: string) => Promise<Course | null | "unknown">;
-    listing: (store: Store, handle: string, productId: string) => Promise<Listing | null | "unknown">;
-    origin: string;
-    nowSeconds: number;
-    deadline: number;
-    counts: DripCounts;
-    refused: Map<string, number>;
-  },
-): Promise<string | null> {
-  const { counts, deadline, nowSeconds } = run;
-  const [courseId, handle, productId] = member.split("|");
-  // The store's sends were refused too often this run: nothing more is tried in it, not even read, until the next.
-  if ((run.refused.get(handle) ?? 0) >= DRIP_REFUSALS_PER_STORE) {
-    counts.held += 1;
-    return null;
+async function migrateDrip(old: string[], load: (handle: string) => Promise<Store | null>, counts: DripCounts): Promise<string[]> {
+  const byHandle = new Map<string, string[]>();
+  for (const member of old) {
+    const handle = member.split("|")[1] ?? "";
+    byHandle.set(handle, [...(byHandle.get(handle) ?? []), member]);
   }
-  let refusedHere = 0;
-  // A send that did not go (refused, or its mark not confirmed): counted against both ceilings. True once either is
-  // reached: the course stops for this run, its students waiting for the next one, inside the same window.
-  const refusedOne = () => {
-    refusedHere += 1;
-    run.refused.set(handle, (run.refused.get(handle) ?? 0) + 1);
-    return refusedHere >= DRIP_REFUSALS_PER_COURSE || (run.refused.get(handle) ?? 0) >= DRIP_REFUSALS_PER_STORE;
-  };
-  const store = courseId && handle && productId ? await run.load(handle) : null;
-  const product = store ? await run.listing(store, handle, productId) : null;
-  if (product === "unknown") throw new UnknownReplyError("a drip course's product");
-  const read = product?.course?.id === courseId ? await run.course(courseId) : null;
-  if (read === "unknown") throw new UnknownReplyError("a drip course's outline");
-  const course = read;
-  if (!store || !product || !course) {
-    // Confirmed: the store, the product or the course is not there, or the product no longer holds this course.
-    await redisPipeline([["SREM", DRIP_SET, member]]);
-    return null;
-  }
-  const dripping = course.modules.filter((m) => m.dripDays > 0 && m.lessons.length > 0);
-  if (dripping.length === 0) return null;
-  // Who is blocked, in its exact shape: an unknown list is never "nobody blocked".
-  const blockedList = stringList(repliesFor(await redisPipeline([["SMEMBERS", blockedKey(course.id)]]), 1)?.[0]);
-  if (!blockedList) throw new UnknownReplyError("a drip course's blocked students");
-  const blocked = new Set(blockedList);
-  let page = from;
-  do {
-    if (Date.now() >= deadline) return page;
-    // Every student, a page at a time (rule 24 and 30): a page that does not read is unknown, never the end.
-    const read = scanPage(await redisPipeline([["HSCAN", studentsKey(course.id), page, "COUNT", DRIP_PAGE]]));
-    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("a page of a drip course's students");
-    for (let i = 0; i < read.items.length; i += 2) {
-      const row = studentTimes(read.items[i + 1]);
-      if (!row || typeof row.e !== "string" || !row.e) {
-        // Not a student's record: said and counted, never read as "nobody to email".
-        counts.unreadStudents += 1;
-        console.error("a student's record in a drip course could not be read; not emailed", course.id);
+  const added: string[] = [];
+  for (const [handle, courses] of byHandle) {
+    try {
+      const store = handle ? await load(handle) : null;
+      if (!store) {
+        await redisPipeline([["SREM", DRIP_SET, ...courses]]);
         continue;
       }
-      if (blocked.has(emailKey(row.e))) continue;
-      for (const unit of dripping) {
-        const at = opensAt(course, unit, row.s);
-        if (at > nowSeconds || at < nowSeconds - 3 * 86_400) continue;
-        // The rest of this page waits for the next run, which starts at this page: what is sent is not sent again.
-        if (Date.now() >= deadline) return page;
-        // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
-        // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
-        // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
-        const mark = dripMailKey(course.id, row.e, unit.id);
-        const value = claimValue();
-        const claimed = await claimMark(mark, 400 * 86_400, value);
-        if (claimed === "unknown") {
-          console.error("a drip email's mark could not be confirmed; not sent this run", course.id, unit.id);
-          await releaseMark(mark, value);
-          if (refusedOne()) {
-            counts.held += 1;
-            return null;
-          }
-        }
-        if (claimed !== "ours") continue;
-        const ok = await sendDripEmail(store, product, unit, row.e, run.origin);
-        if (ok) counts.sent += 1;
-        // Not sent: its own mark let go (compare-and-delete, never another's; never throws, so the pass goes on), and
-        // a later pass sends it; a mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding
-        // 2, open): sendEmail's false is also an SES answer lost after the POST, which a later pass may send again.
-        else {
-          await releaseMark(mark, value);
-          if (refusedOne()) {
-            console.error("a drip course's sends were refused; its other students wait for the next run", course.id);
-            counts.held += 1;
-            return null;
-          }
-        }
-      }
+      const statsId = store.statsId ?? (await ensureStatsId(storeRef(store)))?.statsId ?? null;
+      if (!statsId) throw new UnknownReplyError("a drip store's statsId");
+      const storeMember = `${statsId}|${store.handle}`;
+      const done = repliesFor(await redisPipeline([["SADD", pendingKey(statsId), ...courses], ["SADD", DRIP_STORES, storeMember]]), 2);
+      if (!done || done.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a drip store's pending courses");
+      // Out of the old set only once they are confirmed in the pending one.
+      await redisPipeline([["SREM", DRIP_SET, ...courses]]);
+      added.push(storeMember);
+    } catch (error) {
+      counts.failed += 1;
+      console.error("a store's drip courses could not be moved to its index; they stay for the next run", handle, error);
     }
-    page = read.next;
-  } while (page !== "0");
-  counts.courses += 1;
-  return null;
+  }
+  return added;
+}
+
+type DripRun = {
+  load: (handle: string) => Promise<Store | null>;
+  loadCourse: (id: string) => Promise<Course | null>;
+  loadCourses?: (ids: string[]) => Promise<Map<string, Course | null | "unknown">>;
+  origin: string;
+  nowSeconds: number;
+  deadline: number;
+  counts: DripCounts;
+};
+
+/** One store's run: its pending courses walked into its index, then its pairs due read and emailed. */
+async function dripStore(storeMember: string, run: DripRun): Promise<void> {
+  const [statsId, handle] = storeMember.split("|");
+  const store = statsId && handle ? await run.load(handle) : null;
+  if (!store || store.statsId !== statsId) {
+    // Confirmed: no store under this address, or another store's now. Its index stays with its statsId, read again
+    // under the store's new address once a student or a course puts it back.
+    await redisPipeline([["SREM", DRIP_STORES, storeMember]]);
+    return;
+  }
+  const pending = stringList(repliesFor(await redisPipeline([["SMEMBERS", pendingKey(statsId)]]), 1)?.[0]);
+  if (!pending) throw new UnknownReplyError("a drip store's pending courses");
+  let left = pending.length;
+  if (pending.length > 0) left = await walkPending(store, statsId, [...pending].sort(), run);
+  await sendDue(store, statsId, storeMember, left, run);
+}
+
+/**
+ * Walks a store's pending courses into its index, DRIP_INDEX_PAGES_PER_RUN pages of students a run at the most, each
+ * course from where its walk stopped. A course is taken out of the pending set once read to its last student; one
+ * whose room cannot take its pairs, or that cannot be read, stays for the next run. Answers the courses still pending.
+ */
+async function walkPending(store: Store, statsId: string, pending: string[], run: DripRun): Promise<number> {
+  const { counts } = run;
+  let budget = DRIP_INDEX_PAGES_PER_RUN;
+  let pairsWritten = 0;
+  let left = pending.length;
+  const some = pending.slice(0, budget);
+  const ids = some.map((member) => member.split("|")[0]);
+  const read = repliesFor(await redisPipeline([["MGET", ...ids.map(cardKey)], ["HMGET", walkKey(statsId), ...ids]]), 2);
+  const cards = listSlots(read?.[0]);
+  const walks = listSlots(read?.[1]);
+  if (!read || !cards || !walks || cards.length !== ids.length || walks.length !== ids.length) throw new UnknownReplyError("a drip store's pending cards");
+  // The outlines of the courses with no card yet (the old set's), a hundred at a command when the caller can
+  // (readCoursesEach): an entry missing, or a read that fails whole, is unknown for this run, never "gone".
+  const cardless = ids.filter((_, n) => cards[n] === null);
+  const outlines = new Map<string, Promise<Course | null | "unknown">>();
+  if (cardless.length > 0 && run.loadCourses) {
+    const batch = run.loadCourses(cardless).catch(() => null);
+    for (const id of cardless) outlines.set(id, batch.then((map) => (map && map.has(id) ? (map.get(id) as Course | null | "unknown") : "unknown")));
+  }
+  for (let n = 0; n < some.length && budget > 0; n += 1) {
+    if (Date.now() >= run.deadline) break;
+    const member = some[n];
+    const [courseId, , productId] = member.split("|");
+    try {
+      let card = readCard(cards[n]);
+      if (card === "unknown") throw new UnknownReplyError("a drip course's card");
+      if (card === null) {
+        // A course of the old set, with no card yet: its outline read once, its card written (a page of the budget).
+        budget -= 1;
+        const course = await (outlines.get(courseId) ?? run.loadCourse(courseId));
+        if (course === "unknown") throw new UnknownReplyError("a drip course's outline");
+        card = course && course.id === courseId && productId ? dripCardOf(course, productId) : null;
+        if (!card) {
+          // Confirmed gone, or nothing in it opens over time: out of the pending set, nothing to walk.
+          await redisPipeline([["SREM", pendingKey(statsId), member], ["HDEL", walkKey(statsId), courseId]]);
+          left -= 1;
+          continue;
+        }
+        await noteData(store, [cardRoom(courseId, card)]);
+        await redisPipeline([["SET", cardKey(courseId), JSON.stringify(card), "NX"]]);
+      }
+      const from = walks[n];
+      if (from !== null && (typeof from !== "string" || !/^[0-9]+$/.test(from))) throw new UnknownReplyError("where a drip course's walk stopped");
+      let page = from ?? "0";
+      let finished = false;
+      while (budget > 0 && pairsWritten < DRIP_INDEX_PAIRS_PER_RUN && Date.now() < run.deadline) {
+        budget -= 1;
+        // Every student, a page at a time (rules 24 and 30): a page that does not read is unknown, never the end.
+        const scanned = scanPage(await redisPipeline([["HSCAN", studentsKey(courseId), page, "COUNT", DRIP_PAGE]]));
+        if (!scanned || scanned.items.length % 2 !== 0) throw new UnknownReplyError("a page of a drip course's students");
+        const pairs: [number, string][] = [];
+        for (let i = 0; i < scanned.items.length; i += 2) {
+          const row = studentTimes(scanned.items[i + 1]);
+          if (!row || typeof row.e !== "string" || !row.e) {
+            // Not a student's record: said and counted, never read as "nobody to email".
+            counts.unreadStudents += 1;
+            console.error("a student's record in a drip course could not be read; not indexed", courseId);
+            continue;
+          }
+          pairs.push(...duePairs(courseId, scanned.items[i], row.s, card, run.nowSeconds));
+        }
+        if (pairs.length > 0) {
+          // The page's pairs take their room first: a full room writes none, and the course waits where it is.
+          if (!(await takeData(store, pairRoom(pairs))).ok) throw new Error("the store's data room cannot take a drip course's pairs");
+          const added = repliesFor(await redisPipeline([["ZADD", dueKey(statsId), ...pairs.flatMap(([score, m]) => [score, m])]]), 1);
+          if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a drip course's pairs written");
+          pairsWritten += pairs.length;
+          counts.indexed += pairs.length;
+        }
+        page = scanned.next;
+        if (page === "0") {
+          finished = true;
+          break;
+        }
+        await redisPipeline([["HSET", walkKey(statsId), courseId, page]]);
+      }
+      if (!finished) continue;
+      await redisPipeline([["SREM", pendingKey(statsId), member], ["HDEL", walkKey(statsId), courseId]]);
+      left -= 1;
+      counts.courses += 1;
+    } catch (error) {
+      // Not this course's turn to stop the others: it stays pending, walked again the next run from where it stopped.
+      counts.failed += 1;
+      console.error("a course's drip emails failed; it stays and is tried again the next run", courseId, error);
+    }
+  }
+  return left;
+}
+
+/**
+ * A store's pairs due now: the ones past their window taken out unsent, at most dripIndexEntriesPerRun(store) read,
+ * each checked against its course's card, its student's row, the blocked list and its product, then claimed and sent.
+ * What is sent, or will never be, leaves the index in one ZREM; what was refused stays for the next run.
+ */
+async function sendDue(store: Store, statsId: string, storeMember: string, pending: number, run: DripRun): Promise<void> {
+  const { counts, nowSeconds } = run;
+  const due = dueKey(statsId);
+  const cut = nowSeconds - DRIP_WINDOW_SECONDS;
+  const limit = dripIndexEntriesPerRun(store, nowSeconds);
+  const replies = repliesFor(await redisPipeline([["ZREMRANGEBYSCORE", due, "-inf", cut - 1], ["ZRANGEBYSCORE", due, cut, nowSeconds, "LIMIT", 0, limit], ["ZCARD", due]]), 3);
+  const list = stringList(replies?.[1]);
+  const total = countOf(replies?.[2]);
+  if (!replies || countOf(replies[0]) === null || !list || total === null) throw new UnknownReplyError("a drip store's pairs due");
+  counts.dropped += replies[0] as number;
+  if (list.length === 0) {
+    // Nothing left in the index and nothing pending: out of the stores' set until a student or a course puts it back.
+    if (total === 0 && pending === 0) await redisPipeline([["SREM", DRIP_STORES, storeMember]]);
+    return;
+  }
+  const pairs = list.map((member) => {
+    const [courseId, field, moduleId] = member.split("|");
+    return { member, courseId, field, moduleId, ok: /^[0-9a-f]{32}$/.test(field ?? "") && Boolean(courseId) && Boolean(moduleId) };
+  });
+  const drop: string[] = [];
+  const later: [number, string][] = [];
+  // One pair of each course in turn (Claude 2 on #3344): a course whose sends are slow and refused never holds back the
+  // store's other courses, which come before its next pair.
+  const byCourse = new Map<string, typeof pairs>();
+  for (const pair of pairs.filter((one) => one.ok || (drop.push(one.member), false))) byCourse.set(pair.courseId, [...(byCourse.get(pair.courseId) ?? []), pair]);
+  const valid: typeof pairs = [];
+  for (let round = 0; valid.length < pairs.length - drop.length; round += 1) for (const group of byCourse.values()) if (group[round]) valid.push(group[round]);
+  const courseIds = [...new Set(valid.map((pair) => pair.courseId))];
+  // The cards a hundred at a command (MGET), and each pair's row and blocked check, in one pipeline.
+  const cards = new Map<string, DripCard | null | "unknown">();
+  for (let i = 0; i < courseIds.length; i += 100) {
+    const ids = courseIds.slice(i, i + 100);
+    const rows = listSlots(repliesFor(await redisPipeline([["MGET", ...ids.map(cardKey)]]), 1)?.[0]);
+    ids.forEach((id, n) => cards.set(id, rows && rows.length === ids.length ? readCard(rows[n]) : "unknown"));
+  }
+  const checks = valid.length > 0 ? repliesFor(await redisPipeline(valid.flatMap((pair): Cmd[] => [["HGET", studentsKey(pair.courseId), pair.field], ["SISMEMBER", blockedKey(pair.courseId), pair.field]])), valid.length * 2) : [];
+  if (!checks) throw new UnknownReplyError("a drip store's students due");
+  const products = [...new Set([...cards.values()].flatMap((card) => (card && card !== "unknown" ? [card.p] : [])))];
+  const listings = products.length > 0 ? await readListingsExactly(store, products).catch(() => null) : new Map<string, Listing | null | "unknown">();
+  const refused = new Map<string, number>();
+  let refusedStore = 0;
+  let sentHere = 0;
+  let unknown = 0;
+  let waiting = false;
+  for (let n = 0; n < valid.length; n += 1) {
+    const pair = valid[n];
+    const card = cards.get(pair.courseId);
+    // A course with no card has nothing that opens over time any more, or is gone: its pairs leave unsent.
+    if (card === null) { drop.push(pair.member); continue; }
+    if (card === "unknown" || card === undefined) { unknown += 1; continue; }
+    const row = card.m.find((m) => m[0] === pair.moduleId);
+    if (!row || row[3] === 0) { drop.push(pair.member); continue; }
+    const raw = checks[n * 2];
+    if (raw === null) { drop.push(pair.member); continue; }
+    if (typeof raw !== "string") { unknown += 1; continue; }
+    const student = studentTimes(raw);
+    if (!student || typeof student.e !== "string" || !student.e || emailKey(student.e) !== pair.field) {
+      // Not a student's record: said and counted, never read as "nobody to email"; the pair stays until its window ends.
+      counts.unreadStudents += 1;
+      console.error("a student's record in a drip course could not be read; not emailed", pair.courseId);
+      continue;
+    }
+    // When it opens for them now, from the card as it is: a schedule moved since the pair was written is honored.
+    const unit = cardModule(row);
+    const at = opensAt({ startsAt: card.s }, unit, student.s);
+    if (at > nowSeconds) { later.push([at, pair.member]); continue; }
+    if (at < cut) { drop.push(pair.member); continue; }
+    const blocked = checks[n * 2 + 1];
+    if (blocked === 1) { drop.push(pair.member); continue; }
+    if (blocked !== 0) { unknown += 1; continue; }
+    const product = listings ? listings.get(card.p) ?? "unknown" : "unknown";
+    if (product === "unknown") { unknown += 1; continue; }
+    if (!product || product.course?.id !== pair.courseId) { drop.push(pair.member); continue; }
+    if ((refused.get(pair.courseId) ?? 0) >= DRIP_REFUSALS_PER_COURSE) { waiting = true; continue; }
+    // The rest of the pairs wait for the next run, inside the same window: what is sent is never sent again.
+    if (Date.now() >= run.deadline) { waiting = true; break; }
+    // Sent only on a mark that is ours (lib/claim-mark.ts, CX-123 rule 24): "taken" is an email already sent.
+    // "unknown" sends nothing this pass and lets go of the mark if it holds our own value (it may have landed;
+    // nothing was sent on it), so a later pass tries again (Claude 2 on #3276).
+    const mark = dripMailKey(pair.courseId, student.e, pair.moduleId);
+    const value = claimValue();
+    const claimed = await claimMark(mark, 400 * 86_400, value);
+    if (claimed === "taken") { drop.push(pair.member); continue; }
+    let sent = false;
+    if (claimed === "unknown") {
+      console.error("a drip email's mark could not be confirmed; not sent this run", pair.courseId, pair.moduleId);
+      await releaseMark(mark, value);
+    } else {
+      sent = await sendDripEmail(store, product, unit, student.e, run.origin);
+      // Not sent: its own mark let go (compare-and-delete, never another's; never throws), and a later pass sends it; a
+      // mark that cannot be let go stays. Not yet told apart (Claude 2 on #3276, finding 2, open): sendEmail's false is
+      // also an SES answer lost after the POST, which a later pass may send again.
+      if (!sent) await releaseMark(mark, value);
+    }
+    if (sent) {
+      counts.sent += 1;
+      sentHere += 1;
+      drop.push(pair.member);
+      continue;
+    }
+    // A send that did not go (refused, or its mark not confirmed): counted against both ceilings; the pair stays.
+    refused.set(pair.courseId, (refused.get(pair.courseId) ?? 0) + 1);
+    refusedStore += 1;
+    if (refusedStore >= DRIP_REFUSALS_PER_STORE) {
+      console.error("a store's drip sends were refused; its other pairs wait for the next run", statsId);
+      waiting = true;
+      break;
+    }
+  }
+  // Pairs due left for the next run by a ceiling or the deadline: said, never silently.
+  if (waiting) counts.held += 1;
+  const tidy: Cmd[] = [];
+  if (drop.length > 0) tidy.push(["ZREM", due, ...drop]);
+  if (later.length > 0) tidy.push(["ZADD", due, "XX", ...later.flatMap(([score, member]) => [score, member])]);
+  if (tidy.length > 0) {
+    const done = await redisPipeline(tidy).then((r) => repliesFor(r, tidy.length), () => null);
+    // What could not be confirmed taken out is read again the next run: a pair sent is "taken" then, never sent twice.
+    if (!done || done.some((reply) => countOf(reply) === null)) console.error("a drip store's handled pairs could not be confirmed taken out", statsId);
+    else counts.dropped += drop.length - sentHere;
+  }
+  if (unknown > 0) throw new UnknownReplyError("a drip store's cards, students or products");
 }
 
 async function sendDripEmail(store: Store, product: Listing, unit: CourseModule, email: string, origin: string): Promise<boolean> {
@@ -1316,8 +1633,11 @@ export async function forgetLearnerPerson(
     ...courses.flatMap((c) => [doneKey(c.courseId, email), ...c.moduleIds.map((m) => dripMailKey(c.courseId, email, m))]),
   ];
   const commands: (string | number)[][] = [["DEL", ...keys], ...courses.map((c) => ["HDEL", studentsKey(c.courseId), emailKey(email)])];
+  // Their pairs in the store's drip index (docs/drip-due-index.md), one ZREM of every course and module, counted as the rest.
+  const pairs = courses.flatMap((c) => c.moduleIds.map((m) => `${c.courseId}|${emailKey(email)}|${m}`));
+  if (store.statsId && pairs.length > 0) commands.push(["ZREM", dueKey(store.statsId), ...pairs]);
   const replies = repliesFor(await redisPipeline(commands), commands.length);
-  // One whole count for each DEL and HDEL (CX-123 rule 24): never 0 removed on another shape; thrown, so the
+  // One whole count for each DEL, HDEL and ZREM (CX-123 rule 24): never 0 removed on another shape; thrown, so the
   // erasure says this part did not finish (lib/person-erasure.ts).
   const counts = replies?.map(countOf);
   if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("the deletion of a person's course records");

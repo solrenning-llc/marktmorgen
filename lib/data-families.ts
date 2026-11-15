@@ -16,7 +16,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:ab:", "nl:adsrv:ctx:", "nl:adsrv:sent:", "nl:aff:", "nl:agent:book:",
   "nl:agree:p:", "nl:agree:r:", "nl:agree:s:", "nl:agree:v:", "nl:amem:", "nl:blog:body:", "nl:blog:meta:", "nl:blog:pub:",
   "nl:call:busy:", "nl:call:confirmed:", "nl:call:series:", "nl:callteam:", "nl:callteam:rr:", "nl:catalog:", "nl:cert:",
-  "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:co:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:",
+  "nl:cm:", "nl:cm:unsub:", "nl:copy:", "nl:course:", "nl:crm:co:", "nl:crm:deals:", "nl:crm:pacc:", "nl:crm:pipes:", "nl:crm:tasks:", "nl:crm:v:", "nl:data:", "nl:dc:addr:", "nl:drip:card:", "nl:drip:due:",
   "nl:dc:mem:", "nl:dc:prod:", "nl:depth:", "nl:erased:", "nl:esync:tags:", "nl:form:r:", "nl:imp:buy:",
   "nl:imp:who:", "nl:inbox:", "nl:inbox:tok:", "nl:intro:c:", "nl:keys:", "nl:lc:", "nl:lnote:", "nl:learn:enr:", "nl:letters:i:", "nl:letters:s:", "nl:withdraw:",
   "nl:lib:", "nl:mail:bc:", "nl:mail:bcs:", "nl:mail:enr:", "nl:mail:flowq", "nl:mail:flows:", "nl:mail:mk:",
@@ -51,9 +51,9 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
   "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
-  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:cursor", "nl:courses:drip", "nl:courses:lock",
+  "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
-  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
+  "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:drip:cursor", "nl:drip:pending:", "nl:drip:stores", "nl:drip:walk:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
   "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
@@ -247,7 +247,9 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // A store copy's progress, named by the receiving store (lib/store-copy.ts), seven days; its one-step lock, a minute.
   "nl:copy:": er(7), "nl:copy:lock:": X(1),
   "nl:cotrouble:": E, "nl:cotrouble:mail:": E,
-  "nl:course:": E, "nl:courses:cursor": C, "nl:courses:drip": I, "nl:courses:lock": C,
+  "nl:course:": E, "nl:courses:drip": I, "nl:courses:lock": C,
+  // The drip index (lib/learn.ts; docs/drip-due-index.md): named by the store's statsId or its course's id.
+  "nl:drip:card:": E, "nl:drip:due:": E, "nl:drip:pending:": E, "nl:drip:walk:": E, "nl:drip:stores": I, "nl:drip:cursor": C,
   "nl:creators:responses": C,
   "nl:crm:co:": E, "nl:crm:co:lock:": X(1), "nl:crm:deals:": E, "nl:crm:fields:": E, "nl:crm:pacc:": E, "nl:crm:pipes:": E, "nl:crm:stages:": E, "nl:crm:tasklock:": X(1), "nl:crm:taskrecount:": X(1), "nl:crm:tasks:": E, "nl:crm:v:": E,
   // ---------------------------------------------------------------- d-f

@@ -101,6 +101,12 @@ async function main(): Promise<void> {
     await touchStudent(COURSE.id, email, NOW, earlier, { course: COURSE, productId: PRODUCT.id });
     await touchStudent(COURSE.id, email, NOW - 36 * 3600, earlier, { course: COURSE, productId: PRODUCT.id });
     is("an earlier start rewrites the scores", (await entries(earlier)).slice(0, 2), [member(COURSE, email, "module000002"), String(NOW - 12 * 3600)]);
+    // A later visit writes its pairs no more: the course start (no outline) keeps the row's mark, and a visit after it
+    // writes the row alone.
+    await touchStudent(COURSE.id, email, NOW, earlier);
+    seen.length = 0;
+    await touchStudent(COURSE.id, email, NOW, earlier, { course: COURSE, productId: PRODUCT.id });
+    is("a later visit: the row alone, no ZADD and no room taken", seen.filter((c) => c[0] === "ZADD" || c[0] === "EVAL").length, 0);
   }
 
   part("A due pair is emailed once; one not yet due is untouched; one past the window is removed unsent");
@@ -216,6 +222,32 @@ async function main(): Promise<void> {
     seen.length = 0;
     await quietly(() => run(store));
     is("the next run walks no student page", seen.filter((c) => c[0] === "HSCAN").length, 0);
+  }
+
+  part("A course's walk stops at the page budget and goes on from where it stopped the next run");
+  {
+    const store = await setup();
+    await registerDrip(store, PRODUCT as never, COURSE);
+    // Fifteen pages of one student each: HSCAN answers page n with the cursor n + 1, the last with "0".
+    const PAGES = 15;
+    const scans: string[] = [];
+    inject = (commands) => {
+      if (commands.length !== 1 || commands[0][0] !== "HSCAN") return null;
+      const at = Number(commands[0][2]);
+      scans.push(String(commands[0][2]));
+      const email = `page-${at}@example.com`;
+      return Promise.resolve([[at + 1 >= PAGES ? "0" : String(at + 1), [emailKey(email), JSON.stringify({ e: email, s: NOW - 36 * 3600, l: NOW })]]]);
+    };
+    await quietly(() => run(store));
+    const budget = L.DRIP_INDEX_PAGES_PER_RUN as number;
+    const pendingMember = `${COURSE.id}|${store.handle}|${PRODUCT.id}`;
+    is("the first run reads the page budget, from the first page", [scans.length, scans[0]], [budget, "0"]);
+    is("the course still pending, its walk kept at the next page", [(await original([["SISMEMBER", pendingKey(store), pendingMember]]))[0], (await original([["HGET", `nl:drip:walk:${store.statsId}`, COURSE.id]]))[0]], [1, String(budget)]);
+    scans.length = 0;
+    await quietly(() => run(store));
+    inject = null;
+    is("the next run goes on from there to the last page", [scans[0], scans.length], [String(budget), PAGES - budget]);
+    is("the course walked, out of pending, its cursor gone", [(await original([["SCARD", pendingKey(store)]]))[0], (await original([["HGET", `nl:drip:walk:${store.statsId}`, COURSE.id]]))[0]], [0, null]);
   }
 
   part("A run's commands stay within the formula, every send refused");

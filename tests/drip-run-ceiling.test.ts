@@ -12,6 +12,9 @@
  * course's sends are refused, the rest of its students wait for the next run, inside the same three-day window; what
  * is sent is never sent twice. No price or limit changes.
  *
+ * Since the drip index (docs/drip-due-index.md; tests/drip-due-index.test.ts) the run reads each store's pairs due, not
+ * its courses: the same ceilings hold over the pairs, the store's at five, and the cost line follows the email figure.
+ *
  * Synthetic only: the in-memory Redis (tests/redis-stub.ts) and the synthetic SES (tests/ses-mail-fixture.ts).
  */
 import { claimHandle, setSubscription, storeForEmail, type Store } from "@/lib/store";
@@ -21,7 +24,7 @@ import { paidPeriod } from "./billing-period-fixture";
 import { store as redis } from "./redis-stub";
 import { type SesMailFixtureOptions, installSesMailFixture } from "./ses-mail-fixture";
 import { readFileSync } from "node:fs";
-import { COST_LINES, DRIP_PAGE_ROWS, DRIP_REFUSALS_PER_STORE_RUN, DRIP_REFUSED_SEND_COMMANDS, dripRunMonthlyUsd } from "./plan-cost-registry";
+import { COST_LINES, DRIP_PAGE_ROWS, DRIP_REFUSALS_PER_STORE_RUN, DRIP_RUN_FIXED_COMMANDS, dripEntriesPerRun, dripRunCommandsPerStore, dripRunMonthlyUsd } from "./plan-cost-registry";
 import { done, is, part } from "./check";
 
 const sesHooks: SesMailFixtureOptions = {};
@@ -74,16 +77,18 @@ const quietly = async <T>(work: () => Promise<T>): Promise<T> => {
 
 async function main(): Promise<void> {
   part("The ceilings are named and small");
-  is("a course stops after a few refused sends, a store after a score", [DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE], [3, 20]);
+  // The store's ceiling from 20 to 5 with the drip index (docs/drip-due-index.md): five refused sends in a day already
+  // say its sends are not going, and a course with refusals does not hold back its other courses.
+  is("a course stops after a few refused sends, a store after five", [DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE], [3, 5]);
 
   part("The walk's worst month, a line of each plan (course-drip-run), from the same numbers as the code");
   const source = readFileSync("lib/learn.ts", "utf8");
   is("the registry's ceiling and page are the code's", [DRIP_REFUSALS_PER_STORE_RUN === DRIP_REFUSALS_PER_STORE, source.includes(`const DRIP_PAGE = ${DRIP_PAGE_ROWS};`)], [true, true]);
   is("a line of every plan's worst month", COST_LINES.some((line) => line.id === "course-drip-run"), true);
   const month = (["creator", "pro", "scale"] as const).map((tier) => Math.round(dripRunMonthlyUsd(tier) * 100) / 100);
-  // Store, Studio and Scale at their data room full of students, every product a course: well under a dollar or two,
-  // where the marks without the ceiling cost more than each plan's whole net profit.
-  is("Store, Studio and Scale a month, in dollars", month, [0.31, 0.59, 0.87]);
+  // Store, Studio and Scale at full use: with the index (docs/drip-due-index.md) a few cents, where the marks without
+  // the ceiling cost more than each plan's whole net profit and the walk of every course 31 to 87 cents.
+  is("Store, Studio and Scale a month, in dollars", month, [0.02, 0.03, 0.07]);
 
   part("Every send refused (the store's email figure spent): the marks stop at the ceilings, not at the students");
   {
@@ -97,12 +102,11 @@ async function main(): Promise<void> {
     is("at most DRIP_REFUSALS_PER_STORE marks in the store, DRIP_REFUSALS_PER_COURSE in each course", [claims() <= DRIP_REFUSALS_PER_STORE, claims()], [true, Math.min(8 * DRIP_REFUSALS_PER_COURSE, DRIP_REFUSALS_PER_STORE)]);
     is("of 240 students due, so the marks follow the ceiling, not the students", claims() < 240, true);
     is("the store read once for the run, not once a course", loads, 1);
-    // Every command of the run: two for the set and the cursor, at most one write of the cursor; for each course, its
-    // blocked students and its first page of students (its listing is the store's inline catalog and its record the
-    // test's reader here; the cost line prices both); and for each refused send, at most DRIP_REFUSED_SEND_COMMANDS:
-    // its mark, the email figure's SET NX and INCRBY, the sender's state read and the mark's release script.
-    const most = 3 + 8 * 2 + DRIP_REFUSED_SEND_COMMANDS * DRIP_REFUSALS_PER_STORE;
-    is("the run's commands stay within the formula", seen.length <= most, true);
+    // Every command of the run, from the cost line's own formula: the run's own sets and cursor; the old set's courses
+    // moved to the store's pending set (two SADDs and the old set's SREM, once); and one store's run, its walk of the
+    // eight courses into its index inside the page budget and its pairs due read, a third of its email figure.
+    const most = DRIP_RUN_FIXED_COMMANDS + 3 + dripRunCommandsPerStore(dripEntriesPerRun("pro"));
+    is(`the run's commands (${seen.length}) stay within the formula (${most})`, seen.length <= most, true);
   }
 
   part("Every send goes: everyone due is emailed once, and the next run sends nothing more");
@@ -129,10 +133,22 @@ async function main(): Promise<void> {
     const store = await setup(8);
     for (const course of COURSES) await original([["SET", `nl:course:${course.id}`, JSON.stringify(course)]]);
     seen.length = 0;
-    const run = await quietly(() => sendDripEmails(async () => store, async () => { throw new Error("one at a time is not used"); }, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
-    is("everyone due emailed", run.sent, 240);
-    is("eight courses, one MGET, no GET of a course", [seen.filter((c) => c[0] === "MGET").length, seen.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:course:")).length], [1, 0]);
+    const each = async () => { throw new Error("one at a time is not used"); };
+    const run = await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
+    // A run reads at most a third of the store's email figure of pairs due (dripIndexEntriesPerRun): the rest wait in
+    // the index for the next runs, inside the same three-day window.
+    is("the first run emails as many as a run reads", run.sent, dripEntriesPerRun("pro"));
+    is("eight courses' outlines, one MGET, no GET of a course", [seen.filter((c) => c[0] === "MGET" && String(c[1]).startsWith("nl:course:")).length, seen.filter((c) => c[0] === "GET" && String(c[1]).startsWith("nl:course:")).length], [1, 0]);
+    let sent = run.sent;
+    for (let n = 0; n < 2; n += 1) sent += (await quietly(() => sendDripEmails(async () => store, each, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)))).sent;
+    is("everyone due emailed within the window's three runs, once", sent, 240);
   }
+
+  // Since the drip index (docs/drip-due-index.md), a course of the old set is moved to its store's pending set and its
+  // outline read once to write its card: a course is "kept" while it is pending or has its card.
+  const keptOf = async (store: Store, n: number) =>
+    (await original([["SISMEMBER", `nl:drip:pending:${store.statsId}`, `${COURSES[n].id}|${store.handle}|${products[n].id}`]]))[0] === 1 ||
+    typeof (await original([["GET", `nl:drip:card:${COURSES[n].id}`]]))[0] === "string";
 
   part("An entry of the batch: its exact null is a course gone; one it cannot read keeps that course, the others go on");
   {
@@ -140,9 +156,8 @@ async function main(): Promise<void> {
     const before = mail.sent.filter((m) => m.to.some((a) => a.startsWith("student-2-"))).length;
     await original([["SET", `nl:course:${COURSES[0].id}`, JSON.stringify(COURSES[0])], ["SET", `nl:course:${COURSES[2].id}`, "{not a course"]]);
     const run = await quietly(() => sendDripEmails(async () => store, async () => null, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
-    const inSet = async (n: number) => (await original([["SISMEMBER", DRIP, `${COURSES[n].id}|${store.handle}|${products[n].id}`]]))[0];
     is("the readable course's thirty emailed", run.sent, 30);
-    is("the course whose record is gone (exact null) leaves the set; the unreadable one stays, counted failed", [await inSet(0), await inSet(1), await inSet(2), run.failed], [1, 0, 1, 1]);
+    is("the course whose record is gone (exact null) is let go; the unreadable one stays, counted failed", [await keptOf(store, 0), await keptOf(store, 1), await keptOf(store, 2), run.failed], [true, false, true, 1]);
     is("nobody of the unreadable course emailed", mail.sent.filter((m) => m.to.some((a) => a.startsWith("student-2-"))).length - before, 0);
   }
 
@@ -151,12 +166,12 @@ async function main(): Promise<void> {
     const store = await setup(3);
     for (const course of COURSES.slice(0, 3)) await original([["SET", `nl:course:${course.id}`, JSON.stringify(course)]]);
     let hits = 0;
-    inject = (commands) => (commands[0]?.[0] === "MGET" ? (hits += 1, Promise.reject(new Error("synthetic: the database did not answer"))) : null);
+    inject = (commands) => (commands[0]?.[0] === "MGET" && String(commands[0][1]).startsWith("nl:course:") ? (hits += 1, Promise.reject(new Error("synthetic: the database did not answer"))) : null);
     const run = await quietly(() => sendDripEmails(async () => store, async () => null, "https://marktmorgen.com", NOW, Date.now() + 60_000, (ids) => readCoursesEach(ids)));
     inject = null;
-    const kept = await original(COURSES.slice(0, 3).map((course, n) => ["SISMEMBER", DRIP, `${course.id}|${store.handle}|${products[n].id}`]));
     is("the batch was the walk's own read", hits > 0, true);
-    is("nothing sent, every course failed and kept", [run.sent, run.failed, kept], [0, 3, [1, 1, 1]]);
+    is("nothing sent, every course failed and kept", [run.sent, run.failed, await keptOf(store, 0), await keptOf(store, 1), await keptOf(store, 2)], [0, 3, true, true, true]);
+    is("and none of them has a card yet, so the next run reads it again", (await original(COURSES.slice(0, 3).map((c) => ["GET", `nl:drip:card:${c.id}`]))).every((v) => v === null), true);
   }
 }
 

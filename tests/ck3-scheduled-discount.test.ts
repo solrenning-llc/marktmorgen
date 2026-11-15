@@ -51,12 +51,14 @@ async function main() {
   try {
     const rules = await import("@/lib/discount-schedule-rules");
     const sched = await import("@/lib/discount-schedule");
-    const { MAX_SCHEDULED_CODES, ACTIVATION_TRIES, RETRY_SECONDS, SCHEDULE_UNITS, MIN_LEAD_SECONDS, MAX_AHEAD_SECONDS, readWindow, scheduleState, readScheduleConfirmation } = rules;
+    const { MAX_SCHEDULED_CODES, ACTIVATION_TRIES, RETRY_SECONDS, SCHEDULE_UNITS, STOP_TRIES, MIN_LEAD_SECONDS, MAX_AHEAD_SECONDS, readWindow, scheduleState, readScheduleConfirmation } = rules;
 
     part("The rules: bounded, and paid for before anything is spent");
     is("a store keeps at most a handful of scheduled codes", MAX_SCHEDULED_CODES > 0 && MAX_SCHEDULED_CODES <= 20, true);
     is("activation is tried a bounded number of times", ACTIVATION_TRIES >= 2 && ACTIVATION_TRIES <= 5, true);
-    is("each try is one studio request taken when the code is scheduled", SCHEDULE_UNITS, ACTIVATION_TRIES);
+    // Since #4522 (Claude 6): a stop the last try needs, if Stripe does not confirm it, is tried STOP_TRIES runs more, each paid too.
+    is("each try is one studio request taken when the code is scheduled: to switch it on, then to switch it off", SCHEDULE_UNITS, ACTIVATION_TRIES + STOP_TRIES);
+    is("and switching it off is tried a bounded number of times", STOP_TRIES >= 1 && STOP_TRIES <= 5, true);
     is("retries wait for a later five-minute run", RETRY_SECONDS >= 300, true);
 
     part("The start and the end, read and refused in words");

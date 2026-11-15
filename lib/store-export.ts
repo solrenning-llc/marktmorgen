@@ -19,6 +19,10 @@
  * (lib/plan-closing-rules.ts), its own and never refused for want of room
  * anywhere else, priced with its closing against its own payments
  * (tests/plan-cost-registry.ts, closure).
+ *
+ * Its "store" part carries the owner's yes to "at least 18" when the store was
+ * made (adultConfirmed: the version of the sentence and the time, 568 [GD2]
+ * (i)), exactly as kept; a store made before the box existed has none.
  */
 import { readAllListings } from "@/lib/catalog";
 import { BODIES_PER_READ, type Course, MAX_LESSONS, readAllBodies, readCoursesExact } from "@/lib/course";
@@ -193,7 +197,7 @@ export function storeExport(store: Store, now = Date.now()): ReadableStream<Uint
   /** A part of a part that could not be read, said by name (plural: the products' pages, the courses...). */
   const note = (key: string, what: string): string => said(key, `${what} ${ended ? `could not be read just now, so they are not in this file. ${ENDED_AGAIN}` : UNREAD_LATER}`);
   const parts: (() => Promise<string>)[] = [
-    async () => `{"exportedAt":${JSON.stringify(new Date(now).toISOString())},"store":${JSON.stringify({ handle: store.handle, name: store.name, bio: store.bio, links: store.links, createdAt: store.createdAt, currency: store.currency })}`,
+    async () => `{"exportedAt":${JSON.stringify(new Date(now).toISOString())},"store":${JSON.stringify({ handle: store.handle, name: store.name, bio: store.bio, links: store.links, createdAt: store.createdAt, currency: store.currency, ...(store.adultConfirmed ? { adultConfirmed: { version: store.adultConfirmed.version, at: store.adultConfirmed.at } } : {}) })}`,
     async () => {
       const listings = await readAllListings(store);
       const ids = listings.map((listing) => listing.id);

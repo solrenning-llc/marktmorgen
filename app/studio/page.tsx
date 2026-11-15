@@ -2604,7 +2604,7 @@ export default async function StudioPage({
               <div id="store-data-export" tabIndex={-1} className="card mt-8 scroll-mt-32 p-6 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:p-8">
                 <p className="text-lg font-semibold tracking-[-0.02em] text-ink">Your store&rsquo;s main data, as one file</p>
                 <p className="mt-2 text-ink-soft">
-                  Your store&rsquo;s address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
+                  Your store&rsquo;s address, name, bio, links, currency, the date it was created, the age box you checked when you made it (if any), your products and their pages, thank-you notes, posts, courses with every lesson&rsquo;s text, forms and their answers,
                   contacts and a summary of your orders. It is counted from your studio&rsquo;s requests by its size.
                   Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.
                 </p>
@@ -2683,7 +2683,7 @@ export default async function StudioPage({
                     </button>
                   </form>
                   <span className="text-sm text-ink-soft">
-                    {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
+                    {`One file: your store's address, name, bio, links, currency, the date it was created, the age box you checked when you made it (if any), your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
                 <p className="mt-3 text-sm text-ink-soft">

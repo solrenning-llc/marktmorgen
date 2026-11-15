@@ -79,7 +79,8 @@ export default function PrivacyPage() {
           make a store, you check a box to confirm you are at least 18, or the
           age of majority where you live; we keep that you checked it, which
           version of that sentence you saw and when, with the store, for as
-          long as the store exists.
+          long as the store exists. It is in the file you can download with
+          your store&apos;s data.
         </p>
         <p>
           <strong className="text-black">Buyer information.</strong> When

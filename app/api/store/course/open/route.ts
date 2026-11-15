@@ -3,7 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { storeForHandle } from "@/lib/store";
 import { mintPass, openCourseLink, passCookie, peekCourseLink, storeKey } from "@/lib/learn";
 import { readListing } from "@/lib/catalog";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { OPEN_LINK_REQUEST_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 const GONE = "This link has expired or was already used too many times. Open the course page and ask for a new one.";
@@ -50,8 +50,8 @@ export async function POST(request: NextRequest) {
   const grant = await openCourseLink(token);
   const store = grant ? await storeForHandle(grant.h) : null;
   if (!grant || !store || storeKey(store) !== grant.k) return gone();
-  // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  // The store's public requests on the buyers' side (lib/buyer-actions.ts): two, for the GET and the page before it.
+  if (!(await takeBuyerRead(store, OPEN_LINK_REQUEST_UNITS))) return restingAway(origin, store);
   const product = await readListing(store, grant.p);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({

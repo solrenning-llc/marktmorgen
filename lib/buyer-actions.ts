@@ -33,6 +33,14 @@ import { takePublicRequest } from "@/lib/traffic";
 /** Public requests a community picture counts as: its bytes pass through us (tests/plan-cost-registry.ts holds the price). */
 export const PICTURE_REQUEST_UNITS = 4;
 
+/**
+ * Public requests the tap that opens an emailed community or course link
+ * counts as (MM-SA-41): the link's GET and the page that asks for the tap
+ * read before it, so the whole open is two later pages' commands, never one
+ * (tests/open-link-post.test.ts holds the count under it).
+ */
+export const OPEN_LINK_REQUEST_UNITS = 2;
+
 /** One action, taken from the store's month: the buyer's figure, or the creator's studio requests. */
 export async function takeBuyerAction(store: Store, by: "buyer" | "owner" = "buyer"): Promise<boolean> {
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;

@@ -19,6 +19,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextRequest } from "next/server";
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setLanguage, setSubscription, storeForEmail } from "@/lib/store";
 import { storeKey } from "@/lib/learn";
+import { OPEN_LINK_REQUEST_UNITS } from "@/lib/buyer-actions";
 import { GET as communityGet, POST as communityPost } from "@/app/api/store/community/open/route";
 import { GET as courseGet, POST as coursePost } from "@/app/api/store/course/open/route";
 import CommunityOpenPage from "@/app/[handle]/community/open/page";
@@ -26,6 +27,8 @@ import CourseOpenPage from "@/app/[handle]/course/open/page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { COMMANDS } from "./traffic-cost";
+import { REQUEST_COMMANDS } from "./plan-cost-registry";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const ORIGIN = "https://marktmorgen.com";
@@ -102,10 +105,27 @@ async function main(): Promise<void> {
     is("on to what the link opens, with the store's pass", [tapped.status, tapped.headers.get("location"), Boolean(tapped.headers.get("set-cookie"))], [303, kind.lands, true]);
     is("one open spent, one pass written", [opens(), passes() - startPasses], [1, 1]);
 
-    part(`${kind.name}: a link used up is said as gone at the GET, as before`);
+    part(`${kind.name}: a link used up is said as gone at the tap, as before`);
     await redis.pipeline([["SET", `${kind.grantKey(kind.token)}:opens`, "10", "EX", 3_600]]);
-    const used = await kind.get(new NextRequest(`${url}?token=${kind.token}`, { headers: { Host: "marktmorgen.com" } }));
-    is("410, no cookie", [used.status, used.headers.get("set-cookie")], [410, null]);
+    const used = await post({ Origin: ORIGIN });
+    is("410, no cookie, no pass", [used.status, used.headers.get("set-cookie"), passes() - startPasses], [410, null, 1]);
+    await redis.pipeline([["DEL", `${kind.grantKey(kind.token)}:opens`]]);
+
+    part(`${kind.name}: a whole open, the GET, the page and the tap, stays inside the buyer reads it is counted as`);
+    const original = redis.pipeline.bind(redis);
+    let commands = 0;
+    redis.pipeline = async (batch) => { commands += batch.length; return original(batch); };
+    try {
+      await kind.get(new NextRequest(`${url}?token=${kind.token}`, { headers: { Host: "marktmorgen.com" } }));
+      renderToStaticMarkup(await kind.Page({ params: Promise.resolve({ handle: `@${store.handle}` }), searchParams: Promise.resolve({ token: kind.token }) }));
+      const whole = await post({ Origin: ORIGIN });
+      is("the pass is given", whole.status, 303);
+    } finally {
+      redis.pipeline = original;
+    }
+    // A buyer read is one of the store's public requests (lib/buyer-actions.ts), priced as a later page with its count
+    // (tests/traffic-cost.ts, COMMANDS.laterPage; tests/plan-cost-registry.ts, REQUEST_COMMANDS).
+    is(`${commands} commands, at most the later pages it is counted as`, commands <= OPEN_LINK_REQUEST_UNITS * (COMMANDS.laterPage + REQUEST_COMMANDS), true);
   }
 
   part("The page speaks the store's language");

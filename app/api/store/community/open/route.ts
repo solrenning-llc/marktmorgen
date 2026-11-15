@@ -4,7 +4,7 @@ import { storeForHandle } from "@/lib/store";
 import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { openCommunityLink, peekCommunityLink } from "@/lib/community-access";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
-import { restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { OPEN_LINK_REQUEST_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 import { communityWords } from "@/lib/buyer-words/community";
 
 const GONE = "This link has expired or was already used too many times. Open the community page and ask for a new one.";
@@ -69,8 +69,8 @@ async function open(request: NextRequest, token: string, seen: { language?: unkn
   const store = grant ? await storeForHandle(grant.h) : null;
   seen.language = store?.language;
   if (!grant || !store || storeKey(store) !== grant.k) return gone();
-  // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  if (!(await takeBuyerRead(store))) return restingAway(origin, store);
+  // The store's public requests on the buyers' side (lib/buyer-actions.ts): two, for the GET and the page before it.
+  if (!(await takeBuyerRead(store, OPEN_LINK_REQUEST_UNITS))) return restingAway(origin, store);
   const pass = await mintPass(store, grant.e, "all");
   const headers = new Headers({ Location: `${origin}/@${store.handle}/community`, "Cache-Control": "no-store" });
   headers.append("Set-Cookie", passCookie(store, pass, origin.startsWith("https://")));

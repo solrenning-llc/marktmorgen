@@ -610,6 +610,12 @@ export async function disconnectFor(statsId: string, provider: MeetProvider, hos
 export async function forgetUser(
   provider: MeetProvider,
   accountId: string,
+  /**
+   * When the person removed the app, in milliseconds, as the notice says (Zoom's `deauthorization_time`). A
+   * connection made after it is a new grant, connected again since: kept, and kept in the account's index, so the
+   * provider's notice for that grant still finds it. Without a time, every connection of the account goes, as before.
+   */
+  removedAt?: number,
 ): Promise<{ statsId: string; owner: { email: string; handle: string }; account: string }[]> {
   if (!isRedisConfigured() || !accountId) return [];
   // The mark first, in the same pipeline as the read of the stores: a consent flow that kept its connection before
@@ -627,6 +633,9 @@ export async function forgetUser(
   if (!stores) throw new UnknownReplyError("the stores a meeting account connected");
   const forgot: { statsId: string; owner: { email: string; handle: string }; account: string }[] = [];
   const pass = stores.slice(0, FORGET_PASS);
+  // Stores connected again after the removal (a notice sent again by the provider after a first try failed, while
+  // the creator connected anew in between; webhooks/cron audit, Claude 1, 12/11/2026): their new connection stays.
+  const known = typeof removedAt === "number" && Number.isFinite(removedAt) && removedAt > 0;
   try {
     for (const statsId of pass) {
       // Each store leaves the index under its renewal lock, with its connection: a store connected again since (a flow
@@ -642,6 +651,8 @@ export async function forgetUser(
           confirmCounts(await redisPipeline([unlist]), 1, "a meeting account's store leaving its index");
           return null;
         }
+        // Connected again after the removal: its new connection stays, and so does its place in the index.
+        if (known && found.connectedAt > (removedAt as number)) return null;
         confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)], unlist]), 3, "a meeting connection's deletion");
         return found;
       });

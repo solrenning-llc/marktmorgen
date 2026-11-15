@@ -2609,7 +2609,7 @@ export function PageEditor({
                           productId={product.id}
                           block={block}
                           page={pageToSend}
-                          onChange={(next) => setDrafts((all) => all.map((d, i) => (i === index ? { ...d, block: next } : d)))}
+                          onChange={(next) => setDrafts((all) => all.map((d) => (d.block.id === block.id ? { ...d, block: next } : d)))}
                         />
                       )}
                     </div>

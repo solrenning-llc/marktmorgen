@@ -6,7 +6,7 @@ import { preorderDay, soonOne } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle, syncTakesBuyer } from "@/lib/store";
-import { ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
+import { BoxesRefused, ReturningCodeRefused, canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { RETURNING_TRIES, RETURNING_TRIES_SECONDS, otherDiscountWins, redeemReturningLink, releaseReturningLink, requestReturningLink, spendReturningLink } from "@/lib/returning-code";
 import type { ReturningCode } from "@/lib/returning-code-rules";
 import { countHit } from "@/lib/visit";
@@ -324,6 +324,8 @@ export async function POST(request: NextRequest) {
       createCheckout(store, product, linkOrigin(request, store), optionId, {
         bumps,
         picked,
+        // The boxes the buyer ticked go through the same EU VAT gate as the product, as one order.
+        gateBoxes: (boxes) => consumerGate({ product, members, boxes, headers: request.headers, form: sent }),
         held: holding,
         upsellKey: upsell?.fingerprint,
         plan: inPlan,
@@ -406,6 +408,11 @@ export async function POST(request: NextRequest) {
     // before Stripe is reached, so nothing is charged and no unit is held.
     if (error instanceof DigitalConsentMissing) return away(consentBack);
     // The code's coupon is used up or gone on the creator's account: said on the form, never a checkout at the full price.
+    // A ticked box the EU VAT gate refuses for this order: back to the page, as for the product itself.
+    if (error instanceof BoxesRefused) {
+      const status = error.reason === "refused" ? "abroad" : "country";
+      return away(from ? `/@${store.handle}/${from}/${product.id}?status=${status}` : `/@${store.handle}/p/${product.id}?status=${status}#buy`);
+    }
     if (error instanceof ReturningCodeRefused) return away(`/@${store.handle}/p/${product.id}?returning=${error.reason}#returning`);
     console.error("checkout failed", error);
     // A checkout Stripe would not open: counted, and the creator told (lib/checkout-trouble.ts).

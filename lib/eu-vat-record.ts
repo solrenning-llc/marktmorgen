@@ -16,6 +16,7 @@
  *   used to determine where the customer belongs. Point (i), an invoice's content where one is issued, is added when
  *   invoices under art. 9a are built.
  */
+import { decimalsOf } from "@/lib/money";
 import type { ConsumerPlace } from "@/lib/eu-vat-supply";
 import type { VatOnTop } from "@/lib/eu-vat-amount";
 import type { ViesAnswer } from "@/lib/eu-vat-vies";
@@ -73,7 +74,9 @@ export function euVatRecord(sale: EuVatSale): EuVatRecord | null {
   if (!sale || typeof sale !== "object") return null;
   if (!text(sale.sale, 255) || !text(sale.store, 64) || !text(sale.service, 200)) return null;
   if (sale.supply !== "ess" && sale.supply !== "human") return null;
-  if (typeof sale.currency !== "string" || !/^[a-z]{3}$/i.test(sale.currency)) return null;
+  // Only a currency written in hundredths: the OSS return converts minor units as cents, so a sale in yen or in dinars
+  // would be declared at a hundredth or ten times its VAT (Claude 7 on #4572). One in another unit makes no record.
+  if (typeof sale.currency !== "string" || !/^[a-z]{3}$/i.test(sale.currency) || decimalsOf(sale.currency) !== 2) return null;
   const date = dayOf(sale.at);
   if (!date) return null;
   const vat = sale.vat;

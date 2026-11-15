@@ -32,4 +32,5 @@ export const REFUSE_CONSUMERS_OPEN: readonly string[] = [
   "store tips (lib/store-tip-checkout.ts): not a supply for consideration; awaiting the coordinator's answer",
   "call bookings and call packages (lib/calls.ts, lib/call-packages.ts): live services, outside art. 9a, to be shown so in a test",
   "sales blocks and the embedded card (components/sales-blocks.tsx, app/embed): sent to the product page, where the field is asked",
+  "the one-click offer after paying (app/api/store/upsell, lib/upsell.ts): charged to the card just used, with no billing country of its own; to be gated with the first checkout's evidence, or refused for an electronic offer (Claude 7 on #4572)",
 ];

@@ -795,13 +795,53 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   const raws = await getMany(asked.flatMap((id) => [listingKey(catalog.id!, id), extrasKey(catalog.id!, id)]));
   const out: Product[] = [];
   asked.forEach((id, i) => {
-    const listing = parseJson(raws[i * 2]);
-    if (!listing || typeof listing !== "object") return;
-    const extras = parseJson(raws[i * 2 + 1]);
-    const product = parseProduct({ ...(listing as object), ...(extras && typeof extras === "object" ? extras : {}) });
-    if (product && product.id === id) out.push(product);
+    const product = productRead(raws[i * 2], raws[i * 2 + 1], id);
+    if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * The extras record exactly as productWrites writes it: a JSON record whose own keys are "fields" (a list), "funnel"
+ * (null or one that reads) and, on a product the creator ships, "legal" (#3004). Anything else, a key of the listing (a
+ * title, a price, an id, "__proto__") among them, is null: spread over the listing it would replace the listing's own
+ * value, and the next edit would write it into the listing for good (Codex P on #3888). Only the validated values are
+ * returned, with "legal" as written (parseProduct reads it).
+ */
+function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown; legal?: unknown } | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  if (!keys.includes("fields") || !keys.includes("funnel") || keys.some((key) => !EXTRAS_KEYS.has(key))) return null;
+  const { fields, funnel, legal } = parsed as { fields: unknown; funnel: unknown; legal?: unknown };
+  if (!Array.isArray(fields) || (funnel !== null && !parseFunnel(funnel))) return null;
+  // The legal information (#3004, 618 [SZ2]) is the full record's own, never a listing key; parseProduct reads it.
+  return keys.includes("legal") ? { fields, funnel, legal } : { fields, funnel };
+}
+
+/** The keys productWrites puts in a product's extras record: fields and funnel always, legal when filled (#3004). */
+const EXTRAS_KEYS = new Set(["fields", "funnel", "legal"]);
+
+/**
+ * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no
+ * record); an extras nil is a product with no checkout questions and no funnel. Any other reply (not text, text that
+ * is not a JSON record, extras without their list of questions or with a funnel that does not read, a record that is
+ * not a product or is another product's) throws UnknownReplyError. Every product edit writes back what this read
+ * (lib/store.ts, onProduct), so extras taken for "none" would DEL the creator's questions and funnel, and a listing
+ * taken for "none" would drop the product from a store copy's batch.
+ */
+function productRead(rawListing: unknown, rawExtras: unknown, id: string): Product | null {
+  if (rawListing === null) return null;
+  const listing = typeof rawListing === "string" ? parseJson(rawListing) : null;
+  if (!listing || typeof listing !== "object" || Array.isArray(listing)) throw new UnknownReplyError("a product's listing");
+  let extras: { fields: unknown[]; funnel: unknown } | Record<string, never> = {};
+  if (rawExtras !== null) {
+    const parsed = typeof rawExtras === "string" ? exactExtras(parseJson(rawExtras)) : null;
+    if (!parsed) throw new UnknownReplyError("a product's checkout questions and funnel");
+    extras = parsed;
+  }
+  const product = parseProduct({ ...(listing as object), ...extras });
+  if (!product || product.id !== id) throw new UnknownReplyError("a product's records");
+  return product;
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */
@@ -1133,6 +1173,45 @@ export async function readCardsFor(store: Store, ids: Iterable<string>): Promise
   return found;
 }
 
+/**
+ * Every product's card, in the creator's order, for the studio's search (766
+ * [STN13], lib/studio-search.ts): what the store record holds (inline, or in
+ * the head) with no read, the rest in one HMGET of the card hash, read
+ * exactly. Never filled in from the products' own records, so a search's
+ * reads stay one command whatever the store: a product whose card is absent
+ * or in an older shape is counted in `missing` and left out (the studio's
+ * Sales pages fill them, readCards). Anything but one string or nil for each
+ * product throws UnknownReplyError (rule 24), never "no products".
+ */
+export async function readCardsExact(store: Store): Promise<{ cards: Card[]; missing: number }> {
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  if (catalog.inline) return { cards: catalog.inline.map(cardOf), missing: 0 };
+  const ids = productIds(store);
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const rest = ids.filter((id) => !head.has(id));
+  const found = new Map<string, Card>();
+  for (const id of ids) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  let missing = 0;
+  if (rest.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cards");
+    const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+    const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+    if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+    rest.forEach((id, i) => {
+      const raw = slots[i];
+      if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+      const card = raw === null ? null : parseCard(id, raw);
+      if (card) found.set(id, card);
+      else missing += 1;
+    });
+  }
+  return { cards: ids.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])), missing };
+}
+
 /** When the studio's list is one page of a longer one, as the studio page read it. */
 export type ProductPaging = {
   page: number;
@@ -1382,12 +1461,11 @@ export async function readProductsStrict(store:Store,ids:readonly string[]):Prom
  return asked.map((id,index)=>{
   const listing=parseJson(raws[index*2]);
   const rawExtras=raws[index*2+1];
-  const extras=rawExtras===null?null:parseJson(rawExtras);
-  if(!listing||typeof listing!=="object"||Array.isArray(listing)||rawExtras!==null&&(!extras||typeof extras!=="object"||Array.isArray(extras)))throw new Error("Product records are invalid");
-  const x=extras as {funnel?:unknown;fields?:unknown}|null;
-  if(x&&(!Array.isArray(x.fields)||x.funnel!==null&&!parseFunnel(x.funnel)))throw new Error("Product offer record is invalid");
+  const extras=rawExtras===null?null:exactExtras(parseJson(rawExtras));
+  if(!listing||typeof listing!=="object"||Array.isArray(listing))throw new Error("Product records are invalid");
+  if(rawExtras!==null&&!extras)throw new Error("Product offer record is invalid");
   if(typeof raws[index*2]!=="string"||rawExtras!==null&&typeof rawExtras!=="string"||new TextEncoder().encode(String(raws[index*2])+(rawExtras??"")).length>MAX_PRODUCT_BYTES)throw new Error("Product record exceeds its bound");
-  const product=parseProduct({...listing,...((extras as Record<string,unknown>|null)??{})});
+  const product=parseProduct({...listing,...(extras??{})});
   if(!product||product.id!==id)throw new Error("Product association is invalid");
   return product;
  });

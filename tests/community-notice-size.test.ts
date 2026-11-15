@@ -10,6 +10,11 @@
  * The confirmed-empty and healthy controls stay as they were: ZCARD, the
  * room taken, ZADD, the trim.
  *
+ * Since #3390, tell first asks who is still in (lib/community-push.ts
+ * stillMembers, one EVAL, shown here as "STILL"): the members below are seeded
+ * as members who are in, so the controls still reach them, and the read of the
+ * sizes comes right after that one ask.
+ *
  * Runs the real code against the in-memory Redis (tests/redis-stub.ts),
  * synthetic ids only, no provider. Built from claude6/r24-community-handle
  * (commit a217f5dcdc), whose other parts main already covers or #3095 holds.
@@ -27,6 +32,11 @@ const LIST = `nl:cm:${COMMUNITY}:nt:${MEMBER}`;
 const SECOND_LIST = `nl:cm:${COMMUNITY}:nt:${SECOND}`;
 const room = { sid: "notice-size-replies-1", tier: "creator" as const, subscriptionActive: true, subscriptionId: "sub_synthetic", trialEnds: 0, planEndedAt: "" };
 const TAKE_DATA = "-- marktmorgen:store-data:v1";
+const STILL_IN = "-- marktmorgen:community-still-in:v1";
+const MEMBERS = `nl:cm:${COMMUNITY}:m`;
+// Members who are in, in the shape lib/community.ts keeps them (what STILL_IN reads).
+const seedMembers = () =>
+  store.pipeline([MEMBER, SECOND].map((k) => ["HSET", MEMBERS, k, JSON.stringify({ k, removed: false, muted: false })]));
 
 type Batch = (string | number)[][];
 
@@ -40,27 +50,30 @@ async function withPipeline(answer: (batch: Batch, original: (batch: Batch) => P
   }
 }
 
-const names = (sent: Batch) => sent.map((c) => (c[0] === "EVAL" && String(c[1]).startsWith(TAKE_DATA) ? "TAKE" : String(c[0])));
+const names = (sent: Batch) =>
+  sent.map((c) => (c[0] === "EVAL" && String(c[1]).startsWith(TAKE_DATA) ? "TAKE" : c[0] === "EVAL" && String(c[1]).startsWith(STILL_IN) ? "STILL" : String(c[0])));
 const size = (key: string) => store.pipeline([["ZCARD", key]]).then(([v]) => v);
 
 test("tell: a confirmed empty list takes the notice's room before filing it", async () => {
   store.clear();
+  await seedMembers();
   const sent: Batch = [];
   await withPipeline(async (batch, original) => { sent.push(...batch); return original(batch); }, async () => {
     await tell(COMMUNITY, [MEMBER], { kind: "mention", post: "p2", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(names(sent), ["ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK"]);
+  assert.deepEqual(names(sent), ["STILL", "ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK"]);
   assert.equal(await size(LIST), 1);
 });
 
 test("tell: two healthy lists both grow, each with its room", async () => {
   store.clear();
+  await seedMembers();
   await tell(COMMUNITY, [MEMBER], { kind: "reply", post: "p1", comment: "", by: OTHER, words: "synthetic" }, room);
   const sent: Batch = [];
   await withPipeline(async (batch, original) => { sent.push(...batch); return original(batch); }, async () => {
     await tell(COMMUNITY, [MEMBER, SECOND], { kind: "mention", post: "p2", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(names(sent), ["ZCARD", "ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK", "ZADD", "ZREMRANGEBYRANK"]);
+  assert.deepEqual(names(sent), ["STILL", "ZCARD", "ZCARD", "TAKE", "ZADD", "ZREMRANGEBYRANK", "ZADD", "ZREMRANGEBYRANK"]);
   assert.equal(await size(LIST), 2);
   assert.equal(await size(SECOND_LIST), 1);
 });
@@ -69,6 +82,7 @@ test("tell: a list size in an unknown shape files nothing, so nothing is kept wi
   const shapes: unknown[] = [null, undefined, "OK", {}, [], [1, 2], [null], [undefined], ["5"], [Number.NaN], [-1], [1.5], [{}]];
   for (const reply of shapes) {
     store.clear();
+    await seedMembers();
     const sent: Batch = [];
     await withPipeline(async (batch, original) => {
       sent.push(...batch);
@@ -76,13 +90,14 @@ test("tell: a list size in an unknown shape files nothing, so nothing is kept wi
     }, async () => {
       await tell(COMMUNITY, [MEMBER], { kind: "mention", post: "p3", comment: "", by: OTHER, words: "synthetic" }, room);
     });
-    assert.deepEqual(sent.map((c) => c[0]), ["ZCARD"], `ZCARD reply ${JSON.stringify(reply)}`);
+    assert.deepEqual(names(sent), ["STILL", "ZCARD"], `ZCARD reply ${JSON.stringify(reply)}`);
     assert.equal(await size(LIST), 0, `ZCARD reply ${JSON.stringify(reply)}`);
   }
 });
 
 test("tell: one unknown size among two files nothing for either", async () => {
   store.clear();
+  await seedMembers();
   const sent: Batch = [];
   await withPipeline(async (batch, original) => {
     sent.push(...batch);
@@ -90,7 +105,7 @@ test("tell: one unknown size among two files nothing for either", async () => {
   }, async () => {
     await tell(COMMUNITY, [MEMBER, SECOND], { kind: "mention", post: "p4", comment: "", by: OTHER, words: "synthetic" }, room);
   });
-  assert.deepEqual(sent.map((c) => c[0]), ["ZCARD", "ZCARD"]);
+  assert.deepEqual(names(sent), ["STILL", "ZCARD", "ZCARD"]);
   assert.equal(await size(LIST), 0);
   assert.equal(await size(SECOND_LIST), 0);
 });

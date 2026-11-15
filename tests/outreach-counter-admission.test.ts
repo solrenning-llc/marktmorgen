@@ -17,9 +17,9 @@ async function refused(action: "find" | "draft") {
   assert.deepEqual([state.reads, state.drafts, state.serviceCalls, state.commands.length], [0, 0, 0, 2]);
 }
 async function main() {
-  const sparse = new Array(2); sparse[1] = 1;
+  const sparse = new Array(2); sparse[0] = 1;
   for (const action of ["find", "draft"] as const) {
-    for (const [name, reply] of [["missing", undefined], ["empty", []], ["partial", sparse], ["extra", ["OK", 1, true]], ["text", ["OK", "1"]], ["null", ["OK", null]], ["zero", ["OK", 0]], ["negative", ["OK", -1]], ["unknown SET", [false, 1]]] as [string, unknown][]) {
+    for (const [name, reply] of [["missing", undefined], ["empty", []], ["partial", sparse], ["extra", [1, 1, true]], ["text", ["1", 1]], ["null", [null, 1]], ["zero", [0, 1]], ["negative", [-1, 1]], ["unknown EXPIRE", [1, false]]] as [string, unknown][]) {
       await check(`${action} refuses ${name} counter before provider work`, async () => { reset(); state.override = true; state.reply = reply; await refused(action); });
     }
     await check(`${action} refuses a counter timeout`, async () => { reset(); state.throws = true; await refused(action); });
@@ -30,7 +30,7 @@ async function main() {
     assert.equal((await ask("find")).status, 429);
     assert.deepEqual([state.reads, state.drafts, state.serviceCalls], [60, 0, 60]);
     assert.match(String(state.commands[0][1]), /^nl:rl:outreach-find-day:[0-9a-f]{32}$/);
-    assert.deepEqual(state.commands[0].slice(2), ["0", "EX", 86_400, "NX"]);
+    assert.deepEqual([state.commands[0][0], ...state.commands[1]], ["INCR", "EXPIRE", state.commands[0][1], 86_400, "NX"]);
   });
   await check("confirmed AI counters preserve the existing minute limit", async () => {
     reset();
@@ -38,7 +38,7 @@ async function main() {
     assert.equal((await ask("draft")).status, 429);
     assert.deepEqual([state.reads, state.drafts, state.serviceCalls], [0, AI_PER_MINUTE, 0]);
     assert.match(String(state.commands[0][1]), /^nl:rl:ai:[0-9a-f]{32}$/);
-    assert.deepEqual(state.commands[0].slice(2), ["0", "EX", 60, "NX"]);
+    assert.deepEqual([state.commands[0][0], ...state.commands[1]], ["INCR", "EXPIRE", state.commands[0][1], 60, "NX"]);
   });
   await check("a confirmed daily counter does not bypass a monthly refusal", async () => {
     reset(); state.refusal = { reason: "used", message: "Confirmed monthly refusal" };

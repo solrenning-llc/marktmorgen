@@ -1216,6 +1216,12 @@
       "parameters": []
     },
     {
+      "source": "app/studio/students/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/studio/students",
+      "parameters": []
+    },
+    {
       "source": "app/studio/tax/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/studio/tax",
@@ -1278,6 +1284,7 @@
     }
   ],
   "componentSources": [
+    "components/access-unchecked-note.tsx",
     "components/ad-spend-editor.tsx",
     "components/add-gallery.tsx",
     "components/affiliate-campaign-links.tsx",
@@ -1341,6 +1348,7 @@
     "components/community-events-studio.tsx",
     "components/community-events.tsx",
     "components/community-held.tsx",
+    "components/community-locked.tsx",
     "components/community-member-preview.tsx",
     "components/community-parts.tsx",
     "components/community-push-toggle.tsx",
@@ -1564,6 +1572,7 @@
     "components/review-stars.tsx",
     "components/review-studio.tsx",
     "components/review-themes.tsx",
+    "components/said-line.tsx",
     "components/sale-editor.tsx",
     "components/sales-blocks.tsx",
     "components/sales-goal-card.tsx",
@@ -1617,6 +1626,7 @@
     "components/store-tip-box.tsx",
     "components/store-tracking.tsx",
     "components/structured-data.tsx",
+    "components/students-bulk.tsx",
     "components/studio-app.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
@@ -1797,6 +1807,7 @@
     "app/api/store/community/push/route.ts",
     "app/api/store/community/route.ts",
     "app/api/store/community/rsvp/route.ts",
+    "app/api/store/community/space-view/route.ts",
     "app/api/store/community/upload/route.ts",
     "app/api/store/companies/route.ts",
     "app/api/store/contact-box/route.ts",
@@ -1962,6 +1973,7 @@
     "app/api/store/stores/route.ts",
     "app/api/store/stream/captions/route.ts",
     "app/api/store/stream/route.ts",
+    "app/api/store/students/route.ts",
     "app/api/store/tax/route.ts",
     "app/api/store/team/route.ts",
     "app/api/store/thanks-note/route.ts",
@@ -2094,6 +2106,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 143
+    "pageTemplates": 144
   }
 }

@@ -172,6 +172,40 @@ async function main(): Promise<void> {
   const buyer = await sell(xpage.store, xpage.full, T1);
   delete during.list;
   is("never a call removed and its seat sold at the same time", removed && buyer === "opened", false);
+  part("An unreadable store read never runs the removal without the lock (Claude 6 on #4023)");
+  // The route's own read of the store (storeForEmail) answers in an unknown shape while a buyer's booking holds the
+  // lock: the removal must refuse (503), never go on as if the store had no calendar.
+  const ownerKeyOf = async (email: string) => {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`nimbus-store:${email.toLowerCase()}`)));
+    return `nl:store:owner:${[...digest].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 40)}`;
+  };
+  const xowner = await ownerKeyOf(x.email);
+  const realPipe = redis.pipeline.bind(redis);
+  let ownerReads = 0;
+  let spoil = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (spoil && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === xowner) {
+      ownerReads += 1;
+      // The guard's read is the first; the route's own storeForEmail is the second.
+      if (ownerReads === 2) return [{ odd: true }];
+    }
+    return realPipe(commands);
+  }) as typeof redis.pipeline;
+  let unlockedRemoved = false;
+  during.list = async () => {
+    spoil = true;
+    try {
+      unlockedRemoved = await remove();
+    } finally {
+      spoil = false;
+    }
+  };
+  const lockedBuyer = await sell(xpage.store, xpage.full, T1);
+  delete during.list;
+  redis.pipeline = realPipe;
+  is("a removal whose store read is unknown is refused while a booking holds the lock", unlockedRemoved && lockedBuyer === "opened", false);
+  is("…and the store read was the one spoiled", ownerReads >= 2, true);
+
   is("control: once no booking holds the lock, the call is removed", await remove(), true);
   is("control: …and the product is no longer a call", Boolean((await readProduct((await storeForEmail(x.email)) as Store, x.id))?.call), false);
 

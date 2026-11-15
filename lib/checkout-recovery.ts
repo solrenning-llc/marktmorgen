@@ -704,8 +704,10 @@ export async function forgetRecoveryPerson(statsId: string | null, productIds: s
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
   // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
   // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
-  const gone = repliesFor(await redisPipeline([["DEL", ...productIds.map((p) => onceKey(statsId, email, p))]]), 1);
+  // A count above the keys sent does not match the DEL that ran (#4797): unknown too.
+  const keys = productIds.map((p) => onceKey(statsId, email, p));
+  const gone = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
   const count = gone ? countOf(gone[0]) : null;
-  if (count === null) throw new UnknownReplyError("the deletion of an address's reminder marks");
+  if (count === null || count > keys.length) throw new UnknownReplyError("the deletion of an address's reminder marks");
   return count;
 }

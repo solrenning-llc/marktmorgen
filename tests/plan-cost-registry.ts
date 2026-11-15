@@ -55,6 +55,7 @@ import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { PAID_STORES_PER_FREE_STORE } from "@/lib/free-pool-rules";
 import { CERTIFICATE_PDF_MAX_BYTES } from "@/lib/certificate-pdf";
 import { monthlyEmails, type Tier } from "@/lib/plan";
+import { UPDATE_EMAIL_COMMANDS } from "@/lib/product-updates-rules";
 import { FREE_PAUSE_ABOVE_BYTES } from "@/lib/delivery";
 import { PAID_VIDEO_HOURS } from "@/lib/video-admission-rules";
 import { TOP_HEIGHT, viewingBytes } from "@/lib/stream-rules";
@@ -1235,6 +1236,19 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
     basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+  },
+  {
+    id: "product-update-commands",
+    feature: "A product update's sending, in Redis commands, for each of its emails: the batch's lock, page and checks, the month's reservation, the stop link with its erasure note read again after it is written (#4781), the send and the job saved (15 November 2026)",
+    // Every monthly email of the plan sent as a product update, each in a batch of its own (the dearest way): Store
+    // has no monthly emails, so nothing; Studio and Scale at their monthly emails.
+    monthlyUsd: (tier) => monthlyEmails(tier) * UPDATE_EMAIL_COMMANDS * COMMAND,
+    sources: [
+      { file: "lib/product-updates-rules.ts", names: ["UPDATE_EMAIL_COMMANDS"] },
+      { file: "lib/product-updates.ts", names: ["advanceUpdate", "stopLink", "stillNoted"] },
+      { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS"] },
+    ],
+    basis: "Each email a product update sends takes one from the plan's monthly emails before it goes (lib/mail.ts reserve), so the month's emails bound them. Each is priced at UPDATE_EMAIL_COMMANDS, what a batch of one recipient costs with every script's own commands (tests/i4781-update-commands.test.ts counts it; each further recipient of a batch costs 10). Recipients a batch leaves out (stopped, off the list or deleted) send nothing and take no email; a batch that leaves every one out still pays its page and their three checks each, which the emails do not bound: at most MAX_UPDATE_RECIPIENTS an update, its buyers' search counted in the studio's requests (updateReadUnits).",
   },
   {
     id: "transactional-email",

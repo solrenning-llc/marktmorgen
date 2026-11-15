@@ -68,7 +68,7 @@ import { productsInStats, reachProducts, readAllTimeSales, resultsByCampaign, st
 import { ReadingFailed, ReadingsUsed, keptSales, keptStats, readingsBackAt, readingsLeft } from "@/lib/store-readings";
 import { StatsPanel } from "@/components/stats-panel";
 import { readNotes } from "@/lib/stats-notes";
-import { readSpends } from "@/lib/ad-spend";
+import { spendsForStudio } from "@/lib/ad-spend";
 import { metaView } from "@/lib/meta-ads";
 import { readRanges, recordSample } from "@/lib/benchmarks";
 import { compare, sampleFrom } from "@/lib/benchmark-rules";
@@ -1020,7 +1020,8 @@ export default async function StudioPage({
             )
           : Promise.resolve({ state: "none" as const, value: null, at: null, used: false, failed: false, unnamed: false }),
         readNotes(current.statsId).catch(() => []),
-        readSpends(current.statsId).catch(() => []),
+        // Which part of the spend is unread is said, never that part as $0 (Claude 5 on #2924); it never throws.
+        spendsForStudio(current.statsId),
         heardOff(current.handle).catch(() => false),
         readTrouble(current.statsId).catch(() => ({ week: 0, last: null })),
         // What the store recorded on its own: emails sent, products added, sales (lib/auto-marks.ts).
@@ -1172,7 +1173,7 @@ export default async function StudioPage({
   if (current && paidList && paidList.length) after(() => catchUpBookings(current, paidList, SITE_URL));
   // Visits from Redis and sales from the creator's Stripe, read side by side,
   // with the creator's own notes on the chart and what they spent on ads.
-  const [visitsKept, salesRead, statsNotes, adSpends, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], [], false, { week: 0, last: null }, []];
+  const [visitsKept, salesRead, statsNotes, adSpendRead, heardIsOff, trouble, autoMarks] = statsRead ? await statsRead : [null, null, [], { spends: [], unread: null }, false, { week: 0, last: null }, []];
   const visits = visitsKept?.value ?? null;
   // When the numbers shown were read, whether the day still has a reading to read them again, and when the
   // day's readings come back: said on the panel, the kept copy shown as it is (inbox C4-33 (2), (3)).
@@ -1264,8 +1265,10 @@ export default async function StudioPage({
         { key: "address", title: "Your address", hint: `marktmorgen.com/@${store.handle} is yours.`, done: true, href: "#details" },
         { key: "details", title: "Say what your store is", hint: "One line under your name tells a visitor why they are here.", done: Boolean(store.bio), href: "#details" },
         { key: "look", title: "Add your photo and color", hint: "A face and a color make the page yours.", done: Boolean(store.photoId), href: "#look" },
-        { key: "product", title: "Prepare your first offer", hint: "Keep an AI draft or add one yourself; add the delivery and review its terms.", done: productCount(store) > 0, href: productCount(store) === 0 && ai.on ? "#setup-ai" : "#products" },
-        { key: "publish", title: "Publish your first offer yourself", hint: "Review the product, delivery, price and buyer terms, then choose Publish. Publishing does not open paid selling while sales gates are closed.", done: visibleCount(store) > 0, href: "#products" },
+        // Each hint names only what this studio offers: an AI draft only where the AI box is shown (setup-ai below),
+        // and Publish for what waits on it. A product added by hand is on the page at once (components/product-editor.tsx).
+        { key: "product", title: "Prepare your first offer", hint: productCount(store) === 0 && ai.on ? "Keep an AI draft or add one yourself; add the delivery and review its terms." : "Add what you sell and its price, then the file or link the buyer gets.", done: productCount(store) > 0, href: productCount(store) === 0 && ai.on ? "#setup-ai" : "#products" },
+        { key: "publish", title: "Publish your first offer yourself", hint: "Review the product, delivery, price and buyer terms. A product you add yourself is on your page at once. A draft, from AI or one you unpublished, goes on it when you choose Publish it. Publishing does not open paid selling while sales gates are closed.", done: visibleCount(store) > 0, href: "#products" },
         ...(connectReady
           ? [{ key: "stripe", title: "Connect your Stripe account", hint: "Where your buyers' money goes: yours, not ours.", done: store.stripeChargesEnabled, href: "#stripe" }]
           : []),
@@ -1654,7 +1657,8 @@ export default async function StudioPage({
                       canExport={may("export")}
                       notes={statsNotes}
                       marks={autoMarks}
-                      spends={adSpends}
+                      spends={adSpendRead.spends}
+                      spendsUnread={adSpendRead.unread}
                       beside={beside}
                       meta={await meta}
                       canConnectMeta={may("settings")}
@@ -3391,9 +3395,15 @@ export default async function StudioPage({
                         >
                           <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="font-bold text-ink">{sale.title}</p>
-                            <p className="font-display font-semibold text-ink">
-                              {formatMoney(sale.amount, sale.currency)}
-                            </p>
+                            {sale.amount === null ? (
+                              <p role="status" className="text-sm font-semibold text-ink">
+                                Amount could not be loaded
+                              </p>
+                            ) : (
+                              <p className="font-display font-semibold text-ink">
+                                {formatMoney(sale.amount, sale.currency)}
+                              </p>
+                            )}
                           </div>
                           <p className="mt-1 text-sm text-ink-soft">
                             {sale.email ? (
@@ -3461,7 +3471,7 @@ export default async function StudioPage({
                             </p>
                           ) : null}
                           {/* A one-time payment's receipt, read from Stripe when asked (lib/receipt-pdf.ts); a membership's payments have Stripe's invoices. */}
-                          {sale.oneTime && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
+                          {sale.oneTime && sale.amount !== null && sale.amount > 0 && sale.reference.startsWith("cs_") ? (
                             <p className="mt-2">
                               <a
                                 href={`/api/store/receipt-pdf?${store?.sid ? `store=${store.sid}&` : ""}reference=${sale.reference}`}

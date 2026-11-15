@@ -107,6 +107,9 @@ export function exactEpisodeAudio(raw: unknown, podcastId: string): Set<string> 
 function xml(text: string): string {
   return text
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, "")
+    // Nor U+FFFE, U+FFFF or an unpaired surrogate (a title cut in the middle of an emoji leaves one): XML 1.0 allows
+    // none of them, and a strict podcast app refuses the whole feed over one (Claude 7, 13 November 2026).
+    .replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]|[\ufffe\uffff]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

@@ -14,6 +14,7 @@ import { courseSender } from "@/lib/learn";
 import { tellCreatorNow } from "@/lib/assignment";
 import type { Submission } from "@/lib/assignment-rules";
 import type { Listing, Store } from "@/lib/store";
+import { SITE_URL } from "@/lib/site-url";
 import { coursesWords } from "@/lib/buyer-words/courses";
 
 function excerpt(text: string, max: number): string {
@@ -23,9 +24,11 @@ function excerpt(text: string, max: number): string {
 
 /** Tells the creator there is work to read. Returns whether an email went. */
 export async function tellCreatorOfWork(input: { store: Store; product: Listing; courseId: string; lessonTitle: string; origin: string }): Promise<boolean> {
-  const { store, product, courseId, lessonTitle, origin } = input;
+  // The studio lives on this site, as in every other studio email: never the
+  // host of the student's request, which can be another creator's domain.
+  const { store, product, courseId, lessonTitle } = input;
   if (!(await tellCreatorNow(courseId))) return false;
-  const page = `${origin}/studio/course/${product.id}${store.sid ? `?store=${store.sid}` : ""}#work`;
+  const page = `${SITE_URL}/studio/course/${product.id}${store.sid ? `?store=${store.sid}` : ""}#work`;
   return sendEmail({ meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,

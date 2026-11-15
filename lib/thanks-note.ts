@@ -19,6 +19,13 @@ export const MAX_NOTE_HEADING = 100;
 export const MAX_NOTE_BODY = 2_000;
 export const MAX_NOTE_LABEL = 40;
 
+/**
+ * What the studio's page editor says where a product's note could not be read
+ * (lib/thanks-note-store.ts readThanksNote threw): no note editor is shown, so
+ * nothing typed can be saved over the note that is kept (app/studio/pages).
+ */
+export const NOTE_UNREAD = "Your note after paying could not be read just now, so it is not shown and nothing was changed. Reload, then try again.";
+
 export type ThanksNote = {
   /** Empty is "A note from <store>", in the store's language. */
   heading: string;

@@ -34,11 +34,11 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | --- | --- |
 | FOLLOW-UP-CHARGE | 10 |
 | NEW-CHARGE | 20 |
-| TOTALS | 34 |
-| PAST-SALE | 10 |
-| SETTING | 42 |
-| OTHER | 2 |
-| All | 118 |
+| TOTALS | 35 |
+| PAST-SALE | 5 |
+| SETTING | 43 |
+| OTHER | 3 |
+| All | 116 |
 
 ## The files
 
@@ -99,6 +99,7 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/mcp-tools.ts` | TOTALS | 248–277: revenue in the store's currency, sales_in_another_currency apart (unit 2d) | yes |
 | `lib/member-health.ts` | TOTALS | 164–170: each member's monthly amount in its own currency; 196–200 the at-risk total in the store's, the rest counted (unit 2e) | yes |
 | `lib/membership-numbers.ts` | TOTALS | 523/541: membership numbers and MRR movements in the store's currency | partly: "elsewhere" for live subscriptions only |
+| `lib/next-actions-rules.ts` | TOTALS | 247: "Do this next" ranks recorded money only in the store's currency (`options.currency`); another currency is never compared or converted | no |
 | `lib/meta-ads.ts` | TOTALS | 611: ad spend only for an account in the store's currency | partly: refused |
 | `lib/meta-routes.ts` | TOTALS | 84/88: Meta picks an account in the store's currency | partly |
 | `lib/path-facts.ts` | TOTALS | 81/123: Path's revenue in the store's currency only | partly: other sales count, not their money |
@@ -113,17 +114,13 @@ Unit 2b fixed 1, 2 and 5, unit 2c fixed 3 and 6, units 2d and 2e fixed 4 and 2f 
 | `lib/ad-events.ts` | PAST-SALE | 575/719: the session's or invoice's currency, else the store's | yes |
 | `lib/api-read.ts` | PAST-SALE | 189: the bookings API labels a paid call with the store's currency; 44/59 settings | no (189) |
 | `lib/course-paid-observation.ts` | PAST-SALE | 71–76: the paid session, line item, payment and charge must match the original receipt currency | yes: compares the paid currency with the frozen original, without conversion or borrowing the current store setting |
-| `lib/gifts.ts` | PAST-SALE | 198: the gift receipt in the session's currency | yes |
 | `lib/group-buy.ts` | PAST-SALE | 243: the group receipt in the session's currency | yes |
-| `lib/payment-recovery.ts` | PAST-SALE | 258: the failed-payment email in the invoice's currency | yes |
-| `lib/preorders.ts` | PAST-SALE | 253: the pre-order receipt in the session's currency | yes |
-| `lib/purchase-email.ts` | PAST-SALE | 230: the purchase email in the session's currency | yes |
-| `lib/sale-events.ts` | PAST-SALE | 71: sale notifications in the checkout's currency | yes |
 | `app/[handle]/affiliates/page.tsx` | SETTING | 249–250, 510–512: the creator's lead and bonus terms | no |
 | `lib/course-confirmation-origin.ts` | SETTING | 114–127: an unadmitted course candidate freezes the store currency with its original price and consent text | yes: this is an immutable original-setting snapshot, not proof of payment or an active charge; paid observation must separately match it |
 | `app/[handle]/p/[product]/page.tsx` | SETTING | 188–200: structured data priceCurrency and prices | no (unit 3: what the page says) |
 | `app/api/store/agreements/route.ts` | SETTING | 40/62: agreement line amounts typed | partly: each version keeps its currency |
 | `app/api/store/ai/route.ts` | SETTING | 99/213/261/306: product prices as facts for AI writing | no |
+| `app/api/store/automation-draft/route.ts` | SETTING | 44: product prices are formatted in the store's currency as facts for AI drafting; no charge is created | no |
 | `app/api/store/call-package/route.ts` | SETTING | 26–27: the package price field | no |
 | `app/api/store/cart/route.ts` | SETTING | 59–174: cart prices and total on the store page | no (unit 3) |
 | `app/api/store/currency/route.ts` | SETTING | 37/47/74: changing the store's currency itself | n/a |

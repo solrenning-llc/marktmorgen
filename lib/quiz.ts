@@ -364,11 +364,29 @@ const quizKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:q
 const triesKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:tries:${who}`;
 const resultKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:result:${who}`;
 const passedKey = (courseId: string, who: string) => `nl:course:${courseId}:passed:${who}`;
+/** A command answering 1 when this learner passed a quiz in a course: a dropped one's probe (lib/person-erasure.ts). */
+export const passedProbe = (courseId: string, who: string): (string | number)[] => ["EXISTS", passedKey(courseId, who)];
 
 export async function readQuizFor(courseId: string, lessonId: string): Promise<Quiz | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;
   const [raw] = await redisPipeline([["GET", quizKey(courseId, lessonId)]]);
   return parseQuiz(raw);
+}
+
+/**
+ * One lesson's quiz, read only in its exact shape (CX-123 rule 24): the quiz, or null when Redis answers there is none
+ * (nil). A reply of another shape, a record that does not read as a quiz, a lesson id that cannot be one or no Redis
+ * throws UnknownReplyError, never "this lesson has no quiz". readQuizFor stays as it is for its other callers.
+ */
+export async function readQuizForExact(courseId: string, lessonId: string): Promise<Quiz | null> {
+  const what = "a lesson's quiz";
+  if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) throw new UnknownReplyError(what);
+  const reply = repliesFor(await redisPipeline([["GET", quizKey(courseId, lessonId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError(what);
+  if (reply[0] === null) return null;
+  const quiz = parseQuiz(reply[0]);
+  if (!quiz) throw new UnknownReplyError(what);
+  return quiz;
 }
 
 /**

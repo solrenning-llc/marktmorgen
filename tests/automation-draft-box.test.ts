@@ -12,6 +12,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AutomationDraftBox, DraftReview } from "@/components/automation-draft";
 import type { AutomationDraftValue } from "@/lib/automation-draft";
+import { aiOnValue } from "@/lib/ai-on-value";
 import { done, is } from "./check";
 
 const value: AutomationDraftValue = {
@@ -59,5 +60,6 @@ is("while it saves, saving says so and cannot be pressed twice", [busy.includes(
 
 const page = readFileSync("app/studio/email/page.tsx", "utf8");
 is("the Email page draws it only for those who may save workflows", /can\(role, "send"\) \? \(\s*<AutomationDraftBox/.test(page), true);
-is("the Email page's allowance read does not turn a failed read into 0 left (Revisor 2's LOW on #3458)", [/aiLeft\(store\)\.catch\(\(\) => 0\)/.test(page), /known: false as const/.test(page)], [false, true]);
+// Main hands the unread allowance to aiOnValue (lib/ai-on-value.ts) as null, which turns it into known: false.
+is("the Email page's allowance read does not turn a failed read into 0 left (Revisor 2's LOW on #3458)", [/aiLeft\(store\)\.catch\(\(\) => 0\)/.test(page), /aiOnValue\(true, await aiLeft\(store\)\.catch\(\(\) => null\)\)/.test(page), aiOnValue(true, null)], [false, true, { on: true, left: 0, known: false }]);
 done();

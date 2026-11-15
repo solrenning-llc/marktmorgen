@@ -51,6 +51,10 @@ async function main(): Promise<void> {
   is("3 for two keys throws UnknownReplyError", await forget(["prod1", "prod2"], 3), "UnknownReplyError");
   is("a huge count throws UnknownReplyError", await forget(["prod1", "prod2"], Number.MAX_SAFE_INTEGER), "UnknownReplyError");
 
+  part("A product named twice: DEL removes at most one per distinct key (review of the same family, as lib/discord-access.ts)");
+  is("control: 1 for the same key sent twice is accepted", await forget(["prod1", "prod1"], 1), "1 of 2");
+  is("2 for one distinct key sent twice throws UnknownReplyError", await forget(["prod1", "prod1"], 2), "UnknownReplyError");
+
   part("Other shapes stay unknown");
   is("a negative count", await forget(["prod1"], -1), "UnknownReplyError");
   is("a fraction", await forget(["prod1"], 0.5), "UnknownReplyError");

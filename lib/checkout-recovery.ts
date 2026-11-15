@@ -704,10 +704,11 @@ export async function forgetRecoveryPerson(statsId: string | null, productIds: s
   if (!statsId || !productIds.length || !isRedisConfigured()) return 0;
   // The count only in its exact shape (CX-123 rule 24; docs/reviews/pf1-sweep-r24.md, F5):
   // anything else is unknown, and the erasure says this step could not finish, never "nothing here".
-  // A count above the keys sent does not match the DEL that ran (#4797): unknown too.
+  // A count above the distinct keys sent does not match the DEL that ran (#4797): unknown too. DEL removes at most one
+  // per distinct key, so a product named twice still allows only one (as lib/discord-access.ts).
   const keys = productIds.map((p) => onceKey(statsId, email, p));
   const gone = repliesFor(await redisPipeline([["DEL", ...keys]]), 1);
   const count = gone ? countOf(gone[0]) : null;
-  if (count === null || count > keys.length) throw new UnknownReplyError("the deletion of an address's reminder marks");
+  if (count === null || count > new Set(keys).size) throw new UnknownReplyError("the deletion of an address's reminder marks");
   return count;
 }

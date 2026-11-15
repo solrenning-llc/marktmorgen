@@ -107,7 +107,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (!charge) return json({ error: { message: "No such payment_intent" } }, 404);
     // As Stripe keeps it: what refunds that have not failed took back.
     const refunded = world.refunds.filter((row) => row.payment_intent === intent[1] && (row.status === "succeeded" || row.status === "pending")).reduce((sum, row) => sum + row.amount, 0);
-    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount: charge.amount, amount_refunded: refunded, disputed: charge.disputed } });
+    return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount: charge.amount, amount_refunded: refunded, disputed: charge.disputed } });
   }
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.listLags ? [] : world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {

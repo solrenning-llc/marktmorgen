@@ -19,6 +19,8 @@ export type ChatRefusal =
   | "name"
   | "out"
   | "resting"
+  /** The creator's message poses as Marktmorgen itself (568 [GD2] (c)); a member's is never held to it. */
+  | "imitation"
   | "unknown";
 
 /**

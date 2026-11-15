@@ -10,7 +10,7 @@ type Message = { i: number; a: string; text: string; at: number; n?: string };
 type Leave = { pass: string; ms: number; live: boolean };
 
 const REFUSALS = new Set<string>([
-  "off", "empty", "links", "slow", "hourly", "creatorOnly", "muted", "full", "name", "out", "resting", "unknown",
+  "off", "empty", "links", "slow", "hourly", "creatorOnly", "muted", "full", "name", "out", "resting", "imitation", "unknown",
 ]);
 const isRefusal = (value: unknown): value is ChatRefusal => typeof value === "string" && REFUSALS.has(value);
 

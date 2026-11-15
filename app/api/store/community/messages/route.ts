@@ -17,6 +17,7 @@ import {
 } from "@/lib/community-dm";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { imitationIn } from "@/lib/brand-imitation-rules";
 import { communityWords } from "@/lib/buyer-words/community";
 
 /** How far a request got before something failed: the store's language once read, and whether a write had begun. */
@@ -94,6 +95,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     if (!owner && !(await within(id, key, "dm"))) return back(box, "slow");
     const text = field("text", MAX_MESSAGE_TEXT);
     if (!text) return back(`${box}/${pairOf(key, to)}`, "empty");
+    // The creator's own message, sent privately in the store's name: never one that poses as Marktmorgen (568 [GD2]
+    // (c), lib/brand-imitation-rules.ts). What a member writes is not held to it. Nothing is sent, nothing changed.
+    if (owner && imitationIn(text)) return back(`${box}/${pairOf(key, to)}`, "imitation");
     // Starting a conversation is limited harder than continuing one: the cost
     // of a stranger is in the opening, not in the tenth message of a talk
     // somebody chose to have.

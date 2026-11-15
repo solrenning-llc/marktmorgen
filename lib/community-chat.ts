@@ -42,6 +42,7 @@ import { isProxy } from "node:util/types";
 import { redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { cleanText, linkCount } from "@/lib/community-text";
+import { imitationIn } from "@/lib/brand-imitation-rules";
 import { holdsAll } from "@/lib/community-search";
 import { stringList } from "@/lib/redis-reply";
 
@@ -189,7 +190,7 @@ function copyArray(raw: unknown): unknown[] {
 
 export type SaidResult =
   | { ok: true; message: ChatMessage }
-  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "unknown"; wait?: number };
+  | { ok: false; reason: "off" | "empty" | "links" | "slow" | "creatorOnly" | "imitation" | "unknown"; wait?: number };
 
 function singleReply(reply: unknown): unknown {
   return Array.isArray(reply) && reply.length === 1 ? reply[0] : undefined;
@@ -215,6 +216,9 @@ export async function say(
   const text = cleanText(raw, MAX_CHAT_TEXT);
   if (!text) return { ok: false, reason: "empty" };
   if (!setting.links && !owner && linkCount(text) > 0) return { ok: false, reason: "links" };
+  // Said in the store's name to everybody in the room: never words that pose as Marktmorgen (568 [GD2] (c),
+  // lib/brand-imitation-rules.ts). Only the creator's: what a member says is theirs and is not held to it.
+  if (owner && imitationIn(text)) return { ok: false, reason: "imitation" };
 
   try {
     if (setting.slow > 0 && !owner) {
@@ -338,6 +342,8 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
       return "Your place here has ended, so this no longer takes messages.";
     case "empty":
       return "There was nothing to send.";
+    case "imitation":
+      return "Not sent: it reads as if it came from Marktmorgen itself (its sign-in, its account or its staff), or it links to an address made to look like ours. Write as yourself, and link only to your own pages or to marktmorgen.com. Marktmorgen never asks anyone for a password.";
     case "resting":
       return "This store is resting for now, so nothing can be written here until it opens again.";
     case "unknown":

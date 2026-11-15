@@ -55,6 +55,7 @@ import { alertCreator } from "@/lib/phone-alerts";
 import { award, levelOf, pointsOf } from "@/lib/community-points";
 import { restingAway, takeBuyerAction } from "@/lib/buyer-actions";
 import { DataRoomError } from "@/lib/store-data";
+import { imitationIn } from "@/lib/brand-imitation-rules";
 
 /** The most a form here may weigh: a full post with its picture's details. */
 const MAX_FORM_BYTES = 40_000;
@@ -62,6 +63,14 @@ const MAX_FORM_BYTES = 40_000;
 const OWNER_ONLY = new Set(["hide", "unhide", "hide-comment", "unhide-comment", "pin", "unpin", "start", "unstart", "mute", "unmute"]);
 /** Acts that are not counted: taking away what was counted when it was made. */
 const UNCOUNTED = new Set(["delete", "delete-comment", "withdraw"]);
+
+/**
+ * Whether words the store itself puts before its members pose as Marktmorgen (568 [GD2] (c),
+ * lib/brand-imitation-rules.ts): "Marktmorgen Support: verify your account" in a post or an announcement emailed to
+ * every member is a phishing message under our name. Asked only of the creator's own words: what a member writes is
+ * theirs and is never held to it here. Nothing is written when it answers yes, and the words are not changed.
+ */
+const posesAsUs = (...texts: string[]): boolean => texts.some((words) => imitationIn(words) !== null);
 
 /**
  * Everything a member, or the creator, does inside a community: plain forms
@@ -198,6 +207,8 @@ export async function POST(request: NextRequest) {
       if (!text && !path && !poll) return back(fromPage, "empty");
       if (poll && !title) return back(fromPage, "polltitle");
       if (linkCount(`${title}\n${text}`) > MAX_LINKS_IN_POST) return back(fromPage, "links");
+      // Before a picture is taken for it: the creator's post, poll answers and picture description included.
+      if (owner && posesAsUs(title, text, cleanLine(form.get("img_alt"), MAX_ALT_LENGTH), ...(poll?.options.map((one) => one.text) ?? []))) return back(fromPage, "imitation");
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && (!(await within(id, key, "post")) || !(await within(id, key, "postDay")))) return back(fromPage, "slow");
@@ -299,6 +310,7 @@ export async function POST(request: NextRequest) {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);
       if (!text) return back(postPage, "empty", "reply");
       if (linkCount(text) > MAX_LINKS_IN_COMMENT) return back(postPage, "links", "reply");
+      if (owner && posesAsUs(text)) return back(postPage, "imitation", "reply");
       if (!owner && !viewer.member?.n) return back(`${home}/you`, "name");
       if (!owner && config.questions.length && !viewer.member?.qa) return back(`${home}/you`, "questions");
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", "reply");
@@ -345,6 +357,8 @@ export async function POST(request: NextRequest) {
       const text = cleanText(form.get("text"), MAX_POST_TEXT);
       if (!text && !post.img) return back(postPage, "empty", `post-${post.id}`);
       if (linkCount(`${title}\n${text}`) > MAX_LINKS_IN_POST) return back(postPage, "links", `post-${post.id}`);
+      // The words kept stay as they were: the creator's rewrite is not saved while it poses as Marktmorgen.
+      if (owner && posesAsUs(title, text)) return back(postPage, "imitation", `post-${post.id}`);
       if (!owner && !(await within(id, key, "post"))) return back(postPage, "slow", `post-${post.id}`);
       await editPost(id, post, { title, text }, store);
       return back(postPage, "edited", `post-${post.id}`);
@@ -357,6 +371,7 @@ export async function POST(request: NextRequest) {
       const text = cleanText(form.get("text"), MAX_COMMENT_TEXT);
       if (!text) return back(postPage, "empty", `comment-${comment.id}`);
       if (linkCount(text) > MAX_LINKS_IN_COMMENT) return back(postPage, "links", `comment-${comment.id}`);
+      if (owner && posesAsUs(text)) return back(postPage, "imitation", `comment-${comment.id}`);
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", `comment-${comment.id}`);
       await editComment(id, post.id, comment, text, store);
       return back(postPage, "edited", `comment-${comment.id}`);

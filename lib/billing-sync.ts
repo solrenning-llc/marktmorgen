@@ -24,8 +24,10 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import {
+  BillingError,
   type SubscriptionState,
   isAddOn,
+  customerOf,
   hasContractFunding,
   isBillingConfigured,
   listSubscriptions,
@@ -37,7 +39,7 @@ import {
 } from "@/lib/billing";
 import { ENDED_INDEX } from "@/lib/plan-standing";
 import { allowanceWindow, samePeriod } from "@/lib/allowance-window";
-import { type Store, setSubscription, storeForHandle, storeRef, storesAfter } from "@/lib/store";
+import { type Store, accountStores, setSubscription, storeForEmail, storeForHandle, storeRef, storesAfter } from "@/lib/store";
 import { refusePlanIfClosing } from "@/lib/closing-plan-guard";
 
 const MAX_PAGES = 50;
@@ -135,6 +137,24 @@ export async function refreshPeriodOnce(store: Store, now = Date.now()): Promise
 }
 
 /**
+ * The store that wrote this subscription down, never found by the address in
+ * its metadata alone: renaming does not rewrite that address in Stripe, and an
+ * address let go leads nowhere for a month and may then be another creator's.
+ * First the store the address leads to, when it keeps this very id; otherwise
+ * the stores of the account Stripe's customer signs in with, the one that
+ * keeps this very id and owns it (lib/billing.ts, ownedBy: an address let go
+ * counts only with the store's own customer). Null when none, or more than one.
+ */
+async function storeKeeping(subscription: Record<string, unknown>, id: string, handle: string): Promise<Store | null> {
+  const named = await storeForHandle(handle);
+  if (named && named.subscriptionId === id) return named;
+  const { email } = customerOf(subscription);
+  if (!email) return null;
+  const keeping = (await accountStores(email)).filter((store) => store.subscriptionId === id && ownedBy(store, subscription));
+  return keeping.length === 1 ? keeping[0] : null;
+}
+
+/**
  * Writes down, the day the email about it goes, that a store's renewal is
  * unpaid (lib/billing-reminders.ts, 232 [CA1] unit 4), so what the email
  * says has stopped has stopped. Only for the subscription the store itself
@@ -148,13 +168,13 @@ export async function recordUnpaidRenewal(subscription: Record<string, unknown>)
   const id = typeof subscription.id === "string" ? subscription.id : "";
   const handle = (subscription.metadata as Record<string, unknown> | null | undefined)?.store;
   if (!id || typeof handle !== "string" || !handle || isAddOn(subscription)) return null;
-  const store = await storeForHandle(handle);
+  const store = await storeKeeping(subscription, id, handle);
   if (!store || store.subscriptionId !== id) return null;
   const state = stateOf(subscription);
   if (state.state === "unknown") throw new Error("the subscription's plan is unknown");
   if (state.state !== "active" || !state.renewalUnpaid || hasContractFunding(subscription)) return (store.renewalUnpaidSince ?? 0) > 0;
   await recordState(store, state);
-  const after = await storeForHandle(handle);
+  const after = await storeForEmail(storeRef(store));
   if (!after || !((after.renewalUnpaidSince ?? 0) > 0)) throw new Error("the unpaid renewal could not be written down");
   return true;
 }
@@ -220,6 +240,7 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
   // so the oldest subscriptions are reached too.
   const [saved] = await redisPipeline([["GET", LIST_CURSOR_KEY]]);
   let after: string | undefined = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : undefined;
+  let restarted = false;
   const stop = async () => {
     if (after) await redisPipeline([["SET", LIST_CURSOR_KEY, after, "EX", CURSOR_SECONDS]]);
     return false;
@@ -236,6 +257,17 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
     } catch (error) {
       counts.failed += 1;
       console.error("reading the list of subscriptions failed", error);
+      // A place Stripe says it does not know (the key moved to another
+      // account or mode, or the subscription went with its customer) is
+      // refused on every run: kept, it would stop step 1 for good. It is
+      // dropped and the list is read from its start, once in this run. Any
+      // other refusal keeps the place, so the next run reads it again.
+      if (after && !restarted && error instanceof BillingError && error.code === "resource_missing") {
+        restarted = true;
+        after = undefined;
+        await redisPipeline([["DEL", LIST_CURSOR_KEY]]);
+        continue;
+      }
       return stop();
     }
     const { data, hasMore } = listedPage;

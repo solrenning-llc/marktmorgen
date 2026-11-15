@@ -32,14 +32,20 @@ export type KeptElement = {
   disabled?: boolean;
   isConnected: boolean;
   parentElement?: KeptElement | null;
+  /** The elements beside it, read when the focus arrives: once it is taken away it has none. */
+  nextElementSibling?: KeptElement | null;
+  previousElementSibling?: KeptElement | null;
   focus: (options?: { preventScroll?: boolean }) => void;
 };
 
 /** Where to look once a control was taken away: whether a part of the page is inside its main content, its first control, and whether one element holds another. */
 export type KeeperPlace = {
   inMain: (element: KeptElement) => boolean;
-  firstControlIn: (element: KeptElement) => KeptElement | null;
+  /** The first control in a part that `skip` does not refuse. */
+  firstControlIn: (element: KeptElement, skip?: (control: KeptElement) => boolean) => KeptElement | null;
   contains: (outer: KeptElement, inner: KeptElement) => boolean;
+  /** Whether a control deletes something: it never gets the focus, so a repeated Enter cannot press it. */
+  destructive?: (control: KeptElement) => boolean;
 };
 
 export type FocusKeeper = {
@@ -66,6 +72,8 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
   let last: KeptElement | null = null;
   // Its parts of the page, nearest first, read when it got the focus: once it is taken away it has no parent.
   let around: KeptElement[] = [];
+  // What was beside the control and each of its parts, read at the same time.
+  let beside: { next: KeptElement | null; prev: KeptElement | null }[] = [];
   // The element turned off under the focus, waiting to be on again.
   let waiting: KeptElement | null = null;
   const nowhere = () => {
@@ -78,6 +86,7 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       waiting = null;
       around = [];
       for (let at = element.parentElement; at; at = at.parentElement) around.push(at);
+      beside = [element, ...around].map((node) => ({ next: node.nextElementSibling ?? null, prev: node.previousElementSibling ?? null }));
     },
     focusOut() {
       // Nothing to do: a Tab brings a focusin elsewhere, and a click a pointerdown first. A blur alone also comes to
@@ -89,6 +98,7 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       last = null;
       waiting = null;
       around = [];
+      beside = [];
     },
     disabledChanged(element) {
       if (element.disabled) {
@@ -112,13 +122,32 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       // The page itself was replaced: a navigation brings its own focus.
       if (parts.length === 0 || !place.inMain(parts[0])) return;
       const inside = parts.filter((part) => place.inMain(part));
+      // Never the control taken away, and never one that deletes: after a Delete, a second Enter must delete nothing.
+      const refused = (control: KeptElement) => control === lost || place.destructive?.(control) === true;
+      const safeIn = (part: KeptElement) => {
+        const control = place.firstControlIn(part, refused);
+        return control && !refused(control) ? control : null;
+      };
       // First, what the change added in the nearest part that holds any of it: the editor that took the control's
       // place, beside it or a level up (a goal's form beside its title row), and after other controls of that part (a
       // product card's waitlist box before its shipping editor).
       for (const part of inside.slice(0, NEAR_ADDED)) {
         const fresh = added.filter((node) => node.isConnected && place.contains(part, node));
         if (fresh.length === 0) continue;
-        const next = fresh.map((node) => place.firstControlIn(node)).find((control) => control !== null && control !== lost);
+        const next = fresh.map(safeIn).find((control) => control !== null);
+        if (next) {
+          next.focus({ preventScroll: true });
+          return;
+        }
+      }
+      // Then what was beside the part taken away (an item deleted from a list): the next one, else the one before
+      // (the APG pattern), not the first item of the list.
+      const chain = [lost, ...around];
+      let gone = 0;
+      for (let at = 0; at < chain.length; at += 1) if (!chain[at].isConnected) gone = at;
+      for (const near of [beside[gone]?.next, beside[gone]?.prev]) {
+        if (!near || !near.isConnected || !place.inMain(near)) continue;
+        const next = safeIn(near);
         if (next) {
           next.focus({ preventScroll: true });
           return;
@@ -127,8 +156,8 @@ export function focusKeeper(active: () => unknown, body: unknown, place?: Keeper
       // Nothing added near it: the first control of the nearest part that has one, a few levels up at most, never an
       // unrelated control far up the page.
       for (const part of inside.slice(0, NEAR)) {
-        const next = place.firstControlIn(part);
-        if (next && next !== lost) {
+        const next = safeIn(part);
+        if (next) {
           next.focus({ preventScroll: true });
           return;
         }

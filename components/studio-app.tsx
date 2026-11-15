@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { focusKeeper, type KeeperPlace, type KeptElement } from "@/lib/focus-keeper";
+import { focusKeeper, type KeptElement } from "@/lib/focus-keeper";
+import { STUDIO_PLACE } from "@/lib/focus-keeper-dom";
 
 /** The studio's own service worker and the part of the site it covers. */
 export const STUDIO_WORKER = "/studio-sw.js";
@@ -76,21 +77,3 @@ export function StudioApp() {
   }, []);
   return null;
 }
-
-/** A control the keyboard reaches, in the order a person meets them; a field first, as an editor opened in a button's place starts with one. */
-const FIELDS = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled])';
-const CONTROLS = 'button:not([disabled]), a[href], summary, [tabindex]:not([tabindex="-1"])';
-const shown = (node: Element) => node.getClientRects().length > 0 && getComputedStyle(node).visibility !== "hidden";
-
-/** Where the keeper looks once a control was taken away: only inside the page's main content, never the main region itself. */
-const STUDIO_PLACE: KeeperPlace = {
-  inMain: (part) => part instanceof Element && part.tagName !== "MAIN" && part.closest("main") !== null,
-  firstControlIn: (part) => {
-    if (!(part instanceof Element)) return null;
-    const first = (selector: string) => [...part.querySelectorAll<HTMLElement>(selector)].find(shown) ?? null;
-    // The part itself may be the control (a button added on its own).
-    if (part instanceof HTMLElement && part.matches(`${FIELDS}, ${CONTROLS}`) && shown(part)) return part as HTMLElement & KeptElement;
-    return (first(FIELDS) ?? first(CONTROLS)) as (HTMLElement & KeptElement) | null;
-  },
-  contains: (outer, inner) => outer instanceof Node && inner instanceof Node && outer.contains(inner),
-};

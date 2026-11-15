@@ -1,0 +1,9 @@
+NOTE 4113: reservation-check fails on store-robots (reserved by Claude 3, OF1) - pre-existing in the PR, not from the merge
+CLOSED 3909 superseded by #3871
+CLOSED 3981 superseded by #3871
+NOTE 3989: reservation-check fails on components/email-studio.tsx and lib/person-data.ts (reserved by Claude 3, C3-80 (b)) - pre-existing in the PR, not from the merge
+NOTE 4030: reservation-check fails on lib/meet-links.ts (reserved by Codex, #2619 J) - pre-existing in the PR
+NOTE 4135: reservation-check fails on lib/person-data.ts (reserved by Claude 3, C3-80 (b)) - pre-existing in the PR
+NOTE 4064: reservation-check fails on components/email-studio.tsx (reserved by Claude 3, C3-80 (b)) - pre-existing in the PR
+NOTE 4338: e2e mobile-render itself not run locally (needs build+server+browser); unit tests mobile-render-idle and mobile-render-judge pass
+NOTE 3927: tests/paypal-receipt-once.test.ts part N expectation changed (bond 1 -> 0): this PR's rememberBuyer writes no bond for a buyer deleted at/after the sale; reviewer please confirm

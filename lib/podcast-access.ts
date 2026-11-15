@@ -72,7 +72,20 @@ export async function feedToken(store: Store, productId: string, email: string):
   if (set !== "OK") return null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
-  return made === "OK" ? token : null;
+  return made === "OK" && (await stillIndexed(store, grant, token)) ? token : null;
+}
+
+/**
+ * Whether the index still leads to a grant just written (#4664): an erasure that ran between the index and the grant
+ * deleted the index, and a grant with no index holds the address where no erasure can find it, so it is deleted
+ * again here and no link is given. The index is read after the grant is written: an erasure that reads it later
+ * finds the token and deletes both itself. A read that is not exact deletes the grant too; the buyer asks again.
+ */
+async function stillIndexed(store: Store, grant: FeedGrant, token: string): Promise<boolean> {
+  const now = await indexedToken(grant.s, grant.p, grant.e).catch(() => undefined);
+  if (now === token) return true;
+  await orderWrite(store, [["DEL", tokenKey(token)]]).catch((error) => console.error("taking back a podcast grant with no index failed", error));
+  return false;
 }
 
 /**
@@ -86,7 +99,7 @@ async function withGrant(store: Store, token: string, grant: FeedGrant): Promise
   if (held === undefined) return null;
   if (held !== null) return sameGrant(held, grant) ? token : null;
   const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant), "NX"]]);
-  if (made === "OK") return token;
+  if (made === "OK") return (await stillIndexed(store, grant, token)) ? token : null;
   if (made !== null) return null;
   // null: another call wrote it first; hand it out only if it is this address's grant.
   const again = await grantOf(token);

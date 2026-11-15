@@ -44,6 +44,22 @@ async function main(): Promise<void> {
   is("a list answered in another shape is unknown, never no sales", await readPayPalSales(statsId, 0, 10).then((r) => r.partial, () => "threw"), "threw");
   redis.pipeline = original;
 
+  part("A sale past its keeping period is left out, never 'not read'");
+  // Review of #4001 (Claude 1 cloud and Claude 2 cloud I, MÉDIO): a sale's record expires by design after
+  // PAID_KEPT_SECONDS (400 days), while its member stays in the store's list until the next sale's settle trims it.
+  // Such a member is past keeping, not unknown: an all-time reading stays whole without it.
+  await redisPipeline([["DEL", salesKey, paidKey(order(1)), paidKey(order(2))]]);
+  const day = 86_400;
+  const now = Math.floor(Date.now() / 1000);
+  await redisPipeline([
+    ["ZADD", salesKey, String(now - 450 * day), order(3)],
+    ["ZADD", salesKey, String(now - 100 * day), order(4)],
+    ["SET", paidKey(order(4)), record(statsId, 4, now - 100 * day)],
+  ]);
+  is("an expired sale is left out and the reading is whole", await readPayPalSales(statsId, 0, 10).then((r) => [r.sales.length, r.partial], () => "threw"), [1, false]);
+  await redisPipeline([["ZADD", salesKey, String(now - 5), order(5)]]);
+  is("(control) a sale inside its keeping period with no record still leaves it partial", await readPayPalSales(statsId, 0, 10).then((r) => [r.sales.length, r.partial], () => "threw"), [1, true]);
+
   done();
 }
 

@@ -5,6 +5,11 @@ import { zeroExposureFixture } from "./margin-test-fixtures";
 import { exposureBudgetConfiguration, type ExposureBudgetPolicy, type ExposureFundingContext } from "@/lib/exposure-budget-policy";
 import { claimHeldRecheck, fundHeldStore, heldStoreKnown, heldStoresDue, noteHeldClosing, readHeldMonth, recordHeldMonth } from "@/lib/held-stores";
 import { HELD_RECHECKS_PER_DAY, heldStoreFundingFloorCents } from "@/lib/held-store-rules";
+import { createHash } from "node:crypto";
+
+/** What a closing day writes with a store's place in the final line (closingDay); without it the store is held as lost. */
+const closingStateOf = (ref: string, of: number, day: number) =>
+  ["SET", `nl:plan:closing:${createHash("sha256").update(ref).digest("hex").slice(0, 40)}`, JSON.stringify({ of, day, renewals: day })];
 
 const at = new Date();
 const DAY = Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1, 12);
@@ -142,6 +147,7 @@ test("the actual daily closing retries held coverage only once per day and close
   await setSubscription(email, { active: false });
   const ref = storeRef((await storeForEmail(email))!);
   await redis.run(["ZADD", FINAL_INDEX, DAY - 30 * 86400_000, ref]);
+  await redis.run(closingStateOf(ref, DAY - 30 * 86400_000, DAY));
   const original = globalThis.fetch;
   let reads = 0, complete = false;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -214,6 +220,7 @@ test("a full first page of coverage holds cannot starve the next final closing",
     await setSubscription(email, { active: false });
     const ref = storeRef((await storeForEmail(email))!);
     await redis.run(["ZADD", FINAL_INDEX, DAY - 30 * 86400_000 + i, ref]);
+    await redis.run(closingStateOf(ref, DAY - 30 * 86400_000 + i, DAY));
     await redis.run(["ZREM", "nl:plan:ended", ref]); // Final index must work even when a late active snapshot cleared this one.
     if (i < 200) await noteHeldClosing(ref, true, DAY); else target = ref;
   }

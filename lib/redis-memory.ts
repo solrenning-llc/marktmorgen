@@ -346,6 +346,14 @@ export class MemoryRedis {
           this.run(text === "" ? ["DEL", about] : ["SET", about, text]);
           return [1];
         }
+        // lib/move-members.ts INVITE_KEPT_IF_SAME: an invitation marked kept only while it is still the one read.
+        if (key.startsWith("-- marktmorgen:invite-kept-if-same:v1\n") && args[0] === "2" && args.length === 7) {
+          const [, invites, due, field, read, value, reminder] = args;
+          if (this.run(["HGET", invites, field]) !== read) return 0;
+          this.run(["HSET", invites, field, value]);
+          this.run(["ZREM", due, reminder]);
+          return 1;
+        }
         // lib/redis-reply.ts HDEL_IF_EQUAL: one hash field deleted only while it holds the value given.
         if (key.startsWith("-- marktmorgen:hdel-if-equal:v1\n") && args[0] === "1" && args.length === 4) {
           const [, hash, field, value] = args;

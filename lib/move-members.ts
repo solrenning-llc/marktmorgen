@@ -192,15 +192,30 @@ export async function moveCounts(store: Store): Promise<{ invited: number; kept:
   return { invited: invites.length, kept: invites.filter((i) => i.kept > 0).length };
 }
 
-/** Marks an invitation kept: the member paid, or their membership was found live. */
+/**
+ * An invitation marked kept only while it is still the one read (#4668): KEYS[1] the store's invitations, KEYS[2] the
+ * reminders' queue; ARGV[1] the field, ARGV[2] the invitation as read, ARGV[3] it marked kept, ARGV[4] its reminder.
+ * 1 when written and its reminder taken off; 0 when the row is gone (the person's erasure deleted it) or changed.
+ */
+export const INVITE_KEPT_IF_SAME = `-- marktmorgen:invite-kept-if-same:v1
+if redis.call("HGET", KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])
+redis.call("ZREM", KEYS[2], ARGV[4])
+return 1`;
+
+/**
+ * Marks an invitation kept: the member paid, or their membership was found live. Only over the invitation as read, in
+ * one step (#4668): one deleted since (the person's erasure) stays deleted, and one changed since is left as it is.
+ */
 export async function noteKept(store: Store, email: string, productId: string, now = Date.now()): Promise<void> {
   if (!store.statsId || !store.sid || !isRedisConfigured()) return;
   const field = inviteField(email, productId);
-  const invite = await readInvite(store.statsId, field);
+  if (!FIELD_PATTERN.test(field)) return;
+  const [raw] = await redisPipeline([["HGET", invitesKey(store.statsId), field]]);
+  const invite = parseInvite(raw);
   if (!invite || invite.kept) return;
   await redisPipeline([
-    ["HSET", invitesKey(store.statsId), field, JSON.stringify({ ...invite, kept: Math.floor(now / 1000) })],
-    ["ZREM", DUE_KEY, `${store.sid}|${field}`],
+    ["EVAL", INVITE_KEPT_IF_SAME, 2, invitesKey(store.statsId), DUE_KEY, field, raw as string, JSON.stringify({ ...invite, kept: Math.floor(now / 1000) }), `${store.sid}|${field}`],
   ]);
 }
 

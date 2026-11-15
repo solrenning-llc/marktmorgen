@@ -171,7 +171,9 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!written || written[0] !== "OK") throw new UnknownReplyError("a library link's grant");
   const link = `${input.origin}/library?token=${token}`;
   // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
-  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },
+  // Asked for by whoever typed the address, so only up to askedCeiling of them (`asked`, MM-SA-47): the rest stays for
+  // the links the store's buyers are sent after paying.
+  const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional", asked: true },
     from: NIMBUS_FROM,
     to: email,
     subject: "Your purchases on Marktmorgen",

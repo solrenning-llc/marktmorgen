@@ -20,6 +20,9 @@ import { readBook } from "@/lib/affiliates";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const STATS = "statsid1";
 const CLIENT = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
@@ -35,7 +38,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   fetches += 1;
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   const headers = new Headers(init?.headers);
   if (url.pathname === "/v1/oauth2/token") {

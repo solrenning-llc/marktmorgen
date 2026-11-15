@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
 import { Breadcrumb } from "@/components/breadcrumb";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { BUYER_HELP, BUYER_HELP_CHECKED } from "@/lib/buyer-help";
 
 export const metadata: Metadata = {
@@ -53,7 +53,7 @@ export default function BuyerHelpPage() {
               <h2 id={`${item.id}-q`} className="t-section">{item.q}</h2>
               <div className="mt-3 space-y-3">
                 {item.a.map((paragraph) => (
-                  <p key={paragraph} className="max-w-[70ch] leading-relaxed text-ink-soft">{paragraph}</p>
+                  <p key={paragraph} className="max-w-[46ch] leading-relaxed text-ink-soft">{paragraph}</p>
                 ))}
               </div>
             </section>

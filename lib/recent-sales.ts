@@ -28,6 +28,7 @@
  *   nl:recent:feed:<statsId>   what the pages show, worked out at most every FEED_SECONDS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { onAccount } from "@/lib/stripe-account";
 import { KIND, readListings } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
@@ -182,8 +183,14 @@ export async function recentSales(store: Store, now = Date.now()): Promise<Recen
   }
 }
 
-/** Everything kept here for a store that is being deleted. */
+/**
+ * Everything kept here for a store that is being deleted. The list holds payment references with country, product
+ * and time and has no expiry, so it is gone only on the DEL's own reply, read exactly (CX-123 rule 24; #4752): one
+ * slot, a whole count from 0 to 2. Anything else throws UnknownReplyError, never a deletion said done.
+ */
 export async function forgetRecentSales(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]);
+  const replies = repliesFor(await redisPipeline([["DEL", listKey(statsId), feedKey(statsId)]]), 1);
+  const gone = countOf(replies?.[0]);
+  if (gone === null || gone > 2) throw new UnknownReplyError("the deletion of a store's recent purchases");
 }

@@ -81,6 +81,12 @@ export type PlanRefundReading =
 type Row = Record<string, unknown>;
 const obj = (v: unknown): Row | null => (v && typeof v === "object" && !Array.isArray(v) ? (v as Row) : null);
 const idOf = (v: unknown): string => (typeof v === "string" ? v : typeof obj(v)?.id === "string" ? String(obj(v)!.id) : "");
+/**
+ * Whether Stripe's reply is the object asked for, by its own id (rule 30): another's, or one with none, decides nothing.
+ * A reply that is not an object (a JSON null, a string, a number) is not its own either, never a TypeError (Claude 6 on #3098).
+ */
+const isOwnReply = (reply: unknown, id: string): boolean =>
+  reply !== null && typeof reply === "object" && Object.hasOwn(reply, "id") && (reply as { id?: unknown }).id === id;
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
 
 class Spent extends Error {}
@@ -159,13 +165,22 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (!INVOICE_ID.test(invoiceId) || !CHARGE_ID.test(chargeId)) return { refund: { kind: "unknown", reason: "unreadable" } };
       const charge = await get(`/charges/${encodeURIComponent(chargeId)}?expand[]=balance_transaction`);
       if (charge.id !== chargeId || idOf(charge.invoice) !== invoiceId || idOf(charge.customer) !== customer.id) return { refund: { kind: "unknown", reason: "unreadable" } };
+      // Whether the charge was disputed is read exactly (rule 24; Claude 1's batch on #3405, as lib/closing-refunds.ts
+      // reads it): a flag that is missing, null or not a boolean is unknown, never "no dispute", so a lost dispute never
+      // makes the guarantee payable.
+      if (typeof charge.disputed !== "boolean") return { refund: { kind: "unknown", reason: "unreadable" } };
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
-      if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
-        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
+      if (charge.disputed) {
+        const disputePage = await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
+        const disputes = list(disputePage, 10);
+        // A page that says there is more is not the whole list of this charge's disputes: unknown.
+        if (!disputes || disputePage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
+        // Only this charge's own row decides (rule 30): one of another charge, or naming none, is unknown, so a dispute
+        // won elsewhere never makes the guarantee payable on a charge whose own dispute may be lost (Claude 5 on #3133).
+        if (idOf(disputes[0].charge) !== chargeId) return { refund: { kind: "unknown", reason: "unreadable" } };
         disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
         disputedCents = num(disputes[0].amount);
       }
@@ -313,6 +328,8 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
           // own earlier plans (started again since) is this store's: not decided here, never a silent no.
           if (!INVOICE_ID.test(invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const earlier = await get(`/invoices/${encodeURIComponent(invoiceId)}?expand[]=subscription`);
+          // Another invoice's reply, or one with no id: whose the first payment was is not known, so not decided here.
+          if (!isOwnReply(earlier, invoiceId)) return { refund: { kind: "unknown", reason: "unreadable" } };
           const named = obj(obj(earlier.subscription)?.metadata)?.store;
           const handles = new Set([store.handle, ...store.previousHandles]);
           if (typeof named === "string" && handles.has(named)) return { refund: { kind: "unknown", reason: "not_this_store" } };

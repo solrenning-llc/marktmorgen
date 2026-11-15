@@ -148,6 +148,23 @@ async function main(): Promise<void> {
   is("a link is sent", await ask("Ana@Example.com"), "sent");
   is("to the address as one, with the way to take it", tokenFor("ana@example.com").length, 64);
   is("and nothing is taken by typing", await placesTaken(id), 0);
+  // The month's access emails cannot be read: no email goes, and the person is told to try again, never "sent".
+  for (const [label, reply] of [["a lost reply", "lost"], ["a missing reply", []], ["a word", ["many"]], ["a negative count", ["-1"]]] as [string, unknown[] | "lost"][]) {
+    const original = redis.pipeline;
+    redis.pipeline = async (commands) => {
+      if (!(commands.length === 1 && commands[0][0] === "GET" && String(commands[0][1]).startsWith("nl:allow:transactional:"))) return original(commands);
+      if (reply === "lost") throw new Error("synthetic lost reply");
+      return [...reply];
+    };
+    const mailsBefore = emails.length;
+    let answer: unknown;
+    try {
+      answer = await ask(`unread.${label.length}@example.com`);
+    } finally {
+      redis.pipeline = original;
+    }
+    is(`the month's access emails unread (${label}): unavailable, nothing sent`, [answer, emails.length - mailsBefore], ["unavailable", 0]);
+  }
   // Two more ask while both places are still open.
   await ask("ben@example.com");
   await ask("cy@example.com");

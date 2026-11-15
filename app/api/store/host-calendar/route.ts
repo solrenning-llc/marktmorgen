@@ -73,9 +73,11 @@ export async function POST(request: NextRequest) {
       case "ics-remove":
         await removeHostIcs(store, email);
         return Response.json({ ok: true, view: await view() });
-      case "disconnect":
-        await disconnectHostGoogle(store, email);
-        return Response.json({ ok: true, view: await view() });
+      case "disconnect": {
+        // False when Google did not confirm it took the access back: the page says so, and how to remove it there.
+        const removed = await disconnectHostGoogle(store, email);
+        return Response.json({ ok: true, view: await view(), ...(removed === false ? { providerAccessRemoved: false } : {}) });
+      }
       case "check":
         if (!(await checkHostCalendar(store, email, tz))) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         return Response.json({ ok: true, view: await view() });

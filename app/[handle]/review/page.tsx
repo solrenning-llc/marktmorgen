@@ -6,6 +6,7 @@ import { notFound } from "next/navigation";
 import { clientAddress } from "@/lib/request-guard";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { photoUrl } from "@/lib/photo-limits";
 import { imageUrl } from "@/lib/product-image";
 import { canRecover } from "@/lib/buyer-orders";
@@ -54,6 +55,8 @@ export default async function ReviewPage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const get = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");
@@ -63,14 +66,22 @@ export default async function ReviewPage({ params, searchParams }: Params) {
   const allowed = door ? await withinStore("review-view", `${clientAddress({ headers: await headers() })}|${store.handle}`, VIEWS_PER_TEN_MINUTES, 600, store) : true;
   const opened = door && allowed ? await openDoor(store, door) : ({ state: allowed ? "no" : "slow" } as const);
 
-  let existing = new Map<string, Review | null>();
+  // A review of theirs that could not be read is unknown (CX-123 rule 24, inventory R24 item 13): its place says so,
+  // never a blank form that would post over the review they already wrote, and never the error page.
+  let existing = new Map<string, Review | null | "unknown">();
   if (opened.state === "ok" && store.statsId) {
     const statsId = store.statsId;
     const rows = await Promise.all(
-      opened.proof.products.map(async (p) => [p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, opened.proof.email))] as const),
+      opened.proof.products.map(
+        async (p) => [p.id, await readReview(statsId, p.id, reviewId(statsId, p.id, opened.proof.email)).catch(() => "unknown" as const)] as const,
+      ),
     );
     existing = new Map(rows);
   }
+  const existingKnown = (id: string): Review | null => {
+    const review = existing.get(id);
+    return review === "unknown" ? null : (review ?? null);
+  };
 
   const said = speech(store);
   const g = givingWords(store.language);
@@ -143,16 +154,22 @@ export default async function ReviewPage({ params, searchParams }: Params) {
                         </Link>
                       </div>
                     ) : null}
-                    <ReviewForm
-                      handle={store.handle}
-                      door={door ? doorFields(door) : {}}
-                      product={{ id: product.id, title: product.title }}
-                      existing={existing.get(product.id) ?? null}
-                      storeName={store.name}
-                      back="review"
-                      notice={statusProduct === product.id && REVIEW_NOTICES[status] ? status : null}
-                      lang={said.lang.code}
-                    />
+                    {existing.get(product.id) === "unknown" ? (
+                      <p role="status" className="st-note text-sm">
+                        {g.reviewUnread(product.title)}
+                      </p>
+                    ) : (
+                      <ReviewForm
+                        handle={store.handle}
+                        door={door ? doorFields(door) : {}}
+                        product={{ id: product.id, title: product.title }}
+                        existing={existingKnown(product.id)}
+                        storeName={store.name}
+                        back="review"
+                        notice={statusProduct === product.id && REVIEW_NOTICES[status] ? status : null}
+                        lang={said.lang.code}
+                      />
+                    )}
                   </section>
                 ))}
               </div>

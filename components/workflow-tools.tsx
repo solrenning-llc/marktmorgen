@@ -171,7 +171,7 @@ export function WorkflowPreview({
       </p>
       {request ? (
         <div className="mt-3 flex flex-wrap items-end gap-2">
-          <label className="block min-w-0 flex-1">
+          <label className="block min-w-0 grow basis-56">
             <span className="text-sm text-ink-soft">Or start from someone on your list</span>
             <input className="field mt-1" type="email" autoComplete="off" value={lookup} placeholder="name@example.com" onChange={(e) => setLookup(e.target.value)} />
           </label>

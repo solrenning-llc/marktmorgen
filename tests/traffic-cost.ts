@@ -140,10 +140,12 @@ export const COMMANDS = {
   /**
    * Putting a subscriber's feed together (tests/podcast.test.ts holds the
    * code under both): the day's first time, which also writes the day's
-   * visit and starts the day's count of it, and each time after.
+   * visit and starts the day's count of it, and each time after. The day's
+   * count sends its expiry with every count since November 7, 2026 (finding
+   * L1 on #2888), one command more each time after the first.
    */
   feedFirst: 13,
-  feed: 9,
+  feed: 10,
 };
 
 /** Answering one page and its count: two calls, a tenth of a second of work, and memory held while the database is waited on. */

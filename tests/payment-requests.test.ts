@@ -210,13 +210,13 @@ async function main(): Promise<void> {
   sessions.set(sessionId, { ...sessions.get(sessionId)!, status: "complete", payment_status: "paid", amount_total: 48_000, currency: "usd", payment_intent: "pi_ReqPaid000001", created: Math.floor(now / 1000) });
   const paid = await settleFromReturn(store, (await readRequest(request.id))!, sessionId, now);
   is("paid, with what Stripe took and its payment", [paid.state, paid.amountPaid, paid.payment, statusOf(paid, now)], ["paid", 48_000, "pi_ReqPaid000001", "paid"]);
-  const ordersBefore = await storeOrdersThisMonth(store, now);
+  const ordersBefore = (await storeOrdersThisMonth(store, now))!;
   const mailsBefore = mails.length;
   const confirmed = await confirmPurchase(store, sessionId);
   const receipt = mails.at(-1)!;
-  is("the receipt goes, to the person, and the order is counted", [confirmed, mails.length - mailsBefore, receipt.to, receipt.subject, (await storeOrdersThisMonth(store, now)) - ordersBefore], ["sent", 1, "client@example.com", "Receipt from Dana's Studio Coaching: $480", 1]);
+  is("the receipt goes, to the person, and the order is counted", [confirmed, mails.length - mailsBefore, receipt.to, receipt.subject, (await storeOrdersThisMonth(store, now))! - ordersBefore], ["sent", 1, "client@example.com", "Receipt from Dana's Studio Coaching: $480", 1]);
   is("the receipt names the payment and links to its printable page", [receipt.text.includes("pi_ReqPaid000001"), receipt.text.includes(`/pay/${request.id}`)], [true, true]);
-  is("never twice", [await confirmPurchase(store, sessionId), mails.length - mailsBefore, (await storeOrdersThisMonth(store, now)) - ordersBefore], ["already", 1, 1]);
+  is("never twice", [await confirmPurchase(store, sessionId), mails.length - mailsBefore, (await storeOrdersThisMonth(store, now))! - ordersBefore], ["already", 1, 1]);
   is("a paid request is no longer open, and sends no reminder", [await openCount(store.sid, now), nextReminderAt(paid, now + 30 * 86_400_000)], [limit - 1, null]);
   is("and its page takes no second payment", await openRequestCheckout(store, request.id, "https://marktmorgen.com", now), { ok: false, reason: "gone" });
 

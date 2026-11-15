@@ -42,22 +42,38 @@
  */
 import type { Listing, Store } from "@/lib/store";
 import { offeredItems } from "@/lib/bundles";
-import { bundleReady } from "@/lib/bundle-rules";
+import { bundleReady, deliverableItems } from "@/lib/bundle-rules";
 import { hasDateOnSale } from "@/lib/call-on-sale";
 import { fromPrice, listedLengths } from "@/lib/call-lengths";
 import { canGiveProduct } from "@/lib/free";
 import { outOfKeys } from "@/lib/licence-keys";
 import { paypalReady } from "@/lib/paypal-sales";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { soonState } from "@/lib/preorders";
+import { knownNotSoon, soonState, type SoonState } from "@/lib/preorders";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { stockLeft } from "@/lib/stock";
 import { canSellProduct, fromPriceCents, sellableOptions } from "@/lib/store-checkout";
 import { saleOff } from "@/lib/store-sale";
 import { isFree } from "@/lib/store-field-rules";
 import type { PriceFacts } from "@/lib/mail-product-price";
 
-/** The ids of `products` a buyer can get from `store` now. `now` is in milliseconds. */
-export async function productsBuyableNow(store: Store, products: readonly Listing[], now = Date.now()): Promise<Set<string>> {
+/**
+ * What a caller reading in rounds has read already (lib/community-locked.ts):
+ * the products coming soon, read once (the whole SoonState, so a reading in
+ * part stays unknown), and every listing it read, the
+ * bundles' items among them, so nothing is read again here. An id missing
+ * from `listings` was read and is gone from the store.
+ */
+export type AlreadyRead = { soon: SoonState; listings: ReadonlyMap<string, Listing> };
+
+/**
+ * The ids of `products` a buyer can get from `store` now. `now` is in
+ * milliseconds. With `known`, neither the pre-orders nor the bundles' items
+ * are read: they are taken from it, and a stock or keys read that fails
+ * throws, so that caller says it could not tell (review of #3007, L1) where
+ * an email's block, with no `known`, leaves the product out.
+ */
+export async function productsBuyableNow(store: Store, products: readonly Listing[], now = Date.now(), known?: AlreadyRead): Promise<Set<string>> {
   // A suspended store's pages rest (lib/takedown.ts): nothing of it is shown.
   if (store.suspended) return new Set();
   // What the store itself refuses, before anything is read.
@@ -68,22 +84,30 @@ export async function productsBuyableNow(store: Store, products: readonly Listin
       !(p.call && !hasDateOnSale(p.call, now)),
   );
   if (open.length === 0) return new Set();
-  let soon: Set<string>;
+  let coming: SoonState;
   try {
-    soon = (await soonState(store)).soon;
+    coming = known ? known.soon : await soonState(store);
   } catch {
     return new Set();
   }
-  const ready = open.filter((p) => !soon.has(p.id));
+  // Only a product known not to be coming soon: with the reading in part, one outside it is unknown and left out;
+  // given what was read (`known`), that unknown throws instead, so the caller says it could not tell (L1).
+  if (known && coming.partial && open.some((p) => !coming.soon.has(p.id))) throw new UnknownReplyError("coming-soon products");
+  const ready = open.filter((p) => knownNotSoon(coming, p.id));
   const bundles = ready.filter((p) => p.bundle);
-  const inside = bundles.length ? await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>()) : new Map<string, Listing[]>();
+  const inside = !bundles.length
+    ? new Map<string, Listing[]>()
+    : known
+      ? new Map(bundles.map((p) => [p.id, deliverableItems(p, [...bundles, ...known.listings.values()])]))
+      : await offeredItems(store, bundles).catch(() => new Map<string, Listing[]>());
   const kept = await Promise.all(
     ready.map(async (p) => {
       if (p.bundle && !bundleReady(p, inside.get(p.id)?.length ?? 0)) return null;
       try {
         const [left, noKeys] = await Promise.all([stockLeft(store, p, now), outOfKeys(store, p)]);
         if (left === 0 || noKeys) return null;
-      } catch {
+      } catch (error) {
+        if (known) throw error;
         return null;
       }
       return p.id;

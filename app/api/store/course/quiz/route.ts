@@ -8,7 +8,7 @@ import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, markLesson } from "@/lib/learn";
-import { MAX_QUESTIONS, heldBack, passedQuizzes, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
+import { MAX_QUESTIONS, heldBack, passedForGate, readAnswers, readQuizFor, submitQuiz } from "@/lib/quiz";
 import { limited } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { noteIfFinished } from "@/lib/course-finish";
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
 
   const who = emailKey(access.learner.email);
   // A lesson a required quiz still holds shut cannot be answered from here either.
-  if (heldBack(course, await passedQuizzes(course.id, who)).has(lessonId)) return away(base);
+  if (heldBack(course, await passedForGate(course.id, who)).has(lessonId)) return away(base);
   const quiz = await readQuizFor(course.id, lessonId);
   if (!quiz || !found.lesson.quiz) return away(`${base}/${lessonId}`);
 

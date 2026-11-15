@@ -60,8 +60,9 @@ test("actual email withdrawal preserves missing legacy identifiers and retained 
  // A retained connection with an unreadable old secret is still forgotten
  // through the actual backend, without asking the external platform.
  const cfg="nl:esync:cfg:"+id,tags="nl:esync:tags:"+id,bad="nl:esync:bad:"+id;
+ const configForRemoval={provider:"mailchimp",key:"unreadable-fixture",last4:"ture",target:null,free:true,buyers:"all",products:[],tags:{},since:1,connectedAt:1,handle:allocated.handle};
  await redisPipeline([
-  ["SET",cfg,JSON.stringify({provider:"mailchimp",key:"unreadable-fixture",last4:"ture",target:null,free:true,buyers:"all",products:[],tags:{},since:1,connectedAt:1,handle:allocated.handle})],
+  ["SET",cfg,JSON.stringify(configForRemoval)],
   ["HSET",tags,"mailchimp|old-tag","synthetic-tag"],
   ["SET",bad,JSON.stringify({message:"Old key cannot be opened",at:1})],
  ]);
@@ -77,4 +78,33 @@ test("actual email withdrawal preserves missing legacy identifiers and retained 
  assert.equal((await POST(request("disconnect"))).status,200);
  assert.equal(afterTasks.length,1,"repeat removal has no duplicate notice");
  assert.equal((await storeForEmail(email))!.statsId,id);
+
+ // An unreadable view must never become a precondition for the privacy
+ // action. The first case fails before the write; the second fails only on
+ // the follow-up view after the key has already been removed.
+ const pipeline=redis.pipeline.bind(redis);
+ const unreadableView=(commands:(string|number)[][])=>commands.length===3
+  && commands[0][0]==="GET" && commands[0][1]===cfg
+  && commands[1][0]==="GET" && commands[2][0]==="LRANGE";
+ for(const failAt of [1,2]){
+  await redisPipeline([["SET",cfg,JSON.stringify(configForRemoval)]]);
+  let reads=0;
+  redis.pipeline=async commands=>{
+   if(unreadableView(commands)&&++reads===failAt)return ["broken",null];
+   return pipeline(commands);
+  };
+  try{
+   const noticesBefore:number=afterTasks.length;
+   const response=await POST(request("disconnect"));
+   assert.equal(response.status,200,`disconnect remains successful when view read ${failAt} is unknown`);
+   const body=await response.json();
+   assert.equal(body.ok,true);
+   assert.equal(body.view.connected,null);
+   assert.equal(await redis.run(["EXISTS",cfg]),0,"the saved key is removed despite the unknown view");
+   assert.equal(afterTasks.length,noticesBefore+1,"a completed removal notifies even when its old label is unknown");
+   if(failAt===2)assert.equal(body.view.log,null,"an unread follow-up view stays explicitly unknown");
+  }finally{
+   redis.pipeline=pipeline;
+  }
+ }
 });

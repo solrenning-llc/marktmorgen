@@ -547,10 +547,11 @@ async function main(): Promise<void> {
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
     // Merged with #2803 (Costs: every picture upload's Blob operations and reads, under the owner's US$ 66 ceiling; 15 November 2026): its costs move these figures by cents.
-    is("11: Store, Studio and Scale keep 44.36, 311.94 and 697.58 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.36", "311.94", "697.58"]);
+    // Merged again with its base #2803 (15 November 2026): its blob upload costs with this PR's thumbnails, a few cents less kept a month.
+    is("11: Store, Studio and Scale keep 44.34, 311.88 and 697.41 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.34", "311.88", "697.41"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 36.30, 256.81 and 574.31 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.30", "256.81", "574.31"]);
+    is("11: and 36.28, 256.76 and 574.14 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.28", "256.76", "574.14"]);
   } finally {
     Date.now = realNow;
   }

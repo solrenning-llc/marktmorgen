@@ -307,6 +307,9 @@ export async function readAssistantReturn(store: Store, sessionId: string | unde
   return assistantPlanOf(await readSubscription(subscriptionId));
 }
 
+/** A charge's own id, as lib/refunds.ts reads it: only an expanded charge that names itself decides a dispute. */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+
 /** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */
 const idOf = (value: unknown): string => {
   if (typeof value === "string") return value;
@@ -345,7 +348,9 @@ async function disputed(subscriptionId: string): Promise<boolean> {
       if (!isOwnInvoice(row, subscriptionId)) return false;
       if (!hasOwnField(row, "charge")) return false;
       const charge = chargeOf(row);
-      return charge === null || (plainObject(charge) && typeof ownField(charge, "disputed") === "boolean");
+      // A charge decides only with its own valid id beside a boolean disputed (Codex T on #4443): { disputed: true } with
+      // no id, or another object's id, is a partial answer, so the row is unreadable and nothing is canceled this round.
+      return charge === null || (plainObject(charge) && CHARGE_ID.test(idOf(charge)) && typeof ownField(charge, "disputed") === "boolean");
     },
   );
   if (read.rows.some((row) => { const charge = chargeOf(row); return plainObject(charge) && ownField(charge, "disputed") === true; })) return true;

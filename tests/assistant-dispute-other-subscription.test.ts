@@ -58,17 +58,17 @@ async function main(): Promise<void> {
   try {
     part("The issue's case: another subscription's disputed invoice in the add-on's list");
     await fresh();
-    rows = [{ id: "in_1", subscription: "sub_OtherB01", charge: { id: "ch_1", disputed: true } }];
+    rows = [{ id: "in_1", subscription: "sub_OtherB01", charge: { id: "ch_TestCharge0001", disputed: true } }];
     let result = await syncAssistant((await storeForEmail(owner))!, undefined, now / 1000);
     is("another subscription's disputed invoice does not stop this add-on", [result.assistantPlan?.active, Boolean(result.assistantPlan?.disputedAt), cancelAttempts], [true, false, 0]);
     is("nothing is written on the store this run", (await storeForEmail(owner))?.assistantPlan, plan);
     is("the add-on can still be told apart from a disputed one", assistantRefusal(result, now / 1000), "already");
 
     const unlinked: [string, Record<string, unknown>][] = [
-      ["an expanded object of another subscription", { id: "in_2", subscription: { id: "sub_OtherB01" }, charge: { id: "ch_2", disputed: true } }],
-      ["no subscription field at all", { id: "in_3", charge: { id: "ch_3", disputed: true } }],
-      ["a null subscription", { id: "in_4", subscription: null, charge: { id: "ch_4", disputed: true } }],
-      ["its own subscription on the invoice but another under its parent", { id: "in_5", subscription: OWN, parent: { subscription_details: { subscription: "sub_OtherB01" } }, charge: { id: "ch_5", disputed: true } }],
+      ["an expanded object of another subscription", { id: "in_2", subscription: { id: "sub_OtherB01" }, charge: { id: "ch_TestCharge0002", disputed: true } }],
+      ["no subscription field at all", { id: "in_3", charge: { id: "ch_TestCharge0003", disputed: true } }],
+      ["a null subscription", { id: "in_4", subscription: null, charge: { id: "ch_TestCharge0004", disputed: true } }],
+      ["its own subscription on the invoice but another under its parent", { id: "in_5", subscription: OWN, parent: { subscription_details: { subscription: "sub_OtherB01" } }, charge: { id: "ch_TestCharge0005", disputed: true } }],
     ];
     for (const [label, row] of unlinked) {
       part("A disputed invoice with " + label + ": not proven this add-on's, so nothing is decided");
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
 
     part("An undisputed invoice of another subscription beside this add-on's own clean one: unknown, nothing written");
     await fresh();
-    rows = [{ id: "in_6", subscription: OWN, charge: { id: "ch_6", disputed: false } }, { id: "in_7", subscription: "sub_OtherB01", charge: { id: "ch_7", disputed: false } }];
+    rows = [{ id: "in_6", subscription: OWN, charge: { id: "ch_TestCharge0006", disputed: false } }, { id: "in_7", subscription: "sub_OtherB01", charge: { id: "ch_TestCharge0007", disputed: false } }];
     // A plan no longer paid would set the stop on "not disputed": an unproven list must not read as that either.
     const unpaid = { ...(await storeForEmail(owner))!, subscriptionActive: false };
     result = await syncAssistant(unpaid, undefined, now / 1000);
@@ -100,13 +100,13 @@ async function main(): Promise<void> {
 
     part("Control: a disputed invoice of this very add-on ends it and keeps it from being sold again");
     for (const [label, row] of [
-      ["its id as a string", { id: "in_8", subscription: OWN, charge: { id: "ch_8", disputed: true } }],
-      ["its expanded object", { id: "in_9", subscription: { id: OWN }, charge: { id: "ch_9", disputed: true } }],
-      ["named under its parent only", { id: "in_10", parent: { subscription_details: { subscription: OWN } }, charge: { id: "ch_10", disputed: true } }],
+      ["its id as a string", { id: "in_8", subscription: OWN, charge: { id: "ch_TestCharge0008", disputed: true } }],
+      ["its expanded object", { id: "in_9", subscription: { id: OWN }, charge: { id: "ch_TestCharge0009", disputed: true } }],
+      ["named under its parent only", { id: "in_10", parent: { subscription_details: { subscription: OWN } }, charge: { id: "ch_TestCharge0010", disputed: true } }],
     ] as [string, Record<string, unknown>][]) {
       await fresh();
       // Another subscription's row beside it decides nothing; this add-on's own disputed row is proof enough.
-      rows = [row, { id: "in_11", subscription: "sub_OtherB01", charge: { id: "ch_11", disputed: false } }];
+      rows = [row, { id: "in_11", subscription: "sub_OtherB01", charge: { id: "ch_TestCharge0011", disputed: false } }];
       result = await syncAssistant((await storeForEmail(owner))!, undefined, now / 1000);
       is("own dispute (" + label + ") ends the add-on once", [result.assistantPlan?.active, Boolean(result.assistantPlan?.disputedAt), cancelAttempts], [false, true, 1]);
       is("own dispute (" + label + ") is never sold again", assistantRefusal(result, now / 1000), "disputed");
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
 
     part("Control: this add-on's own clean invoices on a plan no longer paid set the stop, as before");
     await fresh();
-    rows = [{ id: "in_12", subscription: OWN, charge: { id: "ch_12", disputed: false } }, { id: "in_13", subscription: OWN, charge: null }];
+    rows = [{ id: "in_12", subscription: OWN, charge: { id: "ch_TestCharge0012", disputed: false } }, { id: "in_13", subscription: OWN, charge: null }];
     await syncAssistant({ ...(await storeForEmail(owner))!, subscriptionActive: false }, undefined, now / 1000);
     is("not disputed: the stop is set, nothing canceled", [stopWrites, cancelAttempts], [1, 0]);
   } finally {

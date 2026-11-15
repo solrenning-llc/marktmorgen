@@ -6,4 +6,4 @@ Only Claude 1 edits this file (owner, through Claude 1's inbox message C3-7, 02/
 
 | Agent | Item | Branch | Files (exact paths) | Since (Fortaleza) |
 | --- | --- | --- | --- | --- |
-| Claude 1 | 501 [OX3], what the creator's own pitches did, in the Outreach studio | claude1/ox3-outreach-results | `lib/outreach-results.ts` (new), `components/outreach-results.tsx` (new), `tests/outreach-results.test.ts` (new), `components/outreach-studio.tsx` (the card's import and place only) | 12/11/2026 16h55 |
+| Claude 1 | 508 [SG4] complement (C1-20261105-1919-C4-1): the incident-response table says parts 1 and 2 are merged | claude1/sg4-incident-table | `docs/incident-response.md` (table rows "Canal de segurança" and "Análise de código" only) | 12/11/2026 04h40 |

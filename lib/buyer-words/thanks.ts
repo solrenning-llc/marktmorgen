@@ -24,12 +24,20 @@ const en = {
   /** What a page that found no paid order says, by what was found instead. */
   notices: {
     unpaid: {
-      title: "This order has not been paid",
-      body: "If you closed the payment page before finishing, nothing was charged. You can start again from the store.",
+      title: "You were not charged",
+      body: "The payment was not finished, so nothing was charged. You can start again from the store.",
+    },
+    declined: {
+      title: "Your payment did not go through",
+      body: "Your bank or card turned it down, so nothing was charged. You can start again from the store and pay another way.",
+    },
+    checking: {
+      title: "We are checking your payment",
+      body: "Do not pay again. If it went through, your confirmation email comes within a few minutes, and this page shows your order when you open it again.",
     },
     processing: {
       title: "Your payment is on its way",
-      body: "Your bank is still confirming it, which can take a few days. Nothing more is needed from you: when it clears, open this page again, or choose “Get it again” at the bottom of the store with the address you paid with.",
+      body: "Your bank is still confirming it, which can take a few days. Nothing more is needed from you: when it clears, open this page again, or choose “Get it again” at the bottom of the store with the address you paid with. Do not pay again.",
     },
     expired: {
       title: "This link has expired",
@@ -242,12 +250,20 @@ const es: ThanksWords = {
   paymentReceived: "Pago recibido",
   notices: {
     unpaid: {
-      title: "Este pedido no se ha pagado",
-      body: "Si cerraste la página de pago antes de terminar, no se cobró nada. Puedes empezar de nuevo desde la tienda.",
+      title: "No se te cobró nada",
+      body: "El pago no se completó, así que no se cobró nada. Puedes empezar de nuevo desde la tienda.",
+    },
+    declined: {
+      title: "Tu pago no se completó",
+      body: "Tu banco o tu tarjeta lo rechazó, así que no se cobró nada. Puedes empezar de nuevo desde la tienda y pagar de otra forma.",
+    },
+    checking: {
+      title: "Estamos comprobando tu pago",
+      body: "No vuelvas a pagar. Si el pago se completó, el email de confirmación llega en unos minutos, y esta página muestra tu pedido cuando la vuelvas a abrir.",
     },
     processing: {
       title: "Tu pago está en camino",
-      body: "Tu banco todavía lo está confirmando, lo que puede tardar unos días. No necesitas hacer nada más: cuando se confirme, vuelve a abrir esta página o elige «Volver a recibirlo» al final de la tienda con la dirección con la que pagaste.",
+      body: "Tu banco todavía lo está confirmando, lo que puede tardar unos días. No necesitas hacer nada más: cuando se confirme, vuelve a abrir esta página o elige «Volver a recibirlo» al final de la tienda con la dirección con la que pagaste. No vuelvas a pagar.",
     },
     expired: {
       title: "Este enlace ha caducado",
@@ -446,12 +462,20 @@ const fr: ThanksWords = {
   paymentReceived: "Paiement reçu",
   notices: {
     unpaid: {
-      title: "Cette commande n'a pas été payée",
-      body: "Si vous avez fermé la page de paiement avant la fin, rien n'a été débité. Vous pouvez recommencer depuis la boutique.",
+      title: "Rien ne vous a été débité",
+      body: "Le paiement n'a pas été terminé, donc rien n'a été débité. Vous pouvez recommencer depuis la boutique.",
+    },
+    declined: {
+      title: "Votre paiement n'est pas passé",
+      body: "Votre banque ou votre carte l'a refusé, donc rien n'a été débité. Vous pouvez recommencer depuis la boutique et payer autrement.",
+    },
+    checking: {
+      title: "Nous vérifions votre paiement",
+      body: "Ne payez pas une deuxième fois. Si le paiement est passé, l'e-mail de confirmation arrive dans quelques minutes, et cette page affiche votre commande quand vous la rouvrez.",
     },
     processing: {
       title: "Votre paiement est en cours",
-      body: `Votre banque le confirme encore, ce qui peut prendre quelques jours. Vous n'avez rien d'autre à faire${S}: une fois confirmé, rouvrez cette page, ou choisissez «${S}Le recevoir à nouveau${S}» en bas de la boutique avec l'adresse utilisée pour payer.`,
+      body: `Votre banque le confirme encore, ce qui peut prendre quelques jours. Vous n'avez rien d'autre à faire${S}: une fois confirmé, rouvrez cette page, ou choisissez «${S}Le recevoir à nouveau${S}» en bas de la boutique avec l'adresse utilisée pour payer. Ne payez pas une deuxième fois.`,
     },
     expired: {
       title: "Ce lien a expiré",
@@ -651,12 +675,20 @@ const de: ThanksWords = {
   paymentReceived: "Zahlung erhalten",
   notices: {
     unpaid: {
-      title: "Diese Bestellung wurde nicht bezahlt",
-      body: "Wenn Sie die Zahlungsseite vor dem Abschluss geschlossen haben, wurde nichts belastet. Sie können im Shop neu beginnen.",
+      title: "Ihnen wurde nichts berechnet",
+      body: "Die Zahlung wurde nicht abgeschlossen, daher wurde nichts belastet. Sie können im Shop neu beginnen.",
+    },
+    declined: {
+      title: "Ihre Zahlung ist nicht durchgegangen",
+      body: "Ihre Bank oder Karte hat sie abgelehnt, daher wurde nichts belastet. Sie können im Shop neu beginnen und anders bezahlen.",
+    },
+    checking: {
+      title: "Wir prüfen Ihre Zahlung",
+      body: "Bitte nicht noch einmal bezahlen. Wenn die Zahlung durchgegangen ist, kommt die Bestätigungs-E-Mail in wenigen Minuten, und diese Seite zeigt Ihre Bestellung, wenn Sie sie erneut öffnen.",
     },
     processing: {
       title: "Ihre Zahlung ist unterwegs",
-      body: "Ihre Bank bestätigt sie noch, was einige Tage dauern kann. Sie müssen nichts weiter tun: Sobald sie bestätigt ist, öffnen Sie diese Seite erneut oder wählen Sie unten im Shop „Erneut erhalten“ mit der Adresse, mit der Sie bezahlt haben.",
+      body: "Ihre Bank bestätigt sie noch, was einige Tage dauern kann. Sie müssen nichts weiter tun: Sobald sie bestätigt ist, öffnen Sie diese Seite erneut oder wählen Sie unten im Shop „Erneut erhalten“ mit der Adresse, mit der Sie bezahlt haben. Bitte nicht noch einmal bezahlen.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -856,12 +888,20 @@ const it: ThanksWords = {
   paymentReceived: "Pagamento ricevuto",
   notices: {
     unpaid: {
-      title: "Questo ordine non è stato pagato",
-      body: "Se hai chiuso la pagina di pagamento prima di finire, non è stato addebitato nulla. Puoi ricominciare dal negozio.",
+      title: "Non ti è stato addebitato nulla",
+      body: "Il pagamento non è stato completato, quindi non è stato addebitato nulla. Puoi ricominciare dal negozio.",
+    },
+    declined: {
+      title: "Il tuo pagamento non è andato a buon fine",
+      body: "La tua banca o la tua carta lo ha rifiutato, quindi non è stato addebitato nulla. Puoi ricominciare dal negozio e pagare in un altro modo.",
+    },
+    checking: {
+      title: "Stiamo verificando il tuo pagamento",
+      body: "Non pagare di nuovo. Se il pagamento è andato a buon fine, l'email di conferma arriva entro pochi minuti, e questa pagina mostra il tuo ordine quando la riapri.",
     },
     processing: {
       title: "Il tuo pagamento è in arrivo",
-      body: "La tua banca lo sta ancora confermando, e possono volerci alcuni giorni. Non devi fare altro: quando sarà confermato, riapri questa pagina, oppure scegli «Ricevilo di nuovo» in fondo al negozio con l'indirizzo con cui hai pagato.",
+      body: "La tua banca lo sta ancora confermando, e possono volerci alcuni giorni. Non devi fare altro: quando sarà confermato, riapri questa pagina, oppure scegli «Ricevilo di nuovo» in fondo al negozio con l'indirizzo con cui hai pagato. Non pagare di nuovo.",
     },
     expired: {
       title: "Questo link è scaduto",
@@ -1061,12 +1101,20 @@ const nl: ThanksWords = {
   paymentReceived: "Betaling ontvangen",
   notices: {
     unpaid: {
-      title: "Deze bestelling is niet betaald",
-      body: "Als je de betaalpagina sloot voordat je klaar was, is er niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel.",
+      title: "Er is niets afgeschreven",
+      body: "De betaling is niet afgerond, dus er is niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel.",
+    },
+    declined: {
+      title: "Je betaling is niet gelukt",
+      body: "Je bank of kaart heeft hem geweigerd, dus er is niets afgeschreven. Je kunt opnieuw beginnen vanuit de winkel en op een andere manier betalen.",
+    },
+    checking: {
+      title: "We controleren je betaling",
+      body: "Betaal niet opnieuw. Als de betaling gelukt is, komt de bevestigingsmail binnen een paar minuten, en deze pagina toont je bestelling als je hem opnieuw opent.",
     },
     processing: {
       title: "Je betaling is onderweg",
-      body: "Je bank bevestigt hem nog, wat een paar dagen kan duren. Je hoeft verder niets te doen: zodra hij rond is, open je deze pagina opnieuw, of kies je onderaan de winkel ‘Opnieuw ontvangen’ met het adres waarmee je betaalde.",
+      body: "Je bank bevestigt hem nog, wat een paar dagen kan duren. Je hoeft verder niets te doen: zodra hij rond is, open je deze pagina opnieuw, of kies je onderaan de winkel ‘Opnieuw ontvangen’ met het adres waarmee je betaalde. Betaal niet opnieuw.",
     },
     expired: {
       title: "Deze link is verlopen",
@@ -1266,12 +1314,20 @@ const pt: ThanksWords = {
   paymentReceived: "Pagamento recebido",
   notices: {
     unpaid: {
-      title: "Esta encomenda não foi paga",
-      body: "Se fechou a página de pagamento antes de terminar, nada foi cobrado. Pode recomeçar a partir da loja.",
+      title: "Não lhe foi cobrado nada",
+      body: "O pagamento não foi concluído, por isso nada foi cobrado. Pode recomeçar a partir da loja.",
+    },
+    declined: {
+      title: "O seu pagamento não foi aceite",
+      body: "O seu banco ou cartão recusou-o, por isso nada foi cobrado. Pode recomeçar a partir da loja e pagar de outra forma.",
+    },
+    checking: {
+      title: "Estamos a verificar o seu pagamento",
+      body: "Não pague novamente. Se o pagamento foi concluído, o email de confirmação chega dentro de alguns minutos, e esta página mostra a sua encomenda quando a abrir novamente.",
     },
     processing: {
       title: "O seu pagamento está a caminho",
-      body: "O seu banco ainda o está a confirmar, o que pode demorar alguns dias. Não precisa de fazer mais nada: quando for confirmado, abra novamente esta página, ou escolha «Receber de novo» no fundo da loja com o endereço com que pagou.",
+      body: "O seu banco ainda o está a confirmar, o que pode demorar alguns dias. Não precisa de fazer mais nada: quando for confirmado, abra novamente esta página, ou escolha «Receber de novo» no fundo da loja com o endereço com que pagou. Não pague novamente.",
     },
     expired: {
       title: "Esta ligação expirou",

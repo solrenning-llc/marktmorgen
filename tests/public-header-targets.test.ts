@@ -1,10 +1,9 @@
 /**
- * AX274 Part A, item 4 (WCAG 2.2 AAA) on the public site's shared header and footer (components/site-nav.tsx,
- * components/site-footer.tsx), every public page except the home page, which draws its own:
+ * AX274 Part A, item 4 (WCAG 2.2 AAA) on the public site's shared header (components/site-nav.tsx), every public
+ * page except the home page, which draws its own. The footer's links are #3749's (claude4/ax-site-footer-target-size).
  *
  * - 2.5.5 Target Size (Enhanced): every menu button and link in the header is at least 44 px tall (it was 40 px,
- *   `h-10`), and every footer link is at least 44 by 44 px, wide as well as tall (short words such as "Blog" were
- *   31 px wide).
+ *   `h-10`).
  * - 1.3.1 / landmarks: the logo, "Log in" and "Start your store" sit inside the header landmark (`<header>`), not
  *   in a plain `div` beside the "Main" navigation; the line about what is built today is a named region of its own.
  *   The sticky part of the header is the `<header>` itself, so it still sticks for the whole page.
@@ -15,11 +14,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SiteNav } from "@/components/site-nav";
-import { SiteFooter } from "@/components/site-footer";
 import { done, is, part } from "./check";
 
 const nav = renderToStaticMarkup(createElement(SiteNav));
-const footer = renderToStaticMarkup(createElement(SiteFooter, { variant: "full" }));
 
 /** Every opening tag of an interactive element (a, button) in the markup, with its class list. */
 function targets(html: string): { tag: string; classes: string[]; text: string }[] {
@@ -40,15 +37,6 @@ is(
   "the menu buttons, Pricing, Blog and Log in are 44 px tall (h-11)",
   headerTargets.filter((t) => /^(Product|Creators|Why Marktmorgen|Pricing|Blog|Log in)$/.test(t.text)).every((t) => t.classes.includes("h-11")),
   true,
-);
-
-part("2.5.5: footer links are at least 44 by 44 px");
-const footerLinks = targets(footer).filter((t) => t.tag === "a");
-is("the footer draws its links", footerLinks.length > 10, true);
-is(
-  "every footer link is at least 44 px wide as well as tall (min-w-11 with min-h-11)",
-  footerLinks.filter((t) => t.classes.includes("min-h-11") && !t.classes.includes("min-w-11")).map((t) => t.text),
-  [],
 );
 
 part("Landmarks: everything in the header is inside the header");

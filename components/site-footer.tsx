@@ -133,7 +133,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <li key={link.label}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 min-w-11 items-center transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 items-center transition-colors hover:text-ink"
                 />
               </li>
             ))}
@@ -149,7 +149,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
         <div className="max-w-xs">
           {/* On the pages in the morning look (VS1, app/home.css .hm-foot), their own light mark. */}
           {morning ? <MorningLogo /> : (
-            <Link prefetch={false} href="/" className="inline-flex min-h-11 min-w-11 items-center rounded-[10px]" aria-label="Marktmorgen, home">
+            <Link prefetch={false} href="/" className="inline-flex min-h-11 items-center rounded-[10px]" aria-label="Marktmorgen, home">
               <Logo tone="light" />
             </Link>
           )}
@@ -183,7 +183,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
                   <li key={link.label}>
                     <FooterAnchor
                       link={link}
-                      className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                      className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
                     />
                   </li>
                 ))}
@@ -204,7 +204,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <li key={link.href}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 min-w-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                  className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
                 />
               </li>
             ))}

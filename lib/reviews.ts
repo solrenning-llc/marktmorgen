@@ -44,7 +44,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type DataStore, giveData, needData, takeData } from "@/lib/store-data";
 import { orderWrite } from "@/lib/order-data";
@@ -304,8 +304,10 @@ async function locked<T>(statsId: string, productId: string, work: () => Promise
 
 /** Counts a product's numbers again from its reviews, and keeps them. */
 async function recount(statsId: string, productId: string): Promise<Summary> {
-  const [raw] = await redisPipeline([["HGETALL", productKey(statsId, productId)]]);
-  const flat = Array.isArray(raw) ? (raw as unknown[]) : [];
+  // Read exactly (rule 24): a reply cut short or of another shape throws before the summary is written, never an
+  // empty-looking list that deleted the product's stars and count.
+  const flat = stringList(repliesFor(await redisPipeline([["HGETALL", productKey(statsId, productId)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a product's reviews");
   const reviews: Review[] = [];
   for (let i = 1; i < flat.length; i += 2) {
     const review = parseReview(flat[i]);
@@ -425,6 +427,9 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     // When the order was paid: kept from the first writing of the same order, else as the order's proof says.
     const paidAt = before && before.reference === input.reference && before.paidAt ? before.paidAt : input.paidAt;
     if (Number.isSafeInteger(paidAt) && (paidAt as number) > 0) review.paidAt = paidAt;
+    // Read before any room is taken or anything is written: an index that does not read stops the save whole, with
+    // the store's room as it was, never half (rule 24; review of #3862).
+    const entry = review.pi ? await payEntry(statsId, review.pi, `${review.productId}|${id}`) : null;
     const grown = reviewBytes(review) - reviewBytes(before) + countBytes;
     if (grown > 0 && !(await takeData(room, [{ slot: REVIEWS_SLOT(input.productId), bytes: grown }], now)).ok) return { state: "noroom" };
     // Words rewritten (perhaps to take something out): the AI summary built from the old words goes, in the same request.
@@ -436,17 +441,28 @@ export async function saveReview(statsId: string, input: SaveInput, room: DataSt
     ]);
     // Which reviews a payment paid for, kept for its refund: counted in the
     // store's room at what it really adds (lib/order-data.ts).
-    if (review.pi) await orderWrite(room, [["HSET", payKey(statsId), review.pi, await payEntry(statsId, review.pi, `${review.productId}|${id}`)]]);
+    if (review.pi && entry !== null) await orderWrite(room, [["HSET", payKey(statsId), review.pi, entry]]);
     await recount(statsId, input.productId);
     return { state: before ? "updated" : "created", review, photoGranted };
   });
   return result === "busy" ? { state: "busy" } : result;
 }
 
+/**
+ * The reviews a payment paid for, read exactly (rule 24): none only when HGET answers exactly null (or an empty
+ * text); a reply cut short or of another shape throws UnknownReplyError, never "none". Otherwise a refund sweep took
+ * the refund as seen with nothing marked, and payEntry wrote the list again with only the newest review.
+ */
+async function payMembers(statsId: string, pi: string): Promise<string[]> {
+  const replies = repliesFor(await redisPipeline([["HGET", payKey(statsId), pi]]), 1);
+  const raw = replies?.[0];
+  if (!replies || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("the reviews a payment paid for");
+  return raw ? raw.split(";").filter(Boolean) : [];
+}
+
 /** The reviews a payment paid for, with one more added. */
 async function payEntry(statsId: string, pi: string, member: string): Promise<string> {
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const list = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  const list = await payMembers(statsId, pi);
   if (!list.includes(member)) list.push(member);
   return list.slice(-20).join(";");
 }
@@ -538,8 +554,11 @@ async function creatorChange(
 ): Promise<Review | "missing" | "busy"> {
   if (!REVIEW_ID_PATTERN.test(id) || !PRODUCT_ID_PATTERN.test(productId)) return "missing";
   return locked(statsId, productId, async () => {
-    const [raw] = await redisPipeline([["HGET", productKey(statsId, productId), id]]);
-    const before = parseReview(raw);
+    // Missing only on HGET's exact null; a reply cut short, of another shape or a review that does not read throws
+    // (rule 24), so a refund sweep never takes a refund as seen with the review left unmarked.
+    const replies = repliesFor(await redisPipeline([["HGET", productKey(statsId, productId), id]]), 1);
+    if (!replies) throw new UnknownReplyError("a review");
+    const before = storedReview(replies[0], "a review");
     if (!before) return "missing" as const;
     const after = change(before);
     // What the creator's answer grows the review by takes room first (DataRoomError when it does not fit);
@@ -622,8 +641,7 @@ export function setReply(statsId: string, productId: string, id: string, text: s
  */
 export async function markRefunded(statsId: string, pi: string): Promise<number> {
   if (!STATS_ID_PATTERN.test(statsId) || !pi) return 0;
-  const [raw] = await redisPipeline([["HGET", payKey(statsId), pi]]);
-  const members = typeof raw === "string" && raw ? raw.split(";").filter(Boolean) : [];
+  const members = await payMembers(statsId, pi);
   let changed = 0;
   for (const member of members) {
     const [productId, id] = member.split("|");
@@ -767,9 +785,13 @@ export async function reviewsSince(statsId: string | null, since: number): Promi
 export async function dropReviews(statsId: string | null, productId: string, tries = 1): Promise<string[]> {
   if (!statsId || !STATS_ID_PATTERN.test(statsId) || !isRedisConfigured()) return [];
   // Read once: a deletion that ran but did not answer in time leaves nothing to read again, and its photos would be lost.
-  const [raw, all] = await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]);
-  const ids = Array.isArray(raw) ? (raw as string[]) : [];
-  const photos = (Array.isArray(all) ? (all as unknown[]) : []).map((one) => parseReview(one)?.photo?.path).filter((path): path is string => Boolean(path));
+  // Read exactly (rule 24): a reply cut short or of another shape throws before anything is deleted, so no review
+  // leaves the store's indexes behind and no buyer's photo is left with nothing pointing at it.
+  const read = repliesFor(await redisPipeline([["HKEYS", productKey(statsId, productId)], ["HVALS", productKey(statsId, productId)]]), 2);
+  const ids = stringList(read?.[0]);
+  const all = stringList(read?.[1]);
+  if (!ids || !all || ids.length !== all.length) throw new UnknownReplyError("a removed product's reviews");
+  const photos = all.map((one) => parseReview(one)?.photo?.path).filter((path): path is string => Boolean(path));
   const members = ids.map((id) => `${productId}|${id}`);
   // Only the deletion is tried again (it can run twice: every command in it is the same the second time).
   for (let attempt = 1; ; attempt += 1) {

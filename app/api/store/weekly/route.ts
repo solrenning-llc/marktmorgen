@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { fromAnotherSite, limited } from "@/lib/request-guard";
 import { leaveWeeklyTeam, setWeeklyOff, weeklyMemberTokenOk, weeklyTokenOk } from "@/lib/stats-report";
 
 /**
@@ -55,14 +55,10 @@ function notConfirmed(what: string): Response {
   return page("Not changed yet", `<h1>Not changed yet</h1><p>We could not confirm that ${what} just now. Please go back and press the button again in a minute.</p>`, 503);
 }
 
-/** Presses of the stop one connection may make in an hour, signed or not: enough for a person, never a scan of links. */
-export const WEEKLY_STOP_PER_HOUR = 30;
-
 export async function POST(request: NextRequest) {
-  // Before anything is read (a mail app's one-click POST included): a connection past its hour is told to wait.
-  if (!(await withinLimit("weekly-stop", clientAddress(request), WEEKLY_STOP_PER_HOUR, 3_600).catch(() => false))) {
-    return page("Try again later", "<h1>Try again later</h1><p>Too many presses from here in the last hour. Please try again later.</p>", 429);
-  }
+  // The signed token is checked first, by CPU only (readMember, read): a link that is not one is refused without
+  // reading anything stored. No limit per connection: a mail app's one-click presses (RFC 8058) come from a mail
+  // provider's few addresses, and a stop must never be told to wait.
   const member = readMember(request);
   if (member) {
     try {
@@ -79,7 +75,9 @@ export async function POST(request: NextRequest) {
   const off = form?.get("do") !== "on";
   // Another site may only stop these emails (proxy.ts lets a mail app's one-click POST in), never start them again:
   // starting is a press on this site's own page.
-  if (!off && fromAnotherSite(request)) return page("Link not recognized", "<h1>Link not recognized</h1><p>This link is not one we recognize.</p>", 403);
+  if (!off && fromAnotherSite(request)) {
+    return page("Not from another site", "<h1>Not turned on</h1><p>Only our own page can turn these emails back on. Open the link from the email in your browser and, once it has stopped them, press Start it again.</p>", 403);
+  }
   try {
     await setWeeklyOff(asked.handle, off);
   } catch (error) {

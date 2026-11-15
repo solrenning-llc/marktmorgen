@@ -20,6 +20,10 @@ let product = "";
 let actualPrice = "price_IdemMonthly0001", actualConsent = "";
 /** What the fake Stripe does with the next charging update that it runs. */
 let mode: "applied" | "lost response" | "in flight" | "known rejection" | "declined" = "applied";
+/** How the fake Stripe answers the void of a declined switch's open invoice (#4739); "missing": the update names no invoice. */
+let voidReply: "void" | "lost" | "open" | "other" | "missing" = "void";
+/** Voids of an invoice the fake Stripe was asked for. */
+let voidsAsked = 0;
 /** Charging updates Stripe actually ran: each one is a charge. */
 let executions = 0;
 /** The Idempotency-Key header of every charging update sent, "" when none. */
@@ -40,7 +44,7 @@ const invoice = { id: "in_IdemPaid0001", status: "paid", total: 1000, amount_pai
 function run(body: URLSearchParams): { status: number; reply: string; lost: boolean } {
   executions++;
   if (mode === "known rejection") return { status: 400, reply: JSON.stringify({ error: { type: "invalid_request_error", message: "Synthetic refusal, no change applied" } }), lost: false };
-  if (mode === "declined") return { status: 200, reply: JSON.stringify({ ...row(), pending_update: { expires_at: now + 100 }, latest_invoice: { ...invoice, id: "in_IdemDeclined0001", status: "open" } }), lost: false };
+  if (mode === "declined") return { status: 200, reply: JSON.stringify({ ...row(), pending_update: { expires_at: now + 100 }, latest_invoice: voidReply === "missing" ? null : { ...invoice, id: "in_IdemDeclined0001", status: "open" } }), lost: false };
   // "in flight": Stripe has started it and has not finished; the member's subscription still reads as before.
   if (mode === "in flight") return { status: 0, reply: "", lost: true };
   actualPrice = body.get("items[0][price]")!;
@@ -78,7 +82,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (done.lost) throw new TypeError("Synthetic connection lost after the update was sent");
     return new Response(done.reply, { status: done.status });
   }
-  if (method === "POST" && path.startsWith("/invoices/") && path.endsWith("/void")) return json({ id: "in_IdemDeclined0001", status: "void" });
+  if (method === "POST" && path.startsWith("/invoices/") && path.endsWith("/void")) {
+    voidsAsked++;
+    if (voidReply === "lost") throw new TypeError("Synthetic lost void answer");
+    return json({ id: voidReply === "other" ? "in_DifferentInvoice1" : "in_IdemDeclined0001", status: voidReply === "open" ? "open" : "void" });
+  }
   throw new Error(`Missing synthetic response ${method} ${path}`);
 }) as typeof fetch;
 
@@ -164,6 +172,20 @@ async function main() {
       is(`${flow}: control ${control} — result and charges as before`, [reasonOf(result), executions], [control === "applied" ? "applied" : control === "known rejection" ? "error" : "declined", 1]);
       is(`${flow}: control ${control} — sent once with the stable key`, keysSent, [expectedKey(now)]);
     }
+
+    // #4739: a declined switch is said as declined only once Stripe confirms the same invoice void; any other answer
+    // is "unconfirmed" and keeps the lock, with no extra call and no second charge.
+    for (const reply of ["lost", "open", "other", "missing"] as const) {
+      await reset("declined");
+      voidReply = reply;
+      voidsAsked = 0;
+      const result = await attempt(now, now);
+      is(`${flow}: a ${reply} void response keeps the outcome unconfirmed`, reasonOf(result), "unconfirmed");
+      const [timeLeft] = await redis.pipeline([["PTTL", `nl:tier:${subscription}:lock`]]);
+      is(`${flow}: after a ${reply} void response the membership lock remains held`, typeof timeLeft === "number" && timeLeft > 0, true);
+      is(`${flow}: after a ${reply} void response, one charge and at most one void asked`, [executions, voidsAsked <= 1, voidsAsked === (reply === "missing" ? 0 : 1)], [1, true, true]);
+    }
+    voidReply = "void";
 
     // 1. The first update is still running at Stripe when its answer is given up; the lock runs out; the member sends
     //    the same preview again (a new tick of the EU box, so a new second on the yes). Stripe still reads the old

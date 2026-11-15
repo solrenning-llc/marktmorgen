@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -1223,7 +1224,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -2579,6 +2580,14 @@ select.st-field:not([multiple]),
    a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
    inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
 [data-store-layout] .st-footer-link:not(summary, figcaption > *) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
@@ -5323,6 +5332,7 @@ html:has([data-product-editor]) {
   --danger: #ff7b6e;
   --amber-soft: #2e2210;
   --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
   --background: var(--paper);
   --foreground: var(--ink);
 }

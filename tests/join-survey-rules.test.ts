@@ -96,6 +96,12 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   is("a handle after punctuation is taken out", clean("ig:@jane_doe (@jane_doe)"), "ig: ()");
   is("an at sign after a number is kept", clean("I paid 5@ each"), "I paid 5@ each");
   is("control: a plain number stays", clean("I want 3 courses by 2027"), "I want 3 courses by 2027");
+  // Claude 7 on #3652 (MÉDIO, privacy): the stricter reading the reviews' cleaner already uses (lib/review-ai-summary-rules.ts).
+  is("a web address without http or www is taken out, with its path", clean("see janesmith.dev/shop for more"), "see for more");
+  is("an email address written out is taken out", clean("write jane at gmail dot com today"), "write today");
+  is("a messaging link with a number goes whole, not only its digits", clean("text wa.me/5585999999999 ok"), "text ok");
+  is("invisible format characters cannot split an address to slip it through", clean("jane​@gmail.com hi"), "hi");
+  is("control: a library's name stays", clean("I build with Node.js daily"), "I build with Node.js daily");
 }
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");
 is("a choice that is not offered", cleanJoinAnswer(on, { v: 1, choice: "bogus", comment: "" }), { ok: false, problem: "choice" });

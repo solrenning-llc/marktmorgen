@@ -31,6 +31,10 @@ export type ErasureScope = {
   learner: string;
   /** Every course of the store, with its lessons, as the courses' own records are keyed. */
   courses: { productId: string; courseId: string; lessonIds: string[]; moduleIds: string[] }[];
+  /** How many dropped courses were looked at for a record of the person (lib/removed-courses.ts droppedCoursesOf). */
+  droppedCourses?: number;
+  /** How many of them were read whole, the person having a record there (lib/removed-courses.ts droppedCourseRecords). */
+  droppedRecords?: number;
   /** Every product of the store, by id. */
   productIds: string[];
   /** The store's community, when it has one. */
@@ -62,6 +66,10 @@ export type ErasureSize = {
   roomMessages: number;
   events: number;
   certificates: number;
+  /** Dropped courses looked at for a record of the person (lib/removed-courses.ts); those with one are in `courses`. */
+  droppedCourses: number;
+  /** Dropped courses read whole (their lessons and modules), the person having a record there. */
+  droppedRecords: number;
 };
 
 /**
@@ -79,9 +87,11 @@ export const ERASE_SUBMISSIONS: readonly [number, number] = [300, 64_000];
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,
  * and (since 18 October 2026) a person's payment requests at their cap, four commands each for twice MAX_PER_PERSON
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
- * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them.
+ * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
+ * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it.
  */
-export const ERASE_FIXED_COMMANDS = 550 + ERASE_SUBMISSIONS[0];
+export const ERASE_FIXED_COMMANDS = 551 + ERASE_SUBMISSIONS[0];
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
 export const ERASE_FIXED_BYTES = 310_000 + ERASE_SUBMISSIONS[1];
 /** Per thing counted: [commands, bytes]. */
@@ -95,6 +105,14 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   roomMessages: [0, 1_200],
   events: [1, 150],
   certificates: [0, 500],
+  // Six probes a dropped course (lib/removed-courses.ts DROPPED_PROBES: student row, lessons done, passes, certificate,
+  // start and finish marks), their key names and replies, and its entry in the list read whole (its id and its
+  // product's, 160 bytes at most): 6 x 160 + 160 = 1,120, counted at 1,200 (#4542 review).
+  droppedCourses: [6, 1_200],
+  // One GET of a dropped course's lessons and modules, read only where the person has a record:
+  // REMOVED_COURSE_RECORD_BYTES (lib/removed-courses.ts, 15,442) at most, counted at 16,000; held by
+  // tests/erasure-dropped-list-budget.test.ts.
+  droppedRecords: [1, 16_000],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

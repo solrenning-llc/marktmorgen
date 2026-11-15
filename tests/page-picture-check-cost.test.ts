@@ -96,7 +96,10 @@ async function main(): Promise<void> {
   calls.head = 0;
   calls.get = 0;
   is("a page with it: refused", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);
-  is("checked once: a head and a get", [calls.head, calls.get], [1, 1]);
+  // Changed (rule 23, Claude 2 on #2843, 6750890970): a file that is not a picture is now deleted through
+  // dropTakenPictures, whose head checks it was stored after its note, so a file older than its note is kept; that
+  // clean-up head is the one the studio-blob line already counts with each check.
+  is("checked once: a head and a get, then the clean-up head before it is deleted", [calls.head, calls.get], [2, 1]);
   is("and deleted, since this save took it from the door and it is nobody else's", files.has(notPicture), false);
   files.set(notPicture, { bytes: JPEG, contentType: "image/jpeg", at: Date.now() + 1 });
   is("the same name sent again, even with a picture there now: refused, it is neither fresh from the door nor this page's", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0004", [notPicture]) }))), [400, "pictures"]);

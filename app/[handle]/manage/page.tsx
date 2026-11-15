@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
-import { MANAGE_LINK_SECONDS, type Membership, canManage, membershipsListed } from "@/lib/membership-manage";
+import { MANAGE_LINK_SECONDS, type Membership, canManage, endLine, membershipsListed } from "@/lib/membership-manage";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
@@ -133,7 +133,9 @@ export default async function ManagePage({ params, searchParams }: Params) {
               </h1>
 
               {/* Each membership with its own way out. Cancel goes straight to
-                  Stripe's own cancellation page for that one membership. */}
+                  Stripe's own cancellation page for that one membership; one
+                  sold as a number of payments is cancelled here, after the
+                  page asks to confirm (lib/membership-manage.ts). */}
               {memberships.length ? (
                 <ul className="mt-6 space-y-3">
                   {memberships.map((one) => (
@@ -142,7 +144,7 @@ export default async function ManagePage({ params, searchParams }: Params) {
                         <p className="font-bold" style={{ color: "var(--st-text)" }}>{one.title}</p>
                         <p className="st-muted text-sm">
                           {one.amount ? `${formatMoney(one.amount, one.currency, say.lang.locale)} ${every(one)}` : null}
-                          {one.endsAt ? `${one.amount ? " · " : ""}${m.ends(endDate(one.endsAt))}` : null}
+                          {endLine(m, one, endDate) ? `${one.amount ? " · " : ""}${endLine(m, one, endDate)}` : null}
                         </p>
                       </div>
                       {severalCustomers ? (
@@ -177,6 +179,21 @@ export default async function ManagePage({ params, searchParams }: Params) {
                         <Link prefetch={false} href={`/@${store.handle}/manage/leave?token=${token}&sub=${one.id}`} className="btn btn-secondary btn-sm">
                           {m.cancel}
                         </Link>
+                      ) : one.endsAt === null && one.fixedEnd ? (
+                        one.periodEnd ? (
+                          <details className="w-full basis-full" data-fixed-cancel>
+                            <summary className="btn btn-secondary btn-sm cursor-pointer">{m.cancel}</summary>
+                            <form action="/api/store/manage/cancel" method="post" className="mt-2 space-y-2">
+                              <input type="hidden" name="handle" value={store.handle} />
+                              <input type="hidden" name="token" value={token} />
+                              <input type="hidden" name="subscription" value={one.id} />
+                              <p className="st-muted text-sm">{m.fixedCancelNote(endDate(one.periodEnd))}</p>
+                              <button type="submit" className="btn st-btn btn-sm">
+                                {m.leaveCancel}
+                              </button>
+                            </form>
+                          </details>
+                        ) : null
                       ) : one.endsAt === null ? (
                         <form action="/api/store/manage/cancel" method="post">
                           <input type="hidden" name="handle" value={store.handle} />

@@ -24,6 +24,8 @@ export async function cookies() { return {}; }
 export function redirect() { throw Error("unexpected redirect"); }
 export const PLANS_ON_SALE = false;
 export function studioPath() { return "/studio"; }
+/** Main's email page pays its studio requests before it reads the broadcast heads; both are synthetic here. */
+export async function countStudio() { return { ok: true as const }; }
 export async function studioView() {
   return { ok: true, view: { role: "editor", stores: [], owned: [], email: "owner@example.com", store: {
     sid: "synthetic-store", listId: world.list, statsId: "synthetic-stats", handle: "harbor", name: "Harbor",
@@ -37,6 +39,7 @@ export function EmailStudio({ used, monthKnown }: { used: number | null; monthKn
 }
 export async function listCounts() { return { total: 0, agreed: 0, left: 0, mailable: 0 }; }
 export async function listBroadcastsStrict() { return []; }
+export async function readBroadcastHeads() { return { ok: true as const, heads: [] }; }
 export function letterIdFor() { return ""; }
 export async function publishedLetters() { return new Map(); }
 export function broadcastMoney() { return null; }

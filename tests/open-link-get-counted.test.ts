@@ -1,5 +1,6 @@
 /**
- * MM-SA-41 follow-up (same-family reading 51LL): every request of an emailed community or course link pays for its own
+ * MM-SA-41 and MM-SA-53 follow-up (same-family reading 51LL): every request of an emailed community, course or letter
+ * link pays for its own
  * reads. The GET reads the link and the store, the page reads the store and draws the form, the tap spends the open:
  * each takes its own buyer reads from the store's month (lib/buyer-actions.ts, OPEN_LINK_GET_UNITS,
  * OPEN_LINK_PAGE_UNITS, OPEN_LINK_TAP_UNITS), before what it serves. Before, only the tap took the reads of the whole
@@ -20,8 +21,10 @@ import { OPEN_LINK_GET_UNITS, OPEN_LINK_PAGE_UNITS, OPEN_LINK_REQUEST_UNITS, OPE
 import { OPEN_LINK_WORDS } from "@/lib/buyer-words/open-link";
 import { GET as communityGet, POST as communityPost } from "@/app/api/store/community/open/route";
 import { GET as courseGet, POST as coursePost } from "@/app/api/store/course/open/route";
+import { GET as lettersGet, POST as lettersPost } from "@/app/api/store/letters/open/route";
 import CommunityOpenPage from "@/app/[handle]/community/open/page";
 import CourseOpenPage from "@/app/[handle]/course/open/page";
+import LettersOpenPage from "@/app/[handle]/letters/open/page";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -53,6 +56,7 @@ async function main(): Promise<void> {
   const kinds = [
     { name: "community", get: communityGet as Handler, post: communityPost as Handler, token: "a".repeat(64), grantKey: (t: string) => `nl:cm:link:${sha(`nimbus-community:${t}`).slice(0, 40)}`, grant: { e: BUYER, k: storeKey(store), h: store.handle }, Page: CommunityOpenPage, path: "community" },
     { name: "course", get: courseGet as Handler, post: coursePost as Handler, token: "b".repeat(64), grantKey: (t: string) => `nl:learn:link:${sha(t)}`, grant: { e: BUYER, k: storeKey(store), h: store.handle, p: made.product.id }, Page: CourseOpenPage, path: "course" },
+    { name: "letters", get: lettersGet as Handler, post: lettersPost as Handler, token: "c".repeat(64), grantKey: (t: string) => `nl:letters:link:${sha(`nimbus-letter:${t}`).slice(0, 40)}`, grant: { e: BUYER, k: storeKey(store), h: store.handle, l: "0123456789abcdef0123" }, Page: LettersOpenPage, path: "letters" },
   ];
   for (const kind of kinds) {
     await redis.pipeline([["SET", kind.grantKey(kind.token), JSON.stringify(kind.grant), "EX", 3_600]]);

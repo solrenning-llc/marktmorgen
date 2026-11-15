@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
 import { OpenLinkTap } from "@/components/open-link-tap";
 import { openLinkWords } from "@/lib/buyer-words/open-link";
+import { OPEN_LINK_PAGE_UNITS, takeBuyerRead } from "@/lib/buyer-actions";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -26,6 +27,9 @@ export default async function LettersOpenPage({ params, searchParams }: Params) 
   if (!store) notFound();
   // Not refused for a store switched off after notices (lib/takedown.ts): what a buyer bought stays theirs, and the
   // link opened it before this page existed.
+  // This page's own reads, from the store's month (lib/buyer-actions.ts), before it is drawn: a view that is never
+  // followed by a press is counted all the same. A store past its month rests, as its other pages do.
+  if (!(await takeBuyerRead(store, OPEN_LINK_PAGE_UNITS))) redirect(`/@${store.handle}/resting`);
   const token = (await searchParams).token;
   return <OpenLinkTap store={store} token={typeof token === "string" ? token.slice(0, 80) : ""} kind="letters" />;
 }

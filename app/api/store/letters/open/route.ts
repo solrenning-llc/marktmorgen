@@ -4,7 +4,7 @@ import { type ExactStore, storeForHandleExactly } from "@/lib/store-exact";
 import { mintPass, passCookie, storeKey } from "@/lib/learn";
 import { readLetterGrant, spendLetterOpen } from "@/lib/letter-access";
 import { letterWords } from "@/lib/buyer-words/letters";
-import { OPEN_LINK_REQUEST_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
+import { OPEN_LINK_GET_UNITS, OPEN_LINK_TAP_UNITS, restingAway, takeBuyerRead } from "@/lib/buyer-actions";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
 
 /** The browser's first language, as a store language code ("es" from "es-MX,es;q=0.9"); the default when it names none of them. */
@@ -24,9 +24,9 @@ const busyFor = (language: unknown) =>
  * as MM-SA-41 for the community's and courses' links): mail filters and link
  * previews fetch every link in a message, and a GET that spent an open would
  * use the link up before the buyer tapped it, while a GET from another site
- * would make this browser act as the link's owner. It reads the link only
- * (one command) and sends the browser to the store's page that asks for one
- * tap (app/[handle]/letters/open/page.tsx).
+ * would make this browser act as the link's owner. It reads the link and the
+ * store, counts its own reads (OPEN_LINK_GET_UNITS) and sends the browser to the
+ * store's page that asks for one press (app/[handle]/letters/open/page.tsx).
  */
 export async function GET(request: NextRequest) {
   const origin = originFrom(request);
@@ -38,9 +38,21 @@ export async function GET(request: NextRequest) {
     console.error("reading an emailed link's grant failed", error);
     return busyFor(browserLanguage(request));
   }
-  if (!grant) {
-    return new Response(letterWords(browserLanguage(request)).linkGone, { status: 410, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  const goneHere = () =>
+    new Response(letterWords(browserLanguage(request)).linkGone, { status: 410, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
+  if (!grant) return goneHere();
+  // This GET's own reads, from the store's month (lib/buyer-actions.ts): a mail filter that fetches the link again and
+  // again is counted every time, never only when somebody presses. The store read exactly (rule 24): unknown is busy.
+  let found: ExactStore | null;
+  try {
+    found = await storeForHandleExactly(grant.h);
+  } catch (error) {
+    console.error("reading the store of an emailed link failed", error);
+    return busyFor(browserLanguage(request));
   }
+  if (found === "unknown") return busyFor(browserLanguage(request));
+  if (found === "none" || !found || storeKey(found) !== grant.k) return goneHere();
+  if (!(await takeBuyerRead(found, OPEN_LINK_GET_UNITS))) return restingAway(origin, found);
   return new Response(null, { status: 303, headers: { Location: `${origin}/@${grant.h}/letters/open?token=${token}`, "Cache-Control": "no-store" } });
 }
 
@@ -88,9 +100,8 @@ export async function POST(request: NextRequest) {
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     });
   if (!grant || !store || storeKey(store) !== grant.k) return gone(browserLanguage(request));
-  // One of the store's public requests on the buyers' side (lib/buyer-actions.ts).
-  // The store's public requests on the buyers' side (lib/buyer-actions.ts): two, for the GET and the page before it.
-  if (!(await takeBuyerRead(store, OPEN_LINK_REQUEST_UNITS))) return restingAway(origin, store);
+  // The press's own reads (lib/buyer-actions.ts); the GET and the page took theirs.
+  if (!(await takeBuyerRead(store, OPEN_LINK_TAP_UNITS))) return restingAway(origin, store);
   // The link's count of opens read only in its exact shape (CX-123 rule 24): an unknown count lets no browser in, and
   // the buyer is told in the store's words to try again, never shown a bare server error.
   let spent: boolean;

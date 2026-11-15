@@ -89,6 +89,7 @@ const liveKey = (statsId: string) => `nl:stats:${statsId}:live`;
 export const LIVE_MINUTES = 5;
 
 import { isBot, classifySource, cleanTag } from "@/lib/source-rules";
+import { minorUnits } from "@/lib/paid-amount";
 export { isBot, classifySource, cleanTag };
 
 export type HitKind = "view" | "checkout" | "link" | "product" | "signup";
@@ -1289,10 +1290,17 @@ export async function readPaidSales(store: Store, since: number, pages: number):
       partial = true;
       gaps.add("currency");
     }
+    // One of no readable amount is never a $0 sale (lib/paid-amount.ts): left out, and the reading says so.
+    const amount = minorUnits(pi.amount);
+    if (amount === null) {
+      partial = true;
+      gaps.add("amount");
+      return;
+    }
     sales.push({
       created: typeof pi.created === "number" ? pi.created * 1000 : Date.now(),
       product: meta.product ?? "",
-      cents: typeof pi.amount === "number" ? pi.amount : 0,
+      cents: amount,
       currency: currencyOf(pi),
       row: pi,
       upsell: true,
@@ -1578,7 +1586,12 @@ async function readDisputes(store: Store, since: number, pages = DISPUTE_PAGES):
       if (takes !== true) continue;
       const raw = row.payment_intent;
       const pi = typeof raw === "string" ? raw : raw && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string" ? (raw as { id: string }).id : "";
-      const cents = typeof row.amount === "number" && row.amount > 0 ? row.amount : 0;
+      // An amount that does not read is not "nothing taken": the reading is partial (lib/paid-amount.ts).
+      const cents = minorUnits(row.amount);
+      if (cents === null) {
+        partial = true;
+        continue;
+      }
       if (!cents) continue;
       const currency = currencyOf(row);
       if (!currency) partial = true;
@@ -1613,9 +1626,15 @@ async function readRefunds(store: Store, since: number, pages: number): Promise<
       if (row.status !== "succeeded" && row.status !== "pending") continue;
       const currency = currencyOf(row);
       if (!currency) partial = true;
+      // A refund of no readable amount is never a $0 refund (lib/paid-amount.ts): left out, the reading partial.
+      const cents = minorUnits(row.amount);
+      if (cents === null) {
+        partial = true;
+        continue;
+      }
       out.push({
         created: typeof row.created === "number" ? row.created * 1000 : 0,
-        cents: typeof row.amount === "number" ? row.amount : 0,
+        cents,
         currency,
         paymentIntent: typeof row.payment_intent === "string" ? row.payment_intent : "",
       });

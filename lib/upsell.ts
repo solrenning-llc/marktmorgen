@@ -73,6 +73,7 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { cartOfferFrom, ownedBeforeCart } from "@/lib/cart-offers";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
+import { intentMoneyOf } from "@/lib/paid-amount";
 
 export const UPSELL_COOKIE = "nl_upsell";
 export const UPSELL_WINDOW_SECONDS = 60 * 60;
@@ -518,8 +519,16 @@ export async function takeUpsell(input: {
 async function afterPaid(store: Store, session: string, target: Listing, pi: Record<string, unknown>, email: string): Promise<boolean | "unknown"> {
   await noteCharge(store, pi).catch((error) => console.error("noting an affiliate sale failed", error));
   const reference = typeof pi.id === "string" ? pi.id : "";
-  const amountCents = typeof pi.amount === "number" ? pi.amount : 0;
-  const currency = typeof pi.currency === "string" && pi.currency ? pi.currency : store.currency;
+  // What Stripe took, read exactly (lib/paid-amount.ts): one that does not read is never confirmed to the buyer or
+  // counted at $0 or in the store's currency. Unknown: the offer's place stays held until its hours end, as for a
+  // count not confirmed (lib/orders.ts, countOrder).
+  const money = intentMoneyOf(pi);
+  if (!money) {
+    console.error("a paid offer's amount or currency does not read; not confirmed or counted", reference);
+    return "unknown";
+  }
+  const amountCents = money.cents;
+  const currency = money.currency;
   // A bundle added this way: its products, from the list on its own payment.
   const listed = bundleFromMeta(pi.metadata as Record<string, string> | null, "bundle");
   const items = listed.length ? (await contentsOf(store, listed).catch(() => null))?.items : undefined;

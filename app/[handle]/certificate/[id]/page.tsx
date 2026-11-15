@@ -84,7 +84,10 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const { handle, id } = await params;
   const query = await searchParams;
   const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
-  if (!found || found.resting) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
+  // A resting store's tab says so, as the resting page's does (../../resting/page.tsx),
+  // in its language from the record the load already read.
+  if (found?.resting) return { title: `${speech(found.store).w.restingTitle} — Marktmorgen`, robots: { index: false, follow: false } };
+  if (!found) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
   const { certificate } = found;
   const w = coursesWords(found.store.language);
   return {

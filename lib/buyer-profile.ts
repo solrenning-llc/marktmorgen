@@ -232,12 +232,23 @@ export async function removePersonNote(statsId: string, person: string, id: unkn
 /** Every note about every person, for a store that is being deleted. */
 export async function forgetPersonNotes(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [raw] = await redisPipeline([["SMEMBERS", whoKey(statsId)]]);
-  const people = (Array.isArray(raw) ? (raw as unknown[]).map(String) : []).filter((p) => PERSON_KEY.test(p));
+  // The index read exactly (#4673, CX-123 rule 24): one reply holding a whole list of text. Anything else is
+  // unknown and throws before anything is deleted, so the index that finds the notes is never lost while they stay.
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", whoKey(statsId)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("a store's people with notes");
+  const people = members.filter((p) => PERSON_KEY.test(p));
   for (let i = 0; i < people.length; i += 500) {
-    await redisPipeline([["DEL", ...people.slice(i, i + 500).map((p) => notesKey(statsId, p))]]);
+    const batch = people.slice(i, i + 500);
+    confirmDeleted(await redisPipeline([["DEL", ...batch.map((p) => notesKey(statsId, p))]]), batch.length, "a store's people's notes");
   }
-  await redisPipeline([["DEL", whoKey(statsId)]]);
+  // The index goes last, and only once every batch above was confirmed.
+  confirmDeleted(await redisPipeline([["DEL", whoKey(statsId)]]), 1, "a store's notes index");
+}
+
+/** One DEL's own count, read exactly: a whole number from 0 to the keys it was sent, or UnknownReplyError. */
+function confirmDeleted(replies: unknown, keys: number, what: string): void {
+  const count = countOf(repliesFor(replies, 1)?.[0]);
+  if (count === null || count > keys) throw new UnknownReplyError(what);
 }
 
 // ------------------------------------------------------------------ the page

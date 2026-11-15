@@ -70,7 +70,7 @@ const localeOf = (store: Store | null) => LANGUAGES[parseLanguage(store?.languag
 export default async function UnsubscribePage({ searchParams }: { searchParams: Promise<Query> }) {
   const query = await searchParams;
   const reminder = param(query, "r");
-  if (reminder) return <StopReminders token={reminder} />;
+  if (reminder) return <StopReminders token={reminder} notSaved={param(query, "done") === "0"} />;
   const review = param(query, "v");
   if (review) return <StopReviewRequests token={review} notSaved={param(query, "done") === "0"} />;
   const update = param(query, "u");
@@ -217,8 +217,11 @@ async function StopAnnouncements({ token, notSaved }: { token: string; notSaved:
   );
 }
 
-/** The same one button, for a store's abandoned-checkout reminders. */
-async function StopReminders({ token }: { token: string }) {
+/**
+ * The same one button, for a store's abandoned-checkout reminders. `notSaved`: the route answered done=0, so the last
+ * press was not saved (its write was unknown); said only while the link is found and not stopped, with the button again.
+ */
+async function StopReminders({ token, notSaved }: { token: string; notSaved: boolean }) {
   const found = STOP_TOKEN.test(token) ? await readStopToken(token) : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
@@ -240,6 +243,7 @@ async function StopReminders({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{a.remindersAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.forEmail(found.email)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?r=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopReminders}</button>

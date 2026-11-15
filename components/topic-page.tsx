@@ -184,7 +184,7 @@ function BlockView({ block }: { block: Block }) {
           {block.intro ? <p className="mt-2 text-ink-soft">{block.intro}</p> : null}
           <ul className="mt-5 grid gap-3">
             {block.items.map((item) => (
-              <li key={item} className="flex gap-3 text-[0.9375rem] text-ink-soft [overflow-wrap:anywhere]">
+              <li key={item} className="flex max-w-[72ch] gap-3 text-[0.9375rem] text-ink-soft [overflow-wrap:anywhere]">
                 <span className="mt-[0.55rem] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-mute" aria-hidden="true" />
                 <span>{item}</span>
               </li>
@@ -206,7 +206,7 @@ function BlockView({ block }: { block: Block }) {
                   <Icon name="plus" size={18} className="shrink-0 text-violet-deep group-open:hidden" />
                   <Icon name="minus" size={18} className="hidden shrink-0 text-violet-deep group-open:block" />
                 </summary>
-                <p className="px-5 pb-5 text-[0.9375rem] text-ink-soft sm:px-6">{item.a}</p>
+                <p className="max-w-[72ch] px-5 pb-5 text-[0.9375rem] text-ink-soft sm:px-6">{item.a}</p>
               </details>
             ))}
           </div>

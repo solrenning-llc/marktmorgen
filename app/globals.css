@@ -167,6 +167,11 @@
   --focus: #4946a6;
 }
 
+/* WCAG 1.4.8 Visual Presentation, AAA (#4653): small text at a line height of 1.5, not Tailwind's 1.43. */
+@theme {
+  --text-sm--line-height: 1.5;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

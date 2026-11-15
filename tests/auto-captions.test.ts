@@ -57,7 +57,9 @@ let credits: FakeCredit[] = [];
 let creditsAnswer: "ok" | "error" = "ok";
 const FOLDER = "a".repeat(32);
 /** The captions invoice as Stripe keeps it, for its list (the one invoice id the fake makes). */
-let invoiceState: { status: string; mark: string; customer: string } | null = null;
+let invoiceState: { status: string; mark: string; customer: string; total?: number; amountDue?: number; amountPaid?: number } | null = null;
+/** The total the next /pay answers and the invoice keeps, when it is not the price (a discount, or more than asked). */
+let payTotal: number | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -75,7 +77,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path.startsWith("/subscriptions/")) return json({ id: "sub_Store000001", default_payment_method: "pm_card_on_file" });
   if (path === "/invoices" && method === "GET") {
     const data = invoiceState && invoiceState.customer === url.searchParams.get("customer")
-      ? [{ object: "invoice", id: "in_Captions00001", customer: invoiceState.customer, currency: "usd", status: invoiceState.status, payment_intent: invoiceState.status === "paid" ? "pi_Captions000001" : null, metadata: { mark: invoiceState.mark } }]
+      ? [{ object: "invoice", id: "in_Captions00001", customer: invoiceState.customer, currency: "usd", status: invoiceState.status, payment_intent: invoiceState.status === "paid" ? "pi_Captions000001" : null, metadata: { mark: invoiceState.mark }, ...(invoiceState.total !== undefined ? { total: invoiceState.total, amount_due: invoiceState.amountDue, amount_paid: invoiceState.amountPaid } : {}) }]
       : [];
     return json({ object: "list", has_more: false, data });
   }
@@ -92,8 +94,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (declineCard) return json({ error: { code: "card_declined", message: "Your card was declined." } }, 402);
     // An answer that is not a payment: the invoice stays open, as Stripe keeps it.
     if (paidReceipt !== undefined) return json(paidReceipt);
-    if (invoiceState) invoiceState.status = "paid";
-    const charged = Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount"));
+    const charged = payTotal ?? Number(stripe.find((s) => s.path === "POST /invoiceitems")?.body.get("amount"));
+    if (invoiceState) Object.assign(invoiceState, { status: "paid", total: charged, amountDue: charged - creditPaid, amountPaid: charged - creditPaid });
     return json({ id: "in_Captions00001", status: "paid", payment_intent: "pi_Captions000001", total: charged, amount_due: charged - creditPaid, amount_paid: charged - creditPaid, currency: "usd" });
   }
   if (path.endsWith("/void")) {
@@ -256,6 +258,27 @@ async function main(): Promise<void> {
     paidReceipt = undefined;
     stripe = [];
     bunny.length = 0;
+  }
+
+  part("An invoice Stripe paid for another amount than the price is never taken as paid (review of 599eab270)");
+  for (const [what, total] of [["less (a discount on the customer)", CHARGED - 3000], ["more", CHARGED + 3000]] as const) {
+    try {
+      stripe = [];
+      bunny.length = 0;
+      redis.run(["DEL", pending]);
+      payTotal = total;
+      const answer = await requestAutoCaptions(store, PATH, "en", ["es"]);
+      const kept = redis.run(["GET", pending]);
+      is(`paid for ${what}: still being checked, no captions asked for, no charge recorded`,
+        [answer.ok, answer.ok ? null : answer.reason, bunny.filter((b) => b.path.includes("/transcribe")).length, typeof kept === "string" && "pi" in JSON.parse(kept)],
+        [false, "checking", 0, false]);
+    } finally {
+      payTotal = null;
+      stripe = [];
+      bunny.length = 0;
+      invoiceState = null;
+      redis.run(["DEL", pending]);
+    }
   }
 
   part("Paid in part from the creator's credit balance (review of f76db511a): the card paid what was left, and it counts");

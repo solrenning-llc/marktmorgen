@@ -46,8 +46,8 @@ import { readKindExact } from "@/lib/catalog";
 import { readCoursesExact } from "@/lib/course";
 import { emailKey, forgetLearnerPerson, storeKey } from "@/lib/learn";
 import { personKey } from "@/lib/person-key";
-import { ownErasureCommand, suppressCommand } from "@/lib/suppression";
-import { repliesFor } from "@/lib/redis-reply";
+import { ownErasureCommand, suppressCommand, suppressionPrint } from "@/lib/suppression";
+import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { takeAllowance } from "@/lib/store-allowance";
 import { logTeam } from "@/lib/team";
 import type { Role } from "@/lib/team-roles";
@@ -278,6 +278,9 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
   };
 }
 
+/** The part an erasure names when the person's files could be neither deleted nor queued, or their kept paths read. */
+const FILES_PART = "lib/person-erasure.ts#files";
+
 /**
  * Deletes one person from one store. `by` says which door: the team, with
  * who pressed it and their role for the activity log, or the person.
@@ -334,23 +337,41 @@ export async function erasePerson(
       failed.push(eraser.module);
     }
   }
-  if (files.length) {
-    const unique = [...new Set(files)];
-    // Deleted now; if the file store does not answer, handed to the daily job
-    // that deletes uploads nobody kept (app/api/cron/courses), so they go
-    // within a day by themselves. Every path is queued on its own, and one whose
-    // write failed is tried again at once (#4808): a failed write never stops the
-    // paths after it, since their records are already gone and a repeat erasure
-    // could not find them again. A path still not queued fails the erasure.
+  // The person's files (#4808). The paths a step found are kept, under the person's deletion print (never the address),
+  // until each is deleted or queued for the daily job: a repeat erasure finds nothing more through the records already
+  // deleted, so it reads them from there first. Deleted now; if the file store does not answer, handed to the daily
+  // job that deletes uploads nobody kept (app/api/cron/courses), each path on its own and a failed one tried again at
+  // once. Any path neither deleted nor queued, or kept paths that cannot be read, say the erasure is incomplete (never
+  // thrown, so the team's log says "not complete"), and the paths stay kept for the next try.
+  const pendingKey = `nl:erase:files:${scope.listId as string}:${suppressionPrint(scope.listId as string, email)}`;
+  const keptReply = await redisPipeline([["SMEMBERS", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
+  const kept = keptReply ? stringList(keptReply[0]) : null;
+  if (!kept) failed.push(FILES_PART);
+  const unique = [...new Set([...files, ...(kept ?? [])])];
+  if (unique.length) {
+    if (files.length) {
+      const noted = await redisPipeline([["SADD", pendingKey, ...files]]).then((replies) => repliesFor(replies, 1), () => null);
+      const added = noted ? countOf(noted[0]) : null;
+      if (added === null || added > files.length) console.error("deleting a person: their files' paths could not be kept for a repeat");
+    }
+    let lost = 0;
     await deleteFile(unique).catch(async (error: unknown) => {
       console.error("deleting a person: their files go with the daily job instead", error);
       const queue = (paths: string[]) => Promise.allSettled(paths.map((path) => noteTaskUpload(path, 0)));
       const first = await queue(unique);
       const again = unique.filter((_, i) => first[i].status === "rejected");
       const second = again.length ? await queue(again) : [];
-      const lost = again.filter((_, i) => second[i].status === "rejected");
-      if (lost.length) throw new Error(`deleting a person: ${lost.length} of their files could be neither deleted nor queued for deletion`);
+      lost = again.filter((_, i) => second[i].status === "rejected").length;
     });
+    if (lost) {
+      console.error(`deleting a person: ${lost} of their files could be neither deleted nor queued for deletion; kept for a repeat`);
+      if (!failed.includes(FILES_PART)) failed.push(FILES_PART);
+    } else if (kept) {
+      // Every path deleted or queued: the kept ones are let go, exactly.
+      const gone = await redisPipeline([["DEL", pendingKey]]).then((replies) => repliesFor(replies, 1), () => null);
+      const count = gone ? countOf(gone[0]) : null;
+      if (count === null || count > 1) failed.push(FILES_PART);
+    }
   }
   const records = parts.reduce((sum, p) => sum + p.records, 0);
   // The team's own deletions go in its activity log; a person's own is told to the owner by email (lib/erasure-request.ts).

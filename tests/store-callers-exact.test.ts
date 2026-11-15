@@ -1,7 +1,8 @@
 /**
  * Callers of a store read that turned an unreadable record into "no store" (rule 24; Claude 5's MEDIUM B on #2878).
- * Since #2878, storeForEmail throws UnknownReplyError on a record it cannot read; these callers caught that throw as
- * null and acted on "gone". Each part runs a healthy control and a confirmed-absence control first.
+ * storeForEmail answers null both for a store Redis says is not there and for a record it cannot read, so these
+ * callers read through storeForRefExact (lib/store.ts), where only Redis's nil is "no store" and any other answer
+ * throws. Each part runs a healthy control and a confirmed-absence control first.
  *   1. releaseRestarted (lib/closing-holds.ts): an unreadable record is never "gone" and never leaves the held line,
  *      so a restarted store's members are not stranded there.
  *   2. The affiliates route's invite (app/api/store/affiliates/route.ts): an unreadable invitee record answers 503

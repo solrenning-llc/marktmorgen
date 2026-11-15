@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeIdGone } from "@/lib/store";
+import { StoreFullError, setAffiliateSetting, storeForEmail, storeForId, storeForRefExact, storeIdGone } from "@/lib/store";
 import { readMoney } from "@/lib/money";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { guardStoreWrite, text } from "@/lib/store-request";
@@ -311,9 +311,10 @@ export async function POST(request: NextRequest) {
       // Somebody who already has a store here is asked in their own studio
       // instead of an inbox (lib/partner-invites.ts). The agreement moves; it
       // is not skipped. Their own store is never offered a partnership.
-      // A record that cannot be read is not "no store here" (rule 24): nothing is sent, and the creator is
-      // asked to try again, rather than the offer going to an inbox that has a studio.
-      const theirs = to ? await storeForEmail(to).catch(() => undefined) : null;
+      // Read exactly (storeForRefExact): only Redis's nil is "no store here". A record that cannot be read is not
+      // (rule 24): nothing is sent, and the creator is asked to try again, rather than the offer going to an inbox
+      // that has a studio.
+      const theirs = to ? await storeForRefExact(to).catch(() => undefined) : null;
       if (theirs === undefined) return fail("server_error", 503);
       const alreadyHere = Boolean(theirs && theirs.sid !== store.sid);
       const sent = await invitePartner({ store, email: to, share, titles, origin, alreadyHere });

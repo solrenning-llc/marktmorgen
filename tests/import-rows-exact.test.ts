@@ -6,8 +6,8 @@
  * in a month. takeMovedCount, beside it, already reads the same pair exactly. Found by Claude 3 (nuvem C) in the
  * audit of imports and integrations, 11 November 2026.
  *
- * Expected: only "OK" or null for the SET NX and a whole count for the INCRBY take rows; any other shape is
- * "unavailable", never ok. Controls: exact replies still take rows under the limit and refuse them over it.
+ * Expected: only a whole count for the INCRBY and 0 or 1 for the EXPIRE NX take rows (main's windowCountBy, which
+ * replaced the SET NX + INCRBY since; merge of 15 November 2026); any other shape is "unavailable", never ok. Controls: exact replies still take rows under the limit and refuse them over it.
  * In-memory Redis double and a synthetic store only.
  */
 import { takeImportRows } from "@/lib/imports";
@@ -19,10 +19,10 @@ import { paidPeriod } from "./billing-period-fixture";
 
 const ROWS = "nl:imports:rows:";
 const pipeline = redis.pipeline.bind(redis);
-/** The month's rows count answers `set` and `incr` and changes nothing. */
-function countAnswers(set: unknown, incr: unknown): void {
+/** The month's rows count answers `incr` and `expire` and changes nothing. */
+function countAnswers(incr: unknown, expire: unknown): void {
   redis.pipeline = (async (commands: (string | number)[][]) => {
-    if (commands.length === 2 && commands[0][0] === "SET" && String(commands[0][1]).startsWith(ROWS) && commands[1][0] === "INCRBY") return [set, incr];
+    if (commands.length === 2 && commands[0][0] === "INCRBY" && String(commands[0][1]).startsWith(ROWS) && commands[1][0] === "EXPIRE") return [incr, expire];
     return pipeline(commands);
   }) as typeof redis.pipeline;
 }
@@ -46,17 +46,17 @@ async function main(): Promise<void> {
 
   part("A reply of another shape is never a count");
   const shapes: [string, unknown, unknown][] = [
-    ["INCRBY true", null, true],
-    ["INCRBY [150]", null, [150]],
-    ["INCRBY [\"150\"]", null, ["150"]],
-    ["INCRBY 150.5", null, 150.5],
-    ["INCRBY \"abc\"", null, "abc"],
-    ["INCRBY {}", null, {}],
-    ["SET NX \"QUEUED\"", "QUEUED", 150],
-    ["SET NX 1", 1, 150],
+    ["INCRBY true", true, 1],
+    ["INCRBY [150]", [150], 1],
+    ["INCRBY [\"150\"]", ["150"], 1],
+    ["INCRBY 150.5", 150.5, 1],
+    ["INCRBY \"abc\"", "abc", 1],
+    ["INCRBY {}", {}, 1],
+    ["EXPIRE NX \"QUEUED\"", 150, "QUEUED"],
+    ["EXPIRE NX 2", 150, 2],
   ];
-  for (const [label, set, incr] of shapes) {
-    countAnswers(set, incr);
+  for (const [label, incr, expire] of shapes) {
+    countAnswers(incr, expire);
     try {
       const took = await takeImportRows(store, 50);
       is(`${label}: not taken, unavailable`, took, { ok: false, reason: "unavailable", limit });
@@ -66,15 +66,15 @@ async function main(): Promise<void> {
   }
 
   part("Controls: the forms Redis answers in");
-  countAnswers(null, 150);
+  countAnswers(150, 0);
   try {
-    is("SET NX null, INCRBY 150: taken", await takeImportRows(store, 50), { ok: true });
+    is("INCRBY 150, EXPIRE NX 0: taken", await takeImportRows(store, 50), { ok: true });
   } finally {
     restore();
   }
-  countAnswers("OK", "150");
+  countAnswers("150", 1);
   try {
-    is("SET NX OK, INCRBY \"150\" as a whole number in text: taken", await takeImportRows(store, 50), { ok: true });
+    is("INCRBY \"150\" as a whole number in text, EXPIRE NX 1: taken", await takeImportRows(store, 50), { ok: true });
   } finally {
     restore();
   }

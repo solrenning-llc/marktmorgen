@@ -21,6 +21,8 @@ const done = () => new Response(null, { status: 204, headers: { "Cache-Control":
  */
 export async function POST(request: NextRequest) {
   if (fromAnotherSite(request)) return done();
+  // Global Privacy Control is the buyer's no to every store: whatever the page asked, nothing is sent.
+  if (request.headers.get("sec-gpc") === "1") return done();
   if (Number(request.headers.get("content-length") ?? "0") > MAX_BODY_BYTES) return done();
   let body: Record<string, unknown> = {};
   try {

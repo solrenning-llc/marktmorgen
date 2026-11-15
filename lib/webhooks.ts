@@ -684,7 +684,10 @@ async function namesErased(store: Pick<Store, "listId">, body: string, type: str
 async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store: Store | null | "taken", now = Date.now()): Promise<Delivery> {
   const next = { ...delivery, attempts: delivery.attempts + 1, lastAt: now };
   if (!endpoint) {
-    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
+    // Its endpoint removed, or the whole store's webhooks forgotten (its config deleted): the message is not kept
+    // past it. A delivery the log no longer names (older than LOG_SIZE) is not deleted by forgetStoreWebhooks, and
+    // this write would otherwise keep the buyers' data in it for DELIVERY_SECONDS more. Nothing can send it again.
+    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed.", body: "", givenUp: true };
   }
   // An endpoint that no longer hears this kind of event is not sent it on a scheduled try either, as by hand
   // (resendDelivery, "not_heard"): its message (a buyer's name and email) never goes on to an address the creator

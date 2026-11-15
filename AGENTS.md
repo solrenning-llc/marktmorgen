@@ -42,6 +42,8 @@ Autorização do dono, nas palavras dele: "se não faz a construção andar mais
 
 (c) **Junção do main num PR, só quando necessária:** quando houver conflito; logo antes de incorporar, se as verificações verdes forem anteriores ao main atual; e depois que o main vermelho for consertado. Nunca juntar o main repetidamente e nunca fazer push só para tentar o CI de novo; uma falha causada por algo fora do PR é avisada no canal `para-claude-1`, em vez de um novo push. Depois que a fila de incorporação (merge queue) for ligada, é ela que testa a combinação, e as junções de rotina do main acabam de vez.
 
+(d) Família de chave nova (lib/data-families): entra no arquivo do tópico em lib/data-families/<tópico>.ts, em ordem alfabética; tópico novo = arquivo novo; o índice lib/data-families/index.ts é gerado por node scripts/data-families-index.mjs e nunca é editado à mão (C2-213).
+
 Esta regra não muda nenhum preço, limite, comissão, trava, flag ou proibição deste arquivo.
 
 ## CV — "CI verde" só com prova (dono, 09/11/2026, por volta das 13h20 Fortaleza)

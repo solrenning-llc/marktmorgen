@@ -1,4 +1,5 @@
 import { CONTACT_READ_BYTES, LIST_PAGE_READ_BYTES, type ListRead, leadsKey, plainRead } from "@/lib/contacts";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { EXPORT_BYTES_PER_UNIT, EXPORT_COMMANDS_PER_UNIT } from "@/lib/store-export";
@@ -153,8 +154,7 @@ async function holdEndedListDownload(store: Store): Promise<ListHold> {
   const key = `nl:rl:export:${store.statsId}:list-ended:${Date.parse(store.planEndedAt) || 0}`;
   let taken: number | null = null;
   try {
-    const replies = repliesFor(await redisPipeline([["SET", key, "0", "EX", ENDED_LIST_SECONDS, "NX"], ["INCR", key]]), 2);
-    const count = replies && (replies[0] === "OK" || replies[0] === null) ? countOf(replies[1]) : null;
+    const count = windowCountOf(await redisPipeline(windowCount(key, ENDED_LIST_SECONDS)));
     taken = count !== null && count >= 1 ? count : null;
   } catch (error) {
     console.error("counting a list download since a plan ended failed", error);

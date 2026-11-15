@@ -38,7 +38,7 @@ async function main() {
   // never "your first payment" (independent review, 31/10/2026).
   is("the amount's sentence names the payments listed, not which one they are", [html.includes("the plan payment listed below, in full"), html.includes("your first payment, in full")], [true, false]);
   is("the pass carries the amount shown", String(await pass(who.store.sid)).endsWith(":6900"), true);
-  is("what closing does to the store's data and to its renewals is said", [html.includes("its files are removed"), html.includes("stopped at Stripe"), html.includes("deleted")], [true, true, true]);
+  is("what closing does to the store's data and to its renewals is said", [html.includes("its files are removed"), html.includes("collection is paused on your own Stripe account"), html.includes("deleted")], [true, true, true]);
   is("never that the creator's own Stripe account is untouched", /not touched/.test(html), false);
   is("a way back of the same weight", html.includes("Go back without changing anything"), true);
   is("the shared studio layout remains the only skip-link owner", html.includes('href="#content"'), false);

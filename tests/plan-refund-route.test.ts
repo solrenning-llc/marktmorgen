@@ -129,7 +129,7 @@ async function main() {
   is("what happens to the store uses the closing rules' own days", refundEffects({ assistant: false }).some((line) => line.includes(`${CLOSING_DAYS} days`)), true);
   is("the add-on is mentioned only when the store has it", [refundEffects({ assistant: true }).length - refundEffects({ assistant: false }).length], [1]);
   is("the letter's pending wording", planRefundLetter({ store: "Maya", cents: 6_900, currency: "usd", pending: true, assistant: false }).text.includes("still processing"), true);
-  is("what happens says closing stops the renewals sold on the creator's own Stripe, never that it is untouched", [refundEffects({ assistant: false }).some((line) => line.includes("stopped at Stripe")), refundEffects({ assistant: false }).some((line) => /not touched/.test(line))], [true, false]);
+  is("what happens says closing stops the renewals sold on the creator's own Stripe, never that it is untouched", [refundEffects({ assistant: false }).some((line) => line.includes("collection is paused on your own Stripe account")), refundEffects({ assistant: false }).some((line) => /not touched/.test(line))], [true, false]);
   done();
 }
 

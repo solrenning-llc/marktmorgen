@@ -1804,10 +1804,21 @@ export class MemoryRedis {
         else this.until.delete(key);
         return "OK";
       }
-      case "EXPIRE":
+      case "EXPIRE": {
         if (!this.data.has(key)) return 0;
-        this.until.set(key, this.now() + Number(args[0]) * 1000);
+        // Redis 7's options: NX only when the key has no expiry, XX only when it has one, GT/LT only a later/earlier
+        // one (a key with none counts as never expiring). Before, they were ignored, which turned a fixed window
+        // (EXPIRE … NX, lib/window-count.ts) into a sliding one in tests (C7 TTL hunt).
+        const at = this.now() + Number(args[0]) * 1000;
+        const was = this.until.get(key);
+        const option = String(args[1] ?? "").toUpperCase();
+        if (option === "NX" && was !== undefined) return 0;
+        if (option === "XX" && was === undefined) return 0;
+        if (option === "GT" && (was === undefined || at <= was)) return 0;
+        if (option === "LT" && was !== undefined && at >= was) return 0;
+        this.until.set(key, at);
         return 1;
+      }
       case "TTL": {
         if (!this.data.has(key)) return -2;
         const ends = this.until.get(key);
@@ -1878,7 +1889,11 @@ export class MemoryRedis {
       case "DEL": {
         // DEL takes several keys.
         let gone = 0;
-        for (const one of [key, ...args]) if (this.data.delete(one)) gone += 1;
+        // Its expiry goes with it, as in Redis: a key made again under the same name starts with none (C7 TTL hunt).
+        for (const one of [key, ...args]) {
+          if (this.data.delete(one)) gone += 1;
+          this.until.delete(one);
+        }
         return gone;
       }
       case "EXISTS":

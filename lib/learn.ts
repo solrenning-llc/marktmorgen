@@ -25,6 +25,7 @@
  * Progress is kept per course and per student: which lessons they marked done
  * and when they last came back. That is all, and the creator sees it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleHandles } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
@@ -935,12 +936,8 @@ function senderAddress(): string {
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
   // A count in any other shape is unknown (CX-123 rule 24): no course link is emailed on it.
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count !== null && count <= limit;
 }
 
@@ -996,14 +993,10 @@ export async function sendCourseLink(store: Store, product: Listing, email: stri
 /** Spends one open of an emailed link, and says who and what it was for. */
 export async function openCourseLink(token: string): Promise<LinkGrant | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const replies = repliesFor(await redisPipeline([
-    ["GET", linkKey(token)],
-    ["SET", opensKey(token), "0", "EX", LINK_SECONDS, "NX"],
-    ["INCR", opensKey(token)],
-  ]), 3);
-  const raw = replies?.[0];
+  const replies = await redisPipeline([["GET", linkKey(token)], ...windowCount(opensKey(token), LINK_SECONDS)]);
+  const raw = repliesFor(replies, 3)?.[0];
   // The opens in their exact shape (CX-123 rule 24): an unknown count opens nothing.
-  const opens = countOf(replies?.[2]);
+  const opens = windowCountOf(replies, 1, 3);
   if (typeof raw !== "string" || opens === null || opens > MAX_LINK_OPENS) return null;
   try {
     const grant = JSON.parse(raw) as LinkGrant;

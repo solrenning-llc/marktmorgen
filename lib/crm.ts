@@ -661,9 +661,18 @@ export async function forgetCrm(statsId: string | null): Promise<void> {
     throw error;
   });
   const answers = fields ? [fieldsKey(statsId), ...fields.map((f) => valuesKey(statsId, f.id))] : [];
-  await redisPipeline([["DEL", stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers]]);
-  await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]]));
+  const keys = [stagesKey(statsId), pipesKey(statsId), dealsKey(statsId), tasksKey(statsId), ...answers];
+  // Each DEL's own count read exactly (#4675, CX-123 rule 24): a whole number from 0 to the keys sent. A reply
+  // that is missing or of another shape is unknown and throws, so the store's closing never counts it as done.
+  confirmDeleted(await redisPipeline([["DEL", ...keys]]), keys.length, "a store's CRM records");
+  confirmDeleted(await withLock(tasksLockKey(statsId), TASKS_LOCK_SECONDS, TASKS_FORGET_WAIT_MS, () => redisPipeline([["DEL", tasksKey(statsId)]])), 1, "a store's CRM tasks");
   if (!fields) throw new CrmSchemaReadUnavailable();
+}
+
+/** One DEL's own count, read exactly: a whole number from 0 to the keys it was sent, or UnknownReplyError. */
+function confirmDeleted(replies: unknown, keys: number, what: string): void {
+  const count = replyCount(repliesFor(replies, 1)?.[0]);
+  if (count === null || count > keys) throw new UnknownReplyError(what);
 }
 
 /** One person's value of a field deleted, answered with what it was (null when there was none). */

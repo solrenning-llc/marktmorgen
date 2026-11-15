@@ -172,7 +172,7 @@ function parseReading(raw: unknown): Reading | null {
 
 /**
  * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
- * is not the object writeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * is not the object changeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
  * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
  */
 async function readConfig(store: Store): Promise<Config | null> {
@@ -189,11 +189,6 @@ async function readConfig(store: Store): Promise<Config | null> {
   const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
   if (!config) throw new UnknownReplyError("a store's calendar settings");
   return config;
-}
-
-async function writeConfig(store: Store, config: Config): Promise<void> {
-  if (!store.statsId) return;
-  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle, callsId: store.callsId ?? null })]]);
 }
 
 /** The zone for all-day and floating times, when a calendar names none. */
@@ -405,13 +400,16 @@ export class CalendarChangeBusyError extends Error {
  * exactly (rule 24, as readConfig: an unknown read throws), asks `change` what to write from what was read, and
  * writes it only over that exact text, or only while still absent (CALENDAR_CONFIG_SWAP). On a lost race the
  * settings are read and the change made again, CONFIG_TRIES times in all, then "busy" with nothing written.
- * `change` answers a null config to write nothing; its result comes back with "written" or "unchanged".
+ * `change` answers a null config to write nothing; its result comes back with "written" or "unchanged". Given a
+ * store, what is written names its handle and calls; given only its id (the feed's stop), exactly what `change` gave.
+ * `tries` is CONFIG_TRIES unless a writer that runs again on its own next time takes one (ensureFeedToken, stopFeedToken).
  */
 async function changeConfig<T>(
-  store: Store & { statsId: string },
+  store: (Store & { statsId: string }) | { statsId: string },
   change: (config: Config | null) => { config: Config | null; result: T } | Promise<{ config: Config | null; result: T }>,
+  tries = CONFIG_TRIES,
 ): Promise<{ state: "written" | "unchanged"; result: T } | { state: "busy" }> {
-  for (let attempt = 0; attempt < CONFIG_TRIES; attempt += 1) {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
     const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
     const raw = reply?.[0];
     let config: Config | null = null;
@@ -427,7 +425,7 @@ async function changeConfig<T>(
     }
     const next = await change(config);
     if (!next.config) return { state: "unchanged", result: next.result };
-    const text = JSON.stringify({ ...next.config, handle: store.handle, callsId: store.callsId ?? null });
+    const text = JSON.stringify("handle" in store ? { ...next.config, handle: store.handle, callsId: store.callsId ?? null } : next.config);
     const read = typeof raw === "string" ? ["1", raw] : ["0", ""];
     const swapped = repliesFor(await redisPipeline([["EVAL", CALENDAR_CONFIG_SWAP, 1, cfgKey(store.statsId), ...read, text]]), 1);
     if (swapped?.[0] === 1) return { state: "written", result: next.result };
@@ -534,15 +532,24 @@ export async function newFeedToken(store: Store, keepStopped = false): Promise<C
   return calendarView(store);
 }
 
-/** Makes the subscription address the first time the studio needs one. */
+/**
+ * Makes the subscription address the first time the studio needs one. Renamed, or written before the settings named
+ * the store's calls: written again, so the feed reads its marks, only over the settings it read (review of #4007), so
+ * a calendar removed meanwhile is never restored. One try: lost to another change, the refresh is left to the next
+ * opening or making, which checks again (GET and the swap: 4 commands, lib/read-ceilings.ts).
+ */
 export async function ensureFeedToken(store: Store): Promise<void> {
-  if (!store.statsId || !isRedisConfigured()) return;
-  const config = await readConfig(store);
-  if (config?.token) {
-    // Renamed, or written before the settings named the store's calls: written again, so the feed reads its marks.
-    if (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) await writeConfig(store, config);
-    return;
-  }
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return;
+  const changed = await changeConfig(
+    { ...store, statsId },
+    (config) => ({
+      config: config?.token && (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) ? config : null,
+      result: Boolean(config?.token),
+    }),
+    1,
+  );
+  if (changed.state === "busy" || changed.result) return;
   await newFeedToken(store, true);
 }
 
@@ -819,13 +826,21 @@ export class FeedGone extends Error {}
  */
 const refusedKey = (statsId: string) => `nl:cal:refused:${statsId}`;
 
-/** The address let go for being asked too often: its token deleted, the settings told when, so the studio says so. */
+/**
+ * The address let go for being asked too often: its token deleted, the settings told when, so the studio says so;
+ * the settings written only over what was read (review of #4007), so a calendar removed meanwhile is never restored.
+ * One try (GET, the swap, DEL, DEL: 6 commands, within the one more refused answer that prices the stop): lost to
+ * another change, nothing is deleted, so the studio never names a token already gone, and the refusal count left
+ * in place stops it at the next refused answer.
+ */
 async function stopFeedToken(statsId: string, token: string, now: number): Promise<void> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  const config = parseConfig(raw);
-  const commands: (string | number)[][] = [["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]];
-  if (config && config.token === token) commands.push(["SET", cfgKey(statsId), JSON.stringify({ ...config, token: null, stoppedAt: new Date(now).toISOString() })]);
-  await redisPipeline(commands);
+  const changed = await changeConfig(
+    { statsId },
+    (config) => ({ config: config?.token === token ? { ...config, token: null, stoppedAt: new Date(now).toISOString() } : null, result: null }),
+    1,
+  );
+  if (changed.state === "busy") return;
+  await redisPipeline([["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]]);
 }
 
 async function withinPace(statsId: string, now: number, token?: string): Promise<boolean> {

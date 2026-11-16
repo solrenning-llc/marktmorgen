@@ -165,15 +165,21 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       if (!INVOICE_ID.test(invoiceId) || !CHARGE_ID.test(chargeId)) return { refund: { kind: "unknown", reason: "unreadable" } };
       const charge = await get(`/charges/${encodeURIComponent(chargeId)}?expand[]=balance_transaction`);
       if (charge.id !== chargeId || idOf(charge.invoice) !== invoiceId || idOf(charge.customer) !== customer.id) return { refund: { kind: "unknown", reason: "unreadable" } };
+      // Whether the charge was disputed is read exactly (rule 24; Claude 1's batch on #3405, as lib/closing-refunds.ts
+      // reads it): a flag that is missing, null or not a boolean is unknown, never "no dispute", so a lost dispute never
+      // makes the guarantee payable.
+      if (typeof charge.disputed !== "boolean") return { refund: { kind: "unknown", reason: "unreadable" } };
       let disputeStatus: string | null = null;
       let disputedCents: number | null = null;
-      if (charge.disputed === true) {
-        const disputes = list(await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`), 10);
-        if (!disputes) return { refund: { kind: "unknown", reason: "unreadable" } };
+      if (charge.disputed) {
+        const disputePage = await get(`/disputes?${new URLSearchParams({ charge: chargeId, limit: "10" })}`);
+        const disputes = list(disputePage, 10);
+        // A page that says there is more is not the whole list of this charge's disputes: unknown.
+        if (!disputes || disputePage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
         // The one row must prove it is this charge's own dispute (#4468, rule 30): the list's filter is not proof, and
-        // another payment's lost or won dispute would hide or allow this refund. Its payment intent, when given, must match too.
+        // another payment's lost or won dispute would hide or allow this refund (also Claude 5 on #3133). Its payment intent, when given, must match too.
         const dispute = disputes[0];
         const intent = dispute.payment_intent;
         if (idOf(dispute.charge) !== chargeId || (intent != null && idOf(intent) !== idOf(charge.payment_intent))) {

@@ -183,6 +183,23 @@ async function eventPart(): Promise<void> {
   redis.pipeline = real;
   is("an unknown length after writing fails, and the place is given back (never over the cap)", [taken, await real([["HEXISTS", key, "member-dan"]]), await real([["HLEN", key]])], ["threw", [0], [2]]);
   await real([["HDEL", key, "member-eve"]]);
+  // Codex V's fix proposal on #2992 (V-20261114-0008): the unknown HSETNX's clean-up deleted the member's field
+  // whatever wrote it, so a concurrent request's RSVP, written between this one's HEXISTS and its HSETNX, was lost.
+  {
+    redis.pipeline = (async (commands: Command[]) => {
+      const taking = commands.some((c) => c[0] === "HSETNX" && c[1] === key && c[2] === "member-dan");
+      if (!taking) return real(commands);
+      // The other request wins after this request's HEXISTS but before its HSETNX.
+      await real([["HSET", key, "member-dan", "1"]]);
+      const replies = await real(commands);
+      // This request really got HSETNX=0, but cannot read that answer.
+      return commands.map((c, i) => (c[0] === "HSETNX" ? odd() : replies[i]));
+    }) as typeof redis.pipeline;
+    const raced = await rsvp(cid, event, "member-dan", club).then((r) => r, () => "threw");
+    redis.pipeline = real;
+    is("an unknown HSETNX answer fails without deleting another request's RSVP for the same member", [raced, await real([["HEXISTS", key, "member-dan"]]), await real([["HGET", key, "member-dan"]])], ["threw", [1], ["1"]]);
+    await real([["HDEL", key, "member-dan"]]);
+  }
   is("healthy control: the free place is taken", await rsvp(cid, event, "member-dan", club), "added");
 
   part("2. The creator's push before an event never says a count that was not read");

@@ -49,6 +49,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const path = url.pathname.replace(/^\/v1/, "");
   const method = init?.method ?? "GET";
   if (path === "/checkout/sessions" && method === "POST") return new Response(JSON.stringify({ id: `cs_test_${"t".repeat(24)}`, url: "https://checkout.stripe.com/c/pay/test" }));
+  if (path === "/events" && method === "GET") return new Response(JSON.stringify({ object: "list", data: [], has_more: false }));
   if (path === "/refunds" && method === "GET") {
     const after = url.searchParams.get("starting_after");
     reads.push({ after, version: new Headers(init?.headers).get("stripe-version") });

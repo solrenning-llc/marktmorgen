@@ -136,13 +136,17 @@ function ofThisStore(store: Store, charge: Record<string, unknown>): boolean {
   return typeof handle === "string" && handle !== "" && saleHandles(store).has(handle);
 }
 
+/** The refunds asked for in one page, Stripe's most; a page answering more than this is not read as whole. */
+const REFUNDS_PAGE = 100;
+
 /**
  * The refund in a charge's refunds made by this action (its mm_action mark): null when none, undefined when the list
  * is not one page read whole and exactly (more than 100, or another shape), never "none".
  */
 function refundOfAction(listed: unknown, action: string): Record<string, unknown> | null | undefined {
   const list = record(listed);
-  if (!list || list.object !== "list" || list.has_more !== false || !Array.isArray(list.data)) return undefined;
+  // More rows than the page asked for is not one page read whole, whatever has_more says (Codex N1 on #3678).
+  if (!list || list.object !== "list" || list.has_more !== false || !Array.isArray(list.data) || list.data.length > REFUNDS_PAGE) return undefined;
   for (const item of list.data) {
     const refund = record(item);
     if (!refund || refund.object !== "refund") return undefined;
@@ -183,7 +187,7 @@ export async function giveRefund(
   const form = createHash("sha256").update(JSON.stringify([input.full === true, typeof input.amount === "string" ? input.amount.trim() : "", reason ?? ""])).digest("hex").slice(0, 40);
   let earlier: Record<string, unknown> | null | undefined;
   try {
-    earlier = refundOfAction(await onAccount("GET", account, `/refunds?charge=${encodeURIComponent(chargeId)}&limit=100`), action);
+    earlier = refundOfAction(await onAccount("GET", account, `/refunds?charge=${encodeURIComponent(chargeId)}&limit=${REFUNDS_PAGE}`), action);
   } catch (error) {
     console.error("reading a charge's refunds before a refund failed", error);
     return fail("unavailable");

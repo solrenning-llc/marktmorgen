@@ -160,6 +160,20 @@ export async function readPage(statsId: string | null, productId: string): Promi
   return pageOf(replies[0]);
 }
 
+/**
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
+ */
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
   if (raw === null) return { ...EMPTY_PAGE, blocks: [] };

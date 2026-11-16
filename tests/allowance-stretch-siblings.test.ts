@@ -8,12 +8,14 @@
  */
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { store as redis } from "./redis-stub";
-import { addMonthsMs, allowanceWindow, keepSecondsFor, windowKeySeconds } from "@/lib/allowance-window";
+import { addMonthsMs, allowanceWindow, keepSecondsFor, windowId, windowKeySeconds } from "@/lib/allowance-window";
 import { answersAllowance, takeAnswer } from "@/lib/answers";
 import { importAllowanceFor } from "@/lib/import-limits";
 import { reserveMoved } from "@/lib/imports";
+import { withinMonth } from "@/lib/request-guard";
 import { claimHandle, ensureStatsId, setSubscription as writeSubscription, storeForEmail } from "@/lib/store";
 
 const at = (y: number, m: number, d: number, h = 0) => Date.UTC(y, m - 1, d, h);
@@ -119,4 +121,43 @@ test("RED: the imports' month counters take their time to live from the window",
   const imports = readFileSync("lib/imports.ts", "utf8");
   assert.doesNotMatch(imports, /windowCountBy\(key, 32 \* 86_400, n\)/, "a window's counter kept a fixed 32 days");
   assert.equal(imports.match(/windowCountBy\(key, windowKeySeconds\(store, 32 \* 86_400, now\), n\)/g)?.length, 2);
+});
+
+// Claude 6's second MEDIUM on #4561 (6908199466, money, rule 30): withinMonth (lib/request-guard.ts) kept the import
+// month counters (import starts, previews, steps, report downloads, Kajabi and ClickFunnels page reads) a fixed 32 days
+// although every caller keys them by windowId(store), so they lapsed inside a stretched window and opened a second
+// priced allowance under the same id.
+test("RED: an import month counter used up on 2 Mar stays used up on 12 Apr, in the same stretched window", async () => {
+  const useAt = at(2026, 3, 2, 10);
+  let sid = "";
+  const email = await stretched("creator", (who) => when(useAt, async () => {
+    const store = (await storeForEmail(who))!;
+    sid = store.sid;
+    const keep = windowKeySeconds(store, 32 * 86_400, useAt);
+    assert.deepEqual([await withinMonth("import-start-month", sid, 1, windowId(store, useAt), keep), await withinMonth("import-start-month", sid, 1, windowId(store, useAt), keep)], [true, false]);
+  }));
+  const probe = at(2026, 4, 12, 10);
+  const got = await when(probe, async () => {
+    const store = (await storeForEmail(email))!;
+    return { id: windowId(store, probe), within: await withinMonth("import-start-month", sid, 1, windowId(store, probe), windowKeySeconds(store, 32 * 86_400, probe)) };
+  });
+  assert.equal(got.id, "2026-03-01", "the window is March's, stretched to 16 Apr");
+  assert.equal(got.within, false, "a fresh import allowance opened in the same window");
+});
+
+test("RED: every withinMonth in app/ and lib/ takes its time to live from the window", () => {
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (/\.tsx?$/.test(name)) files.push(path);
+    }
+  };
+  walk("app");
+  walk("lib");
+  const calls = files.flatMap((file) => (readFileSync(file, "utf8").match(/withinMonth\((?!scope)[^;]*/g) ?? []).map((call) => [file, call] as const));
+  assert.ok(calls.length >= 8, "the import routes' month counters are found");
+  for (const [file, call] of calls) assert.match(call, /windowId\(store\), windowKeySeconds\(store, 32 \* 86_400\)\)/, `${file}: ${call.slice(0, 80)}`);
+  assert.doesNotMatch(readFileSync("lib/request-guard.ts", "utf8"), /windowCount\(key, 32 \* 86_400\)/, "withinMonth keeps a fixed 32 days");
 });

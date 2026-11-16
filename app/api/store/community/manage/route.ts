@@ -26,6 +26,7 @@ import { parseDmSetting } from "@/lib/community-dm";
 import { parseChatSetting } from "@/lib/community-chat";
 import { forgetTicket } from "@/lib/community-access";
 import { dropCommunityImage } from "@/lib/community-files";
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
 import {
   MAX_COMMUNITY_ABOUT,
   MAX_COMMUNITY_NAME,
@@ -59,6 +60,25 @@ const ACTIONS = new Set([
 
 /** What keeps order, as opposed to what sets the community up. */
 const MODERATION = new Set(["member", "dismiss", "report-hide", "report-delete"]);
+
+/**
+ * The first of the community's own words set here that poses as Marktmorgen itself (568 [GD2] (c),
+ * lib/brand-imitation-rules.ts), answered as a refusal with the part, the passage, why and the fix; null when none
+ * does. Every member reads these words in the store's name on marktmorgen.com, so "Marktmorgen Support: verify your
+ * account" among them is a phishing message under our name. Only the creator's own words are set here; nothing is
+ * saved when it answers, and the words are not changed. `outcome` says what does not happen with them.
+ */
+function posingPart(outcome: string, parts: readonly (readonly [string, string])[]): Response | null {
+  for (const [field, words] of parts) {
+    const text = words.slice(0, MAX_TEXT);
+    const found = imitationIn(text);
+    if (found) {
+      const passage = { field, excerpt: excerptAt(text, found.at, found.length), why: imitationWhy(outcome), fix: IMITATION_FIX };
+      return Response.json({ ok: false, error: "brand_imitation", passage }, { status: 409 });
+    }
+  }
+  return null;
+}
 
 /**
  * Everything the studio changes about the creator's community.
@@ -211,7 +231,11 @@ export async function POST(request: NextRequest) {
       const asked = Array.isArray(body.questions) ? body.questions : [];
       const questions = asked.map((q) => cleanLine(q, MAX_QUESTION)).filter(Boolean);
       if (questions.length > MAX_QUESTIONS) return fail("questions");
-      return save({ ...config, questions, welcome: cleanText(body.welcome, MAX_WELCOME) });
+      const welcome = cleanText(body.welcome, MAX_WELCOME);
+      // Sent to every new member and asked of each, in the store's name: never posing as Marktmorgen (568 [GD2] (c)).
+      const posing = posingPart("new members cannot be welcomed with it", [...questions.map((q) => ["question", q] as const), ["welcome", welcome]]);
+      if (posing) return posing;
+      return save({ ...config, questions, welcome });
     }
 
     if (action === "space-move") {

@@ -77,6 +77,7 @@ import {
   touchMember,
 } from "@/lib/community";
 import { send as sendMessage } from "@/lib/community-dm";
+import { imitationIn } from "@/lib/brand-imitation-rules";
 
 const OPEN_SECONDS = 5 * 60;
 const SHUT_SECONDS = 60;
@@ -504,6 +505,9 @@ export async function communityViewer(store: Store, cookies: CookieJar): Promise
  */
 export async function welcome(id: string, config: CommunityConfig, member: string, room: DataStore): Promise<boolean> {
   if (!config.welcome.trim() || !config.dm.on) return false;
+  // A welcome kept from before the studio refused one posing as Marktmorgen is not sent either (568 [GD2] (c),
+  // lib/brand-imitation-rules.ts): the member still comes in, and the creator's words are not changed.
+  if (imitationIn(config.welcome)) return false;
   // The welcome's mark, once a member: counted in the store's room (lib/order-data.ts).
   const [first] = await orderWrite(room, [["HSETNX", `nl:cm:${id}:wel`, member, Math.floor(Date.now() / 1000)]]);
   if (Number(first) !== 1) return false;

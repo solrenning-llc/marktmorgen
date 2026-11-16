@@ -460,17 +460,22 @@ export async function POST(request: NextRequest) {
       }
       // The sales page read again under the lock its saves are written under, so a part saved since the read above
       // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+      let pageChanged = false;
       let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
       const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
         if (!now.page || !store.statsId) return true;
-        // A page added since the read above was not paid for: nothing is published, and the creator tries again.
-        if (!pagePaid) return false;
+        // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
+        if (!pagePaid) {
+          pageChanged = true;
+          return false;
+        }
         const page = await readPage(store.statsId, now.id);
         const fast = fastMoneyOnPage(pageWords(page));
         const left = templateLeft(page);
         heldBy = { fast, left, title: now.title };
         return !fast && !left;
       });
+      if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
       if (!done.ok && done.reason === "held" && heldBy) {
         const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
         if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });

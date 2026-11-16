@@ -77,15 +77,16 @@ export const CELL_YES = "\u2713";
 export const CELL_NO = "\u2717";
 /** The most a page's record may weigh, in bytes: well past thirty full blocks. A second version tested against it may weigh as much again. */
 export const MAX_PAGE_BYTES = 120_000;
-/**
- * The studio units a draft's publish takes before it reads its sales page (app/api/store/product/route.ts,
- * "visibility"): the page is read twice, for the check and again under the store lock its saves are written under
- * (Codex P on #3693), each up to MAX_PAGE_BYTES, at the 50,000 bytes one studio unit is priced at (UNIT_COST.studio in
- * tests/plan-cost-registry.ts). Taken besides the request's own unit (Claude 7 on #3693).
- */
-export const PUBLISH_PAGE_UNITS = Math.ceil((2 * MAX_PAGE_BYTES) / 50_000);
 /** The most a stored record is read at: the page and a second version, with room to spare. */
 export const MAX_STORED_PAGE_BYTES = MAX_PAGE_BYTES * 3;
+/**
+ * The studio units a draft's publish takes before it reads its sales page (app/api/store/product/route.ts,
+ * "visibility"): the record is read twice, for the check and again under the store lock its saves are written under
+ * (Codex P on #3693), each read one GET of the whole stored record, the page and its second version, at most
+ * MAX_STORED_PAGE_BYTES (Claude 6 on #3693), at the 50,000 bytes one studio unit is priced at (UNIT_COST.studio in
+ * tests/plan-cost-registry.ts). Taken besides the request's own unit (Claude 7 on #3693).
+ */
+export const PUBLISH_PAGE_UNITS = Math.ceil((2 * MAX_STORED_PAGE_BYTES) / 50_000);
 /** Things said about it elsewhere, in one block; the words of one, the name beside it, and its link. */
 export const MAX_QUOTES = 6;
 export const MAX_QUOTE = 400;

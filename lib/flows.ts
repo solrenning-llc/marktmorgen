@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -833,10 +833,28 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     }
     // The run's record first, so its first step always finds it.
     await openRuns(flow.id, fresh, now);
-    await redisPipeline([
-      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, `${store.listId}|${store.handle}|${flow.id}|0|${address}`]),
+    // The first step's place in the queue, read exactly (CX-123 rule 24): each ZADD 0 or 1, the count a whole number.
+    const member = (address: string) => `${store.listId}|${store.handle}|${flow.id}|0|${address}`;
+    const queued = await redisPipeline([
+      ...fresh.map((address) => ["ZADD", QUEUE, now + flow.steps[0].delayHours * 3600, member(address)]),
       ["HINCRBY", statsKey(flow.id), "started", fresh.length],
-    ]);
+    ]).then((replies) => repliesFor(replies, fresh.length + 1), () => null);
+    if (!queued || !queued.slice(0, fresh.length).every((r) => r === 0 || r === 1) || countOf(queued[fresh.length]) === null) {
+      // Not confirmed: the write may still have landed, its answer lost. The once-only start is given back, with the
+      // day's place, only where it is proven that nothing was queued and the run never moved (firstStepNeverQueued),
+      // so the same event starts it again; a mark kept with nothing queued would hold the run at step 0 for 400 days.
+      // Anywhere else the start stays: a start given back after its step went out would send that step twice
+      // (Codex X5 and Codex P on #4307).
+      const never = await firstStepNeverQueued(flow.id, QUEUE, fresh.map((address) => ({ email: address, member: member(address) })));
+      const back = fresh.filter((_, i) => never[i] === true);
+      if (back.length) {
+        await redisPipeline(back.map((address) => ["DEL", enrolledKey(flow.id, address)])).catch(() => {});
+        await giveBackRuns(store.listId, back.length, now);
+      }
+      started += never.filter((answer) => answer === false).length;
+      if (back.length || never.some((answer) => answer === null)) unknown = true;
+      continue;
+    }
     started += fresh.length;
   }
   if (unknown) throw new UnknownReplyError("a sequence's once-only start");
@@ -1590,14 +1608,15 @@ export async function sendDueSteps(
       let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
       const onQueue: (string | number)[][] = [];
       const tallies: (string | number)[][] = [];
-      // Whoever sendTo skipped (in none of done, rest and uncertain) was never handed to the sender: tokensFor no
-      // longer found them mailable, or their link's write lost its compare-and-set three times. Their attempt must not
-      // stay open. Their row is read again exactly: exactly gone, or exactly not mailable, ends the run as "left";
-      // anyone else (still mailable after lost writes, or an unknown answer) waits to be tried again, which cannot
-      // send twice because nothing went out to them.
-      const answered = new Set([...result.done, ...result.rest]);
+      // Whoever sendTo skipped (in none of done, rest, uncertain and refused) was never handed to the sender: tokensFor
+      // no longer found them mailable, or their link's write lost its compare-and-set three times. Their attempt must
+      // not stay open. Their row is read again exactly: exactly gone, or exactly not mailable, ends the run as "left"
+      // (below, settleLeftIfRun, main's #4307: written only where the run still exists, and a refused address is
+      // accounted, never "left"); anyone else (still mailable after lost writes, or an unknown answer) waits to be tried
+      // again, which cannot send twice because nothing went out to them.
+      const answered = new Set([...result.done, ...result.rest, ...(result.refused ?? []).map((r) => r.email)]);
       const skipped = going.filter((email) => !answered.has(email) && !uncertain.has(email));
-      const left: Settled[] = [];
+      const left: string[] = [];
       const again: string[] = [];
       if (skipped.length) {
         const rows = await redisPipeline([["HMGET", leadsKey(listId), ...skipped]])
@@ -1606,10 +1625,9 @@ export async function sendDueSteps(
         skipped.forEach((email, i) => {
           const row = rows?.[i];
           const contact = typeof row === "string" ? parseContact(row) : null;
-          if (rows && (row === null || (contact && !mailable(contact)))) left.push({ email, state: "failed", note: "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", to: -1, status: "left" });
+          if (rows && (row === null || (contact && !mailable(contact)))) left.push(email);
           else again.push(email);
         });
-        counts.dropped += left.length;
       }
       const waits: { email: string; reason: WaitReason; note: string }[] = again.map((email) => ({ email, reason: "retry", note: "Waiting to be tried again later; it was not sent." }));
       if (rest.length) {
@@ -1646,8 +1664,16 @@ export async function sendDueSteps(
         ),
         ...[...uncertain].map((email) => ({ email, state: "uncertain" as const, note: "The sender's answer was lost: this email may or may not have gone out, so it is not sent again by itself.", to: index })),
         ...refused,
-        ...left,
       ];
+      // Whoever the sender left out because they left the list after sendGroup read them (sendTo reads each row again:
+      // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
+      // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
+      // Each is written only where their run still exists: one erased meanwhile leaves nothing behind (Claude 7 on #4307).
+      // Refused address by address (sendTo's fourth list, #3489) is accounted for: settled failed above, never also
+      // "left" (Claude 1 on #4307).
+      // Of them, only those whose row was read again as gone or not mailable (above); the rest wait to be tried again.
+      const gone = left;
+      if (gone.length) counts.dropped += gone.length;
       if (waiting) {
         const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
         outcomes.push(...endedIfTakenOut(waiting.outcomes, stay));
@@ -1656,6 +1682,7 @@ export async function sendDueSteps(
       }
       queued = true;
       await settleAttempts(listId, flow.id, index, step.id, kind, outcomes, now);
+      await settleLeftIfRun(flow.id, index, step.id, kind, gone, "No longer on your list: they unsubscribed, an email to them bounced, or they were removed.", now);
     } catch (error) {
       // Something after the attempt could not be confirmed. The attempts stay
       // open, so nothing is repeated by itself; when nothing was queued after

@@ -82,14 +82,12 @@ None is needed to create prices by hand. The checkout makes each plan's Stripe p
 
 Generated from the actual CI renderer for MR; amounts are registered-model calculations under the binding most-tax reading, not actual invoices or certified margins. No new price or limit is proposed. All costs/coverage outside the model, the full LLC base, SR3requirements and real accounting remain unapproved where unknown. The commercial/art9a/Stripe-eligibility and other gates remain closed.
 
-Regenerated 16 November 2026 (#4348, review by Claude 7): the full-usage column now includes the priced line deleted-store-files (a deleted store's files listed and deleted at the delete and by the daily line, about $0.14 a store at most), carried once per payment and by a store that never paid; nothing else changed.
-
 | Unit | Current price | Revenue | Receiving and reserves | Full usage | Taxes | Net profit | Net margin | Cost room | With room | On sale |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Store monthly ($69) | $69.00 | $54.33 | $9.14 | $7.13 | $32.48 | $5.58 | 10.27% | $0.25 | positive | no |
 | Store yearly ($690) | $690.00 | $543.30 | $85.65 | $80.68 | $321.89 | $55.08 | 10.13% | $1.00 | positive | no |
 | Studio monthly ($449) | $449.00 | $353.54 | $55.97 | $24.53 | $231.15 | $41.89 | 11.84% | $0.25 | positive | no |
-| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $277.03 | $2,291.10 | $413.32 | 11.69% | $1.00 | positive | no |
+| Studio yearly ($4,490) | $4,490.00 | $3,535.43 | $553.98 | $277.04 | $2,291.09 | $413.32 | 11.69% | $1.00 | positive | no |
 | Scale monthly ($999) | $999.00 | $786.61 | $123.76 | $48.88 | $519.35 | $94.62 | 12.02% | $0.25 | positive | no |
 | Scale yearly ($9,990) | $9,990.00 | $7,866.14 | $1,231.82 | $554.71 | $5,146.35 | $933.26 | 11.86% | $1.00 | positive | no |
 | Store assistant add-on ($69/mo, 700 replies) | $69.00 | $54.33 | $9.14 | $2.48 | $36.12 | $6.59 | 12.12% | $0.25 | positive | no |

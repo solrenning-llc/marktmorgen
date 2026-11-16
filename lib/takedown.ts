@@ -97,21 +97,45 @@ export async function fileReport(input: ReportInput, ip: string, origin: string)
  * lib/draft-preview.ts), when it points at one of this store's. A preview link that no longer opens points at nothing.
  */
 export async function reportedProduct(report: Report, store: Store): Promise<Listing | null> {
-  try {
-    const parts = new URL(report.url).pathname.split("/").filter(Boolean);
-    const preview = parts.indexOf("preview");
-    if (preview >= 0) {
-      // Claude 6 on #3439, MEDIUM 1: a notice about a preview address maps to the draft it opens, in this store only.
-      const opened = await readDraftPreview(decodeURIComponent(parts[preview + 1] ?? ""));
-      return opened && store.statsId && opened.statsId === store.statsId ? await readListing(store, opened.productId) : null;
+  // Only an address that is not one points at nothing. A read that cannot be read is unknown, never "no product": it
+  // throws, and the operator's page says the product could not be checked (Claude 4 cloud AE on #3597, LEVE 1).
+  const decoded = (text: string): string | null => {
+    try {
+      return decodeURIComponent(text);
+    } catch {
+      return null;
     }
-    const at = parts.indexOf("p");
-    const segment = at >= 0 ? decodeURIComponent(parts[at + 1] ?? "") : "";
-    const id = segment ? productIdFromAddress(store, segment) : null;
-    return id ? await readListing(store, id) : null;
+  };
+  let parts: string[];
+  try {
+    parts = new URL(report.url).pathname.split("/").filter(Boolean);
   } catch {
     return null;
   }
+  const preview = parts.indexOf("preview");
+  if (preview >= 0) {
+    // Claude 6 on #3439, MEDIUM 1: a notice about a preview address maps to the draft it opens, in this store only.
+    const code = decoded(parts[preview + 1] ?? "");
+    if (code === null) return null;
+    const opened = await readDraftPreview(code);
+    return opened && store.statsId && opened.statsId === store.statsId ? await readListing(store, opened.productId) : null;
+  }
+  const at = parts.indexOf("p");
+  const segment = at >= 0 ? decoded(parts[at + 1] ?? "") : "";
+  const id = segment ? productIdFromAddress(store, segment) : null;
+  return id ? await readListing(store, id) : null;
+}
+
+/**
+ * The products the operator's page lists for a notice, each with its button (app/takedown/[token]/page.tsx): the one
+ * the notice points at first, even when it is a draft (a notice about a draft's preview address, whose button closes
+ * the link: takeDown, stillUp), then the first page of the store's published products. No other draft is listed.
+ * The page is the operator's only, so a draft listed here is shown to nobody else (Claude 4 cloud AE on #3597, MEDIUM).
+ */
+export function operatorProducts(store: Store, pointed: Listing | null): { product: Listing; draft: boolean; named: boolean }[] {
+  const named = pointed ? [{ product: pointed, draft: Boolean(pointed.hidden), named: true }] : [];
+  const rest = store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id).map((p) => ({ product: p, draft: false, named: false }));
+  return [...named, ...rest];
 }
 
 /** The notice a token opens, and its store when the address names one. */

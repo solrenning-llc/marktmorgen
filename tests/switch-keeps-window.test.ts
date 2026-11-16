@@ -583,7 +583,10 @@ async function main(): Promise<void> {
     // together cost Studio's yearly month one cent more: 258.69 where 258.70 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #3446 (16 November 2026, third pass): with main's outbox cost, one cent less than main alone on
     // Studio and Scale in a yearly month (258.67 and 579.89 where 258.68 and 579.90 were); still above zero (MR).
-    is("11: and 37.04, 258.67 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.89"]);
+    // Merge of main into #3446 (16 November 2026, fourth pass, Claude 1 cloud c1-fila): main's model at that merge with
+    // #3446's webhook read-back costs Scale's yearly month one cent more again: 579.88 where 579.89 was; still above zero
+    // (MR). As the model computes it; cost is not lowered.
+    is("11: and 37.04, 258.67 and 579.88 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.88"]);
   } finally {
     Date.now = realNow;
   }

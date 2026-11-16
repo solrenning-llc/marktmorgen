@@ -73,6 +73,9 @@ let sessionReads = 0;
 /** What GET /checkout/sessions answers, by the address asked for; "fail" answers 500, "garbage" a list in another shape. */
 let sessionsByEmail: Record<string, unknown[] | "fail" | "garbage"> = {};
 let hasMore = false;
+/** Customers made on the creator's account (POST /customers), and how the stand-in answers the next one. */
+const customersMade: { body: URLSearchParams; account: string | null; key: string | null }[] = [];
+let customerReply: "ok" | "fail" | "garbage" | "other" = "ok";
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const path = url.pathname.replace(/^\/v1/, "");
@@ -89,6 +92,14 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (rows === "fail") return answer({ error: { message: "down" } }, 500);
     if (rows === "garbage") return answer({ object: "list", data: "nope", has_more: false });
     return answer({ object: "list", data: rows, has_more: hasMore });
+  }
+  if (path === "/customers" && method === "POST") {
+    const body = new URLSearchParams(String(init?.body));
+    customersMade.push({ body, account: new Headers(init?.headers).get("Stripe-Account"), key: new Headers(init?.headers).get("Idempotency-Key") });
+    if (customerReply === "fail") return answer({ error: { message: "down" } }, 500);
+    if (customerReply === "garbage") return answer({ id: "not-a-customer", object: "customer", email: body.get("email") });
+    if (customerReply === "other") return answer({ id: "cus_Member0000001", object: "customer", email: "someone.else@example.com" });
+    return answer({ id: "cus_Member0000001", object: "customer", email: body.get("email") });
   }
   if (path === "/coupons" && method === "POST") {
     const body = new URLSearchParams(String(init?.body));
@@ -363,8 +374,41 @@ async function main(): Promise<void> {
   is("a gift hands nothing to the member: no member price", sent.get("metadata[member]"), null);
   sent = await open({ member: { percent: 20, email: MEMBER }, preorder: true });
   is("a pre-order: none", sent?.get("metadata[member]") ?? null, null);
+  // Codex X4 on #2999 (MEDIUM): customer_email is only a prefill the buyer can type over on Stripe's page, and the delivery reads
+  // customer_details.email first, so the member price went to whichever address was typed there. The checkout now belongs to a
+  // customer of the creator's made with the proved address, which Stripe shows and does not let be changed.
+  customersMade.length = 0;
   sent = await open({ member: { percent: 20, email: MEMBER } });
-  is("the checkout opens with the proved address fixed", [sent.get("metadata[member]"), sent.get("customer_email")], ["20", MEMBER]);
+  is(
+    "the member's checkout belongs to a customer made with the proved address, never a prefill the buyer can type over",
+    [sent.get("metadata[member]"), sent.get("customer"), sent.get("customer_email"), sent.get("customer_creation")],
+    ["20", "cus_Member0000001", null, null],
+  );
+  is(
+    "that customer is made on the creator's own account, with the proved address, once however often it is retried",
+    [customersMade.length, customersMade[0]?.account, customersMade[0]?.body.get("email"), Boolean(customersMade[0]?.key)],
+    [1, "acct_1TestHarbor0001", MEMBER, true],
+  );
+  is("what the buyer types on Stripe's page is saved to that customer, never asked of a customer that has none", [sent.get("customer_update[address]"), sent.get("customer_update[name]")], ["auto", "auto"]);
+  sent = await open({ member: { percent: 20, email: MEMBER }, upsellKey: "upsell_test_0001", email: "typed@example.com" });
+  is(
+    "an offer after paying or an address typed earlier never brings back a prefill or a second customer",
+    [sent.get("customer"), sent.get("customer_email"), sent.get("customer_creation")],
+    ["cus_Member0000001", null, null],
+  );
+  for (const reply of ["fail", "garbage", "other"] as const) {
+    customerReply = reply;
+    checkouts.length = 0;
+    const refused = await createCheckout(await current(), (await readProduct(await current(), planner.product.id))!, "https://marktmorgen.com", "", { member: { percent: 20, email: MEMBER }, digitalConsent: TEST_CONSENT }).then(
+      () => "opened",
+      () => "refused",
+    );
+    is(`a customer Stripe ${reply === "fail" ? "did not make" : reply === "garbage" ? "answered in another shape" : "made for another address"}: no checkout opens at the member price`, [refused, checkouts.length], ["refused", 0]);
+  }
+  customerReply = "ok";
+  customersMade.length = 0;
+  sent = await open({});
+  is("no member price: no customer is made, and nothing is fixed", [customersMade.length, sent.get("customer")], [0, null]);
   const charge_ = readFileSync(join(process.cwd(), "lib/store-checkout.ts"), "utf8");
   is("never with a box checked: a coupon comes off every line, and a checked product may be one no rule covers", charge_.includes("const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;"), true);
   const route = readFileSync(join(process.cwd(), "app/api/store/checkout/route.ts"), "utf8");

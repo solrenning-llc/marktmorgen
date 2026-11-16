@@ -311,20 +311,29 @@ export async function dropCommunityImage(path: string | undefined | null): Promi
 export async function removeCommunityImage(path: string, forget: () => Promise<boolean | "gone"> = async () => true): Promise<boolean> {
   try {
     await del(path);
-    // Its mark and any listing left for it go with the file (security reviews of #3414): the name is free again only
-    // once nothing holds it, and a listing left behind can never give its place back a second time. The place itself is
-    // given back below, only once `forget` confirms (main, Codex G and Codex P on #3020).
-    await redisPipeline([
-      ["DEL", uploadKey(path)],
-      ["ZREM", DOORS_KEY, path],
-    ]);
   } catch (error) {
     console.error("could not delete a community picture", error);
     return false;
   }
   const forgot = await forget().catch(() => false as const);
+  // Its post still holds the name (or that is not known): the mark and its listing stay, so no door is opened again
+  // for the same name while a post may show it (Claude 7 on #3414). The removal is tried again by its caller.
+  if (forgot === false) return false;
+  try {
+    // Its mark and any listing left for it go with the file (security reviews of #3414): the name is free again only
+    // once nothing holds it, and a listing left behind can never give its place back a second time.
+    await redisPipeline([
+      ["DEL", uploadKey(path)],
+      ["ZREM", DOORS_KEY, path],
+    ]);
+  } catch (error) {
+    // The name stays held, the safe way; its place is not given back until its mark goes.
+    console.error("could not free a community picture's name", error);
+    return false;
+  }
+  // The place is given back only once `forget` confirms (main, Codex G and Codex P on #3020).
   if (forgot === true) await givePicturePlace(path);
-  return forgot !== false;
+  return true;
 }
 
 /**

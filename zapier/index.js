@@ -455,6 +455,26 @@ const EVENTS = [
       updated_at: "2026-10-22T09:00:00.000Z",
     },
   },
+  {
+    key: "payment_failed",
+    event: "payment.failed",
+    noun: "Payment",
+    label: "Payment Failed",
+    description: "Triggers when a membership's renewal, or a payment plan's payment, fails on your Stripe account.",
+    data: {
+      invoice: "in_9k8j7h",
+      subscription: "sub_a1b2c3",
+      kind: "membership",
+      product: { id: "p_3d9e7b", title: "The Supper Club" },
+      option: null,
+      amount_cents: 2900,
+      currency: "usd",
+      attempt: 1,
+      next_attempt_at: "2026-11-04T14:05:00.000Z",
+      buyer: { email: "ada@example.com", customer: "cus_a1b2c3" },
+      failed_at: "2026-11-01T14:05:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

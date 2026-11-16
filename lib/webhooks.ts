@@ -21,8 +21,11 @@
  *                        the creator's Stripe account (630 [HN6](18))
  *   dispute.opened       a buyer disputed a payment the store's checkout made
  *                        (630 [HN6](18))
+ *   payment.failed       a membership's renewal, or a payment plan's payment,
+ *                        was tried on the creator's Stripe account and failed
+ *                        (378 [TB4] WG (a))
  *
- * The first four about money, and these last two, are read from the creator's own Stripe account,
+ * The first four about money, and these last three, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
  * dashboard is noticed on the next run, within about five minutes. A refund
@@ -107,6 +110,7 @@ export const WEBHOOK_EVENTS = [
   "membership.trial_ending",
   "course.lesson_completed",
   "product.updated",
+  "payment.failed",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -1641,10 +1645,11 @@ const STRIPE_TYPES = [
   "charge.refunded",
   "charge.dispute.created",
   "customer.subscription.trial_will_end",
+  "invoice.payment_failed",
 ];
 
 /** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
-const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending"];
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending", "payment.failed"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Pick<Config, "endpoints">): boolean {
@@ -1929,6 +1934,35 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
     return true;
   }
 
+  if (event.type === "invoice.payment_failed") {
+    // A try at a membership's renewal, or at a payment plan's payment, that failed, as Stripe tells it each time
+    // (378 [TB4] complement WG (a)). Whose it is is the metadata of the subscription the invoice is for, which
+    // the invoice carries itself: no lookup. An invoice no subscription of this store made sends nothing.
+    meta = invoiceMeta(object);
+    if (!handles.has(meta.store ?? "") || !heard.has("payment.failed")) return true;
+    const invoice = str(object.id);
+    const subscription = invoiceSubscription(object);
+    if (!invoice || !subscription) return true;
+    // Read before anything is sent: an amount or a money that does not read waits, never a failure of $0 or in dollars.
+    const amount = paidCents(object.amount_due, "a failed payment's amount");
+    const currency = paidMoney(object.currency, "a failed payment's money");
+    // next_attempt_at is when Stripe tries the payment again; null when it will not try again.
+    await emitEvent(store, "payment.failed", failedSeed(invoice, object.attempt_count), {
+      invoice,
+      subscription,
+      kind: meta.kind === "plan" ? "payment_plan" : "membership",
+      product: await product(meta.product),
+      option: meta.option ?? null,
+      amount_cents: amount,
+      currency,
+      attempt: num(object.attempt_count),
+      next_attempt_at: iso(object.next_payment_attempt),
+      buyer: { email: str(object.customer_email), customer: str(object.customer) },
+      failed_at: iso(event.created),
+    }, created);
+    return true;
+  }
+
   if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
     if (!handles.has(meta.store ?? "") || meta.kind === "plan") return true;
     const id = str(object.id);
@@ -2109,6 +2143,18 @@ export function changedFields<T extends Record<string, string | number | boolean
   return out;
 }
 
+/** One failed payment's seed: the invoice and the try, so each failed try of the same invoice is told once. */
+function failedSeed(invoice: string, attempt: unknown): string {
+  return `${invoice}|failed|${num(attempt)}`;
+}
+
+/** The subscription an invoice is for, where either of Stripe's API versions keeps it; null for none. */
+function invoiceSubscription(invoice: Record<string, unknown>): string | null {
+  const parent = invoice.parent as { subscription_details?: { subscription?: unknown } | null } | null | undefined;
+  const id = parent?.subscription_details?.subscription ?? invoice.subscription;
+  return str(typeof id === "object" && id ? (id as { id?: unknown }).id : id);
+}
+
 /** One trial ending's seed: the membership and the end Stripe gave, so a trial moved to another end is told again. */
 function trialEndingSeed(subscription: string, trialEnd: number): string {
   return `${subscription}|trial|${trialEnd}`;
@@ -2178,6 +2224,10 @@ function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean):
   if (event.type === "customer.subscription.trial_will_end") {
     const trialEnd = num(object.trial_end);
     return { parts: meta.kind !== "plan" && id && trialEnd ? [{ type: "membership.trial_ending", seed: trialEndingSeed(id, trialEnd) }] : [], about: `subscription ${shown}`, known };
+  }
+  if (event.type === "invoice.payment_failed") {
+    const inMeta = handles.has(invoiceMeta(object).store ?? "");
+    return { parts: id && invoiceSubscription(object) ? [{ type: "payment.failed", seed: failedSeed(id, object.attempt_count) }] : [], about: `invoice ${shown}`, known: confirmed || inMeta };
   }
   return { parts: [], about: `Stripe event ${str(event.id) ?? shown}`, known: false };
 }

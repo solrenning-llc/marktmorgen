@@ -30,6 +30,7 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "membership.trial_ending", label: "Trial ending", hint: "A membership's free trial ends in three days, on your Stripe account" },
   { key: "course.lesson_completed", label: "Lesson completed", hint: "A student finished a lesson of one of your courses" },
   { key: "product.updated", label: "Product updated", hint: "A product on your store was saved" },
+  { key: "payment.failed", label: "Payment failed", hint: "A membership's renewal or a payment plan's payment failed, on your Stripe account" },
 ];
 const ALL = EVENTS.map((e) => e.key);
 

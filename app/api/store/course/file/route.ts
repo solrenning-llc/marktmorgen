@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
   const file = found && Number.isInteger(index) ? found.lesson.files[index] : undefined;
   if (!found || !file) return plain(404, "Not found.");
 
+  // Not even a free preview's download while the store is switched off after a report (lib/takedown.ts), except to its
+  // students, as the lesson page (app/[handle]/course/[product]/[lesson]/page.tsx): they keep what they could open.
+  if (found.lesson.preview && store.suspended && (await courseAccess(store, product, await cookies())).state !== "open") return plain(404, "Not found.");
   if (!found.lesson.preview) {
     // Said to the student in the store's language (lib/buyer-words/courses.ts).
     const w = coursesWords(store.language);
@@ -54,5 +57,8 @@ export async function GET(request: NextRequest) {
   }
   // One of the store's public requests: on the buyers' side, or the public's for a lesson anyone may preview (lib/buyer-actions.ts).
   if (!(await takePublicRequest(store, found.lesson.preview ? "public" : "buyer"))) return plain(503, speech(store).w.restingTitle);
-  return serveFile(file);
+  // A preview lesson's file goes to anyone, signed in or not: a free copy, paused with the store's other free
+  // downloads (lib/serve-file.ts), unless whoever asks holds the course (or owns the store), whose copy is a paid one.
+  const paid = !found.lesson.preview || (await courseAccess(store, product, await cookies())).state === "open";
+  return serveFile(file, { paid });
 }

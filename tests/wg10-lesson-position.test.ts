@@ -95,7 +95,11 @@ is("both players get that key", (page.match(/learner=\{placeKey\}/g) ?? []).leng
 
 part("The course page: places forgotten once the student's access is not open");
 const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
-is("drawn for a signed-in student whose access is not open (refund, lost dispute, ended, taken off), never on a check that could not be made (24 [E7])", /const forgetKey = access\.state !== "open" && access\.state !== "unchecked" && access\.learner && !access\.learner\.owner \? devicePlaceKey\(course\.id, access\.learner\.email\) : null;/.test(coursePage) && /\{forgetKey \? <ForgetLessonPositions courseId=\{course\.id\} learner=\{forgetKey\} \/> : null\}/.test(coursePage), true);
+// Known not to be open, never while it could not be checked (lib/course-door.ts, forgetsOnDevice; its cases in
+// tests/course-access-unchecked.test.ts): a Stripe outage does not wipe a paying student's places.
+is("drawn for a signed-in student whose access is known not to be open (refund, lost dispute, ended, taken off)", /const forgetKey = forgetsOnDevice\(access\) && access\.learner \? devicePlaceKey\(course\.id, access\.learner\.email\) : null;/.test(coursePage) && /\{forgetKey \? <ForgetLessonPositions courseId=\{course\.id\} learner=\{forgetKey\} \/> : null\}/.test(coursePage), true);
+// And never on a check of the course's end date that could not be made (24 [E7], "unchecked"): forgetsOnDevice says so.
+is("never on a check of the course's end date that could not be made (24 [E7])", /access\.state !== "unchecked"/.test(readFileSync("lib/course-door.ts", "utf8")), true);
 
 part("The device key cannot be worked out from an address (Revisor 1 on #2728)");
 const dataKey = process.env.NIMBUS_DATA_KEY;

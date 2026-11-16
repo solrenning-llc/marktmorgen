@@ -41,6 +41,8 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
+import { AccessUncheckedNote } from "@/components/access-unchecked-note";
+import { closedDoor, forgetsOnDevice } from "@/lib/course-door";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -83,11 +85,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar, course);
-  // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
-  // Not on a check that could not be made (24 [E7]): a reply that did not read takes nothing from the device.
-  const forgetKey = access.state !== "open" && access.state !== "unchecked" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
-  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2); not on a check that could not be made either.
-  const forgetPerson = access.state !== "open" && access.state !== "unchecked" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
+  // A signed-in student whose access is known not to be open: their places in this course's videos go from their device
+  // (650 [WG10]); never while it could not be checked (lib/course-door.ts), when they may well still have it.
+  const forgetKey = forgetsOnDevice(access) && access.learner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
+  const forgetPerson = forgetsOnDevice(access) && access.learner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // When access ends (24 [E7]): this student's own end, or, to whoever has not bought, the date still ahead.
   // A membership never takes an end (24 [E7]): members keep the course while they pay, so none is said to them.
@@ -149,6 +151,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const preview = all.find(({ lesson }) => lesson.preview);
   const base = `/@${store.handle}/course/${product.id}`;
   const selling = canSellProduct(store, product);
+  // What stands in for the lessons when the course is not open: a student whose access could not be checked is told so,
+  // never offered to buy it (lib/course-door.ts).
+  const door = open ? null : closedDoor(access, selling, paypalReady(store, product));
   // Said with every term the checkout will apply: a trial, a set number of
   // payments, an introductory price, a price the buyer chooses.
   const price = product.recurring
@@ -338,9 +343,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : settled ? null : (
+          ) : settled ? null : door === "unchecked" ? (
+            <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={base} className="mt-6" />
+          ) : (
             <div className="mt-6 space-y-6">
-              {selling ? (
+              {door === "checkout" ? (
                 <form action="/api/store/checkout" method="post" target="_top" data-checkout="">
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="product" value={product.id} />
@@ -353,7 +360,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   <button type="submit" className="btn st-btn btn-lg btn-block">{w.buyCourse(access.state === "ended", price)}</button>
                   <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
                 </form>
-              ) : paypalReady(store, product) ? (
+              ) : door === "paypal" ? (
                 <Link href={`/@${store.handle}/p/${productSegment(product)}#buy`} className="btn st-btn btn-lg btn-block">{w.buyWithPayPal(price)}</Link>
               ) : (
                 <p className="st-muted text-sm">{w.noPayments(store.name)}</p>

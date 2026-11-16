@@ -182,7 +182,7 @@ export async function heldPictureRefusal(store: Store, path: string): Promise<Re
     return null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 

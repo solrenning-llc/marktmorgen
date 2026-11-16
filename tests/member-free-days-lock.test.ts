@@ -11,6 +11,7 @@ import { switchTier } from "@/lib/tier-switch";
 import { giveFreeDays } from "@/lib/member-free-days";
 import { EU_WITHDRAWAL_CONSENT_VERSION } from "@/lib/digital-consent";
 import { store as redis } from "./redis-stub";
+import { FAMILIES } from "./store-data-registry";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 
@@ -103,6 +104,11 @@ async function main() {
 
   part("Control: with no switch under way, free days are given");
   is("given", (await giveFreeDays(store, "member@example.test", subscription, 7, PERIOD_END, { who: owner, role: "owner" }, now)).ok, true);
+
+  part("The lock is priced per studio press, the only place it is taken, not on every buyer's tier-switch request");
+  // CI on #2912 (16 November 2026): priced as a public tier-switch request, this lock cost Scale's worst month a cent.
+  const lockParts = (FAMILIES["nl:tier:@lib/member-free-days.ts"]?.parts ?? []).map((p) => ("per" in p ? [p.per, p.group ?? null] : ["other", null]));
+  is("one part, per studio request, in no public request kind", lockParts, [["studio", null]]);
   done();
 }
 main().catch((error) => { console.error(error); process.exit(1); });

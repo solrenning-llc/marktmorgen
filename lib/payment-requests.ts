@@ -528,25 +528,33 @@ export async function withdrawRequest(store: Store, id: string, now = Date.now()
   const held = await holdForCheckout(request.id);
   if (!held) return { ok: false, reason: "busy" };
   try {
-    if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
+    // Read again under the hold (Claude 7 on #4513): a checkout the buyer opened between the first read and the hold
+    // is written by then, and opening another one waits on this hold, so the session read here is the one to close.
+    const current = await requestOf(store, id);
+    if (!current) return { ok: false, reason: "gone" };
+    if (statusOf(current, now) !== "open") return { ok: false, reason: "not_open" };
+    if (SESSION_ID.test(current.session) && now - current.sessionAt < CHECKOUT_LIFE_MS) {
       if (!store.stripeAccountId) return { ok: false, reason: "error" };
-      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}`).catch((error: unknown) => {
+      const known = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(current.session)}`).catch((error: unknown) => {
         if (error instanceof StripeError && error.status === 404) return {};
         throw error;
       })) as Record<string, unknown>;
       // Only this request's own checkout decides (rule 30; Claude 1's money review of #4513, the class of #4447).
-      if (!ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
+      if (!ownRequestCheckout(known, current, store)) return { ok: false, reason: "error" };
+      // A reply in a state Stripe does not document says nothing about whether the checkout is still payable.
+      if (Object.keys(known).length > 0 && !CHECKOUT_STATES.has(String(known.status))) return { ok: false, reason: "error" };
       if (isSettled(known)) {
-        await markPaid(store, request.id, known, now);
+        await markPaid(store, current.id, known, now);
         return { ok: false, reason: "paid_online" };
       }
       if (known.status === "complete") return { ok: false, reason: "processing" };
       if (known.status === "open") {
-        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-        if (closed.status !== "expired") return { ok: false, reason: "error" };
+        const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(current.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
+        // Closed only on Stripe's receipt for this very checkout (Codex L on #4455, the same class).
+        if (closed.id !== current.session || closed.status !== "expired") return { ok: false, reason: "error" };
       }
     }
-    const done = await cancelRequest(store, request.id, now);
+    const done = await cancelRequest(store, current.id, now);
     if (done === null) return { ok: false, reason: "gone" };
     if (done === "not_open") return { ok: false, reason: "not_open" };
     return { ok: true, request: done };

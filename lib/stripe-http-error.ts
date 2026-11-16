@@ -25,7 +25,10 @@ export function parseStripeText(text: string, response: Pick<Response, "ok" | "s
 
 /** The body of a Stripe answer as JSON, read through parseStripeText. */
 export async function stripeJson(response: Response): Promise<Record<string, unknown>> {
-  // A stand-in answer that has only json() is read as before.
-  if (typeof response.text !== "function") return (await response.json()) as Record<string, unknown>;
+  // A stand-in answer that has only json(), or that replaced json() on a real Response (to hand back a value JSON
+  // cannot carry, such as NaN), is read through its json() as before; a real Response never has json() of its own.
+  if (typeof response.text !== "function" || Object.hasOwn(response, "json")) {
+    return (await response.json()) as Record<string, unknown>;
+  }
   return parseStripeText(await response.text(), response);
 }

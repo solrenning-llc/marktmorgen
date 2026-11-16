@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   is("a community id in another shape names no folder", (await deletedStoreFolders(spare.sid, "../x")).length, 3);
 
   part("A deleted store's files go with it");
-  is("deleting the store itself leaves them all, as it always did", [(await deleteStore(ref)).ok, kept.size], [true, 7]);
+  is("deleting the store itself leaves them all, as it always did", [(await deleteStore(ref, async () => {})).ok, kept.size], [true, 7]);
   failOn = `images/${pictures}/`;
   is("a folder that cannot be deleted fails the try, so the line tries again", await rejects(() => removeDeletedStoreFiles(spare.sid, communityId, hands())), true);
   is("after every other folder was still seen to", [...kept.keys()].filter((path) => !path.includes(homeFolder) && !path.includes(homePictures)).sort(), [`images/${pictures}/${"b".repeat(32)}.webp`, `images/${pictures}/${"c".repeat(32)}.jpg`].sort());
@@ -88,10 +88,14 @@ async function main(): Promise<void> {
   const tried = await retryStoreForgets(Date.now() + 10_000, Date.now(), async (_stats, _sid, community) => { seen.push(community); });
   is("a try from the line is handed the community the store had", [tried.done, seen], [1, [communityId]]);
   const route = readFileSync("app/api/store/stores/route.ts", "utf8");
-  is("the studio's delete deletes the files on its first try, and puts the community in line when it fails", [
-    route.includes("await removeDeletedStoreFiles(result.store.sid, result.store.community?.id ?? null);"),
-    route.includes("queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"),
-  ], [true, true]);
+  // Since the merge of main (16 November 2026), the delete's first try at the files is main's own forgetStoreFiles
+  // (with its daily sweep for a delete that fails); a folder it could not list puts the store in this line.
+  is("the studio's delete deletes the files on its first try, and puts the community in line when a folder is not listed", [
+    route.includes("forgetStoreFiles(result.store)"),
+    route.includes("listedAll = false;"),
+    route.includes(".then((listedAll) => (listedAll ? undefined : putInLine()))"),
+    route.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"),
+  ], [true, true, true, true]);
   is("and the daily line's own work deletes them too", readFileSync("lib/store-forget-retry.ts", "utf8").includes("await removeDeletedStoreFiles(sid, community, undefined, until);"), true);
 
   // Review of #4348 (Claude 7), MÉDIO 1: Blob was taken as set up only from BLOB_READ_WRITE_TOKEN, and its folders were

@@ -5,7 +5,13 @@ import { forgetStoreReadings } from "@/lib/store-readings";
 import { away, creatorFrom, storeCookie } from "@/lib/studio-route";
 import { limited } from "@/lib/request-guard";
 import { forgetStoreWorkflows } from "@/lib/flows";
-import { deleteStore } from "@/lib/store";
+import { type Store, deleteStore, imageFolder, storeFolder, storeRef } from "@/lib/store";
+import { deleteFile, listFiles } from "@/lib/file-store";
+import { isVaultConfigured } from "@/lib/vault";
+import { noteTaskUpload } from "@/lib/assignment";
+import { communityFolder } from "@/lib/community-image";
+import { forgetPictures } from "@/lib/community-files";
+import { queueDeleted } from "@/lib/closed-store-data";
 import { dropTeam } from "@/lib/team";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetStorePhones } from "@/lib/phone-alerts";
@@ -17,7 +23,46 @@ import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
-import { removeDeletedStoreFiles } from "@/lib/deleted-store-files";
+
+/**
+ * A deleted store's files: its picture folder (its links', pages' and emails' pictures), its own folder in either file
+ * store (an upload never attached) and its community's pictures. Once its record is gone nothing finds them again
+ * (lib/plan-closing.ts removeStored reads the record first), so they go now. A delete that fails goes to the daily job
+ * that deletes uploads nobody keeps (sweepTaskUploads, app/api/cron/courses); a folder that cannot be listed is said in
+ * the log and answers false, and the route puts the store in the daily line of lib/store-forget-retry.ts, which lists
+ * every folder again from the store's id (lib/deleted-store-files.ts; #4348). Its cost: one listing of each folder and
+ * a delete per hundred files, once for a store.
+ */
+async function forgetStoreFiles(store: Store): Promise<boolean> {
+  const ref = storeRef(store);
+  const folder = await storeFolder(ref);
+  const prefixes = [
+    `images/${await imageFolder(ref)}/`,
+    `stores/${folder}/`,
+    ...(isVaultConfigured() ? [`vault/${folder}/`] : []),
+    ...(store.community ? [`community/${communityFolder(store.community.id)}/`] : []),
+  ];
+  let listedAll = true;
+  for (const prefix of prefixes) {
+    let paths: string[];
+    try {
+      paths = await listFiles(prefix);
+    } catch (error) {
+      console.error(`a deleted store's files under ${prefix.split("/")[0]}/ could not be listed; they go in line to try again`, error);
+      listedAll = false;
+      continue;
+    }
+    for (let at = 0; at < paths.length; at += 100) {
+      const some = paths.slice(at, at + 100);
+      await deleteFile(some).catch(async (error: unknown) => {
+        console.error("a deleted store's files could not be deleted now; they go to the daily job", error);
+        for (const path of some) await noteTaskUpload(path, 0).catch((noteError: unknown) => console.error("a deleted store's file could not be handed to the daily job", noteError));
+      });
+    }
+  }
+  if (store.community) await forgetPictures(communityFolder(store.community.id)).catch(() => {});
+  return listedAll;
+}
 
 /**
  * The studio's switcher, and the door out for a store.
@@ -61,13 +106,22 @@ export async function POST(request: NextRequest) {
       // a store with a plan in good standing there is not deleted either.
       const found = isBillingConfigured() ? await findStoreSubscriptions(store) : null;
       if (found?.live) return away(origin, studio("stores=paying"));
-      const result = await deleteStore(ref);
+      // Its keys named by its ids (its page photo, its list, its data room...) are erased by the closing walk, as a
+      // closed store's are: its entry is written before its record goes (lib/closed-store-data.ts, queueDeleted).
+      const result = await deleteStore(ref, queueDeleted);
       if (!result.ok) return away(origin, studio(`stores=${result.reason}`));
       // One that is not paying but could still be charged ends with the store.
       if (found?.lapsed.length) {
         await endLapsed(found.lapsed).catch((error: unknown) => console.error("ending a deleted store's lapsed subscription failed", error));
       }
-      await dropTeam(result.store);
+      // From here its record is gone: nothing below may skip the forgetting, which a retry could never do, since it
+      // finds no store (Claude 6's Q5 on #3670). A step not confirmed is told to the owner after it, never as
+      // "nothing was deleted".
+      let unsure = result.unsure === true;
+      await dropTeam(result.store).catch((error: unknown) => {
+        console.error("dropping a deleted store's team failed", error);
+        unsure = true;
+      });
       // Nothing of a deleted store is kept that could still reach anyone: the
       // sealed key to its email platform, its phones' push addresses, the
       // notes its team wrote about buyers (lib/buyer-profile.ts), its
@@ -81,23 +135,32 @@ export async function POST(request: NextRequest) {
         await forgetStoreWebhooks(result.store.statsId);
         await revokeAllKeys(result.store.sid);
         await forgetMemory(result.store.statsId ?? null, result.store);
-        // Its files: an empty store still keeps pictures (links, pages, emails, its community's posts) that
-        // app/api/image hands to anybody with the address; its record is gone now, so only this and the line find them.
-        await removeDeletedStoreFiles(result.store.sid, result.store.community?.id ?? null);
+      };
+      // Its files: an empty store still keeps pictures (links, pages, emails, its community's posts) that app/api/image
+      // hands to anybody with the address; its record is gone now, so only this and the line find them. A folder not
+      // listed puts the store in the line, with its community, which lists every folder again (#4348).
+      const putInLine = async () => {
+        await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null).catch((queued: unknown) =>
+          console.error("putting a deleted store's webhooks, keys, assistant notes and files in line failed", queued),
+        );
       };
       await Promise.all([
+        forgetStoreFiles(result.store)
+          .catch((error: unknown) => {
+            console.error("forgetting a deleted store's files failed", error);
+            return false;
+          })
+          .then((listedAll) => (listedAll ? undefined : putInLine())),
         Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),
         forgetHooksAndKeys().catch(async (error: unknown) => {
           console.error("forgetting a deleted store's webhooks, keys and assistant notes failed; put in line to try again", error);
-          await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null).catch((queued: unknown) =>
-            console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued),
-          );
+          await putInLine();
         }),
       ]);
       // Back to the owner's first store, and the switcher forgets this one.
-      const response = away(origin, "/studio?stores=deleted");
+      const response = away(origin, unsure ? "/studio?stores=partly" : "/studio?stores=deleted");
       response.headers.append("Set-Cookie", storeCookie("", request).replace(/Max-Age=\d+/, "Max-Age=0"));
       return response;
     } catch (error) {

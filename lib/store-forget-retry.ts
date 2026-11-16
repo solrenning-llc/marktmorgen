@@ -6,6 +6,10 @@
  * FORGET_TRIES times in all, FORGET_PER_RUN stores a run. What is still kept
  * after the last try stays in line, marked, and is counted every month for
  * the owner's report (storeForgetMonth): numbers only, no store, no person.
+ * The closing walk tries a deleted store once more when it admits it, its
+ * record read gone (lib/closed-store-data.ts, admitDeleted: a delete whose
+ * reply was lost may never have forgotten anything), and puts it in this
+ * line only when that try fails.
  *
  *   nl:forget:q                 hash  "<statsId>|<sid>" → { tries, first, last }: tried again daily
  *   nl:forget:kept              hash  the same, given up: never read by the daily run
@@ -28,8 +32,10 @@
  * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
  * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
  * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
- * a deleted store, at most FORGET_PER_RUN stores a day, and only for a delete
- * whose first try failed (held in tests/sg2-unknown-replies.test.ts).
+ * a deleted store in each round, at most FORGET_PER_RUN stores a day, and only for a store
+ * whose try at the delete (held in tests/sg2-unknown-replies.test.ts) or at the walk's
+ * admission failed; another round starts only when a try at the walk's admission fails
+ * while the line no longer holds the store (each such try is the walk's: one a run).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -100,13 +106,20 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  * their room back to the store's data room, which outlives the store.
  */
 export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number) => Promise<void>;
-const forgetBoth: ForgetWork = async (statsId, sid, community, until) => {
+/** The Redis forgets alone: what the closing walk's admission does again (lib/closed-store-data.ts, admitDeleted). */
+export const forgetBoth = async (statsId: string | null, sid: string): Promise<void> => {
   await forgetStoreWebhooks(statsId);
   await revokeAllKeys(sid);
   // A deleted store has no plan: its room is given back as a store without one.
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
-  // And its files: pictures, community pictures, anything left in its folders (lib/deleted-store-files.ts), stopped
-  // at the line's deadline (OutOfTime) so a slow file store cannot run into the closing job's own time.
+};
+/**
+ * One try from the line: the Redis forgets, and its files: pictures, community pictures, anything left in its folders
+ * (lib/deleted-store-files.ts), stopped at the line's deadline (OutOfTime) so a slow file store cannot run into the
+ * closing job's own time.
+ */
+const forgetTry: ForgetWork = async (statsId, sid, community, until) => {
+  await forgetBoth(statsId, sid);
   await removeDeletedStoreFiles(sid, community, undefined, until);
 };
 
@@ -118,7 +131,7 @@ const forgetBoth: ForgetWork = async (statsId, sid, community, until) => {
  * in line as it was, counted as left, and no try is spent. A line read
  * in another shape throws: the job says so, and runs again tomorrow.
  */
-export async function retryStoreForgets(deadline: number, now = Date.now(), work: ForgetWork = forgetBoth): Promise<{ done: number; failed: number; gaveUp: number; left: number }> {
+export async function retryStoreForgets(deadline: number, now = Date.now(), work: ForgetWork = forgetTry): Promise<{ done: number; failed: number; gaveUp: number; left: number }> {
   const out = { done: 0, failed: 0, gaveUp: 0, left: 0 };
   if (!isRedisConfigured()) return out;
   const [raw] = await redisPipeline([["HGETALL", QUEUE]]);

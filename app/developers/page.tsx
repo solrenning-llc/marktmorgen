@@ -478,6 +478,7 @@ export default function DevelopersPage() {
   "currency": "usd",
   "refunds_checked": true,
   "invoices_checked": true,
+  "unlinked_invoices": 0,
   "data": [
     {
       "id": "0123456789ab",
@@ -504,7 +505,10 @@ export default function DevelopersPage() {
           is <code className="font-mono">false</code>, Stripe could not be asked about refunds just now and the amounts may
           be high: read again before paying anyone from them. When <code className="font-mono">invoices_checked</code> is{" "}
           <code className="font-mono">false</code>, not every membership and plan payment could be read and the amounts may
-          be low: do not pay from them either.
+          be low: do not pay from them either. <code className="font-mono">unlinked_invoices</code> counts paid membership
+          and plan payments that could not be matched to one card payment, so their commission is not in the amounts;
+          while it is above 0, <code className="font-mono">invoices_checked</code> is <code className="font-mono">false</code>{" "}
+          too: check those payments in Stripe and pay the affiliates they belong to by hand.
         </p>
       </LegalSection>
 

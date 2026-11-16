@@ -44,7 +44,7 @@ import { flowsBytes, readFlows } from "@/lib/flows";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { listCounts } from "@/lib/contacts";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
-import { type Charge, type Hold, chargeBook } from "@/lib/api-read";
+import { type Charge, type Hold, chargeBook, invoicesSettled } from "@/lib/api-read";
 import {
   EMAILS_BROADCASTS, EMAILS_HEADS_WORK, EMAILS_PROBE_WORK, MEMBERSHIPS_COLD_WORK, addWork, apiReadUnits, boughtNextWork, courseOutlineWork, emailsSizesWork, emailsWork, lessonWork, listingsWork, mailRevenueColdWork,
   membershipsWork, pageReadingWork, pageTestWork, pageVersionsWork, productTextWork, salesPageWork, savedBlocksWork, settledUnits,
@@ -513,8 +513,10 @@ export async function affiliatesTool(store: Store, charge: Charge) {
       held_because: r.flags,
     })),
     refunds_checked: book.refundsChecked,
-    // Every membership and plan payment read (audit A1); false, the amounts may be low (lib/api-read.ts, affiliates).
-    invoices_checked: book.invoicesChecked,
+    // Every membership and plan payment read and none left out unlinked (audit A1); false, the amounts may be low
+    // (lib/api-read.ts, affiliates and invoicesSettled).
+    invoices_checked: invoicesSettled(book),
+    unlinked_invoices: book.unlinkedInvoices ?? 0,
   };
 }
 

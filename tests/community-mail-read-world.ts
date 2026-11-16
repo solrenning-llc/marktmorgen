@@ -72,6 +72,7 @@ export const sendBatchOutcome = async (messages: unknown[]) => { sent.push(messa
 export const BATCH_SIZE = 100;
 export const CHECKED_BATCH_SIZE = 25;
 export const SENDER_WAIT_NOTE = "Waiting for the sender.";
+export const SENDER_RETRY_NOTE = "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
 export const canWrite = () => true;
 export const fromLine = () => "Synthetic <sender@example.com>";
 export const storeSender = fromLine;

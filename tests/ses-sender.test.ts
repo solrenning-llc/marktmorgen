@@ -979,8 +979,11 @@ async function main(): Promise<void> {
   const sesFirst = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
   amazonLosesReply = () => null;
   const sesSecond = await sendBatchOutcome([letter("probe-twice@example.com")], "bc:ses-twice", { by: "company" });
+  // Since main's possibly-taken marks (lib/ses.ts markMaybe, notMaybeTaken; 13 November 2026), the retry no longer posts
+  // to Amazon an email it may have taken: Amazon is asked once. The answer is still "unconfirmed", so the caller counts
+  // the retry again: counted higher, never lower (merge of main into #4073, Claude 3 cloud T).
   is("Amazon's lost answer is not the outcome a caller may keep one count for",
-    [sesFirst, sesSecond, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["unconfirmed", "sent", 2]);
+    [sesFirst, sesSecond, amazon.filter((m) => m.to === "probe-twice@example.com").length], ["unconfirmed", "sent", 1]);
   part("Control: Resend's answer not known (5xx, 408 or none) is the outcome a caller keeps one count for; tried again, written once");
   for (const loss of [503, 408, "throw"] as const) {
     account = approved({ ProductionAccessEnabled: false }); askAgain(); clear();

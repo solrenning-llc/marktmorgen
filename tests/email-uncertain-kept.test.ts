@@ -61,7 +61,9 @@ async function main(): Promise<void> {
   setBatchAnswer("uncertain");
   let last: AnnouncementJob | null = null;
   for (let i = 0; i < 5; i += 1) last = await advanceAnnouncement(id, async () => store, Date.now() + 10_000);
-  is("five unknown answers: the batch is counted once, not five times", [held(), last?.status], [2, "failed"]);
+  // Since main's outage drill (#4530), only a refusal ends an announcement: one the provider never answered keeps
+  // waiting, "sending", never abandoned (merge of main into #4073, Claude 3 cloud T). The count is what this checks.
+  is("five unknown answers: the batch is counted once, not five times", [held(), last?.status], [2, "sending"]);
 
   // A later answer that says nothing went cannot prove the first did not: the count stays, never given back.
   seed();

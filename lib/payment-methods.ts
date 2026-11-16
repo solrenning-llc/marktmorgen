@@ -210,9 +210,11 @@ const CURRENCIES_SECONDS = 12 * 60 * 60;
 /**
  * Which of the store currencies (lib/money.ts) the creator's Stripe account
  * can charge in, from the list Stripe publishes for its country. Null when
- * there is no account, or Stripe could not be asked: every currency on the
- * list is then offered, since each is one Stripe settles in the countries
- * the studio offers.
+ * there is no account, or Stripe could not be asked or answered a list in an
+ * unknown shape (an entry that is not text): every currency on the list is
+ * then offered, since each is one Stripe settles in the countries the studio
+ * offers. A kept list that does not read back as store currencies is not
+ * known either: Stripe is asked again, never "none" (review of #2993).
  */
 export async function chargeableCurrencies(store: Store): Promise<Currency[] | null> {
   const account = store.stripeAccountId;
@@ -222,7 +224,8 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     const [kept] = await redisPipeline([["GET", currenciesKey(account)]]).catch(() => [null]);
     if (typeof kept === "string" && kept) {
       const codes = kept.split(",");
-      return CURRENCIES.map((c) => c.code).filter((code) => codes.includes(code));
+      const known: string[] = CURRENCIES.map((c) => c.code);
+      if (codes.every((code) => known.includes(code))) return CURRENCIES.map((c) => c.code).filter((code) => codes.includes(code));
     }
   }
   try {
@@ -230,10 +233,10 @@ export async function chargeableCurrencies(store: Store): Promise<Currency[] | n
     const country = typeof found.country === "string" ? found.country.toUpperCase() : "";
     if (!/^[A-Z]{2}$/.test(country)) return null;
     const spec = await onAccount("GET", account, `/country_specs/${country}`);
-    const supported = Array.isArray(spec.supported_payment_currencies)
-      ? (spec.supported_payment_currencies as unknown[]).filter((c): c is string => typeof c === "string").map((c) => c.toLowerCase())
-      : [];
-    if (supported.length === 0) return null;
+    const listed: unknown[] = Array.isArray(spec.supported_payment_currencies) ? spec.supported_payment_currencies : [];
+    // An entry that is not text is a list not known whole: never the shorter list, and never kept.
+    if (listed.length === 0 || !listed.every((c): c is string => typeof c === "string")) return null;
+    const supported = listed.map((c) => c.toLowerCase());
     const ours = CURRENCIES.map((c) => c.code).filter((code) => supported.includes(code));
     if (cache) await redisPipeline([["SET", currenciesKey(account), ours.join(","), "EX", CURRENCIES_SECONDS]]).catch(() => {});
     return ours;

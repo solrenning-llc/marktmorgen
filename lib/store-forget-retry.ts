@@ -23,6 +23,10 @@
  * until then it is counted here and logged by the closing job, and nothing
  * takes it out.
  *   nl:forget:month:<YYYY-MM>   hash  queued, done, gaveUp counts for the month, 400 days
+ *   nl:forget:files             hash  <sid> → "1": a deleted store whose files were all seen to, by the delete's own
+ *                                     try (every folder listed) or by a round of this line that finished; its field
+ *                                     is taken out by the closing walk with the store's other keys (an index of
+ *                                     lib/data-families.ts), after which no round of the walk starts for it
  *
  * Its cost is Redis commands only, no supplier: each try runs
  * forgetStoreWebhooks (two pipelines: 13 + 2 × LOG_SIZE commands, and 3 more
@@ -30,8 +34,9 @@
  * MAX_ENDPOINTS told on each of the last three days, lib/webhooks.ts, so
  * 4 × MAX_ENDPOINTS) and revokeAllKeys (4 + MAX_KEYS: the list read, each key's
  * lookup, and the list, its holds and its uses deleted) and forgetMemory (its
- * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most four for
- * the line itself: FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
+ * MEMORY_FORGET_COMMANDS: the assistant's notes, added 5 November 2026), plus at most five for
+ * the line itself (four until #4348; now queueStoreForget's two exact reads, given up and files seen to, and its three
+ * writes, and a try's end at most four): FORGET_TRY_COMMANDS, its worst (review of #2556 at c6267d1ef). At most FORGET_TRIES tries
  * a deleted store in each round, at most FORGET_PER_RUN stores a day, and only for a store
  * whose try at the delete (held in tests/sg2-unknown-replies.test.ts) or at the walk's
  * admission failed; another round starts only when a try at the walk's admission fails
@@ -40,9 +45,15 @@
  * Since #4348 a try also deletes the store's files (lib/deleted-store-files.ts), whose Blob listings, deletes and
  * Redis DEL are priced in the line deleted-store-files of tests/plan-cost-registry.ts: a pass the deadline cuts off
  * (OutOfTime) spends no try up to FORGET_LATE_PASSES times a round, and counts as a failed try after that, so a round
- * takes at most FORGET_TRIES tries and FORGET_LATE_PASSES late passes; and a round started while the store is among
- * the given-up ones (nl:forget:kept, a round the walk starts) forgets its keys only, never its files again
- * (`files: false`), so its files take one round's passes at most (review of #4348, Claude 7's MÉDIO on f0320f0425).
+ * takes at most FORGET_TRIES tries and FORGET_LATE_PASSES late passes (review of #4348, Claude 7's MÉDIO on
+ * f0320f0425). A round that lists the files ends only once that is noted (nl:forget:files, its reply read exactly, or
+ * the try failed) or once it is given up (nl:forget:kept); the delete's own try that listed every folder notes it too
+ * (noteStoreFilesForgotten). A round started while either says so (a round the walk starts) forgets the keys only,
+ * never the files again (`files: false`), and either read in another shape puts nothing in line: the walk tries again
+ * on its next run, and nothing is taken as done (rule 24). So a deleted store's files take the delete's own try and
+ * one round of this line at most: the round is entered with one try spent (`tries: 1`), so it lists FORGET_TRIES − 1
+ * times and FORGET_LATE_PASSES late passes, FORGET_TRIES + FORGET_LATE_PASSES passes with the delete's own (Claude 6's
+ * MEDIUM on 8a05d01969: a round that finished noted nothing, and the walk's next round listed the files again).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -60,7 +71,7 @@ export const FORGET_LATE_PASSES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
-export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 4;
+export const FORGET_TRY_COMMANDS = 13 + 2 * LOG_SIZE + 3 * 4 * MAX_ENDPOINTS + 4 + MAX_KEYS + MEMORY_FORGET_COMMANDS + 5;
 /** Redis commands one monthly owner-report read sends; company cost, not a store allowance. */
 export const STORE_FORGET_MONTH_READ_COMMANDS = 4;
 /** How long a month's counts are kept: past the next yearly look at them. */
@@ -68,6 +79,7 @@ const MONTH_SECONDS = 400 * 86_400;
 
 const QUEUE = "nl:forget:q";
 const KEPT = "nl:forget:kept";
+const FILES = "nl:forget:files";
 const monthKey = (month: string) => `nl:forget:month:${month}`;
 const monthOf = (now: number) => new Date(now).toISOString().slice(0, 7);
 const STATS_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -76,7 +88,7 @@ const SID = /^[0-9a-f]{32}$/;
 /**
  * `community`: the deleted store's community id, the one folder of its files not made from its id
  * (lib/deleted-store-files.ts); `late`: passes of this round the deadline cut off; `files: false`: a round started
- * after one was given up, which forgets the keys only.
+ * after one was given up or after its files were seen to (nl:forget:files), which forgets the keys only.
  */
 type Entry = { tries: number; first: number; last: number; community?: string; late?: number; files?: false };
 
@@ -102,6 +114,20 @@ function fieldOf(statsId: string | null, sid: string): string | null {
   return `${statsId ?? "-"}|${sid}`;
 }
 
+/** HEXISTS's answer read exactly: 1 there, 0 not, null for anything else (rule 24). */
+const presence = (reply: unknown): 0 | 1 | null => (reply === 0 || reply === 1 ? reply : null);
+
+/**
+ * Notes that a deleted store's files were all seen to: by the delete's own try once it listed every folder
+ * (app/api/store/stores, forgetStoreFiles), or by a round of the line that deleted them. A round started after it
+ * forgets the keys only. Throws when the note is not confirmed (HSET's own count, 0 or 1), so nothing takes it as made.
+ */
+export async function noteStoreFilesForgotten(sid: string): Promise<void> {
+  if (!SID.test(sid) || !isRedisConfigured()) throw new Error("a deleted store's files could not be noted as seen to");
+  const written = countOf(repliesFor(await redisPipeline([["HSET", FILES, sid, "1"]]), 1)?.[0]);
+  if (written !== 0 && written !== 1) throw new Error("noting a deleted store's files as seen to answered in an unknown shape");
+}
+
 /**
  * Puts a deleted store in line, after its first try failed. Once: a store
  * already in line keeps its count. Throws when the line cannot be written,
@@ -110,11 +136,13 @@ function fieldOf(statsId: string | null, sid: string): string | null {
 export async function queueStoreForget(statsId: string | null, sid: string, now = Date.now(), community: string | null = null): Promise<void> {
   const field = fieldOf(statsId, sid);
   if (!field || !isRedisConfigured()) throw new Error("a deleted store's forgetting could not be put in line");
-  // Given up before (the walk starting another round): its keys are tried again, its files are not.
-  const [kept] = await redisPipeline([["HEXISTS", KEPT, field]]);
-  const givenUp = countOf(kept);
-  if (givenUp === null) throw new Error("reading whether a deleted store's forgetting was given up answered in an unknown shape");
-  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}), ...(givenUp === 1 ? { files: false as const } : {}) };
+  // Given up before, or its files already seen to (the walk starting another round): its keys are tried again, its
+  // files are not. Each read exactly: one in another shape puts nothing in line, never a round taken as done.
+  const replies = repliesFor(await redisPipeline([["HEXISTS", KEPT, field], ["HEXISTS", FILES, sid]]), 2);
+  const givenUp = presence(replies?.[0]);
+  const filesSeen = presence(replies?.[1]);
+  if (givenUp === null || filesSeen === null) throw new Error("reading whether a deleted store's forgetting was given up, or its files seen to, answered in an unknown shape");
+  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}), ...(givenUp === 1 || filesSeen === 1 ? { files: false as const } : {}) };
   const [added] = await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify(entry)]]);
   const n = countOf(added);
   if (n === null) throw new Error("putting a deleted store's forgetting in line answered in an unknown shape");
@@ -135,7 +163,7 @@ export const forgetBoth = async (statsId: string | null, sid: string): Promise<v
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
 };
 /**
- * One try from the line: the Redis forgets, and, in its first round (`files`), its files: pictures, community
+ * One try from the line: the Redis forgets, and, while its files are not seen to (`files`), its files: pictures, community
  * pictures, anything left in its folders (lib/deleted-store-files.ts), stopped at the line's deadline (OutOfTime) so a
  * slow file store cannot run into the closing job's own time.
  */
@@ -173,7 +201,11 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     const known = entry !== null && sid !== undefined && fieldOf(statsId, sid) === field;
     try {
       if (!known) throw new Error("an entry in an unknown shape");
-      await work(statsId, sid, entry?.community ?? null, deadline, entry?.files !== false);
+      const filesToo = entry?.files !== false;
+      await work(statsId, sid, entry?.community ?? null, deadline, filesToo);
+      // Its files deleted: noted before the round leaves the line, so a round the walk starts later does not list
+      // them again; a note not confirmed throws, and this try counts as failed (Claude 6's MEDIUM on 8a05d01969).
+      if (filesToo) await noteStoreFilesForgotten(sid);
       await redisPipeline([["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "done", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
       out.done += 1;
     } catch (error) {

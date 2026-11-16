@@ -26,9 +26,10 @@
  * DELETED_STORE_LIST_PAGES pages (a thousand paths a page; a folder with more fails the pass, which the line counts
  * and finally gives up and reports, never lists further), sends at most one delete a DELETED_STORE_DELETE_BATCH
  * files listed, and one Redis DEL for its community's picture count. The delete's own first try (app/api/store/stores,
- * forgetStoreFiles) lists with the same ceiling. A deleted store takes at most FORGET_TRIES tries and
- * FORGET_LATE_PASSES passes cut off by the deadline (lib/store-forget-retry.ts), its files only in its first round;
- * all of them priced, at Blob's paid Advanced Operation price, in the line deleted-store-files of
+ * forgetStoreFiles) lists with the same ceiling. A deleted store's files take the delete's own try and one round of
+ * the line at most (lib/store-forget-retry.ts: a round that finished, or a delete that listed every folder, is noted
+ * in nl:forget:files, and a round started after it forgets the keys only), FORGET_TRIES tries and FORGET_LATE_PASSES
+ * passes cut off by the deadline in all; all of them priced, at Blob's paid Advanced Operation price, in the line deleted-store-files of
  * tests/plan-cost-registry.ts, held by tests/deleted-store-files-cost.test.ts.
  */
 import { deleteFile, listFiles } from "@/lib/file-store";

@@ -28,7 +28,7 @@ import { FORGET_TRIES, type ForgetWork, queueStoreForget, retryStoreForgets } fr
 import { claimHandle, createStore, imageFolder, setCommunity, storeFolder, storeRef } from "@/lib/store";
 import { communityFolder } from "@/lib/community-image";
 import { TIERS } from "@/lib/plan";
-import { BLOB_ADVANCED_OPERATION, COMMAND, PER_PAYMENT_LINES } from "./plan-cost-registry";
+import { BLOB_ADVANCED_OPERATION, COMMAND, DELETED_STORE_FILES_NOTES, PER_PAYMENT_LINES } from "./plan-cost-registry";
 import { calls, files } from "./deleted-store-files-cost-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -70,13 +70,14 @@ async function main(): Promise<void> {
   is("a per-payment line, deleted-store-files, is there", line !== undefined, true);
   // One pass at its most: each folder listed to the ceiling, a delete for each hundred files listed, at the paid
   // Advanced Operation price (a list, and a delete taken as one); its community's count forgotten (DEL) and the line's
-  // write of a pass cut off by the deadline. The delete's own try and each of the line's are passes.
+  // write of a pass cut off by the deadline. The delete's own try and each of the line's are passes; and the two notes
+  // that its files were seen to, the delete's and its one round's (Claude 6's MEDIUM on 8a05d01969).
   const listPages = folders * (pages ?? NaN);
   const deleteCalls = (folders * (pages ?? NaN) * 1000) / (batch ?? NaN);
   const pass = (listPages + deleteCalls) * BLOB_ADVANCED_OPERATION + 2 * COMMAND;
   const passes = FORGET_TRIES + (latePasses ?? NaN);
   const priced = TIERS.map((tier) => line?.monthlyUsd(tier) ?? 0);
-  is("it prices every pass, at every plan, never zero", priced.map((usd) => Number.isFinite(usd) && usd > 0 && Math.abs(usd - passes * pass) < 1e-12), TIERS.map(() => true));
+  is("it prices every pass and both notes, at every plan, never zero", [DELETED_STORE_FILES_NOTES, priced.map((usd) => Number.isFinite(usd) && usd > 0 && Math.abs(usd - (passes * pass + DELETED_STORE_FILES_NOTES * COMMAND)) < 1e-12)], [2, TIERS.map(() => true)]);
   const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
   is("and a store that never paid carries it too", registry.includes("+ deletedStoreFilesCost()"), true);
 

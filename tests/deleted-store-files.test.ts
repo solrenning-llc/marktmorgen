@@ -93,9 +93,11 @@ async function main(): Promise<void> {
   is("the studio's delete deletes the files on its first try, and puts the community in line when a folder is not listed", [
     route.includes("forgetStoreFiles(result.store)"),
     route.includes("listedAll = false;"),
-    route.includes(".then((listedAll) => (listedAll ? undefined : putInLine()))"),
+    // Since Claude 6's MEDIUM on 8a05d01969, every folder listed is noted (lib/store-forget-retry.ts), not passed over.
+    route.replace(/\s+/g, " ").includes(".then((listedAll) => listedAll ? noteStoreFilesForgotten(result.store.sid).catch("),
+    route.replace(/\s+/g, " ").includes(") : putInLine(), ),"),
     route.includes("await queueStoreForget(result.store.statsId ?? null, result.store.sid, Date.now(), result.store.community?.id ?? null)"),
-  ], [true, true, true, true]);
+  ], [true, true, true, true, true]);
   is("and the daily line's own work deletes them too", readFileSync("lib/store-forget-retry.ts", "utf8").includes("await removeDeletedStoreFiles(sid, community, undefined, until);"), true);
 
   // Review of #4348 (Claude 7), MÉDIO 1: Blob was taken as set up only from BLOB_READ_WRITE_TOKEN, and its folders were
@@ -143,6 +145,9 @@ async function main(): Promise<void> {
   blobWorld.files.add(`stores/${folder}/p2/late.pdf`);
   blobWorld.files.add(`images/${pictures}/${"h".repeat(32)}.webp`);
   blobWorld.files.add(`community/${cf}/${"i".repeat(16)}.jpg`);
+  // The stand-in work of the first part ended a round, and the line noted the store's files as seen to; so that a
+  // round lists them again, the note goes, as for a store whose files were never seen to (Claude 6's MEDIUM on 8a05d01969).
+  await redis.pipeline([["HDEL", "nl:forget:files", spare.sid]]);
   await queueStoreForget(null, spare.sid, Date.now(), communityId);
   const line = async () => {
     const [flat] = (await redis.pipeline([["HGETALL", "nl:forget:q"]])) as [string[]];

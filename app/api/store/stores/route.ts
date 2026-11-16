@@ -20,7 +20,7 @@ import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { revokeAllKeys } from "@/lib/api-keys";
 import { endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/billing";
 import { forgetPath } from "@/lib/path";
-import { queueStoreForget } from "@/lib/store-forget-retry";
+import { noteStoreFilesForgotten, queueStoreForget } from "@/lib/store-forget-retry";
 import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/deleted-store-files";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
@@ -31,10 +31,12 @@ import { forgetMemory } from "@/lib/assistant-memory-store";
  * (lib/plan-closing.ts removeStored reads the record first), so they go now. A delete that fails goes to the daily job
  * that deletes uploads nobody keeps (sweepTaskUploads, app/api/cron/courses); a folder that cannot be listed is said in
  * the log and answers false, and the route puts the store in the daily line of lib/store-forget-retry.ts, which lists
- * every folder again from the store's id (lib/deleted-store-files.ts; #4348). Its cost: each folder listed to
+ * every folder again from the store's id (lib/deleted-store-files.ts; #4348). Every folder listed, the route notes
+ * it (noteStoreFilesForgotten), so a round the closing walk starts later forgets the keys only and lists none of them
+ * again (Claude 6's MEDIUM on 8a05d01969). Its cost: each folder listed to
  * DELETED_STORE_LIST_PAGES pages at most (a folder with more is not listed further, and goes in line), a delete per
- * DELETED_STORE_DELETE_BATCH files, once for a store: the first pass of the line deleted-store-files
- * (tests/plan-cost-registry.ts).
+ * DELETED_STORE_DELETE_BATCH files, and the note's one command, once for a store: the first pass of the line
+ * deleted-store-files (tests/plan-cost-registry.ts).
  */
 async function forgetStoreFiles(store: Store): Promise<boolean> {
   const ref = storeRef(store);
@@ -153,7 +155,13 @@ export async function POST(request: NextRequest) {
             console.error("forgetting a deleted store's files failed", error);
             return false;
           })
-          .then((listedAll) => (listedAll ? undefined : putInLine())),
+          .then((listedAll) =>
+            listedAll
+              ? noteStoreFilesForgotten(result.store.sid).catch((noted: unknown) =>
+                  console.error("noting a deleted store's files as seen to failed; a round the closing walk starts lists them again", noted),
+                )
+              : putInLine(),
+          ),
         Promise.all([forgetStoreSync(result.store.statsId), forgetStorePhones(result.store.statsId), forgetPersonNotes(result.store.statsId), forgetCrm(result.store.statsId), forgetRecentSales(result.store.statsId), forgetStoreWorkflows(result.store), forgetPath(result.store), forgetStoreCalendar(result.store.statsId), forgetStoreReadings(result.store.statsId)]).catch((error: unknown) =>
           console.error("forgetting a deleted store's integrations failed", error),
         ),

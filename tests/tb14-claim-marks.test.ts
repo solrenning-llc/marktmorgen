@@ -12,9 +12,10 @@
  *   - "OK", or a reply of another shape whose read-back holds this run's
  *     value, is ours, and the purchase is handed over once;
  *   - null, or a read-back holding another value, is somebody else's:
- *     nothing handed over; for a gift, "already" only once it is given, and
- *     otherwise an error, so the caller keeps no "sent" mark and the next
- *     run tries again (Claude 4 on #2726);
+ *     nothing handed over and an error, even once the gift is given, so the
+ *     caller keeps no "sent" mark and the next run tries again (Claude 4 on
+ *     #2726; Claude 6 on #2872: the run holding the mark may have died
+ *     before its emails);
  *   - anything else is unknown: UnknownReplyError, nothing handed over and
  *     no "sent" mark (the caller reads it as Redis not answering, and the
  *     next run tries again);
@@ -116,15 +117,18 @@ async function main(): Promise<void> {
   }
   {
     const g = await gift();
-    // The other run finished meanwhile: then it is "already".
+    // The other run wrote the gift given meanwhile, and may have died before its emails (Claude 6 on #2872):
+    // thrown, never "already", so the caller certifies no email this run did not send.
     is("the gift given by another run", await g.give(), "given");
     await pipeline([["SET", g.key, "someone-else", "EX", 300]]);
-    is("a mark another run holds, the gift given already: already", await g.give(), "already");
+    is("a mark another run holds, the gift given already: thrown, never already", await outcome(() => g.give()), "rejected: Error");
   }
   {
     const g = await gift();
     is("the mark free: given", [await g.give(), await has(g.to)], ["given", true]);
-    is("and let go after", (await pipeline([["GET", g.key]]))[0], null);
+    // Kept until it runs out (#2872 review M1): a run that comes in before the caller keeps its "sent" mark reads it
+    // taken and throws instead of telling and confirming a second time (Claude 6 on #2872: never "already").
+    is("and kept after, this run's own, until it runs out", [typeof (await pipeline([["GET", g.key]]))[0], await outcome(() => g.give())], ["string", "rejected: Error"]);
   }
   {
     const g = await gift();

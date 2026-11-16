@@ -267,7 +267,9 @@ async function gifts(store: Store, product: Listing): Promise<void> {
   const sent = emails.slice(sentBefore);
   is("two emails: the recipient's and the buyer's receipt", sent.map((e) => e.to).sort(), [g.to, "buyer1@recurring.example"].sort());
   is("the receipt's amount is what was charged ($25)", sent.some((e) => e.to === "buyer1@recurring.example" && /Paid: \$25(\.00)?\n/.test(e.text)), true);
-  is("replayed (thanks page + sweep): already, nothing more", await g.deliver(), "already");
+  // Since main's #2872 (M1), the run that gave it keeps its giving mark until it runs out, so a replay right after is
+  // refused (thrown), never answered from a copy: the caller keeps its own "sent" mark (merge of main into #4408).
+  is("replayed (thanks page + sweep) right after: refused, nothing more", await g.deliver().then(() => "answered", () => "threw"), "threw");
   is("still held once, no new email", [await holds(store, g.to, product.id), emails.length - sentBefore], [1, 2]);
 
   part("Gift: partial refund keeps it, a full refund takes it back once");

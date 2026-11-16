@@ -165,16 +165,22 @@ export async function findMembers(store: Store, email: string): Promise<{ custom
   const handles = saleHandles(store);
 
   // Each list is read in its exact shape (lib/stripe-list.ts; Claude 5, sweep APP2, the findMember sibling of
-  // finding 4): a membership found on a readable row stands, but "no membership" is said only when every list
-  // was read to its end with every row readable. Anything else throws StripeListUnreadable, so the form says
-  // something went wrong (the route's "error"), never "sent" with no email behind it.
-  let unknown = false;
+  // finding 4): a membership found on a readable row stands. A list Stripe answers in another shape, or with a row
+  // that cannot be read, throws StripeListUnreadable (here or below), so the form says something went wrong (the
+  // route's "error"), never "sent" on a garbled answer.
+  //
+  // More pages behind a readable first one are not a garbled answer: with no membership found on what was read, the
+  // address gets "sent" like any other, as it did before this change. Throwing there made the answer depend on
+  // how often the address bought here (every checkout makes a customer), so the form told a stranger which
+  // addresses are frequent buyers (Claude 7's MÉDIO on #2985 at db6a5ea6ad). Such a member, if one, finds no
+  // email: the store's own help is the way, as for any address the first page does not reach.
+  let unreadable = false;
   const customers = readStripePage(
     await onAccount("GET", account, `/customers?email=${encodeURIComponent(email)}&limit=${MANAGE_CUSTOMERS_MAX}`),
     () => true,
     CUSTOMER_PATTERN,
   );
-  if (customers.unreadable > 0 || customers.hasMore) unknown = true;
+  if (customers.unreadable > 0) unreadable = true;
   const more = customers.unreadable > 0 || customers.hasMore;
 
   const holding = new Map<string, number>();
@@ -184,8 +190,8 @@ export async function findMembers(store: Store, email: string): Promise<{ custom
       await onAccount("GET", account, `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=20`),
       (row) => typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata")),
     );
+    if (subs.unreadable > 0) unreadable = true;
     if (subs.unreadable > 0 || subs.hasMore) {
-      unknown = true;
       unread.push(customer.id);
     }
     const rows = subs.rows as { status?: unknown; metadata?: Record<string, string> | null; created?: unknown }[];
@@ -199,7 +205,7 @@ export async function findMembers(store: Store, email: string): Promise<{ custom
       if (at >= (holding.get(customer.id) ?? -1)) holding.set(customer.id, at);
     }
   }
-  if (!holding.size && unknown) throw new StripeListUnreadable("the customers or memberships of an address, not read to their end");
+  if (!holding.size && unreadable) throw new StripeListUnreadable("a customer or membership row of an address that cannot be read");
   if (!holding.size) return { customers: [], more: false };
   const newest = [...holding].sort((x, y) => y[1] - x[1]).map(([id]) => id);
   return { customers: [...newest, ...unread.filter((id) => !holding.has(id))], more };
@@ -439,7 +445,9 @@ export async function openPortal(store: Store, token: string, origin: string, su
     }
   }
 
-  const cardOnly = await holdsSetEnd(grant.a, grant.c);
+  // Asked of the customer whose page is made, not the newest one: an older customer's set end would otherwise open
+  // the full portal, where Stripe can renew past it (Claude 7's ALTO on #2985 at db6a5ea6ad).
+  const cardOnly = await holdsSetEnd(grant.a, customer);
   const session = async (configuration: string) =>
     onAccount(
       "POST",

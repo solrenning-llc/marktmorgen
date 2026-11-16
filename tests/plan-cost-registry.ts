@@ -1268,6 +1268,14 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
+      // A card notice to a member (lib/payment-recovery.ts, noticeCards) whose link's SET Redis did not answer with exactly "OK" sends
+      // nothing and removes the link, in case it landed, with one DEL (lib/card-update.ts, cardLink; Claude 7's MÉDIO on #2985): one
+      // command per failed notice, $0.000002 at Upstash's $2 a million, and the notice's mark let go for the next run. No email is
+      // sent, so no store email is taken for it; each card is tried at most once a run of the daily job (CARD_PAGES pages of running
+      // memberships a store), so it is a scheduled job's command, bounded by its schedule, a company cost not yet a line of
+      // lib/llc-fixed-costs.ts: not certified, never zero.
+      { file: "lib/card-update.ts", names: ['redisPipeline([["DEL", key]])', "CARD_LINK_SECONDS"] },
+      { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
     basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
   },

@@ -328,8 +328,9 @@ async function failingBatch(r: Awaited<ReturnType<typeof setup>>, answer: "refus
     return realFetch(input, init);
   }) as typeof fetch;
   let threw = false;
+  // The month's give-back (lib/mail.ts release): main's GIVE_BACK_FLOOR script on the month's count key.
   redis.pipeline = async (commands) => {
-    if (posted && !threw && commands.some((c) => c[0] === "DECRBY" && String(c[1]).startsWith("nl:mail:used:"))) {
+    if (posted && !threw && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:give-back-floor:v1") && String(c[3]).startsWith("nl:mail:used:"))) {
       threw = true;
       throw new Error("synthetic Redis timeout");
     }

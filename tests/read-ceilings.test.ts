@@ -347,12 +347,14 @@ async function main(): Promise<void> {
   is("the store's readings are a line of their own, every reading of every day at the dearest of its kind (heavy, light)", readingsMonth >= 32 * (HEAVY_READINGS_PER_DAY * heavyWorst + (STORE_READINGS_PER_DAY - HEAVY_READINGS_PER_DAY) * lightWorst), true);
   {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
-    // payment refunded in full (tests/plan-margin.test.ts, under US$ 65, a ceiling the owner keeps) stays under it,
-    // and one more heavy reading a day would pass it. Computed as that test computes it.
+    // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
+    // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before; its
+    // item 4 names the course-drip PR (#3344) among those counted against US$ 66. The readings figure is still the one sized
+    // under US$ 65, where one more heavy reading a day passes it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
+    is("the first year given back stays under the owner's US$ 66 with the day's heavy readings", year < 66, true);
     is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }

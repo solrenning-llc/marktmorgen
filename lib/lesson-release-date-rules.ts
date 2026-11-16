@@ -105,6 +105,21 @@ export function fixedRelease(wall: unknown, zone: unknown): { ok: true; release:
 }
 
 /**
+ * Whether a kept date reads whole (rule 24; Codex V and Claude 5 on #3653): an instant on a whole minute, a zone as
+ * zoneName resolves it, and a clock between FIRST_YEAR and LAST_YEAR that the instant reads in that zone. A record
+ * damaged in any of the three (a negative instant, one moved away from the clock typed, a zone that is not one, a
+ * clock that is not one) is unknown, never a date to open on. A date moved by inZone still reads.
+ */
+export function readableRelease(release: unknown): release is FixedRelease {
+  if (!release || typeof release !== "object") return false;
+  const { at, zone, wall } = release as Record<string, unknown>;
+  if (typeof at !== "number" || !inRange(at) || at % 60 !== 0 || typeof zone !== "string" || zoneName(zone) !== zone) return false;
+  const m = typeof wall === "string" ? WALL.exec(wall) : null;
+  if (!m || Number(m[1]) < FIRST_YEAR || Number(m[1]) > LAST_YEAR) return false;
+  return wallIn(at, zone) === wall;
+}
+
+/**
  * Whether a module's schedule, or a lesson's date against its module's, can
  * be kept. A module with both a fixed date and days after joining is refused:
  * which one wins would be a guess.
@@ -113,6 +128,9 @@ export function scheduleProblem(unit: { dripDays: number; fixed: FixedRelease | 
   // Days after joining that are not a whole number from zero up cannot be read: never taken as "no drip" (rule 24;
   // Claude 3 and Codex G on #3653).
   if (!Number.isInteger(unit.dripDays) || unit.dripDays < 0) return "format";
+  // A kept date that does not read whole is never a date to open on (readableRelease).
+  if (unit.fixed != null && !readableRelease(unit.fixed)) return "format";
+  if (moduleFixed != null && !readableRelease(moduleFixed)) return "format";
   if (unit.fixed && unit.dripDays > 0) return "both";
   if (unit.fixed && moduleFixed && unit.fixed.at < moduleFixed.at) return "before-module";
   return null;
@@ -136,7 +154,7 @@ export function releaseAt(input: {
   // a time that was not read (a missing field read as 0), never "open to everyone" (Claude 3 on #3653).
   if (!Number.isFinite(moduleAt) || (!input.module.fixed && moduleAt <= 0)) return null;
   if (!input.lesson) return moduleAt;
-  return Number.isFinite(input.lesson.at) ? Math.max(moduleAt, input.lesson.at) : null;
+  return readableRelease(input.lesson) ? Math.max(moduleAt, input.lesson.at) : null;
 }
 
 /** Open from the instant on, for whoever comes then or later; unknown is never open. */
@@ -148,7 +166,7 @@ export function releaseState(at: number | null, now: number): "open" | "waits" |
 /** What a student reads before it opens, in the zone the creator set: "Opens Monday, January 11, 2027 at 9:00 AM EST"; null when the kept date cannot be read. */
 export function releaseWords(release: FixedRelease): string | null {
   // A kept date that cannot be read (out of range, a zone that is not one) is said as unknown by the caller, never thrown.
-  if (!inRange(release.at) || !zoneName(release.zone)) return null;
+  if (!readableRelease(release)) return null;
   const ms = release.at * 1000;
   const date = new Intl.DateTimeFormat("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: release.zone }).format(ms);
   const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZoneName: "short", timeZone: release.zone }).format(ms);

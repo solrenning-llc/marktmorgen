@@ -133,7 +133,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <li key={link.label}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 items-center transition-colors hover:text-ink"
+                  className="inline-flex min-h-11 min-w-11 items-center transition-colors hover:text-ink"
                 />
               </li>
             ))}
@@ -178,12 +178,14 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <p className="whitespace-nowrap text-[0.8125rem] font-semibold uppercase tracking-[0.14em] text-white/70">
                 {column.title}
               </p>
-              <ul className="mt-4 space-y-1.5 text-[0.9375rem]">
+              {/* Each link a 44 x 44 target, end to end: a negative margin let the next one cover it (2.5.5 AAA,
+                  tests/site-footer-targets.test.ts). */}
+              <ul className="mt-2 text-[0.9375rem]">
                 {column.links.map((link) => (
                   <li key={link.label}>
                     <FooterAnchor
                       link={link}
-                      className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                      className="inline-flex min-h-11 min-w-11 items-center text-white/80 transition-colors hover:text-white"
                     />
                   </li>
                 ))}
@@ -204,7 +206,7 @@ export function SiteFooter({ variant = "full", morning = false }: { variant?: "f
               <li key={link.href}>
                 <FooterAnchor
                   link={link}
-                  className="inline-flex min-h-11 -my-2.5 items-center text-white/80 transition-colors hover:text-white"
+                  className="inline-flex min-h-11 min-w-11 items-center text-white/80 transition-colors hover:text-white"
                 />
               </li>
             ))}

@@ -249,7 +249,7 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   const { store, product } = input;
-  if (!(await withinStore("podcast-link-ip", `${store.handle}:${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
+  if (!(await withinStore("podcast-link-ip", `${store.handle}|${input.ip}`, 10, 3_600, store, "buyer"))) return "limited";
   const byAddress = await essentialLimitState("podcast-link-address", sha(normaliseEmail(raw)), 5, 3_600);
   if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   let listens: boolean;

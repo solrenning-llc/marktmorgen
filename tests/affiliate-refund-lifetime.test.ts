@@ -36,7 +36,7 @@ import { payableLines } from "@/lib/paypal-payouts";
 import type { Store } from "@/lib/store";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
-import { PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
+import { PAYPAL_PENDING_SWEEP, PAYPAL_REFUND_KEPT, PAYPAL_REFUND_WATCH } from "./plan-cost-registry";
 import { ORDER_WRITE } from "@/lib/order-data";
 import { done, is, part } from "./check";
 
@@ -319,6 +319,42 @@ async function main(): Promise<void> {
     is("a failed write is one script and one ZADD an hour on", [failed.kept.length, again.length], [PAYPAL_REFUND_KEPT.scriptsPerRefundLook, PAYPAL_REFUND_KEPT.retryWritesPerFailedLook]);
     is("tried again at most hourly, as the watch's looks", PAYPAL_REFUND_KEPT.looksPerDayAtMost, PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost);
     is("and no longer than the watch keeps the order", PAYPAL_REFUND_KEPT.daysAtMost, PAYPAL_REFUND_WATCH.daysWatchedAtMost);
+
+    // Claude 6 on #3464 (MEDIUM, cost): a failed look is looked at again an hour on, and each later look runs the whole
+    // taken-back path again before the lasting write: the refund mark's ZADD and EXPIRE, and for a capture reversed,
+    // failed or declined also its own mark's. The WHOLE command list of a failed look is held to the lines' sum, so
+    // no step in that path can go uncounted: the run's two list reads (the pending sweep's and the watch's), the watch
+    // line's own two (the paid record's GET and the list write), the one script, and the marks (PAYPAL_REFUND_KEPT).
+    for (const status of ["REFUNDED", "REVERSED"]) {
+      await setup();
+      captures.set(CAPTURE, status);
+      const look = await scripts(() => answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch()));
+      const counted = [
+        (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:pending:${SID}`,
+        (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${SID}`,
+        (c: (string | number)[]) => c[0] === "GET" && c[1] === `nl:ppsell:paid:${ORDER}`,
+        (c: (string | number)[]) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}` && c[c.length - 1] === ORDER,
+        (c: (string | number)[]) => look.kept.includes(c),
+      ];
+      const rest = [...look.sent];
+      for (const named of counted) {
+        const at = rest.findIndex(named);
+        if (at >= 0) rest.splice(at, 1);
+      }
+      const marks = new Set([`nl:ppsell:refunded:${SID}`, `nl:ppsell:reversed:${SID}`]);
+      is(`${status}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
+      is(`${status}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
+      is(
+        `${status}: the whole failed look is within the lines' sum`,
+        look.sent.length <=
+          PAYPAL_PENDING_SWEEP.listReadsPerStoreRun +
+            PAYPAL_REFUND_WATCH.listReadsPerStoreRun +
+            PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook +
+            PAYPAL_REFUND_KEPT.scriptsPerRefundLook +
+            PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost,
+        true,
+      );
+    }
   }
 
   part("The refund seen twice, in the lasting record and in the set, counts once");

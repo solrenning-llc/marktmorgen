@@ -374,7 +374,7 @@ export function EmailStudio(props: {
   email: string;
   name: string;
   mail: MailSettings | null;
-  counts: { total: number; agreed: number; left: number; mailable: number };
+  counts: { total: number; agreed: number; left: number; mailable: number } | null;
   /** This month's emails sent; null when the count could not be read (never shown as a guess). */
   used: number | null;
   allowance: number;
@@ -632,7 +632,7 @@ function ListCard({
   canExport,
   canImport,
 }: {
-  counts: { total: number; agreed: number; left: number; mailable: number };
+  counts: { total: number; agreed: number; left: number; mailable: number } | null;
   canExport: boolean;
   canImport: boolean;
 }) {
@@ -646,7 +646,9 @@ function ListCard({
     <div className="card mt-8 p-6 sm:p-8">
       <h2 className="text-lg font-semibold tracking-[-0.02em] text-ink">Your list</h2>
       <p className="mt-2 text-ink-soft">
-        {`${n(counts.mailable)} ${counts.mailable === 1 ? "person" : "people"} you can write to. ${n(counts.left)} left through the unsubscribe link, and ${n(counts.total - counts.agreed)} gave their address for one thing only and are never written to.`}
+        {counts === null
+          ? "Your list could not be counted just now. Nothing about it changed; open this page again in a moment."
+          : `${n(counts.mailable)} ${counts.mailable === 1 ? "person" : "people"} you can write to. ${n(counts.left)} left through the unsubscribe link, and ${n(counts.total - counts.agreed)} gave their address for one thing only and are never written to.`}
       </p>
       {canExport ? (
         <form action="/api/store/leads" method="get" className="mt-4">
@@ -723,7 +725,7 @@ function Compose(props: {
   email: string;
   products: { id: string; title: string }[];
   links: Record<string, string>;
-  counts: { mailable: number };
+  counts: { mailable: number } | null;
   /** This month's emails used and allowed, as the "This month" card shows them (460 [EL4]); null when the plan's month cannot be told. */
   month: { used: number; allowance: number } | null;
   canSend: boolean;

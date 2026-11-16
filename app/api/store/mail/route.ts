@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       // emails go out in portions that double (lib/mail-health.ts), also
       // when the store's data room filled up partway and only some went in.
       await startRamp(healthId(store), added);
-      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, counts: await listCounts(store.listId) });
+      return Response.json({ ok: true, added, already, skipped, full, roomFull: roomFull ?? null, counts: await listCounts(store.listId).catch(() => null) });
     }
 
     if (action === "count") {

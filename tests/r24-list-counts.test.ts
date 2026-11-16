@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   for (const [what, at] of [["the list's size", 0], ["the agreed counter", 1], ["the unsubscribed counter", 2]] as const) {
     part(`${what} that does not read is unknown, never 0`);
-    for (const value of ["QUEUED", -1, "1.5", { error: "ERR synthetic" }, ...(at === 0 ? [null] : [])]) {
+    for (const value of ["QUEUED", "1.5", "01", { error: "ERR synthetic" }, ...(at === 2 ? [] : [-1, "-1"]), ...(at === 0 ? [null] : [])]) {
       bend = (_c, real) => real.map((r, i) => (i === at ? value : r));
       is(`${JSON.stringify(value)}: unknown`, await outcome(), "unknown");
       bend = null;
@@ -60,6 +60,12 @@ async function main(): Promise<void> {
   part("Control: real replies give the real counts");
   const counts = await outcome();
   is("two people, none agreed yet", counts, { total: 2, agreed: 0, left: 0, mailable: 0, full: false });
+  part("Control: the unsubscribed counter below zero (a plain DECR) is none left, as before");
+  for (const value of [-1, "-1"]) {
+    bend = (_c, real) => real.map((r, i) => (i === 2 ? value : r));
+    is(`${JSON.stringify(value)}: none left`, ((await outcome()) as { left?: number }).left, 0);
+    bend = null;
+  }
   done();
 }
 

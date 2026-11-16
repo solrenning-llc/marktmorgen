@@ -73,7 +73,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     return counted.ok ? ({ ok: true } as const) : ({ ok: false, message: counted.message } as const);
   };
   const [counts, used, listedBroadcasts, loadedFlows, listings, loadedDrafts, pause, health, confirmedPause] = await Promise.all([
-    listCounts(store.listId),
+    // A list that did not count is said so on its card, never "0 people" (rule 24).
+    listCounts(store.listId).catch(() => null),
     // A garbled month counter is unknown (rule 24), and only that card says so: never the whole page down (#3727).
     usedThisMonth(store.listId, windowId(store)).catch(() => null),
     // A campaign whose record expired (400 days) is gone, known: never "could not be read" forever (main's 57ca6e5a3).

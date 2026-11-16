@@ -37,6 +37,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { textCountOf } from "@/lib/redis-count";
 import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
@@ -1247,16 +1248,36 @@ export async function stopWriting(listId: string, rawEmail: string, why: "bounce
 
 export type ListCounts = { total: number; agreed: number; left: number; mailable: number; full: boolean };
 
+/** A counter moved by INCR and DECR, read with GET: absent is 0, a whole number (sign allowed) is itself, else null. */
+function signedCounterOf(reply: unknown): number | null {
+  if (reply === null) return 0;
+  if (typeof reply === "number") return Number.isSafeInteger(reply) ? reply : null;
+  if (typeof reply !== "string" || !/^-?(0|[1-9]\d*)$/.test(reply)) return null;
+  const n = Number(reply);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 export async function listCounts(listId: string | null): Promise<ListCounts> {
   if (!listId || !isRedisConfigured()) return { total: 0, agreed: 0, left: 0, mailable: 0, full: false };
-  const [total, agreed, left] = await redisPipeline([
-    ["HLEN", leadsKey(listId)],
-    ["GET", agreedKey(listId)],
-    ["GET", unsubKey(listId)],
-  ]);
-  const t = Number(total) || 0;
-  const a = Math.min(t, Number(agreed) || 0);
-  const l = Math.min(a, Math.max(0, Number(left) || 0));
+  // Read exactly (rule 24): the size with countOf, each counter with textCountOf (absent is nothing counted yet).
+  // Anything else is unknown and throws, so no page tells the creator "0 people" for a list that did not count.
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HLEN", leadsKey(listId)],
+      ["GET", agreedKey(listId)],
+      ["GET", unsubKey(listId)],
+    ]),
+    3,
+  );
+  const total = replies ? countOf(replies[0]) : null;
+  const agreed = replies ? textCountOf(replies[1]) : null;
+  // The unsubscribed counter is moved with a plain DECR as well (setContact's scripts), so a whole number below zero
+  // is a reply in its exact shape, taken as none left, as before; anything else is unknown.
+  const left = replies ? signedCounterOf(replies[2]) : null;
+  if (total === null || agreed === null || left === null) throw new UnknownReplyError("the list's counts");
+  const t = total;
+  const a = Math.min(t, agreed === "absent" ? 0 : agreed);
+  const l = Math.min(a, Math.max(0, left));
   return { total: t, agreed: a, left: l, mailable: a - l, full: t >= MAX_LEADS };
 }
 

@@ -427,7 +427,7 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
     grew.units += more;
     return { ok: true };
   };
-  const [counts, heads, flows] = await Promise.all([listCounts(store.listId), readMeasuredHeads(sizes, regrow), readFlows(store.listId)]);
+  const [counts, heads, flows] = await Promise.all([listCounts(store.listId).catch(() => null), readMeasuredHeads(sizes, regrow), readFlows(store.listId)]);
   if (grew.refused) return grew.refused;
   if (!heads.ok) throw new Error("the emails could not be read");
   const broadcasts = heads.heads;
@@ -462,7 +462,8 @@ export async function emailsTool(store: Store, meter: { charge: Charge; hold: Ho
   const revenue = revenueRead === "refused" ? null : revenueRead;
   return {
     currency: store.currency,
-    list: { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable },
+    // null when the list did not count just now (rule 24): never zeros.
+    list: counts ? { people: counts.total, agreed_to_hear: counts.agreed, left: counts.left, can_be_emailed: counts.mailable } : null,
     emails: broadcasts.map((b) => {
       const money = broadcastMoney(revenue, b.id);
       return {

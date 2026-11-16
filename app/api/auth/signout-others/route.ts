@@ -3,6 +3,7 @@ import { originFrom } from "@/lib/request-origin";
 import { SESSION_COOKIE, endOtherSessions, isFreshSession, sessionEmail } from "@/lib/auth";
 import { fromAnotherSite } from "@/lib/request-guard";
 import { lockedUntil } from "@/lib/two-step";
+import { lockRead, lockUnreadPage } from "@/lib/two-step-unknown";
 
 /**
  * Closes every session of this creator except the one asking (757 [STN4], unit 1).
@@ -29,11 +30,24 @@ export async function POST(request: NextRequest) {
   // No session (confirmed absent): there is nothing of this person's to close.
   if (!email) return away("/signin");
   // A session let in without its second step cannot log the others out (lib/two-step.ts), as with signout-all.
-  if ((await lockedUntil(id)) > 0) return away("/studio?two-step=locked");
+  // A lock that could not be read is never read as free nor as locked: nothing is closed, and the 503 page says so,
+  // never a server error (rule 24; lib/two-step-unknown.ts; Claude 7's MÉDIO 1 on #3459).
+  const back = { back: `${origin}/studio/devices`, to: "your devices" };
+  const until = await lockRead(lockedUntil(id), back);
+  if (until instanceof Response) return until;
+  if (until > 0) return away("/studio?two-step=locked");
   // Unlike signout-all, this keeps the presser logged in, so it needs a login from the last FRESH_LOGIN_SECONDS, as
   // adding a passkey does: a session cookie that walked off could otherwise log the owner out everywhere and stay in
   // (Claude 3 on #3459). A freshness read that is not exact is not fresh (lib/auth.ts isFreshSession); nothing is closed.
-  if (!(await isFreshSession(id))) return away("/studio/devices?status=out-others-reauth");
+  // One that could not be read at all is not fresh either, and is said with the same 503 page, never a 500.
+  let fresh: boolean;
+  try {
+    fresh = await isFreshSession(id);
+  } catch (error) {
+    console.error("reading the session's freshness to log out the other devices failed", error);
+    return lockUnreadPage(back.back, back.to);
+  }
+  if (!fresh) return away("/studio/devices?status=out-others-reauth");
 
   const ended = await endOtherSessions(email, id);
   return away(`/studio/devices?status=${ended === null ? "out-others-unknown" : "out-others"}`);

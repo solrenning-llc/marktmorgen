@@ -17,6 +17,7 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, emailForSession, endOtherSessions, openSession, sessionMark } from "@/lib/auth";
 import { POST as signOutOthers } from "@/app/api/auth/signout-others/route";
 import { openLockedSession } from "@/lib/two-step";
+import { LOCK_UNREAD_MESSAGE } from "@/lib/two-step-unknown";
 import { advance, store as redis } from "./redis-stub";
 
 type Command = (string | number)[];
@@ -70,6 +71,8 @@ test("every other session of the account is closed, this one stays logged in, an
   );
   // The phone's second-step mark goes with it; this session keeps its own mark and its place in the account's set.
   assert.equal(await sessionMark(phone, OWNER), null);
+  // The closed sessions' marks are deleted, not left to expire (Claude 7's LEVE 1 on #3459): only this session's is left.
+  assert.equal(redis.keys().filter((key) => key.startsWith("nl:auth:second:")).length, (await sessionMark(here, OWNER)) === null ? 0 : 1);
   assert.equal(await endOtherSessions(OWNER, here), 0, "only this browser is left, so nothing more is closed");
 });
 
@@ -194,6 +197,27 @@ test("a freshness read that is not an exact answer is not fresh: nothing is clos
   assert.equal(response.headers.get("location"), REAUTH);
   assert.equal(await emailForSession(laptop), OWNER);
 });
+
+// Rule 24 at the route (Claude 7's MÉDIO 1 on #3459 @9fc786e838): a lock or a freshness that could not be read is
+// neither "locked" nor "free", nor "fresh": nothing is closed, and the person gets the 503 page that says so, with a
+// way back, never a server error (tests/r24-lock-unread-routes.test.ts holds the same for every other route).
+for (const [label, unread] of [
+  ["the two-step lock's read throws", (c: Command) => c[0] === "MGET" && c.some((part) => String(part).startsWith("nl:2fa:locked:"))],
+  ["the freshness read throws", (c: Command) => c[0] === "EXISTS"],
+] as const) {
+  test(`${label}: a 503 page in plain words, never a 500, and no session is closed`, async () => {
+    redis.clear();
+    const here = await openSession(OWNER);
+    const laptop = await openSession(OWNER);
+    const response = await tampered((c) => (unread(c) ? "throw" : null), () => signOutOthers(post(here)));
+    const page = await response.text();
+    assert.deepEqual(
+      [response.status, response.headers.get("retry-after"), page.includes(LOCK_UNREAD_MESSAGE.replace(/'/g, "&#39;")), page.includes(`${SITE}/studio/devices`)],
+      [503, "60", true, true],
+    );
+    assert.deepEqual([await emailForSession(here), await emailForSession(laptop)], [OWNER, OWNER]);
+  });
+}
 
 test("a request from another site is refused before anything is read", async () => {
   redis.clear();

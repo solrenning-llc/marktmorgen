@@ -628,6 +628,24 @@ export async function isMailable(listId: string, rawEmail: string): Promise<bool
 }
 
 /**
+ * The replies an import reads before it decides anything, each read exactly (CX-123 rule 24; the coordinator's sweep
+ * of 16 November 2026): the list's size a whole count, the rows kept for the addresses one string or nothing each,
+ * and the store's deleted people whole (wholeErasedReply). Anything else throws UnknownReplyError before anything is
+ * written: an unknown size is never an empty list (the cap), unknown rows never "not on the list" (a contact who
+ * unsubscribed written back as agreeing) and unknown prints never "not deleted" (a person erased imported again).
+ */
+function importSize(reply: unknown): number {
+  const size = countOf(reply);
+  if (size === null) throw new UnknownReplyError("a list's size, before an import");
+  return size;
+}
+function importRows(reply: unknown, addresses: number): (string | null)[] {
+  const rows = repliesFor(reply, addresses);
+  if (!rows || !rows.every((row) => row === null || typeof row === "string")) throw new UnknownReplyError("a list's contacts, before an import");
+  return rows as (string | null)[];
+}
+
+/**
  * Brings in addresses the creator says agreed to hear from them, a few
  * hundred per round trip. Nobody who left is put back, and nobody already on
  * the list is changed except to mark that they agreed.
@@ -640,15 +658,15 @@ export async function importContacts(
   if (!isRedisConfigured() || !listId || !emails.length) return { added: 0, already: emails.length, full: false };
   const key = leadsKey(listId);
   const [size] = await redisPipeline([["HLEN", key]]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  let room = MAX_LEADS - importSize(size);
   const now = new Date().toISOString();
   let added = 0;
   let full = false;
   for (let i = 0; i < emails.length; i += 500) {
     const chunk = emails.slice(i, i + 500);
     const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
-    const found = Array.isArray(rows) ? rows : [];
-    const deleted = Array.isArray(prints) ? prints : [];
+    const found = importRows(rows, chunk.length);
+    const deleted = wholeErasedReply(prints, chunk.length);
     const pairs: string[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
     let newlyAgreed = 0;
@@ -810,11 +828,12 @@ export async function previewContactRows(
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  const existing = importRows(found, rows.length);
+  const deleted = wholeErasedReply(prints, rows.length);
+  const kept = importSize(size);
   return {
     outcomes: rows.map((row, i) => decide(parseContact(existing[i]), row, deleted[i] !== null && deleted[i] !== undefined)),
-    room: Math.max(0, MAX_LEADS - (Number(size) || 0)),
+    room: Math.max(0, MAX_LEADS - kept),
   };
 }
 
@@ -849,10 +868,10 @@ export async function importContactRows(listId: string, rows: ImportedContact[],
     ["HMGET", key, ...rows.map((r) => r.email)],
     suppressedAmongCommand(listId, rows.map((r) => r.email)),
   ]);
-  let room = MAX_LEADS - (Number(size) || 0);
+  let room = MAX_LEADS - importSize(size);
   const now = new Date().toISOString();
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  const existing = importRows(found, rows.length);
+  const deleted = wholeErasedReply(prints, rows.length);
   // Each write, with the fingerprint of what its address held when read.
   const writes: { email: string; value: string; was: string; row: number }[] = [];
   const sizes: { before: Contact | null; next: Contact }[] = [];

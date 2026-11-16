@@ -6,7 +6,8 @@ import { tellStudent } from "@/lib/lesson-comment-notify";
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { MAX_AI_LESSONS, MAX_AI_MODULES } from "@/lib/ai-rules";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setCourseLessons, setProductCourse, setProductHidden, storeForEmail, storeFolder } from "@/lib/store";
 import { jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
@@ -38,7 +39,7 @@ import { readTask } from "@/lib/assignment-rules";
 import { tellStudentOfReview } from "@/lib/assignment-notify";
 import { EMAIL_PATTERN } from "@/lib/auth";
 import { dropQuiz, readQuiz, readQuizFor, resetTries, saveQuiz, setupOf } from "@/lib/quiz";
-import { CERT_ID_PATTERN, withdrawCertificate } from "@/lib/certificate";
+import { CERT_ID_PATTERN, courseIndexes, withdrawCertificate } from "@/lib/certificate";
 import { hasProduct, productIds, readListing } from "@/lib/catalog";
 import { communityOf, courseChanged, unindexCourse } from "@/lib/community-index";
 import { LockBusyError, withLock } from "@/lib/redis-lock";
@@ -255,14 +256,14 @@ export async function POST(request: NextRequest) {
         // Noted as dropped before the product lets go of it (lib/removed-courses.ts), so its learners' records stay
         // reachable by their erasure; a full list or a note not confirmed keeps the course.
         try {
-          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) });
+          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) }, store, courseIndexes);
           if (noted !== "noted") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
-        await dropCourse(course, store, product.id);
+        await dropCourse(course, store, product.id, courseIndexes);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });
@@ -288,7 +289,7 @@ export async function POST(request: NextRequest) {
           if (!drop) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
           await save(result.course);
           const files = await applyTaskDrop(drop, storeKey(store), store);
-          if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
+          if (files.length) await deleteOrSweep(files, "handed-in work");
           return Response.json({ ok: true, course: result.course });
         }
         // A lesson is done by its quiz or by its assignment, never by both.
@@ -364,6 +365,21 @@ export async function POST(request: NextRequest) {
       if (action === "start") {
         const at = body.at === null ? null : Number(body.at);
         const result = editCourse(course, { op: "start", at });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      /*
+        When access to the course ends (24 [E7]), or null to take it off: a moment the studio worked out as the close
+        of the day the creator picked, in their own zone. The clock is the server's, never the browser's, so "after now"
+        and "never earlier" (lib/course.ts) are judged the same way for every creator. Only a number or null is read:
+        a string, a missing value or anything else is refused as not a date, never turned into one. A membership course
+        never takes an end (members keep it while they pay).
+      */
+      if (action === "access-end") {
+        const at = body.at === null ? null : typeof body.at === "number" ? body.at : Number.NaN;
+        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000), membership: product.recurring !== null });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
         return Response.json({ ok: true, course: result.course });
@@ -555,7 +571,7 @@ export async function POST(request: NextRequest) {
         // An assignment goes with its lesson, and the work handed in for it, as read before the save.
         for (const drop of taskDrops) {
           const files = await applyTaskDrop(drop, storeKey(store), store);
-          if (files.length) await del(files).catch((error: unknown) => console.error("could not delete handed-in work", error));
+          if (files.length) await deleteOrSweep(files, "handed-in work");
         }
       }
       if (edit.op === "module-edit" || edit.op === "module-remove" || edit.op === "lesson-add" || edit.op === "outline") {
@@ -568,7 +584,7 @@ export async function POST(request: NextRequest) {
         if (filesInCourse(result.course).some((f) => f.pathname === file.pathname)) continue;
         // A video the video service keeps is taken away there; anything else, from the file store.
         if (await dropStream(file.pathname, store).catch(() => false)) continue;
-        await del(file.pathname).catch((error: unknown) => console.error("could not delete a lesson file", error));
+        await deleteOrSweep(file.pathname, "a lesson file");
       }
       return Response.json({ ok: true, course: result.course, addedId: result.addedId, ...(stream ? { stream } : {}) });
     });

@@ -339,6 +339,25 @@ export async function POST(request: NextRequest) {
         const result = editCourse(course, { op: "start", at });
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
         await save(result.course);
+        // The cohort's start is part of the drip schedule (the card's `s` and `g`): kept, and its students walked again.
+        await registerDrip(store, product, result.course);
+        return Response.json({ ok: true, course: result.course });
+      }
+
+      /*
+        When access to the course ends (24 [E7]), or null to take it off: a moment the studio worked out as the close
+        of the day the creator picked, in their own zone. The clock is the server's, never the browser's, so "after now"
+        and "never earlier" (lib/course.ts) are judged the same way for every creator. Only a number or null is read:
+        a string, a missing value or anything else is refused as not a date, never turned into one. A membership course
+        never takes an end (members keep it while they pay).
+      */
+      if (action === "access-end") {
+        const at = body.at === null ? null : typeof body.at === "number" ? body.at : Number.NaN;
+        const result = editCourse(course, { op: "access-end", at, now: Math.floor(Date.now() / 1000), membership: product.recurring !== null });
+        if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
+        await save(result.course);
+        // The drip card carries the ends (`e`, `k`), so the run stops a stamped student's emails with their access.
+        await registerDrip(store, product, result.course);
         return Response.json({ ok: true, course: result.course });
       }
 

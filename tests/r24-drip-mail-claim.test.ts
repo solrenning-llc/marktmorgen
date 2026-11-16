@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   const student = async (): Promise<string> => {
     n += 1;
     const email = `drip-student-${n}@example.com`;
-    await touchStudent(course.id, email, NOW - 36 * 3600, store, { course, productId: product.id });
+    await touchStudent(course.id, email, NOW - 36 * 3600, store, undefined, { course, productId: product.id });
     return email;
   };
   const run = () => sendDripEmails(async (handle) => (handle === store.handle ? store : null), async (id) => (id === course.id ? course : null), "https://marktmorgen.com", NOW);

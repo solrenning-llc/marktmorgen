@@ -90,24 +90,24 @@ async function main(): Promise<void> {
   {
     const store = await setup();
     const email = "first@example.com";
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
     const kept = await entries(store);
     is("one pair a module that opens over time, scored when it opens", kept, [member(COURSE, email, "module000002"), String(NOW - 12 * 3600), member(COURSE, email, "module000003"), String(NOW - 36 * 3600 + 30 * DAY)]);
     is("the store is in the stores' set", (await original([["SISMEMBER", "nl:drip:stores", `${store.statsId}|${store.handle}`]]))[0], 1);
     const full = await setup();
     await original([["HSET", `nl:data:${full.sid || full.statsId}`, "#", 10_000_000_000]]);
-    await touchStudent(COURSE.id, "full@example.com", NOW, full, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, "full@example.com", NOW, full, undefined, { course: COURSE, productId: PRODUCT.id });
     const row = (await original([["HGET", `nl:course:${COURSE.id}:students`, emailKey("full@example.com")]]))[0];
     is("a full room: no row, no pair", [row, (await entries(full)).length], [null, 0]);
     const earlier = await setup();
-    await touchStudent(COURSE.id, email, NOW, earlier, { course: COURSE, productId: PRODUCT.id });
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, earlier, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW, earlier, undefined, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, earlier, undefined, { course: COURSE, productId: PRODUCT.id });
     is("an earlier start rewrites the scores", (await entries(earlier)).slice(0, 2), [member(COURSE, email, "module000002"), String(NOW - 12 * 3600)]);
     // A later visit writes its pairs no more: the course start (no outline) keeps the row's mark, and a visit after it
     // writes the row alone.
     await touchStudent(COURSE.id, email, NOW, earlier);
     seen.length = 0;
-    await touchStudent(COURSE.id, email, NOW, earlier, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW, earlier, undefined, { course: COURSE, productId: PRODUCT.id });
     is("a later visit: the row alone, no ZADD and no room taken", seen.filter((c) => c[0] === "ZADD" || c[0] === "EVAL").length, 0);
   }
 
@@ -117,8 +117,8 @@ async function main(): Promise<void> {
     const due = "due@example.com";
     const later = "later@example.com";
     const old = "old@example.com";
-    await touchStudent(COURSE.id, due, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
-    await touchStudent(COURSE.id, later, NOW, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, due, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, later, NOW, store, undefined, { course: COURSE, productId: PRODUCT.id });
     // A pair whose module opened eight days ago, past the seven-day window, written as an older run would have left it.
     await original([["HSET", `nl:course:${COURSE.id}:students`, emailKey(old), JSON.stringify({ e: old, s: NOW - 9 * DAY, l: NOW })], ["ZADD", dueKey(store), NOW - 8 * DAY, member(COURSE, old, "module000002")]]);
     seen.length = 0;
@@ -144,12 +144,33 @@ async function main(): Promise<void> {
     is("the card registerDrip kept", card !== null && card !== "unknown" && typeof card === "object", true);
     const started = "started-only@example.com";
     // The start route's call: the card, never the outline (app/api/store/course/start/route.ts).
-    await touchStudent(COURSE.id, started, NOW - 36 * 3600, store, card && card !== "unknown" ? ({ card } as never) : undefined);
+    await touchStudent(COURSE.id, started, NOW - 36 * 3600, store, undefined, card && card !== "unknown" ? ({ card } as never) : undefined);
     is("its pairs are in the index without a visit to the course page", (await entries(store)).includes(member(COURSE, started, "module000002")), true);
     await quietly(() => run(store));
     is("and the module's email goes on the day it opens, once", to(started), 1);
     const route = readFileSync("app/api/store/course/start/route.ts", "utf8");
     is("the start route reads the card and hands it to touchStudent", /dripCardFor\(course\.id\)/.test(route) && /touchStudent\(course\.id, order\.email, order\.created, store, [^)]*card/.test(route), true);
+  }
+
+  part("The access end (24 [E7]) through the index: ends that do not read send nothing on a guess; a new stamp walks the pairs in again");
+  {
+    const store = await setup();
+    // A course whose ends kept for earlier buyers did not read: a stamped student's end is unknown, never "open".
+    await registerDrip(store, PRODUCT as never, { ...COURSE, accessEndsAt: NOW + 30 * DAY, accessEndsKept: "unknown" } as Course);
+    const stamped = "stamped-unknown@example.com";
+    const plain = "no-stamp@example.com";
+    await touchStudent(COURSE.id, stamped, NOW - 36 * 3600, store, NOW + 30 * DAY, { course: { ...COURSE, accessEndsAt: NOW + 30 * DAY, accessEndsKept: "unknown" } as Course, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, plain, NOW - 36 * 3600, store, null, { course: COURSE, productId: PRODUCT.id });
+    await quietly(() => run(store));
+    is("the stamped student is not emailed while the ends do not read", to(stamped), 0);
+    is("and their pair stays for the next run", (await entries(store)).includes(member(COURSE, stamped, "module000002")), true);
+    is("a student with no stamp is emailed as before", to(plain), 1);
+    const noteStudentStamp = L.noteStudentStamp as (c: string, e: string, r: () => Promise<number | null | "unknown">, s: Store) => Promise<void>;
+    const rowOf = async () => JSON.parse(String((await original([["HGET", `nl:course:${COURSE.id}:students`, emailKey(stamped)]]))[0])) as Record<string, unknown>;
+    is("the row is marked indexed after its first visit", (await rowOf()).i, 1);
+    await noteStudentStamp(COURSE.id, stamped, async () => null, store);
+    const after = await rowOf();
+    is("a stamp taken off clears the row's stamp and its index mark, so the next visit walks its pairs in again", [after.x, after.i], [undefined, undefined]);
   }
 
   part("The window is seven days (three until 15 November 2026): a pair five or six and a half days old is emailed once, not dropped");
@@ -158,8 +179,8 @@ async function main(): Promise<void> {
     const five = "five@example.com";
     const six = "six@example.com";
     // Pairs a three-day window dropped unsent: the seven-day window emails them, later than a fresh pair, once.
-    await touchStudent(COURSE.id, five, NOW - 6 * DAY, store, { course: COURSE, productId: PRODUCT.id });
-    await touchStudent(COURSE.id, six, NOW - 7.5 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, five, NOW - 6 * DAY, store, undefined, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, six, NOW - 7.5 * DAY, store, undefined, { course: COURSE, productId: PRODUCT.id });
     is("both pairs in the index", [(await entries(store)).includes(member(COURSE, five, "module000002")), (await entries(store)).includes(member(COURSE, six, "module000002"))], [true, true]);
     const first = await quietly(() => run(store));
     is("both emailed, once each", [to(five), to(six), first.sent], [1, 1, 2]);
@@ -173,7 +194,7 @@ async function main(): Promise<void> {
     const store = await setup();
     const late = "late-indexed@example.com";
     // The module opened two days ago (start three days ago, dripDays 1); the pair is written only now.
-    await touchStudent(COURSE.id, late, NOW - 3 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, late, NOW - 3 * DAY, store, undefined, { course: COURSE, productId: PRODUCT.id });
     is("the pair is kept, inside the window", (await entries(store)).includes(member(COURSE, late, "module000002")), true);
     await quietly(() => run(store));
     await quietly(() => run(store));
@@ -203,7 +224,7 @@ async function main(): Promise<void> {
     const email = "moved@example.com";
     await registerDrip(store, PRODUCT as never, COURSE);
     // Began nine days ago: the second module opened eight days ago, past its seven-day window, so it is not even indexed.
-    await touchStudent(COURSE.id, email, NOW - 9 * DAY, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 9 * DAY, store, undefined, { course: COURSE, productId: PRODUCT.id });
     await quietly(() => run(store));
     is("nothing pending once the course is walked, nothing sent", [(await original([["SCARD", pendingKey(store)]]))[0], to(email)], [0, 0]);
     const changed = courseOf(COURSE.id, [{ id: "module000002", dripDays: 8 }, { id: "module000003", dripDays: 30 }]);
@@ -224,7 +245,7 @@ async function main(): Promise<void> {
     const store = await setup();
     const email = "removed@example.com";
     await registerDrip(store, PRODUCT as never, COURSE);
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
     await registerDrip(store, PRODUCT as never, courseOf(COURSE.id, [{ id: "module000003", dripDays: 30 }]));
     await original([["SREM", pendingKey(store), `${COURSE.id}|${store.handle}|${PRODUCT.id}`]]);
     await quietly(() => run(store));
@@ -235,12 +256,12 @@ async function main(): Promise<void> {
   {
     const store = await setup();
     const email = "gone@example.com";
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
     const before = (await entries(store)).length / 2;
     const removed = await forgetLearnerPerson(store, email, [{ courseId: COURSE.id, moduleIds: COURSE.modules.map((m) => m.id) }]);
     is("both pairs gone, none left", [before, (await entries(store)).length], [2, 0]);
     is("counted in the records removed", removed >= 2, true);
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
     inject = (commands) => (commands.some((c) => c[0] === "ZREM") ? Promise.resolve(commands.map((c) => (c[0] === "ZREM" ? "QUEUED" : 1))) : null);
     const unknown = await forgetLearnerPerson(store, email, [{ courseId: COURSE.id, moduleIds: COURSE.modules.map((m) => m.id) }]).then(() => "finished", () => "unknown");
     inject = null;
@@ -251,7 +272,7 @@ async function main(): Promise<void> {
   {
     const store = await setup();
     const email = "unread@example.com";
-    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW - 36 * 3600, store, undefined, { course: COURSE, productId: PRODUCT.id });
     inject = (commands) => (commands.some((c) => c[0] === "ZRANGEBYSCORE") ? Promise.resolve(commands.map((c) => (c[0] === "ZRANGEBYSCORE" ? "QUEUED" : 0))) : null);
     const counts = await quietly(() => run(store));
     inject = null;
@@ -309,7 +330,7 @@ async function main(): Promise<void> {
     const courses = products.map((p) => courseOf(p.course.id, [{ id: "module000002", dripDays: 1 }]));
     for (let n = 0; n < 8; n += 1) {
       await registerDrip(store, products[n] as never, courses[n]);
-      for (let s = 0; s < 30; s += 1) await touchStudent(courses[n].id, `student-${n}-${s}@example.com`, NOW - 36 * 3600, store, { course: courses[n], productId: products[n].id });
+      for (let s = 0; s < 30; s += 1) await touchStudent(courses[n].id, `student-${n}-${s}@example.com`, NOW - 36 * 3600, store, undefined, { course: courses[n], productId: products[n].id });
     }
     await original([["DEL", pendingKey(store)]]);
     sesHooks.onSes = () => new Response(JSON.stringify({ message: "synthetic: refused" }), { status: 400, headers: { "content-type": "application/json" } });
@@ -340,7 +361,7 @@ async function main(): Promise<void> {
     await quietly(() => run(store, NOW, async (id) => (id === COURSE.id ? later : null)));
     is("the same pairs rescored", (await original([["ZCARD", dueKey(store)]]))[0], pairs);
     is("a schedule change takes no room again for pairs already there", await used(), walked);
-    for (let i = 0; i < 20; i += 1) await touchStudent(COURSE.id, `walked${i}@example.com`, NOW, store, { course: later, productId: PRODUCT.id });
+    for (let i = 0; i < 20; i += 1) await touchStudent(COURSE.id, `walked${i}@example.com`, NOW, store, undefined, { course: later, productId: PRODUCT.id });
     is("a visit after the walk takes no room again for its pairs", await used(), walked);
   }
 
@@ -358,11 +379,11 @@ async function main(): Promise<void> {
             return out;
           })()
         : null;
-    await quietly(() => touchStudent(COURSE.id, email, NOW, store, { course: COURSE, productId: PRODUCT.id }).catch(() => undefined));
+    await quietly(() => touchStudent(COURSE.id, email, NOW, store, undefined, { course: COURSE, productId: PRODUCT.id }).catch(() => undefined));
     inject = null;
     const row = (await original([["HGET", `nl:course:${COURSE.id}:students`, emailKey(email)]]))[0];
     is("the row is not marked indexed when its pairs were not written", typeof row === "string" ? (JSON.parse(row) as { i?: number }).i ?? 0 : "no row", 0);
-    await touchStudent(COURSE.id, email, NOW, store, { course: COURSE, productId: PRODUCT.id });
+    await touchStudent(COURSE.id, email, NOW, store, undefined, { course: COURSE, productId: PRODUCT.id });
     is("the next visit writes the pairs", (await entries(store)).includes(member(COURSE, email, "module000003")), true);
   }
 
@@ -402,9 +423,13 @@ async function main(): Promise<void> {
     // Claude 5 on #3344 (16 November 2026): the walk asks which pairs are already indexed (ZMSCORE, a command and the
     // pairs' bytes a page), and a student's first start or visit has its bytes priced (an order or an imported row a
     // student); the walk's page went from 200 rows to 100 so its last page costs less: 0.0124, 0.0237 and 0.0472.
-    is("Store, Studio and Scale a month, in dollars", line, [0.0124, 0.0237, 0.0472]);
+    // Merge of main of 16 November 2026 (#3445, 24 [E7]): a row carries its stamp and a card its access ends, priced at
+    // their largest: 0.0125, 0.0238 and 0.0476.
+    is("Store, Studio and Scale a month, in dollars", line, [0.0125, 0.0238, 0.0476]);
     is("the Store line still below the three-day window's", line[0] < 0.0145, true);
     is("the registry's ceilings are the code's", [R.DRIP_REFUSALS_PER_STORE_RUN, R.DRIP_INDEX_PAGES_RUN], [learn.DRIP_REFUSALS_PER_STORE, L.DRIP_INDEX_PAGES_PER_RUN]);
+    // The access end (24 [E7], merge of main of 16 November 2026): a row's stamp and a card's ends are priced as written.
+    is("the registry's stamp and card ends are the code's", [R.DRIP_STAMP_BYTES, R.DRIP_CARD_ENDS_BYTES], [L.STAMP_BYTES, L.DRIP_CARD_END_BYTES]);
   }
 }
 

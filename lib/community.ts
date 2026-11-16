@@ -45,7 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -793,20 +793,29 @@ export async function directorySize(id: string): Promise<number> {
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
 export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
-  const [reply, total] = await redisPipeline([
-    ["HSCAN", membersKey(id), cursor, "COUNT", count],
-    ["HLEN", membersKey(id)],
-  ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  const both = repliesFor(
+    await redisPipeline([
+      ["HSCAN", membersKey(id), cursor, "COUNT", count],
+      ["HLEN", membersKey(id)],
+    ]),
+    2,
+  );
+  // HSCAN answers [cursor, [field, value, ...]] and HLEN a count (CX-123 rule 24): a page in any other shape is
+  // unknown, never a last or empty page, so no list, export or send takes a part of the members for all of them.
+  const page = repliesFor(both?.[0], 2);
+  const at = page?.[0];
+  const next = typeof at === "string" && /^\d{1,20}$/.test(at) ? at : countOf(at) !== null ? String(at) : null;
+  const flat = stringList(page?.[1]);
+  const total = countOf(both?.[1]);
+  if (next === null || !flat || flat.length % 2 !== 0 || total === null) throw new UnknownReplyError("a page of a community's members");
   const members: Member[] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) {
     const member = parseMember(flat[i + 1]);
     if (member) members.push(member);
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
-  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
-  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
+  const bytes = flat.reduce((n, v) => n + Buffer.byteLength(v), 0);
+  return { members, next, total, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */
@@ -917,12 +926,16 @@ export type NewPost = {
 
 /** Writes a post. The caller has checked who may, and cleaned what it says. */
 export async function createPost(id: string, input: NewPost, room: DataStore): Promise<{ ok: true; post: Post } | { ok: false; reason: "full" }> {
-  const [count] = await redisPipeline([["ZCARD", feedKey(id)]]);
-  if (Number(count) >= MAX_POSTS) return { ok: false, reason: "full" };
-  const [n] = await redisPipeline([["INCR", seqKey(id)]]);
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const count = countOf(repliesFor(await redisPipeline([["ZCARD", feedKey(id)]]), 1)?.[0]);
+  if (count === null) throw new UnknownReplyError("ZCARD of a community's feed");
+  if (count >= MAX_POSTS) return { ok: false, reason: "full" };
+  // The post's number is the feeds' score: an unreadable one, or one INCR cannot give, writes nothing (rule 24).
+  const n = countOf(repliesFor(await redisPipeline([["INCR", seqKey(id)]]), 1)?.[0]);
+  if (n === null || n < 1) throw new UnknownReplyError("INCR of a community's post sequence");
   const post: Post = {
     id: input.id && ITEM_ID.test(input.id) ? input.id : newItemId(),
-    n: Number(n),
+    n,
     sp: input.space,
     a: input.author,
     title: input.title,
@@ -1194,8 +1207,10 @@ export async function addComment(
   input: { parent: string; author: string; text: string; id?: string },
   room: DataStore,
 ): Promise<{ ok: true; comment: Comment } | { ok: false; reason: "full" | "parent" }> {
-  const [size] = await redisPipeline([["HLEN", commentsKey(id, post)]]);
-  if (Number(size) >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
+  // An unreadable count is unknown, never under the cap (rule 24): nothing is written on it.
+  const size = countOf(repliesFor(await redisPipeline([["HLEN", commentsKey(id, post)]]), 1)?.[0]);
+  if (size === null) throw new UnknownReplyError("HLEN of a community post's comments");
+  if (size >= MAX_COMMENTS_PER_POST) return { ok: false, reason: "full" };
   let parent = "";
   if (input.parent) {
     const above = await readComment(id, post, input.parent);
@@ -1367,19 +1382,26 @@ export async function dropSpace(id: string, space: string): Promise<void> {
 /**
  * Deletes one member's own record (lib/community-erasure.ts): who they are,
  * their name and answers, their place in the directory, and the counts kept
- * for their limits. Answers the record as it was, for the keys it names
- * elsewhere (their handle, their unsubscribe token), or null.
+ * for their limits. Answers how many records its HDEL deleted (0 or 1);
+ * the keys the record names elsewhere (their handle, their unsubscribe token)
+ * are read and deleted before it, by the erasure (readMember).
  */
-export async function forgetMemberRecord(id: string, who: string): Promise<Member | null> {
-  if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", membersKey(id), who]]);
-  const member = parseMember(raw);
-  await redisPipeline([
+export async function forgetMemberRecord(id: string, who: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const rates = (Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind));
+  // Each delete's own answer, read exactly (CX-123 rule 24; Claude 7 on #3095): HDEL and ZREM of one field 0 or 1, the
+  // rate keys' DEL from 0 up to their number. Any other answer, or a pipeline that does not answer one for each, may
+  // have left the record there: it throws, and the erasure is retried, never reported done. The count is the HDEL's.
+  const replies = repliesFor(await redisPipeline([
     ["HDEL", membersKey(id), who],
     ["ZREM", dirKey(id), who],
-    ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
-  ]);
-  return member;
+    ["DEL", ...rates],
+  ]), 3);
+  const [record, listed, limits] = (replies ?? []).map(countOf);
+  if (!replies || (record !== 0 && record !== 1) || (listed !== 0 && listed !== 1) || limits === null || limits === undefined || limits > rates.length) {
+    throw new UnknownReplyError("a community member's record deleted");
+  }
+  return record;
 }
 
 /** Commands sent at once while reading a whole community for one member's copy. */

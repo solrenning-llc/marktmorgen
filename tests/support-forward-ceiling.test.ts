@@ -483,6 +483,33 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   is("[CORRETO] both are read and sent on, never held", [shown, mailReads - readsBeforeStore], [["sent", "sent"], 2]);
   is("[CORRETO] support mail the announcement shows written to support@ is still held unread", await forward(message("late@made.example"), NOON, "support@marktmorgen.com"), "held");
 
+  // Codex P's review of #3481 at 5262b2e356 (6907713533, HIGH): the pre-read count was skipped whenever the announcement
+  // showed any address on the creators' domain, whether or not a store had that name, so past the day's announcements
+  // support@ written together with a made-up <name>@mail.marktmorgen.com was read at Resend each time, without end.
+  part("above the day, support@ announced with a creator address no store has: held, zero reads");
+  fresh();
+  const mixedDay = new Date(NOON).toISOString().slice(0, 10);
+  await spend("support-announced", mixedDay, ANNOUNCED - (limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200), 2 * 86_400);
+  await spend("support-announced-creator", mixedDay, limits.SUPPORT_ANNOUNCED_CREATOR_DAILY ?? 200, 2 * 86_400);
+  await claimHandle("ana@example.org", "harborkitchen", "Harbor Kitchen", "");
+  await setSubscription("ana@example.org", { customerId: "cus_Harbor0001", subscriptionId: "sub_Harbor0001", active: true, period: paidPeriod() });
+  const readsBeforeMixed = mailReads;
+  const mixed: string[] = [];
+  commands = 0;
+  for (let i = 0; i < 30; i++) {
+    const to = ["support@marktmorgen.com", `ghost${i}@mail.marktmorgen.com`];
+    mixed.push(await forward(message(`m${i}@made${i}.example`), NOON, to, `M <m${i}@made${i}.example>`));
+  }
+  is("[CORRETO] each is held, none read at Resend", [mixed.every((r) => r === "held"), mailReads - readsBeforeMixed], [true, 0]);
+  is("[CORRETO] each costs at most the store-name lookup, the EXISTS of its From and the day's notice beyond the route's", commands <= 30 * 2 + 3, true);
+  const malformed = await forward(message("odd@made.example"), NOON, ["support@marktmorgen.com", "Not A Handle!@mail.marktmorgen.com"]);
+  is("[CORRETO] a creator address that is no store name at all is held too, unread", [malformed, mailReads - readsBeforeMixed], ["held", 0]);
+  const realMixed = await forward(message("Lee <lee@example.org>", [], [], "harborkitchen@mail.marktmorgen.com"), NOON, ["support@marktmorgen.com", "harborkitchen@mail.marktmorgen.com"]);
+  is("[CORRETO] with a store's real address beside support@, it is still read and sent to the creator", [realMixed, mailReads - readsBeforeMixed], ["sent", 1]);
+  failing = /^nl:store:handle:/;
+  is("[CORRETO] a store-name lookup that cannot be read is tried again, unread", [await forward(message("x@made.example"), NOON, ["support@marktmorgen.com", "ghostx@mail.marktmorgen.com"]), mailReads - readsBeforeMixed], ["retry", 1]);
+  failing = null;
+
   globalThis.fetch = originalFetch;
   fixture.restore();
   done();

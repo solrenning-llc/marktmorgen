@@ -50,7 +50,12 @@ const RECOUNT_MOST = 2;
 type Entry = { until: number; paid?: boolean };
 
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
-/** The field of a stock record that counts its units sold: never a checkout id (cs_) nor a provisional hold (p_). */
+/**
+ * The field of a stock record that counts its units sold: never a checkout id (cs_) nor a provisional hold (p_).
+ * A change of format that only goes forward (Claude 5's LEVE on #4472): code from before it reads this field as a hold
+ * and throws "Stock reading unavailable", which closes the product's sale (never sells one more) but would leave every
+ * limited product with a sale unavailable after a rollback, so a rollback past it needs this reader kept.
+ */
 const SOLD = "#sold";
 
 /**
@@ -63,21 +68,25 @@ const SOLD = "#sold";
  * unit before the buyer can pay (withCartStockHolds, before the checkout is
  * handed over), and a hold is let go only once Stripe says its checkout
  * expired or once it is counted here, so a paid checkout always has its field
- * until it is counted. Billed as the EVAL and its two calls
- * (STOCK_SELL_COMMANDS in tests/plan-cost-registry.ts), it runs once for each
- * order's unit (confirmCartStock, or the settling of a lapsed hold Stripe says
- * is paid), never on a page's count of what is left.
- * KEYS: the product's stock record; ARGV: the checkout's id. Returns 1 when counted now, 0 when there was nothing to count.
+ * until it is counted. Billed as the EVAL and its two calls, one HDEL of
+ * every checkout named and one HINCRBY by the number let go
+ * (STOCK_SELL_COMMANDS in tests/plan-cost-registry.ts), whatever the number of
+ * checkouts: a paid order's confirmation names its own (confirmCartStock), and
+ * a page's count names, in one script, every lapsed hold Stripe says is paid,
+ * at most MAX_CHECKS (Claude 5's MÉDIO on #4472: pages counting at the same
+ * time each sent a script a hold, priced nowhere; now each page sends at most
+ * one, inside STOCK_PAGE_SETTLE_COMMANDS_MOST, and a page that comes second
+ * lets go of nothing and counts nothing).
+ * KEYS: the product's stock record; ARGV: 1 to MAX_CHECKS checkout ids. Returns how many were counted now (0 when
+ * there was nothing to count), or -1 for any other shape.
  */
-export const STOCK_SELL = `-- marktmorgen:stock-sell:v1
-if #KEYS ~= 1 or #ARGV ~= 1 then return -1 end
-if redis.call("HDEL", KEYS[1], ARGV[1]) == 1 then
-  redis.call("HINCRBY", KEYS[1], "#sold", 1)
-  return 1
-end
-return 0`;
+export const STOCK_SELL = `-- marktmorgen:stock-sell:v2
+if #KEYS ~= 1 or #ARGV < 1 or #ARGV > ${MAX_CHECKS} then return -1 end
+local sold = redis.call("HDEL", KEYS[1], unpack(ARGV))
+if sold > 0 then redis.call("HINCRBY", KEYS[1], "#sold", sold) end
+return sold`;
 
-const sellCommand = (statsId: string, productId: string, session: string): (string | number)[] => ["EVAL", STOCK_SELL, 1, stockKey(statsId, productId), session];
+const sellCommand = (statsId: string, productId: string, sessions: string[]): (string | number)[] => ["EVAL", STOCK_SELL, 1, stockKey(statsId, productId), ...sessions];
 const lockKey = (id: string, productId: string) => `nl:stock:lock:${id}:${productId}`;
 /** The one hand-back a held checkout carries (handBackOnce), kept no longer than its hold. */
 const backKey = (id: string, session: string) => `nl:stock:back:${id}:${session}`;
@@ -184,7 +193,11 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   // Lapsed holds whose checkout could not be read: counted as used (the safe way to be wrong for selling), and
   // counted here so a refusal is never decided on them (stockLeftKnown).
   let unknown = 0;
-  const writes: (string | number)[][] = [];
+  // What this count settles, sent as one HDEL and one STOCK_SELL a product at the most, whatever the number of holds
+  // (Claude 5's MÉDIO on #4472): pages counting at the same time each pay their own, inside their own request
+  // (STOCK_PAGE_SETTLE_COMMANDS_MOST in tests/plan-cost-registry.ts), and the one that comes second counts nothing.
+  const letGo: string[] = [];
+  const paid: string[] = [];
   for (const [session, entry] of entries) {
     if (entry.paid) {
       // A sale written the old way, a field each: counted as used, as main reads it, and never written by a page's
@@ -199,7 +212,7 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     }
     // A cart's provisional hold that lapsed: every checkout opened under it has closed, and none bears its name (withCartStockHolds).
     if (session.startsWith(PENDING)) {
-      writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
+      letGo.push(session);
       continue;
     }
     if (!ask) {
@@ -215,10 +228,10 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     try {
       const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
       if (isSettled(found)) {
-        writes.push(sellCommand(store.statsId, product.id, session));
+        paid.push(session);
         used += 1;
       } else if (found.status === "expired") {
-        writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
+        letGo.push(session);
       } else {
         // An unknown or completed-but-unsettled response is not proof that
         // this unit can be sold again. A checkout still open or completed is a
@@ -231,6 +244,10 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
       unknown += 1;
     }
   }
+  const writes: (string | number)[][] = [];
+  if (letGo.length) writes.push(["HDEL", stockKey(store.statsId, product.id), ...letGo]);
+  if (paid.length) writes.push(sellCommand(store.statsId, product.id, paid));
+  // A write refused or unanswered leaves its fields for the next count to settle again; a paid hold was counted as used here either way.
   if (writes.length) await redisPipeline(writes).catch(() => {});
   return { left: Math.max(0, limit - used), unresolved, unknown };
 }

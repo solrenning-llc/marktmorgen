@@ -19,12 +19,12 @@ import { STOCK_SELL, stockLeft } from "@/lib/stock";
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
-import { STOCK_SELL_COMMANDS } from "./plan-cost-registry";
+import { STOCK_PAGE_SETTLE_COMMANDS_MOST, STOCK_SELL_COMMANDS } from "./plan-cost-registry";
 
 /** lib/stock.ts MAX_CHECKS: the most lapsed holds one count asks Stripe about. */
 const MAX_CHECKS = 5;
-/** A page's stock count at its worst: its one read, one HDEL of the holds let go, and one STOCK_SELL. */
-const PAGE_MOST = 1 + 1 + STOCK_SELL_COMMANDS;
+/** A page's stock count at its worst: its one read, and one HDEL of the holds let go and one STOCK_SELL (the registry's line). */
+const PAGE_MOST = 1 + STOCK_PAGE_SETTLE_COMMANDS_MOST;
 
 const creator = { statsId: "t".repeat(32), stripeAccountId: "acct_test_stocksettlepages" } as Store;
 const limited = (id: string, stock: number) => parseProduct({ id, title: `Print ${id}`, summary: "", priceCents: 2000, stock, link: `https://example.com/${id}` }) as Listing;

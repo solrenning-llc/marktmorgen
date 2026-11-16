@@ -5,7 +5,7 @@ import { cache } from "react";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteNav } from "@/components/site-nav-server";
 import { AffiliateDirectory } from "@/components/affiliate-directory";
-import { DIRECTORY_ORDER, readDirectory } from "@/lib/affiliate-directory";
+import { DIRECTORY_ORDER, readDirectoryPage } from "@/lib/affiliate-directory";
 import { INDEX_DIRECTORY_AT } from "@/lib/directory-index";
 
 const TITLE = "Affiliate programs to promote — Marktmorgen";
@@ -15,13 +15,14 @@ const DESCRIPTION =
 /**
  * One directory read a request: the metadata and the page share it, so a visit
  * that finds no kept page builds it once, not twice (#2921, CX-116 A1). Any
- * failure is null, the page's "unavailable just now" state.
+ * failure is null, the page's "unavailable just now" state. `omitted` counts the
+ * listed programs that could not be read and are not shown (Codex N1 on #2921).
  */
-const directory = cache(() => readDirectory().catch(() => null));
+const directory = cache(() => readDirectoryPage().catch(() => null));
 
 export async function generateMetadata(): Promise<Metadata> {
   await connection();
-  const rows = await directory();
+  const rows = (await directory())?.rows ?? null;
   return {
     title: TITLE,
     description: DESCRIPTION,
@@ -48,7 +49,9 @@ const HONEST = [
 
 export default async function AffiliateProgramsPage() {
   await connection();
-  const rows = await directory();
+  const directoryPage = await directory();
+  const rows = directoryPage?.rows ?? null;
+  const left = directoryPage && directoryPage.omitted > 0 ? directoryPage.omitted : 0;
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
       <SiteNav />
@@ -91,7 +94,14 @@ export default async function AffiliateProgramsPage() {
               </form>
             </div>
           ) : rows.length ? (
-            <AffiliateDirectory rows={rows} />
+            <>
+              {left > 0 ? (
+                <p role="status" className="mx-auto mb-6 max-w-3xl text-center text-sm text-ink-soft">
+                  {left === 1 ? "1 more program" : `${left} more programs`} could not be read just now and {left === 1 ? "is" : "are"} not shown. This does not mean they left the list. Try again in a few minutes.
+                </p>
+              ) : null}
+              <AffiliateDirectory rows={rows} />
+            </>
           ) : (
             <div className="card mx-auto max-w-2xl p-6 text-center sm:p-8">
               <h2 className="text-lg font-semibold text-ink">The first programs are on their way</h2>

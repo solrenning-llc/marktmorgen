@@ -98,6 +98,31 @@ async function main(): Promise<void> {
   const studio = readFileSync("app/studio/course/[product]/page.tsx", "utf8");
   is("the studio draws the field beside the start date, told whether the course is a membership or offers a payment plan", /<CourseAccessEnd productId=\{product\.id\} endsAt=\{course\.accessEndsAt \?\? null\} passed=\{[^}]+\} membership=\{product\.recurring !== null\} planOffered=\{activePlan\(product\) !== null\} \/>/.test(studio), true);
 
+  // A PayPal purchase is delivered with no end (lib/paypal-delivery.ts, recordOpenEnrollment): its route never reads
+  // the date shown. So every text that lists the ways with no end names PayPal, and a page says the date only where
+  // the checkout that stamps it is offered: never on a page that sells the course through PayPal alone (Claude 5's M1
+  // on #3445, VR item 2).
+  part("a PayPal purchase keeps the course with no end, and every text says so");
+  const paypalDelivery = readFileSync("lib/paypal-delivery.ts", "utf8");
+  const paypalCheckout = readFileSync("app/api/store/paypal/checkout/route.ts", "utf8");
+  is("(the PayPal delivery records the course as open-ended, and its checkout never reads the date shown)",
+    [/recordOpenEnrollment\(/.test(paypalDelivery), /access_end|ACCESS_END_FIELD|readShownAccessEnd/.test(paypalCheckout)], [true, false]);
+  const editor = readFileSync("components/course-editor.tsx", "utf8");
+  const hintAt = editor.indexOf("Leave it empty and students keep this course with no end");
+  const studioHint = hintAt < 0 ? "" : editor.slice(hintAt, editor.indexOf("planOffered ?", hintAt));
+  const paragraph = (file: string) => {
+    const source = readFileSync(file, "utf8");
+    const start = source.indexOf('id="course-access-end"');
+    return start < 0 ? "" : source.slice(start, source.indexOf("</p>", start));
+  };
+  is("the studio's field says a PayPal purchase keeps the course with no end", [studioHint.length > 0, /PayPal/.test(studioHint)], [true, true]);
+  is("the Terms say so", /PayPal/.test(paragraph("app/terms/page.tsx")), true);
+  is("the refund policy says so to the buyer", /PayPal/.test(paragraph("app/refunds/page.tsx")), true);
+  is("the sales page says the date only where the checkout that stamps it is offered",
+    /const accessEndLine = canSellProduct\(store, product\) \? courseFacts\?\.accessEndLine \?\? null : null;/.test(salesPage), true);
+  const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
+  is("and so does the course's own page", /!open && !settled && selling && endsAt !== null \? w\.accessEndsFact/.test(coursePage), true);
+
   part("the learner's gate, with the real ledger");
   redis.clear();
   // Synthetic Stripe: the stamped learner's purchase, or an outage.

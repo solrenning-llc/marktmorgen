@@ -8,12 +8,17 @@
  * the checkouts this store opened on its own Stripe account that were paid,
  * the one-click extras taken after them, and its PayPal sales; with the same
  * ceiling, EXPORT_PAGES pages of a hundred of each Stripe list and
- * EXPORT_PAGES hundred PayPal sales, behind the same counted window
- * (tests/plan-cost-registry.ts, line "studio"). Since the renewals are read
- * (ALTO 1 below) it walks a third Stripe list, the paid and pending invoices,
- * at the same ceiling: Stripe bills no API call, but the request runs longer
- * than the sales file's, a difference no registry line prices yet.
- * Stripe is asked only for the period (created[gte] and created[lt]).
+ * EXPORT_PAGES hundred PayPal sales, behind the same counted window.
+ * Since the renewals are read (ALTO 1 below) it walks a third Stripe list,
+ * the paid and pending invoices, at the same ceiling. Stripe bills no API
+ * call, but the request waits on it: the whole read runs inside its own
+ * cutoff, ACCOUNTING_READ_SECONDS (lib/fetch-timeout.ts, withCutoff), so
+ * every request still out then is given up and the read is refused as too
+ * slow, never cut short; and the route takes ACCOUNTING_READ_UNITS of the
+ * store's studio requests before anything is read, more than the read costs
+ * at the most (tests/plan-cost-registry.ts, ACCOUNTING_READ, line "studio";
+ * Claude 7's MÉDIO 1 on #2996). Stripe is asked only for the period
+ * (created[gte] and created[lt]).
  *
  * Unlike that file, nothing here is guessed or left out quietly: books are
  * filed from it. Every Stripe page is read in its exact shape
@@ -33,8 +38,15 @@
  * on #2996 @13f40ed407 (MÉDIO 2) also a switch to yearly or a plan change
  * ("subscription_update"), a one-off charge ("manual") and any other reason.
  * Only a first invoice ("subscription_create") is left out: it is its
- * checkout's sale already. An invoice paid by credit alone (amount_paid 0)
- * brought no money in and makes no line.
+ * checkout's sale already. An invoice of no more than nothing with nothing
+ * paid (a switch down's own invoice, whose credit goes on the buyer's
+ * balance; a free one) brought no money in and makes no line. One paid with
+ * an amount other than its total (part or all of it from the buyer's credit
+ * balance, which Stripe takes off the next renewal after a switch down,
+ * lib/tier-switch.ts) cannot be split into sale and tax exactly: it makes no
+ * file, and the answer names its day (Claude 7's MÉDIO 2 on #2996), so the
+ * other half of the month can be made and that renewal added by hand. A
+ * membership's first payment, read with its checkout, is held to the same.
  *
  * A day whose payments are not all settled makes no file yet (money review on
  * #2996, MÉDIO 2): its sale would come out later under the same invoice number
@@ -49,8 +61,9 @@
  * date passed) is not a sale: it makes no line and holds nothing. The answer
  * names the date of the earliest payment that holds the file.
  */
-import type { AccountingPeriod, AccountingSale } from "@/lib/accounting-export-rules";
+import { ACCOUNTING_READ_SECONDS, type AccountingPeriod, type AccountingSale } from "@/lib/accounting-export-rules";
 import { listingFinder } from "@/lib/catalog";
+import { timeLeft, withCutoff } from "@/lib/fetch-timeout";
 import { type Paid, readPayPalSalesExact } from "@/lib/paypal-sales";
 import { EXPORT_PAGES } from "@/lib/stats";
 import { type Store, saleHandles } from "@/lib/store";
@@ -61,12 +74,16 @@ import { StripeListUnreadable, hasOwnField, ownField, plainObject, readStripePag
 export const ACCOUNTING_PAGES = EXPORT_PAGES;
 /** PayPal sales read at the most: the sales file's own ceiling (readPaidSales, pages * 100). */
 export const ACCOUNTING_PAYPAL_LIMIT = EXPORT_PAGES * 100;
+// The read's cutoff and the studio requests it takes live with the file's rules, which the studio's form reads too.
+export { ACCOUNTING_READ_SECONDS, ACCOUNTING_READ_UNITS } from "@/lib/accounting-export-rules";
 
 export type AccountingRead =
   | { ok: true; sales: AccountingSale[] }
-  | { ok: false; reason: "too_many" | "unreadable" }
+  | { ok: false; reason: "too_many" | "unreadable" | "slow" }
   /** heldAt: when the earliest payment that holds the file was made (Unix seconds). */
-  | { ok: false; reason: "pending"; heldAt: number };
+  | { ok: false; reason: "pending"; heldAt: number }
+  /** at: when the earliest invoice paid with an amount other than its total was made (Unix seconds). */
+  | { ok: false; reason: "credit"; at: number };
 
 export type AccountingDeps = {
   stripe: (path: string) => Promise<unknown>;
@@ -155,7 +172,23 @@ function sale(period: AccountingPeriod, product: string, amount: unknown, tax: n
   return { at, product, currency: code, net: total - tax, tax };
 }
 
-export async function readAccountingSales(store: Store, period: AccountingPeriod, deps: AccountingDeps = defaultDeps(store)): Promise<AccountingRead> {
+/**
+ * An invoice's total and what was paid on it, as whole numbers (the total may be below zero: a switch down's credit),
+ * or throws Unreadable.
+ */
+function paidAndTotal(row: Record<string, unknown>): { paid: number; total: number } {
+  const total = ownField(row, "total");
+  const paid = wholeFrom(ownField(row, "amount_paid"));
+  if (typeof total !== "number" || !Number.isSafeInteger(total) || paid === null) throw new Unreadable();
+  return { paid, total };
+}
+
+/** The store's paid sales of `period`, read exactly inside its own cutoff (ACCOUNTING_READ_SECONDS). */
+export function readAccountingSales(store: Store, period: AccountingPeriod, deps: AccountingDeps = defaultDeps(store)): Promise<AccountingRead> {
+  return withCutoff(Date.now() + ACCOUNTING_READ_SECONDS * 1000, () => readWithin(store, period, deps));
+}
+
+async function readWithin(store: Store, period: AccountingPeriod, deps: AccountingDeps): Promise<AccountingRead> {
   const handles = saleHandles(store);
   const found: Omit<AccountingSale, "title">[] = [];
   const now = deps.now ? deps.now() : Math.floor(Date.now() / 1000);
@@ -165,6 +198,13 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
     const at = wholeFrom(created);
     if (at === null) throw new Unreadable();
     held.push(at);
+  };
+  // When each invoice paid with an amount other than its total was made; any one refuses the file (MÉDIO 2).
+  const credited: number[] = [];
+  const credit = (created: unknown) => {
+    const at = wholeFrom(created);
+    if (at === null) throw new Unreadable();
+    credited.push(at);
   };
   try {
     const paypal = await deps.paypal(store.statsId, period.from, period.to, ACCOUNTING_PAYPAL_LIMIT);
@@ -213,6 +253,12 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
           throw new Unreadable();
         }
         if (status !== "complete" || paid !== "paid") return;
+        // A membership's first invoice paid partly from the buyer's credit: its amount_total is not what came in (MÉDIO 2).
+        const firstPaid = hasOwnField(row, "invoice") ? ownField(row, "invoice") : null;
+        if (plainObject(firstPaid)) {
+          const first = paidAndTotal(firstPaid);
+          if (first.paid !== first.total) return credit(ownField(row, "created"));
+        }
         const totals = ownField(row, "total_details");
         const tax = plainObject(totals) ? wholeFrom(ownField(totals, "amount_tax")) : null;
         found.push(sale(period, meta.product ?? "", ownField(row, "amount_total"), tax, ownField(row, "currency"), ownField(row, "created")));
@@ -239,20 +285,27 @@ export async function readAccountingSales(store: Store, period: AccountingPeriod
           if (invoiceStillPayable(row, now)) hold(ownField(row, "created"));
           return;
         }
-        // Paid by credit alone: no money came in, so no line.
-        if (ownField(row, "amount_paid") === 0) return;
-        found.push(sale(period, meta.product ?? "", ownField(row, "amount_paid"), invoiceTaxOf(row), ownField(row, "currency"), ownField(row, "created")));
+        const { paid, total } = paidAndTotal(row);
+        // No more than nothing, nothing paid (a switch down's own invoice, a free one): no money came in, so no line.
+        if (paid === 0 && total <= 0) return;
+        // Paid partly or wholly from the buyer's credit balance: the cash cannot be split into sale and tax exactly (MÉDIO 2).
+        if (paid !== total) return credit(ownField(row, "created"));
+        found.push(sale(period, meta.product ?? "", paid, invoiceTaxOf(row), ownField(row, "currency"), ownField(row, "created")));
       });
       // All are read to their end or their first refusal; one failing is the whole answer.
       const settled = await Promise.allSettled([checkouts, extras, renewals]);
       for (const result of settled) if (result.status === "rejected") throw result.reason;
     }
+    // A renewal paid from credit never settles otherwise: said first, with its day, so the creator can act on it.
+    if (credited.length) return { ok: false, reason: "credit", at: Math.min(...credited) };
     if (held.length) return { ok: false, reason: "pending", heldAt: Math.min(...held) };
     const titles = new Map<string, string>();
     for (const product of new Set(found.map((s) => s.product))) titles.set(product, product ? await deps.title(product) : "");
     return { ok: true, sales: found.map((s) => ({ ...s, title: titles.get(s.product) || s.product })) };
   } catch (error) {
     if (error instanceof TooMany) return { ok: false, reason: "too_many" };
+    // The read's own cutoff passed: every request still out was given up. Too slow, never a file cut short.
+    if (timeLeft() <= 0) return { ok: false, reason: "slow" };
     if (!(error instanceof Unreadable || error instanceof StripeListUnreadable)) console.error("reading sales for an accounting file failed", error);
     return { ok: false, reason: "unreadable" };
   }

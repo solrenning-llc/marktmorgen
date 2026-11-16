@@ -52,7 +52,8 @@ import { PATH_READ_UNITS } from "@/lib/path";
 import { PLAN_INVOICES_READ, PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD } from "./plan-cost-registry";
 import { TASKS_RECOUNT_BYTES, TASKS_RECOUNT_UNITS, TASK_KEPT_BYTES, tasksRecountUnits } from "@/lib/crm";
 import { MAX_PERSON_TASKS, MAX_STORE_TASKS } from "@/lib/person-tasks";
-import { ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
+import { ACCOUNTING_READ_UNITS } from "@/lib/accounting-export-rules";
+import { ACCOUNTING_READ, ADD_ON_LINES, ASSIST_REMIND_READ, CERTIFICATE_PDF_READ, PATH_REMINDER_PUSH, PATH_BOARD_JOIN, PATH_BOARD_PRIVACY, PATH_PAGE, PATH_STUDIO_PAGE, PATH_READ, COST_LINES, EMAIL_SITES, KIND_LINES, NEXT_OFFER_READ, NOT_A_COST, SHELF_READ, OPEN, PER_PAYMENT_LINES, PICTURE_READ, SCOPES, UNIT_COST, nonPayingWorst, request } from "./plan-cost-registry";
 import { NEXT_OFFER_REQUEST_UNITS } from "@/lib/next-offer-rules";
 import { CART_OFFER_REQUEST_UNITS } from "@/lib/cart-offers";
 import { RETURNING_CODE_REQUEST_UNITS } from "@/lib/returning-code";
@@ -347,6 +348,11 @@ test("the units a figure is taken in cost at least what they stand for", () => {
   console.log(`an opening of the orders page: $${ORDERS_OPEN_READ.toFixed(6)} at most before its metered reads, counted as ${ORDERS_OPEN_UNITS} requests at $${laterPageCost().toFixed(6)}; ${ORDERS_UNIT_COMMANDS} metered commands a request`);
   // Marktmorgen Path's reading of a store's money and counts is PATH_READ_UNITS studio requests: more than its reads and its Stripe pages cost.
   assert.ok(PATH_READ_UNITS * UNIT_COST.studio >= PATH_READ, `${PATH_READ_UNITS} x ${UNIT_COST.studio} < ${PATH_READ}`);
+  // An accounting file is ACCOUNTING_READ_UNITS studio requests, taken before it reads: more than its read costs at the most, and no
+  // more than it needs (Claude 7's MÉDIO 1 on #2996), so the creator's figure pays only for what the read can cost.
+  assert.ok(ACCOUNTING_READ_UNITS * UNIT_COST.studio >= ACCOUNTING_READ, `${ACCOUNTING_READ_UNITS} x ${UNIT_COST.studio} < ${ACCOUNTING_READ}`);
+  assert.ok((ACCOUNTING_READ_UNITS - 1) * UNIT_COST.studio < ACCOUNTING_READ, "fewer studio requests would be enough: lower ACCOUNTING_READ_UNITS");
+  console.log(`an accounting file: $${ACCOUNTING_READ.toFixed(6)} at most, counted as ${ACCOUNTING_READ_UNITS} studio requests at $${UNIT_COST.studio.toFixed(6)}`);
   // A store's own plan invoices are one billing request of the day, priced as a heavy request (studio line) and two Stripe GETs
   // (platform-subscription-search): more than one Stripe list waited on to its ceiling, with room (601 [KB22] U5).
   const billingRequest = request("heavy", 40, 200_000) + PLATFORM_SUBSCRIPTION_SEARCH_EVENT_USD;

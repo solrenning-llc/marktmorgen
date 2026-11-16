@@ -134,6 +134,9 @@ import { MAX_COMPANIES_BYTES, MAX_COMPANY_RECORD_BYTES, STUDIO_UNIT_SENT_BYTES }
 import { type ReadShape, CALENDAR_BUILD_SHAPE, CALENDAR_FILE_BYTES, CALENDAR_POLL_SHAPE, CALENDAR_REFUSED_PRICED_PER_HOUR, CALENDAR_REFUSED_SHAPE, KEPT_READINGS_SHAPE, LIFE_FILL_SHAPE, LIST_MADE_SHAPE, MEMBERS_READ_SHAPE, SALES_READ_SHAPE, STATS_READ_SHAPE } from "@/lib/read-ceilings";
 import { CALENDAR_BUILDS_PER_DAY, CALENDAR_COPY_SECONDS, CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR } from "@/lib/calendar-sync";
 import { HEAVY_READINGS_PER_DAY, READING_COPY_MAX_BYTES, READING_KEEP_SECONDS, READING_KINDS, STORE_READINGS_PER_DAY } from "@/lib/store-readings";
+import { ACCOUNTING_PAYPAL_LIMIT, ACCOUNTING_READ_SECONDS } from "@/lib/accounting-export";
+import { APP_IMPORT_CAPS } from "@/lib/accounting-export-rules";
+import { LISTING_READ_BYTES } from "@/lib/read-ceilings";
 
 export const GB = 1024 * 1024 * 1024;
 /** Keeping a file, at the dearest of the three stores one may be in. */
@@ -904,6 +907,24 @@ export const PATH_BOARD_PRIVACY = request("heavy",30,120_000);
 
 export const PATH_READ = request("heavy", 26, LIFE_WRITE_MAX * 96 + 20_480) + (PATH_SALE_PAGES + PATH_REFUND_PAGES) * EXPORT_PAGE_SECONDS * MEMORY_SECOND;
 
+/** A line of an accounting file at the most: its product's title (MAX_TITLE_LENGTH, every character quoted twice at four bytes) and its other cells. */
+export const ACCOUNTING_LINE_BYTES = 4_096;
+/**
+ * One accounting file at the most (lib/accounting-export.ts, app/api/store/export with format=xero or quickbooks;
+ * Claude 7's MÉDIO 1 on #2996). The read runs inside its own cutoff (ACCOUNTING_READ_SECONDS), so its three Stripe
+ * walks, side by side, wait no longer than that, held at 2 GB with the CPU taken as busy all of it, and the route
+ * around it a heavy request's time more. Through the database: the PayPal sales listed and every record read
+ * (ACCOUNTING_PAYPAL_LIMIT at MAX_PAID_BYTES, a range and an MGET), a product's title read for each product sold (at
+ * most MAX_PRODUCTS listings at LISTING_READ_BYTES, a GET each), and the window, the session, the store and the take.
+ * Sent on: the file at the most lines an app imports in one go (larger is refused, never sent), ACCOUNTING_LINE_BYTES
+ * each. Counted as ACCOUNTING_READ_UNITS studio requests, taken before anything is read (tests/plan-cost-registry.test.ts
+ * holds the units above it, and tight).
+ */
+export const ACCOUNTING_READ = CALL + (ACCOUNTING_READ_SECONDS + SHAPES.heavy.seconds) * (CPU_SECOND + MEMORY_SECOND)
+  + (2 + MAX_PRODUCTS + 20 + 2 * TAKE_COMMANDS) * COMMAND
+  + ((ACCOUNTING_PAYPAL_LIMIT + 1) * 64 + ACCOUNTING_PAYPAL_LIMIT * MAX_PAID_BYTES + MAX_PRODUCTS * LISTING_READ_BYTES + 50_000) * DB_BYTE
+  + (Math.max(...Object.values(APP_IMPORT_CAPS).map((cap) => cap.rows)) + 1) * ACCOUNTING_LINE_BYTES * ORIGIN_PER_BYTE;
+
 /**
  * Review ceilings for a collection page's reads, paid for since 4 November 2026
  * (lib/page-read-rules.ts). What working through a body costs past what a
@@ -1484,8 +1505,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/crm.ts", names: ["valueReadBytes", "\"HMGET\""] },
       { file: "app/api/store/leads/route.ts", names: ["holdListDownload(store)", "held.read", "held.send", "held.settle"] },
       { file: "app/api/store/audience/route.ts", names: ["holdListDownload(store)", "held.read", "held.send", "held.settle"] },
+      // An accounting file (37 [F6]) takes ACCOUNTING_READ_UNITS studio requests before anything is read, its read bounded by its own cutoff (Claude 7's MÉDIO 1 on #2996).
+      { file: "app/api/store/export/route.ts", names: ['takeAllowance(store, "studio", ACCOUNTING_READ_UNITS)', "readAccountingSales(store, period)"] },
+      { file: "lib/accounting-export-rules.ts", names: ["ACCOUNTING_READ_SECONDS", "ACCOUNTING_READ_UNITS", "APP_IMPORT_CAPS"] },
+      { file: "lib/accounting-export.ts", names: ["withCutoff(Date.now() + ACCOUNTING_READ_SECONDS * 1000", "ACCOUNTING_PAYPAL_LIMIT", "ACCOUNTING_PAGES"] },
     ],
-    basis: "A list file or the buyers audience, which walks the whole list, takes from the figure the units of its commands and of every byte it reads and sends (lib/list-download.ts): each read held before it is made at the most it can answer with (a page of the list at the whole list as counted, the store's fields' values for the page's people at their longest), counted at what it moved, and the file held before it is sent; a read the figure has not the units for is never made, and what was held and not used is given back. Its fields' values are read for the people in the file only, never the whole of a field's values. Once a plan has ended it takes ENDED_LIST_DOWNLOADS of its own instead, priced in the line closure. Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+    basis: "An accounting file (lib/accounting-export.ts, 37 [F6]) takes ACCOUNTING_READ_UNITS of the figure before anything is read, more than ACCOUNTING_READ, its most: its three Stripe walks run inside the read's own cutoff (ACCOUNTING_READ_SECONDS), so they wait no longer than that, with every PayPal record and product title at its ceiling and the file at the most lines an app imports; a store without the units is refused before Stripe is asked. A list file or the buyers audience, which walks the whole list, takes from the figure the units of its commands and of every byte it reads and sends (lib/list-download.ts): each read held before it is made at the most it can answer with (a page of the list at the whole list as counted, the store's fields' values for the page's people at their longest), counted at what it moved, and the file held before it is sent; a read the figure has not the units for is never made, and what was held and not used is given back. Its fields' values are read for the people in the file only, never the whole of a field's values. Once a plan has ended it takes ENDED_LIST_DOWNLOADS of its own instead, priced in the line closure. Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
   },
   {
     id: "store-readings",

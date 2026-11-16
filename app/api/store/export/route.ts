@@ -11,7 +11,7 @@ import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 const ENDED_EXPORT_SECONDS = 60 * 86_400;
 import { takeAllowance } from "@/lib/store-allowance";
 import { APP_IMPORT_CAPS, accountingFile, accountingLines, accountingPeriod, cleanAccountCode, cleanTaxName } from "@/lib/accounting-export-rules";
-import { ACCOUNTING_PAGES, ACCOUNTING_PAYPAL_LIMIT, readAccountingSales } from "@/lib/accounting-export";
+import { ACCOUNTING_PAGES, ACCOUNTING_PAYPAL_LIMIT, ACCOUNTING_READ_UNITS, readAccountingSales } from "@/lib/accounting-export";
 
 /**
  * The count a window round gave (lib/window-count.ts), only in its exact
@@ -129,9 +129,22 @@ export async function GET(request: NextRequest) {
         if (account === null) return plain(400, "An account code is up to 10 letters and digits, like 200. Or leave it empty and choose it in Xero.");
         const tax = cleanTaxName(params.get("tax") ?? "");
         if (tax === null) return plain(400, `A tax rate is its name in ${app}, in plain words up to 50 characters, like Tax Exempt. Or leave it empty and choose it in ${app}.`);
+        // Its three Stripe walks, the PayPal records and the titles at their most, taken from the studio's figure before
+        // anything is read (tests/plan-cost-registry.ts, ACCOUNTING_READ; Claude 7's MÉDIO 1 on #2996).
+        const tookRead = await takeAllowance(store, "studio", ACCOUNTING_READ_UNITS);
+        if (!tookRead.ok) return plain(429, tookRead.message);
         const read = await readAccountingSales(store, period);
         if (!read.ok && read.reason === "unreadable") {
           return plain(502, "Some of your sales could not be read exactly just now, so no file was made: a file with sales missing would put wrong totals in your books. Nothing is lost. Try again in a few minutes.");
+        }
+        if (!read.ok && read.reason === "slow") {
+          return plain(503, `Reading ${period.label} from Stripe took too long, so no file was made. Nothing is lost. Choose the first or the second half of the month, or try again later.`);
+        }
+        if (!read.ok && read.reason === "credit") {
+          // Paid partly or wholly from the buyer's credit balance (Claude 7's MÉDIO 2 on #2996): the cash cannot be split
+          // into sale and tax exactly, and trying again never changes that, so the creator is told what can be done.
+          const day = new Date(read.at * 1000).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "UTC" });
+          return plain(409, `A renewal from ${day} was paid partly or fully with the buyer's credit balance in Stripe. Its sale and its tax cannot be split exactly from that, so no file was made for ${period.label}. Nothing is lost. You can make the file for the half of the month that does not include ${day}, and add that renewal in ${app} by hand from its invoice in Stripe.`);
         }
         if (!read.ok && read.reason === "pending") {
           // A payment of the period can still be paid (money review on #2996, MÉDIO 2): its day's invoice number would

@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { StoreField } from "@/components/studio-store-pin";
-import { accountingMonths } from "@/lib/accounting-export-rules";
+import { ACCOUNTING_READ_UNITS, accountingMonths } from "@/lib/accounting-export-rules";
 
 /**
  * Sales of one month, or half of one, as a file Xero or QuickBooks imports
@@ -26,7 +26,8 @@ export function AccountingExportForm() {
         sales are one invoice to &quot;Online customers&quot;, one line for each product, with the tax buyers paid in its own
         column, so choose &quot;tax exclusive&quot; when you import. Dates are month/day/year, in UTC, and today is added once it is
         over. Sales in another currency are invoices of their own, which your app takes only with more than one currency turned
-        on. Refunds and Stripe fees are not sales, so they are not in it: they are in your Stripe reports.
+        on. Refunds and Stripe fees are not sales, so they are not in it: they are in your Stripe reports. Each file takes{" "}
+        {ACCOUNTING_READ_UNITS} of your plan&apos;s studio requests, because it reads every sale of the month from Stripe.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-3">
         <fieldset className="text-sm" aria-describedby="accounting-export-help">

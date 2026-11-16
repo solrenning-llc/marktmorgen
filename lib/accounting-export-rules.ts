@@ -62,6 +62,15 @@ export const ACCOUNTING_REFERENCE = "Marktmorgen sales";
 /** The product or service QuickBooks books each line to (it makes one by this name when there is none). */
 export const QUICKBOOKS_ITEM = "Sales";
 
+/** How long one read of a period's sales may run (lib/accounting-export.ts): every request still out then is given up, and the read is refused as too slow. */
+export const ACCOUNTING_READ_SECONDS = 120;
+/**
+ * The store's studio requests one accounting file takes before anything is read (app/api/store/export): more than
+ * the read can cost at the most (tests/plan-cost-registry.ts, ACCOUNTING_READ; held, and kept tight, in
+ * tests/plan-cost-registry.test.ts). The studio's form says it.
+ */
+export const ACCOUNTING_READ_UNITS = 200;
+
 /** Lines and invoices one import of each app takes (see the sources above). */
 export const APP_IMPORT_CAPS: Record<AccountingApp, { rows: number; invoices: number }> = {
   xero: { rows: 500, invoices: 500 },

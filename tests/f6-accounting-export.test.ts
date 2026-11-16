@@ -208,6 +208,8 @@ async function main(): Promise<void> {
   part("Renewals and later instalments are sales too (ALTO 1 of the money review on #2996)");
   const invoice = (id: string, over: Record<string, unknown> = {}) => ({
     id, object: "invoice", status: "paid", billing_reason: "subscription_cycle", amount_paid: 2000, currency: "usd", created: from + 5000, tax: 0,
+    // Paid in full by the card unless a check says otherwise: its total is what was paid.
+    total: typeof over.amount_paid === "number" ? over.amount_paid : 2000,
     subscription_details: { metadata: { store: "harbor", product: "p3" } }, ...over,
   });
   titles.p3 = "Bread Club";
@@ -276,9 +278,9 @@ async function main(): Promise<void> {
     invoice("in_m_0", { billing_reason: "manual", amount_paid: 900 }),
     invoice("in_t_0", { billing_reason: "subscription_threshold", amount_paid: 700 }),
     invoice("in_c_0", { billing_reason: "subscription_create" }),
-    invoice("in_z_0", { billing_reason: "subscription_update", amount_paid: 0, tax: 0 }),
+    invoice("in_z_0", { billing_reason: "subscription_update", amount_paid: 0, total: -1500, tax: 0 }),
   ], false)]);
-  is("a switch to yearly or a plan change, a one-off charge and a threshold invoice are lines; a first invoice (its checkout) and one paid by credit alone are not", changes.ok && changes.sales.map((s) => [s.net, s.tax]).sort(), [[3000, 100], [700, 0], [900, 0]]);
+  is("a switch to yearly or a plan change, a one-off charge and a threshold invoice are lines; a first invoice (its checkout) and a switch down's own invoice (its credit, nothing paid) are not", changes.ok && changes.sales.map((s) => [s.net, s.tax]).sort(), [[3000, 100], [700, 0], [900, 0]]);
 
   part("A renewal paid partly or wholly from the buyer's credit (Claude 7's MÉDIO 2 on #2996 @a6919d892f)");
   // A plan switched down with "always_invoice" (lib/tier-switch.ts) leaves a credit on the buyer's balance that Stripe takes off the next
@@ -306,6 +308,26 @@ async function main(): Promise<void> {
   const timedWorld = world(empty, empty);
   await readAccountingSales(store, period, { ...timedWorld.deps, stripe: async (path: string) => { left.push(timeLeft()); return timedWorld.deps.stripe(path); } });
   is("every Stripe page is asked inside the read's own cutoff, so its wall time is bounded", left.length > 0 && left.every((ms) => ms > 0 && ms <= (seconds as number) * 1000), true);
+  const realNow = Date.now;
+  const slow = await readAccountingSales(store, period, {
+    ...timedWorld.deps,
+    // Stripe still out when the cutoff passes: the request is given up as fetch gives up (lib/fetch-timeout.ts).
+    stripe: async () => {
+      const passed = realNow() + ((seconds as number) + 1) * 1000;
+      Date.now = () => passed;
+      throw new TypeError("fetch failed");
+    },
+  }).finally(() => {
+    Date.now = realNow;
+  });
+  is("a read still waiting when its cutoff passes: no file, said as too slow (never \"try again\" as if it were a hiccup)", slow.ok ? "a file" : slow.reason, "slow");
+  is("the route says so, and suggests half the month", /read\.reason === "slow"/.test(exportRouteCredit) && /took too long[^`]*half of the month/.test(exportRouteCredit), true);
+
+  part("A membership's first payment read with its checkout is held to the same (Claude 7's MÉDIO 2 on #2996, its sibling)");
+  const firstFromCredit = await readAccountingSales(store, period, world([page([session("cs_k_0", { mode: "subscription", invoice: invoice("in_k1", { billing_reason: "subscription_create", total: 4900, amount_paid: 3000 }) })], false)], empty).deps);
+  is("a subscription's checkout whose first invoice took part from the buyer's credit: no file, said as credit", firstFromCredit.ok ? "a file" : firstFromCredit.reason, "credit");
+  const firstInFull = await readAccountingSales(store, period, world([page([session("cs_k_0", { mode: "subscription", invoice: invoice("in_k1", { billing_reason: "subscription_create", total: 4900, amount_paid: 4900 }) })], false)], empty).deps);
+  is("and one paid in full is its checkout's sale, as before", firstInFull.ok && firstInFull.sales.map((s) => s.net), [4900]);
 
   part("PayPal's own records, read exactly");
   redis.clear();

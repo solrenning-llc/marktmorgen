@@ -737,13 +737,16 @@ export async function cancelRsvp(id: string, event: CommunityEvent, member: stri
   return Number(removed) === 1;
 }
 
-/** How many are coming to each event, and whether this member is. */
-export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number; mine: boolean }>> {
-  const out = new Map<string, { going: number; mine: boolean }>();
+/**
+ * How many are coming to each event, and whether this member is. A count that does not read is null, never 0 (rule
+ * 24): the pages then say no number for it and never take the event as full for it; the RSVP itself checks the places.
+ */
+export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number | null; mine: boolean }>> {
+  const out = new Map<string, { going: number | null; mine: boolean }>();
   if (!events.length) return out;
-  const rows = await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]));
+  const rows = repliesFor(await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]])), events.length * 2);
   events.forEach((e, i) => {
-    out.set(e.id, { going: Number(rows[i * 2]) || 0, mine: Number(rows[i * 2 + 1]) === 1 });
+    out.set(e.id, { going: rows ? countOf(rows[i * 2]) : null, mine: rows ? rows[i * 2 + 1] === 1 : false });
   });
   return out;
 }

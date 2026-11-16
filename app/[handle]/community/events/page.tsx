@@ -69,7 +69,7 @@ export default async function CommunityEventsPage({ params, searchParams }: Para
       <EventCard
         store={store}
         event={event}
-        going={numbers.get(event.id)?.going ?? 0}
+        going={numbers.get(event.id)?.going ?? null}
         mine={numbers.get(event.id)?.mine ?? false}
         locked={locked.has(event.id)}
         now={now}

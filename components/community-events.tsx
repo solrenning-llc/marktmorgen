@@ -39,8 +39,9 @@ export function DateLeaf({ event, size = "md", locale = "en-US" }: { event: Pick
   );
 }
 
-/** How many are coming, and how many places are left, in a few words. */
-export function placesWords(store: Pick<Store, "language">, event: CommunityEvent, going: number): string {
+/** How many are coming, and how many places are left, in a few words; nothing when the count was not read (never 0). */
+export function placesWords(store: Pick<Store, "language">, event: CommunityEvent, going: number | null): string {
+  if (going === null) return "";
   const w = communityWords(store.language);
   const people = w.goingCount(going);
   if (!event.cap) return people;
@@ -59,7 +60,7 @@ export function EventCard({
 }: {
   store: Store;
   event: CommunityEvent;
-  going: number;
+  going: number | null;
   mine: boolean;
   /** Kept for the buyers of products this reader does not have. */
   locked: boolean;
@@ -92,7 +93,7 @@ export function EventCard({
           {!event.cancelled ? (
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold">
               <span>{eventWhenIn(store, event, now)}</span>
-              <span className="st-muted">{over ? w.rsvpd(going) : placesWords(store, event, going)}</span>
+              {going === null ? null : <span className="st-muted">{over ? w.rsvpd(going) : placesWords(store, event, going)}</span>}
             </p>
           ) : null}
         </div>

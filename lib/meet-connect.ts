@@ -107,6 +107,11 @@ type Connection = {
   refresh: string;
   scope: string;
   connectedAt: number;
+  /**
+   * When its consent flow began (beginConsent), in milliseconds, our clock; 0 for a connection kept before this was
+   * written. A removal notice keeps only a connection whose flow began after the removal (Claude 7 on #3333).
+   */
+  startedAt: number;
   /** Who connected it: their sign-in address. */
   by: string;
   /** The store's owner and address when it was connected, for a notice sent without the store at hand (Zoom's uninstall). */
@@ -145,6 +150,7 @@ function parseConnection(raw: unknown, provider: MeetProvider): Connection | nul
       refresh: v.refresh,
       scope: typeof v.scope === "string" ? v.scope : "",
       connectedAt: Number(v.connectedAt) || 0,
+      startedAt: Number.isSafeInteger(v.startedAt) && Number(v.startedAt) > 0 ? Number(v.startedAt) : 0,
       by: typeof v.by === "string" ? v.by : "",
       owner: { email: String(v.owner?.email ?? ""), handle: String(v.owner?.handle ?? "") },
       broken: typeof v.broken === "string" ? v.broken : "",
@@ -416,6 +422,7 @@ async function keepConnection(
     refresh: seal(traded.tokens.refresh, context(input.statsId, provider, "refresh", host)),
     scope: traded.tokens.scope,
     connectedAt: Date.now(),
+    startedAt: input.startedAt,
     by: input.by,
     owner: input.owner,
     broken: "",
@@ -651,8 +658,11 @@ export async function forgetUser(
           confirmCounts(await redisPipeline([unlist]), 1, "a meeting account's store leaving its index");
           return null;
         }
-        // Connected again after the removal: its new connection stays, and so does its place in the index.
-        if (known && found.connectedAt > (removedAt as number)) return null;
+        // Connected again after the removal: its new connection stays, and so does its place in the index. Read by
+        // when its flow began, less GONE_MARGIN_MS for the two clocks, the same line KEEP_UNLESS_GONE draws: a flow
+        // begun before the removal is not a new grant, however late its keep landed (Claude 7 on #3333). A connection
+        // kept before its flow's start was written is taken as begun FLOW_MS before it was kept, the earliest it can.
+        if (known && grantBegan(found) - GONE_MARGIN_MS > (removedAt as number)) return null;
         confirmCounts(await redisPipeline([["DEL", connKey(statsId, provider)], ["DEL", testKey(statsId, provider)], unlist]), 3, "a meeting connection's deletion");
         return found;
       });
@@ -665,6 +675,9 @@ export async function forgetUser(
   }
   return forgot;
 }
+
+/** When a connection's consent flow began, or, for one kept before that was written, the earliest it can have. */
+const grantBegan = (c: Connection): number => (c.startedAt > 0 ? c.startedAt : c.connectedAt - FLOW_MS);
 
 /** The most stores one provider deletion notice walks; with more, the next notice walks the rest. */
 export const FORGET_PASS = 50;

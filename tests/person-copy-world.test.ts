@@ -60,6 +60,9 @@ async function main(): Promise<void> {
 /** Modules seedPerson writes nothing to for a person (see the log line above). */
 const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-confirmation-outbox.ts", "lib/agreement-store.ts", "lib/affiliate-leads.ts", "lib/assistant-reminder.ts", "lib/paypal-sales.ts", "lib/licence-keys.ts", "lib/gifts.ts", "lib/group-buy.ts", "lib/preorders.ts", "lib/call-packages.ts", "lib/meet-records.ts", "lib/shipments.ts", "lib/closing-buyers.ts", "lib/closing-holds.ts"];
 
+// 610 [WP9] unit 2: the world activates no license key on a device; its copy is held in tests/licence-activations.test.ts.
+EXPECTED_EMPTY.splice(EXPECTED_EMPTY.indexOf("lib/licence-keys.ts") + 1, 0, "lib/licence-activations.ts");
+
 main().catch((error) => {
   console.error(error);
   process.exit(1);

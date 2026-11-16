@@ -566,6 +566,13 @@ async function main(): Promise<void> {
     // base's line per copy, with main's model and #2803's costs; computed, not chosen, each still above zero (MR).
     // #2852 (buyer-blob and mail-picture-blob lines) merged again with its base #2843 (16 November 2026): this PR's lines with
     // the stack's and main's model; computed, not chosen, each still above zero (MR).
+    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
+    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
+    // figures as the model computes them; still above zero (MR), cost not lowered.
+    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #2852 (16 November 2026, second pass): main's #4291 vault release line and the stack's Blob lines together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     is("11: Store, Studio and Scale keep 44.46, 312.35 and 699.10 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.46", "312.35", "699.10"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.

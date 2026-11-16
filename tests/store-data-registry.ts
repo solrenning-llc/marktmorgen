@@ -65,6 +65,7 @@ import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
+import { OUTBOX_MAX_KEPT, OUTBOX_RECORD_MAX_BYTES } from "@/lib/webhook-outbox";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_NOTES, MAX_NOTE_LENGTH as MAX_STATS_NOTE } from "@/lib/stats-notes";
@@ -426,7 +427,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:card:opens:@lib/card-update.ts": short("Presses of a card link", "own", 21, MARK, MAIL("card")),
   "nl:catalog:@lib/catalog.ts": { what: "Products: their listings, their heavy rest, their cards", room: ["lib/store.ts"], parts: [capped(KEY, "The mark of a catalog moved.")] },
   "nl:cert:@lib/certificate.ts": { what: "Certificates, kept for good", room: ["lib/certificate.ts"] },
-  "nl:coursegone:@lib/removed-courses.ts": { what: "The courses a store dropped, with their lessons and modules, so a person's records kept under one are still erased", parts: [capped(MAX_REMOVED_COURSES * (200 + 68 * (MAX_LESSONS + MAX_MODULES)), "At most MAX_REMOVED_COURSES courses, each its id and its product's id in the list (nl:coursegone:<statsId>) and the ids of its lessons and modules in its own key beside it (nl:coursegone:<statsId>:c:<courseId>), 64 bytes at the most, quoted, with at most MAX_NOTED_LESSONS lessons and MAX_NOTED_MODULES modules: a drop past that is refused, never made by dropping an older course.", src("lib/removed-courses.ts", "MAX_REMOVED_COURSES", "MAX_NOTED_LESSONS", "MAX_NOTED_MODULES"))] },
+  "nl:coursegone:@lib/removed-courses.ts": { what: "The courses a store dropped, with their lessons and modules, so a person's records kept under one are still erased", parts: [capped(MAX_REMOVED_COURSES * (200 + 68 * (MAX_LESSONS + MAX_MODULES)), "At most MAX_REMOVED_COURSES courses, each its id, its product's id and when it was dropped (its seconds) in the list (nl:coursegone:<statsId>) and the ids of its lessons and modules in its own key beside it (nl:coursegone:<statsId>:c:<courseId>), 64 bytes at the most, quoted, with at most MAX_NOTED_LESSONS lessons and MAX_NOTED_MODULES modules: a drop past that first makes room by the entries dropped at least FINISH_KEEP_SECONDS ago whose course has nothing left (no data-room slot of its people, no student row, no certificate, no work handed in), taking each one's own key with it, at most one HGETALL and MAX_REMOVED_COURSES / PRUNE_AT_MOST scripts, a studio action; with none, it is refused, never made by dropping a course that still holds a record.", src("lib/removed-courses.ts", "MAX_REMOVED_COURSES", "MAX_NOTED_LESSONS", "MAX_NOTED_MODULES", "PRUNE_AT_MOST"), src("lib/course-finish-rules.ts", "FINISH_KEEP_SECONDS"))] },
   "nl:course:@lib/certificate.ts": { what: "A course's certificates, by student", room: ["lib/certificate.ts"] },
   "nl:cm:@lib/chat-grant.ts": short("A member's leave from the live room's cooldown", "buyer", 1),
   "nl:chatsum:@lib/chat-summary.ts": { what: "Where a chat summary goes, sealed", parts: [capped(KB, "One a store.")] },
@@ -468,6 +469,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:cm:evmail:@lib/community-event-mail.ts": { what: "An event's emails, and who they go to", parts: [per("own", 30, 512, "Each reader's place in a send, thirty days.", MAIL("event"))] },
   "nl:cm:evmailq@lib/community-event-mail.ts": company("Event sends under way", "One set, members gone when sent."),
   "nl:cm:@lib/community-events.ts": { what: "Events, their places and who is coming", room: ["lib/community-events.ts"] },
+  "nl:cm:@lib/community-challenges.ts": { what: "Challenges, who joined each and their daily check-ins; the creator's changes this hour, an hour", room: ["lib/community-challenges.ts"] },
   "nl:cm:evq@lib/community-events.ts": company("Event reminders due", "One sorted set for every store, counted with each event's room."),
   "nl:rl:cm:ev:@lib/community-events.ts": short("Event changes an hour", "studio", 1),
   "nl:cimg:@lib/community-files.ts": { what: "Community pictures, their owners and counts", line: "community-pictures" },
@@ -1109,7 +1111,7 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
-  "nl:hookout:@lib/webhook-outbox.ts": short("A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", "request", 7, 4_096),
+  "nl:hookout:@lib/webhook-outbox.ts": { what: "A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", parts: [capped(OUTBOX_MAX_KEPT * (OUTBOX_RECORD_MAX_BYTES + 2 * KEY), "The whole outbox, which one store may fill: OUTBOX_MAX_KEPT records of OUTBOX_RECORD_MAX_BYTES for the site, counted in OUTBOX_ADMIT, each with its key and its member in the due line.", src("lib/webhook-outbox.ts", "OUTBOX_MAX_KEPT", "OUTBOX_RECORD_MAX_BYTES", "OUTBOX_ADMIT"))] },
   "nl:hookout:due@lib/webhook-outbox.ts": company("Kept webhook events due to be tried again", "One sorted set, each member an event kept by lib/webhook-outbox.ts, gone when it is queued, dropped or its week is over; never more than OUTBOX_MAX_KEPT members, counted in the write that adds one."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),

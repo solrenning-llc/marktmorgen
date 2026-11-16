@@ -115,10 +115,12 @@ function kindOf(store: Store, product: Listing): string {
 export async function aboutPage(store: Store, now = Date.now()): Promise<AboutAnswer> {
   const id = store.community?.id;
   if (!id || !store.community?.on || store.suspended) return { state: "none" };
+  // The page is one of the store's public requests, counted before anything stored is read, the settings included
+  // (Claude 7's review of #3016, MEDIUM): a hit on a page that is off, or on a resting store, is counted too, and a
+  // resting store reads nothing. The settings read that follows fits in that one request (tests/sk1-community-about.test.ts).
+  if (await isResting(store, now)) return { state: "resting" };
   const config = await readConfig(id);
   if (!config || !config.page.on) return { state: "none" };
-  // The page is one of the store's public requests, counted before anything more is read.
-  if (await isResting(store, now)) return { state: "resting" };
   if (config.access.length && !(await takePublicRequest(store, "public", now, listingUnits(config.access.length)))) return { state: "resting" };
   const products = config.access.length ? await readListings(store, config.access) : [];
   const ways = products

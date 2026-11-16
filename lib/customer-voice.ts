@@ -194,6 +194,12 @@ export function cleanVoice(value: string, max = MAX_TEXT): string {
 }
 
 /**
+ * The text a waitlist of a product no longer in the store stands under (Claude 7 on #3731): the store's own product
+ * index no longer lists it, so its name is gone for good, not unread. Its people are still counted, never named.
+ */
+export const REMOVED_WAITLIST_TEXT = "A product no longer in your store";
+
+/**
  * The texts of the last 90 days, newest first in each list, numbered from 1,
  * and the lists whose read failed (rule 24): those are named, never taken for
  * lists with nothing in them. A product's title that cannot be read only

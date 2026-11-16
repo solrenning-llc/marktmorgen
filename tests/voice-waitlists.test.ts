@@ -12,7 +12,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gatherVoice, voicePrompt } from "@/lib/customer-voice";
+import { REMOVED_WAITLIST_TEXT, gatherVoice, voicePrompt } from "@/lib/customer-voice";
 import { WAITLIST_VOICE_PRODUCTS, waitlistSizes } from "@/lib/waitlist";
 import { addProduct, claimHandle, ensureStatsId, removeProduct, storeForEmail } from "@/lib/store";
 import * as voiceScreen from "@/components/customer-voice";
@@ -91,14 +91,16 @@ test("names that cannot be read leave the waitlists unread, never left out", asy
   assert.ok(result.unread.includes("waitlist"));
 });
 
-test("a product removed while people still wait on it leaves the waitlists unread, never left out (Codex T on #3731)", async () => {
+test("a product removed while people still wait on it is counted as no longer in the store, and the summary still works (Claude 7 on #3731)", async () => {
   const owner = "voice.removed@example.com";
-  const { store, ids } = await soonStore(owner, "voice-removed", { "Kiln Basics": 2, "Clay Primer": 1 });
+  const { ids } = await soonStore(owner, "voice-removed", { "Kiln Basics": 2, "Clay Primer": 1 });
   // Removed through the studio's own path: its card goes, while its place on the coming-soon list and its waitlist stay.
   const removed = await removeProduct(owner, ids["Kiln Basics"]);
   assert.equal(removed.ok, true);
   const { items, unread } = await gatherVoice((await storeForEmail(owner))!, Date.now());
-  assert.ok(unread.includes("waitlist"), "people waiting on a product whose name cannot be read: the waitlists are unread");
-  assert.deepEqual(items.filter((i) => i.source === "waitlist"), [], "no summary from part of the waitlists");
-  void store;
+  // The store's own product index says it is gone: known, not unread. Before, the waitlists stayed unread for good
+  // and the creator could never make the monthly summary again.
+  assert.ok(!unread.includes("waitlist"), "a product the store's index no longer lists is gone, not unread");
+  const waiting = items.filter((i) => i.source === "waitlist").map((i) => [i.text, i.n]).sort();
+  assert.deepEqual(waiting, [[REMOVED_WAITLIST_TEXT, 2], ["Clay Primer", 1]], "the removed product's demand is kept, under a fixed text, never who");
 });

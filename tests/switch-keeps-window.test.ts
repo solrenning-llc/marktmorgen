@@ -573,14 +573,16 @@ async function main(): Promise<void> {
     // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #2801 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #2843 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.49, 312.50 and 699.55 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.49", "312.50", "699.55"]);
+    // Claude 7's MEDIUM 2 on #2852: a trial store's studio picture work (studioBlobMonthly at its studio figure) is now in
+    // nonPayingWorst, which every paying store carries a share of: one cent less a month on each plan; still above zero (MR).
+    is("11: Store, Studio and Scale keep 44.48, 312.49 and 699.54 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.48", "312.49", "699.54"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #2843 (16 November 2026, 16h): main's newer costs with the stack's Blob lines leave Store and Scale one
     // cent less in a yearly month: 36.43 and 576.27 where 36.44 and 576.28 were; still above zero (MR). Cost is not lowered.
-    is("11: and 36.43, 257.37 and 576.27 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.43", "257.37", "576.27"]);
+    is("11: and 36.42, 257.36 and 576.27 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.42", "257.36", "576.27"]);
   } finally {
     Date.now = realNow;
   }

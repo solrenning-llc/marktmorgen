@@ -497,6 +497,8 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /** Stripe could not be asked about the subscription: `active` is false because nothing is known, never because it stopped. */
+  unknown?: true;
 };
 
 /**
@@ -582,7 +584,7 @@ export async function readStartedSubscription(
     try{subscription=await subscriptionRecord(subscriptionId);}
     catch(error){
       console.error("reading the subscription failed",error);
-      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
+      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,unknown:true};
     }
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;

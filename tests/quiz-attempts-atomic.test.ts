@@ -6,8 +6,9 @@
  * parallel tries from one student never spends more of the store's monthly
  * submissions than the tries it marks, a creator's wait between tries holds
  * against a burst, and a refused try gives back exactly the data room it took.
- * The route takes a per-connection limit before it reads the student's access,
- * and a per-student limit and one of the store's buyer actions before the try.
+ * The route takes a per-connection limit and the try's public requests before
+ * it reads the student's access, and a per-student limit before the try; never
+ * one of the store's buyer actions (tests/quiz-try-admission.test.ts).
  */
 import { readFileSync } from "node:fs";
 import { readQuiz, submitQuiz, type Quiz } from "@/lib/quiz";
@@ -119,16 +120,16 @@ async function main() {
     is("nothing spent", await spent(), 0);
   }
 
-  part("The route: a limit per connection before access, a limit per student and a buyer action before the try");
+  part("The route: a limit per connection and the try's public requests before access, a limit per student before the try");
   const route = readFileSync("app/api/store/course/quiz/route.ts", "utf8");
   const at = (needle: string) => route.indexOf(needle);
   is("a per-connection limit", at("withinLimit(\"quiz-connection\"") > 0, true);
   is("it comes before the student's access is read", at("withinLimit(\"quiz-connection\"") < at("courseAccess(store"), true);
   is("a per-student limit", at("withinLimit(\"quiz-student\"") > 0, true);
-  is("a buyer action", at("takeBuyerAction(store)") > 0, true);
-  is("the buyer action follows the access check (a stranger spends none)", at("takeBuyerAction(store)") > at("access.state !== \"open\""), true);
-  is("the buyer action comes before the try", at("takeBuyerAction(store)") < at("submitQuiz(course.id"), true);
-  is("the per-student limit comes before the buyer action", at("withinLimit(\"quiz-student\"") < at("takeBuyerAction(store)"), true);
+  is("no buyer action", route.includes("takeBuyerAction"), false);
+  is("the try's public requests come before the student's access is read", at("takeBuyerRead(store, QUIZ_TRY_UNITS)") > 0 && at("takeBuyerRead(store, QUIZ_TRY_UNITS)") < at("courseAccess(store"), true);
+  is("the per-student limit comes before the quiz is read", at("withinLimit(\"quiz-student\"") < at("readQuizFor(course.id"), true);
+  is("and before the try", at("withinLimit(\"quiz-student\"") < at("submitQuiz(course.id"), true);
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

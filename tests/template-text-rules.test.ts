@@ -23,7 +23,8 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail }
 import { readListing } from "@/lib/catalog";
 import { readPage } from "@/lib/sales-page-store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
-import { BLOCK_KINDS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
+import { BLOCK_KINDS, MAX_PAGE_BYTES, PUBLISH_PAGE_UNITS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { POST as productRoute } from "@/app/api/store/product/route";
@@ -254,6 +255,16 @@ async function main(): Promise<void> {
   await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
   const clean = await publish();
   is("once written in the creator's own words, it is published", [clean.status, clean.data.ok, await stillDraft()], [200, true, false]);
+  // Claude 7 on #3693 (MÉDIO, cost): a publish reads the sales page twice, the check and again under the store lock,
+  // each up to MAX_PAGE_BYTES, so it takes the studio units those reads move before it reads (50,000 bytes a unit,
+  // UNIT_COST.studio in tests/plan-cost-registry.ts), not only the request's one.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const studioUsed = async () => Number(await allowanceUsedExact((await storeForEmail(OWNER))!, "studio"));
+  const beforePublish = await studioUsed();
+  const again = await publish();
+  is("published again", [again.status, await stillDraft()], [200, false]);
+  is("the two page reads are priced: at least 2 × MAX_PAGE_BYTES at 50,000 bytes a unit", PUBLISH_PAGE_UNITS * 50_000 >= 2 * MAX_PAGE_BYTES, true);
+  is("and a publish with a page takes them, besides the request's own", (await studioUsed()) - beforePublish >= 1 + PUBLISH_PAGE_UNITS, true);
   const publishMessage = (rules as Record<string, unknown>).templatePublishMessage as ((left: { field: string; kind: string | null; part: string }, product: string | null) => string) | undefined;
   is("the message says the product, where the part is, and the way on", [
     publishMessage?.({ field: "block", kind: "quotes", part: "⟦Their name⟧" }, "Draft guide"),

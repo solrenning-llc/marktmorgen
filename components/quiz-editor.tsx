@@ -20,6 +20,7 @@ import {
 import { MAX_WAIT_MINUTES } from "@/lib/quiz-bank-rules";
 import { QUIZ_MONTHLY_SUBMISSIONS } from "@/lib/quiz-usage-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { browserFrames, focusWhenDrawn } from "@/lib/focus-when-drawn";
 import { AiAssist } from "@/components/ai-assist";
 import { DEFAULT_QUIZ_DRAFT, type DraftedQuestion, QUIZ_DRAFT_COUNTS } from "@/lib/quiz-draft";
 
@@ -366,23 +367,26 @@ export function QuizEditor({
                 <ul className="mt-2 space-y-2">
                   {question.choices.map((choice, ci) => (
                     <li key={ci} className="flex items-center gap-2">
-                      <input
-                        type={question.kind === "single" ? "radio" : "checkbox"}
-                        name={`${qid}-correct`}
-                        aria-label={`Answer ${ci + 1} is right`}
-                        className="h-5 w-5 shrink-0 accent-violet-brand"
-                        checked={question.correct.includes(ci)}
-                        onChange={(e) =>
-                          change(qi, {
-                            correct:
-                              question.kind === "single"
-                                ? [ci]
-                                : e.target.checked
-                                  ? [...question.correct, ci].sort((a, b) => a - b)
-                                  : question.correct.filter((i) => i !== ci),
-                          })
-                        }
-                      />
+                      {/* A 44 x 44 px target that ticks the field (WCAG 2.5.5); the field keeps its own name. */}
+                      <label className="inline-flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg">
+                        <input
+                          type={question.kind === "single" ? "radio" : "checkbox"}
+                          name={`${qid}-correct`}
+                          aria-label={`Answer ${ci + 1} is right`}
+                          className="h-5 w-5 shrink-0 accent-violet-brand"
+                          checked={question.correct.includes(ci)}
+                          onChange={(e) =>
+                            change(qi, {
+                              correct:
+                                question.kind === "single"
+                                  ? [ci]
+                                  : e.target.checked
+                                    ? [...question.correct, ci].sort((a, b) => a - b)
+                                    : question.correct.filter((i) => i !== ci),
+                            })
+                          }
+                        />
+                      </label>
                       <input
                         className="field min-w-0 flex-1"
                         aria-label={`Answer ${ci + 1}`}
@@ -431,7 +435,15 @@ export function QuizEditor({
         })}
       </ol>
       {draft.questions.length < MAX_QUESTIONS ? (
-        <button type="button" className="btn btn-secondary btn-sm mt-3" onClick={() => setDraft({ ...draft, questions: [...draft.questions, blankQuestion()] })}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm mt-3"
+          onClick={() => {
+            const next = draft.questions.length;
+            setDraft({ ...draft, questions: [...draft.questions, blankQuestion()] });
+            focusWhenDrawn(() => document.getElementById(`${prefix}-q${next}-text`), browserFrames());
+          }}
+        >
           Add a question
         </button>
       ) : (

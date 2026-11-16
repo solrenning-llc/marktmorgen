@@ -1,5 +1,5 @@
 import {reserveContractFunding,activateCheckoutContract} from '@/lib/contract-funding';
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import type {NextRequest} from 'next/server';
 import {POST as checkout} from '../app/api/billing/checkout/route';
@@ -12,6 +12,11 @@ import {reset,seed,ledger} from './contract-funding-redis';
 import {setRouteStore} from './contract-route-studio';
 import {observations,resetBilling} from './contract-route-billing';
 import {resetStoreAnswers,savedSubscriptions,storeAnswers} from './contract-route-store';
+// contractFixture() names the review month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// checkout reads the month again before the provider call (lib/contract-funding.ts): a run crossing 00:00 UTC on a
+// month's last day sent the new checkout back as not open. Only Date is stopped, for the whole run; timers and
+// performance.now() run as usual.
+mock.timers.enable({apis:['Date'],now:Date.now()});
 function start(fund=true){reset();resetBilling();resetStoreAnswers();setRouteStore({});const f=contractFixture();setContractFinancialReview(f.review);setContractFundingPolicy(fund?f.policy:null);if(fund)seed(contractFundingConfiguration(f.policy,f.context)!);return f;}
 const request=(path:string,cycle='year')=>new Request('https://marktmorgen.test/api/billing/'+path,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({tier:'creator',cycle})}) as unknown as NextRequest;
 const result=(r:Response)=>new URL(r.headers.get('Location')!).searchParams.get('billing');

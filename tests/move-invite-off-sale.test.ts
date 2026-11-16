@@ -129,7 +129,7 @@ async function main(): Promise<void> {
   is("the gift and group picker still leaves it out", givableOptions({ ...product, recurring: null } as never).map((o) => o.id), [plus]);
   await noteKept(store, "ada@example.com", id);
   const keptAgain = await openMove(store, id, ada.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  is("an invitation already kept does not reopen the price off sale: it says it was moved (\"done\", Revisor 1 on #2685)", keptAgain.ok ? "opened" : keptAgain.reason, "done");
+  is("an invitation already kept does not reopen the price off sale: it says it was kept (\"kept\", main's answer since #4121; Revisor 1 on #2685)", keptAgain.ok ? "opened" : keptAgain.reason, "kept");
 
   part("An invitation whose \"kept\" cannot be read is not taken as unused (Codex C2 on #2685)");
   const benRecord = JSON.parse(redis.run(["HGET", `nl:mv:${statsId}`, benField]) as string) as Record<string, unknown>;
@@ -145,18 +145,18 @@ async function main(): Promise<void> {
   redis.run(["HSET", `nl:mv:${statsId}`, benField, JSON.stringify({ ...benRecord, kept: "x" })]);
   const unknownBefore = checkouts.length;
   const unread = await openMove(store, id, ben.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  is("pressing it opens nothing and answers \"unknown\", never \"done\"", [unread.ok ? "opened" : unread.reason, checkouts.length - unknownBefore], ["unknown", 0]);
+  is("pressing it opens nothing and answers \"unknown\", never \"kept\"", [unread.ok ? "opened" : unread.reason, checkouts.length - unknownBefore], ["unknown", 0]);
   const notices = (language: Parameters<typeof moveWords>[0]) => moveWords(language).notices as Record<string, { title: string; body: string } | undefined>;
   const html = (text: string) => text.replace(/'/g, "&#x27;");
   const unknownNotice = notices("en").unknown;
-  for (const query of [{ k: ben.t }, { k: ben.t, status: "unknown" }, { k: ben.t, status: "done" }] as Record<string, string>[]) {
+  for (const query of [{ k: ben.t }, { k: ben.t, status: "unknown" }, { k: ben.t, status: "kept" }] as Record<string, string>[]) {
     const unreadPage = await movePage("inviteoffsale", id, query);
     is(
-      `its page (${JSON.stringify(query.status ?? "")}) says the state could not be checked, never that it was moved, with no button`,
+      `its page (${JSON.stringify(query.status ?? "")}) says the state could not be checked, never that it was kept, with no button`,
       [
         Boolean(unknownNotice && unreadPage.includes(html(unknownNotice.title)) && unreadPage.includes(html(unknownNotice.body))),
-        unreadPage.includes(html(moveWords("en").notices.done.title)),
-        unreadPage.includes(html(moveWords("en").notices.done.body)),
+        unreadPage.includes(html(moveWords("en").notices.kept.title)),
+        unreadPage.includes(html(moveWords("en").notices.kept.body)),
         unreadPage.includes(moveWords("en").keep),
       ],
       [true, false, false, false],
@@ -212,10 +212,10 @@ async function main(): Promise<void> {
   redis.run(["DEL", `nl:mv:open:${statsId}:${deeField}`]);
   const deeBefore = checkouts.length;
   const deeAgain = await openMove(store, id, dee.t, "https://marktmorgen.com", Date.now(), TEST_CONSENT);
-  is("once kept, a day later, the link opens no second membership", [deeAgain.ok ? "opened" : deeAgain.reason, checkouts.length - deeBefore], ["done", 0]);
+  is("once kept, a day later, the link opens no second membership", [deeAgain.ok ? "opened" : deeAgain.reason, checkouts.length - deeBefore], ["kept", 0]);
   const deePage = await movePage("inviteoffsale", id, { k: dee.t });
-  is("its page says so, with no button to press", [deePage.includes(moveWords("en").notices.done.title), deePage.includes(moveWords("en").keep)], [true, false]);
-  for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) is(`said in ${language} too`, moveWords(language).notices.done.title.length > 0, true);
+  is("its page says so, with no button to press", [deePage.includes(moveWords("en").notices.kept.title), deePage.includes(moveWords("en").keep)], [true, false]);
+  for (const language of ["es", "fr", "de", "it", "nl", "pt"] as const) is(`said in ${language} too`, moveWords(language).notices.kept.title.length > 0, true);
 
   part("The rule itself");
   is("only the named option comes back on sale, nothing else changes", withInvitedOption(product, basic).options.map((o) => [o.id, o.offSale === true]), [[basic, false], [plus, false]]);

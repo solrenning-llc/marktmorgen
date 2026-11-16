@@ -4,14 +4,15 @@ import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 /**
  * The Stripe reads an invitation's button makes are counted before the first one (Codex C2 on #2685, from
  * codex/c-review-2685-invite-kept-evidence@acc706c6, cost MEDIUM 5793736677): at most MOVE_CUSTOMERS_READ customer
- * records are read, one subscription page each, and the checkout's closing time when Stripe left it out, each page
- * one public request unit (AFFILIATE_STRIPE_PAGES_PER_UNIT), all taken before the first read. More customer records
- * than that is not read whole: nothing opens, nothing is made.
+ * records are read, up to KEPT_PAGES subscription pages each (keptAlready, main's reader since #4121), a customer page
+ * for each address form, and the checkout's closing time when Stripe left it out, each page one public request unit
+ * (AFFILIATE_STRIPE_PAGES_PER_UNIT), all taken before the first read (MOVE_STRIPE_PAGES). More customer records than
+ * that is not read whole: nothing opens, nothing is made.
  */
 import { withConsent } from "./digital-consent-fixture";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
-import { inviteMembers, readInvite } from "@/lib/move-members";
+import { MOVE_STRIPE_PAGES, inviteMembers, readInvite } from "@/lib/move-members";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is } from "./check";
@@ -56,7 +57,7 @@ async function main(){
    // As Stripe answers: at most `limit` rows, has_more when there are more than that.
    const limit=Number(url.searchParams.get("limit")??"10");
    const all=url.pathname.endsWith("/customers")?customersThere:url.pathname.endsWith("/subscriptions")?100:0;
-   const data=url.pathname.endsWith("/customers")?Array.from({length:Math.min(limit,all)},(_,i)=>({id:"cus_Cost"+i})):url.pathname.endsWith("/subscriptions")?Array.from({length:Math.min(limit,all)},(_,i)=>({id:"sub_Cost"+i,status:"canceled",metadata:{product:club.product.id}})):null;
+   const data=url.pathname.endsWith("/customers")?Array.from({length:Math.min(limit,all)},(_,i)=>({id:"cus_Cost0000"+i})):url.pathname.endsWith("/subscriptions")?Array.from({length:Math.min(limit,all)},(_,i)=>({id:"sub_Cost0000"+i,status:"canceled",metadata:{product:club.product.id}})):null;
    const text=JSON.stringify(data?{object:"list",data,has_more:all>limit}:{object:"checkout.session",expires_at:Math.floor(Date.now()/1000)+3600});bytes+=Buffer.byteLength(text);return new Response(text);
   }
   return originalFetch(input,init);
@@ -69,7 +70,11 @@ async function main(){
  is("one synthetic checkout only",checkouts-before,1);
  console.log(JSON.stringify({paidBefore,paidAfter:units(),stripeGetPages:gets,transferredBytes:bytes,existingPublicStripePagesPerUnit:AFFILIATE_STRIPE_PAGES_PER_UNIT}));
  // Existing public-request Stripe-page cost uses one page per unit. A dynamic fanout must be covered before IO.
- is("every Stripe page it may read is counted before the first read, at one page a unit",paidBefore>=1+Math.ceil(7/AFFILIATE_STRIPE_PAGES_PER_UNIT),true);
+ // Altered in the merge of main (16/11/2026): the press now reads with main's keptAlready, up to KEPT_PAGES (5) pages
+ // of memberships for each of MOVE_CUSTOMERS_READ (5) records and a customer page for each of two address forms, so
+ // the worst it may read is 2 + 5 × 5 + 1 = 28 pages, all counted before the first read (was 7: one page each).
+ is("the worst a press may read is two customer pages, five pages for each of five records, and the closing time",MOVE_STRIPE_PAGES,2+5*5+1);
+ is("every Stripe page it may read is counted before the first read, at one page a unit",paidBefore>=1+Math.ceil(MOVE_STRIPE_PAGES/AFFILIATE_STRIPE_PAGES_PER_UNIT),true);
 
  // More customer records under that address than are read: not read whole, so nothing opens and nothing is made.
  const other=(await readInvite(store.statsId!,field))!;

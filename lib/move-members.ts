@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -25,13 +26,13 @@ import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { namedPriceGone, namedPriceOffered, withInvitedOption } from "@/lib/product-option";
 import { withStockHold } from "@/lib/stock";
 import { StripeError, onAccount } from "@/lib/stripe-account";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { storeBase } from "@/lib/purchase-email";
 import { membershipLine, speech } from "@/lib/buyer-words";
 import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { dataKey, giveData, needData } from "@/lib/store-data";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { takePublicRequest } from "@/lib/traffic";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -46,22 +47,6 @@ export const INVITED_READ_BYTES = 40_000;
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
 const FIELD_PATTERN = /^[0-9a-f]{32}:[A-Za-z0-9_-]{1,64}$/;
 const LIVE = new Set(["active", "trialing", "past_due"]);
-/** Every status Stripe gives a subscription (https://docs.stripe.com/api/subscriptions/object, read 10/11/2026). */
-const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
-
-/**
- * Whether one subscription row is a live membership to this product: true or false only when the row reads (rule 24,
- * Codex CX1's MEDIUM on #3598). A row that is not an object, a status Stripe has no name for, or metadata that is not
- * a map of strings (missing, null, a product that is a number) is null, never "not a member". Empty metadata reads.
- */
-function liveRow(sub: unknown, productId: string): boolean | null {
-  if (!sub || typeof sub !== "object" || Array.isArray(sub)) return null;
-  const { status, metadata } = sub as { status?: unknown; metadata?: unknown };
-  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return null;
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  if (!Object.values(metadata).every((value) => typeof value === "string")) return null;
-  return LIVE.has(status) && (metadata as Record<string, string>).product === productId;
-}
 
 /** One member invited to keep their membership here. */
 export type Invite = {
@@ -373,56 +358,96 @@ export async function reminderEmail(store: Store, field: string, now = Date.now(
   return { to: invite.e, subject: m.reminderSubject(product.title).slice(0, 200), text };
 }
 
-/** How many customer records under one address keptAlready reads: more is not read whole, so it throws. */
-const KEPT_CUSTOMERS_READ = 10;
+/** Every status Stripe names a subscription with; another is a row that cannot be read. */
+const SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
+const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;
+const CUSTOMER_PATTERN = /^cus_[A-Za-z0-9]{6,64}$/;
+/** Pages of a hundred memberships read for one customer at most; one with more is unknown, never "not kept". */
+const KEPT_PAGES = 5;
 
-/**
- * A Stripe list page's items, only when the page says it is whole: its `data` a list, `has_more` exactly false and no
- * more items than were asked for. Anything else is null, never an empty or complete list (B4, Claude 4 on #2685).
- */
-function wholeList(page: Record<string, unknown>, limit: number): unknown[] | null {
-  return Array.isArray(page.data) && page.has_more === false && page.data.length <= limit ? page.data : null;
+/** A membership row read whole: a status Stripe names and its metadata as a map of strings (as lib/winback-send.ts cameBack). */
+function legibleSub(row: Record<string, unknown>): boolean {
+  const { status, metadata } = row;
+  if (typeof status !== "string" || !SUB_STATUSES.has(status)) return false;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  return Object.values(metadata).every((value) => typeof value === "string");
 }
 
-/** Whether this address has a live membership to this product on the creator's account now. */
-export async function keptAlready(store: Store, email: string, productId: string): Promise<boolean> {
+/**
+ * Whether this address has a live membership to this product on the creator's account now. Read whole (CX-123 rule
+ * 24; review of #4121, MEDIUM): the customers under the address, and every page of each one's memberships, each list
+ * in its exact shape and each row legible. A list in another shape, one read in part (has_more past what is read), or
+ * a row that cannot be read throws StripeListUnreadable (an unknown answer, never "not kept"), so openMove opens
+ * nothing and a reminder is put back in line.
+ *
+ * `most` bounds a read whose pages were counted before it (openMove): at most that many customer records under the
+ * address forms together, each list asked for that many; more is not read whole, so it throws. Without it (the
+ * reminders), the lists are read as above.
+ */
+export async function keptAlready(store: Store, email: string, productId: string, most?: number): Promise<boolean> {
   const account = store.stripeAccountId;
   if (!account || !EMAIL_PATTERN.test(email)) return false;
-  // CX-123 rule 24 (rule 30 of Claude 4's sweep, C4-2890): a list without its data is unknown, never "not kept": it
-  // throws, and sendMoveReminders puts the reminder back an hour instead of emailing someone who kept it. So is a list
-  // cut short or that does not say it is whole (Claude 4's LEVE on #2685): a live membership may lie beyond it.
-  const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(KEPT_CUSTOMERS_READ) })}`), KEPT_CUSTOMERS_READ);
-  if (!customers) throw new Error("a member's customers did not read whole");
+  const customers: string[] = [];
+  for (const address of new Set([email, normaliseEmail(email)])) {
+    const limit = most ?? 100;
+    const page = readStripePage(await onAccount("GET", account, `/customers?${new URLSearchParams({ email: address, limit: String(limit) })}`), undefined, CUSTOMER_PATTERN);
+    if (page.hasMore || page.unreadable > 0) throw new StripeListUnreadable("a moved member's customers, read in part");
+    // More rows than were asked for is not a page Stripe answers (Claude 4's LEVE on #2685): not read as whole.
+    if (page.rows.length > limit) throw new StripeListUnreadable("a moved member's customers, more than were asked for");
+    for (const row of page.rows) if (!customers.includes(row.id)) customers.push(row.id);
+  }
+  // More records than were counted for (the two forms together): not read whole.
+  if (most !== undefined && customers.length > most) throw new StripeListUnreadable("a moved member's customers, more than are read");
   for (const customer of customers) {
-    const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
-    // A customer without its id is unknown, never skipped: its membership may be the live one.
-    if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) throw new Error("a member's customer did not read");
-    const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
-    if (!subs) throw new Error("a member's subscriptions did not read whole");
-    for (const sub of subs) {
-      const live = liveRow(sub, productId);
-      if (live === null) throw new Error("a member's subscription did not read");
-      if (live) return true;
+    let after = "";
+    for (let pages = 0; ; pages += 1) {
+      if (pages >= KEPT_PAGES) throw new StripeListUnreadable("a moved member's memberships, more than are read");
+      const query = new URLSearchParams({ customer, status: "all", limit: "100", ...(after ? { starting_after: after } : {}) });
+      const page = readStripePage(await onAccount("GET", account, `/subscriptions?${query}`), legibleSub, SUB_PATTERN);
+      if (page.unreadable > 0) throw new StripeListUnreadable("a moved member's membership that cannot be read");
+      if (page.rows.some((s) => LIVE.has(String(s.status)) && (s.metadata as Record<string, string>).product === productId)) return true;
+      if (!page.hasMore) break;
+      if (!page.lastId) throw new StripeListUnreadable("a moved member's memberships, with no place to read on from");
+      after = page.lastId;
     }
   }
   return false;
 }
 
-/** Reminders due now, taken off the line: "<store id>|<field>". A reminder not sent is put back by the caller. */
+/** How long a run holds the reminders it took (dueReminders) before they come due again on their own. */
+export const REMINDER_LEASE_SECONDS = 15 * 60;
+
+/**
+ * Reminders due now, "<store id>|<field>", leased rather than taken off the line (webhooks/cron audit, Claude 1,
+ * 12/11/2026): each is moved REMINDER_LEASE_SECONDS ahead, only while still in line (XX, so one forgotten in between
+ * is never added back). The caller puts one back for later (remindLater) or takes it off once finished
+ * (dropReminder); one a run never finishes (the function cut off, Redis failing for the put-back too) comes due again
+ * when the lease runs out, instead of being lost.
+ */
 export async function dueReminders(now = Date.now(), limit = 50): Promise<{ sid: string; field: string }[]> {
   if (!isRedisConfigured()) return [];
   const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, 0, Math.floor(now / 1000), "LIMIT", 0, limit]]);
   const entries = (Array.isArray(due) ? due : []).map(String);
-  if (entries.length) await redisPipeline([["ZREM", DUE_KEY, ...entries]]);
+  const until = Math.floor(now / 1000) + REMINDER_LEASE_SECONDS;
+  if (entries.length) await redisPipeline([["ZADD", DUE_KEY, "XX", ...entries.flatMap((entry) => [until, entry])]]);
   return entries.flatMap((entry) => {
     const [sid, field] = [entry.slice(0, entry.indexOf("|")), entry.slice(entry.indexOf("|") + 1)];
     return sid && FIELD_PATTERN.test(field) ? [{ sid, field }] : [];
   });
 }
 
-/** Puts a reminder back in line, to be tried again in an hour. */
+/** Takes a finished reminder off the line: sent, nothing to send, or no longer wanted. */
+export async function dropReminder(sid: string, field: string): Promise<void> {
+  await redisPipeline([["ZREM", DUE_KEY, `${sid}|${field}`]]);
+}
+
+/**
+ * Puts a leased reminder back in line, to be tried again in an hour: only while it is still in line (XX), so one taken
+ * off meanwhile (a deletion, a membership kept) is never made again (Codex U on #4359). New reminders are put in line
+ * where the invite is made, never here.
+ */
 export async function remindLater(sid: string, field: string, now = Date.now()): Promise<void> {
-  await redisPipeline([["ZADD", DUE_KEY, Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
+  await redisPipeline([["ZADD", DUE_KEY, "XX", Math.floor(now / 1000) + 3_600, `${sid}|${field}`]]);
 }
 
 /** Who a member's link is for, on this store and membership, while it works. */
@@ -441,7 +466,7 @@ export async function readMove(store: Store, productId: string, token: string): 
   }
 }
 
-export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "price" | "refused" | "consent" | "done" | "checking" | "unknown" };
+export type MoveOpen = { ok: true; url: string } | { ok: false; reason: "expired" | "kept" | "unavailable" | "price" | "refused" | "consent" | "checking" | "unknown" };
 
 /** The open mark's value once a try's outcome is not known (a checkout may exist): later presses say so. */
 const OPEN_UNKNOWN = "unknown";
@@ -459,11 +484,11 @@ export async function openMove(
   const invite = await readMove(store, productId, token);
   if (!invite) return { ok: false, reason: "expired" };
   // Kept already, or its state cannot be read (KEPT_UNKNOWN): the link opens nothing more, at any price, so one
-  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was moved only when it was;
-  // a state that cannot be read is said to be unknown, never moved (Claude 4's MÉDIO on #2685), so nobody lets
-  // their old membership lapse on our word.
+  // member never holds two memberships from it (Revisor 1 on #2685). The page says it was kept only when it was;
+  // a state that cannot be read is said to be unknown, never kept (Claude 4's MÉDIO on #2685), so nobody lets
+  // their old membership lapse on our word. Kept: main's own answer, "kept" (review of #4121).
   if (invite.keptUnknown) return { ok: false, reason: "unknown" };
-  if (invite.kept !== 0) return { ok: false, reason: "done" };
+  if (invite.kept !== 0) return { ok: false, reason: "kept" };
   const stored: Product | null = await readProduct(store, productId);
   // A price the creator has since taken off sale stays open to this member alone while the invitation is not yet
   // kept (642 [WG2], C4-20261105-1945-C2-2): the checkout below gets the product with that option back on sale;
@@ -476,6 +501,32 @@ export async function openMove(
   if (namedPriceGone(product, invite.o)) return { ok: false, reason: "price" };
   // Not on sale now, or the option kept with nothing to hand over: the general answer, nothing charged.
   if (!canSellProduct(store, product) || !namedPriceOffered(product, invite.o)) return { ok: false, reason: "unavailable" };
+  // Kept already, found live on the creator's account (review of #4121; B4): paid in a checkout the thanks page and
+  // the sweep never saw. A second checkout would be a second membership of the same thing, charged every period
+  // beside the first, so the link opens nothing more and says it was kept, before any checkout this link opened is
+  // handed back (main's order: a press after paying says "kept", not the paid page again). Read whole by keptAlready
+  // (main's reader): a reply that cannot be read, or one with more than is counted, opens nothing, and the next press
+  // asks again. Every Stripe page this press may read is counted before the first (Codex C2 on #2685):
+  // MOVE_STRIPE_PAGES, each a public request unit at AFFILIATE_STRIPE_PAGES_PER_UNIT. Not counted (the store's month
+  // is used): nothing read, nothing opened. None of this takes the open mark below, so none can leave it behind.
+  if (!(await takePublicRequest(store, "buyer", now, Math.ceil(MOVE_STRIPE_PAGES / AFFILIATE_STRIPE_PAGES_PER_UNIT)))) return { ok: false, reason: "unavailable" };
+  let live: boolean;
+  try {
+    live = await keptAlready(store, invite.e, productId, MOVE_CUSTOMERS_READ);
+  } catch (error) {
+    console.error("reading a moved member's live membership failed", store.handle, error);
+    return { ok: false, reason: "refused" };
+  }
+  if (live) {
+    // Kept, whatever the note says (Claude 4 A5 on #2690): a note that fails to be written is written by the next
+    // press, the thanks page or the sweep.
+    try {
+      await noteKept(store, invite.e, productId, now);
+    } catch (error) {
+      console.error("noting a moved membership as kept failed", store.handle, error);
+    }
+    return { ok: false, reason: "kept" };
+  }
   const option = product.options.length ? invite.o : undefined;
   // One invitation opens one checkout at a time (Claude 4 on #2690): pressed twice at once or again while it is open,
   // it is the same one, so one member never holds two memberships from it. Taken before Stripe is asked, for the
@@ -495,32 +546,6 @@ export async function openMove(
   const release = () => redisPipeline([["DEL", key]]).catch(() => {});
   /** Kept for the longest a checkout lives, marked as an outcome not known, so later presses say so. */
   const keepUnknown = () => redisPipeline([["SET", key, OPEN_UNKNOWN, "XX", "EX", OPEN_SECONDS]]).catch(() => {});
-  // Paid already in a checkout the thanks page and the sweep never saw (B4): Stripe shows the membership live, so
-  // the link opens nothing more and says it was moved. Not read whole: nothing opened, the next press asks again.
-  // Every Stripe page this press may read is counted before the first (Codex C2 on #2685): the customer records, one
-  // subscription page each, and the checkout's closing time when its creation leaves it out, each a public request
-  // unit at AFFILIATE_STRIPE_PAGES_PER_UNIT. Not counted (the store's month is used): nothing read, nothing opened.
-  if (!(await takePublicRequest(store, "buyer", now, Math.ceil(MOVE_STRIPE_PAGES / AFFILIATE_STRIPE_PAGES_PER_UNIT)))) {
-    await release();
-    return { ok: false, reason: "unavailable" };
-  }
-  const live = await liveMembership(store, invite.e, productId);
-  if (live === null) {
-    await release();
-    return { ok: false, reason: "refused" };
-  }
-  if (live) {
-    // Moved, whatever the note says (Claude 4 A5 on #2690): a note that fails to be written is written by the next
-    // press, the thanks page or the sweep, and the mark is let go either way, never left "opening" for a day.
-    try {
-      await noteKept(store, invite.e, productId, now);
-    } catch (error) {
-      console.error("noting a moved membership as kept failed", store.handle, error);
-    } finally {
-      await release();
-    }
-    return { ok: false, reason: "done" };
-  }
   let asked = false;
   try {
     const held = await withStockHold(store, product, (holding) => {
@@ -576,44 +601,16 @@ async function checkoutCloses(store: Store, sessionId: string): Promise<number |
   }
 }
 
-/** Customer records under one address read for an invitation's press; more than this is not read whole (Codex C2 on #2685). */
+/** Customer records read for an invitation's press, under the address forms together; more is not read whole (Codex C2 on #2685). */
 export const MOVE_CUSTOMERS_READ = 5;
-/** Stripe pages one press may read: the customer records, one subscription page each, and the checkout's closing time. */
-export const MOVE_STRIPE_PAGES = 1 + MOVE_CUSTOMERS_READ + 1;
-
+/** Address forms keptAlready asks Stripe for: the address as kept, and its normalised form when that differs. */
+const MOVE_ADDRESS_FORMS = 2;
 /**
- * Whether Stripe shows this address a live membership to this product, read whole (B4): true or false only from
- * complete lists in their exact shape; anything else (an error, a list cut short, a reply that is not a list) is
- * null, never "not a member".
- *
- * Known limit (Revisor 1 on #2685): Stripe's email filter matches the spelling exactly. The invitation's address is
- * kept in lower case, and every checkout this link opens is made with it, so a membership opened from the link is
- * found here. One the member opened elsewhere under another spelling is not; for those the invitation's kept mark
- * (noteKept, from the thanks page and the checkout sweep) is what closes the link.
+ * Stripe pages one press may read, all counted before the first: a customer page for each address form, up to
+ * KEPT_PAGES pages of memberships for each customer record read (keptAlready, main's reader since #4121), and the
+ * checkout's closing time when its creation leaves it out.
  */
-async function liveMembership(store: Store, email: string, productId: string): Promise<boolean | null> {
-  const account = store.stripeAccountId;
-  if (!account || !EMAIL_PATTERN.test(email)) return null;
-  try {
-    // At most MOVE_CUSTOMERS_READ records under the address: more is not read whole, so nothing opens (the cost bound).
-    const customers = wholeList(await onAccount("GET", account, `/customers?${new URLSearchParams({ email, limit: String(MOVE_CUSTOMERS_READ) })}`), MOVE_CUSTOMERS_READ);
-    if (!customers) return null;
-    for (const customer of customers) {
-      const id = customer && typeof customer === "object" ? (customer as { id?: unknown }).id : undefined;
-      if (typeof id !== "string" || !/^cus_[A-Za-z0-9]+$/.test(id)) return null;
-      const subs = wholeList(await onAccount("GET", account, `/subscriptions?customer=${id}&status=all&limit=100`), 100);
-      if (!subs) return null;
-      for (const sub of subs) {
-        const live = liveRow(sub, productId);
-        if (live === null) return null;
-        if (live) return true;
-      }
-    }
-    return false;
-  } catch {
-    return null;
-  }
-}
+export const MOVE_STRIPE_PAGES = MOVE_ADDRESS_FORMS + MOVE_CUSTOMERS_READ * KEPT_PAGES + 1;
 
 /**
  * Deletes the invitations an import gave one person to keep a membership
@@ -624,23 +621,28 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  // CX-123 rule 24 (Claude 4, C4-2890): a reply out of its exact shape is unknown, never "no invitations": it throws,
-  // so the erasure lists this part as not finished instead of reporting 0 while the invitation and its link stay.
-  const rows = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1)?.[0];
-  if (!Array.isArray(rows) || rows.length !== fields.length || rows.some((row) => row !== null && typeof row !== "string")) {
-    throw new UnknownReplyError("a person's invitations");
-  }
-  // An invitation kept under the person's field is deleted even when its record no longer reads: its field, schedule and
-  // checkout mark are known from the field alone; only a link read from the record can be deleted by its token.
-  const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
+  // Read exactly (unknown is never zero): a reply in another shape, or a kept invite that does not read, may still
+  // hold the address and its reminder, so it is never said to be forgotten. It throws, and the erasure reports this
+  // part as not done and tries again (lib/person-erasure.ts), the way forgetLeadPerson does.
+  const what = "a person's membership move invitations";
+  const replies = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1);
+  const rows = replies ? listSlots(replies[0]) : null;
+  if (!rows || rows.length !== fields.length) throw new UnknownReplyError(what);
+  const held: { field: string; invite: Invite }[] = [];
+  fields.forEach((field, i) => {
+    if (rows[i] === null) return;
+    const invite = parseInvite(rows[i]);
+    if (!invite) throw new UnknownReplyError(what);
+    held.push({ field, invite });
+  });
   if (!held.length) return 0;
-  const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
-  await redisPipeline([
+  const gone = repliesFor(await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
-    ...(links.length ? [["DEL", ...links]] : []),
+    ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
     // The checkout their link last opened, kept a day so it is not opened twice.
     ["DEL", ...held.map((h) => openKey(statsId, h.field))],
-  ]);
+  ]), 4);
+  if (!gone || gone.some((n) => { const c = countOf(n); return c === null || c > held.length; })) throw new UnknownReplyError(what);
   return held.length;
 }

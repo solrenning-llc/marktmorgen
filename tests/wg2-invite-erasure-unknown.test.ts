@@ -38,8 +38,13 @@ async function main(): Promise<void> {
   }
   part("Controls");
   is("no invitation on either product: 0, nothing deleted", await attempt((n) => Array(n).fill(null)), { result: 0, deletes: 0 });
-  // Added after the RED: a field holding a record that no longer reads is still the person's, so it is deleted and counted.
-  is("a field whose record does not read is still deleted and counted", await attempt((n) => ["not json", ...Array(n - 1).fill(null)]), { result: 1, deletes: 3 });
+  // Merge of main (16 November 2026): main's rule prevails (BROADCAST-250(b)). A field holding a record that no longer
+  // reads may still hold the address and its reminder, so it is unknown: the eraser throws, deletes nothing, and the
+  // erasure tries again, instead of saying the person is forgotten.
+  is("a field whose record does not read is unknown: it throws and deletes nothing", await attempt((n) => ["not json", ...Array(n - 1).fill(null)]), { result: "threw", deletes: 0 });
+  // A record that reads is deleted with its link, its reminder and the moving-in checkout its link last opened.
+  const invite = JSON.stringify({ e: "person@example.com", p: "prod1", r: 500, t: "a".repeat(40), at: 1, kept: 0 });
+  is("a record that reads: deleted with its link, reminder and open-checkout mark", await attempt((n) => [invite, ...Array(n - 1).fill(null)]), { result: 1, deletes: 4 });
   done();
 }
 

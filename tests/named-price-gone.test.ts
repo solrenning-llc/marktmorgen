@@ -37,6 +37,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     checkouts.push(new URLSearchParams(String(init?.body)));
     return new Response(JSON.stringify({ id: `cs_test_${"p".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" }));
   }
+  // Altered 2026-11-12: a move link now asks whether the member already kept it (lib/move-members.ts, openMove);
+  // nobody here has, so the creator's account lists no customer for the address.
   // What openMove reads around the checkout, as Stripe answers it (Revisor 1 on #2685): nobody here is a member yet
   // (whole, empty lists), and each checkout closes when its body said, or in a day.
   const method = init?.method ?? "GET";

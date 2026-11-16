@@ -37,6 +37,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { type Store, saleHandles } from "@/lib/store";
 import { type Invoice, type Movements, movementsFrom, pricesFrom, UnreadInvoiceError } from "@/lib/mrr-movements";
 import { LEAVE_NAMES, LEAVE_REASONS, type LeaveReason, isLeaveReason, isOwnReasonId } from "@/lib/leave-rules";
+import { stopsBeforeSoldEnd } from "@/lib/fixed-end-rules";
 
 const MAX_PAGES = 20;
 const CACHE_SECONDS = 10 * 60;
@@ -454,6 +455,8 @@ type Raw = {
   ended_at?: unknown;
   trial_end?: unknown;
   canceled_at?: unknown;
+  cancel_at?: unknown;
+  billing_cycle_anchor?: unknown;
   cancellation_details?: { reason?: unknown; feedback?: unknown; comment?: unknown } | null;
   items?: { data?: { quantity?: unknown; price?: { unit_amount?: unknown; recurring?: { interval?: unknown; interval_count?: unknown } | null } | null }[] } | null;
 };
@@ -526,9 +529,11 @@ export function readSub(raw: Raw, handles: Set<string>): Sub | null {
     channel: "channel" in meta ? (meta.channel && meta.channel !== "direct" ? meta.channel : "direct") : meta.utm_source || "unrecorded",
     entry: entryOf(meta),
     // A membership with a set number of payments is given its end when it is
-    // bought; that is not somebody leaving.
-    canceledAt: meta.ends_after ? 0 : num(raw.canceled_at),
-    cancelCause: !meta.ends_after && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
+    // bought; that is not somebody leaving. Stopped before that end, it is
+    // (lib/fixed-end-rules.ts): counted from when the member asked, written by
+    // the store's page, else Stripe's own moment.
+    canceledAt: meta.ends_after ? (stopsBeforeSoldEnd(raw) ? num(Number(meta.cancel_requested_at)) || num(raw.canceled_at) : 0) : num(raw.canceled_at),
+    cancelCause: (!meta.ends_after || stopsBeforeSoldEnd(raw)) && typeof raw.cancellation_details?.reason === "string" ? raw.cancellation_details.reason : "",
     ...feedbackOf(raw),
     customer: typeof raw.customer === "string" ? raw.customer : raw.customer && typeof raw.customer === "object" && typeof (raw.customer as { id?: unknown }).id === "string" ? (raw.customer as { id: string }).id : "",
     // The customer's address, when Stripe gives the customer whole (expand[]=data.customer): to leave out what an erased member wrote.
@@ -712,6 +717,9 @@ async function readMemberships(
   if (beforeStripe && !(await beforeStripe())) return "refused";
   const handles = saleHandles(store);
   const subs: Sub[] = [];
+  // Every membership's id as listed: one listed twice, on a page or across pages, is not two members, and a cursor
+  // read that repeats is not known to have covered the list (#4421). Its id read exactly, as the cursor reads it.
+  const seen = new Set<string>();
   let after = "";
   let complete = false;
   for (let page = 0; page < MAX_PAGES; page += 1) {
@@ -727,6 +735,10 @@ async function readMemberships(
     if (typeof listed.has_more !== "boolean") throw new Error("Stripe gave whether there are more subscriptions in a shape that cannot be read");
     const rows = listed.data as Raw[];
     for (const raw of rows) {
+      const id = raw && typeof raw === "object" ? (raw as { id?: unknown }).id : undefined;
+      if (typeof id !== "string" || !id) throw new Error("Stripe gave a membership with no id to tell it apart");
+      if (seen.has(id)) throw new Error("Stripe listed the same membership twice, so the list is not known to be whole");
+      seen.add(id);
       const sub = readSub(raw, handles);
       if (sub) subs.push(sub);
     }

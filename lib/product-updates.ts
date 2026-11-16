@@ -39,7 +39,7 @@ import { type BatchMessage, sendBatch } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
-import { BATCH_SIZE, SENDER_WAIT_NOTE, canWrite, fromLine, type MailDay, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
+import { BATCH_SIZE, SENDER_RETRY_NOTE, SENDER_WAIT_NOTE, canWrite, fromLine, type MailDay, mailDay, monthlyAllowance, release, render, reserve } from "@/lib/mail";
 import { leadsKey, parseContact } from "@/lib/contacts";
 import { storeBase } from "@/lib/purchase-email";
 import { SITE_URL } from "@/lib/site-url";
@@ -488,9 +488,11 @@ export async function advanceUpdate(id: string, load: (handle: string) => Promis
           await giveBack(store, recipients.length, day);
           const failures = job.failures + 1;
           job =
-            failures >= 5 || outcome === "refused"
+            // Only a refusal ends it: a provider that is down or slow keeps the update waiting in the queue, never
+            // abandoned, and the next run goes on with it (outage drill, 13 November 2026).
+            outcome === "refused"
               ? { ...job, status: "failed", failures, note: "The email service would not take it. Nothing more was sent." }
-              : { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
+              : { ...job, failures, note: SENDER_RETRY_NOTE };
           break;
         }
       }

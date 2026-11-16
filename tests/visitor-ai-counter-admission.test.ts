@@ -18,7 +18,7 @@ function request(ip = "198.51.100.1", origin = "https://example.com", body?: str
 async function main() {
   for (const [route, handler] of handlers) {
     for (const [stage, scope] of scopes.entries()) {
-      for (const [label, reply] of [["missing", undefined], ["empty", []], ["partial", ["OK"]], ["extra", ["OK", 1, true]], ["text", ["OK", "1"]], ["null", ["OK", null]], ["zero", ["OK", 0]], ["negative", ["OK", -1]], ["fraction", ["OK", 0.5]], ["unknown SET", [false, 1]]] as [string, unknown][]) {
+      for (const [label, reply] of [["missing", undefined], ["empty", []], ["partial", [1]], ["extra", [1, 1, true]], ["text", ["1", 1]], ["null", [null, 1]], ["zero", [0, 1]], ["negative", [-1, 1]], ["fraction", [0.5, 1]], ["unknown EXPIRE", [1, false]]] as [string, unknown][]) {
         await check(`${route}/${scope} refuses ${label} before data/model work`, async () => {
           reset(); state.scope = scope; state.reply = reply;
           const response = await handler(request());
@@ -41,7 +41,7 @@ async function main() {
       assert.equal(state.models, ASKS_PER_TEN_MINUTES);
       for (const [index, scope, ttl] of [[0, "ask", 600], [2, "ask-day", 86400], [4, "ask-store", 60]] as const) {
         assert.match(String(state.commands[index][1]), new RegExp(`^nl:rl:${scope}:[0-9a-f]{32}$`));
-        assert.deepEqual(state.commands[index].slice(2), ["0", "EX", ttl, "NX"]);
+        assert.deepEqual([state.commands[index][0], ...state.commands[index + 1]], ["INCR", "EXPIRE", state.commands[index][1], ttl, "NX"]);
       }
     });
     await check(`${route} keeps the confirmed daily ceiling across minute windows`, async () => {

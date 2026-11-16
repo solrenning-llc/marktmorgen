@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $118.58 | $1,211.45 | $69 / $690 |
-| Studio | $174.55 | $1,851.95 | $449 / $4,490 |
-| Scale | $272.33 | $2,988.93 | $999 / $9,990 |
+| Store | $118.58 | $1,211.75 | $69 / $690 |
+| Studio | $174.55 | $1,852.48 | $449 / $4,490 |
+| Scale | $272.33 | $2,989.58 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -43,7 +43,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 **(recommended)** | 17.4% | 60.24% | 60.05% | $77.72 | 0.49 |
-| $149 / $1,490 | 70.0% | 60.27% | 60.06% | $89.81 | 0.43 |
+| $149 / $1,490 | 70.0% | 60.26% | 60.06% | $89.80 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.41% | 60.20% | $102.10 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.91% | 60.73% | $121.22 | 0.32 |
 
@@ -54,7 +54,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $199 / $1,990 | 0.3% | 60.33% | 60.03% | $120.06 | 2.23 |
+| $199 / $1,990 | 0.2% | 60.33% | 60.03% | $120.06 | 2.23 |
 | $249 / $2,490 **(recommended)** | 15.7% | 60.34% | 60.04% | $150.27 | 1.78 |
 | $299 / $2,990 | 30.0% | 60.38% | 60.06% | $180.56 | 1.48 |
 | $449 / $4,490 | 72.9% | 60.36% | 60.02% | $271.06 | 0.99 |
@@ -68,7 +68,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $349 / $3,490 | 3.7% | 60.42% | 60.04% | $210.88 | 2.85 |
 | $399 / $3,990 **(recommended)** | 10.5% | 60.40% | 60.02% | $241.03 | 2.49 |
-| $499 / $4,990 | 23.7% | 60.40% | 60.01% | $301.44 | 1.99 |
+| $499 / $4,990 | 23.5% | 60.41% | 60.01% | $301.46 | 1.99 |
 | $999 / $9,990 | 88.7% | 60.41% | 60.01% | $603.58 | 0.99 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.04% | 60.02% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.12% | 12.14% |
 | Net a customer, a month, at full included use | $77.72 | $150.27 | $241.03 |
-| The same at #553's price | $38.41 | $267.81 | $600.46 |
+| The same at #553's price | $38.41 | $267.81 | $600.45 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

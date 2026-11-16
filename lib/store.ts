@@ -3636,8 +3636,9 @@ export async function editProduct(
       // A bundle is one sale of several things at one price: never free, never
       // charged again and again, never priced by its buyer (lib/bundle-rules.ts).
       if (isBundle(product) && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "bundle" };
-      // A physical product is sold once, at a price (lib/shipping.ts): shipped by the creator.
-      if (product.shipping && (fields.priceCents === 0 || recurring || pwywCents !== null)) return { ok: false, reason: "shipped" };
+      // A physical product is sold once, for a price (lib/shipping.ts): shipped by the creator. The price may be
+      // one the buyer chooses, at or above this one (514 [PF2]), checked by pwywProblem below as on any product.
+      if (product.shipping && (fields.priceCents === 0 || recurring)) return { ok: false, reason: "shipped" };
       const next: Product = {
         ...product,
         title: fields.title,
@@ -3664,6 +3665,30 @@ export async function editProduct(
     return result;
   }
   return { ok: true, store: result.store, product: result.product };
+}
+
+/**
+ * A product's title alone, for a change the creator confirmed from the AI
+ * agent's proposals (631 [AA1] (c), lib/agent-kinds.ts): its price, terms and
+ * everything else stay exactly as they are. Empty is refused, as on the
+ * studio's own form. The words checks are the caller's (descriptionRefusal).
+ */
+export async function setProductTitle(email: string, id: string, rawTitle: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const title = rawTitle.trim().slice(0, MAX_TITLE_LENGTH);
+  // `only.expected`: written only while the title is still that, checked under the store's lock (an agent's
+  // proposal confirmed or undone, lib/agent-kinds.ts); "changed" when it is not, and nothing is written.
+  const result = await onProduct<"title" | "changed">(email, id, (product) =>
+    only && product.title !== only.expected ? { ok: false, reason: "changed" } : title ? { ...product, title } : { ok: false, reason: "title" },
+  );
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
+}
+
+/** A product's short summary alone, as setProductTitle: everything else stays. Empty is allowed, as on the studio's form. */
+export async function setProductSummary(email: string, id: string, rawSummary: string, only?: { expected: string }): Promise<ProductResult | { ok: false; reason: "changed" }> {
+  const summary = rawSummary.trim().slice(0, MAX_SUMMARY_LENGTH);
+  // `only.expected`, as setProductTitle: written only while the summary is still that.
+  const result = await onProduct<"changed">(email, id, (product) => (only && (product.summary ?? "") !== only.expected ? { ok: false, reason: "changed" } : { ...product, summary }));
+  return result.ok ? { ok: true, store: result.store, product: result.product } : result;
 }
 
 /** Takes something off the store. Returns the product as it was, for its files. */

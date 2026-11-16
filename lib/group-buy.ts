@@ -1079,9 +1079,11 @@ export async function revokeRefundedGroups(
       if (known !== "through") {
         // A purchase id in another shape has no mark: its charge is asked as before, never held for good.
         const marked = typeof groupId === "string" && GROUP_ID.test(groupId) ? groupId : "";
+        // Past the run's lookups it holds whatever the mark says, so the mark is read only while a lookup is left
+        // (GROUP_REFUND_RUN in tests/plan-cost-registry.ts: one GET and one SET a lookup at the most).
+        if (lookups <= 0) return "hold";
         const waiting = marked ? repliesFor(await redisPipeline([["GET", heldKey(marked)]]), 1) : [null];
         if (!waiting || waiting[0] !== null) return "hold";
-        if (lookups <= 0) return "hold";
         lookups -= 1;
         let settled: "held" | "through";
         try {

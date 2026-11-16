@@ -532,7 +532,9 @@ export async function paidPeriods(store: Store): Promise<Map<string, PaidPeriod>
   if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError(what);
   for (let i = 0; i < flat.length; i += 2) {
     const row = paidRowOf(flat[i + 1]);
-    if (!SUB_ID.test(flat[i]) || !row) throw new UnknownReplyError(what);
+    // A hash names each field once: a subscription named twice is not the hash asked for, never a payment overwritten
+    // by the other (Codex T on #4454): unknown, so the closing stays held and is read again.
+    if (!SUB_ID.test(flat[i]) || !row || out.has(flat[i])) throw new UnknownReplyError(what);
     out.set(flat[i], row);
   }
   return out;

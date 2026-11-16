@@ -4,6 +4,7 @@ import { photoUrl } from "@/lib/photo-limits";
 import { isFree, type Listing, type Store } from "@/lib/store";
 import { speech } from "@/lib/buyer-words";
 import { communityWords, pollWhenIn, whenIn } from "@/lib/buyer-words/community";
+import { communityUnreadWords } from "@/lib/buyer-words/community-unread";
 import { challengeWords } from "@/lib/buyer-words/challenges";
 import { APPROVAL_WARN, approvalWords } from "@/lib/buyer-words/community-approval";
 import { LANGUAGES } from "@/lib/store-language";
@@ -34,13 +35,15 @@ const WARN = new Set([
   "noemail", "dmoff", "dmbetween", "dmfull", "chatoff", "pollclosed", "polloptions", "polltitle", "notyours", "empty", "links", "slow",
   "name", "questions", "image", "creatoronly", "level", "muted", "full", "fullposts", "fullcomments", "pinfull", "gone", "forbidden",
   "eventfull", "eventcancelled", "eventover", "eventlocked", "host", "nospace", "spacelocked", "out", "off", "error", "locked",
+  "notemailed",
 ]);
 
 /** What happened after a button, in the store's language (lib/buyer-words/community.ts). */
 export function communityNotices(language: unknown): Record<string, { text: string; tone?: "warn" }> {
   const w = communityWords(language);
-  // With what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts).
-  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices };
+  // With what waits for the creator's approval (543 [CM2], lib/buyer-words/community-approval.ts), and a post that went
+  // up while who asked for its email could not be read (lib/buyer-words/community-unread.ts).
+  const all: Record<string, string> = { ...w.notices, ...approvalWords(language).notices, notemailed: communityUnreadWords(language).notEmailed };
   return Object.fromEntries(Object.entries(all).map(([key, text]) => [key, WARN.has(key) || APPROVAL_WARN.has(key) ? { text, tone: "warn" as const } : { text }]));
 }
 

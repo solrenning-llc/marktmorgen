@@ -11,6 +11,17 @@ import { MAX_ABOUT_LENGTH } from "@/lib/product-about";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
+/** Drops every tag until none is left, so a tag cut in two cannot rebuild one (CodeQL js/incomplete-multi-character-sanitization). */
+function withoutTags(text: string): string {
+  let before: string;
+  let after = text;
+  do {
+    before = after;
+    after = before.replace(/<[^>]*>/g, "");
+  } while (after !== before);
+  return after;
+}
+
 async function main(): Promise<void> {
   redis.clear();
   const owner = "import-description@example.com";
@@ -34,10 +45,10 @@ async function main(): Promise<void> {
   is("setup: a styled description under the raw cap with little text", [short.length < MAX_ABOUT_LENGTH * 2, short.length], [true, short.length]);
   is("control: it is made as a draft", await outcomeOf(short), ["added", "title"]);
   const shortText = paragraph.repeat(60) + styled("THE END");
-  is("setup: its text is under the limit, its markup over the raw cap", [shortText.replace(/<[^>]*>/g, "").length < MAX_ABOUT_LENGTH, shortText.length > MAX_ABOUT_LENGTH * 2], [true, true]);
+  is("setup: its text is under the limit, its markup over the raw cap", [withoutTags(shortText).length < MAX_ABOUT_LENGTH, shortText.length > MAX_ABOUT_LENGTH * 2], [true, true]);
   is("a description whose markup is over what is read is refused on its description, not cut before THE END", await outcomeOf(shortText), ["error", "description"]);
   const longText = paragraph.repeat(80) + styled("THE END");
-  is("setup: its text alone is over the limit", longText.replace(/<[^>]*>/g, "").length > MAX_ABOUT_LENGTH, true);
+  is("setup: its text alone is over the limit", withoutTags(longText).length > MAX_ABOUT_LENGTH, true);
   is("a description whose text is over the limit is refused, not cut under it (as it was once its markup took the cut)", await outcomeOf(longText), ["error", "description"]);
   done();
 }

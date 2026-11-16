@@ -558,6 +558,10 @@ async function main(): Promise<void> {
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // Merge of main into #4514 (16 November 2026, Claude 3): main's outbox cost and #4514's invite credit cost line
     // together cost each plan one cent more a month; figures as the model computes them, still above zero (MR).
+    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #4514 again (16 November 2026, Claude 3): main's #3457 records and this PR's invite credit line; figures as computed.
     is("11: Store, Studio and Scale keep 45.09, 313.79 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.09", "313.79", "703.17"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.

@@ -12,6 +12,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { essentialLimitState, withinLimit, withinMonth } from "@/lib/request-guard";
+import { withinChallengeWrites } from "@/lib/community-challenges";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -46,6 +47,20 @@ async function main(): Promise<void> {
     // The window goes by; the next uses start a fresh window, never a count that only grows.
     advance(61_000);
     is("after it, uses are counted again from one", [await count(), await count(), await count()], [true, true, true]);
+  }
+
+  // Review of #3452 (Claude 4 cloud Z, MEDIUM): a creator's changes to challenges in an hour (lib/community-challenges.ts,
+  // withinChallengeWrites) counted with the same SET NX EX + INCR pair, so a key that expired between them locked the
+  // creator out of making or deleting challenges for good.
+  part("withinChallengeWrites: the hour's count expires between the two commands");
+  {
+    redis.clear();
+    const keys = () => (redis.run(["SCAN", "0", "MATCH", "*:chw", "COUNT", 10_000]) as [string, string[]])[1];
+    is("the first change is within", await withinChallengeWrites("synthetic-community"), true);
+    expireBetween = true;
+    await withinChallengeWrites("synthetic-community");
+    is("no count is left without an expiry", keys().filter((k) => redis.run(["TTL", k]) === -1), []);
+    is("and a change is still counted within afterward", await withinChallengeWrites("synthetic-community"), true);
   }
 
   part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");

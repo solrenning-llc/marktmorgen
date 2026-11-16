@@ -16,9 +16,10 @@ import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, addStoreLink, claimHandle, ensureStatsId, imageFolder, setProductImage, setProductPage, setSitePages, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { allowanceUsed } from "@/lib/store-allowance";
 import { MAX_PAGE_PICTURES, MAX_PICTURES } from "@/lib/sales-page";
 import { store as redis } from "./redis-stub";
-import { calls, files } from "./failure-cleanup-world";
+import { calls, failNext, files } from "./failure-cleanup-world";
 import { done, is, part } from "./check";
 import { POST as door } from "@/app/api/store/image/upload/route";
 import { POST as pageRoute } from "@/app/api/store/page/route";
@@ -182,6 +183,48 @@ async function main(): Promise<void> {
   const answered = await result(await productImage(post("/api/store/image", session, ownBody)));
   const after = (await readListing((await storeForEmail(OWNER))!, otherId))?.image ?? null;
   is("sent again: the picture attached, the copy left out, and nothing read", [answered, after?.path, after?.small ?? null, calls.head, calls.get], [[200, "ok"], ownMain, null, 0, 0]);
+
+  // Codex N1 on #2843 (MEDIUM, reproduced by Claude 3, 6912059163): a save that names a good picture and a bad file,
+  // both fresh from the door, wrote the good one down as the page's and was refused; saved again without it, the page
+  // never held it, so nothing let go of it: a file kept for good, owned by a page that does not show it, refused to
+  // every other page. The same when another picture's check did not finish (the save answered server_error).
+  const statsId = (await storeForEmail(OWNER))!.statsId!;
+  const owner = async (path: string) => (await redis.pipeline([["HGET", `nl:product:pics:${statsId}`, path]]))[0];
+  const notPictureBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]);
+  for (const [why, spoil] of [
+    ["a bad file", (path: string) => files.set(path, { bytes: notPictureBytes, contentType: "image/jpeg", at: Date.now() + 1 })],
+    ["a check that did not finish", (path: string) => failNext.head.set(path, 1)],
+  ] as const) {
+    part(`A save refused for ${why} beside a good picture does not leave the good one the page's`);
+    const goodOne = await upload({ productId: id });
+    const spoilt = await upload({ productId: id });
+    spoil(spoilt);
+    const refused = await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0006", [goodOne, spoilt]) })));
+    is("the save is refused", refused[0] === 400 || refused[0] === 500, true);
+    is("saved again without either: saved", await result(await pageRoute(post("/api/store/page", session, { id, page: { blocks: [] } }))), [200, "ok"]);
+    is("[CORRETO] the good picture is not kept as the page's, which never showed it", await owner(goodOne), null);
+    const usedBefore = (await allowanceUsed((await storeForEmail(OWNER))!, "studio")) ?? -1;
+    calls.head = 0;
+    calls.get = 0;
+    is("[CORRETO] a later save that shows it still puts it on", await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0007", [goodOne]) }))), [200, "ok"]);
+    is("and it is then the page's", await owner(goodOne), id);
+    is("checked once more, that check paid as one more studio request beside the save's own", [calls.head, calls.get, ((await allowanceUsed((await storeForEmail(OWNER))!, "studio")) ?? -1) - usedBefore], [1, 1, 2]);
+  }
+
+  part("The same on a store page: a save refused for a bad file leaves its good picture to the next save");
+  const siteGood = await upload({ pageId: "pagepage01" });
+  const siteSpoilt = await upload({ pageId: "pagepage01" });
+  files.set(siteSpoilt, { bytes: notPictureBytes, contentType: "image/jpeg", at: Date.now() + 1 });
+  is("refused", await result(await sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage01", page: pictures("pics0008", [siteGood, siteSpoilt]) }))), [400, "pictures"]);
+  is("[CORRETO] the good picture is not the store page's", await owner(siteGood), null);
+  is("[CORRETO] the next save that shows it puts it on", await result(await sitePage(post("/api/store/site-page", session, { action: "save", id: "pagepage01", page: pictures("pics0008", [siteGood]) }))), [200, "ok"]);
+
+  part("A save naming a picture the door never let in reads nothing, and leaves what it took to the next save");
+  const beside = await upload({ productId: id });
+  calls.head = 0;
+  calls.get = 0;
+  is("refused before any read", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [beside, stray]) }))), calls.head + calls.get], [[400, "pictures"], 0]);
+  is("[CORRETO] the next save with the picture alone puts it on, checked once", [await result(await pageRoute(post("/api/store/page", session, { id, page: pictures("pics0009", [beside]) }))), calls.head, calls.get, await owner(beside)], [[200, "ok"], 1, 1, id]);
   done();
 }
 

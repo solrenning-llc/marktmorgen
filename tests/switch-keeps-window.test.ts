@@ -552,6 +552,17 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
+    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
+    // figures as the model computes them; still above zero (MR), cost not lowered.
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #3545 (15 November 2026): the catalog's product records read in shared MGETs and its listing
     // reads priced as such (lib/catalog.ts, lib/read-ceilings.ts) cost fewer store commands, so each plan keeps more;
     // figures as the model computes them with main's costs and #3545's reads together.
@@ -559,13 +570,13 @@ async function main(): Promise<void> {
     // written ceiling (lib/redis-mget.ts, smaller lots) and reads a booking's two meeting records a GET each, so the
     // catalog and calendar lines cost more store commands: 0.76 dollars less kept on each plan's month, still above
     // zero (MR). Cost is not lowered; figures as the model computes them with both branches together.
-    is("11: Store, Studio and Scale keep 46.08, 314.80 and 704.23 dollars in their worst month on a monthly plan", worstMonth("month"), ["46.08", "314.80", "704.23"]);
+    is("11: Store, Studio and Scale keep 46.07, 314.77 and 704.14 dollars in their worst month on a monthly plan", worstMonth("month"), ["46.07", "314.77", "704.14"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of #3545 into #3079 (15 November 2026): the same byte-sized reads cost a yearly month 0.76 to 0.77 dollars more.
-    is("11: and 38.02, 259.67 and 580.95 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.02", "259.67", "580.95"]);
+    is("11: and 38.01, 259.65 and 580.87 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.01", "259.65", "580.87"]);
   } finally {
     Date.now = realNow;
   }

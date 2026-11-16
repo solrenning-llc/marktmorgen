@@ -111,7 +111,7 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
@@ -125,7 +125,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
+import { BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -538,14 +538,18 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
+  // And the book's two questions about its PayPal payments (lib/affiliates.ts, readBook: an HMGET of the refunds kept
+  // for good and a ZMSCORE of the set, in slices of BOOK_KEPT_SLICE), each field a ceiling of the payments: their
+  // names sent and their answers, BOOK_KEPT_REFUND_BYTES a field, and two commands a slice (pre-review C).
+  const asks = 2 * Math.ceil(size.fields / BOOK_KEPT_SLICE);
   // Up to REFUND_MARKS_PER_READ fields could be a sale, share or lead whose refund is kept on it (lib/affiliates.ts,
   // AFFILIATE_REFUND_MARK): its whole new text sent, one script for each of the three hashes.
   const marks = 3;
-  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + Math.min(size.fields, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * (AFFILIATE_FIELD_BYTES + BOOK_KEPT_REFUND_BYTES) + Math.min(size.fields, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
-  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes + marks, bytes + kept) + perMegabyte(bytes + kept)
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + asks + 2 * writes + marks, bytes + kept) + perMegabyte(bytes + kept)
     + size.stripePages * stripePage();
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
@@ -917,7 +921,9 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
- * Taking a payment back (its two marks, or one for a refund, the buyer's record, a course start) happens once an order
+ * The take-back marks (ZADD and EXPIRE of the refund set, and of the reversed set for a capture reversed, failed or
+ * declined) are counted on every refund look, retries included, in PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost
+ * (Claude 6 on #3464). The rest of taking a payment back (the buyer's record, a course start) happens once an order
  * and is not priced apart here: an open gap, never zero. A scheduled job bounded by its schedule and the batch, a
  * company fixed cost like HAND_OVER_BATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by tests/paypal-reversed-access.test.ts.
  */
@@ -929,6 +935,32 @@ export const PAYPAL_REFUND_WATCH = {
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
+} as const;
+/**
+ * The refund kept for good by the same watch (lib/paypal-sales.ts, watchPayPal, backKey; #3464, Claude 7's MÉDIO):
+ * each look at an order PayPal says is refunded in full writes it to nl:ppsell:back:<stats> with one ORDER_WRITE
+ * script (lib/order-data.ts, orderWrite) carrying one HSETNX, charged to the store's room:
+ * - scriptsPerRefundLook / writesPerScript: one script, one write;
+ * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (EXISTS, TYPE,
+ *   HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET): 11;
+ * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
+ *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
+ *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
+ * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
+ *   tells nothing, so its worst is the marks, one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
+ *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
+ * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
+ * tests/affiliate-refund-lifetime.test.ts.
+ */
+export const PAYPAL_REFUND_KEPT = {
+  scriptsPerRefundLook: 1,
+  writesPerScript: 1,
+  commandsPerScriptAtMost: 11,
+  markCommandsPerRefundLookAtMost: 4,
+  retryWritesPerFailedLook: 1,
+  looksPerDayAtMost: 24,
+  daysAtMost: 400,
 } as const;
 /**
  * The other half of the same function, the sweep of the store's pending PayPal orders (lib/paypal-sales.ts, watchPayPal,
@@ -956,7 +988,7 @@ export const PAYPAL_PENDING_SWEEP = {
  * five-minute job's watch of PayPal refunds, watchPayPal in lib/paypal-sales.ts): before the event, the person's
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
  * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
- * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH above.
+ * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH and PAYPAL_REFUND_KEPT above.
  */
 export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
 /**
@@ -1217,6 +1249,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/calls.ts", names: ["admitOrders(store, CALL_ORDER_UNITS)", "countOrder"] },
       { file: "lib/call-packages.ts", names: ["admitOrders(store, 1)"] },
       { file: "lib/group-buy.ts", names: ["placesHeld", "admitOrders(store, 1)", "settleAdmitted(store, hour)"] },
+      // A gift's and a purchase for several's exact reads and "OK"-checked writes, a place's compare-and-set scripts and a
+      // checkout's room given back once (#2872; Claude 7's LEVE 1): a few commands an order, inside ORDER_COMPUTE.
+      { file: "lib/gifts.ts", names: ["readGiftExactly"] },
+      { file: "lib/group-buy.ts", names: ["readGroupExactly", "PLACE_CLAIM", "PLACE_DROP"] },
+      { file: "lib/purchase-email.ts", names: ["firstToGiveRoomBack"] },
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },

@@ -79,4 +79,3 @@ export function shipsNowhere(product: SafetyCandidate): boolean {
   const shipping = shippingNow(product);
   return shipping !== null && shipping.countries.length === 0;
 }
-

@@ -24,6 +24,9 @@ import { lessonsInOrder, readCourse } from "@/lib/course";
 import { enroll } from "@/lib/flows";
 import { exactReplies, UnknownReply } from "@/lib/redis-exact";
 import type { Store } from "@/lib/store";
+import { FINISH_KEEP_SECONDS } from "@/lib/course-finish-rules";
+
+export { FINISH_KEEP_SECONDS };
 
 const finishedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:fin:${learner}`;
 const openedKeyOf = (courseId: string, learner: string) => `nl:course:${courseId}:open:${learner}`;

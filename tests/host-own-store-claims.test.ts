@@ -1,14 +1,18 @@
 /**
  * A person who hosts on another store's team and also sells ordinary calls in their own store is booked once for any
  * hour. Team bookings are written to the host's own claims (lib/host-claims.ts); an ordinary weekly booking in the
- * host's own store reads the claims other stores made on its owner (lib/calls.ts, holdAndCheckout and slotsForProduct)
- * and writes its own claim on the owner in the same atomic script (CLAIM_HOST_TIMES), kept for a paid booking, moved
- * with a move and let go when the hold is given back or the booking is refunded in full. A claims list that cannot be
- * read is never read as free (rule 24). Audit proof (Claude 5, 9 November 2026, ALTO 1), kept as its regression test.
+ * host's own store reads the claims other stores made on its owner at the hold, inside the order (lib/calls.ts,
+ * holdAndCheckout), and writes its own claim on the owner in the same atomic script (CLAIM_HOST_TIMES), kept for a paid
+ * booking, moved with a move and let go when the hold is given back or the booking is refunded in full. A claims list
+ * that cannot be read is never read as free (rule 24). Audit proof (Claude 5, 9 November 2026, ALTO 1), kept as its
+ * regression test. Owner's decision of 16 November 2026 on #3490 ("ler só no checkout"): the call's page and the move
+ * page no longer read her claims on every visit; the hold and the move refuse a time sold on another store, and the
+ * buyer is told the time was just taken, to pick another, with nothing charged.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
+import { bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { type CallListing, confirmBooking, holdAndCheckout, moveBooking, releaseOwnHold, slotsForMove, slotsForProduct } from "@/lib/calls";
 import type { CallSetup } from "@/lib/call-setup";
 import { putMember } from "@/lib/team";
@@ -67,6 +71,20 @@ const hold = async (store: Store, product: CallListing, start: number) =>
   holdAndCheckout({ store, product: (await readProduct(store, product.id)) as Product & { call: CallSetup }, start, buyerTz: NY, origin: "https://marktmorgen.com" });
 const offered = async (store: Store, product: CallListing, start: number) => Boolean((await slotsForProduct(store, product))?.days.some((d) => d.starts.includes(start)));
 const MAYA = "maya@example.com";
+/** What `run` returns, and how many times it read Maya's claims (one HGETALL each). */
+async function claimReads<T>(run: () => Promise<T>): Promise<[T, number]> {
+  const real = redis.pipeline;
+  let reads = 0;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    reads += commands.filter((c) => c[0] === "HGETALL" && c[1] === claimsKey(hostId(MAYA))).length;
+    return real.call(redis, commands);
+  }) as typeof redis.pipeline;
+  try {
+    return [await run(), reads];
+  } finally {
+    redis.pipeline = real;
+  }
+}
 const mayaClaims = async () => ((await readClaims([hostId(MAYA)])).get(hostId(MAYA)) ?? []).map((c) => ({ start: c.start, held: c.until > 0 })).sort((a, b) => a.start - b.start);
 /** A completed checkout of Maya's call, as Stripe lists it, paid or refunded in full. */
 function paidRow(session: string, store: Store, product: CallListing, start: number, refunded: boolean): Record<string, unknown> {
@@ -99,9 +117,14 @@ async function main(): Promise<void> {
   const S = weekdayAt(3, 600);
   const team = await hold(harbor.store, harbor.product, S);
   is("held on Harbor, as Maya's claim", [team.ok, ((await readClaims([hostId(MAYA)])).get(hostId(MAYA)) ?? []).map((c) => c.start)], [true, [S]]);
-  is("her own store does not offer that hour", await offered(lantern.store, lantern.product, S), false);
-  const own = await hold(lantern.store, lantern.product, S);
-  is("and a buyer of her own call cannot hold it", own.ok ? "held" : own.reason, "taken");
+  // Rule 23 (owner's decision, 16 November 2026, on #3490: "ler só no checkout"): her own store's page read her claims on
+  // every visit and left that hour out; it reads none now, and the hold, inside the order, reads them and refuses it.
+  const [shown, pageReads] = await claimReads(() => offered(lantern.store, lantern.product, S));
+  is("her own store's page reads none of her claims on a visit (the hour is shown)", [pageReads, shown], [0, true]);
+  const [own, holdReads] = await claimReads(() => hold(lantern.store, lantern.product, S));
+  is("a buyer of her own call cannot hold it: the hold reads her claims and refuses", [own.ok ? "held" : own.reason, holdReads > 0], ["taken", true]);
+  const told = bookingNotice(bookingWords("en"), own.ok ? "held" : own.reason, [], 60);
+  is("the buyer is told the time was just taken, to pick another, and that nothing was charged", [told?.title, /Pick another; nothing was charged\./.test(told?.body ?? "")], ["That time was just taken", true]);
 
   part("An ordinary booking in Maya's own store takes her hour");
   const T = weekdayAt(4, 660);
@@ -123,9 +146,11 @@ async function main(): Promise<void> {
   listed.push(paidRow(first.session, lantern.store, lantern.product, T, false));
   // The next hour, which starts as the booking's own hour ends: its own claim never stands in its way.
   const T2 = T + HOUR;
-  const moveOffer = await slotsForMove(lantern.store, lantern.product, first.session, T, HOUR);
+  const [moveOffer, moveReads] = await claimReads(() => slotsForMove(lantern.store, lantern.product, first.session, T, HOUR));
   is("the move page offers the next hour", Boolean(moveOffer?.days.some((d) => d.starts.includes(T2))), true);
-  is("and not the hour Harbor holds her for", Boolean(moveOffer?.days.some((d) => d.starts.includes(S))), false);
+  // Rule 23 (owner's decision, 16 November 2026, on #3490): the move page left Harbor's hour out by reading her claims on
+  // every visit; it reads none now, and the move itself (below) reads them and refuses that hour.
+  is("the move page reads none of her claims on a visit", moveReads, 0);
   const toHarbor = await moveBooking({ store: lantern.store, product: lantern.product, session: first.session, booked: { start: T, end: T + HOUR, email: "buyer@example.com", buyerTz: NY }, start: S, origin: "https://marktmorgen.com" });
   is("a move into Harbor's hour is refused", toHarbor.ok ? "moved" : toHarbor.reason, "taken");
   const moved = await moveBooking({ store: lantern.store, product: lantern.product, session: first.session, booked: { start: T, end: T + HOUR, email: "buyer@example.com", buyerTz: NY }, start: T2, origin: "https://marktmorgen.com" });
@@ -155,9 +180,11 @@ async function main(): Promise<void> {
     const replies = await real(commands);
     return replies.map((reply, i) => (commands[i][0] === "HGETALL" && commands[i][1] === claimsKey(hostId(MAYA)) ? "not a list" : reply));
   }) as typeof redis.pipeline;
-  is("her own store offers no time at all", await slotsForProduct(lantern.store, lantern.product), null);
+  // Rule 23 (owner's decision, 16 November 2026, on #3490): her own store's page offered nothing while her claims could
+  // not be read; it does not read them on a visit now, so it is the hold that reads them and refuses.
+  is("her own store's page does not read them on a visit", Boolean(await slotsForProduct(lantern.store, lantern.product)), true);
   const blind = await hold(lantern.store, lantern.product, V);
-  is("and holds nothing", blind.ok ? "held" : blind.reason, "error");
+  is("and the hold holds nothing", blind.ok ? "held" : blind.reason, "error");
   redis.pipeline = real;
   is("read again, the time is offered", await offered(lantern.store, lantern.product, V), true);
 
@@ -220,7 +247,10 @@ async function main(): Promise<void> {
   listed.length = 0;
   listed.push(paidRow(only.session, lanternNow, group, X, true));
   is("refunded in full, no seat left: her own store offers that group time again", await offered(lanternNow, group, X), true);
-  is("her other call still does not take that hour", await offered(lanternNow, lantern.product, X), false);
+  // Rule 23 (owner's decision, 16 November 2026, on #3490): her own store's page no longer reads her claims, so her other
+  // call is refused that hour at the hold, which reads them, instead of left out of its page.
+  const other = await hold(lanternNow, lantern.product, X);
+  is("her other call still does not take that hour", other.ok ? "held" : other.reason, "taken");
   is("Harbor's team still does not offer her then (the shared claim stays, failing closed)", await offered(harbor.store, harbor.product, X), false);
   const resold = await hold(lanternNow, group, X);
   is("a new buyer holds a seat", resold.ok, true);

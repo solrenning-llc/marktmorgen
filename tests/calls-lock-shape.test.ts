@@ -378,10 +378,14 @@ async function main(): Promise<void> {
     // Rule 23 (#3490, Claude 6's MEDIUM 1): the owner's claim of a weekly hold outlasts the hold by CLAIM_MARGIN_MS, as
     // a team hold's claim does, so a buyer confirmed late is never sold twice on another store. The time comes back once
     // that margin is over; before, it came back as the hold ran out.
+    // Rule 23 again (owner's decision, 16 November 2026, on #3490: "ler só no checkout"): the page no longer reads the
+    // owner's claims on a visit, so it shows the time as soon as the hold is tidied away; the checkout, which reads them,
+    // refuses it until the margin is over.
     Date.now = () => until + 1;
-    is("control: a real hold whose time ran out is tidied away", [(await offered(h))?.includes(H), (await run([["HGET", diaryOf(h), expiring]]))[0]], [false, null]);
+    is("control: a real hold whose time ran out is tidied away, and the page shows its time", [(await offered(h))?.includes(H), (await run([["HGET", diaryOf(h), expiring]]))[0]], [true, null]);
+    is("control: …but the checkout refuses it while the owner's claim outlasts the hold", await sell(h, H), "taken");
     Date.now = () => until + CLAIM_MARGIN_MS + 1;
-    is("control: …and gives its time back once the claim's margin is over", (await offered(h))?.includes(H), true);
+    is("control: …and sells it once the claim's margin is over", await sell(h, H), "opened");
   } finally {
     Date.now = clock;
   }

@@ -30,6 +30,7 @@ import { NextRequest } from "next/server";
 import { GET as recountCron } from "@/app/api/cron/recount/route";
 import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS, NOTE_STORE_READS } from "@/lib/podcast-access";
 import { PODCAST_NOTE_RUN_USD } from "./plan-cost-registry";
+import { BACKUP_SCAN_PAGES } from "@/lib/backup-parts";
 
 const owner = "podcast-removed-owner@example.test";
 const person = "podcast-removed-person@example.test";
@@ -37,8 +38,8 @@ const other = "podcast-removed-other@example.test";
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const grantKey = (token: string) => `nl:pod:t:${sha(token)}`;
 
-async function world() {
-  redis.clear();
+async function world(keep = false) {
+  if (!keep) redis.clear();
   await claimHandle(owner, "podremoved", "Podcast Removed", "");
   await ensureStoreId(owner); await ensureStatsId(owner); await ensureListId(owner);
   await setSubscription(owner, { customerId: "cus_PodRemoved", subscriptionId: "sub_PodRemoved", active: true, tier: "pro", period: paidPeriod() });
@@ -240,4 +241,49 @@ test("one run of the walk stops at its reads of stores, and the next run goes on
   assert.deepEqual([after.pages, after.storeReads, after.done], [0, 0, true], "once done, a run only reads where the walk is");
   assert.ok(PODCAST_NOTE_RUN_USD > 0 && Number.isFinite(PODCAST_NOTE_RUN_USD));
   console.log(`a run of the walk: at most ${NOTE_RUN_COMMANDS} commands and ${NOTE_RUN_BYTES} bytes, $${PODCAST_NOTE_RUN_USD.toFixed(6)}`);
+}));
+
+/**
+ * A SCAN that pages as a real Redis does (Claude 6 on #4471 @c2cc79fec0, MEDIUM): each call examines COUNT keys of a
+ * shared database of `keys` keys, answering [cursor + COUNT, []] until the end, then the stand-in's matches with "0".
+ * The in-memory stand-in answers every SCAN in one page, which hid how long the walk and the bridge take.
+ */
+function pagedScan(keys: number): () => void {
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.length !== 1 || commands[0][0] !== "SCAN") return original(commands);
+    const [, cursor, , , , count] = commands[0].map(String);
+    const next = Number(cursor) + Number(count);
+    if (next < keys) return [[String(next), []]];
+    return original([commands[0].map((v, i) => (i === 1 ? "0" : v))]);
+  };
+  return () => { redis.pipeline = original; };
+}
+
+// Claude 6 (MEDIUM): on a real database every deletion answered "not finished" until the walk ended, which took
+// (keys / 1,000) hours. One run must cover the database the daily backup accepts (BACKUP_SCAN_PAGES pages of 500).
+test("one run of the walk covers a database of the size the daily backup accepts, and deletions finish after it", () => quietly(async () => {
+  const { pid } = await world();
+  const restore = pagedScan(BACKUP_SCAN_PAGES * 500);
+  try {
+    const run = await access.notePodcastProducts(Date.now() + 60_000);
+    assert.equal(run.done, true, `one run ends the walk (${run.pages} pages)`);
+    const result = await erasePerson((await storeForEmail(owner))!, "podcast-removed-nofeed@example.test", { kind: "person" });
+    assert.equal(result.ok, true);
+  } finally { restore(); }
+  assert.ok(pid);
+}));
+
+// Claude 6 (MEDIUM): a store made after the walk started cannot hold a feed from before the note, so its deletions
+// never wait for the walk.
+test("a store made after the walk started never waits for it", () => quietly(async () => {
+  redis.clear();
+  const restore = pagedScan(10_000);
+  try {
+    const run = await access.notePodcastProducts(Date.now() + 60_000, 1);
+    assert.equal(run.done, false, "the walk is under way");
+    await world(true);
+    const result = await erasePerson((await storeForEmail(owner))!, "podcast-removed-nofeed@example.test", { kind: "person" });
+    assert.equal(result.ok, true);
+  } finally { restore(); }
 }));

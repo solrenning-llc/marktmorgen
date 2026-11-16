@@ -102,6 +102,7 @@ export default async function LibraryPage({ searchParams }: Params) {
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
+      {/* SiteNav draws the page's one <header> (banner); wrapped in another, the banners nested (#4610 review). */}
       <SiteNav />
       <main id="content" className="flex-1">
         <section className="surface-dawn border-b border-line">

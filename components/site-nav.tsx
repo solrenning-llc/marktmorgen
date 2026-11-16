@@ -361,12 +361,11 @@ export function SiteNav({ opening }: { opening: NavOpening }) {
       </a>
       {/* What the site is today, before anything else it says
           (lib/opening.ts). It scrolls away with the page; the menu stays.
-          A named region of its own, so it is inside a landmark (axe
-          "region") without a page wrapping the menu in a short <header>,
-          which would stop the menu from sticking (#3997 review). Line
-          spacing 1.5 (WCAG 1.4.8). */}
+          Line spacing 1.5 (WCAG 1.4.8). */}
       {PLANS_ON_SALE ? null : (
-        <section aria-label="About Marktmorgen today" className="bg-ink text-white" data-preview-bar="">
+        // A named region, so its words are inside a landmark (AX274 Part A; axe "region"). It stays outside the
+        // sticky header below so that it scrolls away while the menu stays (tests/public-header-targets.test.ts).
+        <section aria-label="What is built today" className="bg-ink text-white" data-preview-bar="">
           <p className="container-page py-2.5 text-center text-[0.8125rem] leading-normal sm:text-sm">
             {PREVIEW_LINE}{" "}
             <Link prefetch={false} href={PREVIEW_LINK.href} className="whitespace-nowrap font-semibold underline underline-offset-2">
@@ -375,7 +374,9 @@ export function SiteNav({ opening }: { opening: NavOpening }) {
           </p>
         </section>
       )}
-    {/* The page's banner is the sticky menu itself, a direct child of the page's column, so it sticks for the whole page. */}
+    {/* The header landmark is the sticky part itself, so the logo, the menu, Log in and Start your store are all
+        inside it and it still sticks for the whole page (a <header> around the line above would end the sticking at
+        its own bottom). */}
     <header className="sticky top-0 z-50">
 
       <div

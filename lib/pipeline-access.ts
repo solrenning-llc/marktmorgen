@@ -160,13 +160,15 @@ export async function copyPipelineAccess(store: DataStore, from: string, to: str
     // No restriction to carry (the field was never set): a field the new address had from before (someone else's,
     // long gone) must not restrict them, so it goes, and gives its room back. Any stored text, an empty one
     // included, is carried as it is: a record that cannot be read opens nothing (mapOf), and moving it must not
-    // turn it into no restriction (Claude 1, #2036).
-    if (weight(old) === 0) return UNCHANGED;
+    // turn it into no restriction (Claude 1, #2036). An empty text at the new address goes too: kept, it would read
+    // as a record that opens nothing, and the teammate would lose every pipeline (Codex X5, #2036). It has no room
+    // to give back.
+    if (old === null) return UNCHANGED;
     const deleted = oneAnswer(await redisPipeline([["HDEL", accessKey(statsId), after]]).catch(() => null));
     // Not confirmed: it may have landed, so what the new address held is carried, for the caller to put it back.
     if (deleted === null) throw new PipelineAccessCopyUnconfirmed({ prior: old, now: null }, 0);
     if (deleted === 0) return UNCHANGED;
-    await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
+    if (weight(old) > 0) await giveData(store, [{ slot: ACCESS_SLOT, bytes: weight(old) }]);
     return { prior: old, now: null };
   }
   // A record moved, not a new one. Its room is taken BEFORE it is written, so a write that lands is never left

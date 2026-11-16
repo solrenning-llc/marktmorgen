@@ -40,6 +40,7 @@ import {
   type AccountingSale,
 } from "@/lib/accounting-export-rules";
 import { ACCOUNTING_PAGES, ACCOUNTING_PAYPAL_LIMIT, readAccountingSales } from "@/lib/accounting-export";
+import { timeLeft } from "@/lib/fetch-timeout";
 import { readPayPalSalesExact } from "@/lib/paypal-sales";
 import { EXPORT_PAGES } from "@/lib/stats";
 import type { Store } from "@/lib/store";
@@ -278,6 +279,33 @@ async function main(): Promise<void> {
     invoice("in_z_0", { billing_reason: "subscription_update", amount_paid: 0, tax: 0 }),
   ], false)]);
   is("a switch to yearly or a plan change, a one-off charge and a threshold invoice are lines; a first invoice (its checkout) and one paid by credit alone are not", changes.ok && changes.sales.map((s) => [s.net, s.tax]).sort(), [[3000, 100], [700, 0], [900, 0]]);
+
+  part("A renewal paid partly or wholly from the buyer's credit (Claude 7's MÉDIO 2 on #2996 @a6919d892f)");
+  // A plan switched down with "always_invoice" (lib/tier-switch.ts) leaves a credit on the buyer's balance that Stripe takes off the next
+  // renewal: amount_paid is then less than the invoice's total, and the cash cannot be split into sale and tax exactly.
+  const creditRead = (rows: unknown[]) => readAccountingSales(store, period, world(empty, empty, undefined, [page(rows, false)]).deps).catch(() => ({ ok: false as const, reason: "threw" }));
+  const credited = (paidCents: number) => invoice("in_k_0", { total: 1000, tax: 200, amount_paid: paidCents, starting_balance: paidCents - 1000, created: from + 4 * 86_400 });
+  for (const [paidCents, what] of [[800, "a credit smaller than the net (never booked as 600 net)"], [100, "a credit larger than the net (never an unreadable month for good)"], [0, "a credit that pays it all (never a sale and its tax left out)"]] as const) {
+    const result = await creditRead([credited(paidCents)]);
+    is(`${what}: no file, said as credit, with the day of that invoice`, result.ok ? "a file" : [result.reason, "at" in result ? result.at : null], ["credit", from + 4 * 86_400]);
+  }
+  const creditNote = await creditRead([invoice("in_n_0", { billing_reason: "subscription_update", total: -1500, amount_paid: 0, tax: 0 }), invoice("in_a_0")]);
+  is("a switch down's own invoice (a negative total, nothing paid) is no line and holds nothing", creditNote.ok && creditNote.sales.map((s) => [s.net, s.tax]), [[2000, 0]]);
+  is("a paid renewal whose total cannot be read: no file (unknown is not the amount paid)", (await creditRead([invoice("in_a_0", { total: "20" })])).ok, false);
+  const exportRouteCredit = readFileSync(join(process.cwd(), "app/api/store/export/route.ts"), "utf8");
+  is("the creator is told the day of that renewal and what can be done, never \"try again\" for it", /read\.reason === "credit"/.test(exportRouteCredit), true);
+
+  part("The accounting read is priced and bounded before it runs (Claude 7's MÉDIO 1 on #2996 @a6919d892f)");
+  const accountingModule = (await import("@/lib/accounting-export")) as Record<string, unknown>;
+  const units = accountingModule.ACCOUNTING_READ_UNITS;
+  const seconds = accountingModule.ACCOUNTING_READ_SECONDS;
+  is("its studio requests and its time are whole numbers above zero", [Number.isSafeInteger(units) && (units as number) > 0, Number.isSafeInteger(seconds) && (seconds as number) > 0], [true, true]);
+  const routeUnits = exportRouteCredit.indexOf('takeAllowance(store, "studio", ACCOUNTING_READ_UNITS)');
+  is("the route takes them from the studio's figure after the window is counted and before anything is read", [routeUnits > exportRouteCredit.indexOf("count > EXPORTS_PER_WINDOW"), routeUnits > 0 && routeUnits < exportRouteCredit.indexOf("readAccountingSales(")], [true, true]);
+  const left: number[] = [];
+  const timedWorld = world(empty, empty);
+  await readAccountingSales(store, period, { ...timedWorld.deps, stripe: async (path: string) => { left.push(timeLeft()); return timedWorld.deps.stripe(path); } });
+  is("every Stripe page is asked inside the read's own cutoff, so its wall time is bounded", left.length > 0 && left.every((ms) => ms > 0 && ms <= (seconds as number) * 1000), true);
 
   part("PayPal's own records, read exactly");
   redis.clear();

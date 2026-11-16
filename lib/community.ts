@@ -549,6 +549,13 @@ export async function readMembersExact(id: string, keys: string[]): Promise<Map<
   return out;
 }
 
+/**
+ * How many times one change to a member's record may add to what it already holds in the store's data room, after
+ * its first reservation, when its set is tried again (patchMember): one. Past it the change fails as a record that
+ * kept changing, so the room calls of one profile action stay at most three whatever the retries.
+ */
+export const MEMBER_ROOM_TOP_UPS = 1;
+
 /** Writes a member's record only if it is still exactly what was read. */
 const CAS_MEMBER = [
   'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
@@ -583,40 +590,72 @@ async function patchMember(
   key: string,
   change: (member: Member) => Partial<Member>,
   /**
-   * When given, each try takes from the store's data room what it adds before its compare-and-set writes, gives it
-   * back when the set did not go in (the record changed since it was read), keeps it when the answer is not known,
-   * and gives back what the written record freed only once the set went in.
+   * When given, what a try adds is taken from the store's data room before its compare-and-set writes, and kept
+   * across the tries whose set did not go in (the record changed since it was read): a later try tops it up only
+   * when it needs more than is held, at most once (MEMBER_ROOM_TOP_UPS). What is held beyond what the written record
+   * took is given back once, after the set went in; all of it when nothing was written; none of it when the set's
+   * answer is not known. So one change runs at most three room calls (a reservation, a top-up, a give-back), never
+   * one per try (rule 30 on Claude 7's MEDIUM on #3024 at 2d7c9cd60b).
    */
   room?: DataStore,
 ): Promise<Member | null> {
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const read = await readMemberExact(id, key);
-    if (!read) return null;
-    const { raw, member } = read;
-    const next: Member = { ...member, ...change(member), k: member.k };
-    const grown = room ? profileGrowth(raw, member, next) : 0;
-    if (room && grown > 0) await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-    const listed = next.dir && next.n && !next.removed ? "1" : "0";
-    const replies = repliesFor(await redisPipeline([
-      ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
-    ]), 1);
-    // 1 written, 0 changed since it was read (read again); anything else is not known to be either.
-    const written = replies?.[0];
-    if (written === 0) {
-      // Nothing of this try was written: what it took is given back before the record is read again.
-      if (room && grown > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: grown }]);
-      continue;
+  // The bytes this change holds in the room, and the top-ups it has run.
+  let held = 0;
+  let topUps = 0;
+  // Set once the set's answer is not known: what is held then stays taken.
+  let unknown = false;
+  const giveBack = async (bytes: number) => {
+    if (room && bytes > 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes }]);
+  };
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const read = await readMemberExact(id, key);
+      if (!read) {
+        await giveBack(held);
+        held = 0;
+        return null;
+      }
+      const { raw, member } = read;
+      const next: Member = { ...member, ...change(member), k: member.k };
+      const grown = room ? profileGrowth(raw, member, next) : 0;
+      if (room && grown > held) {
+        // The first reservation, or one top-up when the record shrank since (only the member's own other saves
+        // shrink what this change writes over); a second would make the room calls depend on the retries.
+        if (held > 0 && topUps >= MEMBER_ROOM_TOP_UPS) break;
+        if (held > 0) topUps += 1;
+        await needData(room, [{ slot: MEMBERS_SLOT, bytes: grown - held }]);
+        held = grown;
+      }
+      const listed = next.dir && next.n && !next.removed ? "1" : "0";
+      const replies = repliesFor(await redisPipeline([
+        ["EVAL", CAS_MEMBER, 2, membersKey(id), dirKey(id), key, raw, JSON.stringify(next), listed, next.at],
+      ]), 1);
+      // 1 written, 0 changed since it was read (read again, keeping what is held); anything else is not known to be either.
+      const written = replies?.[0];
+      if (written === 0) continue;
+      if (written !== 1) {
+        // Not known to have gone in or not: what was taken stays taken, and nothing is given back.
+        unknown = true;
+        throw new UnknownReplyError("a change to a community member record");
+      }
+      // The record took `grown` (less than nothing when it shrank): the rest of what is held goes back, once.
+      const excess = held - grown;
+      held = 0;
+      await giveBack(excess);
+      // The search index follows the very same switch the directory does, from
+      // the very same place, so the two can never come to disagree about who is
+      // findable. Somebody who took themselves off the list is taken out of the
+      // index in the same breath.
+      await indexMember(id, next).catch(() => {});
+      return next;
     }
-    // Not known to have gone in or not: what was taken stays taken, and nothing is given back.
-    if (written !== 1) throw new UnknownReplyError("a change to a community member record");
-    if (room && grown < 0) await giveData(room, [{ slot: MEMBERS_SLOT, bytes: -grown }]);
-    // The search index follows the very same switch the directory does, from
-    // the very same place, so the two can never come to disagree about who is
-    // findable. Somebody who took themselves off the list is taken out of the
-    // index in the same breath.
-    await indexMember(id, next).catch(() => {});
-    return next;
+  } catch (error) {
+    // A read, a reservation or a set known not to have gone in: nothing of this change was written, so what it holds
+    // goes back. A set whose answer is not known keeps it.
+    if (!unknown) await giveBack(held).catch(() => {});
+    throw error;
   }
+  await giveBack(held);
   throw new Error("a member's record kept changing");
 }
 

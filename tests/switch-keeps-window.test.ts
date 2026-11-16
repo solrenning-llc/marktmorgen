@@ -555,7 +555,12 @@ async function main(): Promise<void> {
     // #3411's PayPal pending record (its capture watch, PAYPAL_CAPTURE_WATCH, and the record kept thirty days, nl:ppsell:o:)
     // is counted at its limit. Recomputed from the model at the merge of main c757064cc0 (15 November 2026, with #4542):
     // Studio keeps a cent less and Scale two, monthly; still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.24 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.24"]);
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merge of main 7aa1ce65a3 (16 November 2026) into #3411: #3411's pending record and main's outbox together;
+    // Scale's monthly worst month keeps 703.16 where main shows 703.18 (Store and Studio as main); still above zero (MR).
+    // Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.16 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.16"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -564,7 +569,9 @@ async function main(): Promise<void> {
     // Store and Studio unchanged.
     // Merge of main 24fcd87caf (15 November 2026, with #4022) into #3411: both together cost Studio's yearly month one
     // cent more, 258.69 where 258.70 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.69 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.97"]);
+    // Main at 7aa1ce65a3 (16 November 2026, with #4319's outbox) shows 37.04, 258.68 and 579.90; merged into #3411 with
+    // its pending record, Studio keeps 258.67 and Scale 579.88 (Store as main); still above zero (MR). Cost is not lowered.
+    is("11: and 37.04, 258.67 and 579.88 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.88"]);
   } finally {
     Date.now = realNow;
   }

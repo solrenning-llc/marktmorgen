@@ -80,10 +80,11 @@ import {checkPathCertificates} from "./path-certificates.mjs";
  *
  *   node tests/e2e/store-copy.mjs              builds the app, then checks
  *   node tests/e2e/store-copy.mjs --no-build   uses the build already in .next
+ *   STORE_COPY_PART=2/3 node tests/e2e/store-copy.mjs --no-build   runs one part
  *
  * The real app against the stand-in database of tests/e2e/services.mjs, as
  * tests/e2e/agreements.mjs runs it; nothing real is reached. In CI it runs
- * after the production build of the "verify" job.
+ * after the production build of each "store-copy" and "cross-browser" part.
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -93,6 +94,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { startServices } from "./services.mjs";
+import { parseStoreCopyPart, storeCopyPartSteps } from "./store-copy-parts.mjs";
 import { fieldFocusPixels,mountFieldFocusFixture } from "./field-focus.mjs";
 import { checkGrowthAndContact } from "./growth-contact.mjs";
 import { checkPathReminder, checkPathAnswers } from "./path-reminder.mjs";
@@ -143,6 +145,8 @@ const APP = Number(process.env.E2E_APP_PORT || 3189);
 const LOCAL = `http://localhost:${APP}`;
 const FAKE = `http://127.0.0.1:${SERVICES}`;
 const BUILD = !process.argv.includes("--no-build");
+// STORE_COPY_PART="index/total" runs one part (tests/e2e/store-copy-parts.mjs); a mistyped value fails here, before anything runs.
+const PART = parseStoreCopyPart(process.env.STORE_COPY_PART);
 
 const env = {
   ...process.env,
@@ -299,6 +303,91 @@ try {
   const errors = [];
   const watch = (page) => page.on("pageerror", (error) => {console.error("WATCHED_PAGE_ERROR:"+JSON.stringify({url:page.url(),error:String(error),stack:error.stack}));errors.push(String(error));});
   const open = async (page, url) => { const response=await page.goto(url,{waitUntil:"networkidle",timeout:60000}); if(!new URL(url).pathname.startsWith("/@"))is("platform document declares American English",await page.locator("html").getAttribute("lang"),"en-US"); return response; };
+  // The checks after the studio journey, in their order. STORE_COPY_PART runs one contiguous part of them on its own
+  // machine (tests/e2e/store-copy-parts.mjs); unset runs the journey and every step, as before.
+  // Seeded on first use, at the same point of the full run as before (just before the shipment acknowledgment).
+  let seededShipment;
+  const shipment = () => (seededShipment ??= services.seedShipment("templatelibraryfixture", libraryFixture.product));
+  const steps = [
+    ["checkPostSalePath", () => checkPostSalePath({browser,LOCAL,services,session:growthSession,sid:growthSid,product:growthProduct,axeSource,is})],
+    ["checkReturnPath", () => checkReturnPath({browser,LOCAL,session:returnSession,sid:returnSid,otherSid:growthSid,axeSource,is})],
+    ["checkPathScripts", () => checkPathScripts({browser,LOCAL,session:growthSession,sid:growthSid,axeSource,is})],
+    ["checkPathWording", () => checkPathWording({browser,LOCAL,services,session:wordingSession,sid:wordingSid,trialSession:wordingTrialSession,trialSid:wordingTrialSid,axeSource,is})],
+    ["checkPathCertificates", () => checkPathCertificates({browser,LOCAL,session:growthSession,sid:growthSid,otherSession:wordingSession,axeSource,is})],
+    ["checkCertificateHeading", () => publicStandardAx2Run() ? checkCertificateHeading({browser,LOCAL,fixture:certificateHeadingFixture,axeSource,is}) : undefined],
+    ["checkPublicAmericanEnglish", () => checkPublicAmericanEnglish({browser,LOCAL,is})],
+    ["checkSalesComparisons", () => checkSalesComparisons({browser,LOCAL,axeSource,is})],
+    ["checkGuidePlacement", () => checkGuidePlacement({browser,LOCAL,fixture:guideFixture,axeSource,is})],
+    ["checkHomePath", () => checkHomePath({browser,LOCAL,axeSource,is})],
+    ["checkContactAcknowledgment", () => checkContactAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkRecoveryAcknowledgment", () => checkRecoveryAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkSocialAcknowledgment", () => checkSocialAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkJoinAcknowledgment", () => checkJoinAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkIntroAcknowledgment", () => checkIntroAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkTipsAcknowledgment", () => checkTipsAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkPdfStampAcknowledgment", () => checkPdfStampAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is})],
+    ["checkPdfPreviewAcknowledgment", () => checkPdfPreviewAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is})],
+    ["checkFaqAcknowledgment", () => checkFaqAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkSitesAcknowledgment", () => checkSitesAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkLeaveAcknowledgment", () => checkLeaveAcknowledgment({browser,LOCAL,fixture:tierFixture,is})],
+    ["checkPackageAcknowledgment", () => checkPackageAcknowledgment({browser,LOCAL,fixture:packageFixture,is})],
+    ["checkNumbersAcknowledgment", () => checkNumbersAcknowledgment({browser,LOCAL,fixture:tierFixture,is})],
+    ["checkYearlyAcknowledgment", () => checkYearlyAcknowledgment({browser,LOCAL,fixture:tierFixture,is})],
+    ["checkDunningAcknowledgment", () => checkDunningAcknowledgment({browser,LOCAL,fixture:tierFixture,is})],
+    ["checkTierAcknowledgment", () => checkTierAcknowledgment({browser,LOCAL,fixture:tierFixture,is})],
+    ["checkOrderAcknowledgment", () => checkOrderAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is})],
+    ["checkExitAcknowledgment", () => checkExitAcknowledgment({browser,LOCAL,fixture:exitFixture,is})],
+    ["checkCartAcknowledgment", () => checkCartAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is})],
+    ["checkEnableAcknowledgment", () => checkEnableAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkPairsAcknowledgment", () => checkPairsAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is})],
+    ["checkCollectionsAcknowledgment", () => checkCollectionsAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is})],
+    ["checkLayoutAcknowledgment", () => checkLayoutAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is})],
+    ["checkLookAcknowledgment", () => checkLookAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkLanguageAcknowledgment", () => checkLanguageAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkThanksAcknowledgment", () => checkThanksAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is})],
+    ["checkNoCountAcknowledgment", () => checkNoCountAcknowledgment({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkNudgeAcknowledgment", () => checkNudgeAcknowledgment({browser,LOCAL,fixture:pauseFixtures[0],is})],
+    ["captureHomeStudio", () => captureHomeStudio({browser,LOCAL,fixture:homeDemo,is})],
+    ["checkOfferPlanning", () => checkOfferPlanning({browser,LOCAL,fixture:libraryFixture,axeSource,is})],
+    ["checkPixelAttributionCenter", () => checkPixelAttributionCenter({browser,LOCAL,fixture:libraryFixture,axeSource,is})],
+    ["checkPartnerCopy", () => checkPartnerCopy({browser,LOCAL,axeSource,is})],
+    ["checkPublicTrustDesign", () => checkPublicTrustDesign({browser,LOCAL,axeSource,is})],
+    ["checkTemplateLibrary", () => checkTemplateLibrary({browser,LOCAL,fixture:libraryFixture,axeSource,is})],
+    ["checkEvergreenGuides", () => checkEvergreenGuides({browser,LOCAL,is,axeSource})],
+    ["checkSalesLevers", () => checkSalesLevers({browser,LOCAL,fixture:activationFixture,axeSource,is})],
+    ["checkPlatformProof", () => checkPlatformProof({browser,LOCAL,is})],
+    ["checkCreatorShowcase", () => checkCreatorShowcase({browser,LOCAL,axeSource,is})],
+    ["checkSigninTerms", () => checkSigninTerms({browser,LOCAL,prices:signinPrices,axeSource,is})],
+    ["checkStoreActivation", () => checkStoreActivation({browser,LOCAL,fixture:activationFixture,axeSource,is})],
+    ["checkHotmartComparison", () => checkHotmartComparison({browser,LOCAL,axeSource,is})],
+    ["checkPricingValue", () => checkPricingValue({browser,LOCAL,axeSource,is})],
+    ["checkCreatorJourney", () => checkCreatorJourney({browser,LOCAL,axeSource,is})],
+    ["checkHomeHero", () => checkHomeHero({browser,LOCAL,axeSource,is})],
+    ["checkHomeModules", () => checkHomeModules({browser,LOCAL,axeSource,is})],
+    ["checkHomeStudioDetails", () => checkHomeStudioDetails({browser,LOCAL,axeSource,is})],
+    ["checkHomeReasons", () => checkHomeReasons({browser,LOCAL,axeSource,is})],
+    ["checkDisputeReview", () => checkDisputeReview({browser,LOCAL,fixture:homeDemo,axeSource,is})],
+    ["checkStudioAmericanEnglish", () => checkStudioAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkComposerAmericanEnglish", () => checkComposerAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is})],
+    ["checkBlockPickerTurnsWide", () => checkBlockPickerTurnsWide({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is})],
+    ["checkTaxScope", () => checkTaxScope({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkTaxSaveAcknowledgment", () => checkTaxSaveAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkRenameAcknowledgment", () => checkRenameAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkDetailsAcknowledgment", () => checkDetailsAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkClaimAcknowledgment", () => checkClaimAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is})],
+    ["checkPauseAcknowledgment", () => checkPauseAcknowledgment({browser,LOCAL,fixtures:pauseFixtures,is})],
+    ["checkEmailCapabilities", () => checkEmailCapabilities({browser,LOCAL,is})],
+    ["checkShipmentAcknowledgment", () => checkShipmentAcknowledgment({browser,LOCAL,fixture:libraryFixture,shipment:shipment(),is})],
+    ["checkMenuMounting", () => checkMenuMounting({browser,LOCAL,is})],
+    ["checkPurchaseResend", () => checkPurchaseResend({browser,LOCAL,fixture:libraryFixture,shipment:shipment(),axeSource,is})],
+    ["checkShippingSave", () => checkShippingSave({browser,LOCAL,fixture:shippingFixture,is})],
+    ["checkDiscountAcknowledgment", () => checkDiscountAcknowledgment({browser,LOCAL,fixture:libraryFixture,is})],
+    ["checkBillingStudioObservation", () => checkBillingStudioObservation({browser,LOCAL,services,fixture:billingObservation,is})],
+    ["checkShrinkTone", () => checkShrinkTone({ browser, root, is })],
+  ];
+  const chosen = storeCopyPartSteps(steps.map(([name]) => name), PART);
+  console.log(`STORE_COPY_PART ${PART ? PART.index + "/" + PART.total : "all"}: journey ${chosen.journey ? "yes" : "no"}; ${chosen.steps.length} of ${steps.length} steps: ${chosen.steps.join(",")}`);
+  if (chosen.journey) {
   const studio = await browser.newContext({ serviceWorkers: "block", viewport: { width: 1280, height: 900 } });
   await studio.addCookies([{ name: "nl_session", value: session, url: LOCAL }]);
   const owner = await studio.newPage();
@@ -338,9 +427,12 @@ try {
   });
   await owner.getByLabel("What do you want to do?").selectOption("sales");
   await owner.getByLabel("Find a campaign").fill("digital toolkit");
-  await owner.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+  // Each journey button names its campaign for assistive technology after its visible words (#3799, WCAG 2.4.6).
+  const journey = owner.getByRole("button", { name: /^See the journey and what you need\s*: \S/ });
+  is("the one matching campaign's journey button names it", await journey.count(), 1);
+  await journey.click();
   is("campaign requirements come from the actual bundle", await owner.getByText("Your download or toolkit (paid)", { exact: true }).isVisible(), true);
-  is("the journey is keyboard accessible", await owner.getByRole("button", { name: "Hide the journey", exact: true }).getAttribute("aria-expanded"), "true");
+  is("the journey is keyboard accessible", await owner.getByRole("button", { name: /^Hide the journey\s*: \S/ }).getAttribute("aria-expanded"), "true");
   await owner.getByLabel("Find a campaign").fill("no-such-campaign");
   is("unmatched search can be reset", await owner.getByText("No campaigns match these filters.", { exact: true }).isVisible(), true);
   await owner.getByRole("button", { name: "Show all campaigns", exact: true }).click();
@@ -474,7 +566,7 @@ try {
     is(`copy page at ${width}: axe`, await page.evaluate(async () => (await window.axe.run(document, { runOnly: { type: "tag", values: ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22a", "wcag22aa"] } })).violations.map((v) => v.id)), []);
     await open(page, `${LOCAL}/studio/funnels`);
     await page.getByLabel("Find a campaign").fill("launch waitlist");
-    await page.getByRole("button", { name: "See the journey and what you need", exact: true }).click();
+    await page.getByRole("button", { name: /^See the journey and what you need\s*: \S/ }).click();
     const nextAtWidth=page.locator('details[aria-label="Suggested next funnel check"]').first();
     await nextAtWidth.locator("summary").click();
     // Stress a long unbroken customer title at the actual mobile and desktop widths.
@@ -841,82 +933,9 @@ try {
   const afterLeave=await owner.evaluate(async sid=>(await fetch("/api/store/path?store="+sid)).json(),pathSid);
   is("withdrawal preserves private Path answers",afterLeave.path.answers.subject,"Sourdough");
   is("withdrawal removes exported membership",afterLeave.path.board,null);
-  await checkPostSalePath({browser,LOCAL,services,session:growthSession,sid:growthSid,product:growthProduct,axeSource,is});
-  await checkReturnPath({browser,LOCAL,session:returnSession,sid:returnSid,otherSid:growthSid,axeSource,is});
-  await checkPathScripts({browser,LOCAL,session:growthSession,sid:growthSid,axeSource,is});
-  await checkPathWording({browser,LOCAL,services,session:wordingSession,sid:wordingSid,trialSession:wordingTrialSession,trialSid:wordingTrialSid,axeSource,is});
-  await checkPathCertificates({browser,LOCAL,session:growthSession,sid:growthSid,otherSession:wordingSession,axeSource,is});
-  if(publicStandardAx2Run())await checkCertificateHeading({browser,LOCAL,fixture:certificateHeadingFixture,axeSource,is});
-  await checkPublicAmericanEnglish({browser,LOCAL,is});
-  await checkSalesComparisons({browser,LOCAL,axeSource,is});
-  await checkGuidePlacement({browser,LOCAL,fixture:guideFixture,axeSource,is});
-  await checkHomePath({browser,LOCAL,axeSource,is});
-  await checkContactAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkRecoveryAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-  await checkSocialAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkJoinAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkIntroAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkTipsAcknowledgment({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkPdfStampAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is});
-  await checkPdfPreviewAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is});
-  await checkFaqAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-  await checkSitesAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-  await checkLeaveAcknowledgment({browser,LOCAL,fixture:tierFixture,is});
-  await checkPackageAcknowledgment({browser,LOCAL,fixture:packageFixture,is});
-  await checkNumbersAcknowledgment({browser,LOCAL,fixture:tierFixture,is});
-  await checkYearlyAcknowledgment({browser,LOCAL,fixture:tierFixture,is});
-await checkDunningAcknowledgment({browser,LOCAL,fixture:tierFixture,is});
-await checkTierAcknowledgment({browser,LOCAL,fixture:tierFixture,is});
-await checkOrderAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is});
-await checkExitAcknowledgment({browser,LOCAL,fixture:exitFixture,is});
-await checkCartAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is});
-await checkEnableAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-await checkPairsAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is});
-await checkCollectionsAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is});
-await checkLayoutAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid},is});
-await checkLookAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-await checkLanguageAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-await checkThanksAcknowledgment({browser,LOCAL,fixture:{session:growthSession,sid:growthSid,product:growthProduct},is});
-await checkNoCountAcknowledgment({browser,LOCAL,fixture:homeDemo,is});
-await checkNudgeAcknowledgment({browser,LOCAL,fixture:pauseFixtures[0],is});
-  await captureHomeStudio({browser,LOCAL,fixture:homeDemo,is});
-  await checkOfferPlanning({browser,LOCAL,fixture:libraryFixture,axeSource,is});
-  await checkPixelAttributionCenter({browser,LOCAL,fixture:libraryFixture,axeSource,is});
-  await checkPartnerCopy({browser,LOCAL,axeSource,is});
-  await checkPublicTrustDesign({browser,LOCAL,axeSource,is});
-  await checkTemplateLibrary({browser,LOCAL,fixture:libraryFixture,axeSource,is});
-  await checkEvergreenGuides({browser,LOCAL,is,axeSource});
-  await checkSalesLevers({browser,LOCAL,fixture:activationFixture,axeSource,is});
-  await checkPlatformProof({browser,LOCAL,is});
-  await checkCreatorShowcase({browser,LOCAL,axeSource,is});
-  await checkSigninTerms({browser,LOCAL,prices:signinPrices,axeSource,is});
-  await checkStoreActivation({browser,LOCAL,fixture:activationFixture,axeSource,is});
-  await checkHotmartComparison({browser,LOCAL,axeSource,is});
-  await checkPricingValue({browser,LOCAL,axeSource,is});
-  await checkCreatorJourney({browser,LOCAL,axeSource,is});
-  await checkHomeHero({browser,LOCAL,axeSource,is});
-  await checkHomeModules({browser,LOCAL,axeSource,is});
-  await checkHomeStudioDetails({browser,LOCAL,axeSource,is});
-  await checkHomeReasons({browser,LOCAL,axeSource,is});
-  await checkDisputeReview({browser,LOCAL,fixture:homeDemo,axeSource,is});
-  await checkStudioAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkComposerAmericanEnglish({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is});
-  await checkBlockPickerTurnsWide({browser,LOCAL,session:growthSession,sid:growthSid,product:growthProduct,is});
-  await checkTaxScope({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkTaxSaveAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkRenameAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkDetailsAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkClaimAcknowledgment({browser,LOCAL,session:growthSession,sid:growthSid,is});
-  await checkPauseAcknowledgment({browser,LOCAL,fixtures:pauseFixtures,is});
-  await checkEmailCapabilities({browser,LOCAL,is});
-  const shipment=services.seedShipment("templatelibraryfixture",libraryFixture.product);
-  await checkShipmentAcknowledgment({browser,LOCAL,fixture:libraryFixture,shipment,is});
-  await checkMenuMounting({browser,LOCAL,is});
-  await checkPurchaseResend({browser,LOCAL,fixture:libraryFixture,shipment,axeSource,is});
-  await checkShippingSave({browser,LOCAL,fixture:shippingFixture,is});
-  await checkDiscountAcknowledgment({browser,LOCAL,fixture:libraryFixture,is});
-  await checkBillingStudioObservation({browser,LOCAL,services,fixture:billingObservation,is});
-  await checkShrinkTone({ browser, root, is });
+  }
+  const running = new Set(chosen.steps);
+  for (const [name, step] of steps) if (running.has(name)) await step();
   is("no page threw", errors, []);
 } catch (error) {
   failed += 1;

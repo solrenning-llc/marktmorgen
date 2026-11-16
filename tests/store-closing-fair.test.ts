@@ -197,6 +197,18 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     if (status === "open") return json({ object: "list", data: row.open?.status === "open" ? [{ id: row.open.id, status: "open", ...ownerOf(row) }] : [], has_more: false });
     return json({ object: "list", data: [], has_more: false });
   }
+  // One paid invoice read alone, and its list of payments: read before every refund since #4428 (Codex P and X5). Each
+  // paid invoice here was paid by its own one payment.
+  const paidOne = (id: string | null) => [...world.subs.values()].flatMap(paidInvoicesOf).find((inv) => inv.id === id) as { id: string; payment_intent?: unknown } | undefined;
+  const readOne = path.match(/^\/invoices\/(in_\w+)$/);
+  if (readOne && method === "GET") {
+    const inv = paidOne(readOne[1]);
+    return inv ? json(inv) : json({ error: { message: `no such invoice ${readOne[1]}` } }, 404);
+  }
+  if (path === "/invoice_payments" && method === "GET") {
+    const inv = paidOne(url.searchParams.get("invoice"));
+    return json({ object: "list", has_more: false, data: inv ? [{ id: `inpay_${inv.id.slice(3)}`, object: "invoice_payment", invoice: inv.id, status: "paid", payment: { type: "payment_intent", payment_intent: inv.payment_intent } }] : [] });
+  }
   const drafted = path.match(/^\/invoices\/(in_\w+)$/);
   if (drafted && method === "POST") {
     const row = [...world.subs.values()].find((s) => s.draft?.id === drafted[1]);

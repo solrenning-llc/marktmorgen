@@ -43,6 +43,7 @@ import { repliesFor } from "@/lib/redis-reply";
 import { type Store, storeFolder, storeRef } from "@/lib/store";
 import { type PaidPeriod, REFUNDS_PER_REQUEST, stillToGive, totalsOf, unusedOf } from "@/lib/closing-buyers-rules";
 import { paidPeriods, savePaidPeriod, takeCalls, workKey } from "@/lib/closing-holds";
+import { disputeTakes } from "@/lib/retained-revenue";
 
 const INTENT_ID = /^pi_[A-Za-z0-9]{6,64}$/;
 const REFUND_ID = /^re_[A-Za-z0-9]{3,252}$/;
@@ -160,6 +161,12 @@ const idOf = (value: unknown): unknown => (value !== null && typeof value === "o
  */
 const KNOWN_UNPAID: ReadonlySet<unknown> = new Set(["open", "canceled"]);
 
+/** A charge's id as Stripe gives one (lib/refunds.ts). */
+const CHARGE_ID = /^(ch|py)_[A-Za-z0-9]{6,255}$/;
+
+/** Every status Stripe gives a dispute (lib/refunds.ts); anything else does not read. */
+const DISPUTE_STATUSES: ReadonlySet<unknown> = new Set(["warning_needs_response", "warning_under_review", "warning_closed", "needs_response", "under_review", "won", "lost", "prevented", "charge_refunded"]);
+
 /**
  * The payment intent an invoice was paid by, whichever way this account's API version names it; "" only when this
  * invoice's own whole list of payments holds none paid. A reply for another invoice, a list that is not one, a row of
@@ -173,8 +180,11 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   count();
   const read = await onAccount("GET", account, `/invoices/${encodeURIComponent(invoice)}`);
   if (!isOwnReply(read, invoice)) throw new Error("Stripe answered for another invoice");
+  // The invoice's own payment_intent names a payment, never that it is the only one (Codex P on #4428): an invoice paid
+  // in parts may still name its first. So the whole list of its payments is always read, and the payment the invoice
+  // names must be among the paid ones it holds.
   const direct = idOf(read.payment_intent);
-  if (typeof direct === "string" && INTENT_ID.test(direct)) return { intents: [direct], whole: true };
+  const named = typeof direct === "string" && INTENT_ID.test(direct) ? direct : "";
   count();
   const listed = await onAccount("GET", account, `/invoice_payments?${new URLSearchParams({ invoice, limit: "10" })}`);
   const rows = objectOf(listed)?.data;
@@ -208,12 +218,24 @@ async function intentsOf(account: string, invoice: string, count: () => void): P
   // nothing is given back on the readable ones beside it (Codex L on #4428; a deliberate tightening of the decision
   // reviewed on #3120). A row whose status is not paid (processing and the like) has no refund and no dispute yet,
   // so the readable ones may still be given back over (`whole` false keeps such a member from settling short).
-  if (paid.length && (unread || objectOf(listed)?.has_more !== false)) throw new Error("a paid payment of this invoice, or a page of its payments, did not read; nothing is given back until it does");
-  if (paid.length) return { intents: paid, whole };
+  // A status this code does not know beside a paid one is no better (Codex P on #4428): it may be a payment made, given
+  // back or disputed under a state not read here, so it bars every refund as an unread row does, whether or not the
+  // readable ones could cover all that is owed.
+  if (paid.length && (unread || unknownStatus || objectOf(listed)?.has_more !== false)) throw new Error("a paid payment of this invoice, or a page of its payments, did not read; nothing is given back until it does");
+  if (paid.length) {
+    if (named && !paid.includes(named)) throw new Error("the payment the invoice names is not among the paid payments it lists");
+    return { intents: paid, whole };
+  }
   if (unread) throw new Error("an invoice's paid payment did not read as a payment intent");
   if (unknownStatus) throw new Error("an invoice's payment has a status that does not read as paid or not paid");
   // "None" only from a whole list: one that says, exactly, that there is no more.
   if (!whole) throw new Error("an invoice's payments could not be read whole");
+  // An exact, empty list beside the payment the invoice names: an invoice from before it listed its payments, paid by
+  // that one payment (Codex X5's fallback on #4428). A list holding rows none of which is paid stays "none paid".
+  if (named && rows.length === 0) return { intents: [named], whole: true };
+  // Rows listed, none of them paid, beside a payment the invoice names as its own: the two do not agree, so nothing is
+  // taken as either.
+  if (named) throw new Error("the invoice names a payment that its list of payments does not hold as paid");
   return { intents: [], whole };
 }
 
@@ -328,12 +350,43 @@ export async function giveBackUnused(
       return { ...out, failed: rows.length };
     }
     /**
+     * What one charge's disputes took to the buyer: 0 for a charge not disputed. For a disputed one, its own disputes,
+     * read whole (rules 24 and 30): each one in a status Stripe gives and that takes the creator's money
+     * (lib/retained-revenue.ts disputeTakes: open, lost, or prevented with its money gone) counts at its own amount in
+     * the charge's currency; one won, an inquiry or a prevented one whose money came back counts nothing. Anything that
+     * does not read throws, so the member is tried again.
+     */
+    const disputedAway = async (charge: Record<string, unknown>, count: () => void): Promise<number> => {
+      if (charge.disputed !== true) return 0;
+      const id = typeof charge.id === "string" ? charge.id : "";
+      if (!CHARGE_ID.test(id)) throw new Error("a disputed charge's id could not be read");
+      count();
+      const listed = objectOf(await onAccount("GET", account, `/disputes?${new URLSearchParams({ charge: id, limit: "10" })}`));
+      const rows = listed?.data;
+      if (!listed || !Array.isArray(rows) || listed.has_more !== false) throw new Error("a charge's disputes could not be read whole");
+      let away = 0;
+      for (const item of rows) {
+        const row = objectOf(item);
+        if (!row || row.object !== "dispute" || idOf(row.charge) !== id || !DISPUTE_STATUSES.has(row.status)) throw new Error("a dispute listed for this charge could not be read");
+        const takes = disputeTakes(row as { status?: unknown; balance_transactions?: unknown });
+        if (takes === null) throw new Error("a prevented dispute's money could not be read");
+        if (!takes) continue;
+        if (!Number.isSafeInteger(row.amount) || (row.amount as number) <= 0 || row.currency !== charge.currency) throw new Error("a dispute's amount could not be read");
+        away += row.amount as number;
+      }
+      return Math.min(away, charge.amount as number);
+    };
+
+    /**
      * One member's unused part given back over every paid charge of an invoice paid in more than one (#4411), in the
-     * order Stripe lists them, each within what its charge can still give back. Everything is read before anything is
-     * sent: a disputed charge settles the member disputed with nothing sent; what was already given back on any of
-     * the charges (every refund, ours under this invoice or not) is taken off what is owed, so a run after a cut-short
-     * one gives only the rest and a charge already given back under this invoice is never asked again. Each refund has
-     * its own idempotency key. Any answer that does not read throws, and the member is tried again.
+     * order Stripe lists them, each within what its charge can still give back.
+     *
+     * Every charge, its refunds and its disputes are read again before each refund (Codex G on #4428): a refund made
+     * elsewhere on any of them between two of ours is taken off what is owed, never added to it on old figures. What
+     * was already given back on any charge (every refund, ours under this invoice or not) and what a dispute took to
+     * the buyer (Codex U and N1 on #4428) are taken off what is owed, and the rest goes back through the charges that
+     * are not disputed; a charge already given back under this invoice is never asked again. Each refund has its own
+     * idempotency key. Any answer that does not read throws, and the member is tried again.
      */
     const giveSplit = async (
       row: UnusedRow,
@@ -341,44 +394,38 @@ export async function giveBackUnused(
       whole: boolean,
       ops: { settle: (r: PaidPeriod["r"], amount?: number) => Promise<void>; short: (give: number) => Promise<void>; count: () => void; final: boolean },
     ) => {
-      const charges: { intent: string; charge: Record<string, unknown>; refunded: number; prior: { state: "done" | "pending"; amount: number } | null }[] = [];
-      for (const intent of intents) {
-        const charge = await readCharge(account, intent, ops.count);
-        ops.count();
-        const list = await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: intent, limit: "100" })}`);
-        const prior = priorRefund(list, intent, row.paid.inv, row.paid.cur);
-        if (prior === "unknown") throw new Error("the refunds already made for this payment could not be read whole");
-        // Never less than ours already made on it, whether or not the charge counts a pending refund yet.
-        charges.push({ intent, charge, refunded: Math.max(charge.amount_refunded as number, prior?.amount ?? 0), prior });
-      }
-      if (charges.some((c) => c.charge.disputed)) {
-        await ops.settle("disputed");
-        out.disputed += 1;
-        return;
-      }
-      let given = charges.reduce((sum, c) => sum + (c.prior?.amount ?? 0), 0);
-      let pending = charges.some((c) => c.prior?.state === "pending");
-      const refundedAll = charges.reduce((sum, c) => sum + c.refunded, 0);
-      let left = Math.min(stillToGive(row.unused, refundedAll), Math.max(0, (row.paid.tot ?? row.paid.amt) - refundedAll));
-      const finish = async () => {
-        if (given <= 0) {
-          await ops.settle("none");
-          out.none += 1;
-        } else if (pending) {
-          await ops.settle("pending", given);
-          out.pending += 1;
-        } else {
-          await ops.settle("done", given);
-          out.done.push({ sub: row.sub, amount: given, cur: row.paid.cur });
+      type Read = { intent: string; charge: Record<string, unknown>; refunded: number; away: number; prior: { state: "done" | "pending"; amount: number } | null };
+      const readAll = async (): Promise<Read[]> => {
+        const reads: Read[] = [];
+        for (const intent of intents) {
+          const charge = await readCharge(account, intent, ops.count);
+          ops.count();
+          const list = await onAccount("GET", account, `/refunds?${new URLSearchParams({ payment_intent: intent, limit: "100" })}`);
+          const prior = priorRefund(list, intent, row.paid.inv, row.paid.cur);
+          if (prior === "unknown") throw new Error("the refunds already made for this payment could not be read whole");
+          const away = await disputedAway(charge, ops.count);
+          // Never less than ours already made on it, whether or not the charge counts a pending refund yet.
+          reads.push({ intent, charge, refunded: Math.max(charge.amount_refunded as number, prior?.amount ?? 0), away, prior });
         }
+        return reads;
       };
-      for (const c of charges) {
-        if (left <= 0) break;
-        // One refund of ours per charge under this invoice: one already there is never followed by a second.
-        if (c.prior) continue;
-        const give = Math.min(left, (c.charge.amount as number) - c.refunded);
-        if (give <= 0) continue;
-        const cost = settledCost(give, c.charge);
+      // At most one refund per charge, so at most as many rounds as charges, each on figures read just before it.
+      let given = 0;
+      let pending = false;
+      let left = 0;
+      let disputed = false;
+      for (let round = 0; ; round += 1) {
+        const charges = await readAll();
+        given = charges.reduce((sum, c) => sum + (c.prior?.amount ?? 0), 0);
+        pending = pending || charges.some((c) => c.prior?.state === "pending");
+        disputed = charges.some((c) => c.charge.disputed === true);
+        const gone = charges.reduce((sum, c) => sum + c.refunded + c.away, 0);
+        left = Math.min(stillToGive(row.unused, gone), Math.max(0, (row.paid.tot ?? row.paid.amt) - gone));
+        // One refund of ours per charge under this invoice, and none on a disputed charge (Stripe refuses it).
+        const next = left > 0 && round < intents.length ? charges.find((c) => !c.prior && c.charge.disputed !== true && (c.charge.amount as number) - c.refunded > 0) : undefined;
+        if (!next) break;
+        const give = Math.min(left, (next.charge.amount as number) - next.refunded);
+        const cost = settledCost(give, next.charge);
         if ((funds.get(cost.cur) ?? 0) < cost.amount) {
           await ops.short(left);
           return;
@@ -390,27 +437,24 @@ export async function giveBackUnused(
             "POST",
             account,
             "/refunds",
-            new URLSearchParams({ payment_intent: c.intent, amount: String(give), reason: "requested_by_customer", "metadata[closing_refund]": row.paid.inv, "metadata[store_closing]": "unused_time" }),
+            new URLSearchParams({ payment_intent: next.intent, amount: String(give), reason: "requested_by_customer", "metadata[closing_refund]": row.paid.inv, "metadata[store_closing]": "unused_time" }),
             undefined,
-            `closing-refund:${row.paid.inv}:${c.intent}`,
+            `closing-refund:${row.paid.inv}:${next.intent}`,
           );
         } catch (error) {
           if (error instanceof StripeError && error.code === "balance_insufficient") {
             await ops.short(left);
             return;
           }
-          if (error instanceof StripeError && (error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {
-            await ops.settle("disputed");
-            out.disputed += 1;
-            return;
+          // Disputed or refunded elsewhere since it was read (Codex P on #4428): the figures this split was worked out
+          // from are stale, so nothing more is sent on them. The member is tried again, and the next run reads every
+          // charge, its refunds and its disputes anew and gives only what is still owed.
+          if (error instanceof StripeError && (error.code === "charge_already_refunded" || error.code === "charge_disputed" || error.code === "refund_disputed_payment")) {
+            throw new Error("a charge of this invoice was refunded or disputed since it was read; the member is tried again on fresh figures");
           }
-          // Refunded elsewhere since it was read (Codex P on #4428): the figures this split was worked out from are
-          // stale, so nothing more is sent on them. The member is tried again, and the next run reads every charge
-          // and its refunds anew and gives only what is still owed.
-          if (error instanceof StripeError && error.code === "charge_already_refunded") throw new Error("a charge of this invoice was refunded since it was read; the member is tried again on fresh figures");
           throw error;
         }
-        const state = refundState(refund, c.intent, give, row.paid.cur);
+        const state = refundState(refund, next.intent, give, row.paid.cur);
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {
           if (ops.final) {
@@ -425,14 +469,32 @@ export async function giveBackUnused(
         }
         funds.set(cost.cur, (funds.get(cost.cur) ?? 0) - cost.amount);
         if (state === "pending") pending = true;
-        given += give;
-        left -= give;
+        // Nothing more to give, or no other charge to give it through: settled on what was just made, without reading
+        // everything once more.
+        if (give >= left || !charges.some((c) => c !== next && !c.prior && c.charge.disputed !== true && (c.charge.amount as number) - c.refunded > 0)) {
+          given += give;
+          left -= give;
+          break;
+        }
       }
       // Owed more than the readable charges can give back while some of the invoice's payments did not read: the rest
       // may be on those, so the member is tried again (what was given now is counted then), never settled short.
       if (left > 0 && !whole) throw new Error("part of an invoice's payments did not read, and the readable ones cannot give back all that is owed");
-      // What could be given is given: a charge with nothing left to give back cannot be asked for more.
-      await finish();
+      // What could be given is given: a charge with nothing left to give back, or a disputed one, cannot be asked for
+      // more. A member who got nothing from this closing because a dispute had already taken it is settled disputed.
+      if (given <= 0 && disputed) {
+        await ops.settle("disputed");
+        out.disputed += 1;
+      } else if (given <= 0) {
+        await ops.settle("none");
+        out.none += 1;
+      } else if (pending) {
+        await ops.settle("pending", given);
+        out.pending += 1;
+      } else {
+        await ops.settle("done", given);
+        out.done.push({ sub: row.sub, amount: given, cur: row.paid.cur });
+      }
     };
 
     // One at a time: each refund is counted off the balance before the next is weighed.
@@ -447,11 +509,14 @@ export async function giveBackUnused(
         await settle("short", give);
         out.short.push({ sub: row.sub, amount: give, cur: row.paid.cur, email: row.paid.e });
       };
-      // Its payment, the refunds already made on it and the refund itself, and two more when Stripe did not name its
-      // payment when it was held. Before the closing day they come from the budget; only the closing day uses the
-      // calls set aside when it was held (rcalls), so pressing the button again can never drain them. Every call not
-      // made is given back to where it was taken from.
-      const need = row.paid.pi ? 3 : 5;
+      // Its payment, the refunds already made on it and the refund itself, and two more (the invoice and its list of
+      // payments) unless the payment kept when it was held was proven its only one then (`one`, #4428). A payment kept
+      // without that proof, by a period held before #4428 that kept the first of several, is a hint only, and the
+      // invoice's payments are read again (Codex X5 on #4428). Before the closing day they come from the budget; only
+      // the closing day uses the calls set aside when it was held (rcalls), so pressing the button again can never
+      // drain them. Every call not made is given back to where it was taken from.
+      const proven = row.paid.pi && row.paid.one === 1 ? row.paid.pi : "";
+      const need = proven ? 3 : 5;
       const taken: ["calls" | "rcalls", number][] = [];
       const take = async (from: "calls" | "rcalls", n: number) => {
         if (!(await takeCalls(folder, n, from))) return false;
@@ -503,16 +568,17 @@ export async function giveBackUnused(
         continue;
       }
       try {
-        const { intents, whole } = row.paid.pi ? { intents: [row.paid.pi], whole: true } : await intentsOf(account, row.paid.inv, count);
+        const { intents, whole } = proven ? { intents: [proven], whole: true } : await intentsOf(account, row.paid.inv, count);
         if (!intents.length) {
           await settle("none");
           out.none += 1;
           continue;
         }
         if (intents.length > 1 || !whole) {
-          // An invoice paid in more than one charge (#4411): two reads for each charge and at most one refund each,
-          // beyond the five already taken (the invoice, its list and one charge's three). Taken before any is made.
-          const extra = 3 * intents.length - 3;
+          // An invoice paid in more than one charge (#4411): at most one refund for each charge, each after every
+          // charge's three reads (its payment, its refunds, its disputes) are made again (Codex G on #4428), beyond the
+          // five already taken (the invoice, its list and one charge's three). Taken before any is made.
+          const extra = intents.length * (3 * intents.length + 1) - 3;
           const more = (await take("calls", extra)) || (options.final === true && (await take("rcalls", extra)));
           if (!more) {
             await notMade();

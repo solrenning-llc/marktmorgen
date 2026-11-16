@@ -221,27 +221,52 @@ export async function takeCalls(folder: string, n: number, from: "calls" | "rcal
   return false;
 }
 
+/** The invoice-payment statuses Stripe documents (https://docs.stripe.com/api/invoice-payment/object); anything else is unknown. */
+const PAYMENT_STATUSES: ReadonlySet<unknown> = new Set(["paid", "open", "canceled"]);
+
+/**
+ * The one payment an expanded payments list proves an invoice was paid by: "" unless the list says no more follow,
+ * every row is an object in a status Stripe documents, and exactly one is paid, naming a readable payment intent.
+ * A row that does not read or whose status is unknown may be another paid charge (Codex P, T and N1 on #4428), so it
+ * never lets the sole readable paid row stand for the invoice's one payment. undefined when the invoice lists none.
+ */
+function soleListedPayment(list: unknown): string | undefined {
+  if (list === undefined) return undefined;
+  const page = list && typeof list === "object" && !Array.isArray(list) ? (list as { has_more?: unknown; data?: unknown }) : null;
+  const rows = Array.isArray(page?.data) ? (page.data as unknown[]) : null;
+  if (!page || page.has_more !== false || !rows) return "";
+  const paid: string[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return "";
+    const { status, payment } = row as { status?: unknown; payment?: unknown };
+    if (!PAYMENT_STATUSES.has(status)) return "";
+    if (status !== "paid") continue;
+    const id = idOf(payment && typeof payment === "object" ? (payment as { payment_intent?: unknown }).payment_intent : undefined);
+    if (!INTENT_ID.test(id)) return "";
+    paid.push(id);
+  }
+  return paid.length === 1 ? paid[0] : "";
+}
+
 /** A member's last paid invoice, as its membership line says, with the payment it was paid by. */
 export function paidPeriodOf(invoice: Record<string, unknown>, email: string, intent = ""): PaidPeriod | null {
   // The payment it was paid by: on the invoice in older API versions, among its payments (expanded) in newer ones.
-  // Only as the invoice's one payment (money review on #4428): exactly one paid among them, from a list that says no
-  // more follow. An invoice paid in more than one charge keeps none here, so the refund at closing reads every one
+  // Only as the invoice's one payment (money review on #4428): exactly one paid among them, from a whole list of rows
+  // that all read. An invoice paid in more than one charge keeps none here, so the refund at closing reads every one
   // of its payments (lib/closing-refunds.ts intentsOf) and gives back over all of them (#4411), never from the first.
-  if (!intent) {
-    const list = invoice.payments as { has_more?: unknown; data?: { status?: unknown; payment?: { payment_intent?: unknown } | null }[] } | undefined;
-    const paidOnes = Array.isArray(list?.data) ? list.data.filter((p) => p?.status === "paid") : [];
-    const found = list?.has_more === false && paidOnes.length === 1 ? paidOnes[0].payment?.payment_intent : undefined;
-    const id = typeof found === "string" ? found : (found as { id?: unknown } | null | undefined)?.id;
-    if (typeof id === "string") intent = id;
-  }
+  // The invoice's own payment_intent names a payment, never that it is the only one: beside a listed payments page it
+  // is kept only when it is that page's sole paid payment (Codex P on #4428). The refund reads the invoice's payments
+  // again unless `one` says it was proven so here (Codex X5).
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;
   const line = membershipLineOf(invoice as Parameters<typeof membershipLineOf>[0]);
   const tot = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
   const cur = typeof invoice.currency === "string" ? invoice.currency.toLowerCase() : "";
   if (!line || !(tot > 0) || !cur) return null;
-  const direct = typeof invoice.payment_intent === "string" ? invoice.payment_intent : (invoice.payment_intent as { id?: unknown } | null)?.id;
-  const pi = typeof direct === "string" && INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
-  return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
+  const direct = idOf(invoice.payment_intent);
+  const named = INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
+  const listed = soleListedPayment(invoice.payments);
+  const pi = listed === undefined ? named : listed && (!named || named === listed) ? listed : "";
+  return { inv: invoice.id, ...(pi ? { pi, one: 1 as const } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };
 }
 
 /** An id as Stripe gives it: a string, or an expanded object's own id; "" when it is neither. */

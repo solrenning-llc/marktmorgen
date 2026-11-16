@@ -54,11 +54,11 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const id = decodeURIComponent(path.slice("/payment_intents/".length));
     const c = charges.get(id);
     if (!c) return Response.json({ error: { message: "no such payment" } }, { status: 404 });
-    return Response.json({ id, object: "payment_intent", latest_charge: { id: `ch_${id}`, payment_intent: id, amount: c.amount, currency: "usd", amount_refunded: c.refunded, disputed: disputes.has(id), balance_transaction: null } });
+    return Response.json({ id, object: "payment_intent", latest_charge: { id: `ch_${id.slice(3)}`, payment_intent: id, amount: c.amount, currency: "usd", amount_refunded: c.refunded, disputed: disputes.has(id), balance_transaction: null } });
   }
   if (path === "/disputes") {
     const charge = String(url.searchParams.get("charge"));
-    const pi = charge.replace(/^ch_/, "");
+    const pi = `pi_${charge.slice(3)}`;
     const rows = (disputes.get(pi) ?? []).map((d, i) => ({ id: `dp_closetwo${i}`, object: "dispute", charge, payment_intent: pi, amount: d.amount, currency: "usd", status: d.status, balance_transactions: [] }));
     return Response.json({ object: "list", has_more: false, data: rows });
   }

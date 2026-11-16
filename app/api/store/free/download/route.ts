@@ -4,7 +4,7 @@ import { recordLead, spendClaim } from "@/lib/free";
 import { recordLead as recordAffiliateLead } from "@/lib/affiliate-leads";
 import { scheduleReminder } from "@/lib/welcome-offer-send";
 import { enroll } from "@/lib/flows";
-import { emitEvent } from "@/lib/webhooks";
+import { emitOrKeep } from "@/lib/webhook-outbox";
 import { queuePerson } from "@/lib/email-sync";
 import { plain, serveFile } from "@/lib/serve-file";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
@@ -35,12 +35,15 @@ export async function POST(request: NextRequest) {
     return plain(400, "Bad request");
   }
 
-  // A use count that could not be read hands nothing over, and says so (CX-123 rule 24).
-  const used = await spendClaim(token).catch((error: unknown) => {
-    console.error("counting a free copy's link failed", error);
-    return null;
-  });
-  if (!used) return plain(503, "This link could not be checked just now. Try again in a moment.");
+  // A use count that could not be read is neither good nor spent: the file is
+  // not handed over on it, and the person is told to try again (sweep A2).
+  let used: Awaited<ReturnType<typeof spendClaim>>;
+  try {
+    used = await spendClaim(token);
+  } catch (error) {
+    console.error("checking a free copy's link failed", error);
+    return plain(503, "We could not check this link just now. Try again in a moment.");
+  }
   if (!used.ok) {
     return used.reason === "spent"
       ? plain(429, "This link has been used as many times as it can be. Ask the store for a new copy.")
@@ -74,12 +77,13 @@ export async function POST(request: NextRequest) {
   }
   // The creator's webhooks hear of it once per request, however many times
   // the same link is pressed.
-  await emitEvent(store, "lead.captured", `${claim.e}|${claim.p}|${claim.at}`, {
+  // One that could not be queued now is kept, and the five-minute job tries it again (lib/webhook-outbox.ts, #4284).
+  await emitOrKeep(store, "lead.captured", `${claim.e}|${claim.p}|${claim.at}`, {
     email: claim.e,
     agreed_to_emails: claim.c,
     product: { id: product.id, title: product.title },
     requested_at: claim.at || null,
-  }).catch((error) => console.error("queueing the lead.captured webhook failed", error));
+  });
   // The creator's own email platform, when they connected one and take free
   // sign-ups there: only someone who ticked the box is sent (lib/email-sync.ts).
   // After the file is on its way, so it never waits on another company.

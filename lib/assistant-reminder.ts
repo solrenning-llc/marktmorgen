@@ -21,7 +21,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
-import { withinLimit } from "@/lib/request-guard";
+import { withinEssentialLimit } from "@/lib/request-guard";
 import { createHash } from "node:crypto";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { isHouseStore } from "@/lib/house-store";
@@ -130,7 +130,7 @@ export async function keepAssistReminder(input: { store: Store; session: string;
   if (!email || email.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(email)) return "email";
   const statsId = store.statsId as string;
   try {
-    if (!(await withinLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
+    if (!(await withinEssentialLimit("assist-remind-store", statsId, ASSIST_REMINDERS_PER_STORE_DAY, 86_400))) return "limited";
     const consent: Consent = { s: statsId, e: email, t: assistReminderWords(store.language).box, v: ASSIST_REMIND_VERSION, l: store.language, at: now };
     const key = assistRemindKey(input.session);
     // Due an hour after the checkout closes, which it does an hour after it opened (lib/store-checkout.ts).
@@ -156,17 +156,24 @@ export async function keepAssistReminder(input: { store: Store; session: string;
 export async function forgetAssistReminderPerson(statsId: string | null, email: string): Promise<number> {
   if (!statsId || !email || !isRedisConfigured()) return 0;
   const who = whoKey(statsId, email);
-  const sessions = await sessionsOf(who);
-  // Read exactly (rule 24): a count that does not read is not "nothing deleted"; the part is said not finished.
-  const gone = countOf(repliesFor(await redisPipeline([["DEL", who, ...sessions.map(assistRemindKey)]]), 1)?.[0]);
-  if (gone === null) throw new UnknownReplyError("the deletion of a person's checkout reminders");
+  // The note of their checkouts, read exactly (CX-123 rule 24): an unknown list is not "no checkouts". It throws before
+  // anything is deleted, so the note stays the way back to the consents and the erasure is said as not finished.
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the note of a person's checkout reminders");
+  // A member that is not a session reference cannot be matched to its consent safely: the erasure is not finished, and
+  // the note, the only way back to that consent, is kept for the next try (Codex X5 on #3095).
+  if (members.some((s) => !SESSION.test(s))) throw new UnknownReplyError("the note of a person's checkout reminders");
+  const keys = [who, ...members.map(assistRemindKey)];
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", ...keys]]), 1)?.[0]);
+  // Never 0 removed on a reply of another shape (as forgetLedgerCopy, lib/segments.ts): a consent may still be kept.
+  if (gone === null || gone > keys.length) throw new UnknownReplyError("the deletion of a person's checkout reminder consents");
   return gone;
 }
 
 /**
- * The checkouts one address said yes on, read exactly (rule 24): only a list of strings is the note. A reply out of
- * shape throws UnknownReplyError, never "none": the erasure would delete the note alone and say it was done, leaving
- * every yes it named (with the typed address) for a queued reminder to email, and the copy would say there was none.
+ * The checkouts one address said yes on, for the person's copy (remindersOf), read exactly (rule 24): only a list of
+ * strings is the note. A reply out of shape throws UnknownReplyError, never "none", so the copy never says there was
+ * none. The erasure reads the note itself (forgetAssistReminderPerson, above), refusing a member that is not a session.
  */
 async function sessionsOf(who: string): Promise<string[]> {
   const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", who]]), 1)?.[0]);

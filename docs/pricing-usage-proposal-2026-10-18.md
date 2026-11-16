@@ -21,7 +21,7 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 | --- | --- | --- | --- |
 | Store | $118.58 | $1,211.45 | $69 / $690 |
 | Studio | $174.55 | $1,852.48 | $449 / $4,490 |
-| Scale | $272.80 | $2,990.55 | $999 / $9,990 |
+| Scale | $272.80 | $2,990.95 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 

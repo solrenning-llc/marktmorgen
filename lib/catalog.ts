@@ -38,6 +38,7 @@
 import { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 export { LISTINGS_PER_MGET, MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH, listingReads } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
+import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -252,6 +253,13 @@ export type Product = {
    */
   shipping?: Shipping | null;
   /**
+   * The legal information the creator filled on a product they ship
+   * (lib/physical-legal-record.ts, 618 [SZ2]): EU product safety, a
+   * Proposition 65 text and the net quantity of each price. Absent or null is
+   * nothing filled. Kept on the full record only, never on the listing.
+   */
+  legal?: PhysicalLegal | null;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -264,7 +272,7 @@ export type Product = {
  * its own page, a download and most of the site need. Anything that takes a
  * Listing also takes a full Product.
  */
-export type Listing = Omit<Product, "fields" | "funnel">;
+export type Listing = Omit<Product, "fields" | "funnel" | "legal">;
 
 /**
  * One product as the store record lists it: its id, what kind of thing it is
@@ -374,6 +382,8 @@ export function parseProduct(entry: unknown): Product | null {
   // An unreadable physical record must not become a digital product or free shipping.
   // Leave the stored creator record intact and refuse to offer this product.
   if (value.shipping !== undefined && value.shipping !== null && !shipping) return null;
+  // Unreadable legal fields read as not filled, so every EU/EEA gap stays open; the product itself still reads.
+  const legal = readPhysicalLegal(value.legal);
   return {
     id: value.id,
     title: value.title.slice(0, MAX_TITLE_LENGTH),
@@ -414,6 +424,7 @@ export function parseProduct(entry: unknown): Product | null {
     yearly: parseYearly(value.yearly),
     note: value.note === true,
     shipping,
+    ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
   };
 }
@@ -812,6 +823,32 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
     if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * Which of these products ask questions at checkout (lib/checkout-fields.ts), read without the products in full:
+ * the questions live in the heavy rest of a product's record, which a listing does not carry, so a cart that reads
+ * listings alone took a product with questions for one it could pay for, and the cart checkout then refused the
+ * whole order (#4350). One GET per product a store does not hold inline. A product with no heavy rest asks nothing
+ * (productWrites deletes it); a reply or record that does not read throws UnknownReplyError (CX-123 rule 24), never
+ * "asks nothing".
+ */
+export async function readAsking(store: Store, ids: Iterable<string>): Promise<Set<string>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) return new Set(catalog.inline.filter((p) => asked.includes(p.id) && p.fields.length > 0).map((p) => p.id));
+  if (asked.length === 0) return new Set();
+  if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a product's checkout questions");
+  const raws = await getMany(asked.map((id) => extrasKey(catalog.id!, id)));
+  const asking = new Set<string>();
+  asked.forEach((id, i) => {
+    if (raws[i] === null) return;
+    // Read exactly as readProducts reads it (exactExtras): a record in another shape is unknown, never "asks nothing".
+    const extras = typeof raws[i] === "string" ? exactExtras(parseJson(raws[i])) : null;
+    if (!extras) throw new UnknownReplyError("a product's checkout questions");
+    if (parseFields(extras.fields).length > 0) asking.add(id);
+  });
+  return asking;
 }
 
 /**
@@ -1359,12 +1396,23 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/**
+ * The heavy rest of a product, kept beside its listing: its checkout
+ * questions, its funnel and, on a product the creator ships, its legal
+ * information (lib/physical-legal-record.ts). "" when it has none of them.
+ */
+function extrasOf(product: Product): string {
+  const legal = product.legal ?? null;
+  if (product.fields.length === 0 && product.funnel === null && legal === null) return "";
+  return JSON.stringify({ fields: product.fields, funnel: product.funnel, ...(legal ? { legal } : {}) });
+}
+
 /** The writes that put one product in its records. Refuses one past the ceiling. */
 export function productWrites(catalog: string, product: Product): Command[] {
   if (!SAFE_ID.test(product.id)) throw new Error("product id");
   const listing = JSON.stringify(listingOf(product));
-  const heavy = product.fields.length > 0 || product.funnel !== null;
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
   return [
     ["SET", listingKey(catalog, product.id), listing],
@@ -1379,9 +1427,9 @@ export function productWrites(catalog: string, product: Product): Command[] {
  * its own key or field.
  */
 export function productBytes(product: Product): number {
-  const heavy = product.fields.length > 0 || product.funnel !== null;
   const listing = JSON.stringify(listingOf(product));
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
 }
 

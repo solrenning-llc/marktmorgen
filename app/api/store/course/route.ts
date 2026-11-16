@@ -1,4 +1,5 @@
 import { originFrom } from "@/lib/request-origin";
+import { noteRemovedCourse } from "@/lib/removed-courses";
 import { addComment, deleteComment, dropComments, dropLessonComments, readComment, setCommentsOn, setHidden } from "@/lib/lesson-comments";
 import { COMMENT_ID_PATTERN, CREATOR_AUTHOR } from "@/lib/lesson-comments-rules";
 import { tellStudent } from "@/lib/lesson-comment-notify";
@@ -245,9 +246,17 @@ export async function POST(request: NextRequest) {
         } catch {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
+        // Noted as dropped before the product lets go of it (lib/removed-courses.ts), so its learners' records stay
+        // reachable by their erasure; a full list or a note not confirmed keeps the course.
+        try {
+          const noted = await noteRemovedCourse(store.statsId, { productId: product.id, courseId: course.id, lessonIds: [], moduleIds: course.modules.map((m) => m.id) });
+          if (noted !== "noted") return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        } catch {
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
         const result = await setProductCourse(ref, id, null);
         if (!result.ok) return Response.json({ ok: false, error: result.reason }, { status: 400 });
-        await dropCourse(course, store);
+        await dropCourse(course, store, product.id);
         if (community) await unindexCourse(community, product.id, course).catch(() => {});
         await registerDrip(store, product, { ...course, modules: [] });
         return Response.json({ ok: true });

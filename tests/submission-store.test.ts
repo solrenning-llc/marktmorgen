@@ -102,7 +102,9 @@ async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; comman
 /** A pipeline whose first command is `name`, or the close's one-step record write (lib/submission-store.ts, SUBMISSION_CLOSE_WRITE). */
 const CLOSE_WRITE = "close-write";
 const firstIs = (list: (string | number)[][], name: string) =>
-  name === CLOSE_WRITE ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-close-write:v1") : String(list[0]?.[0]) === name;
+  name === CLOSE_WRITE
+    ? String(list[0]?.[0]) === "EVAL" && String(list[0]?.[1]).startsWith("-- marktmorgen:submission-close-write:v1")
+    : String(list[0]?.[0]) === name.split(" ")[0] && (!name.split(" ")[1] || String(list[0]?.[2]) === name.split(" ")[1]);
 function breakNext(name: string) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
@@ -314,6 +316,19 @@ async function main(): Promise<void> {
     is("a record write answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file it would have named is deleted", w.calls.includes("vault:delete"), true);
     is("Redis confirms no record was written", await readSubmission(FOLDER, idOf(path)), null);
+  }
+  {
+    // Rule 24 on the kept file's turn (review of #3568, MEDIUM A): a turn not known to be written keeps nothing.
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0turn1";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    breakNext("ZADD GT");
+    is("a kept file's turn answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
+    is("and nothing is kept: no record, and its file deleted", [await readSubmission(FOLDER, idOf(path)), w.calls.includes("vault:delete")], [null, true]);
+    redis.pipeline = PIPELINE;
   }
   part("A record that may have been written never loses its file (review of #3568, Codex C2)");
   {
@@ -546,7 +561,7 @@ async function main(): Promise<void> {
     const swept = await commandsOf(() => settleSubmissionSlots(later));
     is("once the door's day is over, the sweep sets the slot back to what is held: nothing", [swept.value.settled, await slotOf()], [1, 0]);
     is("inside the commands each open pays for its sweep", swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
-    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 3 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
+    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 2 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
     is("and nothing is left on the list for it", await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`], ["ZSCORE", "nl:sub:slotdue", `${dataKey(SHOP)?.slice(8)}|${FOLDER}`]]), [0, null]);
     const again = await commandsOf(() => settleSubmissionSlots(later + 60));
     is("a second sweep finds nothing to do", again.value.settled, 0);
@@ -583,10 +598,26 @@ async function main(): Promise<void> {
     const keptSlot = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, kept, EVE) ?? ""]]))[0] ?? 0);
     const sent = await openSubmissionDoor({ ...ask(EVE), lessonId: kept }, w.steps);
     if (!sent.ok) throw new Error("open refused");
-    await closeSubmissionDoor({ ...where(EVE), lessonId: kept, data: SHOP, note: "" }, sent.upload.pathname, ["e"], NOW, w.steps);
+    const closedKept = await closeSubmissionDoor({ ...where(EVE), lessonId: kept, data: SHOP, note: "" }, sent.upload.pathname, ["e"], NOW, w.steps);
+    if (!closedKept.ok) throw new Error("close refused");
     const afterClose = await keptSlot();
     await settleSubmissionSlots(NOW + UPLOAD_SECONDS + 1);
     is("a kept file's place stays counted after the sweep", [afterClose > 0, await keptSlot()], [true, afterClose]);
+
+    // Claude 3 and Claude 5 on #3568 (MEDIUM A): the kept file's place was counted until its keeping time, but the
+    // slot's only turn was the door's end, so nothing set it back once the place lapsed. Its turn is now the kept file's
+    // keeping time: the sweep sets it back then.
+    const keptAt = closedKept.submission.keepUntil;
+    is("before the keeping time ends, the slot still holds the kept file's place", (await settleSubmissionSlots(keptAt - 60), await keptSlot()), afterClose);
+    await settleSubmissionSlots(keptAt + 1);
+    is("once the keeping time has ended, the sweep sets the slot back to what is held: nothing", await keptSlot(), 0);
+
+    // Claude 5 on #3568 (MEDIUM B): the store's list expired a month after its last open, so a backlog the daily sweep
+    // had not reached yet was lost and its slots stayed at their most. The list now never expires by itself: each turn
+    // is counted in its buyer's slot, and goes with the sweep, the store's closing or the buyer's erasure.
+    const left2 = await openSubmissionDoor({ ...ask(EVE, 50 * MiB, NOW), lessonId: "lesson0ttl01" }, w.steps);
+    is("control: an upload opened", left2.ok, true);
+    is("the store's list of turns has no expiry of its own, so a backlog is never lost", (await redis.pipeline([["TTL", `nl:sub:slots:${FOLDER}`]]))[0], -1);
   }
 }
 

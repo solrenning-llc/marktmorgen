@@ -2765,6 +2765,12 @@ function bumpCents(value: unknown): number {
   return cents;
 }
 
+/** An order's subtotal (`amount_subtotal`) as Stripe gives it: whole cents from 0. Anything else throws UnknownReplyError. */
+function exactSubtotal(subtotal: unknown): number {
+  if (typeof subtotal !== "number" || !Number.isSafeInteger(subtotal) || subtotal < 0) throw new UnknownReplyError("an order's subtotal");
+  return subtotal;
+}
+
 /**
  * The lines of an order that holds products added at checkout or a cart: each added product at what it was
  * charged (`<bump>_cents`, bumpCents) and the order's own product at the rest of the subtotal (`amount_subtotal`,
@@ -2774,7 +2780,7 @@ function bumpCents(value: unknown): number {
 function orderLines(meta: Record<string, string>, subtotal: unknown): { product: string; cents: number }[] | undefined {
   const added = bumpsFromMeta(meta);
   if (!added.length) return undefined;
-  if (typeof subtotal !== "number" || !Number.isSafeInteger(subtotal) || subtotal < 0) throw new UnknownReplyError("an order's subtotal");
+  exactSubtotal(subtotal);
   const lines = added.map(({ key, id }) => ({ product: id, cents: bumpCents(meta[`${key}_cents`]) }));
   const own = subtotal - lines.reduce((sum, line) => sum + line.cents, 0);
   if (own < 0) throw new UnknownReplyError("the lines of an order");
@@ -2910,7 +2916,10 @@ export async function noteSession(
   // Each product ticked at checkout earns its own product's share, none when
   // the creator left that product out: the one rate kept for the sale is the
   // shares together, each weighed by its part of the whole.
-  const subtotal = typeof session.amount_subtotal === "number" ? session.amount_subtotal : 0;
+  // With a product ticked, the subtotal it is weighed against is read as orderLines reads it, before anything is
+  // written: one that does not read throws, never 0, which skipped the weighing and set the whole order down for good
+  // at the front share (CX-123 rule 24). With none ticked it weighs nothing and is not read.
+  const subtotal = bumpsFromMeta(meta).length ? exactSubtotal(session.amount_subtotal) : 0;
   if (subtotal > 0 && base > 0) {
     let blended = 0;
     let taken = 0;

@@ -254,7 +254,7 @@ export async function sendFeedLink(input: { store: Store; product: Listing; emai
 export async function forgetPodcastPerson(store: Store, catalogIds: string[], email: string): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
   const sid = store.statsId;
-  const productIds = await podcastProductIds(sid, catalogIds, email);
+  const productIds = await podcastProductIds(sid, store.createdAt, catalogIds, email);
   if (!productIds.length) return 0;
   // Read exactly before anything is deleted (CX-123 rule 24): the index is the only way back to the grant that holds
   // the address, so on an unknown read both stay, the step throws and the erasure says it is not finished.
@@ -272,14 +272,20 @@ export async function forgetPodcastPerson(store: Store, catalogIds: string[], em
  * The products a person's feeds are looked for in: the catalog and every product the store's set notes, removed
  * ones included. Read exactly: an unreadable set throws, so a deletion says it could not finish, never that there
  * was nothing to delete (rule 24). The set is whole only once the walk below has noted the products of every feed
- * granted before the set existed (Codex N1, P, T and X5 on #4471). Until it has, this person's own indexes in this
- * store are looked for by a read-only SCAN of at most NOTE_INLINE_PAGES pages; a SCAN that does not reach its end
- * there, or does not read, throws, so a deletion is never said to be done while an old grant may be left, and the
- * copy of a person's data never leaves out a feed the deletion would take away. Nothing is written here.
+ * granted before the set existed (Codex N1, P, T and X5 on #4471). A store made after the walk started cannot hold
+ * such a feed: only the code before the note wrote them, and the walk runs only once this code is live (Claude 6 on
+ * #4471). For any other store, until the walk is done, this person's own indexes in this store are looked for by a
+ * read-only SCAN of at most NOTE_INLINE_PAGES pages; a SCAN that does not reach its end there, or does not read, throws,
+ * so a deletion is never said to be done while an old grant may be left, and the copy of a person's data never leaves
+ * out a feed the deletion would take away. A store's making time that does not read as a time is not "after": it waits
+ * too. Nothing is written here. One run of the walk covers the whole database the daily backup accepts
+ * (NOTE_PAGES_PER_RUN), so the wait is the time to the first hourly run after an update, where that holds.
  */
-async function podcastProductIds(sid: string, catalogIds: string[], email: string): Promise<string[]> {
+async function podcastProductIds(sid: string, createdAt: string, catalogIds: string[], email: string): Promise<string[]> {
   const read = await notedProducts(sid);
-  const found = read.walked ? [] : await oldProductsOf(sid, email);
+  const made = Date.parse(createdAt);
+  const madeAfter = read.started !== null && /^\d{4}-\d{2}-\d{2}T/.test(createdAt) && Number.isFinite(made) && made >= read.started;
+  const found = read.walked || madeAfter ? [] : await oldProductsOf(sid, email);
   return [...new Set([...catalogIds, ...read.members, ...found])];
 }
 
@@ -311,13 +317,20 @@ export async function podcastProductCount(sid: string | null): Promise<number> {
   return count;
 }
 
-/** Whether the walk is done, and the store's noted products, in one request; any reply not in its exact shape throws. */
-async function notedProducts(sid: string): Promise<{ walked: boolean; members: string[] }> {
-  const replies = repliesFor(await redisPipeline([["HGET", NOTE_WALK_KEY, "phase"], ["SMEMBERS", pidsKey(sid)]]), 2);
-  const phase = replies?.[0];
+/**
+ * Whether the walk is done, when it started (milliseconds, null before its first run), and the store's noted products,
+ * in one request; any reply not in its exact shape throws. A start that is not a whole number of milliseconds is unknown.
+ */
+async function notedProducts(sid: string): Promise<{ walked: boolean; started: number | null; members: string[] }> {
+  const replies = repliesFor(await redisPipeline([["HMGET", NOTE_WALK_KEY, "phase", "started"], ["SMEMBERS", pidsKey(sid)]]), 2);
+  const fields = replies?.[0];
   const members = stringList(replies?.[1]);
-  if (!replies || (phase !== null && typeof phase !== "string") || !members) throw new UnknownReplyError("the products with private podcast feeds");
-  return { walked: phase === NOTE_DONE, members };
+  if (!replies || !Array.isArray(fields) || fields.length !== 2 || !fields.every((v) => v === null || typeof v === "string") || !members) {
+    throw new UnknownReplyError("the products with private podcast feeds");
+  }
+  const [phase, started] = fields as (string | null)[];
+  if (started !== null && !/^[0-9]{1,16}$/.test(started)) throw new UnknownReplyError("when the walk of feeds granted before the product note started");
+  return { walked: phase === NOTE_DONE, started: started === null ? null : Number(started), members };
 }
 
 /**
@@ -327,7 +340,7 @@ async function notedProducts(sid: string): Promise<{ walked: boolean; members: s
  * is read by SCAN (MATCH NOTE_MATCH): a full walk returns every key that was there from its start to its end, and
  * every feed granted since notes its product in the same script as its index (feedToken), so once the walk ends the
  * sets name every product with a feed. It ends once: the company key NOTE_WALK_KEY says "done" and is kept, so later
- * runs read one field and do nothing.
+ * runs read it and do nothing.
  *
  * Each page's products are noted before the cursor moves on: SADD through orderWrite, counted in the room of the store
  * the feed's grant names (its handle, read back to the same statsId) and, where no store answers to it, in the room
@@ -335,7 +348,8 @@ async function notedProducts(sid: string): Promise<{ walked: boolean; members: s
  * not in its exact shape throws and the cursor stays where it was, so the page is walked again (SADD is idempotent);
  * two runs at once can only walk a page twice. A key that does not read as an index is not one this code wrote.
  *
- * Bounded: `maxPages` pages (NOTE_PAGES_PER_RUN, from the hourly one-time jobs, app/api/cron/recount), the deadline,
+ * Bounded: `maxPages` pages (NOTE_PAGES_PER_RUN, from the hourly one-time jobs, app/api/cron/recount, which run it
+ * first), the deadline,
  * and NOTE_STORE_READS stores whose products are not all noted yet: NOTE_RUN_COMMANDS commands and NOTE_RUN_BYTES bytes
  * at the most, a page taken at NOTE_PAGE_KEYS names (COUNT is a hint to Redis). How many runs the whole walk takes
  * depends on the size of the shared database, which is not known: its total cost is unknown, never zero
@@ -344,9 +358,11 @@ async function notedProducts(sid: string): Promise<{ walked: boolean; members: s
 export async function notePodcastProducts(deadline: number, maxPages = NOTE_PAGES_PER_RUN): Promise<NoteWalkReport> {
   const report: NoteWalkReport = { pages: 0, noted: 0, storeReads: 0, done: false };
   if (!isRedisConfigured()) return report;
-  const state = repliesFor(await redisPipeline([["HMGET", NOTE_WALK_KEY, "phase", "cursor"]]), 1)?.[0];
+  // Its start is written once, by its first run (HSETNX): a store made after it cannot hold a feed from before the note.
+  const read = repliesFor(await redisPipeline([["HSETNX", NOTE_WALK_KEY, "started", String(Date.now())], ["HMGET", NOTE_WALK_KEY, "phase", "cursor"]]), 2);
+  const state = read?.[1];
   const fields = Array.isArray(state) && state.length === 2 && state.every((v) => v === null || typeof v === "string") ? (state as (string | null)[]) : null;
-  if (!fields) throw new UnknownReplyError("where the walk of feeds granted before the product note is");
+  if (!read || (read[0] !== 0 && read[0] !== 1) || !fields) throw new UnknownReplyError("where the walk of feeds granted before the product note is");
   if (fields[0] === NOTE_DONE) return { ...report, done: true };
   let cursor = fields[1] ?? "0";
   if (!/^[0-9]+$/.test(cursor)) throw new UnknownReplyError("the walk of feeds granted before the product note: its cursor");
@@ -399,26 +415,32 @@ async function ownerOf(sid: string, index: string): Promise<DataOwner> {
 }
 
 export type NoteWalkReport = { pages: number; noted: number; storeReads: number; done: boolean };
-/** The company's key for the walk: its phase ("walk", then NOTE_DONE for good) and its cursor. */
+/** The company's key for the walk: its phase ("walk", then NOTE_DONE for good), its cursor and when it started. */
 export const NOTE_WALK_KEY = "nl:podnote:walk";
 const NOTE_DONE = "done";
 /** The names the walk reads: every feed's index. */
 const NOTE_MATCH = "nl:pod:by:*";
 const OLD_INDEX = /^nl:pod:by:([A-Za-z0-9_-]{1,80}):([A-Za-z0-9_-]{1,80}):[0-9a-f]{32}$/;
-/** Names one page is asked for (a hint to Redis: a page is taken at this many names). */
-export const NOTE_PAGE_KEYS = 100;
-/** Pages one run of the hourly one-time jobs walks at the most. */
-export const NOTE_PAGES_PER_RUN = 10;
+/**
+ * Keys one SCAN examines (its COUNT, a hint to Redis): one command whatever the COUNT, and only the names that match
+ * come back (Claude 6 on #4471); a page is still taken at this many names in what it may cost.
+ */
+export const NOTE_PAGE_KEYS = 1_000;
+/**
+ * Pages one run walks at the most: 200,000 keys, twice the whole database the daily backup accepts (lib/backup-parts.ts,
+ * BACKUP_SCAN_PAGES pages of 500; a larger one fails the backup), so on such a database one run ends the walk.
+ */
+export const NOTE_PAGES_PER_RUN = 200;
 /** Stores whose products one run notes at the most: each is a read of its index, its grant and its record, and a script. */
 export const NOTE_STORE_READS = 50;
 /** Commands each of those stores costs: the index's GET, the grant's GET, the handle's GET, the record's GET, the script. */
 export const NOTE_STORE_COMMANDS = 5;
 /**
- * Commands one run sends at the most: where the walk is (HMGET); per page its SCAN, its cursor's HSET and one
- * SMISMEMBER per store on it, taken at one a name; and NOTE_STORE_READS stores. Priced in tests/plan-cost-registry.ts
- * (PODCAST_NOTE_RUN_USD) with NOTE_RUN_BYTES.
+ * Commands one run sends at the most: its start's HSETNX and where the walk is (HMGET); per page its SCAN, its cursor's
+ * HSET and one SMISMEMBER per store on it, taken at one a name; and NOTE_STORE_READS stores. Priced in
+ * tests/plan-cost-registry.ts (PODCAST_NOTE_RUN_USD) with NOTE_RUN_BYTES.
  */
-export const NOTE_RUN_COMMANDS = 1 + NOTE_PAGES_PER_RUN * (2 + NOTE_PAGE_KEYS) + NOTE_STORE_READS * NOTE_STORE_COMMANDS;
+export const NOTE_RUN_COMMANDS = 2 + NOTE_PAGES_PER_RUN * (2 + NOTE_PAGE_KEYS) + NOTE_STORE_READS * NOTE_STORE_COMMANDS;
 /**
  * Bytes one run moves at the most: every name on its pages (an index's name is at most 204 bytes, counted at 256, with
  * its SMISMEMBER reply), and per store read its record (MAX_STORE_BYTES), its grant and the replies around it (4 KB).
@@ -447,7 +469,7 @@ async function indexedTokens(sid: string, productIds: string[], email: string): 
 export async function feedsOf(store: Store, catalogIds: string[], email: string): Promise<string[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
   // The same products a deletion reaches, so the copy shows every feed the deletion would take away.
-  const productIds = await podcastProductIds(store.statsId, catalogIds, email);
+  const productIds = await podcastProductIds(store.statsId, store.createdAt, catalogIds, email);
   if (!productIds.length) return [];
   const tokens = await indexedTokens(store.statsId, productIds, email);
   return productIds.filter((_, i) => typeof tokens[i] === "string" && FEED_TOKEN.test(tokens[i] as string));

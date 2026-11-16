@@ -427,8 +427,9 @@ export default function PrivacyPage() {
           keep which episodes you play. The creator sees neither your feed nor
           what you listen to. We keep your feed until you ask the store to
           delete your data or the store closes, even after the creator removes
-          the podcast. If a deletion cannot yet reach all of your feeds, it
-          says it is not finished, and you can ask again.
+          the podcast. Right after some updates, usually for less than an
+          hour, a deletion may not yet reach every feed. Then it says it is
+          not finished, and you can ask again.
         </p>
         <p id="packages">
           <strong className="text-black">Packages of sessions.</strong>{" "}

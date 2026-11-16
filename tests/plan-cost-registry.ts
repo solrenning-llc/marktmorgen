@@ -2317,10 +2317,11 @@ export const API_SALES_READ = CALL + 1 * CPU_SECOND + (STRIPE_TIMEOUT_MS / 1000 
 /**
  * One run of the one-time walk that notes the products of private podcast feeds granted before the product note
  * (#4471; lib/podcast-access.ts notePodcastProducts, run by app/api/cron/recount every hour until it is done): its
- * commands and bytes at their ceilings (NOTE_RUN_COMMANDS, NOTE_RUN_BYTES), each SCAN page taken at its COUNT. A
- * company cost (100% Marktmorgen, FX275), never a plan's: how many runs the walk takes depends on the size of the
- * shared database, which is not known, so its total stays unknown, never zero (docs/funded-exposure-review.md). Once
- * it is done, a run reads one field. What a deletion adds while it is not done is in its own units
+ * commands and bytes at their ceilings (NOTE_RUN_COMMANDS, NOTE_RUN_BYTES), each SCAN page taken at its COUNT (1,000
+ * names, as if every key examined were a feed's index of another store). A company cost (100% Marktmorgen, FX275),
+ * never a plan's: one run covers twice the database the daily backup accepts; on a larger one, how many runs it takes
+ * is not known, so its total stays unknown, never zero (docs/funded-exposure-review.md). Once it is done, a run sends
+ * two commands. What a deletion adds while it is not done is in its own units
  * (lib/erasure-rules.ts, ERASE_FIXED_COMMANDS and ERASE_PER.podcastProducts).
  */
 export const PODCAST_NOTE_RUN_USD = NOTE_RUN_COMMANDS * COMMAND + NOTE_RUN_BYTES * DB_BYTE;

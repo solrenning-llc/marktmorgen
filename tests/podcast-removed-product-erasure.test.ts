@@ -287,3 +287,19 @@ test("a store made after the walk started never waits for it", () => quietly(asy
     assert.equal(result.ok, true);
   } finally { restore(); }
 }));
+
+test("a store made before the walk started, or whose making time does not read, still waits for it", () => quietly(async () => {
+  await world();
+  const restore = pagedScan(10_000);
+  try {
+    assert.equal((await access.notePodcastProducts(Date.now() + 60_000, 1)).done, false, "the walk is under way");
+    const before = await erasePerson((await storeForEmail(owner))!, "podcast-removed-nofeed@example.test", { kind: "person" });
+    assert.ok(!before.ok && before.reason === "incomplete", "made before the walk: it waits");
+    const shop = (await storeForEmail(owner))!;
+    const blank = await erasePerson({ ...shop, createdAt: "" }, "podcast-removed-nofeed@example.test", { kind: "person" });
+    assert.ok(!blank.ok && blank.reason === "incomplete", "no making time: it waits");
+    redis.run(["HSET", "nl:podnote:walk", "started", "soon"]);
+    const garbled = await erasePerson({ ...shop, createdAt: new Date(Date.now() + 86_400_000).toISOString() }, "podcast-removed-nofeed@example.test", { kind: "person" });
+    assert.ok(!garbled.ok && garbled.reason === "incomplete", "a start that does not read: it waits");
+  } finally { restore(); }
+}));

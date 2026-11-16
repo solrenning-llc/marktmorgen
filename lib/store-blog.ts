@@ -26,7 +26,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { type Block, aboutBlocks, aboutExcerpt, cleanAbout } from "@/lib/product-about";
 import { slugOf } from "@/lib/product-slug";
 import { blogReadArray, blogReadBody } from "@/lib/blog-read-replies";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 export const MAX_POSTS = 200;
 export const MAX_POST_TITLE = 120;
@@ -203,7 +203,8 @@ export async function readPosts(statsId: string | null, metas: PostMeta[]): Prom
   return out;
 }
 
-export type SaveResult = { ok: true; post: Post; published: number } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "off" };
+/** `published` is null when the count of published posts did not read after the save (rule 24): never 0 for it. */
+export type SaveResult = { ok: true; post: Post; published: number | null } | { ok: false; reason: "title" | "body" | "full" | "unknown" | "off" };
 
 /**
  * Writes a post: a new one when `id` is null, else the one with that id. A
@@ -228,8 +229,10 @@ export async function savePost(
     before = parseMeta(raw);
     if (!before) return { ok: false, reason: "unknown" };
   } else {
-    const [count] = await redisPipeline([["HLEN", metaKey(statsId)]]);
-    if ((Number(count) || 0) >= MAX_POSTS) return { ok: false, reason: "full" };
+    // Read exactly (CX-123 rule 24): a count that does not read is unknown, never under MAX_POSTS; nothing is written.
+    const count = countOf(repliesFor(await redisPipeline([["HLEN", metaKey(statsId)]]), 1)?.[0]);
+    if (count === null) throw new UnknownReplyError("a blog's posts counted against its cap");
+    if (count >= MAX_POSTS) return { ok: false, reason: "full" };
   }
   const postId = before?.id ?? newId();
   const publishedAt = input.draft ? before?.publishedAt ?? 0 : before?.publishedAt || now;
@@ -237,24 +240,29 @@ export async function savePost(
   // Its room first: the post's two records and its place among the published, counted as it now is.
   const bodyJson = JSON.stringify({ body: input.body, product: input.product });
   await needData(room, [{ slot: `bl:${postId}`, bytes: dataBytes([JSON.stringify(meta), bodyJson], 3), set: true }]);
-  const [, , , total] = await redisPipeline([
+  const replies = await redisPipeline([
     ["HSET", metaKey(statsId), postId, JSON.stringify(meta)],
     ["HSET", bodyKey(statsId), postId, bodyJson],
     input.draft ? ["ZREM", pubKey(statsId), postId] : ["ZADD", pubKey(statsId), publishedAt, postId],
     ["ZCARD", pubKey(statsId)],
   ]);
-  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: Number(total) || 0 };
+  // The published count read exactly (rule 24): one that does not read is null, so nobody writes 0 for it.
+  return { ok: true, post: { ...meta, body: input.body, product: input.product }, published: countOf(repliesFor(replies, 4)?.[3]) };
 }
 
 /** Removes a post for good. Says how many are published after it. */
 export async function deletePost(statsId: string | null, id: string, room: DataStore): Promise<number | null> {
   if (!statsId || !isRedisConfigured() || !POST_ID.test(id)) return null;
-  const [, , , total] = await redisPipeline([
+  const replies = await redisPipeline([
     ["HDEL", metaKey(statsId), id],
     ["HDEL", bodyKey(statsId), id],
     ["ZREM", pubKey(statsId), id],
     ["ZCARD", pubKey(statsId)],
   ]);
   await giveData(room, [{ slot: `bl:${id}`, bytes: 0, set: true }]);
-  return Number(total) || 0;
+  // The published count read exactly (rule 24): one that does not read throws, never "0 published" kept on the
+  // store's record; the delete may be pressed again, which removes nothing more.
+  const total = countOf(repliesFor(replies, 4)?.[3]);
+  if (total === null) throw new UnknownReplyError("a blog's published posts counted after a delete");
+  return total;
 }

@@ -727,6 +727,8 @@ async function ensurePost(store: Store, product: Listing, pending: string[]): Pr
     pending.push(refused("post", saved.reason));
     return store;
   }
+  // An unread count (rule 24) keeps the store's record as it is, never 0 published.
+  if (saved.published === null) return store;
   return (await setPostCount(REF, saved.published)) ?? store;
 }
 

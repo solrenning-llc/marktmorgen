@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
     const id = typeof body.id === "string" && body.id ? text(body.id, 20) : null;
     const saved = await savePost(store.statsId, id, input, () => randomBytes(5).toString("hex"), store);
     if (!saved.ok) return fail(saved.reason, saved.reason === "unknown" ? 404 : 400);
-    await setPostCount(guarded.ref, saved.published);
+    // Kept on the store's record only when it read (rule 24): an unread count never writes 0 published.
+    if (saved.published !== null) await setPostCount(guarded.ref, saved.published);
     return Response.json({ ok: true, post: saved.post });
   } catch (error) {
     // What does not fit in the store's data room is not written (lib/store-data.ts).

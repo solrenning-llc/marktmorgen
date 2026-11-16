@@ -65,6 +65,13 @@ async function main(): Promise<void> {
   is("a list holding a number", await withPaidReply(key, [SUB, 7], () => paidPeriods(store)), "threw");
   is("an object", await withPaidReply(key, { [SUB]: ROW }, () => paidPeriods(store)), "threw");
   is("an empty list is a confirmed empty hash", await withPaidReply(key, [], () => paidPeriods(store)), "read 0");
+  // A hash never names a field twice: a list that does is not the hash asked for (Codex T on #4454, HIGH). Read as it
+  // was, the second row replaced the first, and the refund was worked out from the smaller payment only.
+  is(
+    "the same subscription twice",
+    await withPaidReply(key, [SUB, ROW, SUB, JSON.stringify({ ...JSON.parse(ROW), amt: 500, tot: 500 })], () => paidPeriods(store)),
+    "threw",
+  );
 
   part("Rule 24: a member's row that does not read is unknown, never left out");
   await redis.pipeline([["HSET", key, "sub_2PaidPeriodsExact", "{not json"]]);

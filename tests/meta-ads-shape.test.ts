@@ -65,7 +65,7 @@ async function main(): Promise<void> {
   await ensureStatsId("metashape@example.com");
   const store = (await storeForEmail("metashape@example.com"))!;
   const statsId = store.statsId!;
-  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metashape@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency });
+  const connected = await finishMeta({ statsId, sid: store.sid, code: "good-code", redirect: "https://marktmorgen.com/api/integrations/meta/callback", by: "metashape@example.com", owner: { email: store.email, handle: store.handle }, currency: store.currency, startedAt: Date.now() });
   if (!connected.ok) throw new Error(`not connected: ${connected.error}`);
 
   part("A real read first");

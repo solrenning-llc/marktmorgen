@@ -552,15 +552,21 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // Merge of main into #3545 (15 November 2026): the catalog's product records read in shared MGETs and its listing
     // reads priced as such (lib/catalog.ts, lib/read-ceilings.ts) cost fewer store commands, so each plan keeps more;
     // figures as the model computes them with main's costs and #3545's reads together.
-    is("11: Store, Studio and Scale keep 46.84, 315.56 and 704.99 dollars in their worst month on a monthly plan", worstMonth("month"), ["46.84", "315.56", "704.99"]);
+    // Merge of main into #3545 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 46.84, 315.54, 704.91;
+    // figures as the model computes them; still above zero (MR). The merge lowers no cost: the gain is this PR's shared MGET reads.
+    is("11: Store, Studio and Scale keep 46.84, 315.54 and 704.91 dollars in their worst month on a monthly plan", worstMonth("month"), ["46.84", "315.54", "704.91"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 38.79, 260.44 and 581.72 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.79", "260.44", "581.72"]);
+    // Merge of main into #3545 (16 November 2026): main's costs and this PR's change together, yearly month 37.04, 258.68, 579.90 -> 38.78, 260.41, 581.64;
+    // figures as the model computes them; still above zero (MR). The merge lowers no cost: the gain is this PR's shared MGET reads.
+    is("11: and 38.78, 260.41 and 581.64 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.78", "260.41", "581.64"]);
   } finally {
     Date.now = realNow;
   }

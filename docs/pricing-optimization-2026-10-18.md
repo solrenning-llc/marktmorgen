@@ -10,9 +10,9 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$139 / $1,390** | every #553 figure, none cut | 60.78% / 60.74% | 12.28% | 116 | $69 / $690 |
-| Studio | **$709 / $7,090** | every #553 figure, none cut | 61.34% / 61.10% | 12.50% | 16 | $449 / $4,490 |
-| Scale | **$1,519 / $15,190** | every #553 figure, none cut | 61.43% / 61.16% | 12.54% | 7 | $999 / $9,990 |
+| Store | **$139 / $1,390** | every #553 figure, none cut | 60.78% / 60.74% | 12.28% | 117 | $69 / $690 |
+| Studio | **$709 / $7,090** | every #553 figure, none cut | 61.33% / 61.10% | 12.50% | 16 | $449 / $4,490 |
+| Scale | **$1,519 / $15,190** | every #553 figure, none cut | 61.43% / 61.15% | 12.54% | 7 | $999 / $9,990 |
 
 **Usage above the included figures: prepaid credits** (docs/pack-cost-decomposition-2026-10-18.md, option 3), sold at $50, $100, $250, $500, $1,000, each keeping 60% however it is spent (60.36%, 60.18%, 60.07%, 60.03%, 60.01% on its dearest-to-serve resource), at the rates of that document's table (list email $27.11, $21.33, $19.01, $18.32, $17.99 per 1,000).
 
@@ -142,7 +142,7 @@ R² 0.635 (adjusted 0.552), main; 0.678 (adjusted 0.620), robustness. Each step 
 
 **Decisions.** For each plan, its monthly price on the grid of every $X9 from $9 to twice today's (the year at ten monthly payments, Marktmorgen's convention), and the share of each of #553's eight per-use figures (visits, orders, list emails, AI, storage, video hours, access emails, store emails).
 
-**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 2¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
+**Constraints.** Every plan, alone, at full use of every figure, keeps 60% on both intervals with the spend floor test's room (25¢ a month, $1 a year), under the sizing reading: the program's room per price is `unitUnder`'s, less 5¢ of safety for rounding, and its usage is linear in the shares, with coefficients read from `usageCents` (the largest gap between that line and `usageCents` at today's figures is 3¢). Prices rise from Store to Studio to Scale; no figure of a plan is above the same figure of the plan above it. The number of plans stays three. Then each solution, as a page would print it, is checked again by `unitUnder` itself.
 
 **Objective.** Demand at each price is q = (price ÷ the band's median price)^ε, one scenario for each ε in −0.5, −1, −1.5 and −2; the objective is the sum over plans of q times the monthly payment's net at full use: **a profit index in dollars per customer the band's median price would bring**, comparable within a scenario only. No scenario is a measurement: no sale has ever been open.
 
@@ -152,14 +152,14 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Scenario | Alternative | Store | Studio | Scale | Each plan keeps 60% (checked) | Same as the exhaustive search |
 | --- | --- | --- | --- | --- | --- | --- |
-| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.66% / 61.63%; 62.44% / 62.32%; 62.54% / 62.40%) | yes |
-| ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.26% / 62.30%; 63.24% / 63.22%; 63.32% / 63.28%) | yes |
-| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.66% / 61.63%; 62.44% / 62.32%; 62.54% / 62.40%) | yes |
-| ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.26% / 62.30%; 63.24% / 63.22%; 63.32% / 63.28%) | yes |
-| ε = -1.5 | A | $119 | $499 | $1,049 | yes (60.29% / 60.25%; 60.35% / 60.02%; 60.42% / 60.03%) | yes |
-| ε = -1.5 | C | $89 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $179 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $329 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.48% / 60.58%; 60.36% / 60.17%; 60.37% / 60.03%) | yes |
-| ε = -2 | A | $119 | $499 | $1,049 | yes (60.29% / 60.25%; 60.35% / 60.02%; 60.42% / 60.03%) | yes |
-| ε = -2 | C | $89 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $179 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $329 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.48% / 60.58%; 60.36% / 60.17%; 60.37% / 60.03%) | yes |
+| ε = -0.5 | A | $199 | $1,339 | $2,989 | yes (61.65% / 61.63%; 62.44% / 62.32%; 62.54% / 62.40%) | yes |
+| ε = -0.5 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.26% / 62.29%; 63.24% / 63.21%; 63.32% / 63.28%) | yes |
+| ε = -1 | A | $199 | $1,339 | $2,989 | yes (61.65% / 61.63%; 62.44% / 62.32%; 62.54% / 62.40%) | yes |
+| ε = -1 | C | $199 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $1,339 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $2,989 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (62.26% / 62.29%; 63.24% / 63.21%; 63.32% / 63.28%) | yes |
+| ε = -1.5 | A | $119 | $499 | $1,049 | yes (60.28% / 60.24%; 60.35% / 60.01%; 60.41% / 60.02%) | yes |
+| ε = -1.5 | C | $89 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $179 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $339 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.48% / 60.58%; 60.35% / 60.16%; 60.45% / 60.12%) | yes |
+| ε = -2 | A | $119 | $499 | $1,049 | yes (60.28% / 60.24%; 60.35% / 60.01%; 60.41% / 60.02%) | yes |
+| ε = -2 | C | $89 (video 1, storage 1 GB, orders 20, store-email 7, transactional-email 15, visits 340) | $179 (ai 4, video 3, storage 4 GB, orders 45, store-email 30, transactional-email 40, list-email 700, visits 1,000) | $339 (ai 8, video 6, storage 8 GB, orders 150, store-email 80, transactional-email 100, list-email 1,000, visits 4,000) | yes (60.48% / 60.58%; 60.35% / 60.16%; 60.45% / 60.12%) | yes |
 
 **What the scenarios agree on, and where they part.** Under A the lowest price that keeps 60% with every #553 figure is Store $119, Studio $499, Scale $1,049 (today $69, $449, $999): nothing near the band medians is possible without cutting figures. With |ε| at most 1 (−0.5, −1), constant-elasticity demand has no finite best price, and the program goes to the top of the grid: that is the model's shape, not a finding that the market would pay it. With |ε| above 1 (−1.5, −2) the best price is that lowest one. So the scenarios disagree on direction and agree only on the floor.
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $139 | 17.6% | 17.6% / 1.4% / 6.7% / 13.7% | 116 |
+| Store | $139 | 17.6% | 17.6% / 1.4% / 6.7% / 13.7% | 117 |
 | Studio | $709 | 28.5% | 28.5% / 1.8% / 14.7% / 28.5% | 16 |
 | Scale | $1,519 | 30.0% | 30.0% / 1.8% / 15.5% / 29.8% | 7 |
 
@@ -177,8 +177,8 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | 1× today's price | 1.25× today's price | 1.5× today's price | 2× today's price |
 | --- | --- | --- | --- | --- |
-| Store | $69: none finite | $79: none finite | $99: none finite | $129: 180 |
-| Studio | $449: none finite | $559: 52 | $669: 19 | $889: 9 |
+| Store | $69: none finite | $79: none finite | $99: none finite | $129: 182 |
+| Studio | $449: none finite | $559: 53 | $669: 19 | $889: 9 |
 | Scale | $999: none finite | $1,239: 17 | $1,489: 8 | $1,989: 4 |
 
 **Alternative C, what a cut is worth.** The profit index at C's best price over A's best, per scenario. It is an **upper bound**: the demand model cannot see the value a cut takes away, so it always prefers the cut.
@@ -187,7 +187,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | --- | --- | --- | --- | --- |
 | Store | 1.01× ($199 against $199) | 1.01× ($199 against $199) | 1.16× ($89 against $119) | 1.34× ($89 against $119) |
 | Studio | 1.01× ($1,339 against $1,339) | 1.01× ($1,339 against $1,339) | 1.67× ($179 against $499) | 2.79× ($179 against $499) |
-| Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.78× ($329 against $1,049) | 3.19× ($329 against $1,049) |
+| Scale | 1.01× ($2,989 against $2,989) | 1.01× ($2,989 against $2,989) | 1.76× ($339 against $1,049) | 3.10× ($339 against $1,049) |
 
 **Each cut alone.** The same, one figure at a time cut to a tenth of #553's (rounded down as a page prints it), every other kept: the lowest price that keeps 60%, and the profit index over A's best in the two scenarios where a cut can lower the price.
 
@@ -207,14 +207,14 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Studio | transactional-email | 40 | $499 | 1.00× | 1.00× |
 | Studio | list-email | 700 | $369 | 1.16× | 1.35× |
 | Studio | visits | 1,000 | $449 | 1.05× | 1.11× |
-| Scale | ai | 8 | $909 | 1.07× | 1.15× |
+| Scale | ai | 8 | $919 | 1.07× | 1.14× |
 | Scale | video | 6 | $1,029 | 1.01× | 1.02× |
 | Scale | storage | 8 GB | $1,009 | 1.02× | 1.04× |
 | Scale | orders | 150 | $979 | 1.03× | 1.07× |
 | Scale | store-email | 80 | $1,029 | 1.01× | 1.02× |
 | Scale | transactional-email | 100 | $1,029 | 1.01× | 1.02× |
 | Scale | list-email | 1,000 | $859 | 1.10× | 1.22× |
-| Scale | visits | 4,000 | $819 | 1.13× | 1.28× |
+| Scale | visits | 4,000 | $829 | 1.12× | 1.26× |
 
 ## 4. At least the best competitor in the band, on every attribute (alternative B)
 

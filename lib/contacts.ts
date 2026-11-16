@@ -37,7 +37,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, readTags } from "@/lib/contact-rules";
+import { MAX_CONTACT_NAME, MAX_IMPORT, MAX_LEADS, leadsKey, readTags } from "@/lib/contact-rules";
 import { liftCommand, suppressCommand, suppressedAmongCommand, suppressedCommand, suppressedKey, suppressionPrint, wasSuppressed, wholeErasedReply } from "@/lib/suppression";
 import { joinedCommands } from "@/lib/joined-stores";
 import { DataRoomError, type DataStore, dataKey, giveData, needData } from "@/lib/store-data";
@@ -150,7 +150,9 @@ async function settleContacts(room: ContactRoom, pairs: { before: Contact | null
   if (back > 0) await giveData(room, [{ slot: CONTACTS_SLOT, bytes: back }]);
 }
 
-export const leadsKey = (listId: string) => `nl:store:leads:${listId}`;
+// The list's key lives in lib/contact-rules.ts (no imports), so a sender that only needs to read a row, such as the
+// community announcements (lib/community-mail.ts), does not pull in sign-in and email.
+export { leadsKey };
 export const agreedKey = (listId: string) => `nl:store:leads:${listId}:agreed`;
 export const unsubKey = (listId: string) => `nl:store:leads:${listId}:unsub`;
 export const tokenKey = (token: string) => `nl:mail:unsub:${token}`;
@@ -195,6 +197,12 @@ export type AddResult = {
   /** Newly recorded as having got or bought this product. */
   gotProduct: boolean;
   full: boolean;
+  /**
+   * A fenced write (upsertContact's `fence`) refused, nothing written: the fence was gone at the write, an erasure
+   * print to lift was written in or after the second the fence was issued, or a deletion this yes does not postdate
+   * was found (#4268).
+   */
+  gone?: true;
 };
 
 /**
@@ -217,6 +225,13 @@ export async function upsertContact(
     clicks?: boolean;
     /** The store's id, given when the person typed the address themselves, so asking to be deleted from every store finds this one (lib/joined-stores.ts). */
     sid?: string;
+    /**
+     * The confirmation link a yes was given by, which the person's erasure deletes, and the lifetime it was set with
+     * (EX seconds). Checked in one step with the write, together with the row and the deleted mark being as read
+     * (CONTACT_FENCED_WRITE_IF): the link gone, or an erasure print written in or after the second the link was
+     * issued, and nothing is written; the answer says `gone`, never retried. Not for an order's room.
+     */
+    fence?: { key: string; seconds: number };
   },
   /** The store whose data room the contact takes from; orderRoom(store) for one an order put on (lib/order-data.ts); null for the company's own lists. */
   room: ContactRoom,
@@ -236,6 +251,9 @@ export async function upsertContact(
   // first, one public request of the store's (`payRound`), or not made: refused, for the visitor to try again (Codex Z
   // on #3448, 6751568157). An order's goes round CONTACT_WRITE_TRIES times, inside the order's own compute.
   const publicRoom = room !== null && !isOrderRoom(room);
+  // A fenced write (#4268) is never an order's; one refused by a deletion says so (`gone`), as one refused by its fence.
+  const fence = input.fence && !(room && isOrderRoom(room)) ? input.fence : undefined;
+  const refused: AddResult = fence ? { ...none, gone: true } : none;
   for (let round = 0; round < CONTACT_WRITE_TRIES; round += 1) {
     if (round > 0 && publicRoom && !(payRound && (await payRound().catch(() => false)))) break;
     const replies = repliesFor(await redisPipeline([
@@ -264,7 +282,7 @@ export async function upsertContact(
     const deleted = wasSuppressed(erased);
     // Deleted between an earlier read and its write: what was read before the deletion is never written after it.
     if (deletedAtFirst === null) deletedAtFirst = deleted;
-    else if (deleted && !deletedAtFirst) return none;
+    else if (deleted && !deletedAtFirst) return refused;
     // When they were deleted: the mark holds the second (lib/suppression.ts, suppressCommand), read exactly only for
     // an address that has one. Gone between the two reads: read again.
     const mark = deleted ? await textOrNil(["HGET", suppressedKey(listId), suppressionPrint(listId, email)], "when an address was deleted") : null;
@@ -273,8 +291,10 @@ export async function upsertContact(
     // which was already there when it was read. Something from before the deletion, or from its same second, is
     // never written after it: a thank-you page of an older order reloaded, a download link opened again. A mark in
     // another shape is not known to be older, so nothing is written either.
-    if (deleted && !afterDeletion(mark, input.at)) return none;
+    // A fenced own yes (#4268) is placed by CONTACT_FENCED_WRITE_IF instead, against its link's issue time on Redis's
+    // clock, the mark's own: the app's `at` may run behind it, which would refuse a fresh yes. Its shape is still read here.
     const ownYes = input.agreed && input.explicit;
+    if (deleted && !afterDeletion(mark, fence && ownYes ? undefined : input.at)) return refused;
     const agreed = Boolean(before?.agreed) || (input.agreed && (!deleted || ownYes));
     // A yes only undoes an unsubscribe when it was given after it: a thank-you
     // page reloaded, or a download link opened again, repeats an old tick.
@@ -319,10 +339,12 @@ export async function upsertContact(
     await needContacts(room, [{ before, next }]);
     const counts = { agreed: agreed && !before?.agreed, left: resubscribe ? -1 : 0 } as const;
     const joined = input.sid ? joinedCommands(input.sid, email) : [];
-    const written = await writeContactIf(listId, email, raw, mark, next, deleted && ownYes, counts, joined, room);
-    if (written) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
-    // Changed meanwhile: what it took of the room goes back, and it is read again.
+    const written = await writeContactIf(listId, email, raw, mark, next, deleted && ownYes, counts, joined, room, fence);
+    if (written === true) return { joined: mailable(next) && !wasMailable, gotProduct, full: false };
+    // Changed meanwhile, or refused by its fence: what it took of the room goes back. Changed is read again; a fence
+    // gone (or a print it cannot lift) stays refused, never retried.
     await settleContacts(room, [{ before, next }], [false]);
+    if (written === "gone") return { ...none, gone: true };
   }
   throw new Error("a contact kept changing while it was written");
 }
@@ -341,6 +363,13 @@ const CONTACT_WRITE_TRIES = 3;
 export const CONTACT_WRITE_CALLS = 8;
 
 /**
+ * The most redis.call one run of CONTACT_FENCED_WRITE_IF makes: CONTACT_WRITE_CALLS, and the fence's PTTL and, to
+ * place a print to lift in time, Redis's TIME (#4268). A waitlist confirmation's sign-up runs it, so a sign-up's
+ * round is priced at this, the dearer of the two. Held against the script's text in tests/contacts-write-cost.test.ts.
+ */
+export const CONTACT_FENCED_WRITE_CALLS = CONTACT_WRITE_CALLS + 2;
+
+/**
  * The most database commands each path of this file's checked writes makes, a script counted as 1 plus its calls
  * (review of #3448, 9 November 2026; held in tests/contacts-write-cost.test.ts and named in
  * tests/plan-cost-registry.ts). Each is CONTACT_WRITE_TRIES rounds lost to a change made in between, and, once, the
@@ -351,14 +380,17 @@ export const CONTACT_WRITE_CALLS = 8;
  */
 export const CONTACT_COMMANDS_MOST = {
   tries: CONTACT_WRITE_TRIES,
-  /** upsertContact: the row, the list's size and the deleted mark; the mark's time; the script and its calls. */
-  upsertRound: 3 + 1 + 1 + CONTACT_WRITE_CALLS,
-  upsert: CONTACT_WRITE_TRIES * (3 + 1 + 1 + CONTACT_WRITE_CALLS) + 2,
+  /**
+   * upsertContact: the row, the list's size and the deleted mark; the mark's time; the script and its calls, at the
+   * dearer script (a fenced sign-up's, CONTACT_FENCED_WRITE_CALLS).
+   */
+  upsertRound: 3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS,
+  upsert: CONTACT_WRITE_TRIES * (3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS) + 2,
   /**
    * upsertContact from a public request (a store's own room), what that request pays for: one round, and once the read
    * back; each round more is paid first by a public request of its own (payRound), at most upsertRound commands each.
    */
-  upsertPublic: (3 + 1 + 1 + CONTACT_WRITE_CALLS) + 2,
+  upsertPublic: (3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS) + 2,
   /** unsubscribe: the link, the row, the script and the 3 calls it makes there (the row, the row written, the left count). */
   unsubscribeRound: 1 + 1 + 1 + 3,
   unsubscribe: CONTACT_WRITE_TRIES * (1 + 1 + 1 + 3),
@@ -420,6 +452,54 @@ export const CONTACT_WRITE_IF = [
 ].join("\n");
 
 /**
+ * CONTACT_WRITE_IF fenced by a link that the person's erasure deletes (#4268: a waitlist confirmation read before an
+ * erasure that completed meanwhile put the address back and lifted the print), all in one step. KEYS[1]..KEYS[4] and
+ * ARGV[1]..ARGV[8] as CONTACT_WRITE_IF; KEYS[5] the fence, ARGV[9] its whole lifetime in ms (it was set with that EX);
+ * with KEYS[6] (the person's set of stores joined) ARGV[10] the store's id and ARGV[11] the day it ends. Answers:
+ *   - 2 refused by the fence, nothing written, never to be retried: the fence is gone (an erasure that finished
+ *     deleted it), or a mark to lift was written in or after the second the fence was issued (PTTL against its
+ *     lifetime, on Redis's clock, as the mark's second is: lib/suppression.ts ERASED_PRINT); a fence with no expiry,
+ *     or a mark that is not a second, cannot be placed in time and is refused. erasePerson writes the mark first and
+ *     deletes the noted links last, so only a link issued after the erasure, a fresh yes, lifts the mark;
+ *   - 0 changed, nothing written: the row or the mark is not what was read (read again, as CONTACT_WRITE_IF's 0);
+ *   - 1 written, with its counts and the stores joined.
+ * Billed as one EVAL and its calls, at most CONTACT_FENCED_WRITE_CALLS; lib/redis-memory.ts runs the same steps.
+ */
+export const CONTACT_FENCED_WRITE_IF = [
+  "-- marktmorgen:contact-fenced-write-if:v3",
+  'local left = redis.call("PTTL", KEYS[5])',
+  "if left == -2 then return 2 end",
+  'local cur = redis.call("HGET", KEYS[1], ARGV[1])',
+  'local seen = ""',
+  "if cur then seen = redis.sha1hex(cur) end",
+  "if seen ~= ARGV[2] then return 0 end",
+  "local held = false",
+  'if ARGV[4] ~= "" then',
+  '  held = redis.call("HGET", KEYS[2], ARGV[4])',
+  '  local markSeen = ""',
+  "  if held then markSeen = redis.sha1hex(held) end",
+  "  if markSeen ~= ARGV[5] then return 0 end",
+  "end",
+  'local lift = ARGV[6] == "1" and held',
+  "if lift then",
+  "  local at = tonumber(held)",
+  "  if left < 0 or not at then return 2 end",
+  '  local t = redis.call("TIME")',
+  "  local issued = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000) - (tonumber(ARGV[9]) - left)",
+  "  if (at + 1) * 1000 > issued then return 2 end",
+  "end",
+  'redis.call("HSET", KEYS[1], ARGV[1], ARGV[3])',
+  'if lift then redis.call("HDEL", KEYS[2], ARGV[4]) end',
+  'if ARGV[7] == "1" then redis.call("INCR", KEYS[3]) end',
+  'if ARGV[8] == "1" then redis.call("INCR", KEYS[4]) elseif ARGV[8] == "-1" then redis.call("DECR", KEYS[4]) end',
+  "if #ARGV >= 11 then",
+  '  redis.call("SADD", KEYS[6], ARGV[10])',
+  '  redis.call("EXPIREAT", KEYS[6], ARGV[11])',
+  "end",
+  "return 1",
+].join("\n");
+
+/**
  * Writes one contact's row, the lifting of its deleted mark when `lift`, and its counts, only while the row is
  * still `raw` and the mark still `mark` (consent audit of 9 November 2026: a read and then a plain HSET wrote an
  * unsubscribe, a complaint or a deletion made in between over). The stores the address joined (`joined`, how
@@ -442,7 +522,9 @@ async function writeContactIf(
   counts: { agreed: boolean; left: -1 | 0 | 1 },
   joined: (string | number)[][],
   room: ContactRoom,
-): Promise<boolean> {
+  /** upsertContact's `fence` (never an order's): the write runs CONTACT_FENCED_WRITE_IF, and "gone" is its refusal. */
+  fence?: { key: string; seconds: number },
+): Promise<boolean | "gone"> {
   const key = leadsKey(listId);
   const marks = suppressedKey(listId);
   const print = suppressionPrint(listId, email);
@@ -460,7 +542,7 @@ async function writeContactIf(
     return (await orderWriteIfSame(room.order, [{ key, field: email, sha1: was }, { key: marks, field: print, sha1: markWas }], commands)) !== null;
   }
   // A room that is an order's but has no key of its own (dataKey) gets them here as well, in the same script.
-  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined);
+  return writeRowIf(listId, email, was, value, { print, markWas, mark, lift }, counts, false, joined, fence);
 }
 
 /**
@@ -478,16 +560,23 @@ async function writeRowIf(
   strict = false,
   /** joinedCommands: the person's set of stores joined, added to in the script after its checks. */
   joined: (string | number)[][] = [],
-): Promise<boolean> {
+  /** A fence (upsertContact's): CONTACT_FENCED_WRITE_IF in place of CONTACT_WRITE_IF, its 2 answered as "gone". */
+  fence?: { key: string; seconds: number },
+): Promise<boolean | "gone"> {
   const key = leadsKey(listId);
   const marks = suppressedKey(listId);
   const args = [email, was, value, mark?.print ?? "", mark?.markWas ?? "", mark?.lift ? "1" : "0", counts.agreed ? "1" : "0", String(counts.left)];
   // joinedCommands is [SADD set sid, EXPIREAT set day]; anything else is not sent (no index is better than a wrong one).
   const [add, expire] = joined;
   const index = add?.[0] === "SADD" && expire?.[0] === "EXPIREAT" && joined.length === 2 && add[1] === expire[1];
+  const keys = [key, marks, agreedKey(listId), unsubKey(listId)];
+  const command: (string | number)[] = fence
+    ? ["EVAL", CONTACT_FENCED_WRITE_IF, index ? 6 : 5, ...keys, fence.key, ...(index ? [String(add[1])] : []), ...args, fence.seconds * 1000, ...(index ? [String(add[2]), String(expire[2])] : [])]
+    : ["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, ...keys, ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])];
   let result: unknown;
   try {
-    result = repliesFor(await redisPipeline([["EVAL", CONTACT_WRITE_IF, index ? 5 : 4, key, marks, agreedKey(listId), unsubKey(listId), ...(index ? [String(add[1])] : []), ...args, ...(index ? [String(add[2]), String(expire[2])] : [])]]), 1)?.[0];
+    result = repliesFor(await redisPipeline([command]), 1)?.[0];
+    if (fence && result === 2) return "gone";
     if (result !== 0 && result !== 1) throw new UnknownReplyError("a contact's write");
   } catch (error) {
     if (strict) throw error instanceof UnknownReplyError ? error : new UnknownReplyError("a contact's write");

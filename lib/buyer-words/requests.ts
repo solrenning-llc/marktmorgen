@@ -63,6 +63,8 @@ const en = {
   receiptSubject: (store: string, amount: string) => `Receipt from ${store}: ${amount}`,
   receiptLead: (store: string, amount: string, date: string) => `Thank you. You paid ${store} ${amount} on ${date}, for:`,
   receiptLink: "Your receipt, to print or save:",
+  /** Sales tax added on top of a request's lines, on its receipt (audit R48). */
+  receiptTax: (amount: string) => `Sales tax or VAT: ${amount}`,
   statement: (store: string) => `The charge shows on your statement under the name of ${store}'s business.`,
 };
 
@@ -121,6 +123,7 @@ const es: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Gracias. Pagaste ${amount} a ${store} el ${date}, por:`,
   receiptLink: "Tu recibo, para imprimirlo o guardarlo:",
+  receiptTax: (amount) => `IVA o impuesto sobre ventas: ${amount}`,
   statement: (store) => `El cargo aparece en tu extracto con el nombre del negocio de ${store}.`,
 };
 
@@ -177,6 +180,7 @@ const fr: RequestWords = {
   receiptSubject: (store, amount) => `Reçu de ${store} : ${amount}`,
   receiptLead: (store, amount, date) => `Merci. Vous avez payé ${amount} à ${store} le ${date}, pour :`,
   receiptLink: "Votre reçu, à imprimer ou à enregistrer :",
+  receiptTax: (amount) => `TVA ou taxe de vente : ${amount}`,
   statement: (store) => `Le débit apparaît sur votre relevé sous le nom de l'entreprise de ${store}.`,
 };
 
@@ -233,6 +237,7 @@ const de: RequestWords = {
   receiptSubject: (store, amount) => `Quittung von ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Danke. Du hast ${store} am ${date} ${amount} bezahlt, für:`,
   receiptLink: "Deine Quittung zum Drucken oder Speichern:",
+  receiptTax: (amount) => `Umsatzsteuer: ${amount}`,
   statement: (store) => `Die Abbuchung steht auf deinem Kontoauszug unter dem Namen des Unternehmens von ${store}.`,
 };
 
@@ -289,6 +294,7 @@ const it: RequestWords = {
   receiptSubject: (store, amount) => `Ricevuta da ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Grazie. Hai pagato ${amount} a ${store} il ${date}, per:`,
   receiptLink: "La tua ricevuta, da stampare o salvare:",
+  receiptTax: (amount) => `IVA o imposta sulle vendite: ${amount}`,
   statement: (store) => `L'addebito compare sul tuo estratto conto con il nome dell'attività di ${store}.`,
 };
 
@@ -345,6 +351,7 @@ const nl: RequestWords = {
   receiptSubject: (store, amount) => `Ontvangstbewijs van ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Bedankt. Je hebt op ${date} ${amount} aan ${store} betaald, voor:`,
   receiptLink: "Je ontvangstbewijs, om af te drukken of op te slaan:",
+  receiptTax: (amount) => `Btw of omzetbelasting: ${amount}`,
   statement: (store) => `De afschrijving staat op je afschrift onder de naam van het bedrijf van ${store}.`,
 };
 
@@ -401,6 +408,7 @@ const pt: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Obrigado. Pagou ${amount} a ${store} a ${date}, por:`,
   receiptLink: "O seu recibo, para imprimir ou guardar:",
+  receiptTax: (amount) => `IVA ou imposto sobre vendas: ${amount}`,
   statement: (store) => `A cobrança aparece no seu extrato com o nome da empresa de ${store}.`,
 };
 

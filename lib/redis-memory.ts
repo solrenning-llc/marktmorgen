@@ -129,6 +129,15 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/webhook-outbox.ts OUTBOX_ADMIT: an event kept in the outbox only while its line has room, record and place together.
+        if (key.startsWith("-- marktmorgen:hookout-admit:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, record, line, id, value, seconds, due, ceiling] = args;
+          if (this.run(["ZSCORE", line, id]) !== null) return 0;
+          if (Number(this.run(["ZCARD", line])) >= Number(ceiling)) return -1;
+          this.run(["SET", record, value, "NX", "EX", seconds]);
+          this.run(["ZADD", line, due, id]);
+          return 1;
+        }
         // lib/licence-keys.ts POOL_PUSH: the first keys pushed onto the pool while it is under its bound, and how many.
         if (key.startsWith("-- marktmorgen:license-pool-push:v1\n") && args[0] === "1" && args.length >= 3) {
           const [, pool, bound, ...keys] = args;
@@ -148,6 +157,21 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
+        // lib/removed-courses.ts NOTE_REMOVED_COURSE: the list keeps the course and its product, the course's own key its
+        // lessons and modules, written together; a course on the list has both replaced (0); a new one is added
+        // only while the list has room (1), never by dropping another; full, nothing written (-1).
+        if (key.startsWith("-- marktmorgen:removed-course-note:v2\n") && args[0] === "2" && args.length === 7) {
+          const [, list, recordKey, course, entry, record, most] = args;
+          if (this.run(["HEXISTS", list, course]) === 1) {
+            this.run(["HSET", list, course, entry]);
+            this.run(["SET", recordKey, record]);
+            return 0;
+          }
+          if (Number(this.run(["HLEN", list])) >= Number(most)) return -1;
+          this.run(["HSET", list, course, entry]);
+          this.run(["SET", recordKey, record]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
           this.live(listKey);
@@ -162,6 +186,12 @@ export class MemoryRedis {
             }
           }
           return null;
+        }
+        // lib/community-mentions.ts FORGET_HANDLE: a handle deleted only while it still points at the member.
+        if (key.startsWith("-- marktmorgen:community-handle-forget:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, handles, handle, who] = args;
+          if (this.run(["HGET", handles, handle]) !== who) return 0;
+          return this.run(["HDEL", handles, handle]);
         }
         // lib/community.ts GIVE_BACK_HANDLE: a handle deleted only while it points at the member and their record does not carry it.
         if (key.startsWith("-- marktmorgen:community-handle-give-back:v1\n") && args[0] === "2" && args.length === 5) {
@@ -263,6 +293,50 @@ export class MemoryRedis {
           const [, lock, book, token, json] = args;
           if (this.run(["GET", lock]) !== token) return 0;
           this.run(["SET", book, json]);
+          return 1;
+        }
+        // lib/contacts.ts CONTACT_FENCED_WRITE_IF: CONTACT_WRITE_IF (the row and the mark as read) only while its fence exists,
+        // a mark lifted only when older than the fence (its second, on this clock); 2 refused by the fence, 0 changed, 1 written.
+        if (key.startsWith("-- marktmorgen:contact-fenced-write-if:v3\n") && ((args[0] === "5" && args.length === 15) || (args[0] === "6" && args.length === 18))) {
+          const withIndex = args[0] === "6";
+          const [list, marks, agreedCount, leftCount, fence] = args.slice(1, 6);
+          const [field, was, value, print, markWas, liftAsked, agreed, leftBy, lifetime, member, day] = args.slice(withIndex ? 7 : 6);
+          const sha1 = (text: unknown) => (typeof text === "string" ? createHash("sha1").update(text).digest("hex") : "");
+          const left = this.run(["PTTL", fence]) as number;
+          this.scriptCalls += 1;
+          if (left === -2) return 2;
+          this.scriptCalls += 1;
+          if (sha1(this.run(["HGET", list, field])) !== was) return 0;
+          let held: unknown = null;
+          if (print !== "") {
+            held = this.run(["HGET", marks, print]);
+            this.scriptCalls += 1;
+            if (sha1(held) !== markWas) return 0;
+          }
+          const lift = liftAsked === "1" && typeof held === "string";
+          if (lift) {
+            if (left < 0 || !/^-?\d+(\.\d+)?$/.test(held as string)) return 2;
+            this.scriptCalls += 1;
+            if ((Number(held) + 1) * 1000 > this.now() - (Number(lifetime) - left)) return 2;
+          }
+          this.run(["HSET", list, field, value]);
+          this.scriptCalls += 1;
+          if (lift) { this.run(["HDEL", marks, print]); this.scriptCalls += 1; }
+          if (agreed === "1") { this.run(["INCR", agreedCount]); this.scriptCalls += 1; }
+          if (leftBy === "1") { this.run(["INCR", leftCount]); this.scriptCalls += 1; }
+          else if (leftBy === "-1") { this.run(["DECR", leftCount]); this.scriptCalls += 1; }
+          if (withIndex) { this.run(["SADD", args[6], member]); this.run(["EXPIREAT", args[6], day]); this.scriptCalls += 2; }
+          return 1;
+        }
+        // lib/waitlist.ts WAIT_CONFIRM: a waitlist entry written back only while its confirmation link and the entry still exist.
+        if (key.startsWith("-- marktmorgen:waitlist-confirm:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, link, list, email, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["EXISTS", link]) === 0) return 0;
+          this.scriptCalls += 1;
+          if (this.run(["HEXISTS", list, email]) === 0) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
           return 1;
         }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
@@ -546,6 +620,17 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:extend:v1\n") && args[0] === "1" && args.length === 4) {
           const [, lock, token, seconds] = args;
           return this.run(["GET", lock]) === token ? this.run(["EXPIRE", lock, seconds]) : 0;
+        }
+        // lib/mail-drafts.ts DRAFT_SET_HELD and DRAFT_DEL_HELD: a draft set or deleted only while its lease holds the writer's value.
+        if (key.startsWith("-- marktmorgen:draft-set-held:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, drafts, lease, value, field, json] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HSET", drafts, field, json]);
+        }
+        if (key.startsWith("-- marktmorgen:draft-del-held:v1\n") && args[0] === "2" && args.length === 5) {
+          const [, drafts, lease, value, field] = args;
+          if (this.run(["GET", lease]) !== value) return -1;
+          return this.run(["HDEL", drafts, field]);
         }
         // lib/calls.ts: a call lock's value swapped (take-over, renewal), and a hold written, only while the lock holds the value given.
         if (key.startsWith("-- marktmorgen:call-lock-swap:v1\n") && args[0] === "1" && args.length === 5) {
@@ -894,6 +979,17 @@ export class MemoryRedis {
           this.run(["SET", copy, value, "EX", seconds]);
           return 1;
         }
+        // lib/calendar-sync.ts CALENDAR_CONFIG_SWAP: a store's calendar settings written only over the exact text they
+        // were read as ("1"), or only while still absent ("0"); 0 when changed since (issue #3984).
+        if (key.startsWith("-- marktmorgen:calendar-config-swap:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, settings, present, expected, value] = args;
+          this.scriptCalls += 1;
+          const now = this.run(["GET", settings]);
+          if (present === "1" ? now !== expected : now !== null) return 0;
+          this.scriptCalls += 1;
+          this.run(["SET", settings, value]);
+          return 1;
+        }
         // lib/discord-store.ts FORGET_PEOPLE: a server's people read, each deleted only while their row is the one read,
         // each address link only while it points at them; the people and links deleted and the people left.
         if (key.startsWith("-- marktmorgen:discord-forget-people:v1\n") && Number(args[0]) >= 2 && args.length === 1 + Number(args[0]) + 1 + 2 * (Number(args[0]) - 2)) {
@@ -1001,6 +1097,19 @@ export class MemoryRedis {
           // Match SET KEEPTTL: no expiry extension or removal.
           this.data.set(record, next);
           return 1;
+        }
+        // lib/affiliates.ts AFFILIATE_REFUND_MARK: each record's refund mark written only over exactly the text read (its SHA-1).
+        if (key.startsWith("-- marktmorgen:affiliate-refund-mark:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
+          const target = args[1];
+          let n = 0;
+          for (let i = 2; i < args.length; i += 3) {
+            const current = this.run(["HGET", target, args[i]]);
+            if (typeof current === "string" && createHash("sha1").update(current).digest("hex") === args[i + 1]) {
+              this.run(["HSET", target, args[i], args[i + 2]]);
+              n += 1;
+            }
+          }
+          return n;
         }
         // lib/inbox.ts INBOX_WRITE: a conversation's record, index entry, message, expiries, chat token and unread
         // episode written in one step, only over exactly the record read ("" for a new one, which must not exist).
@@ -1976,11 +2085,14 @@ export class MemoryRedis {
         return held;
       }
       case "DEL": {
-        // DEL takes several keys.
+        // DEL takes several keys. An empty list, set, sorted set or hash does not exist in Redis (it goes with its last
+        // member), so one this stand-in left behind on a read is removed here without being counted, as Redis answers.
         let gone = 0;
         // Its expiry goes with it, as in Redis: a key made again under the same name starts with none (C7 TTL hunt).
         for (const one of [key, ...args]) {
-          if (this.data.delete(one)) gone += 1;
+          const held = this.data.get(one);
+          const empty = (Array.isArray(held) && held.length === 0) || ((held instanceof Set || held instanceof Map) && held.size === 0);
+          if (this.data.delete(one) && !empty) gone += 1;
           this.until.delete(one);
         }
         return gone;

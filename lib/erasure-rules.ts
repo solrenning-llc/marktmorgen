@@ -37,6 +37,13 @@ export type ErasureScope = {
   droppedRecords?: number;
   /** Every product of the store, by id. */
   productIds: string[];
+  /**
+   * The products, not in the catalog, whose waitlists the person may still be on: marked coming soon or still being
+   * dropped (lib/waitlist.ts waitlistMarks, #4462). Reached by the waitlist's eraser and copy only.
+   */
+  waitlistIds?: string[];
+  /** How many waitlist marks were read to find them, the catalog's included: counted as ErasureSize.waitlists. */
+  waitlistMarks?: number;
   /** The store's community, when it has one. */
   communityId: string | null;
 };
@@ -70,6 +77,8 @@ export type ErasureSize = {
   droppedCourses: number;
   /** Dropped courses read whole (their lessons and modules), the person having a record there. */
   droppedRecords: number;
+  /** Waitlist marks read (lib/waitlist.ts waitlistMarks): coming soon and still dropping, at most MAX_WAITLIST_MARKS. */
+  waitlists: number;
 };
 
 /**
@@ -78,9 +87,11 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4462, 16 November 2026) the
+ * count and the read of the store's waitlist marks (lib/waitlist.ts waitlistMarks: two SCARD, two SMEMBERS), whose
+ * members are then counted with the rest (ERASE_PER.waitlists): 551 before them.
  */
-export const ERASE_FIXED_COMMANDS = 551;
+export const ERASE_FIXED_COMMANDS = 555;
 /** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
 export const ERASE_FIXED_BYTES = 310_000;
 /** Per thing counted: [commands, bytes]. */
@@ -102,6 +113,11 @@ export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   // REMOVED_COURSE_RECORD_BYTES (lib/removed-courses.ts, 15,442) at most, counted at 16,000; held by
   // tests/erasure-dropped-list-budget.test.ts.
   droppedRecords: [1, 16_000],
+  // A waitlist mark read (#4462, Claude 7 MÉDIO 4 and 8): its member in the SMEMBERS reply (a product id, 64 bytes at
+  // most), and for one not in the catalog the HDEL of the address (its key and the address, 254 bytes at most) and its
+  // launch list walked in BLANK_IN_LISTS (its key, then LRANGE and an LSET inside the script): 3 commands, counted at
+  // 1,000 bytes. A mark of a catalog product is counted the same, though its product's line already pays for it.
+  waitlists: [3, 1_000],
 };
 /** The studio units that cover an erasure's own call, its CPU and memory, and waiting on Discord to take roles back. */
 export const ERASE_BASE_UNITS = 15;

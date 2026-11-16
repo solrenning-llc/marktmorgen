@@ -74,7 +74,8 @@ test("removing a product drops its waitlist, its launch list and job, and its co
   assert.deepEqual(redis.run(["SMEMBERS", "nl:wl:jobs"]), [`${sid}|another`], "another product's launch stays");
 });
 
+// The route itself is run, with its drop failing and asked again, in tests/waitlist-removed-drop-pending.test.ts (#4462).
 test("the product route drops the waitlist when it removes a product", () => {
   const route = readFileSync("app/api/store/product/route.ts", "utf8");
-  assert.match(route, /dropWaitlist\(removed\.store\.statsId, id\)/);
+  assert.match(route, /dropWaitlist\(removed\.store\.statsId, id, removed\.store\)/);
 });

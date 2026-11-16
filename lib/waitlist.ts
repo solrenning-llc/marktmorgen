@@ -7,6 +7,7 @@
  *   nl:wl:<store>:<product>:send list   who the launch email goes to, fixed when it starts
  *   nl:wl:t:<sha(token)>        string what a confirm or leave link is for
  *   nl:wl:jobs                  set    launches still sending: "<store>|<product>"
+ *   nl:wl:<store>:soon:dropping set    products being removed whose waitlist is not yet confirmed gone
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
@@ -15,7 +16,7 @@ import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { takeData } from "@/lib/store-data";
+import { type DataStore, giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, sendBatch, sendEmail } from "@/lib/email";
@@ -26,6 +27,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
 import { takePublicRequest } from "@/lib/traffic";
 import { listingSizes, productIds } from "@/lib/catalog";
+import { MAX_PRODUCTS } from "@/lib/catalog-rules";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
@@ -51,6 +53,10 @@ const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
 const jobKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:job`;
 const sendKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:send`;
 const JOBS = "nl:wl:jobs";
+// Noted before a product is removed and taken off only once its waitlist is confirmed gone (dropWaitlist), so a person's
+// deletion still reaches a waitlist whose drop failed (#4462, Codex X8 and Claude 7). ":" is never in a product id, so
+// no product's keys can be this one.
+const droppingKey = (sid: string) => `nl:wl:${sid}:soon:dropping`;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -143,9 +149,19 @@ export async function joinWaitlist(input: {
   const grant = (k: TokenGrant["k"]): string => JSON.stringify({ s: sid, h: store.handle, p: product.id, e: email, k } satisfies TokenGrant);
   // A new address takes room in the store's data room, with its link to leave
   // (kept as long as the list); with no room the list is full for it.
-  if (!before && !(await takeData(store, [{ slot: `wl:${product.id}`, bytes: dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1) }])).ok) return "full";
+  const room = dataBytes([email, JSON.stringify(entry)], 1) + dataBytes([tokenKey(leave), grant("leave")], 1);
+  if (!before && !(await takeData(store, [{ slot: `wl:${product.id}`, bytes: room }])).ok) return "full";
+  // Written only while the product is still coming soon, in one step with that check (#4462, Claude 7 MÉDIO 1): a
+  // removal that lands after isSoon above takes the mark off before it deletes the list (dropWaitlist), so this join
+  // then writes nothing, and never puts an address back on a list no deletion could reach.
+  const wrote = repliesFor(await redisPipeline([["EVAL", WAIT_JOIN, 2, soonKey(sid), listKey(sid, product.id), product.id, email, JSON.stringify(entry)]]), 1)?.[0];
+  if (wrote === 0 || wrote === "0") {
+    if (!before) await giveData(store, [{ slot: `wl:${product.id}`, bytes: room }]);
+    return "closed";
+  }
+  // Another reply is unknown (rule 24): the place may be written, so its room stays taken and nothing is sent.
+  if (wrote !== 1 && wrote !== "1") return "error";
   await redisPipeline([
-    ["HSET", listKey(sid, product.id), email, JSON.stringify(entry)],
     ["SET", tokenKey(confirm), grant("confirm"), "EX", CONFIRM_SECONDS],
     ["SET", tokenKey(leave), grant("leave"), "EX", WAIT_SECONDS],
     ...noteForErasure(sid, email, tokenKey(confirm)),
@@ -175,6 +191,22 @@ export async function joinWaitlist(input: {
   });
   return sent ? "sent" : "error";
 }
+
+/**
+ * A join's write, fenced by the coming-soon mark (#4462): KEYS[1] the store's coming-soon set, KEYS[2] the product's
+ * waitlist; ARGV[1] the product, ARGV[2] the address, ARGV[3] the place. Answers 1 written, 0 not (the product is no
+ * longer coming soon). Billed as one EVAL and the calls inside it, at most WAIT_JOIN_CALLS (SISMEMBER and HSET), in
+ * place of the one HSET it replaced.
+ */
+export const WAIT_JOIN = [
+  "-- marktmorgen:waitlist-join:v1",
+  'if redis.call("SISMEMBER", KEYS[1], ARGV[1]) == 0 then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[2], ARGV[3])',
+  "return 1",
+].join("\n");
+
+/** The most redis.call one run of WAIT_JOIN makes: SISMEMBER and HSET. */
+export const WAIT_JOIN_CALLS = 2;
 
 /** What a link is for, without using it: for the page that shows its button. */
 export async function readWaitToken(token: string): Promise<TokenGrant | null> {
@@ -478,41 +510,112 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
   return sent;
 }
 
+/** A count Redis answered, held to what it can be: an integer from 0 to `most` (rule 24). */
+const within = (reply: unknown, most: number): boolean => {
+  const n = countOf(reply);
+  return n !== null && n <= most;
+};
+
 /**
- * The products whose waitlists a person may be on: those in the catalog and every one still marked coming soon.
- * A product removed before its waitlist was dropped with it (dropWaitlist) is gone from the catalog but was never
- * unmarked, so its waitlist, addresses and all, is still reached (nuvem I privacy audit, 13 November 2026). The
- * mark is read exactly: an unreadable one throws, so the deletion says it could not finish (rule 24).
+ * The most product ids a deletion walks besides the catalog's: every product still marked coming soon and every one
+ * still being dropped (waitlistMarks). The catalog holds at most MAX_PRODUCTS, so a store keeps at most that many marks
+ * of its own; the rest are marks of products removed before their removal unmarked them, and failed drops not yet
+ * asked again. A set larger than this is unknown, never walked unpaid (#4462, Claude 7 MÉDIO 4).
  */
-async function waitlistProductIds(sid: string, catalogIds: string[]): Promise<string[]> {
-  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(sid)]]), 1)?.[0]);
-  if (!members) throw new UnknownReplyError("the products coming soon");
-  return [...new Set([...catalogIds, ...members])];
+export const MAX_WAITLIST_MARKS = MAX_PRODUCTS + 500;
+
+/**
+ * The products whose waitlists a person may be on besides the catalog's: every one still marked coming soon (a product
+ * removed before its waitlist was dropped with it was never unmarked) and every one still being dropped (holdWaitlistDrop).
+ * Counted first and capped (MAX_WAITLIST_MARKS), then read; `read` is how many members were read, for the erasure's size
+ * (ERASE_PER.waitlists, lib/erasure-rules.ts). Every reply is read exactly: anything else throws, so the deletion and the
+ * copy say they could not finish (rule 24).
+ */
+export async function waitlistMarks(sid: string | null): Promise<{ ids: string[]; read: number }> {
+  if (!sid || !isRedisConfigured()) return { ids: [], read: 0 };
+  const what = "the products a person's waitlists may be on";
+  const counts = repliesFor(await redisPipeline([["SCARD", soonKey(sid)], ["SCARD", droppingKey(sid)]]), 2);
+  const soon = countOf(counts?.[0]);
+  const dropping = countOf(counts?.[1]);
+  if (soon === null || dropping === null || soon + dropping > MAX_WAITLIST_MARKS) throw new UnknownReplyError(what);
+  if (soon + dropping === 0) return { ids: [], read: 0 };
+  const members = repliesFor(await redisPipeline([["SMEMBERS", soonKey(sid)], ["SMEMBERS", droppingKey(sid)]]), 2);
+  const marked = stringList(members?.[0]);
+  const held = stringList(members?.[1]);
+  if (!marked || !held || marked.length + held.length > MAX_WAITLIST_MARKS) throw new UnknownReplyError(what);
+  return { ids: [...new Set([...marked, ...held])], read: marked.length + held.length };
+}
+
+/**
+ * The studio requests a product's removal takes for its waitlist before anything goes (app/api/store/product/route.ts):
+ * holdWaitlistDrop, dropWaitlist with its room given back, or finishWaitlistDrop, at their most WAITLIST_DROP_COMMANDS
+ * commands and WAITLIST_DROP_BYTES bytes, inside these units' (lib/erasure-rules.ts UNIT_COMMANDS, UNIT_BYTES); held in
+ * tests/waitlist-removed-drop-pending.test.ts and named in tests/plan-cost-registry.ts.
+ */
+export const WAITLIST_DROP_UNITS = 1;
+/** SADD (the hold) or SISMEMBER (asked again); SREM, DEL and SREM; the room given back (lib/store-data.ts run, at most 6); SREM. */
+export const WAITLIST_DROP_COMMANDS = 12;
+/** Its keys, the product's id, the replies and the room's script, at the most. */
+export const WAITLIST_DROP_BYTES = 20_000;
+
+/**
+ * Before a product is removed: noted as dropping, so its waitlist, whatever its coming-soon mark, is still reached by a
+ * person's deletion (waitlistMarks) until dropWaitlist confirms it gone (#4462, Codex X8). Read exactly; anything else
+ * throws, and the route removes nothing.
+ */
+export async function holdWaitlistDrop(sid: string | null | undefined, pid: string): Promise<void> {
+  if (!sid || !pid || !isRedisConfigured()) return;
+  const held = repliesFor(await redisPipeline([["SADD", droppingKey(sid), pid]]), 1);
+  if (!held || !within(held[0], 1)) throw new UnknownReplyError("a product noted as dropping its waitlist");
 }
 
 /**
  * A removed product's waitlist goes with it (nuvem I privacy audit, 13 November 2026): its addresses, the launch
- * email's list and job, and its coming-soon mark. Kept, they held addresses in plain text with no expiry, for a
- * product nobody could buy or be told about. Every reply is read exactly; anything else throws (rule 24).
+ * email's list and job, its coming-soon mark and the data room it took. Kept, they held addresses in plain text with no
+ * expiry, for a product nobody could buy or be told about.
+ *
+ * The mark goes first, in the same ordered pipeline as the DEL, so a join already past its check writes nothing after
+ * it (WAIT_JOIN). Each reply is held to what it can be (0 or 1 for an SREM, 0 to 3 for the DEL of three keys); anything
+ * else throws (rule 24, #4462). The note holdWaitlistDrop made goes only once all of that is confirmed: until then it is
+ * what leads a deletion to the addresses.
  */
-export async function dropWaitlist(sid: string | null | undefined, pid: string): Promise<void> {
+export async function dropWaitlist(sid: string | null | undefined, pid: string, room?: DataStore): Promise<void> {
   if (!sid || !pid || !isRedisConfigured()) return;
   const what = "the removal of a product's waitlist";
-  const gone = repliesFor(await redisPipeline([["DEL", listKey(sid, pid), sendKey(sid, pid), jobKey(sid, pid)], ["SREM", JOBS, `${sid}|${pid}`]]), 2);
-  if (!gone || gone.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
-  // Unmarked only once the addresses are confirmed gone: until then the mark is what leads a deletion to them.
-  const unmarked = repliesFor(await redisPipeline([["SREM", soonKey(sid), pid]]), 1);
-  if (!unmarked || countOf(unmarked[0]) === null) throw new UnknownReplyError(what);
+  const gone = repliesFor(await redisPipeline([
+    ["SREM", soonKey(sid), pid],
+    ["DEL", listKey(sid, pid), sendKey(sid, pid), jobKey(sid, pid)],
+    ["SREM", JOBS, `${sid}|${pid}`],
+  ]), 3);
+  if (!gone || !within(gone[0], 1) || !within(gone[1], 3) || !within(gone[2], 1)) throw new UnknownReplyError(what);
+  // The room its addresses and their links took (joinWaitlist), given back as dropThanksNote gives back its own.
+  if (room) await giveData(room, [{ slot: `wl:${pid}`, bytes: 0, set: true }]);
+  const released = repliesFor(await redisPipeline([["SREM", droppingKey(sid), pid]]), 1);
+  if (!released || !within(released[0], 1)) throw new UnknownReplyError(what);
+}
+
+/**
+ * Asked again for a product already removed (app/api/store/product/route.ts): a waitlist still noted as dropping is
+ * dropped now. "none" when it is not noted (an exact 0), "dropped" once its drop is confirmed; anything else throws.
+ */
+export async function finishWaitlistDrop(sid: string | null | undefined, pid: string, room?: DataStore): Promise<"none" | "dropped"> {
+  if (!sid || !pid || !isRedisConfigured()) return "none";
+  const raw = repliesFor(await redisPipeline([["SISMEMBER", droppingKey(sid), pid]]), 1)?.[0];
+  if (raw === 0 || raw === "0") return "none";
+  if (raw !== 1 && raw !== "1") throw new UnknownReplyError("whether a product's waitlist is still being dropped");
+  await dropWaitlist(sid, pid, room);
+  return "dropped";
 }
 
 /**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
  */
-export async function forgetWaitlistPerson(sid: string | null, catalogIds: string[], email: string): Promise<number> {
+export async function forgetWaitlistPerson(sid: string | null, ids: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const productIds = await waitlistProductIds(sid, catalogIds);
+  // The catalog's and the marked ones (lib/person-erasure.ts erasureScope: productIds and waitlistIds), each once.
+  const productIds = [...new Set(ids)];
   let removed = 0;
   if (productIds.length) {
     // One reply per product, each the integer 0 or 1. Anything else is unknown (rule 24, #4383): an entry holding the
@@ -532,11 +635,12 @@ export async function forgetWaitlistPerson(sid: string | null, catalogIds: strin
  * and whether they also asked to hear from the creator. The secret in their
  * waitlist link is left out. Only reads.
  */
-export async function waitlistPlacesOf(sid: string | null, catalogIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
+export async function waitlistPlacesOf(sid: string | null, ids: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
   if (!sid || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  // The same products a deletion reaches, so the copy shows every place the deletion would take away.
-  const productIds = await waitlistProductIds(sid, catalogIds);
+  // The same products a deletion reaches (the scope's productIds and waitlistIds), so the copy shows every place the
+  // deletion would take away.
+  const productIds = [...new Set(ids)];
   if (!productIds.length) return [];
   // One reply per product, each the place or an exact null (none). Anything
   // else is unknown, never "on no waitlist" (rule 24): the copy says it could

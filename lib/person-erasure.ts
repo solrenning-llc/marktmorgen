@@ -76,7 +76,7 @@ import { certificateProbe, forgetCertificatesPerson } from "@/lib/certificate";
 import { forgetLessonCommentsPerson } from "@/lib/lesson-comments";
 import { forgetLessonNotesPerson } from "@/lib/lesson-notes";
 import { forgetCommunityPerson } from "@/lib/community-erasure";
-import { forgetWaitlistPerson } from "@/lib/waitlist";
+import { forgetWaitlistPerson, waitlistMarks } from "@/lib/waitlist";
 import { DROPPED_PROBES, type RemovedCourse, droppedCourseIds, droppedCourseRecords } from "@/lib/removed-courses";
 import { forgetBondPerson } from "@/lib/affiliate-bond";
 import { forgetLeadPerson } from "@/lib/affiliate-leads";
@@ -164,7 +164,7 @@ export const ERASERS: Eraser[] = [
   },
   { module: "lib/lesson-notes.ts", run: (s) => forgetLessonNotesPerson(s.statsId, s.learner, s.store) },
   { module: "lib/community-erasure.ts", run: (s) => (s.communityId ? forgetCommunityPerson(s.communityId, s.learner, s.email, s.productIds, s.store) : Promise.resolve(0)) },
-  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, s.productIds, s.email) },
+  { module: "lib/waitlist.ts", run: (s) => forgetWaitlistPerson(s.statsId, [...s.productIds, ...(s.waitlistIds ?? [])], s.email) },
   { module: "lib/affiliate-bond.ts", run: (s) => forgetBondPerson(s.statsId, s.email) },
   { module: "lib/affiliate-leads.ts", run: (s) => forgetLeadPerson(s.store, s.email) },
   { module: "lib/imported-purchases.ts", only: "person", run: (s) => forgetImportedPerson(s.statsId, s.email) },
@@ -257,6 +257,11 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
   // And the courses the store dropped where this person has a record (lib/removed-courses.ts): their records kept under
   // one are still reached. Read exactly: a list or a probe that cannot be read throws, so the erasure is pressed again.
   const dropped = await droppedCoursesOf(current.statsId, emailKey(email), new Set(courses.keys()));
+  // And the waitlists of products no longer in the catalog: marked coming soon or still being dropped (lib/waitlist.ts,
+  // #4462). Counted and capped before they are read, every mark read counted in the size; unknown throws.
+  const catalogIds = current.catalog.items.map((item) => item.id);
+  const inCatalog = new Set(catalogIds);
+  const marks = await waitlistMarks(current.statsId);
   return {
     store: current,
     sid: current.sid,
@@ -271,7 +276,9 @@ export async function erasureScope(store: Store, email: string): Promise<Erasure
       lessonIds: course.modules.flatMap((m) => m.lessons.map((l) => l.id)),
       moduleIds: course.modules.map((m) => m.id),
     })).concat(dropped.courses),
-    productIds: current.catalog.items.map((item) => item.id),
+    productIds: catalogIds,
+    waitlistIds: marks.ids.filter((id) => !inCatalog.has(id)),
+    waitlistMarks: marks.read,
     communityId: current.community?.id ?? null,
     droppedCourses: dropped.probed,
     droppedRecords: dropped.courses.length,
@@ -301,6 +308,7 @@ export async function erasureSize(scope: ErasureScope): Promise<ErasureSize> {
     certificates,
     droppedCourses: scope.droppedCourses ?? 0,
     droppedRecords: scope.droppedRecords ?? 0,
+    waitlists: scope.waitlistMarks ?? 0,
   };
 }
 

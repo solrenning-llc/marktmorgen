@@ -406,6 +406,15 @@ export class MemoryRedis {
           this.scriptCalls += 1;
           return 1;
         }
+        // lib/waitlist.ts WAIT_JOIN: a join's place written only while its product is still coming soon (#4462).
+        if (key.startsWith("-- marktmorgen:waitlist-join:v1\n") && args[0] === "2" && args.length === 6) {
+          const [, soon, list, product, email, entry] = args;
+          this.scriptCalls += 1;
+          if (this.run(["SISMEMBER", soon, product]) === 0) return 0;
+          this.run(["HSET", list, email, entry]);
+          this.scriptCalls += 1;
+          return 1;
+        }
         // lib/contacts.ts CAS_HSET: each contact set only while it still holds what was read (its SHA-1, "" for none), in one step.
         if (key.startsWith("-- marktmorgen:contact-cas-hset:v1\n") && args[0] === "1" && args.length >= 5 && (args.length - 2) % 3 === 0) {
           const target = args[1];

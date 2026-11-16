@@ -40,7 +40,8 @@ import { finishLandingsDrop } from "@/lib/campaign-landing-store";
 const PRODUCT_ID = /^[a-z0-9]{6,40}$/;
 import { dropThanksNote } from "@/lib/thanks-note-store";
 import { dropReviews } from "@/lib/reviews";
-import { dropWaitlist } from "@/lib/waitlist";
+import { WAITLIST_DROP_UNITS, dropWaitlist, finishWaitlistDrop, holdWaitlistDrop } from "@/lib/waitlist";
+import { takeAllowance } from "@/lib/store-allowance";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { dropCourse, filesInCourse, lessonsInOrder, readCourse, readCourseExact } from "@/lib/course";
 import { dropComments, dropCommentsAfterCourseGone } from "@/lib/lesson-comments";
@@ -315,6 +316,19 @@ export async function POST(request: NextRequest) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
+      // Its waitlist's hold and drop are paid for before anything goes (WAITLIST_DROP_UNITS, lib/waitlist.ts; #4462).
+      const paid = await takeAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS);
+      if (!paid.ok) return paid.reason === "used" ? refusedJson("used", paid.message) : Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      // Noted as dropping its waitlist before the product goes (lib/waitlist.ts holdWaitlistDrop): whatever its coming-soon
+      // mark, a person's deletion reaches the addresses until their drop is confirmed. Not noted, nothing is removed.
+      if (before) {
+        try {
+          await holdWaitlistDrop(guarded.store.statsId, id);
+        } catch (error) {
+          console.error("could not note a product's waitlist as dropping before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
@@ -343,7 +357,13 @@ export async function POST(request: NextRequest) {
       if (!removed.ok && removed.reason === "unknown" && id && PRODUCT_ID.test(id)) {
         const finished = await finishLandingsDrop(guarded.store.statsId, id, guarded.store).catch(() => null);
         if (finished === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
-        if (finished === "dropped") result = { ok: true, product: null };
+        // And its waitlist, still noted as dropping when its drop was not confirmed then (lib/waitlist.ts, #4462).
+        const waited = await finishWaitlistDrop(guarded.store.statsId, id, guarded.store).catch((error: unknown) => {
+          console.error("could not finish dropping a removed product's waitlist", error);
+          return null;
+        });
+        if (waited === null) return Response.json({ ok: false, error: "unavailable", cleanupPending: true }, { status: 503 });
+        if (finished === "dropped" || waited === "dropped") result = { ok: true, product: null };
       }
       if (removed.ok) {
         const going = removed.product;
@@ -383,9 +403,13 @@ export async function POST(request: NextRequest) {
           return [] as string[];
         });
         had.push(...reviewPhotos.map((pathname) => ({ pathname })));
-        // And its waitlist, whose addresses are kept in plain text with no expiry (lib/waitlist.ts). One not
-        // confirmed gone is still reached by a person's deletion, through the coming-soon mark it keeps.
-        await dropWaitlist(removed.store.statsId, id).catch((error: unknown) => console.error("could not drop a removed product's waitlist", error));
+        // And its waitlist, whose addresses are kept in plain text with no expiry (lib/waitlist.ts). One not confirmed
+        // gone is said (cleanupPending) and stays noted as dropping, so a person's deletion still reaches it and the
+        // same removal asked again finishes it (finishWaitlistDrop above).
+        await dropWaitlist(removed.store.statsId, id, removed.store).catch((error: unknown) => {
+          cleanupPending = true;
+          console.error("could not drop a removed product's waitlist", error);
+        });
         if (removedCourse) {
           await dropCourse(removedCourse, removed.store, id, courseIndexes).catch((error: unknown) => console.error("could not drop a removed course", error));
         }

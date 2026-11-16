@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Breadcrumb } from "@/components/breadcrumb";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { HelpTopics } from "@/components/help-topics";
 import { HELP_SECTIONS, answerId } from "@/lib/help-content";
 import { answerSummary, helpAnswerPath, helpSection, helpTopics } from "@/lib/help-pages";

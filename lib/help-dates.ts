@@ -17,7 +17,7 @@ export const HELP_DATES: Readonly<Record<string, HelpDates>> = {
   "what-does-it-cost-to-start": { created: "2026-09-20", updated: "2026-10-17", digest: "7be5b3c3667e" },
   "what-will-it-cost": { created: "2026-09-18", updated: "2026-10-17", digest: "9d13d8eb619a" },
   "can-i-switch-between-monthly-and-yearly-or-between-the-plans": { created: "2026-09-22", updated: "2026-10-16", digest: "75e75ac1c609" },
-  "can-i-run-more-than-one-store-or-have-someone-help-me": { created: "2026-09-27", updated: "2026-09-28", digest: "c02e49f8814f" },
+  "can-i-run-more-than-one-store-or-have-someone-help-me": { created: "2026-09-27", updated: "2026-11-12", digest: "b1786e9b1a01" },
   "can-i-move-my-store-from-stan-gumroad-or-another-platform": { created: "2026-09-27", updated: "2026-10-17", digest: "971f3ce9351e" },
   "how-does-marktmorgen-compare-with-stan": { created: "2026-10-31", updated: "2026-10-31", digest: "2d4b052c30b0" },
   "can-i-move-from-clickfunnels": { created: "2026-10-17", updated: "2026-11-02", digest: "9ffe95687a6e" },

@@ -56,13 +56,19 @@ export type YearlyChoice = {
 
 const num = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
 
-/** Whether an affiliate's share for a set number of months still runs on this membership. */
+/**
+ * Whether an affiliate's share for a set number of months still runs on this membership. Every writer sets
+ * `via_months` (a whole number from 1) and `via_at` (whole seconds) beside `via` (lib/store-checkout.ts), so on a
+ * membership with `via` either in any other shape, missing included, is unknown and answers true: the yearly price is
+ * not offered, as when the share is known to run (CX-123 rule 24), never offered as if no share ran.
+ */
 export function affiliateMonthsLeft(meta: Record<string, string> | null | undefined, nowSeconds: number): boolean {
   if (!meta?.via) return false;
-  const months = Number(meta.via_months) || 0;
-  if (months < 1 || months >= RECURRING_ALWAYS) return false;
-  const at = Number(meta.via_at) || 0;
-  if (!at) return true;
+  const months = typeof meta.via_months === "string" && /^[1-9]\d{0,5}$/.test(meta.via_months) ? Number(meta.via_months) : null;
+  if (months === null) return true;
+  if (months >= RECURRING_ALWAYS) return false;
+  const at = typeof meta.via_at === "string" && /^[1-9]\d{0,11}$/.test(meta.via_at) ? Number(meta.via_at) : null;
+  if (at === null) return true;
   const start = new Date(at * 1000);
   const end = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months, start.getUTCDate(), start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds()) / 1000;
   return nowSeconds < end;

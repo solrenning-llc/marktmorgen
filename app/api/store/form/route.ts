@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
   if (one("website").trim()) return go(done("", false));
 
   const ip = clientAddress(request);
-  if (!(await withinStore("form-ip", `${statsId}:${ip}`, PER_HOUR, 3_600, store))) return back("limited");
+  if (!(await withinStore("form-ip", `${statsId}|${ip}`, PER_HOUR, 3_600, store))) return back("limited");
 
   const read = readAnswers(def, (name) => form.getAll(name).filter((v): v is string => typeof v === "string").map((v) => v.slice(0, 4_000)));
   if (!read.ok) return back(read.error);

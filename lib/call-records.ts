@@ -37,8 +37,18 @@ export type Move = {
 export const movedKey = (session: string) => `nl:call:moved:${session}`;
 export const REMINDER_QUEUE = "nl:call:remindq";
 
-/** A move is kept well past any call it could be about. */
+/**
+ * A move is kept this long after the call it moved to has ended (and never
+ * less): a dated session may be any distance ahead, so a flat time could run
+ * out before the call and leave the booking read as never moved.
+ */
 const MOVE_SECONDS = 200 * 86_400;
+
+/**
+ * And never longer than this, whatever the call's date: the privacy policy
+ * (app/privacy/page.tsx), lib/data-families.ts and the cost registry state it.
+ */
+const MOVE_MAX_SECONDS = 730 * 86_400;
 
 /** Reminders due sooner than this after the booking is made are not sent. */
 export const REMINDER_MIN_LEAD_MS = 60 * 60_000;
@@ -107,7 +117,8 @@ export async function readMoves(sessions: string[]): Promise<Map<string, Move>> 
  */
 export async function writeMove(session: string, move: Move): Promise<void> {
   const value = JSON.stringify(move);
-  const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", MOVE_SECONDS]]), 1);
+  const keep = Math.min(MOVE_MAX_SECONDS, Math.max(0, Math.ceil((move.e - Date.now()) / 1000)) + MOVE_SECONDS);
+  const replies = repliesFor(await redisPipeline([["SET", movedKey(session), value, "EX", keep]]), 1);
   if (replies?.[0] === "OK") return;
   const kept = repliesFor(await redisPipeline([["GET", movedKey(session)]]), 1);
   if (kept?.[0] !== value) throw new UnknownReplyError("a booking's move");

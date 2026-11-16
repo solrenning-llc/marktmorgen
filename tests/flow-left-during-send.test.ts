@@ -23,6 +23,7 @@ Date.now = () => realNow() + shift;
 const real = redis.pipeline.bind(redis);
 let leaveAfterRead: string | null = null;
 let eraseAfterRead: (() => Promise<void>) | null = null;
+let takeOverAfterRead: string | null = null;
 redis.pipeline = (async (batch: Command[]) => {
   const values = await real(batch);
   if (leaveAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
@@ -38,6 +39,12 @@ redis.pipeline = (async (batch: Command[]) => {
     const erase = eraseAfterRead;
     eraseAfterRead = null;
     await erase();
+  }
+  if (takeOverAfterRead && batch[0]?.[0] === "HMGET" && batch.length > 1 && batch.slice(1).every((c) => c[0] === "ZSCORE")) {
+    // A later take writes its own score on this person's lease entry right after sendGroup read it (Codex G2 on #2287).
+    const member = batch.slice(1).map((c) => String(c[2])).find((m) => m.endsWith(`|${takeOverAfterRead}`));
+    takeOverAfterRead = null;
+    if (member) await real([["ZADD", "nl:mail:flowq:lease", Math.floor(Date.now() / 1000) + 7200.5, member]]);
   }
   return values;
 }) as typeof redis.pipeline;
@@ -92,6 +99,16 @@ async function main(): Promise<void> {
   is("their run is not written back: nothing of them is left", await readRun(flowId, personOf("erased@example.com")), null);
   const [indexed] = await real([["ZSCORE", `nl:wf:runs:${flowId}`, personOf("erased@example.com")]]);
   is("and they are not in the workflow's list of runs", indexed, null);
+
+  part("Taken over by a later take between the step's row read and the send: their run is that take's, never cleared here (Codex G2 on #2287)");
+  await upsertContact(list, "taken@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "taken@example.com", { joined: false, tag: "welcome" });
+  takeOverAfterRead = "taken@example.com";
+  await run();
+  const takenRun = await readRun(flowId, personOf("taken@example.com"));
+  is("the take-over was injected", takeOverAfterRead, null);
+  is("nothing was sent to them by this take", sentTo("taken@example.com"), 0);
+  is("their run is kept, with its address, for the take that holds it", takenRun?.run.email, "taken@example.com");
 
   part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
   // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is

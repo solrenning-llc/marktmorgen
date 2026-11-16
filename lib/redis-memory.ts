@@ -309,6 +309,13 @@ export class MemoryRedis {
           return this.run(["INCR", counter]);
         }
         // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
+        // lib/flow-runs.ts DROP_IF_NO_RUN: what a claim wrote for someone whose run has no address (erased) is deleted.
+        if (key.startsWith("-- marktmorgen:flow-drop-if-no-run:v1\n") && args[0] === "2" && args.length === 3) {
+          const [, run, log] = args;
+          if (this.run(["HEXISTS", run, "email"]) === 1) return 0;
+          this.run(["DEL", run, log]);
+          return 1;
+        }
         if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
           const [, run, log, index, email, now, entry, keep, person] = args;
           if (this.run(["HEXISTS", run, "email"]) !== 1) {

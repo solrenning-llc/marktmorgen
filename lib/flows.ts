@@ -7,7 +7,7 @@ import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_K
 import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
-import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun } from "@/lib/flow-runs";
+import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, firstStepNeverQueued, forgetHeldCommand, giveBackRuns, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts, settleLeftIfRun, dropClaimsOfErased } from "@/lib/flow-runs";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 /**
@@ -1665,6 +1665,13 @@ export async function sendDueSteps(
     // generation, in its own script (lib/crm.ts, SET_CRM_VALUE); an email cannot be sent in the same step as a check.
     const going = await stillHeld(group, claim.claimed, score);
     counts.dropped += claim.claimed.length - going.length;
+    // Of those, a person erased meanwhile has a run with no address: what the claim just wrote for them (the open
+    // attempt and its event) is deleted, so nothing of them is written back (#4307). A run with its address, taken out
+    // or taken over by a later take, is not touched (Codex G2).
+    if (going.length < claim.claimed.length) {
+      const kept = new Set(going);
+      await dropClaimsOfErased(flow.id, claim.claimed.filter((email) => !kept.has(email))).catch((error) => console.error("clearing an erased person's claim failed", error));
+    }
     if (!going.length) return;
     const to = afterIndex(flow.steps, index);
     const queueNext = (people: string[]): (string | number)[][] =>

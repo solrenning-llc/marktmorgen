@@ -378,6 +378,28 @@ redis.call('EXPIRE', KEYS[1], ARGV[4])
 redis.call('EXPIRE', KEYS[2], ARGV[4])
 return 1`;
 
+/**
+ * What claimAttempts wrote for someone this take no longer holds (stillHeld, lib/flows.ts), deleted only where their
+ * run has no address of its own: a person erased meanwhile (forgetWorkflowPerson) took their run with them, and the
+ * open attempt and its event the claim wrote again are all that is left of them (main's rule from #4307: nothing of
+ * an erased person is written back). A run that still has its address is left as it is, never touched here: a later
+ * take that took the same entry over keeps its own (Codex G2 on #2287). KEYS: the run, its history. 1 when deleted.
+ */
+const DROP_IF_NO_RUN = `-- marktmorgen:flow-drop-if-no-run:v1
+if redis.call('HEXISTS', KEYS[1], 'email') == 0 then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return 1
+end
+return 0`;
+
+export async function dropClaimsOfErased(flowId: string, emails: string[]): Promise<void> {
+  if (!emails.length) return;
+  await redisPipeline(emails.map((email) => {
+    const person = personOf(email);
+    return ["EVAL", DROP_IF_NO_RUN, 2, runKey(flowId, person), logKey(flowId, person)];
+  }));
+}
+
 export async function settleLeftIfRun(flowId: string, index: number, stepId: string, kind: string, emails: string[], note: string, nowSeconds = Math.floor(Date.now() / 1000)): Promise<void> {
   if (!emails.length) return;
   await redisPipeline(emails.map((email) => {

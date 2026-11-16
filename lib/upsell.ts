@@ -215,11 +215,19 @@ function parseRecord(raw: unknown): UpsellRecord | null {
   }
 }
 
-/** The answer to one offer of this order, or null when there is none yet. */
+/**
+ * The answer to one offer of this order, or null when there is none yet (GET null). A reply in any other shape,
+ * or a record that does not parse, is unknown and throws (CX-123 rule 24): an offer waiting on Stripe is never
+ * let go, and a paid one never read as not there, on it.
+ */
 export async function readUpsell(session: string, slot = ""): Promise<UpsellRecord | null> {
   if (!isRedisConfigured() || !SESSION_ID.test(session) || (slot && !SLOT_PATTERN.test(slot))) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(session, slot)]]);
-  return parseRecord(raw);
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(session, slot)]]), 1);
+  if (!replies) throw new UnknownReplyError("an offer's answer");
+  if (replies[0] === null) return null;
+  const record = parseRecord(replies[0]);
+  if (!record || typeof record !== "object" || typeof record.state !== "string") throw new UnknownReplyError("an offer's answer");
+  return record;
 }
 
 /** Every answer this order has, keyed by slot ("" for the first offer). */
@@ -447,6 +455,13 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
+  // An order that came through an affiliate's link carries them on to what
+  // is added after it, at the share this product earns today. Read before
+  // anything is written or charged: a share that cannot be read throws
+  // (CX-123 rule 24), and the offer is not charged without it.
+  const via = view.metadata?.via ?? "";
+  const rate = via ? await funnelRate(store, via, target.id) : 0;
+
   // Once, however many times the button is pressed. Taken here only on exactly "OK"; null is an answer already
   // written. Any other reply (none, a number, another word, more than one) does not say the claim is this press's,
   // so it is unknown (CX-123 rule 24): the card is not charged and nothing more is written.
@@ -518,10 +533,6 @@ export async function takeUpsell(input: {
   // The yes to start access at once, its version and its time, on the offer's own payment.
   if (digital && input.consent) body.set(`metadata[${CONSENT_META}]`, consentMetaValue(input.consent, consentKind(target)));
   if (email) body.set("receipt_email", email);
-  // An order that came through an affiliate's link carries them on to what
-  // is added after it, at the share this product earns today.
-  const via = view.metadata?.via ?? "";
-  const rate = via ? await funnelRate(store, via, target.id).catch(() => 0) : 0;
   if (via && rate > 0) {
     body.set("metadata[via]", via);
     body.set("metadata[via_rate]", String(rate));

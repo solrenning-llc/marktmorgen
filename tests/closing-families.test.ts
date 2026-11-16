@@ -41,6 +41,9 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
+  // A PayPal payout item's mark, written with its expiry by the batches before 8 November 2026 and only read now
+  // (lib/affiliates.ts, #4606): gone by that expiry (Claude 4 cloud Z on #4614).
+  "nl:pp:item:": ["lib/paypal-payouts.ts", "ITEM_MARK_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

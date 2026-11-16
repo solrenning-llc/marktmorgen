@@ -58,6 +58,12 @@ const TIMEOUT_MS = 20_000;
 const linkKey = (statsId: string) => `nl:pp:${statsId}`;
 const openKey = (statsId: string) => `nl:pp:open:${statsId}`;
 const itemKey = (item: string) => `nl:pp:item:${item}`;
+/**
+ * How long an item's mark was kept when a batch wrote it (SET NX EX, before payouts took their item's id on 8 November
+ * 2026): the marks read now (lib/affiliates.ts, an older PayPal payout's Undo, #4606) lapse by then, and the family's
+ * bound in lib/data-families.ts is this one (tests/closing-families.test.ts, TIMED_IN_CODE; Claude 4 cloud Z on #4614).
+ */
+export const ITEM_MARK_SECONDS = 400 * 86_400;
 const STORES = "nl:pp:stores";
 const context = (statsId: string) => `paypal-payouts|${statsId}`;
 

@@ -2383,7 +2383,9 @@ export async function removePayout(store: Store, id: string): Promise<boolean | 
   if (held === null || held === undefined) return false;
   if (typeof held !== "string") throw new UnknownReplyError("a payout before it is taken off");
   const payout = parsePayout(held);
-  if (payout && (await sentThroughPayPal([payout]))[0]) return "sent";
+  // Text that does not read as a payout may be one PayPal sent: never taken off on a guess (Claude 4 cloud Z on #4614).
+  if (!payout) throw new UnknownReplyError("a payout before it is taken off");
+  if ((await sentThroughPayPal([payout]))[0]) return "sent";
   const [removed] = await redisPipeline([["HDEL", payoutsKey(store.statsId), id]]);
   if (Number(removed) === 1) await giveData(store, [{ slot: PAYOUTS_SLOT, bytes: dataBytes([id, held], 1) }]);
   return Number(removed) === 1;

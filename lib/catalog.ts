@@ -847,6 +847,32 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
 }
 
 /**
+ * Which of these products ask questions at checkout (lib/checkout-fields.ts), read without the products in full:
+ * the questions live in the heavy rest of a product's record, which a listing does not carry, so a cart that reads
+ * listings alone took a product with questions for one it could pay for, and the cart checkout then refused the
+ * whole order (#4350). One GET per product a store does not hold inline. A product with no heavy rest asks nothing
+ * (productWrites deletes it); a reply or record that does not read throws UnknownReplyError (CX-123 rule 24), never
+ * "asks nothing".
+ */
+export async function readAsking(store: Store, ids: Iterable<string>): Promise<Set<string>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) return new Set(catalog.inline.filter((p) => asked.includes(p.id) && p.fields.length > 0).map((p) => p.id));
+  if (asked.length === 0) return new Set();
+  if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a product's checkout questions");
+  const raws = await getMany(asked.map((id) => extrasKey(catalog.id!, id)));
+  const asking = new Set<string>();
+  asked.forEach((id, i) => {
+    if (raws[i] === null) return;
+    // Read exactly as readProducts reads it (exactExtras): a record in another shape is unknown, never "asks nothing".
+    const extras = typeof raws[i] === "string" ? exactExtras(parseJson(raws[i])) : null;
+    if (!extras) throw new UnknownReplyError("a product's checkout questions");
+    if (parseFields(extras.fields).length > 0) asking.add(id);
+  });
+  return asking;
+}
+
+/**
  * The extras record exactly as productWrites writes it: a JSON record whose own keys are "fields" (a list), "funnel"
  * (null or one that reads) and, on a product the creator ships, "legal" (#3004). Anything else, a key of the listing (a
  * title, a price, an id, "__proto__") among them, is null: spread over the listing it would replace the listing's own

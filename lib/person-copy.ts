@@ -191,6 +191,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/next-offer.ts": { how: "passing", days: 3, what: "The product the store's assistant suggested after an order, under the order's reference with no name or address, deleted three days later" },
   "lib/community.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your community posts, comments, likes and reports are in your community part" },
   "lib/community-polls.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your votes in community polls are in your community part" },
+  "lib/plan-late-notice.ts": { how: "passing", days: 400, what: "If a payment of your payment plan was taken after the plan ended and then refunded: whether you were emailed about that refund and how many times it was tried, kept under the payment's Stripe invoice only, so you are never emailed about it twice. Your address is read from the invoice at Stripe when the email is sent and is not kept here. Deleted 400 days after the last try" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
 };

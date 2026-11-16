@@ -642,10 +642,24 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) 
 return 0`;
 
 /**
- * Settles one offer still waiting on an answer. Nothing is ever charged here.
- * Answers the payment's status as Stripe gave it, or null when none was read.
+ * What settleOne answers when Stripe could not be read (an error status, a timeout, a list it could not page
+ * through) or the answer could not be acted on: unknown, so never read as "not processing" (rule 24). Kept apart
+ * from null, which is an answer that was read and is not about this offer (or no payment to read).
  */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<string | null> {
+const UNREAD = Symbol("unread");
+
+/**
+ * Settles one offer still waiting on an answer. Nothing is ever charged here.
+ * Answers the payment's status as Stripe gave it, null when there was no status to read for this offer (no payment
+ * found, or a reply about another offer), or UNREAD when Stripe could not be read.
+ */
+async function settleOne(
+  store: Store,
+  session: string,
+  slot: string,
+  record: UpsellRecord,
+  pages: number,
+): Promise<string | null | typeof UNREAD> {
   if (record.state !== "pending" || !store.stripeAccountId) return null;
   try {
     let pi: Record<string, unknown> | null;
@@ -698,7 +712,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
     return typeof pi.status === "string" ? pi.status : null;
   } catch (error) {
     console.error("settling an upsell failed", error);
-    return null;
+    return UNREAD;
   }
 }
 
@@ -764,11 +778,13 @@ export async function settlePendingOffers(
         await drop();
       } else {
         // Looked at again later, less often the longer it waits (WATCH_AFTER_MS); past its watch, a payment still
-        // clearing at the bank is looked at once a day, so a late success is handed over in full.
+        // clearing at the bank is looked at once a day, so a late success is handed over in full. An answer that
+        // could not be read is unknown, not "not processing" (rule 24): it is looked at again the same way, a day
+        // later, still only inside PROCESSING_WATCH_MS, so its looks stay inside OFFER_WATCH_LOOKS_MOST.
         const next = nextLook(after.at, Date.now());
         if (next !== null) {
           await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
-        } else if (status === "processing" && Date.now() - after.at <= PROCESSING_WATCH_MS) {
+        } else if ((status === "processing" || status === UNREAD) && Date.now() - after.at <= PROCESSING_WATCH_MS) {
           await redisPipeline([["ZADD", PENDING_KEY, Date.now() + PROCESSING_RECHECK_MS, pendingMember(handle, session, slot)]]);
         } else {
           await drop();

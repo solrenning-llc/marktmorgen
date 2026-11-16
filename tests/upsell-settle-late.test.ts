@@ -9,7 +9,11 @@
  *   - still "processing" after two days: kept on the job's list, looked at again a day later;
  *   - a success on the fifth day: settled by the job, paid once with no second charge, confirmation sent;
  *   - an offer whose payment is not processing (waiting on the buyer's bank page) is still let go after two days;
- *   - nothing is watched for more than seven days, inside the offer record's own eight.
+ *   - nothing is watched for more than seven days, inside the offer record's own eight;
+ *   - one Stripe read that fails (an error status) past the second day is unknown, not "not processing" (rule 24):
+ *     the offer stays on the list, looked at a day later, and a later success is still settled by the job; a
+ *     read that keeps failing stays inside the same looks and the same seven days; an answer that was read and
+ *     is about another offer is still let go.
  */
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { addProduct, storeForHandle, claimHandle, ensureStatsId, setProductFunnel, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -36,6 +40,8 @@ const made: Record<string, unknown>[] = [];
 const sessions: Record<string, Record<string, unknown>> = {};
 const emails: string[] = [];
 const stripeReads: string[] = [];
+/** Payments whose GET Stripe answers with an error, as a 500 or a timeout would. */
+const unreadable = new Set<string>();
 /** The clock the job reads: moved forward to stand for days passing. */
 const realNow = Date.now.bind(Date);
 let ahead = 0;
@@ -80,6 +86,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const one = /^\/payment_intents\/(pi_[A-Za-z0-9_]+)$/.exec(path);
   if (one) {
     stripeReads.push(path);
+    if (unreadable.has(one[1])) return answer({ error: { message: "stand-in for a Stripe error" } }, 500);
     const found = made.find((pi) => pi.id === one[1]);
     return found ? answer(found) : answer({ error: { message: "no such payment" } }, 404);
   }
@@ -232,6 +239,73 @@ async function main(): Promise<void> {
   ahead = 7 * DAY + 60_000;
   await job();
   is("still processing after the seventh day: let go", await listed("cs_test_settlelate000003"), null);
+
+  part("RED: one Stripe read that fails past the second day does not end the watch of a payment still processing");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000006 = paidCheckout("cs_test_settlelate000006", front, browser.fingerprint);
+  is("checking for the buyer", (await take("cs_test_settlelate000006", "kit001", "yes")).kind, "checking");
+  const late = made[made.length - 1];
+  for (ahead = 60_000; ahead <= 2 * DAY; ahead += 30 * 60_000) await job();
+  is("still listed, still processing, through the second day", [(await listed("cs_test_settlelate000006")) !== null, late.status], [true, "processing"]);
+  unreadable.add(String(late.id));
+  ahead = 2 * DAY + 2 * 60_000;
+  const readsBefore = stripeReads.filter((path) => path.endsWith(String(late.id))).length;
+  await job();
+  is("the job did ask Stripe, and was not answered", stripeReads.filter((path) => path.endsWith(String(late.id))).length, readsBefore + 1);
+  is("RED: still listed after an unread Stripe answer", (await listed("cs_test_settlelate000006")) !== null, true);
+  is("looked at again a day later, not on every pass", Number(await listed("cs_test_settlelate000006")) - Date.now() > 23 * 60 * 60 * 1000, true);
+  is("still pending, still checking, nothing more charged", [(await readUpsell("cs_test_settlelate000006"))?.state, (await readUpsell("cs_test_settlelate000006"))?.waiting, charges.length], ["pending", "processing", charges.length]);
+  unreadable.delete(String(late.id));
+  late.status = "succeeded";
+  const mailed = emails.length;
+  const charged = charges.length;
+  ahead = 4 * DAY;
+  const settledLate = await job();
+  is("RED: the late success is settled by the job: paid, with no second charge", [(await readUpsell("cs_test_settlelate000006"))?.state, charges.length, settledLate.settled], ["paid", charged, 1]);
+  is("RED: the confirmation is sent (afterPaid ran)", emails.length > mailed, true);
+  is("and off the job's list", await listed("cs_test_settlelate000006"), null);
+
+  part("A Stripe read that keeps failing: the same daily looks, still let go by the eighth day");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000007 = paidCheckout("cs_test_settlelate000007", front, browser.fingerprint);
+  await take("cs_test_settlelate000007", "kit001", "yes");
+  const down = String(made[made.length - 1].id);
+  unreadable.add(down);
+  for (ahead = 60_000; ahead <= 6 * DAY + 12 * 60 * 60 * 1000; ahead += 30 * 60_000) await job();
+  is("still listed on its sixth day, left pending: never marked paid or failed on an unknown", [(await listed("cs_test_settlelate000007")) !== null, (await readUpsell("cs_test_settlelate000007"))?.state], [true, "pending"]);
+  for (; ahead <= 9 * DAY; ahead += 30 * 60_000) await job();
+  const downLooks = stripeReads.filter((path) => path.endsWith(down)).length;
+  is("looked at no more than its declared number of times in all", [downLooks, downLooks <= OFFER_WATCH_LOOKS_MOST], [downLooks, true]);
+  is("let go once its seven days are over", await listed("cs_test_settlelate000007"), null);
+  unreadable.delete(down);
+
+  part("RED: an offer waiting on the buyer's bank page whose read fails on the second day is not let go on the unknown");
+  ahead = 0;
+  nextCharge = "requires_action";
+  sessions.cs_test_settlelate000008 = paidCheckout("cs_test_settlelate000008", front, browser.fingerprint);
+  is("sent to confirm", (await take("cs_test_settlelate000008", "kit001", "yes")).kind, "confirm");
+  const asked = String(made[made.length - 1].id);
+  unreadable.add(asked);
+  ahead = 2 * DAY + 2 * 60_000;
+  await job();
+  is("RED: still listed after an unread Stripe answer", (await listed("cs_test_settlelate000008")) !== null, true);
+  unreadable.delete(asked);
+  ahead = 3 * DAY + 5 * 60_000;
+  await job();
+  is("read again, still waiting on the buyer: let go", await listed("cs_test_settlelate000008"), null);
+
+  part("An answer that was read and is about another offer is still let go after two days");
+  ahead = 0;
+  nextCharge = "processing";
+  sessions.cs_test_settlelate000009 = paidCheckout("cs_test_settlelate000009", front, browser.fingerprint);
+  await take("cs_test_settlelate000009", "kit001", "yes");
+  const other = made[made.length - 1];
+  other.metadata = { ...(other.metadata as Record<string, string>), step: "other1" };
+  ahead = 2 * DAY + 2 * 60_000;
+  await job();
+  is("off the list: read, and not about this offer", await listed("cs_test_settlelate000009"), null);
 
   done();
 }

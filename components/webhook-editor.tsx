@@ -3,12 +3,12 @@
 import { ConfirmAction } from "@/components/confirm-action";
 import { UrlField } from "@/components/url-field";
 import { WEBHOOK_CHECK } from "@/lib/fetch-url-check";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "@/components/toast";
 import { Icon } from "@/components/icons";
 import type { DeliveryView, WebhookEvent, WebhooksView } from "@/lib/webhooks";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
-import { DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX } from "@/lib/webhook-limits";
+import { DELIVERY_WRITE_MAX_BYTES, MAX_ENDPOINTS, MESSAGE_TEXT_MAX, RANGE_MAX_DAYS, RANGE_MAX_SENT } from "@/lib/webhook-limits";
 
 
 /** Every event, in the order the studio lists them, with what each means. */
@@ -49,7 +49,33 @@ const MESSAGES: Record<string, string> = {
   not_heard: "That endpoint no longer gets this event. Add it under Events to send it again.",
   resent: "It was already sent again, or it is itself a copy sent again. Send the original again only if its last resend failed.",
   server_error: "Something went wrong on our side. Nothing was changed; try again in a moment.",
+  interval: `Choose a start and an end at most ${RANGE_MAX_DAYS} days apart, with the end after the start.`,
 };
+
+const DAY_MS = 86_400_000;
+const noSubscribe = () => () => {};
+
+/** A time as a date-and-time field shows it, in the browser's own time zone. */
+function localInput(ms: number): string {
+  const d = new Date(ms);
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+}
+
+/** What one press of "Send failed ones again" did, in a sentence or a few. */
+function rangeWords(done: { sent?: number; delivered?: number; skipped?: number; left?: number; stopped?: string | null }): string {
+  const sent = done.sent ?? 0;
+  const delivered = done.delivered ?? 0;
+  const skipped = done.skipped ?? 0;
+  const left = done.left ?? 0;
+  if (!sent && !skipped && !left && !done.stopped) return "No failed deliveries to that endpoint in that time.";
+  const parts: string[] = [];
+  if (sent) parts.push(`Sent ${sent} again: ${delivered} delivered${sent > delivered ? `, ${sent - delivered} failed again` : ""}.`);
+  if (skipped) parts.push(`${skipped} skipped: already sent again, or that endpoint no longer gets that event.`);
+  if (done.stopped) parts.push(done.stopped);
+  if (left) parts.push(`${left} more ${left === 1 ? "is" : "are"} left. Press again in a minute.`);
+  return parts.join(" ");
+}
 
 function when(ms: number): string {
   if (!ms) return "";
@@ -79,6 +105,15 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
     if (secret) secretField.current?.focus();
   }, [secret]);
   const [editing, setEditing] = useState<{ id: string; events: WebhookEvent[] } | null>(null);
+  // 378 [TB4] WG (b): an endpoint's failed deliveries of an interval, sent again; the last day until now to start with,
+  // in the browser's own time zone, so the form is drawn only in the browser (never from the server's clock).
+  const [range, setRange] = useState<{ endpoint: string; from: string; to: string }>(() => {
+    const now = Date.now();
+    return { endpoint: "", from: localInput(now - DAY_MS), to: localInput(now) };
+  });
+  const [rangeResult, setRangeResult] = useState("");
+  const inBrowser = useSyncExternalStore(noSubscribe, () => true, () => false);
+  const rangeEndpoint = view.endpoints.some((e) => e.id === range.endpoint) ? range.endpoint : (view.endpoints[0]?.id ?? "");
 
   async function send(body: Record<string, unknown>, tag: string) {
     setBusy(tag);
@@ -145,6 +180,21 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
     if (!data) return;
     if (data.delivered) toast(`Sent again and delivered (${data.status}).`);
     else setError(`It did not arrive this time either${data.status ? ` (${data.status})` : ""}: ${(data.message || "no answer").replace(/\.?$/, ".")} It is not tried again by itself.`);
+  }
+
+  // 378 [TB4] WG (b): every failed delivery to one endpoint in the chosen time, sent again once each, oldest first.
+  async function resendRangeNow(event: React.FormEvent) {
+    event.preventDefault();
+    setRangeResult("");
+    // A date-and-time field's value is read in the browser's own time zone.
+    const from = Date.parse(range.from);
+    const to = Date.parse(range.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > RANGE_MAX_DAYS * DAY_MS) {
+      setError(MESSAGES.interval);
+      return;
+    }
+    const data = (await send({ action: "resend_range", endpoint: rangeEndpoint, from: new Date(from).toISOString(), to: new Date(to).toISOString() }, "resend-range")) as Parameters<typeof rangeWords>[0] | null;
+    if (data) setRangeResult(rangeWords(data));
   }
 
   async function copySecret() {
@@ -342,6 +392,9 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
           </li>
           <li>The same event can arrive twice in rare cases; its id never changes, so a receiver can ignore a repeat.</li>
           <li>
+            {`A delivery that failed can be sent again by hand, once: one at a time with its "Send again", or every one to an endpoint in a time you choose, at most ${RANGE_MAX_DAYS} days apart and ${RANGE_MAX_SENT} a press, with "Send failed ones again". It is the same message with the same id, and each one sent is one of the month's webhook deliveries.`}
+          </li>
+          <li>
             {`Each text in a message is at most ${MESSAGE_TEXT_MAX} characters, with control characters turned into spaces, and a message takes at most ${DELIVERY_WRITE_MAX_BYTES / 1024} KB to keep. A larger one is not sent and not counted, and it is marked “Not sent” here. When the month's webhook deliveries are used, new messages are not kept or sent either: each is marked “Not sent” here, up to three a day for each reason, then one line that counts the rest.`}
           </li>
           <li>
@@ -357,6 +410,48 @@ export function WebhookEditor({ view: initial }: { view: WebhooksView }) {
       {view.log.length ? (
         <div className="mt-6">
           <h3 className="text-sm font-bold text-ink">{`Last ${view.log.length} ${view.log.length === 1 ? "delivery" : "deliveries"}`}</h3>
+          {inBrowser && view.endpoints.length > 0 && view.log.some((d) => d.state === "failed" && d.type !== "test") ? (
+            <form onSubmit={resendRangeNow} className="mt-3 rounded-[12px] bg-paper px-4 py-3 ring-1 ring-line" aria-labelledby="resend-range-title">
+              <h4 id="resend-range-title" className="text-sm font-semibold text-ink">
+                Send failed ones again
+              </h4>
+              <p className="mt-1 text-sm text-ink-soft">
+                {`Every delivery to one endpoint that failed in the time you choose, at most ${RANGE_MAX_DAYS} days apart, sent again once each, oldest first and ${RANGE_MAX_SENT} a press. Each one sent is one of your month's webhook deliveries.`}
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <div>
+                  <label htmlFor="resend-range-endpoint" className="field-label">
+                    Endpoint
+                  </label>
+                  <select id="resend-range-endpoint" value={rangeEndpoint} onChange={(e) => setRange({ ...range, endpoint: e.target.value })} className="field mt-1">
+                    {view.endpoints.map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.where}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="resend-range-from" className="field-label">
+                    Failed from
+                  </label>
+                  <input id="resend-range-from" type="datetime-local" required value={range.from} onChange={(e) => setRange({ ...range, from: e.target.value })} className="field mt-1" />
+                </div>
+                <div>
+                  <label htmlFor="resend-range-to" className="field-label">
+                    Until
+                  </label>
+                  <input id="resend-range-to" type="datetime-local" required value={range.to} onChange={(e) => setRange({ ...range, to: e.target.value })} className="field mt-1" />
+                </div>
+              </div>
+              <button type="submit" disabled={busy !== null || !rangeEndpoint} aria-busy={busy === "resend-range"} className="btn btn-secondary btn-sm mt-3">
+                {busy === "resend-range" ? "Sending…" : "Send failed ones again"}
+              </button>
+              <p role="status" aria-live="polite" className="mt-2 text-sm text-ink">
+                {rangeResult}
+              </p>
+            </form>
+          ) : null}
           <ul className="mt-2 divide-y divide-line text-sm">
             {view.log.map((d) => {
               const result = outcome(d);

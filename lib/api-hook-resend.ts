@@ -21,17 +21,25 @@
  * and at anything it cannot confirm; what was sent before stays sent and is
  * said. An interval longer than RANGE_MAX_DAYS, or one that ends before it
  * starts, is refused before anything is read.
+ *
+ * The studio's "Send failed ones again" (app/api/store/webhooks/route.ts,
+ * action "resend_range") is the same loop with `studio`: a press in the
+ * studio, as one "Send again" is, takes none of the store's API requests. Its
+ * reading of the log is the one the Webhooks section makes on every load and
+ * every "Send again" (LOG_SIZE deliveries at most), measured the same way and
+ * set aside at nothing; each try is still one of the month's webhook
+ * deliveries, taken before the endpoint is called, within the ten a minute.
  */
 import { apiReadUnits, RESEND_WORK } from "@/lib/api-read-rules";
-import { recentDeliveries } from "@/lib/api-read";
+import { type Hold, recentDeliveries } from "@/lib/api-read";
 import { holdMoreApi, takeMoreApi } from "@/lib/api-guard";
 import type { Store } from "@/lib/store";
 import { type DeliveryRow, resendDelivery, webhooksView } from "@/lib/webhooks";
 
-/** The longest interval one call may send again: the log keeps deliveries up to seven days. */
-export const RANGE_MAX_DAYS = 7;
-/** The most deliveries one call sends again: the tests' and resends' limit a minute (lib/webhooks.ts, TESTS_PER_MINUTE). */
-export const RANGE_MAX_SENT = 10;
+import { RANGE_MAX_DAYS, RANGE_MAX_SENT } from "@/lib/webhook-limits";
+
+/** The longest interval and the most deliveries one call sends again, kept where the studio's editor reads them too. */
+export { RANGE_MAX_DAYS, RANGE_MAX_SENT };
 
 export type RangeAsk = { endpoint: string; from: number; to: number };
 
@@ -69,12 +77,18 @@ const SKIP_WORDS: Record<string, string> = {
   too_large: "too_large",
 };
 
-/** The endpoint's failed deliveries of the interval, sent again, oldest first; a Response when the reading itself is refused. */
-export async function resendRange(store: Store, ask: RangeAsk): Promise<RangeAnswer | Response | "no_endpoint"> {
+/** A reading from the studio: the studio's own reading of its log, which takes none of the store's API requests. */
+const STUDIO_HOLD: Hold = async () => async () => null;
+
+/**
+ * The endpoint's failed deliveries of the interval, sent again, oldest first; a Response when the reading itself is
+ * refused. `studio`: pressed in the studio, so none of the store's API requests is taken (see above).
+ */
+export async function resendRange(store: Store, ask: RangeAsk, { studio = false }: { studio?: boolean } = {}): Promise<RangeAnswer | Response | "no_endpoint"> {
   // A store without that endpoint reads nothing more and sends nothing.
   const view = await webhooksView(store, { log: false });
   if (!view.endpoints.some((e) => e.id === ask.endpoint)) return "no_endpoint";
-  const listed = await recentDeliveries(store, ask.endpoint, (most) => holdMoreApi(store, most));
+  const listed = studio ? await recentDeliveries(store, ask.endpoint, STUDIO_HOLD) : await recentDeliveries(store, ask.endpoint, (most) => holdMoreApi(store, most));
   if (listed instanceof Response) return listed;
   const due = listed.data
     .filter((row: DeliveryRow) => row.state === "failed" && row.endpoint === ask.endpoint && within(row.created_at, ask))
@@ -84,7 +98,7 @@ export async function resendRange(store: Store, ask: RangeAsk): Promise<RangeAns
   for (; i < due.length; i += 1) {
     if (answer.sent.length >= RANGE_MAX_SENT) break;
     const row = due[i];
-    const refused = await takeMoreApi(store, apiReadUnits(RESEND_WORK));
+    const refused = studio ? null : await takeMoreApi(store, apiReadUnits(RESEND_WORK));
     if (refused) {
       const said = (await refused.clone().json().catch(() => null)) as { error?: string; message?: string } | null;
       answer.stopped = { error: said?.error ?? "unavailable", message: said?.message ?? "It could not go on just now." };

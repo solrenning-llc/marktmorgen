@@ -4,6 +4,7 @@ import { ensureStatsId, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
 import { addedEndpointWhere } from "@/lib/webhook-added";
+import { readRange, resendRange } from "@/lib/api-hook-resend";
 import { MAX_ENDPOINT_URL, WEBHOOK_SETTINGS_UNSURE_WORDS, WebhookSettingsUnsureError, addEndpoint, removeEndpoint, resendDelivery, rotateSecret, sendTest, setEndpointEvents, webhooksView } from "@/lib/webhooks";
 
 /**
@@ -87,6 +88,26 @@ export async function POST(request: NextRequest) {
         return Response.json({ ok: false, error: result.reason }, { status: result.reason === "missing" ? 404 : 409 });
       }
       return Response.json({ ok: true, delivered: result.delivery.state === "delivered", status: result.delivery.lastStatus, message: result.delivery.lastError, view: result.view });
+    }
+    if (action === "resend_range") {
+      // 378 [TB4] WG (b): an endpoint's failed deliveries of an interval sent again, as the API's range does
+      // (lib/api-hook-resend.ts), at most ten a press and seven days, taking none of the store's API requests.
+      const paused = integrationPauseWord(store);
+      if (paused) return Response.json({ ok: false, error: paused, message: WEBHOOK_TEST_PAUSED_WORDS[paused] }, { status: 409 });
+      const ask = readRange(guarded.body);
+      if ("error" in ask) return Response.json({ ok: false, error: ask.error === "invalid_id" ? "missing" : "interval" }, { status: ask.error === "invalid_id" ? 404 : 400 });
+      const done = await resendRange(store, ask, { studio: true });
+      if (done === "no_endpoint") return Response.json({ ok: false, error: "missing" }, { status: 404 });
+      if (done instanceof Response) return Response.json({ ok: false, error: "unavailable", message: "The deliveries could not be read just now. Nothing was sent; try again in a moment." }, { status: 503 });
+      return Response.json({
+        ok: true,
+        sent: done.sent.length,
+        delivered: done.sent.filter((d) => d.delivered).length,
+        skipped: done.skipped.length,
+        left: done.left,
+        stopped: done.stopped?.message ?? null,
+        view: await webhooksView(store),
+      });
     }
     return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   } catch (error) {

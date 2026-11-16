@@ -7,6 +7,11 @@
 /** Endpoints one store may have. */
 export const MAX_ENDPOINTS = 5;
 
+/** The longest interval of failed deliveries one request sends again (lib/api-hook-resend.ts): the log keeps deliveries up to seven days. */
+export const RANGE_MAX_DAYS = 7;
+/** The most deliveries one such request sends again: the tests' and resends' limit a minute (lib/webhooks.ts, TESTS_PER_MINUTE). */
+export const RANGE_MAX_SENT = 10;
+
 /**
  * The longest any text in a message may be, in UTF-16 code units, once it is
  * cleaned where the message is made (lib/webhooks.ts, cleanText): every text

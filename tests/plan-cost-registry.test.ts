@@ -707,8 +707,8 @@ test("an API reading that reads more than a page takes further requests that cov
   before("lib/api-read.ts", "return scannedPage(hold, LEAD_LOOKUP_MOST", '["HGET", leadsKey(listId), email]');
   before("app/api/v1/hooks/resend/route.ts", "const refused = await takeMoreApi(writer.store, apiReadUnits(RESEND_WORK));", "await resendDelivery(writer.store, id,");
   // An interval sent again (lib/api-hook-resend.ts): the deliveries read as the list is paid for, then each one's reads taken before it.
-  before("lib/api-hook-resend.ts", "await recentDeliveries(store, ask.endpoint, (most) => holdMoreApi(store, most))", "const refused = await takeMoreApi(store, apiReadUnits(RESEND_WORK));");
-  before("lib/api-hook-resend.ts", "const refused = await takeMoreApi(store, apiReadUnits(RESEND_WORK));", "await resendDelivery(store, row.id,");
+  before("lib/api-hook-resend.ts", "await recentDeliveries(store, ask.endpoint, (most) => holdMoreApi(store, most))", "await takeMoreApi(store, apiReadUnits(RESEND_WORK));");
+  before("lib/api-hook-resend.ts", "await takeMoreApi(store, apiReadUnits(RESEND_WORK));", "await resendDelivery(store, row.id,");
   before("lib/api-numbers.ts", "const settle = await hold(most);", '["GET", key]');
   before("lib/api-numbers.ts", "const refused = await charge(units, taken);", "await readNumbers(store, now)");
   assert.ok(!read("lib/mcp-tools.ts").includes("readTitles("), "the MCP tools never read every card, nor the listings' fall-back that reads every product");

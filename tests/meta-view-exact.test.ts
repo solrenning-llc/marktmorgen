@@ -145,6 +145,8 @@ const connectInput = (statsId: string, sid: string, handle: string) => ({
   by: OWNER,
   owner: { email: OWNER, handle },
   currency: "usd",
+  // This PR's flow start (finishMeta keeps a connection only for a fresh flow; merged with main of 15 November 2026).
+  startedAt: Date.now(),
 });
 const connRead = (statsId: string) => (commands: Command[]) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === connKey(statsId);
 

@@ -237,7 +237,7 @@ function hostPart(name: string, apex: string): string {
  * an answer that did not come, or came without Vercel's verdicts, is never
  * read as records that are wrong.
  */
-export async function domainStatus(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | null> {
+export async function domainStatus(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">): Promise<DomainStatus | null> {
   // "Gone" and not known are the same null here, so the checkup's second request is not made (review of Codex P).
   const read = await readDomain(name, store, false);
   return read === "gone" ? null : read;
@@ -249,11 +249,11 @@ export async function domainStatus(name: string, store: Pick<Store, "sid">): Pro
  * the creator, not a failure to read), and null whenever either answer did
  * not come, so a missing answer is never taken for records that are wrong.
  */
-export async function domainCheckup(name: string, store: Pick<Store, "sid">): Promise<DomainStatus | "gone" | null> {
+export async function domainCheckup(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">): Promise<DomainStatus | "gone" | null> {
   return readDomain(name, store, true);
 }
 
-async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
+async function readDomain(name: string, store: Pick<Store, "sid" | "handle" | "previousHandles">, tellGone: boolean): Promise<DomainStatus | "gone" | null> {
   const project = await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`);
   if (project.status === 404) {
     if (!tellGone) return null;
@@ -264,7 +264,11 @@ async function readDomain(name: string, store: Pick<Store, "sid">, tellGone: boo
   }
   if (project.status !== 200) return null;
   // Not known whether it is proved: not known whether it is live (the studio's check would take a live domain off).
-  const proved = await domainProved(name).catch(() => null);
+  // Proved for this store only: another store's proof on the key is not this store's (LOW on #4248), so a store that
+  // only claimed a domain someone else proved is never told it is set up.
+  const holder = await domainHolder(name).catch(() => undefined);
+  if (holder === undefined) return null;
+  const proved = typeof holder === "string" && holder !== "" && !holder.startsWith(UNPROVED) && [store.handle, ...(store.previousHandles ?? [])].includes(holder);
   if (proved === null) return null;
   const config = await vercel("GET", `/v6/domains/${name}/config?projectIdOrName=${vercelProject()}`);
   // An answer whose verdicts are not there is not read as records that are wrong.
@@ -316,6 +320,8 @@ export type ConnectResult =
 /**
  * Adds a domain to a store: claims it here first, so two stores cannot both
  * have it, then asks Vercel to serve it. A claim Vercel refuses is let go.
+ * Another store's claim not proved yet does not keep this store out: the
+ * store that adds its TXT record proves it (#4108).
  */
 export async function connectDomain(store: Store, raw: string): Promise<ConnectResult> {
   if (!canUseDomain(store)) return { ok: false, reason: "plan" };
@@ -334,12 +340,16 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   // A nil is not always another store (Claude 4 on #2859, 6728179008): this store's own claim may be left from a press
   // whose answer was not known, or whose write to the store failed after the claim, and it would read as "taken" for
   // up to UNPROVED_SECONDS. Who holds it is read exactly (it throws when that cannot be told, before Vercel is asked):
-  // this store's own value, under an address it still owns (as proveDomain reads it), goes on; anything else, an
-  // address this store let go of included, stays taken. Only the exact `claim` is ever let go below, never a proof.
+  // this store's own value, under an address it still owns (as proveDomain reads it), goes on. Another store's claim
+  // not proved yet serves nothing and keeps nobody out (#4108): this store connects it too, leaving that claim as it
+  // is, and the TXT record decides (lib/domain-proof.ts). Anything else (a proof, an address this store let go of
+  // included) stays taken. Only the exact `claim` is ever let go below, never another store's claim or a proof.
   if (claimed === "taken") {
     const holder = await domainHolder(name);
     const ours = [store.handle, ...store.previousHandles];
-    if (holder === null || !ours.includes(holder.replace(/^\?/, ""))) return { ok: false, reason: "taken" };
+    const ownValue = holder !== null && ours.includes(holder.replace(/^\?/, ""));
+    const othersUnproved = holder !== null && !ownValue && holder.startsWith(UNPROVED) && holder.length > UNPROVED.length;
+    if (!ownValue && !othersUnproved) return { ok: false, reason: "taken" };
   }
 
   const added = await vercel("POST", `/v10/projects/${vercelProject()}/domains`, { name });
@@ -348,8 +358,8 @@ export async function connectDomain(store: Store, raw: string): Promise<ConnectR
   const alreadyHere =
     added.status === 409 && (await vercel("GET", `/v9/projects/${vercelProject()}/domains/${name}`)).status === 200;
   if (added.status !== 200 && !alreadyHere) {
-    // Only this store's own claim is let go of, never a key another store holds by now; one that cannot be let go
-    // lapses on its own.
+    // Only this store's own claim is let go of, never a key another store holds by now (an unproved claim this
+    // store connected beside included); one that cannot be let go lapses on its own.
     await releaseMark(domainKey(name), claim);
     cache.delete(name);
     if (added.status === 409) return { ok: false, reason: "elsewhere" };

@@ -297,7 +297,7 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
     [ownerFiles, commands + ROUTE_COMMANDS <= (costs.SUPPORT_FORWARD_COMMANDS ?? 0)],
     ["sent", true],
   );
-  is("the registry counts the announcement's worst path, 7 commands", costs.SUPPORT_ANNOUNCEMENT_COMMANDS, 7);
+  is("the registry counts the announcement's worst path, 8 commands (the store-name MGET included)", costs.SUPPORT_ANNOUNCEMENT_COMMANDS, 8);
 
   part("files: SUPPORT_FILE_BYTES_DAILY a UTC day, the rest left out and named");
   fresh();
@@ -495,13 +495,14 @@ const notices = () => fixture.ses.filter((m) => m.subject !== "hello");
   await setSubscription("ana@example.org", { customerId: "cus_Harbor0001", subscriptionId: "sub_Harbor0001", active: true, period: paidPeriod() });
   const readsBeforeMixed = mailReads;
   const mixed: string[] = [];
-  commands = 0;
   for (let i = 0; i < 30; i++) {
+    // The first one finds the day out (its counter) and sends the day's notice; each after it only looks.
+    if (i === 1) commands = 0;
     const to = ["support@marktmorgen.com", `ghost${i}@mail.marktmorgen.com`];
     mixed.push(await forward(message(`m${i}@made${i}.example`), NOON, to, `M <m${i}@made${i}.example>`));
   }
   is("[CORRETO] each is held, none read at Resend", [mixed.every((r) => r === "held"), mailReads - readsBeforeMixed], [true, 0]);
-  is("[CORRETO] each costs at most the store-name lookup, the EXISTS of its From and the day's notice beyond the route's", commands <= 30 * 2 + 3, true);
+  is("[CORRETO] once the day is known out, each costs two commands beyond the route's: the store-name MGET and its From's EXISTS", commands, 29 * 2);
   const malformed = await forward(message("odd@made.example"), NOON, ["support@marktmorgen.com", "Not A Handle!@mail.marktmorgen.com"]);
   is("[CORRETO] a creator address that is no store name at all is held too, unread", [malformed, mailReads - readsBeforeMixed], ["held", 0]);
   const realMixed = await forward(message("Lee <lee@example.org>", [], [], "harborkitchen@mail.marktmorgen.com"), NOON, ["support@marktmorgen.com", "harborkitchen@mail.marktmorgen.com"]);

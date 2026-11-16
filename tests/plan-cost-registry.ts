@@ -1127,16 +1127,19 @@ export function heldCompanyMonthlyExposure(caseCap: number | null, observed: num
  * 9 November 2026 (aws.amazon.com blocked in that session). Not in the
  * figure, so the complete one stays unknown, never zero: announcements past
  * SUPPORT_ANNOUNCED_DAILY (a call and the route's 3 commands each, no counter
- * after the first on an instance, bounded only by the webhook's per-connection
+ * after the first on an instance, one EXISTS more with a From and one MGET of
+ * store names more beside a creators'-domain address, no read at Resend;
+ * bounded only by the webhook's per-connection
  * limit and Resend's receiving quota), transfer
  * out of the function to SES, and Resend's count of received mail.
  */
 /**
- * The announcement's worst path, a paying store owner's (cloud J's review of #3481, MEDIUM): the EXISTS of
- * ownsAStore, the owner's own share of the reserve (SET and INCR), the reserve and then the public share (SET and
- * INCR each): 1 + 2 + 2 + 2.
+ * The announcement's worst path, a paying store owner's (cloud J's review of #3481, MEDIUM): the MGET of the store
+ * names it shows beside support@ (anyStoreNamed, Codex P's review of #3481, HIGH), the EXISTS of ownsAStore, the
+ * owner's own share of the reserve (SET and INCR), the reserve and then the public share (SET and INCR each):
+ * 1 + 1 + 2 + 2 + 2.
  */
-export const SUPPORT_ANNOUNCEMENT_COMMANDS = 7;
+export const SUPPORT_ANNOUNCEMENT_COMMANDS = 8;
 export const SUPPORT_FORWARD_COMMANDS = 3 + SUPPORT_ANNOUNCEMENT_COMMANDS + 18 + 100 * 4 + 64;
 /**
  * A message held after its read, at its worst: a paying store owner's, the reserve spent, held by the company's day

@@ -92,7 +92,8 @@ import { creatorDomain } from "@/lib/mail-from";
 import { redisPipeline } from "@/lib/redis";
 import { stringList } from "@/lib/redis-reply";
 import { essentialLimitState, withinLimit } from "@/lib/request-guard";
-import { HANDLE_PATTERN, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
+import { windowCountBy, windowCountOf } from "@/lib/window-count";
+import { HANDLE_PATTERN, anyStoreNamed, ownsAStore, storeForEmail, storeForHandle } from "@/lib/store";
 import { RESEND_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -286,10 +287,11 @@ async function chargeSupportBytes(mark: string, taken: { bytes: number }, want: 
   const extra = want - taken.bytes;
   const day = `nl:inbound:support:bytes:${new Date(now).toISOString().slice(0, 10)}`;
   try {
-    const reply = await redisPipeline([["SET", day, "0", "EX", SUPPORT_MARK_SECONDS, "NX"], ["INCRBY", day, extra]]);
-    const total = Array.isArray(reply) ? reply[1] : undefined;
+    // The INCRBY first, the day's expiry set only when the key has none (lib/window-count.ts), so a key that expires
+    // between the two is never made again without one (tests/window-count-expiry.test.ts).
+    const total = windowCountOf(await redisPipeline(windowCountBy(day, SUPPORT_MARK_SECONDS, extra)));
     // Not known: what may have been added stays spent, and the file is left out.
-    if (typeof total !== "number" || !Number.isSafeInteger(total)) return false;
+    if (total === null) return false;
     if (total > SUPPORT_FILE_BYTES_DAILY) {
       // Given back with the day's own expiry set again, so a key the give-back makes is never kept for ever.
       await redisPipeline([["DECRBY", day, extra], ["EXPIRE", day, SUPPORT_MARK_SECONDS]]).catch(() => {});
@@ -534,11 +536,24 @@ export async function forwardInbound(id: string, now = Date.now(), announcedTo?:
   // an alias, with no `to` or one in another shape) is read and decided after the read, where admitSupport bounds
   // support mail, so a flood of public announcements never holds a creator's mail unread. Reads of announcements that
   // show neither stay outside the day's count: unknown, never zero (docs/funded-exposure-review.md).
+  // An address on the creators' domain exempts the announcement only when a store has that name (Codex P's review of
+  // #3481, HIGH): support@ written beside a made-up <name>@ of that domain is counted like any support mail, so it is
+  // held unread past the day. The names are looked up in one MGET (anyStoreNamed), no store record read; a lookup that
+  // cannot be read is tried again, unread.
   const creatorsDomain = creatorDomain(NIMBUS_FROM);
   const announced = typeof announcedTo === "string" ? [announcedTo] : list(announcedTo);
   const announcedAddresses = announced.map((one) => (parseSender(one).address ?? "").toLowerCase());
   const showsSupport = announcedAddresses.some((address) => address.endsWith(`@${platformDomain()}`));
-  const showsStore = creatorsDomain !== null && creatorsDomain !== undefined && creatorsDomain !== "" && announcedAddresses.some((address) => address.endsWith(`@${creatorsDomain}`));
+  const shownStores = creatorsDomain ? announcedAddresses.filter((address) => address.endsWith(`@${creatorsDomain}`)).map((address) => address.slice(0, address.lastIndexOf("@"))) : [];
+  let showsStore = false;
+  if (showsSupport && shownStores.length > 0) {
+    try {
+      showsStore = await anyStoreNamed(shownStores);
+    } catch (error) {
+      console.error("the store names a support message's announcement shows could not be read", error);
+      return "retry";
+    }
+  }
   if (showsSupport && !showsStore) {
     const today = new Date(now).toISOString().slice(0, 10);
     const first = announced.map((one) => parseSender(one).address).find((a) => a && a.toLowerCase().endsWith(`@${platformDomain()}`));

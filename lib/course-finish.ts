@@ -39,7 +39,7 @@ const openedKey = (courseId: string, email: string) => openedKeyOf(courseId, ema
 export const finishMarkProbes = (courseId: string, learner: string): (string | number)[][] => [["EXISTS", openedKeyOf(courseId, learner)], ["EXISTS", finishedKeyOf(courseId, learner)]];
 
 /** How long a moment's mark lives once its sequences started: a student opens and finishes a course once. */
-const KEPT_SECONDS = 400 * 86_400;
+const KEPT_SECONDS = FINISH_KEEP_SECONDS;
 /**
  * How long a mark lives while its sequences are being started. It becomes KEPT_SECONDS only once enroll went through,
  * so a start that failed and whose cleanup DEL was lost or answered in an unknown shape holds the moment for an hour

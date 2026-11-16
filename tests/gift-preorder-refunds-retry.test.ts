@@ -313,6 +313,38 @@ async function stuck(job: Job, base: number): Promise<void> {
  * A refund on the list read again before anything is taken back (review of #3302, Claude 2 MEDIUM, probes P1 and P3;
  * the owner's decision 18 of 9 November 2026). Each part starts from a confirmed absent anchor, so its rows are read.
  */
+/**
+ * Claude 5's MEDIUM on #3302: a page read again puts back on the list rows already on it. They were counted twice
+ * (the list's HLEN, which holds them, plus the page's rows), so 51 rows never handled made 51 + 51 > 100 and held the
+ * anchor at the oldest of them on every pass. Only rows not yet on the list count against its cap.
+ */
+async function recount(job: Job, base: number): Promise<void> {
+  part(`${job.name}: rows already on the list are not counted twice when their page is read again`);
+  const made: Made[] = [];
+  for (let n = 0; n < 60; n += 1) made.push(await job.make(100 + n));
+  const paid: Record<number, string> = {};
+  made.forEach((m, i) => { paid[i] = m.pi; });
+  refunds = list(`${job.name}r`, 61, base, paid);
+  // The oldest, of another payment, not final yet: it holds the anchor, so the next pass reads the page again.
+  refunds[60] = { ...refunds[60], status: "pending", charge: { object: "charge", refunded: false } };
+  ledger.set(String(refunds[60].id), refunds[60]);
+  const emails = new Set(made.map((m) => m.email));
+  const never = async (email: string) => {
+    if (emails.has(email)) throw new Error("the ledger never answers for these");
+  };
+  await job.run(never);
+  is(`${job.name}: the 60 rows are on the list`, Object.keys(await waiting(job.retry)).length, 60);
+  is(`${job.name}: the anchor waits at the refund not final yet`, await read(job.anchor), String(base - 60));
+  refunds[60] = { ...refunds[60], status: "failed" };
+  ledger.set(String(refunds[60].id), refunds[60]);
+  for (let i = 0; i < 3; i += 1) await job.run(never);
+  is(`${job.name}: after three more passes the anchor moves to the newest refund`, await read(job.anchor), String(base));
+  is(`${job.name}: the 60 rows are still on the list, once each`, Object.keys(await waiting(job.retry)).length, 60);
+  // Let them go for the parts after this one.
+  for (let i = 0; i < 8 && Object.keys(await waiting(job.retry)).length; i += 1) await job.run();
+  is(`${job.name}: handled at last, the list is empty`, await waiting(job.retry), {});
+}
+
 async function stale(job: Job, base: number): Promise<void> {
   const row = (tag: string, i: number) => `re_${job.name}${tag}${String(i).padStart(6, "0")}`;
   const refusing = (who: string) => async (email: string) => {
@@ -685,6 +717,9 @@ async function main(): Promise<void> {
   await stuck(pre, NOW - 4_000);
   await stale(pre, NOW - 20_000);
   await rotation(pre, NOW - 30_000);
+  // After every other part, newer than any anchor they left.
+  await recount(gift, NOW + 10_000);
+  await recount(pre, NOW + 20_000);
 
   done();
 }

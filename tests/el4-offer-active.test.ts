@@ -38,7 +38,7 @@ function main(): void {
 
   part("In the composer");
   const studio = readFileSync("components/email-studio.tsx", "utf8");
-  is("the offer is read from the count line, the chosen window and the quiet days", studio.includes("const offerDays = monthCount?.over ? activeOffer(true, activeDays, quietDays, ACTIVE_DAYS) : null;"), true);
+  is("the offer is read from the count line, the chosen window and the quiet days", studio.includes("const offerDays = shownCount?.over ? activeOffer(true, activeDays, quietDays, ACTIVE_DAYS) : null;"), true);
   is("the button names the window it sets", studio.includes("{`Write only to buyers who bought in the last ${offerDays} days`}"), true);
   is("it says who is left out and that the new count comes first", studio.includes("People who never bought from you are left out. You see the new count before anything is sent."), true);
   is("pressing it sets only the existing choice, opens the choices and moves the focus there", studio.includes("onClick={() => { setActiveDays(offerDays); setMore(true); focusActive.current = true; }}"), true);

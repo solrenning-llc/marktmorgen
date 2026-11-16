@@ -3,7 +3,7 @@
 import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
-import { activeOffer, sendCount } from "@/lib/send-count";
+import { activeOffer, scheduledCount, sendCount } from "@/lib/send-count";
 import { afterSwitch, emailName, setAsideCount, setAsideNote, takeNewest } from "@/lib/set-aside";
 import { EMAIL_GOALS, type EmailGoal } from "@/lib/ai-rules";
 import { appendSequenceDraft, sequenceDraftSlots, DEFAULT_SEQUENCE_DRAFT, type DraftedStep, SEQUENCE_DRAFT_COUNTS } from "@/lib/sequence-draft";
@@ -380,6 +380,8 @@ export function EmailStudio(props: {
   allowance: number;
   /** Whether the plan's month can be told (lib/allowance-window.ts windowId); without it no count before sending is shown. */
   monthKnown?: boolean;
+  /** When the plan's month ends (ms, lib/allowance-window.ts allowanceWindow), for the count of an email scheduled for later (460 [EL4], unit 3); null when it cannot be told. */
+  monthEnds?: number | null;
   trial: boolean;
   products: { id: string; title: string }[];
   broadcasts: BroadcastRow[];
@@ -508,6 +510,7 @@ export function EmailStudio(props: {
                 links={props.links ?? {}}
                 counts={props.counts}
                 month={props.monthKnown && props.used !== null ? { used: props.used, allowance: props.allowance } : null}
+                monthEnds={props.monthKnown && props.used !== null ? props.monthEnds ?? null : null}
                 canSend={props.canSend}
                 broadcastUnconfirmed={broadcastUnconfirmed}
                 onBroadcastUnconfirmed={() => setBroadcastUnconfirmed(true)}
@@ -726,6 +729,8 @@ function Compose(props: {
   counts: { mailable: number };
   /** This month's emails used and allowed, as the "This month" card shows them (460 [EL4]); null when the plan's month cannot be told. */
   month: { used: number; allowance: number } | null;
+  /** When that month ends (ms), for an email scheduled for later (460 [EL4], unit 3); null when it cannot be told. */
+  monthEnds?: number | null;
   canSend: boolean;
   /** A draft opened into the composer, or null for a new email. */
   draft: DraftRow | null;
@@ -821,8 +826,11 @@ function Compose(props: {
   // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
   const reach = !invalidSpent && cleanLabel === countedLabel && reachResult?.key === countKey ? reachResult.count : null;
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
+  // An email scheduled for later (460 [EL4], unit 3): this month's emails when it goes out before the month ends, the next month's after.
+  const laterCount = reach !== null && later && scheduledAt !== null && props.month && props.monthEnds ? scheduledCount(reach, props.month.used, props.month.allowance, scheduledAt, props.monthEnds) : null;
+  const shownCount = monthCount ?? laterCount;
   // Past what is left, the buyers still active (460 [EL4], unit 2; 461 [EL5]): one window at a time, the widest first (lib/send-count.ts).
-  const offerDays = monthCount?.over ? activeOffer(true, activeDays, quietDays, ACTIVE_DAYS) : null;
+  const offerDays = shownCount?.over ? activeOffer(true, activeDays, quietDays, ACTIVE_DAYS) : null;
   // Set only when the creator pressed the offer, so the focus never moves by itself (WCAG 3.2.5).
   const focusActive = useRef(false);
   const activeBox = useRef<HTMLSelectElement>(null);
@@ -1273,7 +1281,7 @@ function Compose(props: {
         </details>
         <p className="text-sm font-semibold text-ink" role="status">{invalidSpent ? "Correct the spending amount before checking recipients." : reach === null ? (reachPending ? "Checking recipients…" : "The recipient count is unavailable. Check it again before sending or scheduling.") : `${n(reach)} ${reach === 1 ? "person" : "people"}${narrowedNow && asOf !== null ? `, from your buyers ${asOfWords(asOf)}` : ""}`}</p>
         {/* What this email is of the month's emails, from the two numbers already on the page (lib/send-count.ts), read out when it changes. */}
-        <p className={`text-sm ${monthCount?.over ? "font-semibold text-ink" : "text-ink-soft"}`} aria-live="polite" data-send-count>{monthCount?.line ?? ""}</p>
+        <p className={`text-sm ${shownCount?.over ? "font-semibold text-ink" : "text-ink-soft"}`} aria-live="polite" data-send-count>{shownCount?.line ?? ""}</p>
         {offerDays !== null ? (
           <div>
             <button type="button" className="btn btn-secondary btn-sm" disabled={locked} aria-describedby="mail-active-offer-hint" data-active-offer onClick={() => { setActiveDays(offerDays); setMore(true); focusActive.current = true; }}>

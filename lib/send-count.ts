@@ -60,3 +60,33 @@ export function activeOffer(over: boolean, activeDays: number, quietDays: number
   if (!windows.includes(activeDays)) return null;
   return open.find((d) => d < activeDays) ?? null;
 }
+
+/**
+ * The count for an email scheduled for later (460 [EL4], unit 3; added
+ * 16 November 2026), or null when there is nothing to say.
+ *
+ * From the same two numbers as sendCount, and the end of the plan's month
+ * as the page reads it (lib/allowance-window.ts allowanceWindow). Going out
+ * before that end, it is this month's emails: what it uses and what is left
+ * right now, and, past what is left, that the rest waits until the month
+ * turns, as the sending does (lib/broadcasts.ts). Going out after it, it
+ * counts in that month, which nobody can read yet, so no number is given
+ * for it. Nothing is sent or refused from here.
+ */
+export function scheduledCount(reach: number, used: number, allowance: number, atMs: number, endsMs: number): SendCount | null {
+  if (!Number.isSafeInteger(reach) || !Number.isSafeInteger(used) || !Number.isSafeInteger(allowance) || reach <= 0 || allowance < 0 || used < 0) return null;
+  if (!Number.isFinite(atMs) || !Number.isFinite(endsMs)) return null;
+  const emails = (count: number) => `${n(count)} ${count === 1 ? "email" : "emails"}`;
+  if (atMs >= endsMs) {
+    return { over: false, line: `It goes out after this month of your plan ends, so its ${emails(reach)} ${reach === 1 ? "counts" : "count"} in that month, not this one.` };
+  }
+  const left = Math.max(0, allowance - used);
+  const leftWords = left === 0 ? "none are" : left === 1 ? "1 is" : `${n(left)} are`;
+  if (reach > left) {
+    return {
+      over: true,
+      line: `When it goes out, this email needs ${emails(reach)}, and ${leftWords} left this month right now. What does not fit waits until the month turns. Send it to a smaller group, or schedule it after this month ends.`,
+    };
+  }
+  return { over: false, line: `When it goes out, this email uses ${emails(reach)}; ${leftWords} left this month right now. Anything sent before then uses the same month.` };
+}

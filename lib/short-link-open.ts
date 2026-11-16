@@ -36,7 +36,7 @@
  *   - Once the link is found, the store's id, its resting mark and the open's
  *     refund off the hour it was counted in (DECR with its EXPIRE) go in one
  *     pipeline. The open is then one of the store's public requests
- *     (lib/traffic.ts, takePublicRequestWhy), so its plan pays for it. What
+ *     (lib/traffic.ts, takePublicRequestRefusal), so its plan pays for it. What
  *     the store does not pay for is counted in that hour again, at
  *     SHORT_LINK_UNPAID_READ_UNITS in the shared hour, except:
  *       - the store over its own requests (or a free store without a place):
@@ -119,7 +119,7 @@
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { withinLocalLimit } from "@/lib/local-limit";
-import { takePublicRequestWhy } from "@/lib/traffic";
+import { takePublicRequestRefusal } from "@/lib/traffic";
 import { statusTime } from "@/lib/status-page";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { type Store, storeForIdRefRead, storeIdCommand } from "@/lib/store";
@@ -605,7 +605,7 @@ async function payOpen(
     await unpaid(back);
     return null;
   }
-  const why = await takePublicRequestWhy(store, "public", now, SHORT_LINK_OPEN_UNITS).catch(() => "unknown" as const);
+  const why = await takePublicRequestRefusal(store, "public", now, SHORT_LINK_OPEN_UNITS).catch(() => "unknown" as const);
   if (why === "ok") {
     outcome.kept = false;
     resting.delete(link.sid);

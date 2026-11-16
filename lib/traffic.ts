@@ -264,9 +264,17 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
 }
 
 /**
- * Why a public request was refused (takePublicRequestWhy): "store" when the store itself cannot take it (its window's
- * requests are used, or it pays nothing and the month's free places are taken), "connection" when only the asking
- * connection is over its share of the day, "unknown" when it could not be counted at all.
+ * A public request's take, said three ways (outage drill, 13 November 2026): "ok" counted within the window; "over"
+ * refused by a figure that was read (the window, the connection's share, a free store's place); "unknown" when the
+ * count could not be made, so a caller can say "not checked just now" instead of "too many". Both refuse.
+ */
+export type RequestTake = "ok" | "over" | "unknown";
+
+/**
+ * Why a public request was refused, finer than RequestTake (takePublicRequestRefusal): "store" when the store itself
+ * cannot take it (its window's requests are used, its paid window could not be reserved, or it pays nothing and the
+ * month's free places are taken), "connection" when only the asking connection is over its share of the day,
+ * "unknown" when it could not be counted at all. RequestTake's "over" is "store" or "connection".
  */
 export type PublicRequestRefusal = "store" | "connection" | "unknown";
 
@@ -320,7 +328,7 @@ export async function takePublicRequest(store: Store, who: "public" | "buyer" = 
  * (lib/short-link-open.ts): the same counts, taken the same way. A throw, a window that cannot be told or a paid
  * window that cannot be reserved is "unknown", never the store's own refusal.
  */
-export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<"ok" | PublicRequestRefusal> {
+export async function takePublicRequestRefusal(store: Store, who: "public" | "buyer" = "public", now = Date.now(), units = 1): Promise<"ok" | PublicRequestRefusal> {
   return takePublicWhy(store, who, now, units, false, false);
 }
 
@@ -343,11 +351,18 @@ async function takePublicWhy(store: Store, who: "public" | "buyer", now: number,
   try {
     const window = allowanceWindow(store, now);
     if (!window) return "unknown";
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "store";
     return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
+    // Redis or the store's folder could not be reached: a count that was not made, never room, and never "too many".
     return "unknown";
   }
+}
+
+/** takePublicRequest, said three ways (RequestTake): for a page that tells "too many" apart from "not checked just now". */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now()): Promise<RequestTake> {
+  const why = await takePublicWhy(store, who, now, 1, false, false);
+  return why === "store" || why === "connection" ? "over" : why;
 }
 
 /**

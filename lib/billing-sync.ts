@@ -71,7 +71,14 @@ export type SyncCounts = {
  * Stripe could not be asked, and changes nothing. Returns whether it wrote.
  */
 export async function recordState(store: Store, state: SubscriptionState): Promise<boolean> {
-  if (state.state === "unknown") return false;
+  const plan = changeOf(store, state);
+  if (!plan) return false;
+  return (await setSubscription(storeRef(store), plan)) !== null;
+}
+
+/** What a state would write over the store's snapshot, or null when it changes nothing (or is unknown). */
+function changeOf(store: Store, state: SubscriptionState): Parameters<typeof setSubscription>[1] | null {
+  if (state.state === "unknown") return null;
   const active = state.state === "active";
   const plan = active ? { tier: state.tier, cycle: state.cycle, trialEnds: state.trialing ? state.until : 0, shared: state.shared, period: state.period, renewalUnpaid: state.renewalUnpaid === true } : null;
   if (
@@ -79,9 +86,9 @@ export async function recordState(store: Store, state: SubscriptionState): Promi
     (!plan || (plan.tier === store.tier && plan.cycle === store.cycle && plan.trialEnds === store.trialEnds && plan.shared === store.shared && samePeriod(plan.period, store.period ?? null) &&
       plan.renewalUnpaid === (store.renewalUnpaidSince ?? 0) > 0))
   ) {
-    return false;
+    return null;
   }
-  return (await setSubscription(storeRef(store), { active, ...(plan ?? {}) })) !== null;
+  return { active, ...(plan ?? {}) };
 }
 
 /**
@@ -92,8 +99,8 @@ export async function recordState(store: Store, state: SubscriptionState): Promi
  * shut out by the very thing it would put right. Answers the store as it is
  * now; unchanged when Stripe cannot be asked.
  */
-export async function refreshPeriod(store: Store): Promise<Store> {
-  if (!store.subscriptionId || !isBillingConfigured() || allowanceWindow(store)) return store;
+export async function refreshPeriod(store: Store, now = Date.now()): Promise<Store> {
+  if (!store.subscriptionId || !isBillingConfigured() || allowanceWindow(store, now)) return store;
   try {
     const state = await readSubscription(store.subscriptionId,store);
     if (!(await recordState(store, state))) return store;
@@ -102,6 +109,38 @@ export async function refreshPeriod(store: Store): Promise<Store> {
     console.error("reading a store's billing month failed", error);
     return store;
   }
+}
+
+/** How long one buyer-side read of a store's billing month holds its claim: at most one such call to Stripe per store in it. */
+export const PERIOD_READ_CLAIM_SECONDS = 60;
+const periodReadKey = (store: Store) => `nl:billing:period-read:${storeRef(store)}`;
+
+/**
+ * refreshPeriod for a buyer's path (a checkout's admission, a buyer's email):
+ * a store that pays but whose billing month the record does not have yet (a
+ * trial that has just turned into its first paid month, a renewal past its
+ * grace) would otherwise refuse its buyers until the studio is opened or the
+ * daily job runs. Asks Stripe at most once per store in
+ * PERIOD_READ_CLAIM_SECONDS, whatever the number of buyers: the first takes a
+ * short claim in Redis, and every other one in that time only reads the store
+ * back from Redis (what the first wrote down, or still unknown and refused as
+ * before). No claim (Redis unknown), a failed or unreadable reply: the store
+ * is answered unchanged, still unknown. Never assumes a window.
+ */
+export async function refreshPeriodOnce(store: Store, now = Date.now()): Promise<Store> {
+  if (!store.subscriptionId || !isBillingConfigured() || !isRedisConfigured() || allowanceWindow(store, now)) return store;
+  try {
+    const [claimed] = await redisPipeline([["SET", periodReadKey(store), "1", "NX", "EX", PERIOD_READ_CLAIM_SECONDS]]);
+    // Another buyer holds the claim: what it may have written down already is read back (Redis only, no call to Stripe).
+    if (claimed !== "OK") {
+      const again = await storeForHandle(store.handle);
+      return again && storeRef(again) === storeRef(store) ? again : store;
+    }
+  } catch (error) {
+    console.error("could not claim the read of a store's billing month", error);
+    return store;
+  }
+  return refreshPeriod(store, now);
 }
 
 /**
@@ -173,14 +212,26 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   }
   if (!store) return false;
 
-  // The one this store wrote down: Stripe's word stands.
+  // The one this store wrote down: Stripe's word stands, but only its word
+  // now. The page was read before the rows ahead of this one were applied
+  // (each can take Stripe calls of its own), so this row can be older than
+  // what the store wrote down since: a plan the money-back refund or the
+  // cancel button ended, or a switch. A change it would make is written only
+  // from a fresh read of this one subscription (readSubscription, which also
+  // observes contract funding); one Stripe cannot give writes nothing, and
+  // step 2 asks about the store again.
   if (store.subscriptionId === id) {
-    const state=stateOf(subscription);
-    if(state.state==='active'&&hasContractFunding(subscription)){
-      const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return false;
-      state.period=observed.period;
-    }
-    if (await recordState(store, state)) counts.updated += 1;
+    // A row whose plan cannot be read (CX-123 rule 24) says nothing: the store is not in line with Stripe, so step 2
+    // asks about it on its own, and an answer that is still unknown there is counted as a failure.
+    const listed = stateOf(subscription);
+    if (listed.state === "unknown") return false;
+    if (!changeOf(store, listed)) return true;
+    const now = await readSubscription(id, store);
+    if (now.state === "unknown") return false;
+    // Written only over the snapshot this was decided on (Codex U's MÉDIO on #4002): a plan the money-back refund or
+    // the cancel button ended after Stripe answered, or a switch, refuses the write, and the next run reads Stripe again.
+    const plan = changeOf(store, now);
+    if (plan && (await setSubscription(storeRef(store), plan, store)) !== null) counts.updated += 1;
     return true;
   }
 

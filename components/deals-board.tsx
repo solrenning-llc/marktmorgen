@@ -526,8 +526,8 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
             {allTotals.map(t => (
               <button key={t.pipeline.id} id={`pipeline-tab-${t.pipeline.id}`} type="button" aria-pressed={t.pipeline.id === pipeline.id} {...offProps(editing && t.pipeline.id !== pipeline.id, WHY_ID)} className={`btn btn-sm ${t.pipeline.id === pipeline.id ? "btn-primary" : "btn-secondary"}`} onClick={() => { if (editing || t.pipeline.id === pipeline.id) return; setPipelineId(t.pipeline.id); setError(null); setConfirming(null); }}>
                 {t.pipeline.name}
-                <span className="tabular-nums opacity-80">{` · ${t.open.count} open`}</span>
-                {readOnly.has(t.pipeline.id) ? <span className="opacity-80"> · view only</span> : null}
+                <span className="tabular-nums">{` · ${t.open.count} open`}</span>
+                {readOnly.has(t.pipeline.id) ? <span> · view only</span> : null}
               </button>
             ))}
             {pipelines.length < pipelineMax ? (
@@ -544,7 +544,7 @@ export function DealsBoard({ deals, versions = {}, stages: everyStage, pipelines
               </button>
             ) : null}
           </div>
-          <div className="mt-3 overflow-x-auto">
+          <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Totals by pipeline, as a table">
             <table className="w-full min-w-[32rem] text-left text-sm">
               <caption className="sr-only">What each pipeline&apos;s deals add up to</caption>
               <thead><tr className="text-ink-soft">{["Pipeline", "Open", "Won", "Lost"].map(label => <th key={label} scope="col" className="py-2 pr-4 font-semibold">{label}</th>)}</tr></thead>

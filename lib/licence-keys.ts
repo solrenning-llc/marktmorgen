@@ -471,7 +471,8 @@ export type UploadResult = {
   known: number;
   /** Left out because the pool would pass MAX_POOL_KEYS. */
   overflow: number;
-  left: number;
+  /** Keys in the pool after the upload; null when the length did not read (rule 24), never 0. */
+  left: number | null;
   /** Waiting buyers given a key by this upload. */
   served: number;
 };
@@ -496,16 +497,28 @@ export async function addKeys(store: Store, product: Listing, keys: string[], or
   for (let i = 0; i < keys.length; i += BATCH) {
     const batch = keys.slice(i, i + BATCH);
     // One key at a time into the set, so the answer says which ones are new.
-    const fresh = await redisPipeline(batch.map((key) => ["SADD", allKey(store, product), key]));
+    const fresh = repliesFor(await redisPipeline(batch.map((key) => ["SADD", allKey(store, product), key])), batch.length);
     const offered: string[] = [];
+    const unread: string[] = [];
     batch.forEach((key, j) => {
-      if (Number(fresh[j]) !== 1) {
+      // Read exactly (CX-123 rule 24): 1 is new, 0 is known; anything else may have been written, never "known".
+      const n = fresh ? countOf(fresh[j]) : null;
+      if (n === 0) {
         known += 1;
         notKept.push(key);
-        return;
-      }
-      offered.push(key);
+      } else if (n === 1) offered.push(key);
+      else unread.push(key);
     });
+    if (unread.length) {
+      // A key whose SADD did not read may be in the record without ever reaching the pool, and every later upload
+      // would then call it "already added". The batch's new and unread keys are taken back out of the record, read
+      // exactly, their room given back, and the upload answers unknown: the same keys can simply be uploaded again.
+      const back = [...offered, ...unread];
+      const removed = countOf(repliesFor(await redisPipeline([["SREM", allKey(store, product), ...back]]), 1)?.[0]);
+      if (removed !== null) notKept.push(...back);
+      await giveData(store, [{ slot, bytes: weigh(notKept) }]);
+      throw new UnknownReplyError("a license key's SADD");
+    }
     if (!offered.length) continue;
     // The room is taken with the push (POOL_PUSH): what did not fit is left out. Read exactly (CX-123 rule 24): an
     // answer that is not a count of the keys offered throws, never "all of them fitted" or "none did".
@@ -524,16 +537,16 @@ export async function addKeys(store: Store, product: Listing, keys: string[], or
   // A top-up means the next low pool is worth another warning.
   if (added > 0) await redisPipeline([["DEL", warnedKey(store, product)]]);
   const served = added > 0 ? await serveWaiting(store, product, origin) : 0;
-  const [after] = await redisPipeline([["LLEN", poolKey(store, product)]]);
-  return { added, known, overflow, left: Number(after) || 0, served };
+  const after = repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1);
+  return { added, known, overflow, left: after ? countOf(after[0]) : null, served };
 }
 
-/** Takes every key still in the pool out, so none of them is ever given. */
-export async function clearPool(store: Store, product: Listing): Promise<number> {
+/** Takes every key still in the pool out, so none of them is ever given. How many: null when that did not read (rule 24). */
+export async function clearPool(store: Store, product: Listing): Promise<number | null> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [length] = await redisPipeline([["LLEN", poolKey(store, product)]]);
+  const length = repliesFor(await redisPipeline([["LLEN", poolKey(store, product)]]), 1);
   await redisPipeline([["DEL", poolKey(store, product)]]);
-  return Number(length) || 0;
+  return length ? countOf(length[0]) : null;
 }
 
 /**

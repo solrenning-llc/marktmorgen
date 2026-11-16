@@ -165,9 +165,13 @@ async function main(): Promise<void> {
   const savedListing = (await redis.pipeline([["GET", listingKey]]))[0];
   const savedLegal = (await redis.pipeline([["GET", legalKey]]))[0];
   is("the page's copy is the record kept with the product", savedLegal, JSON.stringify(legal));
-  await redis.pipeline([["SET", extrasKey, "{not json"], ["SET", legalKey, "{not json"]]);
+  // Its legal fields unreadable inside a record that reads: none, so the EU/EEA stays out. A heavy rest that does not
+  // read at all is refused, never taken for "none" (CX-123 rule 24, lib/catalog.ts productRead): no checkout from it.
+  await redis.pipeline([["SET", extrasKey, JSON.stringify({ ...JSON.parse(String(savedExtras)), legal: "{not json" })], ["SET", legalKey, "{not json"]]);
   store = (await storeForEmail(OWNER))!;
-  is("its records unreadable: no legal record, and its checkout leaves the EU/EEA out though the listing is marked", [await readProductLegal(store, id), shippingNow((await readProduct(store, id))!)?.countries], [null, ["US"]]);
+  is("its legal fields unreadable: no legal record, and its checkout leaves the EU/EEA out though the listing is marked", [await readProductLegal(store, id), shippingNow((await readProduct(store, id))!)?.countries], [null, ["US"]]);
+  await redis.pipeline([["SET", extrasKey, "{not json"]]);
+  is("its heavy rest unreadable: the product is refused, never read without its legal fields", await readProduct(store, id).then(() => "read", (error: Error) => error.name), "UnknownReplyError");
   await redis.pipeline([["SET", extrasKey, String(savedExtras)], ["SET", legalKey, String(savedLegal)]]);
   await setProductLegal(OWNER, id, null);
   is("the legal record removed: the page's copy goes with it", (await redis.pipeline([["GET", legalKey]]))[0] ?? null, null);

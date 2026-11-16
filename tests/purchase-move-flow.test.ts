@@ -290,6 +290,29 @@ async function main(): Promise<void> {
     is("the fourth is refused", answers, ["sent", "sent", "sent", "over"]);
   }
 
+  part("A deleted address is counted in the day like any other, so asking cannot sort deleted people from the rest");
+  {
+    // Codex N4 on #3625 (MEDIUM): the deleted people were read before the day's count was taken, so a buyer
+    // could try any number of addresses and tell which asked to be deleted here.
+    const now = Math.floor(Date.now() / 1000);
+    const over = await signIn("over.buyer@example.com");
+    const answers: string[] = [];
+    for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY; i += 1) answers.push(await askToMovePurchases({ store: moss, token: over, to: `over.new${i}@example.com`, origin: ORIGIN }));
+    const [m, k] = [mails.length, moveKeys().length];
+    for (let i = 0; i < 5; i += 1) {
+      await redis.pipeline([suppressCommand(moss.listId!, `over.gone${i}@example.com`, now)]);
+      answers.push(await askToMovePurchases({ store: moss, token: over, to: `over.gone${i}@example.com`, origin: ORIGIN }));
+    }
+    is("past the day's asks, a deleted address is answered as any other address", answers, [...Array(MAX_MOVES_PER_ADDRESS_DAY).fill("sent"), ...Array(5).fill("over")]);
+    is("and nothing was written or sent for them", [moveKeys().length - k, mails.length - m], [0, 0]);
+
+    const first = await signIn("first.buyer@example.com");
+    await redis.pipeline([suppressCommand(moss.listId!, "first.gone@example.com", now)]);
+    const day: string[] = [await askToMovePurchases({ store: moss, token: first, to: "first.gone@example.com", origin: ORIGIN })];
+    for (let i = 0; i < MAX_MOVES_PER_ADDRESS_DAY; i += 1) day.push(await askToMovePurchases({ store: moss, token: first, to: `first.new${i}@example.com`, origin: ORIGIN }));
+    is("an ask to a deleted address takes one of the day's asks", day, ["deleted", ...Array(MAX_MOVES_PER_ADDRESS_DAY - 1).fill("sent"), "over"]);
+  }
+
   part("The store's access emails spent or unreadable: said as it is");
   {
     const one = await signIn("spent.buyer@example.com");

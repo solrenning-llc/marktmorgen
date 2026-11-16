@@ -68,7 +68,12 @@ export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   "components/community-composer.tsx": { uploadPresigned: { open: "audit 7: a community picture's put, every try" } },
   "lib/community-files.ts": { head: { open: "audit 7: a community picture's checks" }, get: { open: "audit 7: a community picture's checks" }, del: DELETE_IS_FREE },
   "app/api/store/community/image/route.ts": { get: { line: "public-requests" } },
-  "app/api/store/course/task/upload/route.ts": { issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
+  // Main's task door also asks the file store once whether the browser's name is already a file (9 November 2026):
+  // that head is in TASK_DOOR_COST, which the line buyer-actions pays for (tests/task-upload-path.test.ts).
+  "app/api/store/course/task/upload/route.ts": { head: { line: "buyer-actions" }, issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
+  // A task's answer (from main): it imports only BlobNotFoundError and calls no Blob operation itself; its headFile is
+  // lib/file-store's, counted there (audit 6).
+  "app/api/store/course/task/route.ts": {},
   "components/lesson-task.tsx": { uploadPresigned: { open: "audit 7: a student's file put, every try" } },
 
   // A buyer's review photo and an email's picture: Blob puts no line prices (audit 2 and 8).

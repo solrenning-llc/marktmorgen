@@ -31,6 +31,7 @@
  * second would write back the team it read before the first, and a person
  * just taken off could be back on it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { copyPipelineAccess, forgetPipelineAccess } from "@/lib/pipeline-access";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -41,7 +42,7 @@ import { withLock } from "@/lib/redis-lock";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { twoStepOn } from "@/lib/two-step";
 import { listPasskeys, pendingRemoval } from "@/lib/passkeys";
-import { type Store, STORE_ID_PATTERN, storeForId } from "@/lib/store";
+import { type Store, STORE_ID_PATTERN, storeForId, storeForIdExact } from "@/lib/store";
 import { storeForIdExactly } from "@/lib/store-exact";
 import { type Role, type TeamRole, INVITE_DAYS, ROLE_NAMES, ROLE_SUMMARIES, parseTeamRole } from "@/lib/team-roles";
 
@@ -121,6 +122,18 @@ export type LogLine = {
 const EMPTY: Team = { members: [], invites: [] };
 
 /** A team record as read, keeping only members and invitations the studio accepts (a valid address and role, MAX_TEAM at most); lib/api-keys.ts reads the team with it too. */
+/** Whether a team GET's text is a team record as the writers make it: a JSON object whose invitations, if any, are a list. */
+function readsAsTeamRecord(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const invites = (value as { invites?: unknown }).invites;
+    return invites === undefined || Array.isArray(invites);
+  } catch {
+    return false;
+  }
+}
+
 export function parseTeam(raw: unknown): Team {
   if (typeof raw !== "string" || !raw) return { members: [], invites: [] };
   try {
@@ -433,12 +446,8 @@ export async function inviteMember(
     if (team.members.length + team.invites.length >= MAX_TEAM) return { ok: false, reason: "full" };
 
     const counter = `nl:rl:team-invite:${store.sid}`;
-    const replies = repliesFor(await redisPipeline([
-      ["SET", counter, "0", "EX", 24 * 60 * 60, "NX"],
-      ["INCR", counter],
-    ]), 2);
     // A count in any other shape is unknown (CX-123 rule 24): no invitation is emailed on it.
-    const sent = countOf(replies?.[1]);
+    const sent = windowCountOf(await redisPipeline(windowCount(counter, 24 * 60 * 60)));
     if (sent === null || sent > INVITES_PER_DAY) return { ok: false, reason: "limited" };
 
     const token = randomBytes(32).toString("hex");
@@ -635,25 +644,41 @@ export async function removeMember(store: Store, email: string, options: { repea
 }
 
 /**
- * What an invitation is for, read without spending it, so the page the link
- * opens can say which store and which role before anything happens.
+ * What an invitation is for, read without spending it, so the page the link opens can say which store and which
+ * role before anything happens: null when it no longer works. The link's GET in any other shape is unknown and
+ * throws UnknownReplyError, and a read behind it that fails (the store, the team) throws too: never "no longer
+ * works" for what could not be read (CX-123 rule 24).
  */
 export async function peekInvite(token: string): Promise<{ store: Store; email: string; role: TeamRole } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", inviteKey(token)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const read = repliesFor(await redisPipeline([["GET", inviteKey(token)]]), 1);
+  if (!read) throw new UnknownReplyError("a team invitation");
+  const [raw] = read;
+  if (raw === null || raw === "") return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("a team invitation");
+  let claim: { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
   try {
-    const claim = JSON.parse(raw) as { sid?: unknown; id?: unknown; email?: unknown; role?: unknown };
-    const role = parseTeamRole(claim.role);
-    if (typeof claim.sid !== "string" || typeof claim.email !== "string" || !role) return null;
-    const store = await storeForId(claim.sid);
-    if (!store) return null;
-    const team = await readTeam(store.sid);
-    if (!team.invites.some((i) => i.id === claim.id)) return null;
-    return { store, email: normaliseEmail(claim.email), role };
+    claim = JSON.parse(raw) as typeof claim;
   } catch {
     return null;
   }
+  const role = parseTeamRole(claim?.role);
+  if (typeof claim?.sid !== "string" || typeof claim.email !== "string" || !role) return null;
+  // The store read exactly (Claude 6 on #2969): only one confirmed not there is "no longer works".
+  const store = await storeForIdExact(claim.sid);
+  if (!store) return null;
+  // The team read exactly too (Claude 1 on #2969, the team case of K2's MEDIUM): nil is no team, a string is the
+  // record as written, and any other answer is unknown, never an empty team that sends a valid link to "expired".
+  const teamRead = repliesFor(await redisPipeline([["GET", teamKey(store.sid)]]), 1);
+  if (!teamRead) throw new UnknownReplyError("a team");
+  const [teamRaw] = teamRead;
+  if (teamRaw !== null && typeof teamRaw !== "string") throw new UnknownReplyError("a team");
+  // A string is the record only when it reads as one (Codex X5 on #2969): text that is not JSON, empty text, JSON
+  // that is not a record or invitations that are not a list would be parsed as an empty team, which says expired.
+  if (typeof teamRaw === "string" && !readsAsTeamRecord(teamRaw)) throw new UnknownReplyError("a team record");
+  const live = parseTeam(teamRaw).invites.filter((i) => i.expiresAt > now());
+  if (!live.some((i) => i.id === claim.id)) return null;
+  return { store, email: normaliseEmail(claim.email), role };
 }
 
 export type JoinResult =
@@ -677,7 +702,7 @@ export async function spendInvite(token: string): Promise<JoinResult> {
   } catch {
     const [read] = await redisPipeline([["GET", key]]);
     const [removed] = await redisPipeline([["DEL", key]]);
-    raw = Number(removed) === 1 ? read : null;
+    raw = countOf(removed) === 1 ? read : null;
   }
   if (typeof raw !== "string" || !raw) return { ok: false, reason: "expired" };
 

@@ -188,6 +188,12 @@ type Ctx = {
   sources: readonly BackupFilesSource[];
   stores: Map<string, StoreState>;
   dirty: Set<string>;
+  /**
+   * The uploads whose `charged` this run wrote and saved. A charge that rode on a save is honored only in the run that
+   * made it: a run cut after a part's read and before its save leaves `charged` past `next`, and the next run charges
+   * that part again before reading it (Claude 3's MEDIUM on #3340), so no byte is ever read uncharged.
+   */
+  chargedHere: Set<string>;
   fresh: Map<string, Fresh>;
   recordsHold: boolean;
   /** The journal's archive names, once read in this run (JOURNAL_KEY). */
@@ -923,6 +929,7 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     state.read = addDay(state.read, ctx.day, 1, first);
     src.upload = { key: object.key, etag: object.etag, size: object.size, name: object.name, uploadId: id, parts: [], next: 0, charged: first };
     await saveStore(ctx, state);
+    ctx.chargedHere.add(id);
   }
   const upload = src.upload;
   if (upload.etag !== object.etag || upload.size !== object.size || upload.name !== object.name) return refuse("changed");
@@ -932,11 +939,16 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     ctx.run.boundary(4);
     if (entry.expiresAt - ctx.opts.now() < BACKUP_FILES_URL_MARGIN_MS) return;
     const end = partEnd(upload.next);
-    // Paid already when its charge rode on the last save; otherwise charged and saved now. Past the ceiling the
-    // upload is kept, its parts already paid; it resumes when the 32 days allow.
-    if (upload.charged <= upload.next) {
-      if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
+    // Paid already only when its charge rode on a save of this run; otherwise (a resumed upload, or none carried)
+    // charged and saved now, so a part read again after a cut run is charged again: more, never less, than was read.
+    // Past the ceiling the upload is kept, its parts already paid; it resumes when the 32 days allow.
+    if (upload.charged <= upload.next || !ctx.chargedHere.has(upload.uploadId)) {
       upload.charged = end + 1;
+      if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) {
+        upload.charged = upload.next;
+        return;
+      }
+      ctx.chargedHere.add(upload.uploadId);
     }
     const body = await readPart(ctx, entry, object, upload.next, end);
     if (typeof body === "string") return refuse(body);
@@ -1117,6 +1129,7 @@ export async function runBackupFiles(env: BackupFilesEnv, opts: RunOptions): Pro
     sources: opts.sources ?? BACKUP_FILES_SOURCES,
     stores: new Map(),
     dirty: new Set(),
+    chargedHere: new Set(),
     fresh: new Map(),
     recordsHold: false,
     journal: null,

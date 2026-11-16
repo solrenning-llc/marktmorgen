@@ -37,6 +37,12 @@ const CODEQL_COMMENT = [
   "  # runs and one waits, and a newer push replaces the waiting one, so runs never pile up.",
 ].join("\n") + "\n";
 const read = (name: string) => readFileSync(`.github/workflows/${name}.yml`, "utf8");
+/**
+ * The one heavy job gated by the event: CodeQL's analyze, skipped under merge_group, where it uploaded nothing and
+ * could not fail on a finding; it still runs on every pull request, push to main, daily and manual run, and its final
+ * check accepts that skip only there (.github/workflows/codeql.yml, scripts/ci_all_checks.py, tests/codeql-timeout.test.ts).
+ */
+const QUEUE_SKIP: Record<string, string> = { "codeql/analyze": " && github.event_name != 'merge_group'" };
 
 /** Top-level jobs of a workflow: {job id: its text}. */
 function jobs(text: string): Record<string, string> {
@@ -75,10 +81,12 @@ for (const name of WORKFLOWS) {
   for (const [id, body] of Object.entries(all)) {
     if (id === "all-checks" || id === "documentation-scope") continue;
     const condition = /^ {4}if: (.*)$/m.exec(body)?.[1] ?? "";
-    is(`${name}/${id}: gated only by the scope result, never by event, ref or branch`, [
+    const skip = QUEUE_SKIP[`${name}/${id}`];
+    is(`${name}/${id}: gated only by the scope result${skip ? " and, at its end, the merge-queue skip" : ""}, never by anything else of the event, ref or branch`, [
       condition.startsWith("${{ !cancelled() && needs.documentation-scope.outputs.full != 'false'"),
-      /github\.(event_name|ref|head_ref|base_ref)|merge_group|pull_request/.test(condition),
-    ], [true, false]);
+      skip === undefined || condition.endsWith(skip + " }}"),
+      /github\.(event_name|ref|head_ref|base_ref)|merge_group|pull_request/.test(skip ? condition.replace(skip, "") : condition),
+    ], [true, true, false]);
   }
   const pullRequestReads = text.split("\n").filter((line) => line.includes("github.event.pull_request"));
   is(`${name}: pull request fields are read only as the scope's inputs, which are empty under merge_group`,
@@ -110,6 +118,36 @@ const scope = spawnSync("python3", ["-c", [
   "print(requires_full('merge_group', '', '', lambda *a: b''), can_reuse_main())",
 ].join("\n")], { encoding: "utf8" });
 is("merge_group: full coverage, and no reuse of an earlier run", scope.stdout.trim(), "True False");
+
+part("on a pull request only the six accessibility workflows defer their heavy jobs, and never outside one");
+const ACCESSIBILITY = WORKFLOWS.filter((name) => name.startsWith("accessibility-"));
+is("six accessibility workflows", ACCESSIBILITY.length, 6);
+for (const name of WORKFLOWS) {
+  const text = read(name);
+  const all = jobs(text);
+  const merged = ACCESSIBILITY.includes(name);
+  const heavy = Object.entries(all).filter(([id]) => id !== "all-checks" && id !== "documentation-scope");
+  is(`${name}: ${merged ? "each heavy job also waits for the merge queue on a pull request" : "no heavy job is ever deferred"}`,
+    heavy.map(([id, body]) => [id, (/^ {4}if: (.*)$/m.exec(body)?.[1] ?? "").includes(" && needs.documentation-scope.outputs.deferred != 'true'")]),
+    heavy.map(([id]) => [id, merged]));
+  is(`${name}: the scope ${merged ? "is told it may defer and passes the answer on" : "is never told it may defer"}`, [
+    /\n {10}CI_MERGE_GROUP_ONLY: "true"\n/.test(all["documentation-scope"] ?? ""),
+    /\n {6}deferred: \$\{\{ steps\.scope\.outputs\.deferred \}\}\n/.test(all["documentation-scope"] ?? ""),
+  ], [merged, merged]);
+}
+const deferral = spawnSync("python3", ["-c", [
+  "import sys; sys.path.insert(0, 'scripts')",
+  "from ci_documentation_scope import deferred_to_merge_group",
+  "from ci_all_checks import decide",
+  "raw = (':100644 100644 ' + 'a' * 40 + ' ' + 'b' * 40 + ' M\\0app/page.tsx\\0').encode()",
+  "a, b = 'a' * 40, 'b' * 40",
+  "events = ['merge_group', 'push', 'schedule', 'workflow_dispatch']",
+  "print([deferred_to_merge_group(True, e, a, b, lambda *_: raw) for e in ['pull_request'] + events])",
+  "needs = {'documentation-scope': {'result': 'success', 'outputs': {'full': 'true', 'deferred': 'true'}}, 'matrix': {'result': 'skipped'}}",
+  "print([decide(needs, e, True)[0] for e in ['pull_request'] + events])",
+].join("\n")], { encoding: "utf8" });
+is("the deferral exists only on a pull request; under merge_group, push, daily and manual runs every job must run and pass",
+  deferral.stdout.trim().split("\n"), ["[True, False, False, False, False]", "[True, False, False, False, False]"]);
 
 part("a push to main reuses the merge queue's green on the same commit, never for CodeQL (C1-0305-C4-28)");
 const reuse = spawnSync("python3", ["-c", [

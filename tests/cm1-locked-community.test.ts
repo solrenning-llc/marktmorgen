@@ -13,7 +13,12 @@
  *   - a member who holds one of the products sees the space as before
  *     (holdsAnyOf), with nothing to unlock;
  *   - an access answer that is unknown (Stripe down, or the kept answer not
- *     read) draws the locked view, never the content, and never fails the page.
+ *     read) never shows the content and never offers to sell the product
+ *     again: the space is said as not checked just now (review of #3007, M1);
+ *     asked for directly, it is never answered as kept for other buyers;
+ *   - a product whose stock or keys cannot be read is unknown, never "not
+ *     available" (L1), and a space's view whose save was not confirmed is
+ *     never answered as saved (L2).
  */
 import { createElement } from "react";
 import { readFileSync } from "node:fs";
@@ -28,6 +33,11 @@ import { CREATOR, type CommunityConfig, addComment, createPost, freshConfig, mem
 import { leadsKey } from "@/lib/contacts";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { productSegment } from "@/lib/product-slug";
+import { MAX_UNLOCK_PRODUCTS, lockedOf, unlockCandidates, unlocksOf } from "@/lib/community-locked";
+import { collectionUnits } from "@/lib/page-read-rules";
+import { readListings } from "@/lib/catalog";
+import { productsBuyableNow } from "@/lib/mail-product-sellable";
+import type { Listing } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { cookieValues } from "./meeting-withdrawal-page-world";
 import { paidPeriod } from "./billing-period-fixture";
@@ -99,12 +109,12 @@ async function main(): Promise<void> {
   await createPost(id, { space: general, author: CREATOR, title: "Hello everyone", text: "OPEN-GENERAL-TEXT", img: null, kind: "post", poll: null }, store);
   if ((await readMember(id, memberKey(INSIDER)))?.n !== "Ivy Insider") throw new Error("no insider");
 
-  async function draw(as: string): Promise<string> {
+  async function draw(as: string, query: Record<string, string> = {}): Promise<string> {
     cookieValues.clear();
     store = (await storeForEmail(OWNER))!;
     cookieValues.set(passCookieName(store), await mintPass(store, as, "all"));
     try {
-      const page = await CommunityPage({ params: Promise.resolve({ handle: "@lockedclub" }), searchParams: Promise.resolve({}) });
+      const page = await CommunityPage({ params: Promise.resolve({ handle: "@lockedclub" }), searchParams: Promise.resolve(query) });
       return renderToStaticMarkup(createElement(AppRouterContext.Provider, { value: { refresh() {}, push() {}, replace() {}, prefetch() {} } as never }, page));
     } catch (error) {
       return `PAGE_FAILED ${String(error)}`;
@@ -133,10 +143,16 @@ async function main(): Promise<void> {
   is("the inner post and its author are there", [html.includes("PRIVATE-INNER-TEXT"), html.includes("Ivy Insider")], [true, true]);
   is("and nothing to unlock for it", lockedPart(html).includes("Inner circle"), false);
 
-  part("An unknown access answer draws the locked view, never the content");
+  part("An unknown access answer: never the content, never an offer to buy, said as not checked (review of #3007, M1)");
+  const uncheckedPart = (html: string) => html.match(/<section[^>]*id="cm-unchecked"[\s\S]*?<\/section>/)?.[0] ?? "";
+  const NOT_CHECKED = "We couldn&#x27;t check your access to these spaces just now. Reload the page to try again.";
+  const GATE_NOT_CHECKED = "We could not check your access just now";
   stripe = "down";
   html = await draw(STRANGER);
-  is("Stripe down: the page is drawn, locked, with nothing from inside", [html.startsWith("PAGE_FAILED"), lockedPart(html).includes("Inner circle"), nothingInside(html)], [false, true, []]);
+  is("Stripe down: the page is drawn, with nothing from inside", [html.startsWith("PAGE_FAILED"), nothingInside(html)], [false, []]);
+  is("Stripe down: no offer to buy the product, and the space is not called locked", [html.includes("Unlock with"), lockedPart(html).includes("Inner circle")], [false, false]);
+  is("Stripe down: the space is said as not checked just now", [uncheckedPart(html).includes("Inner circle"), uncheckedPart(html).includes(NOT_CHECKED)], [true, true]);
+  is("Stripe down: a Hidden space still shows no sign of itself", [html.includes("Secret room"), html.includes(secret)], [false, false]);
   stripe = "empty";
   const original = redis.pipeline.bind(redis);
   // Rule 23 (the pre-review of 9 November 2026, P1): the spaces are answered from the one kept reading of what the
@@ -149,12 +165,45 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   try {
     html = await draw(OUTSIDER);
-    is("the kept answer not read: the page is drawn, with nothing from inside", [html.startsWith("PAGE_FAILED"), nothingInside(html)], [false, []]);
+    is("the kept answer not read: drawn, nothing from inside, no offer to buy", [html.startsWith("PAGE_FAILED"), nothingInside(html), html.includes("Unlock with")], [false, [], false]);
+    // Rule 23 (merge of main into #3395): main read each space's kept answer (:sp:ok:) apart from the door's, so a
+    // lost reply left the member in with that one space "not checked". Here the door and the spaces share one kept
+    // reading (:h:), so a lost reply leaves the door itself not known: the gate says it could not check, never an
+    // offer to buy. A space not known while the door is known is held above (Stripe down) and in
+    // tests/community-paid-unknown.test.ts.
+    is("and the door says it could not check", html.includes(GATE_NOT_CHECKED), true);
     html = await draw(INSIDER);
-    is("even for a member who holds the product: locked, never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
+    is("a member who holds the product: never the content", [html.startsWith("PAGE_FAILED"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
+    is("and never asked to buy it again, nor told it is locked", [html.includes("Unlock with Guide"), html.includes(guideHref), lockedPart(html).includes("Inner circle")], [false, false, false]);
+    // Rule 23, as above: the shared reading lost, the door says it could not check.
+    is("but told their access could not be checked just now", html.includes(GATE_NOT_CHECKED), true);
+    html = await draw(INSIDER, { space: inner });
+    is("asked for directly: never answered as kept for other buyers, never the content", [html.includes("spacelocked"), html.includes("PRIVATE-INNER-TEXT")], [false, false]);
   } finally {
     redis.pipeline = original;
   }
+  html = await draw(INSIDER);
+  is("control: read again, the member who holds it sees it", [html.includes("PRIVATE-INNER-TEXT"), uncheckedPart(html)], [true, ""]);
+
+  part("A product whose stock cannot be read is unknown, never 'not available' (review of #3007, L1)");
+  store = (await storeForEmail(OWNER))!;
+  const [guideListing] = await readListings(store, [guide]);
+  const limited: Listing = { ...guideListing, stock: 5 };
+  const already = { soon: { soon: new Set<string>(), days: new Map<string, string>() }, listings: new Map<string, Listing>() };
+  is("control: its stock read, it is on sale", (await productsBuyableNow(store, [limited], Date.now(), already)).has(guide), true);
+  // main's soonState can read the pre-orders in part (knownNotSoon): given what was read, a product outside that part is
+  // unknown and throws, so the space says it could not tell; one inside it is known coming soon and only left out.
+  const partOutside = { soon: { soon: new Set<string>(["other"]), days: new Map<string, string>(), partial: true as const }, listings: new Map<string, Listing>() };
+  is("pre-orders read in part: unknown, never 'not available'", await productsBuyableNow(store, [limited], Date.now(), partOutside).then(() => "answered", () => "unknown"), "unknown");
+  const partInside = { soon: { soon: new Set<string>([guide]), days: new Map<string, string>(), partial: true as const }, listings: new Map<string, Listing>() };
+  is("pre-orders read in part, the product among them: coming soon, left out", (await productsBuyableNow(store, [limited], Date.now(), partInside)).has(guide), false);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands.some((c) => c[0] === "HGETALL" && String(c[1]).startsWith("nl:stock:"))) throw new Error("synthetic lost reply");
+    return original(commands);
+  }) as typeof redis.pipeline;
+  const stockUnread = await productsBuyableNow(store, [limited], Date.now(), already).then((ids) => (ids.has(guide) ? "on sale" : "left out"), () => "unknown");
+  redis.pipeline = original;
+  is("its stock not read: unknown (the locked space then says so), never left out as not on sale", stockUnread, "unknown");
 
   part("Only a product on sale now is named");
   await setStripeAccount(OWNER, "acct_1TestLocked0001", false);
@@ -174,12 +223,104 @@ async function main(): Promise<void> {
   is("Draft room made Hidden", await choose({ id: later, view: "hidden" }), [200, true]);
   is("an unknown space, or a view that is neither, is refused", [await choose({ id: newItemId(), view: "locked" }), await choose({ id: secret, view: "open" })], [[404, false], [400, false]]);
   is("nobody signed in is refused", await choose({ id: secret, view: "hidden" }, ""), [401, false]);
+  // Review of #3007, L2: the save's own answer is read; one not confirmed is never answered as saved.
+  const keep = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const reply = await keep(commands);
+    // The save is a compare-and-set since Codex X5's review (EVAL of WRITE_ABOUT_IF over the :cfg key): its answer lost.
+    return reply.map((r, i) => (commands[i][0] === "EVAL" && String(commands[i][3]).endsWith(":cfg") ? null : r));
+  }) as typeof redis.pipeline;
+  const unconfirmed = await choose({ id: secret, view: "locked" });
+  redis.pipeline = keep;
+  is("a save whose answer is not OK: an error, never saved", unconfirmed, [500, false]);
   html = await draw(OUTSIDER);
   is("the page follows: Secret room locked with nothing from inside, Draft room gone", [lockedPart(html).includes("Secret room"), lockedPart(html).includes("Draft room"), nothingInside(html)], [true, false, []]);
 
   part("The creator chooses it in the studio");
   const studio = readFileSync("components/community-studio.tsx", "utf8");
   is("the space's form offers Hidden and Visible and locked", [studio.includes("Visible and locked"), studio.includes("Hidden")], [true, true]);
+
+  part("Products past the read cap: a space whose products were not read never says access isn't available");
+  // Review of #3007 (6 November 2026): the candidates were every space's products joined and cut at the first 24,
+  // so a space after one with 24 products got "none" while its product was on sale.
+  const fillers: string[] = [];
+  for (let n = 0; n < MAX_UNLOCK_PRODUCTS; n++) fillers.push(await made(`Item ${n}`, "5"));
+  const big = newItemId(), small = newItemId();
+  const capped = (bigNeeds: string[]): CommunityConfig => ({
+    ...freshConfig(store.name),
+    access: [starter, guide, ...fillers],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: big, name: "Big room", about: "", creatorOnly: false, only: bigNeeds, level: 0, shown: true },
+      { id: small, name: "Small room", about: "", creatorOnly: false, only: [guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  });
+  const yes = async () => true;
+  store = (await storeForEmail(OWNER))!;
+  const guideLink = { title: "Guide", href: guideHref };
+  is("control: with 23 products in the space before it, the small space names its product", (await unlocksOf(store, capped(fillers.slice(0, MAX_UNLOCK_PRODUCTS - 1)), yes))?.[small], guideLink);
+  is("with 24 products in the space before it, the small space still names its product", (await unlocksOf(store, capped(fillers), yes))?.[small], guideLink);
+  await saveConfig(id, capped(fillers));
+  html = await draw(OUTSIDER);
+  is("the member's page: Unlock with Guide for the small space, never not available", [lockedPart(html).includes("Unlock with Guide"), lockedPart(html).includes(`href="${guideHref}"`)], [true, true]);
+  is("never more than the cap is read", unlockCandidates(lockedOf(capped(fillers), new Set())).length <= MAX_UNLOCK_PRODUCTS, true);
+  // One space per product, more spaces than the cap: the one left unread is "unknown", never "none".
+  const many: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [starter, guide, ...fillers],
+    spaces: [...fillers, guide].map((product, n) => ({ id: newItemId(), name: `Room ${n}`, about: "", creatorOnly: false, only: [product], level: 0, shown: true })) as CommunityConfig["spaces"],
+  };
+  const ways = (await unlocksOf(store, many, yes))!;
+  const last = many.spaces[many.spaces.length - 1].id;
+  is("a space none of whose products was read is capped (ask the creator), not none", ways[last], "capped");
+  is("no space says none while its product is on sale", Object.values(ways).filter((way) => way === "none").length, 0);
+
+  part("The read cap runs out before a product on sale: the space says so truthfully, never 'reload'");
+  // Review of #3007 (7 November 2026): 24 hidden products before the one on sale left the space "unknown" for good,
+  // and the page said "Reload the page to try again", which never helps (a space takes up to 50 products).
+  const shelved: string[] = [];
+  for (let n = 0; n < MAX_UNLOCK_PRODUCTS; n++) {
+    const product = await made(`Shelved ${n}`, "5");
+    await setProductHidden(OWNER, product, true);
+    shelved.push(product);
+  }
+  const deep = newItemId();
+  const deepConfig: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [starter, guide, ...shelved],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: deep, name: "Deep room", about: "", creatorOnly: false, only: [...shelved, guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  };
+  store = (await storeForEmail(OWNER))!;
+  let units = 0;
+  const counted = async (n: number) => {
+    units += n;
+    return true;
+  };
+  is("24 hidden products, then Guide on sale: the space is capped, not unknown", (await unlocksOf(store, deepConfig, counted))?.[deep], "capped");
+  is("and no more than the cap was paid for", units <= collectionUnits(MAX_UNLOCK_PRODUCTS), true);
+  await saveConfig(id, deepConfig);
+  html = await draw(OUTSIDER);
+  is("the member's page asks them to ask the creator, and never says reload", [lockedPart(html).includes("Ask the creator how to get in."), lockedPart(html).includes("Reload the page")], [true, false]);
+
+  part("A space settled by its first product leaves the rest of the cap to the next one");
+  const quick = newItemId(), slow = newItemId();
+  const twoConfig: CommunityConfig = {
+    ...freshConfig(store.name),
+    access: [guide, ...fillers, ...shelved],
+    spaces: [
+      { id: general, name: "General", about: "", creatorOnly: false, only: [], level: 0 },
+      { id: quick, name: "Quick room", about: "", creatorOnly: false, only: fillers, level: 0, shown: true },
+      { id: slow, name: "Slow room", about: "", creatorOnly: false, only: [...shelved.slice(0, 13), guide], level: 0, shown: true },
+    ] as CommunityConfig["spaces"],
+  };
+  units = 0;
+  const two = (await unlocksOf(store, twoConfig, counted))!;
+  is("the quick space names its first product", two[quick], { title: "Item 0", href: `/@lockedclub/p/${productSegment({ id: fillers[0], title: "Item 0" })}` });
+  is("the slow space, behind 13 hidden products, still names Guide", two[slow], guideLink);
+  is("and the reads stay inside the cap", units <= collectionUnits(MAX_UNLOCK_PRODUCTS), true);
   done();
 }
 

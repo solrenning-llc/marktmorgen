@@ -37,6 +37,9 @@ import { TEST_CONSENT, withConsent } from "./digital-consent-fixture";
 import { consentMetaValue } from "@/lib/digital-consent";
 import { NextRequest } from "next/server";
 import { POST as switchRoute } from "@/app/api/store/manage/switch/route";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 process.env.STRIPE_SECRET_KEY = "sk_test_yearly_switch_only";
 process.env.RESEND_API_KEY = "re_test_yearly_switch_only";

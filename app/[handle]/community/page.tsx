@@ -94,8 +94,15 @@ export default async function CommunityPage({ params, searchParams }: Params) {
   const { spaces, unchecked, lasting } = await spaceChecks(store, config, { owner, email: viewer.email, holdings: viewer.holdings });
   const mineIds = new Set(spaces.map((s) => s.id));
   const askedSpace = typeof query.space === "string" && ITEM_ID.test(query.space) ? query.space : "";
+  if (askedSpace && unchecked.has(askedSpace)) {
+    // Asking again will not tell (the pre-review of #3395, round 2): the member is told to write to the creator,
+    // never sent to an error page that says to try again. A passing unknown still fails to the store's error page
+    // (review of #3007, M1), never answered as kept for other buyers.
+    if (lasting) redirect(`/@${store.handle}/community?n=spaceunknownlasting`);
+    throw new Error("a community space's access could not be checked just now");
+  }
   // A space they may not see answers the same as one that is not there.
-  if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=${unchecked.has(askedSpace) ? (lasting ? "spaceunknownlasting" : "spaceunknown") : "spacelocked"}`);
+  if (askedSpace && !mineIds.has(askedSpace)) redirect(`${`/@${store.handle}/community`}?n=spacelocked`);
   const space = askedSpace ? spaces.find((s) => s.id === askedSpace) ?? null : null;
   const beforeRaw = typeof query.before === "string" ? Number(query.before) : NaN;
   const before = Number.isInteger(beforeRaw) && beforeRaw > 0 ? beforeRaw : null;

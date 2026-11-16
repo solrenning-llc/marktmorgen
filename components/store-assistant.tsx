@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { EmailInput } from "@/components/email-input";
 import { assistantWords } from "@/lib/buyer-words/assistant";
-import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/store-assistant-rules";
+import { MAX_ASSISTANT_QUESTION, MIN_ASSISTANT_QUESTION } from "@/lib/assistant-question-length";
 
 type Turn = { at: number; from: "buyer" | "ai"; text: string; status?: "answer" | "unknown" | "handoff" | "sent" };
 type Thread = { token: string; turns: Turn[] };

@@ -220,7 +220,9 @@ async function main(): Promise<void> {
   sessions["jo@example.com"] = [paid(1, ticket), ...history(pages * 100 + 5, null, other).map((row, i) => ({ ...row, id: `cs_test_cpujo${String(i).padStart(6, "0")}` }))];
   is("jo is let in (control)", (await viewerOf("jo@example.com")).state, "in");
   const roomHtml = await draw("jo@example.com");
-  const locked = roomHtml.match(/<section[^>]*id="cm-locked"[\s\S]*?<\/section>/)?.[0] ?? "";
+  // Rule 23 (merge of main into #3395): main's #3007 (review M1) lists a space whose answer is not known apart, in
+  // its own section (cm-unchecked), never under "Locked"; it was read from cm-locked here.
+  const locked = roomHtml.match(/<section[^>]*id="cm-unchecked"[\s\S]*?<\/section>/)?.[0] ?? "";
   is("the page is drawn", roomHtml.startsWith("PAGE_FAILED"), false);
   is("the space is listed, without 'Unlock with' a product jo may hold", [locked.includes("Inner room"), locked.includes("Unlock with")], [true, false]);
   // Rule 23 (round 2 of that pre-review): was `unchecked` ("Reload the page"); jo's purchases are more than are read,

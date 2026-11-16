@@ -733,6 +733,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:stats:@lib/meta-ads.ts": { what: "What Meta says the ads spent", parts: [capped(KEPT_DAYS * 256, "A line a day.", src("lib/stats.ts", "KEPT_DAYS"))] },
   "nl:mv:@lib/move-members.ts": room("Members invited over from another platform", "lib/move-members.ts"),
   "nl:mv:due@lib/move-members.ts": company("Invites to remind", "One sorted set for every store, each an invite's."),
+  // Claude 7, MEDIUM on #3473: a membership's removal marks it for a day, so an import step that read the catalog before it writes nothing to it.
+  "nl:mv:gone:@lib/move-members.ts": short("A membership just removed, so no import step writes an invitation to it", "studio", 1),
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },

@@ -435,6 +435,14 @@ export const monthPeriod = (handle: string, month: string): SummaryPeriod => ({ 
  * the provider keeps refusing) stops after three tries, so the cost of trying is bounded.
  */
 export const SUMMARY_TRIES = 3;
+/**
+ * The most Redis commands the weekly or monthly route sends for one store on one try of a period's summary, its own
+ * (the email's sender, lib/email.ts sendEmailPinned, is the email's): measured on the longest try, a post and the
+ * owner's email both refused, so every part's mark is taken, its first try's time kept, the mark let go, the tries
+ * counted and the period given back (tests/numbers-summary-retry-cost.test.ts). Priced in tests/plan-cost-registry.ts
+ * (NUMBERS_SUMMARY_RETRY).
+ */
+export const SUMMARY_TRY_COMMANDS_MOST = 20;
 
 /** A part of the summary (the owner's email, the channel's post), marked once for the period before it goes. */
 export type SummaryPart = "emailed" | "posted";
@@ -515,6 +523,21 @@ export async function sendPart(
   if (got === "unknown") console.error(`stats-report: a ${part} mark answered in an unknown shape; that part is not sent this run`);
   await releaseMark(key, value);
   return "missed";
+}
+
+/**
+ * Whether no run has tried this period before (the tries count tryPeriodAgain keeps answered exactly nil). A period let
+ * go for another try, or a count that did not read exactly (rule 24), is not a first try: what a first try alone
+ * may spend (the weekly AI lead, one of the creator's monthly AI writing jobs; Claude 7's MEDIUM on #3297) is not
+ * spent again on it. Never throws.
+ */
+export async function firstTryOf(period: SummaryPeriod): Promise<boolean> {
+  try {
+    const replies = repliesFor(await redisPipeline([["GET", `${period.key}:tries`]]), 1);
+    return !!replies && replies[0] === null;
+  } catch {
+    return false;
+  }
 }
 
 /**

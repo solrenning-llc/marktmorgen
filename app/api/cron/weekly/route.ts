@@ -8,7 +8,7 @@ import { monthKey } from "@/lib/delivery";
 import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
-import { EMAIL_KEY_HOLDS_MS, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
+import { EMAIL_KEY_HOLDS_MS, firstTryOf, noteSeen, readNumbers, readSeen, releaseWeek, sendPart, tryPeriodAgain, weekClaim, weekOf, weekPeriod, weeklyMessage, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { weeklySummary } from "@/lib/numbers-ask";
 import { aiAvailableFor } from "@/lib/ai";
 import { spendsForReport } from "@/lib/ad-spend";
@@ -147,8 +147,10 @@ export async function GET(request: NextRequest) {
         decided.push(folder);
         continue;
       }
-      // A few sentences written from the same numbers, first, where the creator turned it on (lib/numbers-ask.ts).
-      if (store.weeklyAi && aiAvailableFor(store)) {
+      // A few sentences written from the same numbers, first, where the creator turned it on (lib/numbers-ask.ts). Only on
+      // the week's first try: each lead is one of the creator's monthly AI writing jobs, and a week tried again (a post
+      // or an email that did not go) never takes another for the same summary (Claude 7's MEDIUM on #3297).
+      if (store.weeklyAi && aiAvailableFor(store) && (await firstTryOf(period))) {
         const lead = await weeklySummary(store, data).catch(() => null);
         if (lead) message.text = `In short: ${lead}\n\n${message.text}`;
       }

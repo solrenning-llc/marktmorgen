@@ -42,7 +42,9 @@ part("Honest words: it discourages, never protects");
 for (const [name, words] of [["notice", VIDEO_STAMP_NOTICE], ["studio note", VIDEO_STAMP_STUDIO_NOTE]] as const) {
   is(`${name} promises no protection`, /\b(protect|prevent|secure|stops? (?:piracy|copying)|can'?t be (?:copied|shared))/i.test(words.replace("cannot stop anyone", "")), false);
 }
-is("the studio says what it cannot do", VIDEO_STAMP_STUDIO_NOTE.includes("cannot stop anyone from recording") && VIDEO_STAMP_STUDIO_NOTE.includes("not shown while a video plays full screen"), true);
+is("the studio says what it cannot do", VIDEO_STAMP_STUDIO_NOTE.includes("cannot stop anyone from recording"), true);
+is("the studio says where full screen keeps it and where it does not", VIDEO_STAMP_STUDIO_NOTE.includes("The Full screen button under the video keeps it showing") && VIDEO_STAMP_STUDIO_NOTE.includes("not shown when a browser or phone plays the video full screen on its own"), true);
+is("nothing says it is shown in every full screen", /shown (?:in|while) (?:every|any|all) full screen|always shown/i.test(VIDEO_STAMP_STUDIO_NOTE + VIDEO_STAMP_NOTICE), false);
 is("buyers are told before they pay", VIDEO_STAMP_NOTICE.includes("your email"), true);
 
 done();

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import {
@@ -10,6 +11,7 @@ import {
   MAX_BUTTON_TEXT,
   MAX_PLACE,
   buttonCode,
+  buttonColors,
   buttonStyle,
   buttonText,
   cardCode,
@@ -84,6 +86,7 @@ export function BuyButtonEditor({
   }
 
   const words = buttonText(text, product.title);
+  const colorsChanged = buttonColors(fill, onFill).changed;
   const height = heights[product.id] ?? CARD_HEIGHTS.plain;
   const code =
     kind === "card"
@@ -169,6 +172,13 @@ export function BuyButtonEditor({
           </span>
           <input className="field mt-1" maxLength={MAX_BUTTON_TEXT} value={text} placeholder={`Buy ${product.title}`} onChange={(event) => setText(event.target.value)} />
         </label>
+      ) : null}
+
+      {kind === "button" && colorsChanged ? (
+        <p className="mt-3 text-sm text-ink-soft">
+          These colors are hard to read. The code uses readable colors so the words are clear.{" "}
+          <Link href="/studio#look" prefetch={false} className="font-semibold underline underline-offset-4">Choose another store color</Link>.
+        </p>
       ) : null}
 
       <div className="mt-6">

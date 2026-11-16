@@ -18,6 +18,9 @@ const MESSAGES: Record<string, string> = {
   too_big: "That picture is still over 1 MB after shrinking. Try a simpler one.",
   type: "That picture could not be read. Try a JPEG, PNG or WebP.",
   unknown: "That link is no longer on your page.",
+  // A name that is neither a new upload nor this one's own picture (app/api/store/image, app/api/store/link-image): used
+  // elsewhere, or an upload a failed try already took. Said neutrally, so it is true either way.
+  in_use: "That picture could not be used here. Choose it from your device again.",
   none: "This account has no store yet.",
   signed_out: "Your session ended. Log in again.",
   store_full: "Your store is full. Remove something before adding more.",

@@ -12,7 +12,16 @@
  * ... mit Beginn der Vertragserfüllung sein Widerrufsrecht erlischt").
  * `membership` is for a membership, at least partly a service: the express
  * request to start now, and what a cancellation in the 14 days costs
- * (arts. 8(8), 14(3), 16(a)); it never says the right is lost.
+ * (arts. 8(8), 14(3), 16(a)); it never says the right is lost. It ends by
+ * naming the withdrawal function by the label the buyer's list of purchases
+ * shows (lib/buyer-words/withdrawal.ts, withdrawLink) and saying it is there:
+ * the pre-contract information on its existence and placement (art. 6(1)(h)
+ * and Annex I as amended by Directive (EU) 2023/2673; queue item 588 [KB9]).
+ * `digital` does not name it, and keeps the words of 2026-10-30.2: its own yes
+ * closes the function once supplied, with the confirmation known sent
+ * (lib/withdrawal-rules.ts, withdrawalWindow). Where the function is, for
+ * every kind of purchase, is said beside the box, outside both sentences
+ * (lib/buyer-words/withdrawal.ts, checkoutWhere; components/withdrawal-where.tsx).
  *
  * Both sentences are quoted back in the email, so a change to either in any
  * language is a new EU_WITHDRAWAL_CONSENT_VERSION and a new
@@ -49,7 +58,7 @@ export type DigitalConsentWords = {
 const en: DigitalConsentWords = {
   box: {
     digital: "Start my access before the 14-day cancellation period ends, as soon as it is available. I understand that once access starts, I lose my right to cancel.",
-    membership: "Start my membership now, before the 14-day cancellation period ends. I understand that if I cancel within those 14 days, I pay for what I was given until then.",
+    membership: "Start my membership now, before the 14-day cancellation period ends. I understand that if I cancel within those 14 days, I pay for what I was given until then. To cancel, I can use ‘Withdraw from contract here’ on my purchases page.",
   },
   note: "This is for buyers who have that right where they live, such as in the EU and the UK. You need to check this box to pay.",
   noteAdded: "This is for buyers who have that right where they live, such as in the EU and the UK. It is only about an added product you can open right away: check it to pay for that one. A shipped item keeps its own right to cancel.",
@@ -68,7 +77,7 @@ const en: DigitalConsentWords = {
 const es: DigitalConsentWords = {
   box: {
     digital: "Pido que mi acceso empiece antes de que acabe el plazo de desistimiento de 14 días, en cuanto esté disponible. Entiendo que pierdo mi derecho de desistimiento en cuanto empieza el acceso.",
-    membership: "Pido que mi suscripción empiece ya, antes de que acabe el plazo de desistimiento de 14 días. Entiendo que, si desisto en esos 14 días, pago lo que se me haya dado hasta entonces.",
+    membership: "Pido que mi suscripción empiece ya, antes de que acabe el plazo de desistimiento de 14 días. Entiendo que, si desisto en esos 14 días, pago lo que se me haya dado hasta entonces. Para desistir, puedo usar “Desistir del contrato aquí” en mis compras.",
   },
   note: "Es para quienes tienen ese derecho donde viven, como en la UE y el Reino Unido. Tienes que marcar esta casilla para pagar.",
   noteAdded: "Es para quienes tienen ese derecho donde viven, como en la UE y el Reino Unido. Solo afecta a un producto añadido que puedes abrir enseguida: márcala para pagarlo. Un artículo enviado conserva su propio derecho de desistimiento.",
@@ -87,7 +96,7 @@ const es: DigitalConsentWords = {
 const fr: DigitalConsentWords = {
   box: {
     digital: "Je demande que mon accès commence avant la fin du délai de rétractation de 14 jours, dès qu’il est disponible. Je reconnais perdre mon droit de rétractation dès que l’accès commence.",
-    membership: "Je demande que mon abonnement commence maintenant, avant la fin du délai de rétractation de 14 jours. Je reconnais que, si je me rétracte dans ces 14 jours, je paie ce qui m’a été fourni jusque-là.",
+    membership: "Je demande que mon abonnement commence maintenant, avant la fin du délai de rétractation de 14 jours. Je reconnais que, si je me rétracte dans ces 14 jours, je paie ce qui m’a été fourni jusque-là. Pour me rétracter, je peux utiliser « Se rétracter du contrat ici » dans mes achats.",
   },
   note: "C’est pour les acheteurs qui ont ce droit là où ils vivent, comme dans l’UE et au Royaume-Uni. Vous devez cocher cette case pour payer.",
   noteAdded: "C’est pour les acheteurs qui ont ce droit là où ils vivent, comme dans l’UE et au Royaume-Uni. Elle ne concerne qu’un produit ajouté que vous pouvez ouvrir tout de suite : cochez-la pour le payer. Un article expédié garde son propre droit de rétractation.",
@@ -106,7 +115,7 @@ const fr: DigitalConsentWords = {
 const de: DigitalConsentWords = {
   box: {
     digital: "Ich stimme ausdrücklich zu, dass mein Zugang vor Ablauf der 14-tägigen Widerrufsfrist beginnt, sobald er verfügbar ist. Mir ist bekannt, dass ich mit Beginn des Zugangs mein Widerrufsrecht verliere.",
-    membership: "Ich verlange ausdrücklich, dass meine Mitgliedschaft jetzt beginnt, vor Ablauf der 14-tägigen Widerrufsfrist. Mir ist bekannt, dass ich bei einem Widerruf innerhalb dieser 14 Tage für das bis dahin Erhaltene zahle.",
+    membership: "Ich verlange ausdrücklich, dass meine Mitgliedschaft jetzt beginnt, vor Ablauf der 14-tägigen Widerrufsfrist. Mir ist bekannt, dass ich bei einem Widerruf innerhalb dieser 14 Tage für das bis dahin Erhaltene zahle. Für einen Widerruf kann ich ‚Vertrag hier widerrufen‘ unter meinen Käufen nutzen.",
   },
   note: "Das gilt für Käufer, die dieses Recht dort haben, wo sie leben, etwa in der EU und im Vereinigten Königreich. Zum Bezahlen müssen Sie dieses Kästchen ankreuzen.",
   noteAdded: "Das gilt für Käufer, die dieses Recht dort haben, wo sie leben, etwa in der EU und im Vereinigten Königreich. Es betrifft nur ein hinzugefügtes Produkt, das Sie sofort öffnen können: Kreuzen Sie es an, um dieses zu bezahlen. Ein versandter Artikel behält sein eigenes Widerrufsrecht.",
@@ -125,7 +134,7 @@ const de: DigitalConsentWords = {
 const it: DigitalConsentWords = {
   box: {
     digital: "Chiedo che il mio accesso inizi prima della fine del periodo di recesso di 14 giorni, appena è disponibile. Riconosco che perdo il diritto di recesso appena inizia l’accesso.",
-    membership: "Chiedo che il mio abbonamento inizi subito, prima della fine del periodo di recesso di 14 giorni. Riconosco che, se recedo entro quei 14 giorni, pago quanto ricevuto fino ad allora.",
+    membership: "Chiedo che il mio abbonamento inizi subito, prima della fine del periodo di recesso di 14 giorni. Riconosco che, se recedo entro quei 14 giorni, pago quanto ricevuto fino ad allora. Per recedere, posso usare “Recedi dal contratto qui” nei miei acquisti.",
   },
   note: "Vale per chi ha questo diritto dove vive, come nell’UE e nel Regno Unito. Per pagare devi selezionare questa casella.",
   noteAdded: "Vale per chi ha questo diritto dove vive, come nell’UE e nel Regno Unito. Riguarda solo un prodotto aggiunto che puoi aprire subito: selezionala per pagarlo. Un articolo spedito mantiene il proprio diritto di recesso.",
@@ -144,7 +153,7 @@ const it: DigitalConsentWords = {
 const nl: DigitalConsentWords = {
   box: {
     digital: "Ik wil dat mijn toegang begint vóór het einde van de bedenktijd van 14 dagen, zodra het beschikbaar is. Ik begrijp dat ik mijn herroepingsrecht verlies zodra de toegang begint.",
-    membership: "Ik wil dat mijn lidmaatschap nu begint, vóór het einde van de bedenktijd van 14 dagen. Ik begrijp dat ik, als ik binnen die 14 dagen herroep, betaal voor wat ik tot dan heb gekregen.",
+    membership: "Ik wil dat mijn lidmaatschap nu begint, vóór het einde van de bedenktijd van 14 dagen. Ik begrijp dat ik, als ik binnen die 14 dagen herroep, betaal voor wat ik tot dan heb gekregen. Om te herroepen kan ik ‘Overeenkomst hier herroepen’ gebruiken bij mijn aankopen.",
   },
   note: "Dit is voor kopers die dat recht hebben waar ze wonen, zoals in de EU en het Verenigd Koninkrijk. Je moet dit vakje aanvinken om te betalen.",
   noteAdded: "Dit is voor kopers die dat recht hebben waar ze wonen, zoals in de EU en het Verenigd Koninkrijk. Het gaat alleen over een toegevoegd product dat je meteen kunt openen: vink het aan om dat te betalen. Een verzonden artikel houdt zijn eigen herroepingsrecht.",
@@ -163,7 +172,7 @@ const nl: DigitalConsentWords = {
 const pt: DigitalConsentWords = {
   box: {
     digital: "Peço que o meu acesso comece antes do fim do prazo de livre resolução de 14 dias, assim que estiver disponível. Reconheço que perco o direito de livre resolução quando o acesso começar.",
-    membership: "Peço que a minha subscrição comece já, antes do fim do prazo de livre resolução de 14 dias. Reconheço que, se resolver o contrato nesses 14 dias, pago o que me foi prestado até lá.",
+    membership: "Peço que a minha subscrição comece já, antes do fim do prazo de livre resolução de 14 dias. Reconheço que, se resolver o contrato nesses 14 dias, pago o que me foi prestado até lá. Para resolver o contrato, posso usar “Desistir do contrato aqui” nas minhas compras.",
   },
   note: "É para quem tem esse direito onde vive, como na UE e no Reino Unido. Tem de assinalar esta caixa para pagar.",
   noteAdded: "É para quem tem esse direito onde vive, como na UE e no Reino Unido. Diz respeito apenas a um produto adicionado que pode abrir logo: assinale-a para o pagar. Um artigo enviado mantém o seu próprio direito de livre resolução.",

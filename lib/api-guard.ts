@@ -12,7 +12,7 @@
  * page can copy, and a browser refusing the request is the kinder way to learn
  * that.
  */
-import { type AgentScope, keyFromHeader, resolveKey } from "@/lib/api-keys";
+import { type AgentScope, type PauseWhy, keyFromHeader, resolveKey } from "@/lib/api-keys";
 import { agentMay } from "@/lib/api-key-rules";
 import { storeForId, type Store } from "@/lib/store";
 import { BodyTooLarge, limited, withinLimit } from "@/lib/request-guard";
@@ -24,6 +24,16 @@ import { API_READ_PAUSED_WORDS, API_WRITE_PAUSED_WORDS, integrationPauseWord } f
 export const API_RATE = 120;
 
 const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
+
+/** What a paused key's request is told, by why it is paused (lib/api-keys.ts PauseWhy): who can turn it back on, if anybody. */
+export const KEY_PAUSED_WORDS: Readonly<Record<PauseWhy, string>> = {
+  rule: "This key is paused: the store's team now logs in with a second step, and the key was made without one. Whoever made it can turn it back on under API keys in the studio, after logging in with a passkey or an authenticator app's code.",
+  left: "This key is paused for good: it was made by someone who is no longer on the store's team. The store's owner can revoke it under API keys in the studio and make a new one.",
+  role: "This key is paused: the role of the person who made it no longer allows it. The store's owner can turn it back on under API keys in the studio.",
+  unmatched: "This key is paused: it could not be linked to anyone on the store's team, most likely because the server's secret changed. The store's owner can check whose key it is under API keys in the studio (its name and when it was last used help), then turn it back on for that person, or revoke it.",
+  unknown: "This key is refused for now: its state on the store could not be read. Try again in a moment. If this keeps happening, the store's owner can revoke it under API keys in the studio and make a new one.",
+  unrecorded: "This key is paused: nobody is recorded as its maker (keys made before November 4, 2026), and after a change on the store's team (someone leaving, a role changed, or two-step login asked of everyone) such a key waits for the owner. The store's owner can turn it back on under API keys in the studio.",
+};
 
 export function apiError(status: number, error: string, message: string, extra: Record<string, string> = {}): Response {
   return Response.json({ error, message }, { status, headers: { ...headers, ...extra } });
@@ -132,6 +142,9 @@ async function apiKeyed(
   // Missing, malformed, unknown and revoked all get the same answer, so the
   // API cannot be used to learn which keys ever existed.
   if (!found) return unauthorized();
+  // Paused by the team's two-step rule (owner C3-100, lib/api-key-pause.ts):
+  // the key is real and kept, so its holder is told why and what to do.
+  if (found.paused) return apiError(403, "key_paused", KEY_PAUSED_WORDS[found.why ?? "rule"]);
   if (!(await withinLimit("api", found.id, API_RATE, 60))) {
     return apiError(429, "rate_limited", `At most ${API_RATE} requests a minute per key. Try again in a minute.`, { "Retry-After": "60" });
   }
@@ -151,9 +164,11 @@ async function apiKeyed(
     const held = await hold(store);
     if (held) return held;
   }
-  // Read-only API/MCP work needs its paid resource month. Writing includes
-  // access revocation and needs its own retained-cleanup classification.
-  if (purpose === "read" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
+  // Read-only API/MCP work, and an agent's preparation of a change (it reads
+  // the store and writes a proposal), need their paid resource month (Claude 5
+  // on #1856, CX72). Writing includes access revocation and needs its own
+  // retained-cleanup classification.
+  if (purpose !== "write" && store.period?.funded === true && !(await reservePaidResourceWindow(store))) {
     return apiError(429, "unavailable", "The store could not answer just now. Try again in a moment.");
   }
   // Each request is one of the store's window (lib/store-allowance-rules.ts), taken before any work.

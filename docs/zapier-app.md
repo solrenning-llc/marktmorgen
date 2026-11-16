@@ -31,11 +31,39 @@ not already.
   - Add or Remove Labels (`POST /api/v1/leads/labels`)
   - Give Product Access (`POST /api/v1/access`), its product field filled from
     `GET /api/v1/products`.
+  - Create Discount Code (`POST /api/v1/codes`) — made on the creator's own
+    Stripe account with the studio's rules, only while the store is taking
+    payments; letters already used there are refused, so a repeated run makes
+    no second code.
 
 The five endpoints a store may have (`MAX_ENDPOINTS`) count those a Zap adds,
 so a creator cannot run past the store's own limit from Zapier. Every endpoint
 a Zap adds is reported to the creator's inbox, exactly as one added in the
 studio is.
+
+### What reaches a Zap
+
+A trigger passes a message on only when it is one the store's webhooks sent
+for this Zap. The signing secret `POST /api/v1/hooks` returns is kept as the
+Zap's subscribeData (a subscription answered without one is not kept), and
+every message is checked against it as `lib/webhooks.ts` signs it: one `v1`
+of `Marktmorgen-Signature` must be the HMAC-SHA256 of `"<t>.<raw body>"`,
+compared in constant time (Web Crypto, so the file still needs no `require`),
+and `t` must be within 5 minutes of now (`SIGNATURE_TOLERANCE_SECONDS`; the
+server sets no number of its own and signs at each try, so a retry is fresh).
+For the day a replaced secret still signs, a Zap holding either one passes.
+Anything else (no header, another secret, a changed body or time, an old
+message, no raw body to check) halts the run with `HaltedError`: it shows in
+the Zap's history and never turns the Zap off, so a forger cannot switch it
+off by posting to its URL. A creator who makes a new secret for an endpoint a
+Zap added must turn that Zap off and on again within the day, or its messages
+stop passing. Tested by `tests/zapier-hook-signature.test.ts`.
+
+Repeats are **not** ignored. The same event can arrive twice (its id never
+changes), and Zapier does not drop repeats of an instant trigger. Ignoring
+them needs the ids already passed on remembered between runs, which is
+storage this app does not have (nothing is kept between runs of `perform`);
+it is left out until that storage is decided.
 
 ## The code
 
@@ -66,9 +94,14 @@ requests of its plan (`API_RATE`, `takeAllowance`), which
 `tests/spend-floor.test.ts` already holds to the floor: one for a call that
 reads only the store, and more for a read that reads more than one request's
 worth (`lib/api-read-rules.ts`). The samples of events shown while a Zap is
-set up (`GET /api/v1/events`) read the newest deliveries at their most, so each
-counts as 5 (`1 + apiReadUnits(eventsWork())`), taken before it reads. The webhook endpoints a
-Zap adds use the store's own webhook deliveries, already counted and bounded.
+set up (`GET /api/v1/events`) read the newest deliveries. The measuring is
+set aside before it is done (`EVENTS_PROBE_MOST`); each delivery is then
+measured, set aside at its size with the room its tries may still write on it
+(`deliveryReadBound`), read only up to that, and the whole settled at what was
+read and sent,
+so each counts as 2 to 14 (`1 + apiReadUnits(eventsWork())` at the most, for
+messages made since 4 November 2026, bounded by `DELIVERY_MAX_BYTES`; while one kept from before is larger than that, the
+sample is not read and says it could not be read just now). The webhook endpoints a Zap adds use the store's own webhook deliveries, already counted and bounded.
 
 ## Before it is published (do not skip)
 

@@ -26,14 +26,16 @@ const load = cache(async (raw: string, segment: string) => {
   // A store switched off after notices (lib/takedown.ts) shows no posts.
   if (!store || store.suspended) return null;
   const id = postIdFrom(decodeURIComponent(segment));
-  const post = id ? await readPost(store.statsId, id) : null;
-  return post && !post.draft ? { store, post } : null;
+  const post = id ? await readPost(store.statsId, id).catch(() => undefined) : null;
+  if (post === undefined) return { store, post: null, unavailable: true as const };
+  return post && !post.draft ? { store, post, unavailable: false as const } : null;
 });
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, post: segment } = await params;
   const found = await load(handle, segment);
   if (!found) return { title: "Not found — Marktmorgen" };
+  if (found.unavailable) return { title: `${speech(found.store).w.notAvailable} — ${found.store.name}`, robots: { index: false, follow: true } };
   const { store, post } = found;
   const url = `${storeRoot(store)}/blog/${postSegment(post)}`;
   return {
@@ -49,8 +51,21 @@ export default async function PostPage({ params }: Params) {
   const { handle, post: segment } = await params;
   const found = await load(handle, segment);
   if (!found) notFound();
-  const { store, post } = found;
+  const { store } = found;
   if (await isResting(store)) return <StoreResting store={store} />;
+  if (found.unavailable) {
+    const { w, lang } = speech(store);
+    return (
+      <div lang={lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{w.blogOf(store.name)}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}/blog`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.blogAll}</Link>
+        </main>
+      </div>
+    );
+  }
+  const { post } = found;
   // Its address with today's title in words: an older one still finds it.
   if (decodeURIComponent(segment) !== postSegment(post)) permanentRedirect(`/@${store.handle}/blog/${postSegment(post)}`);
   const say = speech(store);

@@ -216,7 +216,8 @@ export const emptyBlocksLeft = (): BlocksLeft => ({ pictures: 0, refs: 0, review
  * first left out (reviews are the first store's buyers'), every product and
  * form named mapped to its copy, and no tie to a section saved in the first
  * store. The blocks keep their ids, so writing the same copy again writes
- * the same page.
+ * the same page. A divider or a space (375 [TB1]) holds nothing of the first
+ * store's, so it comes across as it is.
  */
 export function copiedBlocks(blocks: readonly PageBlock[], products: IdMap, forms: IdMap, left: BlocksLeft): PageBlock[] {
   return blocks.flatMap((original): PageBlock[] => {

@@ -1,3 +1,4 @@
+import { OPTION_PARAM, linkedOption } from "@/lib/option-link-rules";
 import { absoluteImageUrl, servedImageUrl, servedSrcSet } from "@/lib/picture-served";
 import { listedLengths } from "@/lib/call-lengths";
 import { assistReminderShown } from "@/lib/assistant-reminder";
@@ -17,10 +18,11 @@ import { previewable } from "@/lib/pdf-preview";
 import { after } from "next/server";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
 import { planLine, speech, worthLine } from "@/lib/buyer-words";
+import { contactOpen } from "@/lib/store-contact";
 import { readAllTimeSales } from "@/lib/stats";
 import { paypalReady } from "@/lib/paypal-sales";
 import { saleClock, salePrice } from "@/lib/store-sale";
-import { preorderDay, soonOne, soonState } from "@/lib/preorders";
+import { knownNotSoon, preorderDay, soonOne, soonState } from "@/lib/preorders";
 import { GoesWellWith, InCollections } from "@/components/store-collections";
 import { canGift } from "@/lib/gift-rules";
 import { canGroup } from "@/lib/group-rules";
@@ -77,6 +79,8 @@ import { breadcrumbData, faqData } from "@/lib/page-structured-data";
 import { PictureViewer } from "@/components/picture-viewer";
 import { featuredCards } from "@/lib/featured-cards";
 import { ProductAbout } from "@/components/product-about-view";
+import { readCourse } from "@/lib/course";
+import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -115,9 +119,11 @@ const load = cache(async (raw: string, id: string): Promise<{ store: Store; prod
   return product && !product.hidden ? { store, product, asked } : null;
 });
 
-async function pageOf(store: Store, product: Listing): Promise<SalesPage> {
-  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage).
-  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => ({ ...EMPTY_PAGE, blocks: [] })) : { ...EMPTY_PAGE, blocks: [] };
+async function pageOf(store: Store, product: Listing): Promise<SalesPage | "unread"> {
+  // A page kept from visitors while the creator works on it shows as none (lib/sales-page.ts, livePage). One whose
+  // read is not known is "unread": said so, out of search, never shown as the product with no page
+  // (C4-20261106-2610-C6-153, unit B).
+  return product.page ? readPage(store.statsId, product.id).then((page) => livePage(page, saleClock())).catch(() => "unread" as const) : { ...EMPTY_PAGE, blocks: [] };
 }
 
 /**
@@ -146,6 +152,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
+  if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
   const description =
     page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
   const title = page.seoTitle || `${product.title} — ${store.name}`;
@@ -286,6 +293,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // Sent from a card on one of the creator's listed sites (app/embed): the site and the way back, carried to the
   // checkout, which checks both against the store's list again; anything else is ignored there.
   const embedSite = typeof query.site === "string" ? query.site.slice(0, 300) : "";
+  // A link to one price option opens the page with it chosen (630 [HN6](27)): only one the page offers now.
+  const linkedChoice = linkedOption(query[OPTION_PARAM], sellableOptions(product));
   const embedReturn = typeof query.return === "string" ? query.return.slice(0, 700) : "";
   // A reminder asked for below the buy box, and what came of it (lib/checkout-ask.ts).
   const remindAsked = typeof query.asked === "string" ? query.asked.slice(0, 20) : "";
@@ -304,10 +313,11 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
     product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""),
-    stockLeft(store, product).catch(() => null),
-    outOfKeys(store, product).catch(() => false),
+    // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
+    stockLeft(store, product).catch(() => undefined),
+    outOfKeys(store, product).catch(() => null),
     pageOf(store, product),
     summaryOf(store.statsId, product.id).catch(() => null),
     // What its order bump offers, drawn in the same box as on the store page.
@@ -316,7 +326,22 @@ export default async function ProductPage({ params, searchParams }: Params) {
     product.bundle ? offeredItems(store, [product]).then((m) => m.get(product.id) ?? []).catch(() => []) : Promise.resolve(null),
     // How many times it was bought, when the creator chose to say so (lib/sold-count.ts).
     readSoldCounts(store).catch(() => null),
+    // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
+    product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
   ]);
+  // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
+  if (savedPage === "unread") {
+    return (
+      <div lang={speech(store).lang.locale} className={`st-page st-theme-${store.look.theme} relative min-h-screen`} style={lookStyle(store.look) as React.CSSProperties}>
+        <main id="content" className="relative mx-auto max-w-2xl px-4 pb-16 pt-10 sm:pt-14">
+          <h1 className="font-display text-3xl font-semibold leading-tight">{product.title}</h1>
+          <p role="status" className="st-muted mt-4">{w.notAvailable}</p>
+          <Link href={`/@${store.handle}`} className="st-footer-link mt-6 inline-block rounded-lg py-3 text-sm font-semibold">{w.backTo(store.name)}</Link>
+        </main>
+      </div>
+    );
+  }
+  const videoLine = courseFacts?.videoSeconds != null ? videoTotalLine(courseFacts.videoSeconds, store.language) : null;
   // The version of a page test this visitor reads (lib/headline-test.ts),
   // before anything is drawn from the page, so all of it is one version.
   const page = await shownVersion(store, product.id, savedPage, product.priceCents > 0);
@@ -359,13 +384,15 @@ export default async function ProductPage({ params, searchParams }: Params) {
   // The reviews the creator picked to show first, on a page built from blocks (lib/sales-page.ts, ReviewsBlock).
   const pickedFirst = page.blocks.find((block) => block.kind === "reviews")?.first ?? [];
   const reviews = summary && summary.visible > 0 ? await visibleReviews(store.statsId, product.id, 0, REVIEWS_ON_PAGE, pickedFirst).catch(() => []) : [];
-  const count = noKeys ? 0 : stock;
+  // Its stock or its keys could not be read: no way to buy it is drawn, it is said so, and search is told of no offer.
+  const unread = stock === undefined || noKeys === null;
+  const count = unread ? null : noKeys ? 0 : (stock ?? null);
   const blocks = aboutBlocks(about);
   const remaining = count !== null && canSellProduct(store, product) ? count : null;
   // Bought for somebody else, where it can be: on sale, not coming soon, not sold out (lib/gift-rules.ts).
-  const giftable = selling && !soon && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
+  const giftable = selling && !soon && !unread && remaining !== 0 && bundleReady && canSellProduct(store, product) && canGift(product);
   // And for several people at once, where a gift can be and nothing is limited (lib/group-rules.ts).
-  const groupable = selling && !soon && bundleReady && canSellProduct(store, product) && canGroup(product);
+  const groupable = selling && !soon && !unread && bundleReady && canSellProduct(store, product) && canGroup(product);
   const plan = activePlan(product);
   const pwyw = activePwyw(product);
   const description = page.seoDescription || product.summary || aboutExcerpt(about) || product.title;
@@ -399,10 +426,15 @@ export default async function ProductPage({ params, searchParams }: Params) {
       <strong>{w.testModeTitle}</strong> {w.testModeBody}
     </p>
   ) : selling || byPayPal ? (
-    <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+    <>
+      <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(selling, byPayPal), store.name)}</p>
+      <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
+    </>
   ) : (
-    <p className="st-note mt-6 text-sm">
-      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne(store.name)}
+    <p className="st-note mt-6 text-sm" data-no-payments>
+      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBodyOne}
+      {/* A way to the creator only where there is one: the contact form on the store page, while it is open. */}
+      {contactOpen(store) ? <> <a href={`/@${store.handle}#contact`} className="underline underline-offset-2">{w.noPaymentsWrite(store.name)}</a></> : null}
     </p>
   );
 
@@ -427,8 +459,12 @@ export default async function ProductPage({ params, searchParams }: Params) {
           </a>
         </p>
       ) : null}
-      <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} />
-      {cartOn && !soon && cartable(product) ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {unread && selling && !soon ? (
+        <p role="status" className="st-muted mt-4 text-sm">{w.cardBuyUnread}</p>
+      ) : (
+        <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
+      )}
+      {cartOn && !soon && !unread && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox
@@ -493,9 +529,16 @@ export default async function ProductPage({ params, searchParams }: Params) {
     const other = pairListings.find((p) => p.id === id);
     return other && !other.hidden ? [other] : [];
   });
-  // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts).
-  const pairedSoon = cartOn && paired.length ? (await soonState(store).catch(() => ({ soon: new Set<string>() }))).soon : new Set<string>();
-  const pairedCart = new Set(paired.filter((p) => cartOn && cartable(p) && canSellProduct(store, p) && !pairedSoon.has(p.id)).map((p) => p.id));
+  // Which of them can go in the cart now: one more read, only when there are any (lib/preorders.ts). A reading that
+  // failed, or came back partial, is unknown, never "none coming soon" (CX-123 rule 24): no pick goes in the cart then.
+  const pairedSoon = cartOn && paired.length ? await soonState(store).catch(() => null) : null;
+  // A limited one with none left is not offered for the cart (lib/stock.ts); only limited ones are counted. Nor one
+  // handing out keys from a pool that is empty or cannot be read, which the checkout would refuse (lib/licence-keys.ts).
+  const pairedOut = new Set((await Promise.all(paired.filter((p) => cartOn && (p.stock !== null || p.keys)).map(async (p) => {
+    const none = (p.stock !== null && (await stockLeft(store, p).catch(() => 0)) === 0) || (p.keys && (await outOfKeys(store, p).catch(() => true)));
+    return none ? p.id : null;
+  }))).filter((id) => id !== null));
+  const pairedCart = new Set(paired.filter((p) => cartOn && pairedSoon && knownNotSoon(pairedSoon, p.id) && cartable(p) && canSellProduct(store, p) && !pairedOut.has(p.id)).map((p) => p.id));
   const shownElsewhere = [...paired.map((p) => p.id), ...alsoBought.map((item) => item.product.id)];
   const more = (
     <>
@@ -508,7 +551,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   const footer = (
     <div className="mt-10 text-center">
-      <a href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+      <a href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
         {w.everythingFrom(store.name)}
       </a>
       <StoreTracking store={store} presence product={product.id} />
@@ -519,7 +562,8 @@ export default async function ProductPage({ params, searchParams }: Params) {
 
   // Where the buy box is and what its button says, for the page's own blocks
   // and for the bar held at the bottom of a phone's screen (components/sticky-buy.tsx).
-  const { action, label } = pageAction(store, product, remaining, selling, related, soon, preorder);
+  const { action, label } =
+    unread && selling && !soon ? { action: { kind: "none" as const, text: w.cardBuyUnread }, label: "" } : pageAction(store, product, remaining, selling, related, soon, preorder);
   const sticky =
     action.kind === "none" ? null : (
       <StickyBuy target={free ? "get" : "buy"} label={label} price={<PriceTag store={store} product={product} />} />
@@ -533,12 +577,17 @@ export default async function ProductPage({ params, searchParams }: Params) {
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      {unread ? (
+        // A count that cannot be read: the product, with no offer for search engines (rule 24).
+        <JsonLd data={productData(store, product, description, false, summary, soon, Boolean(preorder), false)} />
+      ) : (
+        <JsonLd data={productData(store, product, description, remaining === 0, summary, soon, Boolean(preorder), free ? canGiveProduct(store, product) : canSellProduct(store, product) || byPayPal)} />
+      )}
       <JsonLd data={breadcrumbData({ name: store.name, url: `${SITE_URL}/@${store.handle}` }, { title: product.title, url: `${SITE_URL}${productPath(store, product)}` })} />
       {faq ? <JsonLd data={faq} /> : null}
       <ExitOfferSlot store={store} except={product.id} />
       {page.blocks.some((block) => block.kind === "pictures" && block.items.length > 0) ? <PictureViewer lang={store.language} /> : null}
-      <main id="content" className={`relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
+      <main id="content" className={`st-measure relative mx-auto ${wide ? "max-w-3xl" : "max-w-2xl"} px-4 pb-16 pt-10 sm:pt-14${sticky ? " st-has-sticky" : ""}`}>
         {children}
       </main>
       {sticky}
@@ -563,7 +612,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
                 height={product.image.height}
                 fetchPriority="high"
                 className="st-hero-img"
-                style={{ aspectRatio: `${product.image.width} / ${product.image.height}` }}
+                style={{ aspectRatio: `${product.image.width} / ${product.image.height}`, ...(product.image.tone ? { backgroundColor: product.image.tone } : {}) }}
               />
             </div>
           ) : null}
@@ -577,7 +626,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
             </div>
             {summary ? <RatingLine summary={summary} href="#reviews" className="mt-2" lang={store.language} /> : null}
             {soldLine}
-            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} />
+            <ProductFacts store={store} product={product} bundleItems={inside} linkCourse={false} videoLine={videoLine} />
             {product.summary ? <p className="st-muted mt-4 text-lg leading-relaxed">{product.summary}</p> : null}
             {blocks.length > 0 ? <ProductAbout blocks={blocks} language={store.language} /> : null}
             {bundleList}
@@ -645,7 +694,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         <p className="st-price text-base"><PriceTag store={store} product={product} /></p>
       </div>
       {soldLine}
-      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} />
+      <ProductFacts store={store} product={product} linkCourse={false} bundleItems={inside} videoLine={videoLine} />
       {bundleList}
       <div className="mt-4">{buyTerms}</div>
     </section>

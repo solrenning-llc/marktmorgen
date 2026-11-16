@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { clientAddress, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { believed, heard, isStreamConfigured, streamConfig } from "@/lib/stream";
 import { syncAutoCaptions } from "@/lib/auto-captions";
 
@@ -26,7 +26,7 @@ export const maxDuration = 30;
 export async function POST(request: NextRequest) {
   const config = streamConfig();
   if (!config || !config.readKey || !isStreamConfigured()) return new Response("Not found.", { status: 404 });
-  if (!(await withinLimit("stream-hook", clientAddress(request), PER_MINUTE, 60))) {
+  if (!(await withinEssentialLimit("stream-hook", clientAddress(request), PER_MINUTE, 60))) {
     return Response.json({ ok: false }, { status: 429 });
   }
   let body: string;

@@ -65,9 +65,17 @@ export function assessPlanPaymentDisputeCosts(value: unknown): ReviewedPlanPayme
     if (!cents(principal) || principal < PUBLISHED_PLAN_PRICES[tier][cycle] || !cents(fees) ||
         row.allContractPaymentsBounded !== true || row.liabilityTailReviewed !== true ||
         typeof evidence !== "string" || !evidence.trim() || evidence.length > 1_000) return null;
+    // Reject Proxy-forged descriptors before this row becomes known evidence.
+    // Every admitted field is already own primitive data, so this executes no
+    // review getter and a Proxy fails closed with DataCloneError.
+    try { structuredClone(review[key]); } catch { return null; }
     const loss = BigInt(principal) + BigInt(fees);
     if (loss > BigInt(PLAN_PAYMENT_DISPUTE_COST_RULES.maxInteger)) return null;
     result[key] = { principalCents: principal, feesCents: fees, lostPaymentWorstCaseCents: Number(loss) };
   }
+  // Children were rejected first, so cloning the exact outer record cannot
+  // traverse unknown executable evidence. A transparent outer Proxy is still
+  // unreviewed and must not become a complete liability snapshot.
+  try { structuredClone(value); } catch { return null; }
   return result;
 }

@@ -8,6 +8,7 @@ import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { previewSwitch } from "@/lib/tier-switch";
 import { YEARLY_TARGET, previewYearly } from "@/lib/yearly-switch";
+import { DigitalConsentBox } from "@/components/digital-consent-box";
 
 type Params = {
   params: Promise<{ handle: string }>;
@@ -42,7 +43,9 @@ export default async function SwitchPage({ params, searchParams }: Params) {
   // Reached from the page that asked why before cancelling (lib/leave-rules.ts).
   const fromLeave = read("from") === "leave";
   // `from=offer`: the link in the email that offers it (lib/yearly-ask.ts), which works for 14 days.
-  if (to === YEARLY_TARGET) return <YearlyPage store={store} token={token} sub={sub} fromOffer={read("from") === "offer"} />;
+  // Sent back here by the button when the EU box was not checked (app/api/store/manage/switch): it says what is missing.
+  const consentNeeded = read("consent") === "needed";
+  if (to === YEARLY_TARGET) return <YearlyPage store={store} token={token} sub={sub} fromOffer={read("from") === "offer"} consentNeeded={consentNeeded} />;
   const result = await previewSwitch(store, token, sub, to);
   const back = `/@${store.handle}/manage${token ? `?token=${encodeURIComponent(token)}` : ""}`;
   const m = membershipWords(store.language);
@@ -101,6 +104,8 @@ export default async function SwitchPage({ params, searchParams }: Params) {
                 <input type="hidden" name="to" value={result.preview.to.id} />
                 <input type="hidden" name="at" value={String(result.preview.at)} />
                 {fromLeave ? <input type="hidden" name="from" value="leave" /> : null}
+                {/* The new tier opens at once: the EU box again, before anything is charged (91 [D2-EU-WITHDRAWAL]). */}
+                {result.preview.digital ? <DigitalConsentBox id={`dc-switch-${result.preview.to.id}`} kind="membership" lang={store.language} refused={consentNeeded} className="mb-5" /> : null}
                 <button type="submit" className="btn st-btn btn-lg btn-block">
                   {result.preview.due > 0 && !result.preview.trialing ? m.switchAndPay(money(result.preview.due, result.preview.currency)) : m.switchNow}
                 </button>
@@ -132,7 +137,7 @@ export default async function SwitchPage({ params, searchParams }: Params) {
  * member's page or from the one email that offers it, whose link opens this
  * switch and nothing else.
  */
-async function YearlyPage({ store, token, sub, fromOffer }: { store: NonNullable<Awaited<ReturnType<typeof storeForPage>>>; token: string; sub: string; fromOffer: boolean }) {
+async function YearlyPage({ store, token, sub, fromOffer, consentNeeded }: { store: NonNullable<Awaited<ReturnType<typeof storeForPage>>>; token: string; sub: string; fromOffer: boolean; consentNeeded: boolean }) {
   const result = await previewYearly(store, token, sub);
   // The emailed link opens nothing else, so going back means asking for the member's own link.
   const back = `/@${store.handle}/manage${token && !result.emailed && !fromOffer ? `?token=${encodeURIComponent(token)}` : ""}`;
@@ -176,6 +181,8 @@ async function YearlyPage({ store, token, sub, fromOffer }: { store: NonNullable
                 <input type="hidden" name="sub" value={result.preview.sub} />
                 <input type="hidden" name="to" value={YEARLY_TARGET} />
                 <input type="hidden" name="at" value={String(result.preview.at)} />
+                {fromOffer ? <input type="hidden" name="from" value="offer" /> : null}
+                {result.preview.digital ? <DigitalConsentBox id="dc-switch-yearly" kind="membership" lang={store.language} refused={consentNeeded} className="mb-5" /> : null}
                 <button type="submit" className="btn st-btn btn-lg btn-block">
                   {result.preview.due > 0 && !result.preview.trialing ? m.switchAndPay(money(result.preview.due, result.preview.currency)) : m.switchNow}
                 </button>

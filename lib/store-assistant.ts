@@ -20,6 +20,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { repliesFor, stringList, UnknownReplyError } from "@/lib/redis-reply";
 import { boundedAiRequest } from "@/lib/ai-request-rules";
 import { aiRequestHoldMicroUsd } from "@/lib/spend-cost-table";
 import { modelKeySet, postToModel } from "@/lib/ai";
@@ -60,6 +61,8 @@ import {
 export const ASSISTANT_TOKEN = /^[A-Za-z0-9_-]{32}$/;
 const POOL_KEEP_SECONDS = 40 * 86_400;
 const poolKey = (statsId: string, windowId: string) => `nl:assist:pool:${statsId}:${windowId}`;
+/** The pool's fields, every one a whole amount written by ASSISTANT_POOL. */
+const POOL_FIELDS = new Set(["cap", "held", "spent", "n"]);
 const threadKey = (token: string) => `nl:assist:c:${token}`;
 const missedKey = (statsId: string) => `nl:assist:missed:${statsId}`;
 
@@ -138,10 +141,19 @@ export function assistantShown(store: Store, now = Date.now()): boolean {
 export async function assistantLeft(store: Store, now = Date.now()): Promise<{ left: number; answered: number; capMicroUsd: number; spentMicroUsd: number; heldMicroUsd: number } | null> {
   const window = assistantWindow(store.assistantPlan, now / 1000);
   if (!window || !store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]);
-  const flat = Array.isArray(raw) ? raw.map(String) : [];
+  // Rule 24: read exactly as ASSISTANT_POOL's own amount() does; a reply or a field that does not read is unknown,
+  // never 0 (which would show the month's pool as still there). A pool not written yet is a fresh month.
+  const reply = repliesFor(await redisPipeline([["HGETALL", poolKey(store.statsId, window.id)]]), 1);
+  const flat = reply ? stringList(reply[0]) : null;
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("the assistant's pool");
   const fields = new Map<string, number>();
-  for (let i = 0; i + 1 < flat.length; i += 2) fields.set(flat[i], Number(flat[i + 1]) || 0);
+  for (let i = 0; i < flat.length; i += 2) {
+    if (!POOL_FIELDS.has(flat[i])) continue;
+    const value = flat[i + 1];
+    const n = /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : NaN;
+    if (!Number.isSafeInteger(n) || n > 1_000_000_000_000) throw new UnknownReplyError("the assistant's pool");
+    fields.set(flat[i], n);
+  }
   const cap = Math.min(fields.get("cap") ?? assistantPoolMicroUsd(), assistantPoolMicroUsd());
   const held = fields.get("held") ?? 0, spent = fields.get("spent") ?? 0;
   return { left: Math.max(0, Math.floor((cap - held - spent) / assistantMessageWorstMicroUsd())), answered: fields.get("n") ?? 0, capMicroUsd: cap, spentMicroUsd: spent, heldMicroUsd: held };
@@ -209,12 +221,16 @@ export function assistantFacts(store: Store, products: Listing[], pages: Map<str
   return text;
 }
 
-/** The facts for a store, read as its public pages show them: its first products and the pages of the first few. */
+/**
+ * The facts for a store, read as its public pages show them: its first products and the pages of the first few. A page
+ * whose read is not known refuses the whole read (it throws): answered without it, the assistant could say the store
+ * does not say what its page does (C4-20261106-2610-C6-153, unit B).
+ */
 export async function readAssistantFacts(store: Store): Promise<string> {
   const products = (await readListings(store, visibleIds(store).slice(0, ASSISTANT_PRODUCTS))).filter((p) => !p.hidden);
   const pages = new Map<string, SalesPage>();
   const withPage = products.filter((p) => p.page).slice(0, ASSISTANT_PAGES);
-  const read = await Promise.all(withPage.map((p) => readPage(store.statsId, p.id).catch(() => null)));
+  const read = await Promise.all(withPage.map((p) => readPage(store.statsId, p.id)));
   withPage.forEach((p, i) => {
     const page = read[i];
     if (page && pageShown(page)) pages.set(p.id, page);
@@ -350,7 +366,10 @@ export async function askAssistant(input: { store: Store; token?: unknown; text:
   // No key on this deployment: the question can still be left for the creator.
   if (!modelKeySet()) return { ok: false, reason: "spent" };
 
-  const facts = input.facts ?? (await readAssistantFacts(store));
+  // Facts that could not be read whole are no facts to answer from: the question can still be left for the creator,
+  // and nothing is reserved or spent (unit B).
+  const facts = input.facts ?? (await readAssistantFacts(store).catch(() => null));
+  if (facts === null) return { ok: false, reason: "failed" };
   const request = assistantRequest(store, facts, before, text);
   if (!request) return { ok: false, reason: "failed" };
   const modelHold = aiRequestHoldMicroUsd(ASSISTANT_MODEL, { inputBytes: request.inputBytes, blocks: 1, media: null, maxTokens: ASSISTANT_OUTPUT_TOKENS });

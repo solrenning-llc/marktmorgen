@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { readTitles } from "@/lib/catalog";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { storeKey } from "@/lib/learn";
 import { isDiscordConfigured, serverRoles } from "@/lib/discord";
@@ -21,6 +22,10 @@ const NOTICES: Record<string, { tone: "ok" | "error"; text: string }> = {
   connected: { tone: "ok", text: "Your Discord server is connected. Now choose which products give which roles." },
   declined: { tone: "error", text: "Nothing was connected: the bot was not added on Discord's page." },
   error: { tone: "error", text: "The server could not be connected just now. Nothing was changed; try again in a moment." },
+  // The server connected now could not be read (app/api/discord/callback/route.ts): nothing was switched.
+  unchecked: { tone: "error", text: "We could not check the server connected now. Nothing was changed; try again in a moment." },
+  // The old server's forget failed and what it left could not be read (app/api/discord/callback/route.ts): unknown.
+  unconfirmed: { tone: "error", text: "We could not tell whether your old server was disconnected. Reload this page to see what is connected now, then try again." },
   limited: { tone: "error", text: "That is a lot of tries in a few minutes. Wait a little and try again." },
   // The paid period's resources could not be reserved (lib/contract-resource-window.ts): not a matter of tries.
   funding: { tone: "error", text: "Connections can't be made just now. Nothing was changed; try again later." },
@@ -60,7 +65,7 @@ export default async function StudioDiscordPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Discord</p>
+          <StudioTrail store={store} here="Discord" />
           <h1 className="t-h2 mt-3">Your Discord server, opened by what people buy</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             {`Choose which products give which roles in your server. A buyer presses “Join the Discord” after paying, says yes on Discord's own page, and is in with those roles. They keep them while they hold what they bought; when a membership ends or a purchase is refunded in full, the roles are taken back at the next check, which comes about every ${CHECK_HOURS} hours. While Stripe or Discord cannot be reached, or Discord will not let the bot remove a role, nothing is taken until it can be.`}

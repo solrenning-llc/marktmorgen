@@ -43,8 +43,9 @@ async function main(): Promise<void> {
   const text = JSON.stringify(copy);
   is("the other person's address is not in it", text.includes(other), false);
   is("the store's owner's is not either", text.includes(OWNER), false);
-  const community = copy.sections.find((s) => s.module === "lib/community-erasure.ts")?.records[0] as { room: { text: string }[]; events: { event: string }[] } | undefined;
+  const community = copy.sections.find((s) => s.module === "lib/community-erasure.ts")?.records[0] as { room: { text: string }[]; events: { event: string }[]; privateMessages: { request: boolean; messages: { from: string; text: string }[] }[] } | undefined;
   is("what they said in the community's room, and the event they are coming to", [community?.room.map((m) => m.text), community?.events.map((e) => e.event)], [["hello room"], ["ev0001"]]);
+  is("their private conversation, whole", community?.privateMessages.map((c) => c.messages.map((m) => [m.from, m.text])), [[["you", "hi"]]]);
 
   part("After the erasure");
   const erased = await erasePerson(store, person, { kind: "person" });

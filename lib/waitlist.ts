@@ -10,6 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -22,7 +23,9 @@ import { withinLimit } from "@/lib/request-guard";
 import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
-import type { Listing, Store } from "@/lib/store";
+import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
+import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
@@ -62,17 +65,26 @@ function sender(store: Store): string {
 
 // ------------------------------------------------------------------ coming soon
 
-/** The products of a store that are coming soon, for its pages. */
+/**
+ * The products of a store that are coming soon, for its pages. A reply that is
+ * not exactly a list of text (none, another shape, a hole, a lost pipeline) is
+ * unknown, never an empty set: it throws, so no caller can take a product whose
+ * state could not be read for one already on sale (rule 24).
+ */
 export async function soonProducts(store: Store): Promise<Set<string>> {
   if (!store.statsId || !isRedisConfigured()) return new Set();
-  const [raw] = await redisPipeline([["SMEMBERS", soonKey(store.statsId)]]);
-  return new Set(Array.isArray(raw) ? (raw as string[]) : []);
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", soonKey(store.statsId)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("the products coming soon");
+  return new Set(members);
 }
 
+/** Whether one product is coming soon: 0 or 1 only, as lib/preorders.ts reads it; anything else throws as unknown (rule 24). */
 export async function isSoon(store: Store, productId: string): Promise<boolean> {
   if (!store.statsId || !isRedisConfigured()) return false;
-  const [raw] = await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]);
-  return raw === 1 || raw === "1";
+  const raw = repliesFor(await redisPipeline([["SISMEMBER", soonKey(store.statsId), productId]]), 1)?.[0];
+  if (raw === 1 || raw === "1") return true;
+  if (raw === 0 || raw === "0") return false;
+  throw new UnknownReplyError("whether a product is coming soon");
 }
 
 export async function setSoon(store: Store, productId: string, on: boolean): Promise<void> {
@@ -108,12 +120,21 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
+  // Both read exactly (rule 24): a length in another shape is never room on the list, and a place
+  // in another shape is never "not on it", which would write a confirmed place over as a new one.
+  const read = repliesFor(await redisPipeline([
     ["HGET", listKey(sid, product.id), email],
     ["HLEN", listKey(sid, product.id)],
-  ]);
+  ]), 2);
+  const existing = read?.[0];
+  const size = countOf(read?.[1]);
+  if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
   const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
+  // Only a place that is not there (null) is "not on the list". A place kept as text that does not read is unknown
+  // (#4792): written over as a new one, it would lose a confirmed place and its leave token, take data room again and
+  // send a new confirmation. It is left as it is, and nothing is sent.
+  if (existing !== null && !before) return "error";
+  if (!before && size >= MAX_WAITLIST) return "full";
 
   const leave = before?.t ?? newToken();
   const asked = Boolean(before?.c) || consent;
@@ -162,20 +183,55 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
   return parseStoreWaitlistGrant(raw);
 }
 
+/**
+ * Writes a confirmed waitlist entry back only while its confirmation link and the entry itself still exist, in one
+ * step (#4268): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2] the entry. Answers 1 written, 0
+ * not. Billed as one EVAL and the calls inside it, at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the same
+ * check in one step.
+ */
+const WAIT_CONFIRM = [
+  "-- marktmorgen:waitlist-confirm:v1",
+  'if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 0 then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  "return 1",
+].join("\n");
+
+/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HEXISTS and HSET (tests/waitlist-confirm-cost.test.ts). */
+export const WAIT_CONFIRM_CALLS = 3;
+
+/**
+ * Public requests of the store's a press takes before it writes anything (#4404): the page the button is on pays one,
+ * and a press that writes the entry back (WAIT_CONFIRM) or signs the address up to the list does more than that one
+ * pays for (the link and the store read again, the script and its calls, the sign-up's first round), so it takes one
+ * more first, or writes nothing. Held in tests/waitlist-confirm-cost.test.ts and named in tests/plan-cost-registry.ts.
+ */
+export const WAIT_CONFIRM_UNITS = 1;
+
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
   const entry = parseEntry(raw);
   if (!entry) return { ok: false };
+  // Paid before it spends: a press that writes takes WAIT_CONFIRM_UNITS of the store's public requests, or is refused.
+  const joins = Boolean(entry.c && store.listId);
+  // Refused for want of a request: the link still works, so the page says to press it again later, never "expired".
+  if ((!entry.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false, reason: "busy" };
+  // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
+  // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
+  // the list again and lifts the erasure print.
   if (!entry.ok) {
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    if (written !== 1) return { ok: false };
   }
-  if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
-      console.error("could not add a waitlist address to a list", error),
-    );
+  if (joins && store.listId) {
+    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
+      console.error("could not add a waitlist address to a list", error);
+      // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.
+      return error instanceof UnknownReplyError ? ({ gone: true } as const) : null;
+    });
+    if (added?.gone) return { ok: false };
   }
   return { ok: true, productId: grant.p };
 }
@@ -259,6 +315,47 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
 }
 
 /**
+ * The store and product a launch sends for, "gone" only on an exact answer
+ * that one of them no longer exists, and "unknown" when a read did not come
+ * back in its shape (rule 24). `load` and `readProduct` answer null for both,
+ * so a null is checked again exactly: the handle's own key (Redis's nil, or a
+ * name let go, is a free handle) and the product among the store's own ids,
+ * then its listing record's size (STRLEN 0: no record).
+ */
+async function launchTarget(
+  handle: string,
+  sid: string,
+  pid: string,
+  load: (handle: string) => Promise<Store | null>,
+  readProduct: (store: Store, id: string) => Promise<Listing | null>,
+): Promise<{ store: Store; product: Listing } | "gone" | "unknown"> {
+  let store: Store | null;
+  try {
+    store = await load(handle);
+  } catch {
+    return "unknown";
+  }
+  if (!store) {
+    const reply = repliesFor(await redisPipeline([["GET", storeHandleKey(handle)]]), 1);
+    if (!reply) return "unknown";
+    const raw = reply[0];
+    return raw === null || (typeof raw === "string" && !handleLeadsToStore(raw)) ? "gone" : "unknown";
+  }
+  // The handle now leads to another store: this launch's store is not there.
+  if (store.statsId !== sid) return "gone";
+  let product: Listing | null;
+  try {
+    product = await readProduct(store, pid);
+  } catch {
+    return "unknown";
+  }
+  if (product) return { store, product };
+  if (!productIds(store).includes(pid)) return "gone";
+  const sizes = await listingSizes(store, [pid]).catch(() => null);
+  return sizes?.[0] === 0 ? "gone" : "unknown";
+}
+
+/**
  * Sends what launches still owe, a hundred at a time, until `deadline`.
  * Each batch carries a key made of where it starts, so a batch tried again
  * is never sent twice. Returns how many emails went.
@@ -270,14 +367,32 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
   for (const member of Array.isArray(members) ? (members as string[]) : []) {
     if (Date.now() > deadline) break;
     const [sid, pid] = member.split("|");
-    const [rawJob] = await redisPipeline([["GET", jobKey(sid, pid)]]);
-    const job = parseJob(rawJob);
-    const store = job ? await load(job.handle) : null;
-    const product = store && store.statsId === sid ? await readProduct(store, pid) : null;
-    if (!job || job.finished || !store || !product) {
+    // Only an exact answer that the launch is gone takes it off the queue
+    // (rule 24). A read that came back in another shape holds it where it is:
+    // nothing reserved, nothing sent, the cursor left, tried again next run.
+    // A hold is bounded: the job key lapses 120 days after its last write, and
+    // then its exact nil finishes the launch here.
+    const jobReply = repliesFor(await redisPipeline([["GET", jobKey(sid, pid)]]), 1);
+    const job = jobReply && typeof jobReply[0] === "string" ? parseJob(jobReply[0]) : null;
+    if (!job) {
+      if (jobReply && jobReply[0] === null) await redisPipeline([["SREM", JOBS, member]]);
+      else console.error("sending a waitlist launch: its job was read in an unknown shape, so it waits", new UnknownReplyError("a waitlist launch's job"));
+      continue;
+    }
+    if (job.finished) {
       await redisPipeline([["SREM", JOBS, member]]);
       continue;
     }
+    const target = await launchTarget(job.handle, sid, pid, load, readProduct);
+    if (target === "gone") {
+      await redisPipeline([["SREM", JOBS, member]]);
+      continue;
+    }
+    if (target === "unknown") {
+      console.error("sending a waitlist launch: its store or product was read in an unknown shape, so it waits", new UnknownReplyError("a waitlist launch's store or product"));
+      continue;
+    }
+    const { store, product } = target;
     const said = speech(store);
     const g = givingWords(store.language);
     const words = launchBody(
@@ -296,10 +411,29 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       const emails = Array.isArray(slice) ? (slice as string[]) : [];
       if (!emails.length) break;
       const [rows] = await redisPipeline([["HMGET", listKey(sid, pid), ...emails]]);
-      // Whoever removed their address since the launch started is skipped.
-      const chunk = emails
-        .map((email, i) => [email, parseEntry(Array.isArray(rows) ? rows[i] : null)] as const)
-        .filter((pair): pair is readonly [string, WaitEntry] => pair[1] !== null);
+      // Whoever removed their address since the launch started (an exact
+      // null) is skipped. A reply of another shape, or a place that does not
+      // read as one, is unknown, never "left" (rule 24): the batch waits for
+      // the next run, as on a retry, rather than passing them over for good.
+      const places = repliesFor(rows, emails.length);
+      const chunk: (readonly [string, WaitEntry])[] = [];
+      let unknown = places === null;
+      if (places) {
+        for (const [i, email] of emails.entries()) {
+          const place = places[i];
+          if (place === null) continue;
+          const entry = typeof place === "string" ? parseEntry(place) : null;
+          if (!entry) {
+            unknown = true;
+            break;
+          }
+          chunk.push([email, entry]);
+        }
+      }
+      if (unknown) {
+        console.error("sending a waitlist launch: its places were read in an unknown shape, so the batch waits", new UnknownReplyError("a launch batch's waitlist places"));
+        break;
+      }
       if (!(await reserveDay(chunk.length))) break;
       const messages = chunk.map(([email, entry]) => {
         const page = `${SITE_URL}/@${store.handle}/waitlist?leave=${entry.t}`;
@@ -351,9 +485,17 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  let removed = 0;
+  if (productIds.length) {
+    // One reply per product, each the integer 0 or 1. Anything else is unknown (rule 24, #4383): an entry holding the
+    // address may still be there to be copied into a launch, so the erasure is never reported complete; its retry
+    // deletes what is left.
+    const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
+    if (!replies || replies.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a person's waitlist deletions");
+    removed = replies.reduce<number>((sum, n) => sum + (n as number), 0);
+  }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return removed + blanked;
 }
 
 /**
@@ -365,9 +507,16 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
 export async function waitlistPlacesOf(sid: string | null, productIds: string[], email: string): Promise<{ product: string; joined: number; confirmed: number; news: boolean }[]> {
   if (!sid || !productIds.length || !isRedisConfigured()) return [];
   const address = normaliseEmail(email);
-  const replies = await redisPipeline(productIds.map((p) => ["HGET", listKey(sid, p), address]));
+  // One reply per product, each the place or an exact null (none). Anything
+  // else is unknown, never "on no waitlist" (rule 24): the copy says it could
+  // not be made (lib/person-copy.ts).
+  const what = "a person's waitlist places";
+  const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HGET", listKey(sid, p), address])), productIds.length);
+  if (!replies) throw new UnknownReplyError(what);
   return productIds.flatMap((product, i) => {
-    const entry = parseEntry(replies[i]);
-    return entry ? [{ product, joined: entry.at, confirmed: entry.ok, news: entry.c }] : [];
+    if (replies[i] === null) return [];
+    const entry = typeof replies[i] === "string" ? parseEntry(replies[i]) : null;
+    if (!entry) throw new UnknownReplyError(what);
+    return [{ product, joined: entry.at, confirmed: entry.ok, news: entry.c }];
   });
 }

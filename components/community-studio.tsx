@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { MemberPreview } from "@/components/community-member-preview";
+import { type LockedPreviewData, MemberPreview } from "@/components/community-member-preview";
 import type { CommunityConfig, Space } from "@/lib/community";
 import {
   MAX_COMMENTS_PER_POST,
@@ -32,7 +32,7 @@ import { startersAddedWords, startersToAdd } from "@/lib/community-starter";
 export type QueueRow = {
   key: string;
   kind: "post" | "comment";
-  count: number;
+  count: number | null;
   at: number;
   text: string;
   author: string;
@@ -76,13 +76,16 @@ const MESSAGES: Record<string, string> = {
   level: "Pick who may start posts here.",
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, first.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  not_confirmed: "We could not confirm that change just now. Reload the page to see where it stands, then try again.",
+  setup_read_unavailable: "Your community could not be read just now, so nothing was changed. Try again in a moment.",
+  report_read_unavailable: "This report could not be checked just now, so nothing was changed and it is still in the list. Try again in a moment.",
 };
 
 type Answer = { ok?: boolean; error?: string; config?: CommunityConfig };
 
-async function send(payload: Record<string, unknown>): Promise<Answer> {
+async function send(payload: Record<string, unknown>, route = "/api/store/community/manage"): Promise<Answer> {
   try {
-    const response = await fetch("/api/store/community/manage", {
+    const response = await fetch(route, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -114,15 +117,17 @@ export function CommunityStudio({
   canSettings = true,
   isOwner = true,
   events = null,
+  approval = null,
   rewards = [],
   courses = [],
+  lockedPreview = null,
 }: {
   handle: string;
   address: string;
   on: boolean;
   config: CommunityConfig | null;
   products: ProductChoice[];
-  queue: QueueRow[];
+  queue: QueueRow[] | null;
   members: StudioMember[];
   totals: { members: number; listed: number; posts: number; reach: number };
   canEmail: boolean;
@@ -136,19 +141,23 @@ export function CommunityStudio({
   isOwner?: boolean;
   /** The live events section (components/community-events-studio.tsx), drawn after the basics. */
   events?: React.ReactNode;
+  /** Approval before publishing and what waits for it (components/community-approval-studio.tsx), drawn beside the reports. */
+  approval?: React.ReactNode;
   /** Which course each level hands over (lib/community-points.ts). */
   rewards?: Reward[];
   /** The store's courses: what a level can hand over. */
   courses?: { id: string; title: string }[];
+  /** The way into each space shown locked, worked out on the server, for "View as a member" (542 [CM1]). */
+  lockedPreview?: LockedPreviewData | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ where: string; text: string } | null>(null);
 
-  async function run(where: string, payload: Record<string, unknown>, done: string): Promise<Answer> {
+  async function run(where: string, payload: Record<string, unknown>, done: string, route?: string): Promise<Answer> {
     setBusy(where);
     setError(null);
-    const answer = await send(payload);
+    const answer = await send(payload, route);
     setBusy(null);
     if (!answer.ok) {
       setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
@@ -207,12 +216,13 @@ export function CommunityStudio({
             <Welcome config={config} busy={busy} run={run} problem={problem} />
             <Messages config={config} busy={busy} run={run} problem={problem} />
             <Room config={config} busy={busy} run={run} problem={problem} />
-            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} />
+            <Spaces config={config} products={products} busy={busy} run={run} problem={problem} lockedPreview={lockedPreview} />
             <Levels config={config} rewards={rewards} courses={courses} busy={busy} run={run} problem={problem} />
           </>
         ) : (
           events
         )}
+        {approval}
         <Queue queue={queue} busy={busy} run={run} problem={problem} isOwner={isOwner} />
         <Members members={members} total={totals.members} busy={busy} run={run} problem={problem} />
       </div>
@@ -221,7 +231,7 @@ export function CommunityStudio({
   );
 }
 
-type Runner = (where: string, payload: Record<string, unknown>, done: string) => Promise<Answer>;
+type Runner = (where: string, payload: Record<string, unknown>, done: string, route?: string) => Promise<Answer>;
 type Problem = (where: string) => React.ReactNode;
 
 function Basics({
@@ -606,6 +616,8 @@ function SpaceRow({
   // that means "this is the only space".
   const [keptFor, setKeptFor] = useState<string[]>(space.only);
   const [level, setLevel] = useState(space.level);
+  // What a member without the products sees of it (542 [CM1]): nothing, or its name and line, locked.
+  const [view, setView] = useState<SpaceView>(space.shown === true ? "locked" : "hidden");
   const where = `space-${space.id}`;
   const kept = open.filter((p) => space.only.includes(p.id));
   return (
@@ -615,8 +627,12 @@ function SpaceRow({
           className="space-y-3"
           onSubmit={async (event) => {
             event.preventDefault();
-            const answer = await run(where, { action: "space-edit", id: space.id, name, about, creatorOnly, only: keptFor, level: creatorOnly ? 0 : level }, "Space saved.");
-            if (answer.ok) setEditing(false);
+            // How it shows is kept apart from the rest of the space (app/api/store/community/space-view), and saved after it.
+            const viewChanged = keptFor.length > 0 && view !== (space.shown === true ? "locked" : "hidden");
+            const answer = await run(where, { action: "space-edit", id: space.id, name, about, creatorOnly, only: keptFor, level: creatorOnly ? 0 : level }, viewChanged ? "" : "Space saved.");
+            if (!answer.ok) return;
+            if (viewChanged && !(await run(where, { id: space.id, view }, "Space saved.", "/api/store/community/space-view")).ok) return;
+            setEditing(false);
           }}
         >
           <div>
@@ -633,6 +649,7 @@ function SpaceRow({
           </label>
           {!creatorOnly ? <LevelPicker id={`${where}-level`} level={level} setLevel={setLevel} /> : null}
           <OnlyPicker open={open} only={keptFor} setOnly={setKeptFor} />
+          {keptFor.length > 0 ? <ViewPicker id={`${where}-view`} view={view} setView={setView} /> : null}
           <div className="flex flex-wrap gap-2">
             <button type="submit" className="btn btn-primary btn-sm" disabled={busy !== null}>Save</button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}>Cancel</button>
@@ -648,6 +665,7 @@ function SpaceRow({
               {kept.length ? (
                 <span className="tag ml-2 align-middle">{`Buyers of ${kept.length === 1 ? kept[0].title : `${kept.length} products`}`}</span>
               ) : null}
+              {kept.length && space.shown === true ? <span className="tag ml-2 align-middle">Visible and locked</span> : null}
             </p>
             {space.about ? <p className="text-sm text-ink-soft">{space.about}</p> : null}
           </div>
@@ -680,6 +698,35 @@ function SpaceRow({
   );
 }
 
+type SpaceView = "hidden" | "locked";
+
+/**
+ * What a member without the products a space is kept for sees of it (542 [CM1]).
+ * Either way they never see its posts, comments, members, files, events or a
+ * count of them; "Visible and locked" shows its name and one line, locked,
+ * with a button to the first of its products on sale now.
+ */
+function ViewPicker({ id, view, setView }: { id: string; view: SpaceView; setView: (next: SpaceView) => void }) {
+  const choice = (value: SpaceView, title: string, detail: string) => (
+    <label className="flex min-h-11 items-start gap-2 text-sm">
+      <input type="radio" name={id} className="mt-0.5 h-5 w-5 shrink-0" checked={view === value} onChange={() => setView(value)} />
+      <span className="min-w-0">
+        <span className="block font-semibold text-ink">{title}</span>
+        <span className="block text-ink-soft">{detail}</span>
+      </span>
+    </label>
+  );
+  return (
+    <fieldset>
+      <legend className="field-label">Members without one of these products</legend>
+      <div className="mt-2 space-y-1.5">
+        {choice("hidden", "Hidden", "They see no sign of the space.")}
+        {choice("locked", "Visible and locked", "They see its name and its one line, marked Locked, with a button to buy one of these products. Never its posts, comments or members, and no counts.")}
+      </div>
+    </fieldset>
+  );
+}
+
 /**
  * The products a space may be kept for: only those that already open the
  * community, because a space kept for a product that lets nobody in would
@@ -700,7 +747,7 @@ function OnlyPicker({
       <legend className="field-label">Keep it for the buyers of</legend>
       <p className="mt-1 text-xs text-ink-soft">
         Leave every box empty and the space is for every member. Check one or more and only members who have one of them see
-        the space, its posts and its address — everybody else sees no sign of it.
+        the space, its posts and its address. You choose below what everybody else sees.
       </p>
       <div className="mt-2 space-y-1.5">
         {open.map((product) => (
@@ -941,12 +988,14 @@ function Spaces({
   busy,
   run,
   problem,
+  lockedPreview,
 }: {
   config: CommunityConfig;
   products: ProductChoice[];
   busy: string | null;
   run: Runner;
   problem: Problem;
+  lockedPreview: LockedPreviewData | null;
 }) {
   const [name, setName] = useState("");
   const [about, setAbout] = useState("");
@@ -967,7 +1016,7 @@ function Spaces({
       <ul className="mt-3 divide-y divide-line">
         {config.spaces.map((space, i) => (
           <SpaceRow
-            key={`${space.id}-${space.name}-${space.about}-${space.creatorOnly}-${space.level}`}
+            key={`${space.id}-${space.name}-${space.about}-${space.creatorOnly}-${space.level}-${space.shown === true}`}
             space={space}
             first={i === 0}
             last={i === config.spaces.length - 1}
@@ -979,7 +1028,7 @@ function Spaces({
         ))}
       </ul>
       {config.spaces.map((s) => <div key={s.id}>{problem(`space-${s.id}`)}</div>)}
-      <MemberPreview spaces={config.spaces} access={config.access} open={open} />
+      <MemberPreview spaces={config.spaces} access={config.access} open={open} locked={lockedPreview} />
 
       {!full ? (
         <form
@@ -1037,7 +1086,7 @@ function Queue({
   problem,
   isOwner,
 }: {
-  queue: QueueRow[];
+  queue: QueueRow[] | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
@@ -1047,14 +1096,16 @@ function Queue({
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-queue-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="cm-queue-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Reported</h2>
-        <span className={`tag ${queue.length ? "tag-brand" : ""}`}>{queue.length ? `${queue.length} waiting` : "Nothing waiting"}</span>
+        <span className={`tag ${queue?.length ? "tag-brand" : ""}`}>{queue === null ? "Not loaded" : queue.length ? `${queue.length} waiting` : "Nothing waiting"}</span>
       </div>
       <p className="mt-2 text-ink-soft">
         {isOwner
           ? "Posts and comments members reported. Nobody is told who reported what. You can also hide, delete or mute from the ⋯ menu on any post."
           : "Posts and comments members reported. Nobody is told who reported what."}
       </p>
-      {queue.length === 0 ? (
+      {queue === null ? (
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">Reports could not be loaded. Reload this page to check them.</p>
+      ) : queue.length === 0 ? (
         <p className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">No reports. When a member reports something, it waits here.</p>
       ) : (
         <ul className="mt-4 space-y-3">
@@ -1064,7 +1115,7 @@ function Queue({
                 <span className="font-semibold text-ink">{row.kind === "post" ? "Post" : "Comment"}</span>
                 {` by ${row.author}`}
                 {row.authorEmail ? <span className="break-all">{` (${row.authorEmail})`}</span> : null}
-                {` · reported ${row.count === 1 ? "once" : `${row.count} times`}, last on ${day(row.at)}`}
+                {` · ${row.count === null ? "reported; reporter count is no longer available" : `reported ${row.count === 1 ? "once" : `${row.count} times`}`}, last on ${day(row.at)}`}
                 {row.hidden ? " · already hidden" : ""}
               </p>
               <p className="mt-2 break-words text-ink">{row.text}</p>

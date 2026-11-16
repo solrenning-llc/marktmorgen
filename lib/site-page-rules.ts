@@ -167,6 +167,9 @@ export const SITE_KINDS: readonly BlockKind[] = [
   "cta",
   // A form, survey or quiz (lib/forms.ts): asked on the store's own pages only, where it can lead a funnel on.
   "form",
+  // Arrangement only (375 [TB1]): a line and empty room, nothing of the creator's to write, check or pay for.
+  "divider",
+  "space",
 ];
 
 /** The key a page's blocks are kept under, beside the products' (lib/sales-page-store.ts). */

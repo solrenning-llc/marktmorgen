@@ -34,6 +34,17 @@ export async function POST(request: NextRequest) {
   const affiliate = await affiliateForSession(store, request.cookies.get(affiliateCookieName(store.handle))?.value);
   if (!affiliate) return back("signedout");
   if (!(await withinService("aff-payto", `${store.handle}|${affiliate.id}`, 5, 3600, store))) return back("payto-slow");
-  const result = await setPayAddress(store, affiliate, paypal);
+  // The record could not be read or written exactly, or kept changing (lib/affiliates.ts changeAffiliate): nothing
+  // was saved, and the page is not told it was.
+  const result = await setPayAddress(store, affiliate, paypal).catch((error: unknown) => {
+    console.error("saving an affiliate's PayPal address failed", error);
+    return null;
+  });
+  if (!result) {
+    return new Response("Your PayPal address could not be saved just now. Nothing was changed. Go back and try again in a moment.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "5" },
+    });
+  }
   return back(result.ok ? "payto" : "payto-email");
 }

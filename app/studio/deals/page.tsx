@@ -6,8 +6,11 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { DealsBoard } from "@/components/deals-board";
+import { DealChannelsLoader, DealChannelsWaiting } from "@/components/deal-channels-table";
+import { Suspense } from "react";
 import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { readFields, readOpportunityReview } from "@/lib/crm";
@@ -64,7 +67,7 @@ export default async function StudioDealsPage({ searchParams }: Params) {
       />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Deals and fields</p>
+          <StudioTrail store={store} here="Deals and fields" />
           <h1 className="t-h2 mt-3">Your deals, pipelines and what you keep about people</h1>
           <p className="mt-3 max-w-2xl text-ink-soft">
             Only your team sees any of this. Nothing here sends anything by itself; a workflow you set to start from a stage, under Email, can. Each person&apos;s answers to your fields are on their page under{" "}
@@ -76,6 +79,12 @@ export default async function StudioDealsPage({ searchParams }: Params) {
           <div className="mt-8">
             {restricted && access === null ? <p className="notice notice-warn">Your access to this store&apos;s pipelines could not be read just now, so none is shown. Reload the page in a moment, or ask the store&apos;s owner.</p> : inventory.available && access !== null && shown.pipelines.length === 0 ? <p className="notice notice-info">You have no pipelines to see in this store. Ask the store&apos;s owner if you should.</p> : available ? <DealsBoard key={(store.sid || store.handle) + ":" + dealActionFilter(query.followup)} deals={shown.deals} versions={Object.fromEntries(shown.deals.map(d => [d.id, inventory.versions[d.id] ?? ""]))} stages={shown.stages} pipelines={shown.pipelines} pipelineMax={Math.max(0, pipelineLimit(store) - hidden)} viewOnly={viewOnly} someHidden={restricted} fields={fields} currency={store.currency} assignees={assignees} today={today} initialFilter={dealActionFilter(query.followup)} requestHref={can(view.role, "send") ? studioPath(store, "", "requests") : undefined} /> : <DealsUnavailable storeId={store.sid} buyersHref={studioPath(store, "", "people")} fields={fields} followup={dealActionFilter(query.followup)} />}
           </div>
+          {/* 639 [GL7](9): the deals' value by where their people first came from; streamed in after the board. */}
+          {available ? (
+            <Suspense fallback={<DealChannelsWaiting />}>
+              <DealChannelsLoader store={store} deals={inventory.deals} stages={inventory.stages} />
+            </Suspense>
+          ) : null}
         </main>
       </StudioStorePin>
     </div>

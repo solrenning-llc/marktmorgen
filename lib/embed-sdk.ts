@@ -57,11 +57,11 @@
  * Browser-safe: the studio builds the code with these.
  */
 import { SITE_URL } from "./site-url";
-import { escapeHtml } from "./embed-rules";
+import { buttonColors, escapeHtml } from "./embed-rules";
 import { type ScriptMode, SCRIPT_MEDIUM, withTags } from "./embed-sites";
 
 /** Which version of the script this is; a change to it is a new version, and the old one keeps working. */
-export const SCRIPT_VERSION = 1;
+export const SCRIPT_VERSION = 2;
 
 /**
  * The script, exactly as it is pasted. One line per statement group, so a
@@ -94,17 +94,18 @@ export function loaderSource(origin = SITE_URL): string {
     'var join=p[3]==="join",info={kind:join?"optin":"product",handle:decodeURIComponent(p[2]),product:join?null:p[3],mode:a.getAttribute("data-mm")==="page"?"page":"overlay"};',
     'if(info.mode==="page"){fire("open",info,a);return}',
     'e.preventDefault();if(open)return;fire("open",info,a);u.searchParams.set("mm","overlay");',
-    'var box=d.createElement("div"),frame=d.createElement("iframe"),x=d.createElement("button"),name=(a.textContent||"").trim().slice(0,80)||"Checkout";',
+    'var box=d.createElement("dialog"),frame=d.createElement("iframe"),x=d.createElement("button"),name=(a.textContent||"").trim().slice(0,80)||"Checkout";',
     'box.setAttribute("role","dialog");box.setAttribute("aria-modal","true");box.setAttribute("aria-label",name);',
-    'box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;padding:72px 16px 16px;background:rgba(17,14,36,.6)";',
-    'frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";',
+    'box.style.cssText="position:fixed;inset:0;z-index:2147483646;display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;height:100%;max-width:none;max-height:none;margin:0;border:0;padding:72px 16px 16px;background:rgba(17,14,36,.6)";',
+    'frame.src=u.href;frame.title=name;frame.referrerPolicy="origin";frame.onload=function(){frame.onload=null;var f=d.activeElement;if(f===frame||f===box)try{frame.contentWindow.focus()}catch(x){}};',
     'frame.style.cssText="display:block;width:100%;max-width:400px;height:420px;max-height:calc(100vh - 96px);border:0;border-radius:24px;background:transparent";',
     'x.type="button";x.setAttribute("aria-label","Close");x.textContent="\\u00d7";',
     'x.style.cssText="position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:999px;background:#fff;color:#15112e;font:600 26px/1 system-ui,sans-serif;cursor:pointer";',
-    'x.onclick=function(){shut("button")};box.onclick=function(ev){if(ev.target===box)shut("backdrop")};',
+    'x.onfocus=function(){x.style.outline="3px solid transparent";x.style.boxShadow="0 0 0 3px #15112e,0 0 0 6px #fff"};x.onblur=function(){x.style.outline="";x.style.boxShadow="none"};',
+    'x.onclick=function(){shut("button")};box.onclick=function(ev){if(ev.target===box)shut("backdrop")};box.oncancel=function(ev){ev.preventDefault();shut("escape")};',
     "box.appendChild(frame);box.appendChild(x);",
     "open={box:box,frame:frame,el:a,info:info,over:d.documentElement.style.overflow};",
-    'd.documentElement.style.overflow="hidden";w.addEventListener("message",hear);d.addEventListener("keydown",key,true);d.body.appendChild(box);frame.focus()',
+    'd.documentElement.style.overflow="hidden";w.addEventListener("message",hear);d.addEventListener("keydown",key,true);d.body.appendChild(box);if(box.showModal)try{box.showModal()}catch(x){}frame.focus()',
     "});",
     "var mark=/^#mm-purchase=([a-z0-9]{6,40})\\.(evt_[0-9a-f]{32})$/.exec(w.location.hash);",
     'if(mark){api.purchase={product:mark[1],order:mark[2]};try{history.replaceState(history.state,"",w.location.pathname+w.location.search)}catch(x){}',
@@ -131,13 +132,13 @@ export const MAX_LINK_TEXT = 60;
 
 /** The link's look, the same as the plain button's (lib/embed-rules.ts buttonStyle), written into its style attribute. */
 function styleText(fill: string, onFill: string): string {
-  const safe = (colour: string) => (/^#[0-9a-f]{6}$/i.test(colour) ? colour : "#15112e");
+  const colors = buttonColors(fill, onFill);
   return [
     "display:inline-block",
     "padding:14px 28px",
     "border-radius:999px",
-    `background:${safe(fill)}`,
-    `color:${safe(onFill)}`,
+    `background:${colors.fill}`,
+    `color:${colors.onFill}`,
     "font:600 16px/1.25 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
     "text-decoration:none",
   ].join(";");

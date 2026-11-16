@@ -32,6 +32,7 @@
  * as it is; tests/order-data.test.ts holds them to the constants below.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, dataKey, giveData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 
@@ -174,14 +175,51 @@ local out = {charged}
 for c = 1, n do out[c + 1] = replies[c] end
 return out`;
 
+/** The commands ORDER_WRITE_IF_NEW carries: hash writes only, the first an HSETNX. */
+export const ORDER_IF_NEW_COMMANDS = ["HSETNX", "HSET", "HDEL"] as const;
+
+/** What ORDER_WRITE_IF_NEW answers when its first HSETNX's field was already there: nothing written, nothing charged. */
+export const ORDER_IF_NEW_TAKEN = -2;
+
+/**
+ * ORDER_WRITE, unchanged below its first line, run only when its first command, an HSETNX, would set its field, so
+ * the records that go with that field are written with it or not at all (lib/licence-keys.ts settle, 11 November
+ * 2026: the sale's key line and the key's record had been two writes, and a process that stopped between them left
+ * a key that no check could ever find). Before anything is written it holds the call to hash writes only, each
+ * well formed, on keys that are hashes or not there, the room included, so no command can fail halfway; then, if
+ * the HSETNX's field is already there, it answers {-2} and writes nothing. Otherwise ORDER_WRITE runs as it always
+ * does, measured and charged the same way, in the same script.
+ */
+export const ORDER_IF_NEW_GUARD = `-- marktmorgen:order-write-if-new:v1
+do
+  local n = tonumber(ARGV[1])
+  if not n or n < 1 or n > 48 or ARGV[2] ~= 'HSETNX' or ARGV[4] ~= '2' then return {-1} end
+  local room = redis.call('TYPE', KEYS[1])['ok']
+  if room ~= 'hash' and room ~= 'none' then return {-1} end
+  local i = 2
+  for c = 1, n do
+    local name, k, argc = ARGV[i], tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
+    if not k or k < 2 or not KEYS[k] or not argc or i + 2 + argc > #ARGV then return {-1} end
+    if not ((name == 'HSETNX' and argc == 2) or (name == 'HSET' and argc >= 2 and argc % 2 == 0) or (name == 'HDEL' and argc >= 1)) then return {-1} end
+    local t = redis.call('TYPE', KEYS[k])['ok']
+    if t ~= 'hash' and t ~= 'none' then return {-1} end
+    i = i + 3 + argc
+  end
+  if i ~= #ARGV + 1 then return {-1} end
+  if redis.call('HEXISTS', KEYS[tonumber(ARGV[3])], ARGV[5]) == 1 then return {-2} end
+end`;
+
+/** The guard, then ORDER_WRITE below its first line: written out whole so scripts/test_order_data_redis.py can put it together the same way. */
+export const ORDER_WRITE_IF_NEW = `${ORDER_IF_NEW_GUARD}\n${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}`;
+
 /** Whether a command is one an order's records may be written with, and names its key. */
 function checked(command: Command): string | null {
   const [name, key] = command;
   return typeof name === "string" && ALLOWED.has(name) && typeof key === "string" && key.length > 0 && key.length <= 512 ? key : null;
 }
 
-/** One script's worth: its keys and arguments. */
-function scriptOf(room: string, commands: Command[]): (string | number)[] {
+/** One script's worth: its keys and arguments (ORDER_WRITE, or ORDER_WRITE_IF_NEW, which reads them the same way). */
+function scriptOf(room: string, commands: Command[], script: string = ORDER_WRITE): (string | number)[] {
   const keys = [room];
   const index = new Map<string, number>();
   const argv: (string | number)[] = [commands.length];
@@ -195,16 +233,80 @@ function scriptOf(room: string, commands: Command[]): (string | number)[] {
     }
     argv.push(String(command[0]), at, command.length - 2, ...command.slice(2).map(String));
   }
-  return ["EVAL", ORDER_WRITE, keys.length, ...keys, ...argv];
+  return ["EVAL", script, keys.length, ...keys, ...argv];
 }
 
-/** What one script answered: what it charged, and each command's reply. Throws for a malformed call or a refused command, as redisPipeline does. */
-function readScript(reply: unknown, count: number): { charged: number; replies: unknown[] } {
-  if (!Array.isArray(reply) || reply.length !== count + 1 || !Number.isFinite(Number(reply[0])) || Number(reply[0]) < 0) throw new Error("an order's records could not be written");
-  const replies = reply.slice(1);
+/** Whether a reply is a whole count from `low` to `high` (inclusive). */
+const between = (reply: unknown, low: number, high: number): boolean => typeof reply === "number" && Number.isSafeInteger(reply) && reply >= low && reply <= high;
+
+/**
+ * Whether one command's reply is in the exact shape and range that command answers when it ran (Codex G on #2719,
+ * twice): "OK" for SET (or nothing only when it was asked NX or XX); a number for ZINCRBY and ZADD INCR; any whole
+ * number for the counters, whose negatives are real; and for the rest, a whole count no larger than what the command
+ * could have changed: a one-field HSET answers 0 or 1, never -1 or 2. Anything else, a null or a missing reply
+ * included, is not a write that landed.
+ */
+function replyFits(command: Command, reply: unknown): boolean {
+  const name = String(command[0]).toUpperCase();
+  const args = command.slice(2).map((a) => String(a).toUpperCase());
+  const count = typeof reply === "number" && Number.isSafeInteger(reply);
+  const numeric = count || (typeof reply === "string" && reply.trim() !== "" && Number.isFinite(Number(reply)));
+  switch (name) {
+    case "SET":
+      return reply === "OK" || (args.slice(1).some((a) => a === "NX" || a === "XX") && (reply === null || reply === false));
+    case "ZINCRBY":
+      return numeric;
+    case "ZADD": {
+      if (args.includes("INCR")) return numeric || reply === null;
+      const flags = args.filter((a) => ["NX", "XX", "GT", "LT", "CH"].includes(a)).length;
+      return between(reply, 0, Math.floor((args.length - flags) / 2));
+    }
+    case "INCR":
+    case "INCRBY":
+    case "DECR":
+    case "DECRBY":
+    case "HINCRBY":
+      return count;
+    case "HSET":
+      return between(reply, 0, Math.floor(args.length / 2));
+    case "HSETNX":
+    case "EXPIRE":
+    case "PEXPIRE":
+    case "EXPIREAT":
+    case "PEXPIREAT":
+      return between(reply, 0, 1);
+    case "SADD":
+    case "SREM":
+    case "HDEL":
+    case "ZREM":
+      return between(reply, 0, args.length);
+    case "DEL":
+      return between(reply, 0, args.length + 1);
+    case "RPUSH":
+    case "LPUSH":
+      return between(reply, Math.max(1, args.length), Number.MAX_SAFE_INTEGER);
+    default:
+      return false;
+  }
+}
+
+/**
+ * What one script answered: what it charged, and each command's reply. Throws for a malformed call, a refused
+ * command, or a reply not in its exact shape (Codex G on #2719: a charge that is not a whole count, or a command
+ * answered null, is not a write that landed, so no caller may take it as done). An HSETNX answers exactly 0 or 1 (Codex G on #2809;
+ * CX-123 rule 24), which replyFits holds with every other command.
+ */
+function readScript(reply: unknown, commands: Command[]): { charged: number; replies: unknown[] } {
+  // What was charged is the script's Lua integer, which Redis and Upstash's REST API answer as a number: a whole
+  // number from zero up, and nothing else (CX-123 rule 24). Null, text or a fraction is not "charged 0".
+  const charged = Array.isArray(reply) && reply.length === commands.length + 1 ? countOf(reply[0]) : null;
+  if (charged === null) throw new Error("an order's records could not be written");
+  const replies = (reply as unknown[]).slice(1);
   const failed = replies.find((r) => typeof r === "string" && r.startsWith(ORDER_WRITE_ERROR));
   if (failed) throw new Error(`Redis error: ${String(failed).slice(ORDER_WRITE_ERROR.length)}`);
-  return { charged: Number(reply[0]), replies: replies.map((r) => (r === false ? null : r)) };
+  // Every place, a hole included (Array.prototype.some skips holes): a reply that is not there is not a write that landed.
+  for (let i = 0; i < commands.length; i++) if (!replyFits(commands[i], replies[i])) throw new UnknownReplyError("an order's write: a command's reply");
+  return { charged, replies: replies.map((r) => (r === false ? null : r)) };
 }
 
 /**
@@ -223,8 +325,9 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
   const replies: unknown[] = [];
   for (let at = 0; at < commands.length; at += ORDER_WRITE_MAX) {
     const some = commands.slice(at, at + ORDER_WRITE_MAX);
-    const [reply] = await redisPipeline([scriptOf(room, some)]);
-    const read = readScript(reply, some.length);
+    // Exactly one reply for the one script sent (Codex G on #2809): an answer of another length is unknown, never its first item.
+    const reply = repliesFor(await redisPipeline([scriptOf(room, some)]), 1)?.[0];
+    const read = readScript(reply, some);
     charged += read.charged;
     replies.push(...read.replies);
   }
@@ -234,6 +337,81 @@ export async function orderWriteCharged(owner: DataOwner, commands: Command[]): 
 /** The same, answering only each command's reply: what a writer that used redisPipeline reads. */
 export async function orderWrite(owner: DataOwner, commands: Command[]): Promise<unknown[]> {
   return (await orderWriteCharged(owner, commands)).replies;
+}
+
+/**
+ * Writes an order's records in one script, ORDER_WRITE_IF_NEW, only when the first command, an HSETNX, sets its
+ * field: either every command is applied, charged as orderWrite charges it, or none is. Answers each command's reply,
+ * the first being 1, or null when the field was already there and nothing was written. Every reply is read in its
+ * exact shape (readScript); anything else throws, UnknownReplyError for a reply not known, never "written" and never
+ * "already there". Not split across scripts and never sent as a plain pipeline: with no room to count it in, or more
+ * commands than one script carries, it throws before writing anything.
+ */
+export async function orderWriteIfNew(owner: DataOwner, commands: Command[]): Promise<unknown[] | null> {
+  const [first] = commands;
+  if (!first || first[0] !== "HSETNX" || first.length !== 4 || commands.length > ORDER_WRITE_MAX) throw new Error("not a write an order's records are written with if new");
+  for (const command of commands) {
+    if (!checked(command) || !(ORDER_IF_NEW_COMMANDS as readonly string[]).includes(String(command[0]))) throw new Error(`not a command an order's records are written with if new: ${String(command[0])}`);
+  }
+  const room = dataKey(owner);
+  if (!room || !isRedisConfigured()) throw new Error("an order's records could not be written");
+  const reply = repliesFor(await redisPipeline([scriptOf(room, commands, ORDER_WRITE_IF_NEW)]), 1)?.[0];
+  const slots = listSlots(reply);
+  if (slots && slots.length === 1 && slots[0] === ORDER_IF_NEW_TAKEN) return null;
+  const { replies } = readScript(reply, commands);
+  // The field was not there when the script looked, in the same script: its HSETNX can only have set it.
+  if (replies[0] !== 1) throw new UnknownReplyError("an order's write if new: its first HSETNX");
+  return replies;
+}
+
+/**
+ * ORDER_WRITE behind a once-only mark, in the same step (Claude 5, 9 November 2026; rules 24 and 30): KEYS[2], the
+ * key of the first command (a SET ... NX of the mark), is read first, and when it holds a value the script answers
+ * {-2, that value} and writes nothing; otherwise it runs ORDER_WRITE as it is, every command and the room's charge,
+ * and when any command was refused (a key of another type: ORDER_WRITE runs the rest, as a pipeline does) the mark is
+ * deleted again before the answer, so the next try writes it all anew. So a mark is never left without the records
+ * it stands for, nor those records written twice. ORDER_WRITE itself runs unchanged inside, its sizes held on a real
+ * Redis by scripts/test_order_data_redis.py.
+ */
+export const ORDER_WRITE_ONCE = `-- marktmorgen:order-write-once:v1
+local held = redis.call('GET', KEYS[2])
+if held then return {-2, held} end
+local function write()
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+local out = write()
+for c = 2, #out do
+  if type(out[c]) == 'string' and string.sub(out[c], 1, 19) == string.char(0) .. 'order-write-error:' then
+    redis.call('DEL', KEYS[2])
+    return out
+  end
+end
+return out`;
+
+/**
+ * Writes an order's records under a once-only mark, in one script (ORDER_WRITE_ONCE), never split: the first command
+ * is the mark's SET NX, the rest what it stands for. Answers { held } with the mark's value when it was there already
+ * (nothing written), or the replies as orderWrite does. Any other answer is unknown and thrown (rule 24): never taken
+ * for either.
+ */
+export async function orderWriteOnce(owner: DataOwner, commands: Command[]): Promise<{ held: string } | { replies: unknown[] }> {
+  const [mark] = commands;
+  if (!mark || mark[0] !== "SET" || !mark.slice(3).some((a) => String(a).toUpperCase() === "NX")) throw new Error("an order's once-only write starts with its mark's SET NX");
+  if (commands.length > ORDER_WRITE_MAX) throw new Error("an order's once-only write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room || !isRedisConfigured()) throw new Error("an order's once-only write needs its store's room");
+  const script = scriptOf(room, commands);
+  script[1] = ORDER_WRITE_ONCE;
+  const reply = repliesFor(await redisPipeline([script]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 2 && reply[0] === -2) {
+    if (typeof reply[1] !== "string") throw new UnknownReplyError("an order's once-only mark");
+    return { held: reply[1] };
+  }
+  const { replies } = readScript(reply, commands);
+  // The guard found no mark, so its SET NX ran in the same step: "OK", and nothing else.
+  if (replies[0] !== "OK") throw new UnknownReplyError("an order's once-only mark");
+  return { replies };
 }
 
 /**
@@ -251,4 +429,54 @@ export function fieldReleaseBytes(field: string, value: string): number {
 export async function releaseOrderData(store: DataStore, bytes: number): Promise<void> {
   if (!Number.isFinite(bytes) || bytes <= 0) return;
   await giveData(store, [{ slot: "o", bytes: Math.floor(bytes) }]);
+}
+
+/**
+ * ORDER_WRITE run only while a few hash fields still hold what was read, in the same step (consent audit of
+ * 9 November 2026: a contact an order writes is written only over the row it was decided from and the address's
+ * deleted mark as read, so an unsubscribe, a complaint or a deletion that lands in between is never written over,
+ * lib/contacts.ts). ARGV[1] is how many checks, then each as the index of its hash in KEYS, the field, and the
+ * SHA-1 of the field's value as read ("" when there was none). Any check that no longer holds answers {-2} and
+ * nothing is written; a malformed check answers {-1}. Otherwise ORDER_WRITE runs as it is, every command and the
+ * room's charge, on the rest of ARGV, its sizes held on a real Redis by scripts/test_order_data_redis.py.
+ */
+export const ORDER_WRITE_IF_SAME = `-- marktmorgen:order-write-if-same:v1
+local g = tonumber(ARGV[1])
+if not g or g < 1 or g > 4 or #ARGV < 1 + 3 * g then return {-1} end
+for c = 0, g - 1 do
+  local key = KEYS[tonumber(ARGV[2 + 3 * c]) or 0]
+  if not key then return {-1} end
+  local cur = redis.call('HGET', key, ARGV[3 + 3 * c])
+  local seen = ''
+  if cur then seen = redis.sha1hex(cur) end
+  if seen ~= ARGV[4 + 3 * c] then return {-2} end
+end
+local function write(ARGV)
+${ORDER_WRITE.slice(ORDER_WRITE.indexOf("\n") + 1)}
+end
+return write({select(2 + 3 * g, unpack(ARGV))})`;
+
+/** One check of orderWriteIfSame: a hash field's value as read, by its SHA-1 ("" for none). */
+export type SameField = { key: string; field: string; sha1: string };
+
+/**
+ * Writes an order's records and charges its room as orderWrite does, in one script (ORDER_WRITE_IF_SAME), only
+ * while every check still holds: answers null when one no longer does (nothing written), or the replies. Any
+ * other answer is unknown and thrown (rule 24), never taken for either. A store with no room key has its records
+ * written by the caller another way: this throws for it.
+ */
+export async function orderWriteIfSame(owner: DataOwner, same: SameField[], commands: Command[]): Promise<unknown[] | null> {
+  if (!same.length || same.length > 4) throw new Error("an order's write checks one to four fields");
+  if (!commands.length || commands.length > ORDER_WRITE_MAX) throw new Error("an order's checked write is one script");
+  for (const command of commands) if (!checked(command)) throw new Error(`not a command an order's records are written with: ${String(command[0])}`);
+  const room = dataKey(owner);
+  if (!room || !isRedisConfigured()) throw new Error("an order's checked write needs its store's room");
+  const script = scriptOf(room, commands);
+  const count = Number(script[2]);
+  const keys = script.slice(3, 3 + count).map(String);
+  for (const { key } of same) if (!keys.includes(key)) keys.push(key);
+  const checks = same.flatMap((s) => [keys.indexOf(s.key) + 1, s.field, s.sha1]);
+  const reply = repliesFor(await redisPipeline([["EVAL", ORDER_WRITE_IF_SAME, keys.length, ...keys, same.length, ...checks, ...script.slice(3 + count)]]), 1)?.[0];
+  if (Array.isArray(reply) && reply.length === 1 && reply[0] === -2) return null;
+  return readScript(reply, commands).replies;
 }

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
+import { clientAddress, fromAnotherSite, limited, withinEssentialLimit } from "@/lib/request-guard";
 import { withinStore } from "@/lib/metered-limits";
 import { askAssistant, assistantShown, deleteThread, handToCreator, readThread } from "@/lib/store-assistant";
 import { ASSISTANT_LABEL, ASSISTANT_PER_DAY, ASSISTANT_PER_TEN_MINUTES, ASSISTANT_STORE_PER_MINUTE } from "@/lib/store-assistant-rules";
@@ -50,9 +50,9 @@ export async function POST(request: NextRequest) {
     switch (body.action) {
       case "ask": {
         if (
-          !(await withinLimit("assist", who, ASSISTANT_PER_TEN_MINUTES, 600)) ||
-          !(await withinLimit("assist-day", who, ASSISTANT_PER_DAY, 86_400)) ||
-          !(await withinLimit("assist-store", store.handle, ASSISTANT_STORE_PER_MINUTE, 60))
+          !(await withinEssentialLimit("assist", who, ASSISTANT_PER_TEN_MINUTES, 600)) ||
+          !(await withinEssentialLimit("assist-day", who, ASSISTANT_PER_DAY, 86_400)) ||
+          !(await withinEssentialLimit("assist-store", store.handle, ASSISTANT_STORE_PER_MINUTE, 60))
         ) {
           return slow();
         }

@@ -26,7 +26,7 @@ export async function checkHomeActions({browser,LOCAL,axeSource,is}){
     is("ME3 home page at most 600 words and 30 links",[size.words<=600,size.links<=30,size],[true,true,size]);
    }
    const nav=page.getByRole("navigation",{name:"Main",exact:true});
-   is("menu has the home link, Pricing, Log in and Start free "+width,await nav.locator("a").evaluateAll(nodes=>nodes.map(node=>node.getAttribute("aria-label")??node.textContent.trim())),["Marktmorgen, home","Pricing","Log in","Start free"]);
+   is("menu has the home link, Pricing, Log in and Start your store "+width,await nav.locator("a").evaluateAll(nodes=>nodes.map(node=>node.getAttribute("aria-label")??node.textContent.trim())),["Marktmorgen, home","Pricing","Log in","Start your store"]);
    is("menu destinations "+width,await nav.locator("a").evaluateAll(nodes=>nodes.map(node=>node.getAttribute("href"))),["/","/pricing","/signin?to=login","/signin"]);
    const forms=page.locator("[data-home-claim]");
    is("address field at the top and at the end "+width,await forms.count(),2);
@@ -40,7 +40,7 @@ export async function checkHomeActions({browser,LOCAL,axeSource,is}){
     await page.addScriptTag({content:axeSource});const issues=await form.evaluate(async n=>(await window.axe.run(n,{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}})).violations.map(v=>v.id));is("address form accessibility "+width,issues,[]);
    }
    const plan=page.locator("[data-home-plan]");
-   is("plan button goes to the start page "+width,await plan.getByRole("link",{name:"Start free",exact:true}).getAttribute("href"),"/signin");
+   is("plan button goes to the start page "+width,await plan.getByRole("link",{name:"Start your store",exact:true}).getAttribute("href"),"/signin");
    is("compare all plans "+width,await page.getByRole("link",{name:"Compare Store, Studio and Scale",exact:true}).getAttribute("href"),"/pricing#plans");
    // The end form submits as a plain form, before or without any script.
    const end=forms.nth(1);await end.getByLabel("Pick your store address",{exact:true}).fill("ada");

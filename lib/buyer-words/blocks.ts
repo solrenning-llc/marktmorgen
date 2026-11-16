@@ -53,6 +53,8 @@ const en = {
   videoPlay: (provider: string) => `Play · loads from ${provider}`,
   videoPlayLabel: (title: string, provider: string) => `Play the video: ${title}. It loads from ${provider}.`,
   videoFrame: (title: string, provider: string) => `${title} (video on ${provider})`,
+  /** After a button's own words when it opens a video in a window (components/video-window.tsx). */
+  videoWindowMark: "(video)",
   audioPlayLabel: (title: string, provider: string) => `Play: ${title}. It loads from ${provider}.`,
   audioFrame: (title: string, provider: string) => `${title} (on ${provider})`,
   unavailableTitle: "This page is unavailable",
@@ -78,8 +80,11 @@ const en = {
   searchButton: "Search",
   searchFound: (n: number, q: string) => `${n} ${plural(n, "product", "products")} for “${q}”`,
   searchNone: (q: string) => `Nothing here for “${q}”. Try another word, or see every product.`,
+  /** More found than a search shows (STORE_SEARCH_LIMIT): how many of how many, and how to find the rest. */
+  searchCut: (shown: number, total: number, q: string) => `Showing the first ${shown} of ${total} products for “${q}”. Add a word to find the rest.`,
   searchClear: "Show every product",
   searchSlow: "Too many searches for now. Try again in a few minutes.",
+  searchUnavailable: "Search isn't available for this store right now. Browse the products below.",
   /** The store's own questions and answers (lib/store-faq.ts). */
   storeFaqTitle: "Questions, answered",
 };
@@ -121,6 +126,7 @@ const es: BlockWords = {
   videoPlay: (provider) => `Reproducir · se carga desde ${provider}`,
   videoPlayLabel: (title, provider) => `Reproducir el vídeo: ${title}. Se carga desde ${provider}.`,
   videoFrame: (title, provider) => `${title} (vídeo en ${provider})`,
+  videoWindowMark: "(vídeo)",
   audioPlayLabel: (title, provider) => `Reproducir: ${title}. Se carga desde ${provider}.`,
   audioFrame: (title, provider) => `${title} (en ${provider})`,
   unavailableTitle: "Esta página no está disponible",
@@ -140,8 +146,10 @@ const es: BlockWords = {
   searchButton: "Buscar",
   searchFound: (n, q) => `${n} ${plural(n, "producto", "productos")} para «${q}»`,
   searchNone: (q) => `No hay nada para «${q}». Prueba con otra palabra o mira todos los productos.`,
+  searchCut: (shown, total, q) => `Se muestran los primeros ${shown} de ${total} productos para «${q}». Añade una palabra para encontrar el resto.`,
   searchClear: "Ver todos los productos",
   searchSlow: "Demasiadas búsquedas por ahora. Inténtalo dentro de unos minutos.",
+  searchUnavailable: "La búsqueda no está disponible en esta tienda por ahora. Mira los productos de abajo.",
   storeFaqTitle: "Preguntas y respuestas",
 };
 
@@ -180,6 +188,7 @@ const fr: BlockWords = {
   videoPlay: (provider) => `Lire · chargée depuis ${provider}`,
   videoPlayLabel: (title, provider) => `Lire la vidéo « ${title} », chargée depuis ${provider}.`,
   videoFrame: (title, provider) => `${title} (vidéo sur ${provider})`,
+  videoWindowMark: "(vidéo)",
   audioPlayLabel: (title, provider) => `Écouter « ${title} », chargé depuis ${provider}.`,
   audioFrame: (title, provider) => `${title} (sur ${provider})`,
   unavailableTitle: "Cette page n'est pas disponible",
@@ -199,8 +208,10 @@ const fr: BlockWords = {
   searchButton: "Rechercher",
   searchFound: (n, q) => `${n} ${frPlural(n, "produit", "produits")} pour « ${q} »`,
   searchNone: (q) => `Rien ici pour « ${q} ». Essayez un autre mot, ou voyez tous les produits.`,
+  searchCut: (shown, total, q) => `Voici les ${shown} premiers des ${total} produits pour « ${q} ». Ajoutez un mot pour trouver les autres.`,
   searchClear: "Voir tous les produits",
   searchSlow: "Trop de recherches pour le moment. Réessayez dans quelques minutes.",
+  searchUnavailable: "La recherche n’est pas disponible pour cette boutique pour le moment. Parcourez les produits ci-dessous.",
   storeFaqTitle: "Vos questions, nos réponses",
 };
 
@@ -239,6 +250,7 @@ const de: BlockWords = {
   videoPlay: (provider) => `Abspielen · wird von ${provider} geladen`,
   videoPlayLabel: (title, provider) => `Video abspielen: ${title}. Es wird von ${provider} geladen.`,
   videoFrame: (title, provider) => `${title} (Video auf ${provider})`,
+  videoWindowMark: "(Video)",
   audioPlayLabel: (title, provider) => `Abspielen: ${title}. Es wird von ${provider} geladen.`,
   audioFrame: (title, provider) => `${title} (auf ${provider})`,
   unavailableTitle: "Diese Seite ist nicht verfügbar",
@@ -258,8 +270,10 @@ const de: BlockWords = {
   searchButton: "Suchen",
   searchFound: (n, q) => `${n} ${plural(n, "Produkt", "Produkte")} für „${q}“`,
   searchNone: (q) => `Hier gibt es nichts zu „${q}“. Versuche ein anderes Wort oder sieh dir alle Produkte an.`,
+  searchCut: (shown, total, q) => `Die ersten ${shown} von ${total} Produkten für „${q}“. Füge ein Wort hinzu, um die übrigen zu finden.`,
   searchClear: "Alle Produkte zeigen",
   searchSlow: "Gerade zu viele Suchen. Versuche es in ein paar Minuten wieder.",
+  searchUnavailable: "Die Suche ist in diesem Shop gerade nicht verfügbar. Sieh dir die Produkte unten an.",
   storeFaqTitle: "Fragen und Antworten",
 };
 
@@ -298,6 +312,7 @@ const it: BlockWords = {
   videoPlay: (provider) => `Riproduci · si carica da ${provider}`,
   videoPlayLabel: (title, provider) => `Riproduci il video: ${title}. Si carica da ${provider}.`,
   videoFrame: (title, provider) => `${title} (video su ${provider})`,
+  videoWindowMark: "(video)",
   audioPlayLabel: (title, provider) => `Ascolta: ${title}. Si carica da ${provider}.`,
   audioFrame: (title, provider) => `${title} (su ${provider})`,
   unavailableTitle: "Questa pagina non è disponibile",
@@ -317,8 +332,10 @@ const it: BlockWords = {
   searchButton: "Cerca",
   searchFound: (n, q) => `${n} ${plural(n, "prodotto", "prodotti")} per «${q}»`,
   searchNone: (q) => `Niente qui per «${q}». Prova un'altra parola o guarda tutti i prodotti.`,
+  searchCut: (shown, total, q) => `Ecco i primi ${shown} di ${total} prodotti per «${q}». Aggiungi una parola per trovare gli altri.`,
   searchClear: "Mostra tutti i prodotti",
   searchSlow: "Troppe ricerche per ora. Riprova tra qualche minuto.",
+  searchUnavailable: "La ricerca non è disponibile in questo negozio per ora. Sfoglia i prodotti qui sotto.",
   storeFaqTitle: "Domande e risposte",
 };
 
@@ -357,6 +374,7 @@ const nl: BlockWords = {
   videoPlay: (provider) => `Afspelen · laadt van ${provider}`,
   videoPlayLabel: (title, provider) => `Speel de video af: ${title}. Hij laadt van ${provider}.`,
   videoFrame: (title, provider) => `${title} (video op ${provider})`,
+  videoWindowMark: "(video)",
   audioPlayLabel: (title, provider) => `Afspelen: ${title}. Het laadt van ${provider}.`,
   audioFrame: (title, provider) => `${title} (op ${provider})`,
   unavailableTitle: "Deze pagina is niet beschikbaar",
@@ -376,8 +394,10 @@ const nl: BlockWords = {
   searchButton: "Zoeken",
   searchFound: (n, q) => `${n} ${plural(n, "product", "producten")} voor ‘${q}’`,
   searchNone: (q) => `Niets gevonden voor ‘${q}’. Probeer een ander woord, of bekijk alle producten.`,
+  searchCut: (shown, total, q) => `De eerste ${shown} van ${total} producten voor ‘${q}’. Voeg een woord toe om de rest te vinden.`,
   searchClear: "Alle producten tonen",
   searchSlow: "Even te veel zoekopdrachten. Probeer het over een paar minuten opnieuw.",
+  searchUnavailable: "Zoeken is in deze winkel nu niet beschikbaar. Bekijk de producten hieronder.",
   storeFaqTitle: "Vragen en antwoorden",
 };
 
@@ -416,6 +436,7 @@ const pt: BlockWords = {
   videoPlay: (provider) => `Reproduzir · carrega do ${provider}`,
   videoPlayLabel: (title, provider) => `Reproduzir o vídeo: ${title}. Ele carrega do ${provider}.`,
   videoFrame: (title, provider) => `${title} (vídeo no ${provider})`,
+  videoWindowMark: "(vídeo)",
   audioPlayLabel: (title, provider) => `Ouvir: ${title}. Carrega a partir do ${provider}.`,
   audioFrame: (title, provider) => `${title} (no ${provider})`,
   unavailableTitle: "Esta página não está disponível",
@@ -435,8 +456,10 @@ const pt: BlockWords = {
   searchButton: "Pesquisar",
   searchFound: (n, q) => `${n} ${plural(n, "produto", "produtos")} para «${q}»`,
   searchNone: (q) => `Não há nada aqui para «${q}». Experimente outra palavra ou veja todos os produtos.`,
+  searchCut: (shown, total, q) => `Mostrando os primeiros ${shown} de ${total} produtos para «${q}». Acrescente uma palavra para encontrar o resto.`,
   searchClear: "Ver todos os produtos",
   searchSlow: "Demasiadas pesquisas por agora. Tente novamente dentro de alguns minutos.",
+  searchUnavailable: "A pesquisa não está disponível nesta loja por agora. Veja os produtos abaixo.",
   storeFaqTitle: "Perguntas e respostas",
 };
 

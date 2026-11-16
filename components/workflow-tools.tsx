@@ -10,6 +10,8 @@
 import { useEffect, useState } from "react";
 import { type FlowAction, type FlowGoal, type StepCondition, isCourseIf } from "@/lib/flow-rules";
 import { END, type RoutedStep, type SampleContact, previewRun } from "@/lib/flow-paths";
+import { flowMapLayout } from "@/lib/flow-map";
+import { WorkflowDiagram } from "@/components/workflow-diagram";
 import type { RunEvent, RunRecord } from "@/lib/flow-runs";
 import { MAX_RETRIES_BY_YOU, MAX_RUN_EVENTS } from "@/lib/flow-limits";
 import { runEffects } from "@/lib/run-effects";
@@ -73,19 +75,101 @@ export function routeWords(steps: readonly MapStep[], index: number): string {
   return `if yes, ${then}; if not, ${stepName(otherwise)}`;
 }
 
-/** The map of a workflow: every step with what it does and where it leads. */
-export function WorkflowMap({ steps, conditionText }: { steps: readonly MapStep[]; conditionText: (when: StepCondition) => string }) {
+/** What a step says, in its box and in its line of the list: its condition, then what it does. One copy, so the two never differ. */
+export const stepText = (step: MapStep, conditionText: (when: StepCondition) => string) =>
+  `${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`;
+
+/** A step's box: its number, then stepText. */
+export const stepLine = (step: MapStep, i: number, conditionText: (when: StepCondition) => string) => `${i + 1}. ${stepText(step, conditionText)}`;
+
+/**
+ * The id of the "Edit step" button of a step in a workflow's map, so the editor can give the focus back to it. By the
+ * step's own id, never its place: a step moved or removed in the editor leaves every other step's button where the
+ * focus expects it (review of #4124).
+ */
+export const mapEditId = (flowId: string, stepId: string) => `flow-map-edit-${flowId}-${stepId}`;
+
+/**
+ * What the sequence editor does with the focus at each change of being open or locked (review of #4124):
+ * "open" when it has just opened; "wait" when it has closed but the sequences are still being refreshed (every button
+ * is disabled then); "restore" once it is closed and unlocked, so the button that opened it, or the fallback, can take
+ * the focus; "none" otherwise.
+ */
+export function editorFocusPhase({ editing, wasEditing, closing, locked }: { editing: boolean; wasEditing: boolean; closing: boolean; locked: boolean }): "open" | "wait" | "restore" | "none" {
+  if (editing) return wasEditing ? "none" : "open";
+  if (!wasEditing && !closing) return "none";
+  return locked ? "wait" : "restore";
+}
+
+/** What focusBack needs of a page: its elements by id, and which one has the focus. */
+export type FocusDoc = { getElementById: (id: string) => { focus: () => void; disabled?: boolean } | null; activeElement: unknown };
+
+/**
+ * Gives the focus to the first of `ids` that can take it: present, not disabled, and really focused afterwards (one
+ * inside a closed details, or hidden, is not). Returns that id, or null when none could; a later id is the fallback,
+ * such as the sequence's own Edit button when the step that was open is gone.
+ */
+export function focusBack(doc: FocusDoc, ids: readonly (string | null | undefined)[]): string | null {
+  for (const id of ids) {
+    if (!id) continue;
+    const el = doc.getElementById(id);
+    if (!el || el.disabled) continue;
+    el.focus();
+    if (doc.activeElement === el) return id;
+  }
+  return null;
+}
+
+/**
+ * The map of a workflow: its picture (391 [CX2]), then every step with what it
+ * does and where it leads. With `onEdit` (unit 2), each step of the list has an
+ * "Edit step N" button and each box of the picture opens the same: the editor,
+ * at that step. The buttons are the way in by keyboard and screen reader; the
+ * boxes are a larger target for a pointer, doing exactly what the button does.
+ */
+export function WorkflowMap({
+  steps,
+  conditionText,
+  flowId,
+  flowName,
+  onEdit,
+  editDisabled = false,
+}: {
+  steps: readonly MapStep[];
+  conditionText: (when: StepCondition) => string;
+  flowId?: string;
+  /** The sequence's name, said after "Edit step N" to a screen reader, so the buttons of two sequences differ (review of #4124). */
+  flowName?: string;
+  onEdit?: (index: number) => void;
+  editDisabled?: boolean;
+}) {
+  const edit = onEdit && flowId && !editDisabled ? onEdit : undefined;
   return (
+    <>
+    <WorkflowDiagram layout={flowMapLayout(steps, steps.map((step, i) => stepLine(step, i, conditionText)))} steps={steps.length} onBox={edit} />
     <ol className="mt-2 space-y-1 text-sm text-ink-soft" data-workflow-map>
       {steps.map((step, i) => (
-        <li key={step.id} className="flex flex-wrap gap-x-2">
+        <li key={step.id} className="flex flex-wrap items-center gap-x-2">
           <span className="font-semibold text-ink">{`${i + 1}.`}</span>
-          <span>{`${step.when ? `If ${conditionText(step.when)}: ` : ""}${stepWhat(step)}`}</span>
+          <span>{stepText(step, conditionText)}</span>
           <span aria-hidden="true">→</span>
           <span>{routeWords(steps, i)}</span>
+          {onEdit && flowId ? (
+            <button
+              type="button"
+              id={mapEditId(flowId, step.id)}
+              className="inline-flex min-h-11 min-w-11 items-center font-semibold text-ink underline underline-offset-4 hover:text-violet-deep"
+              disabled={editDisabled}
+              onClick={() => onEdit(i)}
+            >
+              {`Edit step ${i + 1}`}
+              {flowName ? <span className="sr-only">{` of \u201c${flowName}\u201d`}</span> : null}
+            </button>
+          ) : null}
         </li>
       ))}
     </ol>
+    </>
   );
 }
 
@@ -171,7 +255,7 @@ export function WorkflowPreview({
       </p>
       {request ? (
         <div className="mt-3 flex flex-wrap items-end gap-2">
-          <label className="block min-w-0 flex-1">
+          <label className="block min-w-0 grow basis-56">
             <span className="text-sm text-ink-soft">Or start from someone on your list</span>
             <input className="field mt-1" type="email" autoComplete="off" value={lookup} placeholder="name@example.com" onChange={(e) => setLookup(e.target.value)} />
           </label>

@@ -36,6 +36,13 @@ export function paypalAtCheckout(env: Record<string, string | undefined> = proce
 /** Why PayPal is not at checkout yet, said one way everywhere. */
 export const PAYPAL_WAITS = "it is built and waits on PayPal approving us as a platform";
 
+/** The mission page's line on PayPal at checkout: "built" when it is on, "not built" with the reason when it is not. */
+export function paypalCheckoutLine(on: boolean = paypalAtCheckout()): string {
+  return on
+    ? "PayPal at checkout through a separate connection: the buyer pays straight into your own PayPal account, for one-time products at one price"
+    : `PayPal at checkout: Stripe offers it only to accounts in the EU (except Hungary), the UK, Switzerland, Norway and Liechtenstein, and does not support it for the direct charges every sale here is made with; a separate PayPal connection, straight into your own PayPal account, is not on yet: ${PAYPAL_WAITS}`;
+}
+
 /** For a row on what a buyer can pay with, while PayPal is off. */
 export const PAYPAL_NOT_YET = `No PayPal yet: ${PAYPAL_WAITS}`;
 

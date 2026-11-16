@@ -109,6 +109,12 @@ export function askedCeiling(limit: number): number {
 
 /** A contact added or a product given through the API is this many of the window's API requests, the request included (lib/api-write.ts). */
 export const API_WRITE_UNITS = 5;
+/**
+ * A page of sales read through the API (GET /api/v1/sales, lib/api-sales.ts) is this many of the window's API
+ * requests, the request included: it may wait on the creator's Stripe account for its whole ceiling while a
+ * hundred checkouts come back (tests/plan-cost-registry.ts, API_SALES_READ).
+ */
+export const API_SALES_UNITS = 10;
 
 /** How each kind is named in a sentence: "studio requests", "API requests". */
 export const KIND_WORDS: Record<AllowanceKind, { many: string; what: string }> = {
@@ -154,3 +160,22 @@ export function usedWords(kind: AllowanceKind, limit: number, reset: string, sta
 
 /** What a visitor or a buyer is told when a store cannot take what they sent: never the store's plan. */
 export const VISITOR_REFUSAL = "This store can't take this right now. Please try again later.";
+
+/**
+ * A figure's line on the studio page: "120 of 5,000 store emails used", or, when the count could not be read, the
+ * figure and that it was not read. An unread count is never "0 of 5,000 used" (rule 24).
+ */
+export function figureUsedLine(used: number | null, limit: number, many: string): string {
+  const all = `${limit.toLocaleString("en-US")} ${many}`;
+  return used === null ? `${all} in all. How many are used could not be read just now; reload the page to check.` : `${used.toLocaleString("en-US")} of ${all} used`;
+}
+
+/**
+ * How many of the store's emails this month are used, as the studio's sending tools say it after "…emails for this
+ * month:" (agreements, payment requests). An unread count (null, lib/store-allowance.ts allowanceUsedExact) is said
+ * to be unknown, never "0 of N used".
+ */
+export function emailsUsedLine(used: number | null, limit: number): string {
+  const all = limit.toLocaleString("en-US");
+  return used === null ? `${all} in all. How many are used could not be read just now; reload the page to check.` : `${used.toLocaleString("en-US")} of ${all} used.`;
+}

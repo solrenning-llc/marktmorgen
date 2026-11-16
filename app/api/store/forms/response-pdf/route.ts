@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { creatorFrom } from "@/lib/studio-route";
-import { readForm, readResponses } from "@/lib/form-store";
+import { readForm, readResponse } from "@/lib/form-store";
 import { FORM_ID, FORM_RESPONSE_ID } from "@/lib/forms";
 import { responseDrawable, responsePdf } from "@/lib/form-response-pdf";
 import { parseLanguage } from "@/lib/store-language";
@@ -23,7 +23,9 @@ export async function GET(request: NextRequest) {
   if (!FORM_ID.test(id) || !FORM_RESPONSE_ID.test(responseId)) return plain(400, "Which form, and which answer?");
   const form = await readForm(store.statsId, id);
   if (!form) return plain(404, "That form is gone.");
-  const response = (await readResponses(store.statsId, id)).responses.find((r) => r.id === responseId);
+  // Only this answer is read, found by its id in Redis, never every answer kept (lib/form-store.ts readResponse).
+  const response = await readResponse(store.statsId, id, responseId).catch(() => undefined);
+  if (response === undefined) return plain(503, "unavailable");
   if (!response) return plain(404, "That answer is no longer kept.");
   const when = new Date(response.at * 1000);
   const sentLine = `Sent on ${new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(when)}`;

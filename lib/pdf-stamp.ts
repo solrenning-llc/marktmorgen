@@ -33,14 +33,18 @@
  */
 import { createHash } from "node:crypto";
 import { stampLine } from "@/lib/pdf-stamp-line";
-import { PDFDocument, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFOperator, PDFOperatorNames, degrees, rgb } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import { loadFonts } from "@/lib/certificate-pdf";
 import { deleteFile, listFiles, readFileWhole, writeFileWhole } from "@/lib/file-store";
 import { VAULT_PREFIX, isVaultPath, keyName } from "@/lib/vault-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { MAX_STAMP_BYTES, type ProductFile, isEpub, isStampable } from "@/lib/product-file";
 import { type EpubProblem, stampEpub } from "@/lib/epub-stamp";
 import { folderFromPathname } from "@/lib/delivery";
 import { type DataStore, keepFor } from "@/lib/store-data";
+import type { LanguageCode } from "@/lib/store-language";
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -84,10 +88,19 @@ function writable(text: string): string {
  * Puts the line along the bottom of every page, however the page is turned: a
  * page stored sideways and shown upright gets the line along what the reader
  * sees as its foot, reading left to right. Pure: bytes in, bytes out.
+ *
+ * The line is drawn as an artifact (`/Artifact BMC … EMC`), like a running
+ * footer or a watermark: a creator's tagged PDF keeps every piece of its
+ * content in its structure tree or marked as decoration (PDF/UA, ISO 14289-1
+ * 7.1), so a screen reader goes on reading the book and not the mark. In an
+ * untagged file the marker changes nothing a reader sees.
  */
 export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Array> {
   const doc = await PDFDocument.load(bytes, { updateMetadata: false });
-  const font = await doc.embedFont(StandardFonts.Helvetica);
+  // The project's own Noto Sans, embedded as a subset (PDF/UA, ISO 14289-1 7.21.4.1: every font used to draw is in
+  // the file, an artifact's included), as the receipt and the certificate are (review of #3761, Claude 3 nuvem P).
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont((await loadFonts()).sans, { subset: true });
   const text = writable(line);
   const margin = 14;
   for (const page of doc.getPages()) {
@@ -105,6 +118,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
           : angle === 270
             ? { x: box.x + lift, y: box.y + box.height - inset, rotate: 270 }
             : { x: box.x + inset, y: box.y + lift, rotate: 0 };
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.BeginMarkedContent, [PDFName.of("Artifact")]));
     page.drawText(text, {
       x: at.x,
       y: at.y,
@@ -114,6 +128,7 @@ export async function stampPdf(bytes: Uint8Array, line: string): Promise<Uint8Ar
       color: rgb(0.38, 0.38, 0.42),
       opacity: 0.85,
     });
+    page.pushOperators(PDFOperator.of(PDFOperatorNames.EndMarkedContent));
   }
   return doc.save();
 }
@@ -171,7 +186,7 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 export async function stampedCopy(
   file: ProductFile,
   sale: { reference: string; email: string; paidAt: number },
-  store: DataStore,
+  store: DataStore & { language?: LanguageCode },
 ): Promise<ProductFile | null> {
   if (!isStampable(file) || !sale.reference || !sale.email) return null;
   if (file.bytes > MAX_STAMP_BYTES) {
@@ -200,7 +215,8 @@ export async function stampedCopy(
       await noteProblem(file.pathname, "too_big");
       return null;
     }
-    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000));
+    // In the store's language, with the date its way (lib/buyer-words/stamp.ts).
+    const line = stampLine(sale.email, sale.reference, new Date((sale.paidAt || Date.now() / 1000) * 1000), store.language);
     let stamped: Uint8Array;
     if (epub) {
       const result = stampEpub(original, line);
@@ -238,6 +254,10 @@ export async function stampedCopy(
     if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
       await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
     }
+    // Copies left over by a removal the file store failed are tried again here too, a few at a time; the buyer's
+    // copy is already made, and a failure leaves them on the list for the next try. This file's own folder is kept
+    // for a later try: emptying it now would delete the copy handed over below.
+    await retryStampDrops(RETRY_PER_CALL, copyFolder(file)).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
     return copy;
   } catch (error) {
     console.error("stamping a file failed; handing over the original", error);
@@ -246,15 +266,70 @@ export async function stampedCopy(
 }
 
 /**
- * Deletes every stamped copy made from a file, once the file itself is gone.
- * Best effort, like every other clean-up of storage here.
+ * Folders of stamped copies whose deletion failed, each tried again until its copies are gone: every copy carries
+ * a buyer's email and counts in the store's paid storage, so a failed deletion is never counted as done.
+ */
+export const DROP_QUEUE = "nl:stamp:drop";
+/** How many such folders one removal or one new copy tries again: a few calls to the file store at most. */
+const RETRY_PER_CALL = 2;
+/** What copyFolder makes, and so the only thing read from the list that is ever listed and deleted. */
+const COPY_FOLDER = new RegExp(`^(?:${VAULT_PREFIX}|stores)/[^/]+/stamped/[0-9a-f]{24}/$`);
+
+/** Deletes every file in a folder of stamped copies. Throws when the folder cannot be listed whole or a file not deleted. */
+async function deleteFolder(folder: string): Promise<void> {
+  const copies = await listFiles(folder);
+  for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+}
+
+/** Puts a folder down to be tried again. False when that could not be confirmed (rule 24: SADD answers 0 or 1). */
+async function noteDrop(folder: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  try {
+    const replies = repliesFor(await redisPipeline([["SADD", DROP_QUEUE, folder]]), 1);
+    const added = replies ? countOf(replies[0]) : null;
+    return added === 0 || added === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tries again up to `limit` folders a deletion left behind, and answers how many were emptied. A folder leaves the
+ * list only after every copy in it is confirmed deleted; the first that fails stops the try and stays. A list read
+ * in any shape but an exact list of text throws (UnknownReplyError), and nothing is deleted on it.
+ */
+export async function retryStampDrops(limit: number, keep?: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const replies = repliesFor(await redisPipeline([["SRANDMEMBER", DROP_QUEUE, limit]]), 1);
+  const folders = replies ? stringList(replies[0]) : null;
+  if (!folders || folders.length > limit) throw new UnknownReplyError("the stamped copies to delete");
+  let emptied = 0;
+  for (const folder of folders) {
+    // `keep` is the folder of a copy being handed over right now: it stays on the list for a later try, so a new
+    // copy is never deleted by its own call (Codex M on #3312).
+    if (!COPY_FOLDER.test(folder) || folder === keep) continue;
+    await deleteFolder(folder);
+    const gone = repliesFor(await redisPipeline([["SREM", DROP_QUEUE, folder]]), 1);
+    const count = gone ? countOf(gone[0]) : null;
+    if (count === null || count > 1) throw new UnknownReplyError("a folder of deleted copies taken off the list");
+    emptied += 1;
+  }
+  return emptied;
+}
+
+/**
+ * Deletes every stamped copy made from a file, once the file itself is gone. It never fails the removal that
+ * called it (the file is already off the product): a folder the file store could not list whole or empty is put
+ * down in DROP_QUEUE and tried again by the next removal or new copy, and the log says so when even that cannot be.
  */
 export async function dropStamped(file: Pick<ProductFile, "pathname" | "name" | "contentType">): Promise<void> {
   if (!isStampable(file)) return;
+  await retryStampDrops(RETRY_PER_CALL).catch((error: unknown) => console.error("stamped copies left from before could not be deleted yet; they stay on the list", error));
+  const folder = copyFolder(file);
   try {
-    const copies = await listFiles(copyFolder(file));
-    for (let i = 0; i < copies.length; i += 1000) await deleteFile(copies.slice(i, i + 1000));
+    await deleteFolder(folder);
   } catch (error) {
-    console.error("could not delete stamped copies", error);
+    if (await noteDrop(folder)) console.error("could not delete stamped copies; put down to be tried again", error);
+    else console.error(`could not delete stamped copies in ${folder}, and nothing will try again: the list could not be written`, error);
   }
 }

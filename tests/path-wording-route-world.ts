@@ -6,6 +6,7 @@ export const storeRef=()=> "owner@example.test";
 export const readPath=async()=>state.record?{}:null;
 export const currentWordingSource=()=>state.source;
 export const withinLimit=async()=>!state.limited;
+export const withinEssentialLimit=async()=>!state.limited;
 export const writePathWording=async(store:unknown,source:unknown)=>{state.asked.push({store,source});return{ok:true,mission:state.source.mission,source:state.source.step,text:state.source.step,fallback:true,reason:"off"};};
 export const countStudio=async()=>({ok:true});
 export const creatorFrom=async()=>({role:state.role,store:guardedStore});

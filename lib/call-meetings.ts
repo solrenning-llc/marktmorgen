@@ -31,13 +31,15 @@
 import { whereOf } from "@/lib/call-place";
 import { saleHandles } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { isSenderConfigured } from "@/lib/email";
 import { onAccount } from "@/lib/stripe-account";
 import { type LostRead, confirmLostRead, lostCursorKey, lostDisputesOrRetry, rowGivesBack } from "@/lib/refunds";
 import { readListing } from "@/lib/catalog";
-import { readMoves } from "@/lib/call-records";
-import { readRecord } from "@/lib/meet-records";
-import { MEET_STORES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
+import { markBookingsChanged, readMoves } from "@/lib/call-records";
+import { MEET_QUEUE, readRecord } from "@/lib/meet-records";
+import { storeOrGone } from "@/lib/store-gone";
+import { MEET_STORES, RETRY_MINUTES, callRefunded, dropScope, dueScopes, retryRecord } from "@/lib/meet-links";
 import { type PaidCall, isCallProduct, paidCalls, tellNewLink } from "@/lib/calls";
 import { eventStillWants, readEventScope } from "@/lib/event-meetings";
 import type { Store } from "@/lib/store";
@@ -53,6 +55,9 @@ const INTENT = /^pi_[A-Za-z0-9]{6,200}$/;
 const anchorKey = (callsId: string) => `nl:meet:rf:${callsId}:since`;
 const seenKey = (callsId: string) => `nl:meet:rf:${callsId}:seen`;
 
+/** How far a record whose store could not be read moves back in the queue: the first retry step (lib/meet-links.ts). */
+const STORE_RETRY_MS = RETRY_MINUTES[0] * 60_000;
+
 export type MeetingsRun = { done: number; failed: number; switched: number; told: number; refunds: number };
 
 export async function syncMeetings(
@@ -64,8 +69,11 @@ export async function syncMeetings(
   if (!isRedisConfigured()) return run;
   const stores = new Map<string, Store | null>();
   const paid = new Map<string, PaidCall[] | null>();
+  // Throws what the read throws, and UnknownReplyError on an answer it cannot read: only an exact nil (or a released
+  // name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). Only an answer is kept for the run,
+  // so one failed read never stands for the store's other records.
   const storeFor = async (handle: string) => {
-    if (!stores.has(handle)) stores.set(handle, await findStore(handle).catch(() => null));
+    if (!stores.has(handle)) stores.set(handle, await storeOrGone(findStore, handle));
     return stores.get(handle) ?? null;
   };
   const paidFor = async (store: Store) => {
@@ -80,7 +88,19 @@ export async function syncMeetings(
       await dropScope(scope);
       continue;
     }
-    const store = await storeFor(record.handle);
+    // A store that could not be read is not gone: the record stays queued, moved back STORE_RETRY_MS so the records
+    // behind it are reached, and a later run tries it again (Claude 2 on #3211). Only a record still queued is moved
+    // (ZADD XX): one done or dropped meanwhile stays out. A failed move keeps the old score, as before.
+    let store: Store | null;
+    try {
+      store = await storeFor(record.handle);
+    } catch (error) {
+      console.error("reading a store for its meeting failed", error);
+      await redisPipeline([["ZADD", MEET_QUEUE, "XX", Date.now() + STORE_RETRY_MS, scope]]).catch((failed) => {
+        console.error("moving a meeting back in the queue failed", failed);
+      });
+      continue;
+    }
     if (!store || store.statsId !== record.statsId || (record.callsId && store.callsId !== record.callsId)) {
       // The store is gone or is somebody else's now: nothing we may do with it.
       await dropScope(scope);
@@ -153,7 +173,8 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
   for (const member of members) {
     if (Date.now() > deadline) break;
     const [callsId, handle] = member.split("|");
-    const store = callsId && handle ? await storeFor(handle) : null;
+    // A store that could not be read is skipped this run (nothing is written for it), and read again the next.
+    const store = callsId && handle ? await storeFor(handle).catch(() => null) : null;
     if (!store || store.callsId !== callsId || !store.stripeAccountId) continue;
     handled += await refundsOf(store, callsId, deadline).catch((error) => {
       console.error("reading a store's refunds for meetings failed", error);
@@ -166,7 +187,13 @@ async function readRefunds(storeFor: (handle: string) => Promise<Store | null>, 
 async function refundsOf(store: Store, callsId: string, deadline: number): Promise<number> {
   const account = store.stripeAccountId as string;
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const [anchorRaw] = await redisPipeline([["GET", anchorKey(callsId)]]);
+  // The walk's place, read exactly (rule 24): only GET's exact null is "no place yet"; another shape stops this store's
+  // walk with the place as it was, never a one-day window written over the real, older place.
+  const anchorRead = repliesFor(await redisPipeline([["GET", anchorKey(callsId)]]), 1);
+  const anchorRaw = anchorRead?.[0];
+  if (!anchorRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+    throw new UnknownReplyError("the call refunds' place");
+  }
   // The first look goes back a day: meetings are only made from now on, and
   // a refund made before one existed has nothing to remove.
   const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;
@@ -185,7 +212,14 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
     query.append("expand[]", "data.charge");
     if (after) query.set("starting_after", after);
     const listed = await onAccount("GET", account, `/refunds?${query}`);
-    const refunds = Array.isArray(listed.data) ? (listed.data as Record<string, unknown>[]) : [];
+    // A page in another shape, or holding a row that is not a refund with its id, is unknown (rule 24): the walk stops
+    // there and the place is held, never read as an empty page that moves the place past refunds it never read.
+    const plain = (row: unknown): row is Record<string, unknown> => row !== null && typeof row === "object" && !Array.isArray(row) && typeof (row as { id?: unknown }).id === "string" && Boolean((row as { id: string }).id);
+    if (!Array.isArray(listed.data) || !listed.data.every(plain)) {
+      unsure = true;
+      break;
+    }
+    const refunds = listed.data as Record<string, unknown>[];
     // A dispute closed as lost ends the booking's meeting
     // as a full refund does (lib/refunds.ts, queue 388 [TB14]): read once,
     // with the first page, from Stripe's closing events (kept thirty days).
@@ -221,7 +255,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       if (lookups <= 0) continue;
       lookups -= 1;
       const sessions = await onAccount("GET", account, `/checkout/sessions?${new URLSearchParams({ payment_intent: intent, limit: "1" })}`);
-      const session = (Array.isArray(sessions.data) ? (sessions.data as Record<string, unknown>[]) : [])[0];
+      // A list in another shape, or a first row that is not a checkout with its id, is unknown (rule 24): the refund
+      // stays unread and the place held, never "no call". Only an empty list is "no checkout, so no call".
+      if (!Array.isArray(sessions.data) || (sessions.data.length > 0 && !plain(sessions.data[0]))) {
+        unsure = true;
+        continue;
+      }
+      const session = (sessions.data as Record<string, unknown>[])[0];
       const meta = ((session?.metadata ?? {}) as Record<string, string>) ?? {};
       if (session && typeof session.id === "string" && meta.kind === "call" && handles.has(meta.store ?? "")) {
         const moved = (await readMoves([session.id])).get(session.id);
@@ -229,6 +269,13 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
         const details = (session.customer_details ?? {}) as { email?: unknown };
         if (Number.isFinite(start) && (await callRefunded(store, { session: session.id, product: meta.product ?? "", start, email: typeof details.email === "string" ? details.email : null }))) {
           handled += 1;
+        }
+        // A call refunded in full leaves the private calendar feed (lib/calls.ts, callFromRow, drops a payment
+        // refunded in full): marked, its file is made again at the app's next check, not a day later, with or
+        // without a meeting room (inbox C4-18, M3). A lost dispute is not marked: the feed reads the payment, which a
+        // lost dispute does not show as refunded, so the booking stays there until lib/calls.ts reads it.
+        if (refund.object !== "dispute") {
+          await markBookingsChanged(callsId).catch((error: unknown) => console.error("marking the bookings changed failed", error));
         }
         // A team booking refunded in full gives its hosts their time back, on every store.
         const hosts = (meta.hosts ?? "").split(",").filter(isHostId);
@@ -241,11 +288,23 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
       newest = Math.max(newest, created);
     }
     const last = refunds[refunds.length - 1];
-    if (listed.has_more !== true || !last || typeof last.id !== "string") {
+    // Only an exact false is the last page; anything but an exact true ("true", 1, null, missing) is unknown (rule 24):
+    // the place is held, never moved past a page it never read (Claude 2 nuvem I and Codex X5 on #3866).
+    if (listed.has_more === false) {
       complete = true;
       break;
     }
-    after = last.id;
+    if (listed.has_more !== true) {
+      unsure = true;
+      break;
+    }
+    // More pages and no last row to go on from: unknown, the place is held.
+    if (!last) {
+      unsure = true;
+      break;
+    }
+    // Every row of the page was checked above to be a refund with a string id.
+    after = last.id as string;
   }
   // The lost disputes' place moves only once every one read was handled (lib/refunds.ts, confirmLostRead); a sweep
   // that went on from a kept place moves the job no further than the newest closing it read, so a dispute closed

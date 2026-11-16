@@ -40,15 +40,17 @@
  *   nl:metaads:user:<hash>        the stores a Meta user connected
  *   nl:metaads:stores             the stores connected, for the daily read
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { storeForId } from "@/lib/store";
 import { costsPaused } from "@/lib/plan-standing";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { canSeal, seal, unseal } from "@/lib/secret-box";
 import { timed } from "@/lib/fetch-timeout";
 import type { AdSpend } from "@/lib/ad-spend-rules";
-import { linesFrom, mergeLines, parseLines, readWindow, type InsightRow } from "@/lib/meta-ads-rules";
+import { linesFrom, mergeLines, minorUnits, parseLines, readWindow, type InsightRow } from "@/lib/meta-ads-rules";
 
 export type MetaAccount = { id: string; name: string; currency: string };
 
@@ -75,7 +77,8 @@ export type MetaRead = {
   day: string;
   at: number;
   /** What stopped the last try: the currencies differ, Meta was busy or failed. Empty when it worked. */
-  problem: "" | "currency" | "busy" | "error";
+  /** "big": the account has more lines over 30 days than one reading takes; tried again the next UTC day. */
+  problem: "" | "currency" | "busy" | "big" | "error";
   /** No try before this, after a problem Meta may get over (seconds). */
   after: number;
   /** Lines read, and what they come to, over the 30 days read. */
@@ -117,6 +120,11 @@ export const linesKey = (statsId: string) => `nl:stats:${statsId}:spend:meta`;
 const stateKey = (state: string) => `nl:metaads:state:${hash(`metaads-state:${state}`)}`;
 const userKey = (user: string) => `nl:metaads:user:${hash(`metaads-user:${user}`)}`;
 const STORES_KEY = "nl:metaads:stores";
+/** The daily pass's mark and the generation it holds (readMetaDue). */
+const PASS_KEY = "nl:metaads:pass";
+const GEN_KEY = "nl:metaads:gen";
+/** The longest a pass mark lasts while a store is paused (its payment may be recorded at any time). */
+export const PAUSED_PASS_SECONDS = 3600;
 const readingKey = (statsId: string) => `nl:metaads:reading:${statsId}`;
 const context = (statsId: string) => `metaads|${statsId}|token`;
 
@@ -162,6 +170,17 @@ export class MetaError extends Error {
   }
 }
 
+/**
+ * The account's 30 days hold more rows than one read takes (20 pages of 500). Not something an hour changes: the same
+ * read would ask Meta its 20 pages again and refuse the part again, so it is noted busy until the next day, never
+ * tried every hour (each try is 20 calls against the creator's own ad account's rate limit at Meta).
+ */
+class MetaTooBig extends MetaError {
+  constructor() {
+    super("busy", "Meta had more ad spend than one read takes");
+  }
+}
+
 /** One call to the Graph API, answered as JSON or thrown as a MetaError. */
 async function call(method: "GET" | "DELETE", path: string, params: Record<string, string>, token = ""): Promise<Record<string, unknown>> {
   const url = new URL(path.startsWith("http") ? path : graph(path));
@@ -176,7 +195,12 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
   } catch {
     throw new MetaError("busy", "Meta could not be reached");
   }
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+  const parsed: unknown = await response.json().catch(() => undefined);
+  // Only a JSON object is one of Meta's answers (CX-123 rule 24): a success that is not one, or cannot be read, is
+  // not known, never "nothing" (a read with no rows would erase the days already read).
+  const object = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  const body = (object ? parsed : {}) as Record<string, unknown>;
+  if (response.ok && !object) throw new MetaError("busy", `Meta answered ${response.status} in a shape that could not be read`);
   if (response.ok && !body.error) return body;
   const error = (body.error ?? {}) as { code?: number; message?: string };
   const code = Number(error.code);
@@ -189,16 +213,29 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
 
 // ---- Reading what is kept ----------------------------------------------------------
 
-function parseConnection(raw: unknown): Connection | null {
+const wholeAccount = (a: unknown): a is MetaAccount => Boolean(a && typeof (a as MetaAccount).id === "string" && typeof (a as MetaAccount).currency === "string");
+
+/** A field this code writes as text or a number, when it is there at all: missing reads as its default, as before. */
+const absentOr = (value: unknown, type: "string" | "number") => value === undefined || (type === "number" ? typeof value === "number" && Number.isFinite(value) : typeof value === type);
+
+/**
+ * A kept connection, or null. With `whole`, every ad account in it, and the chosen account, why it broke and when it
+ * runs out, must be in the shape this code writes, so what the studio is shown is never a list with one left out, nor
+ * "choose an account" for one that could not be read, and a read or a choice never drops the chosen account or takes
+ * a connection as healthy because a field could not be read (CX-123 rule 24).
+ */
+function parseConnection(raw: unknown, whole = false): Connection | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw) as Partial<Connection>;
-    if (typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
+    if (!v || typeof v !== "object" || typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
+    if (whole && !v.accounts.every(wholeAccount)) return null;
+    if (whole && !(absentOr(v.account, "string") && absentOr(v.broken, "string") && absentOr(v.expires, "number") && absentOr(v.connectedAt, "number"))) return null;
     return {
       user: v.user,
       token: v.token,
       expires: Number(v.expires) || 0,
-      accounts: v.accounts.filter((a): a is MetaAccount => Boolean(a && typeof a.id === "string" && typeof a.currency === "string")).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
+      accounts: v.accounts.filter(wholeAccount).map((a) => ({ id: a.id, name: String(a.name ?? ""), currency: a.currency.toLowerCase() })),
       account: typeof v.account === "string" ? v.account : "",
       connectedAt: Number(v.connectedAt) || 0,
       by: typeof v.by === "string" ? v.by : "",
@@ -211,28 +248,36 @@ function parseConnection(raw: unknown): Connection | null {
   }
 }
 
+const keptCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/** No read kept yet: no day, so the studio shows no amount. */
+const NOT_READ: MetaRead = { day: "", at: 0, problem: "", after: 0, lines: 0, cents: 0, campaigns: 0 };
+
+/**
+ * The last read, only in the shape this code writes (CX-123 rule 24; Claude 6 on #3069): every field present, the day
+ * a date or empty, each figure a non-negative whole number. A record with an amount missing or out of shape is not a
+ * last read (null), never "Read <day>: $0.00 over the last 30 days".
+ */
 function parseRead(raw: unknown): MetaRead | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
-    const v = JSON.parse(raw) as Partial<MetaRead>;
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+    if (typeof v.day !== "string" || (v.day !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(v.day))) return null;
+    if (v.problem !== "" && v.problem !== "currency" && v.problem !== "busy" && v.problem !== "big" && v.problem !== "error") return null;
+    if (![v.at, v.after, v.lines, v.cents, v.campaigns].every(keptCount)) return null;
     return {
-      day: typeof v.day === "string" ? v.day : "",
-      at: Number(v.at) || 0,
-      problem: v.problem === "currency" || v.problem === "busy" || v.problem === "error" ? v.problem : "",
-      after: Number(v.after) || 0,
-      lines: Number(v.lines) || 0,
-      cents: Number(v.cents) || 0,
-      campaigns: Number(v.campaigns) || 0,
+      day: v.day,
+      at: v.at as number,
+      problem: v.problem,
+      after: v.after as number,
+      lines: v.lines as number,
+      cents: v.cents as number,
+      campaigns: v.campaigns as number,
     };
   } catch {
     return null;
   }
-}
-
-async function readConnection(statsId: string): Promise<Connection | null> {
-  if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", connKey(statsId)]]);
-  return parseConnection(raw);
 }
 
 /**
@@ -241,8 +286,17 @@ async function readConnection(statsId: string): Promise<Connection | null> {
  */
 export async function metaLines(statsId: string): Promise<AdSpend[]> {
   if (!isRedisConfigured()) return [];
-  const [conn, raw] = await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]);
-  return Number(conn) ? parseLines(raw) : [];
+  // Read exactly (CX-123 rule 24): no lines only when the store is confirmed not connected or nothing was read yet;
+  // a reply in another shape throws, so the figures that use spend say it is unread instead of leaving it out as 0.
+  const replies = repliesFor(await redisPipeline([["EXISTS", connKey(statsId)], ["GET", linesKey(statsId)]]), 2);
+  const connected = replies ? countOf(replies[0]) : null;
+  if (!replies || connected === null || connected > 1) throw new UnknownReplyError("Meta's ad spend lines");
+  const raw = replies[1];
+  if (connected === 0 || raw === null) return [];
+  // Every member whole, or none read (Codex Z on #2924): one line in another shape is not the rest as all of it.
+  const lines = parseLines(raw);
+  if (!lines) throw new UnknownReplyError("Meta's ad spend lines");
+  return lines;
 }
 
 /** What the studio shows; null while the deployment has no Meta app, so nothing about it is shown. */
@@ -250,15 +304,22 @@ export async function metaView(statsId: string | null, currency: string): Promis
   if (!isMetaConfigured()) return null;
   const empty: MetaAdsView = { connected: false, accounts: [], account: null, currency, read: null, broken: "", expires: 0, by: "" };
   if (!statsId || !isRedisConfigured()) return empty;
-  const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-  const c = parseConnection(rawConn);
-  if (!c) return empty;
+  // Read exactly (CX-123 rule 24): "not connected" only for a confirmed nil, the last read null only for one; a reply
+  // or a kept record in another shape throws, so the studio is never told "not connected", "choose an account" or
+  // "read for the first time within the hour" about a connection it could not read (the Meta route answers 503).
+  const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+  if (!replies) throw new UnknownReplyError("the studio's Meta connection");
+  const [rawConn, rawRead] = replies;
+  if (rawConn === null) return empty;
+  const c = parseConnection(rawConn, true);
+  const read = rawRead === null ? null : parseRead(rawRead);
+  if (!c || (rawRead !== null && !read)) throw new UnknownReplyError("the studio's Meta connection");
   return {
     connected: true,
     accounts: c.accounts,
     account: c.accounts.find((a) => a.id === c.account) ?? null,
     currency,
-    read: parseRead(rawRead),
+    read,
     broken: c.broken,
     expires: c.expires,
     by: c.by,
@@ -356,7 +417,10 @@ export async function finishMeta(input: {
     await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
     return { ok: false, error: "accounts" };
   }
-  const before = await readConnection(input.statsId);
+  // The connection it replaces read exactly (CX-123 rule 24): an unknown reply throws before anything is written, so
+  // a connection it could not read is never overwritten with the old person's token kept and the old account's lines
+  // counted under the new one. Only a confirmed nil is "nothing to replace".
+  const before = await exactConnection(input.statsId);
   const connection: Connection = {
     user,
     token: seal(token, context(input.statsId)),
@@ -369,33 +433,54 @@ export async function finishMeta(input: {
     owner: input.owner,
     broken: "",
   };
-  await redisPipeline([
-    ["SET", connKey(input.statsId), JSON.stringify(connection)],
-    ["DEL", readKey(input.statsId)],
-    ["SADD", STORES_KEY, input.statsId],
-    ["SADD", userKey(user), input.statsId],
-  ]);
+  // The new connection's write confirmed (CX-123 rule 24; Claude 6 on #3069): "OK" and a count for each other command.
+  // Otherwise it throws before anything of the old connection is given back, unlisted or deleted, so a write that may
+  // not have landed never leaves the kept connection with its token revoked, and the reconnect answers an error.
+  const written = repliesFor(
+    await redisPipeline([
+      ["SET", connKey(input.statsId), JSON.stringify(connection)],
+      ["DEL", readKey(input.statsId)],
+      ["SADD", STORES_KEY, input.statsId],
+      // Due now: the daily pass's mark no longer holds (readMetaDue).
+      ["INCR", GEN_KEY],
+      ["SADD", userKey(user), input.statsId],
+    ]),
+    5,
+  );
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta connection written");
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
     await giveBack(input.statsId, before).catch(() => {});
     await redisPipeline([["SREM", userKey(before.user), input.statsId]]).catch(() => {});
   }
   // Lines of an account no longer read go.
-  if (before && before.account !== connection.account) await redisPipeline([["DEL", linesKey(input.statsId)]]);
+  if (before && before.account !== connection.account) confirmDeleted(await redisPipeline([["DEL", linesKey(input.statsId)]]), 1, "the lines of an account no longer read");
   const view = (await metaView(input.statsId, input.currency)) as MetaAdsView;
   return { ok: true, view, account: view.account };
 }
 
-/** Chooses which of the connected person's ad accounts is read. */
+/**
+ * Chooses which of the connected person's ad accounts is read. Read exactly (CX-123 rule 24): false only when the
+ * store is confirmed not connected or the id is not one of its accounts; an unknown reply, a record with an account
+ * out of shape (rewriting it would drop that account) or a write not answered in its shape throws, so the Meta route
+ * answers 503, never "not one of your accounts" nor "chosen" unseen.
+ */
 export async function chooseAccount(statsId: string, id: unknown): Promise<boolean> {
-  const c = await readConnection(statsId);
-  if (!c || typeof id !== "string" || !c.accounts.some((a) => a.id === id)) return false;
+  if (!isRedisConfigured() || typeof id !== "string") return false;
+  const c = await exactConnection(statsId, true);
+  if (!c || !c.accounts.some((a) => a.id === id)) return false;
   if (c.account === id) return true;
-  await redisPipeline([
-    ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
-    ["DEL", readKey(statsId)],
-    ["DEL", linesKey(statsId)],
-  ]);
+  const written = repliesFor(
+    await redisPipeline([
+      ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
+      ["DEL", readKey(statsId)],
+      ["DEL", linesKey(statsId)],
+      // Due now: the daily pass's mark no longer holds (readMetaDue).
+      ["INCR", GEN_KEY],
+    ]),
+    4,
+  );
+  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta ad account chosen");
   return true;
 }
 
@@ -406,16 +491,23 @@ async function giveBack(statsId: string, c: Connection): Promise<void> {
 
 /** Disconnects: gives the permission back to Meta, then forgets the connection and every line read. */
 export async function disconnectMeta(statsId: string): Promise<MetaAccount | null | false> {
-  const c = await readConnection(statsId);
+  // Redis not configured is not "not connected" (Codex U on #2924): the route would say "disconnected" with the
+  // sealed token, the connection and its lines still stored, so it is unknown and the studio is told it failed.
+  if (!isRedisConfigured()) throw new UnknownReplyError("a Meta connection: Redis is not configured");
+  // Read exactly (Claude 5 on #2924, rule 24): false only when the store is confirmed not connected; an unknown
+  // reply, or a deletion not answered in its shape, throws, so the studio is told it could not be done, never
+  // "disconnected" with the connection, its token and its lines still kept.
+  const c = await exactConnection(statsId);
   if (!c) return false;
   // Forgotten here whatever Meta says: a give-back that fails must not keep a connection the creator ended.
   await giveBack(statsId, c).catch((error) => console.error("giving the Meta permission back failed", error));
-  await forget(statsId, c.user);
+  confirmDeleted(await forget(statsId, c.user), 5, "a Meta connection's deletion");
   return c.accounts.find((a) => a.id === c.account) ?? null;
 }
 
-async function forget(statsId: string, user: string): Promise<void> {
-  await redisPipeline([
+/** Forgets one store's connection and what was read from it; answers the deletion's own replies. */
+async function forget(statsId: string, user: string): Promise<unknown[]> {
+  return redisPipeline([
     ["DEL", connKey(statsId)],
     ["DEL", readKey(statsId)],
     ["DEL", linesKey(statsId)],
@@ -428,37 +520,136 @@ async function forget(statsId: string, user: string): Promise<void> {
 
 /** The user a signed_request from Meta is about, when its signature is the app's. */
 export function signedUser(raw: unknown): string | null {
+  return signedNotice(raw)?.user ?? null;
+}
+
+/** How far ahead of this server's clock a notice's issued_at may be. */
+const NOTICE_AHEAD_MS = 10 * 60_000;
+/** Clock room between Meta and this server when a notice is set against a connection's time. */
+export const NOTICE_SKEW_MS = 60_000;
+
+/**
+ * A signed_request from Meta whose signature is the app's: the user, and when Meta issued it (ms). A notice
+ * without an integer issued_at, or issued well in the future, is refused. An old one is still believed, so
+ * Meta asking again after a 503 still deletes, but it reaches only connections made before it (forgetMetaUser's
+ * cutoff): one seen once and sent again later never disconnects a store connected since (#4585).
+ */
+export function signedNotice(raw: unknown): { user: string; issuedAt: number } | null {
   const secret = appSecret();
   if (!secret || typeof raw !== "string" || raw.length > 4096) return null;
   const [sig, payload] = raw.split(".");
   if (!sig || !payload) return null;
   const made = createHmac("sha256", secret).update(payload).digest();
   const given = Buffer.from(sig, "base64url");
+  // Node's decoder skips characters outside the alphabet, reads "+" and "/" and ignores "=", so a garbled
+  // signature could decode to the right bytes: only its exact canonical base64url is one (input fuzz, Claude 7).
+  if (given.toString("base64url") !== sig) return null;
   if (given.length !== made.length || !timingSafeEqual(given, made)) return null;
   try {
-    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown };
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { algorithm?: string; user_id?: unknown; issued_at?: unknown };
     if (String(data.algorithm).toUpperCase() !== "HMAC-SHA256") return null;
     const user = typeof data.user_id === "string" || typeof data.user_id === "number" ? String(data.user_id) : "";
-    return /^\d{1,30}$/.test(user) ? user : null;
+    const issued = data.issued_at;
+    if (typeof issued !== "number" || !Number.isSafeInteger(issued) || issued <= 0) return null;
+    const issuedAt = issued * 1000;
+    if (issuedAt > Date.now() + NOTICE_AHEAD_MS) return null;
+    return /^\d{1,30}$/.test(user) ? { user, issuedAt } : null;
   } catch {
     return null;
   }
 }
 
-/** Forgets every store a Meta user connected. Returns, for each, who to tell. */
-export async function forgetMetaUser(user: string): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
+/** Every reply of one deletion pipeline confirmed by its own count, or UnknownReplyError: never taken as done unseen. */
+function confirmDeleted(replies: unknown, commands: number, what: string): void {
+  const answered = repliesFor(replies, commands);
+  if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
+}
+
+/**
+ * One store's connection read exactly (CX-123 rule 24): null only when it is confirmed absent; an unknown reply throws.
+ * With `whole`, a record with any account or field out of shape throws too (parseConnection); disconnecting and
+ * forgetting read without it, so a damaged account list never stops a connection being ended.
+ */
+async function exactConnection(statsId: string, whole = false): Promise<Connection | null> {
+  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
+  if (!read) throw new UnknownReplyError("a Meta connection");
+  if (read[0] === null) return null;
+  const c = parseConnection(read[0], whole);
+  if (!c) throw new UnknownReplyError("a Meta connection");
+  return c;
+}
+
+/**
+ * Forgets every store a Meta user connected. Returns, for each, who to tell.
+ *
+ * Read exactly (CX-123 rule 24): the user's stores, each connection and each
+ * deletion. An unknown reply throws before the user's index is deleted, so
+ * the callback answers 503 without a confirmation code
+ * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
+ * user connected is left without a way to find it.
+ *
+ * One pass walks at most META_FORGET_PASS stores, from a random place in id
+ * order, wrapping around. With more, the stores of this pass leave the index and the pass is not answered as done, so the next
+ * callback walks the rest; the index goes only once every store was walked
+ * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
+ * stores it already forgot, so their owners are still told (Claude 5 on #2869).
+ */
+export async function forgetMetaUser(
+  user: string,
+  cutoff = Number.POSITIVE_INFINITY,
+  /** Where in the user's stores, in id order, this pass starts; a random place by default (Claude 7 on #4647). */
+  start?: number,
+): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
-  const [members] = await redisPipeline([["SMEMBERS", userKey(user)]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
+  // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
+  const kept: string[] = [];
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
-  for (const statsId of stores.slice(0, 50)) {
-    const c = await readConnection(statsId);
-    if (!c || c.user !== user) continue;
-    await forget(statsId, user);
-    forgot.push({ statsId, owner: c.owner });
+  // A store kept (connected after the notice) stays in the index, so a pass that always took the same first
+  // META_FORGET_PASS stores could meet only kept ones and never reach an older store behind them: the deletion would
+  // never finish. Each pass starts at a random place in id order and wraps around, so every store left is reached by
+  // some pass (Claude 7 on #4647). With no more than one pass's worth, the start does not matter: every store is walked.
+  const ordered = [...stores].sort();
+  const from = ordered.length > META_FORGET_PASS ? (start ?? randomInt(ordered.length)) % ordered.length : 0;
+  const pass = [...ordered.slice(from), ...ordered.slice(0, from)].slice(0, META_FORGET_PASS);
+  try {
+    for (const statsId of pass) {
+      const c = await exactConnection(statsId);
+      if (!c || c.user !== user) continue;
+      if (c.connectedAt > cutoff) {
+        kept.push(statsId);
+        continue;
+      }
+      confirmDeleted(await forget(statsId, user), 5, "a Meta connection's deletion");
+      forgot.push({ statsId, owner: c.owner });
+    }
+    const walked = pass.filter((statsId) => !kept.includes(statsId));
+    if (stores.length > pass.length) {
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
+      throw new MetaIncompleteForget(forgot, "more stores than one pass walks; the next callback walks the rest");
+    }
+    if (kept.length) {
+      if (walked.length) confirmDeleted(await redisPipeline([["SREM", userKey(user), ...walked]]), 1, "a Meta user's walked stores");
+    } else confirmDeleted(await redisPipeline([["DEL", userKey(user)]]), 1, "a Meta user's index deletion");
+  } catch (error) {
+    throw error instanceof MetaIncompleteForget ? error : new MetaIncompleteForget(forgot, error);
   }
-  await redisPipeline([["DEL", userKey(user)]]);
   return forgot;
+}
+
+/** The most stores one Meta deletion callback walks; with more, the next callback walks the rest. */
+export const META_FORGET_PASS = 50;
+
+/** A Meta deletion pass that did not finish; `forgot` holds the stores it did forget, whose owners are told now. */
+export class MetaIncompleteForget extends Error {
+  constructor(
+    readonly forgot: { statsId: string; owner: { email: string; handle: string } }[],
+    cause: unknown,
+  ) {
+    super("a Meta deletion pass did not finish", { cause });
+    this.name = "MetaIncompleteForget";
+  }
 }
 
 // ---- Reading what was spent ------------------------------------------------------------
@@ -469,10 +660,16 @@ export type ReadResult = "read" | "none" | "currency" | "busy" | "error" | "brok
 /** Hook for telling the owner once that the connection broke. */
 export type MetaBrokenHook = (owner: { email: string; handle: string }) => Promise<void>;
 
+/**
+ * Marks that very connection broken and tells the owner once. Read exactly (CX-123 rule 24): only a confirmed nil, a
+ * newer connection or one already marked is left as it is; an unknown reply, or a mark not answered "OK", throws
+ * before the owner is told, so a connection is never said broken without the mark kept, nor left healthy by guess.
+ */
 async function markBroken(statsId: string, c: Connection, why: string, onBroken?: MetaBrokenHook): Promise<void> {
-  const now = await readConnection(statsId);
+  const now = await exactConnection(statsId, true);
   if (!now || now.connectedAt !== c.connectedAt || now.broken) return;
-  await redisPipeline([["SET", connKey(statsId), JSON.stringify({ ...now, broken: why })]]);
+  const marked = repliesFor(await redisPipeline([["SET", connKey(statsId), JSON.stringify({ ...now, broken: why })]]), 1);
+  if (!marked || marked[0] !== "OK") throw new UnknownReplyError("a Meta connection marked broken");
   await onBroken?.(now.owner).catch(() => {});
 }
 
@@ -483,10 +680,13 @@ async function markBroken(statsId: string, c: Connection, why: string, onBroken?
  */
 export async function readMetaSpend(statsId: string, storeCurrency: string, now = Date.now(), onBroken?: MetaBrokenHook): Promise<ReadResult> {
   if (!isMetaConfigured() || !isRedisConfigured()) return "none";
-  const c = await readConnection(statsId);
+  // Read exactly (CX-123 rule 24): "none" only for a confirmed nil or no account chosen yet. An unknown reply, a record
+  // out of shape, or a chosen account not among the kept ones throws before Meta is asked, never "not connected", a
+  // chosen account dropped, or a connection taken as healthy because why it broke could not be read.
+  const c = await exactConnection(statsId, true);
   if (!c || c.broken || !c.account) return c?.broken ? "broken" : "none";
   const account = c.accounts.find((a) => a.id === c.account);
-  if (!account) return "none";
+  if (!account) throw new UnknownReplyError("a Meta connection's chosen ad account");
   // Resolve the connection's own current store, including calls made by the
   // daily job or account picker, before a read lock or any provider request.
   const store = await storeForId(c.sid);
@@ -495,17 +695,30 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   // (lib/integration-pause.ts); the daily pass counts it skipped and tries the next day.
   if (costsPaused(store)) return "paused";
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "busy";
-  const [got] = await redisPipeline([["SET", readingKey(statsId), "1", "NX", "EX", 90]]);
-  if (got === null) return "busy";
+  // The reading lock read exactly (lib/claim-mark.ts; CX-123 rule 24): another read's is "busy". An unknown one asks
+  // Meta nothing this time ("busy", tried again later) and is let go only while it holds this read's value.
+  const reading = claimValue();
+  const claimed = await claimMark(readingKey(statsId), 90, reading);
+  if (claimed === "taken") return "busy";
+  if (claimed !== "ours") {
+    await releaseMark(readingKey(statsId), reading);
+    return "busy";
+  }
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
-    // Written only while that very connection is still there.
-    const still = await readConnection(statsId);
+    // Written only while that very connection is still there, read exactly: an unknown reply throws (CX-123 rule 24).
+    const still = await exactConnection(statsId, true);
     if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return false;
-    const [rawBefore] = await redisPipeline([["GET", readKey(statsId)]]);
-    const before = parseRead(rawBefore);
-    const next: MetaRead = { day: before?.day ?? "", at: before?.at ?? 0, problem: "", after: 0, lines: before?.lines ?? 0, cents: before?.cents ?? 0, campaigns: before?.campaigns ?? 0, ...read };
-    await redisPipeline([["SET", readKey(statsId), JSON.stringify(next), "EX", KEEP_SECONDS]]);
+    // The last read: a reply in another shape is unknown. A kept record that does not parse is replaced, as it always
+    // was: what it held is only the figures of an earlier read, and keeping it would stop every later note.
+    const beforeReply = repliesFor(await redisPipeline([["GET", readKey(statsId)]]), 1);
+    if (!beforeReply) throw new UnknownReplyError("Meta's last read");
+    // Only a whole earlier read's figures are carried over (Claude 6 on #3070): one whose figures do not read is replaced
+    // by "not read yet" (no day, so the studio shows no amount), never kept under its day with an amount never read.
+    const before = parseRead(beforeReply[0]) ?? NOT_READ;
+    const next: MetaRead = { ...before, problem: "", after: 0, ...read };
+    const noted = repliesFor(await redisPipeline([["SET", readKey(statsId), JSON.stringify(next), "EX", KEEP_SECONDS]]), 1);
+    if (!noted || noted[0] !== "OK") throw new UnknownReplyError("Meta's last read noted");
     return true;
   };
   try {
@@ -535,18 +748,36 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     };
     for (let page = 0; next && page < 20; page += 1) {
       const answer = await call("GET", next, params, open.value);
-      for (const row of Array.isArray(answer.data) ? (answer.data as InsightRow[]) : []) rows.push(row);
-      const paging = answer.paging as { next?: unknown } | undefined;
-      // Meta's next page carries the token and every parameter itself; it is followed only on Meta's own host.
-      next = typeof paging?.next === "string" && sameHost(paging.next) ? paging.next : null;
+      // Every page names its rows, each in Meta's shape; anything else is not a read, and nothing kept is replaced.
+      if (!Array.isArray(answer.data) || !answer.data.every(insightRow)) throw new MetaError("busy", "Meta's ad spend came back in a shape that could not be read");
+      for (const row of answer.data as InsightRow[]) rows.push(row);
+      // Meta's next page carries the token and every parameter itself; it is followed only on Meta's own host. No
+      // `next` is the last page; a `paging` or `next` out of shape is not known (review of Codex G on #2681).
+      const paging = answer.paging;
+      if (paging !== undefined && (paging === null || typeof paging !== "object" || Array.isArray(paging))) throw new MetaError("busy", "Meta's next page could not be read");
+      const link = (paging as { next?: unknown } | undefined)?.next;
+      if (link !== undefined && (typeof link !== "string" || !sameHost(link))) throw new MetaError("busy", "Meta's next page could not be read");
+      next = link ?? null;
       params = {};
     }
+    // More pages than one read takes: a part is not the whole, so nothing kept is replaced.
+    if (next) throw new MetaTooBig();
     const fresh = linesFrom(rows, account.currency);
-    const [rawKept] = await redisPipeline([["GET", linesKey(statsId)]]);
-    const merged = mergeLines(parseLines(rawKept), fresh, window.from, window.to);
-    const still = await readConnection(statsId);
+    // Every cent Meta said was spent must be in the lines kept: a row the lines left out (a day or an amount out of
+    // range) would show a cost lower than Meta's, so the read is not taken.
+    const said = rows.reduce((sum, row) => sum + minorUnits(row.spend, account.currency), 0);
+    if (!Number.isSafeInteger(said) || said !== fresh.reduce((sum, line) => sum + line.cents, 0)) throw new MetaError("busy", "Meta's ad spend did not add up");
+    // The kept lines read exactly (Claude 6 on #2924): nil is none kept; any other shape, a member included, is not
+    // read, so the write below never replaces the older lines with the fresh window alone.
+    const keptReply = repliesFor(await redisPipeline([["GET", linesKey(statsId)]]), 1);
+    const kept = !keptReply ? null : keptReply[0] === null ? [] : parseLines(keptReply[0]);
+    if (!kept) throw new UnknownReplyError("the Meta ad spend lines kept");
+    const merged = mergeLines(kept, fresh, window.from, window.to);
+    // Still that very connection, read exactly: an unknown reply is an error tried again, never "none" (rule 24).
+    const still = await exactConnection(statsId, true);
     if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";
-    await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]);
+    const written = repliesFor(await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]), 1);
+    if (!written || written[0] !== "OK") throw new UnknownReplyError("the Meta ad spend lines written");
     await note({
       day: window.to,
       at: Math.floor(now / 1000),
@@ -564,11 +795,24 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     }
     const busy = error instanceof MetaError && error.kind === "busy";
     console.error("reading Meta ad spend failed", error instanceof Error ? error.message : error);
-    await note({ problem: busy ? "busy" : "error", after: Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600) }).catch(() => false);
+    // Too big for one read: looked at again the next day, as a currency that differs is, not every hour.
+    const after = error instanceof MetaTooBig ? Math.floor(Date.parse(`${window.to}T00:00:00Z`) / 1000) + 86_400 : Math.floor(now / 1000) + (busy ? 3600 : 6 * 3600);
+    await note({ problem: error instanceof MetaTooBig ? "big" : busy ? "busy" : "error", after }).catch(() => false);
     return busy ? "busy" : "error";
   } finally {
-    await redisPipeline([["DEL", readingKey(statsId)]]).catch(() => {});
+    // Only this read's own lock: one that ran out may be the next read's now.
+    await releaseMark(readingKey(statsId), reading);
   }
+}
+
+/** One row of the insights asked for: its campaign, its day, its platform and a spend Meta wrote as a decimal. */
+function insightRow(row: unknown): boolean {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return false;
+  const r = row as Record<string, unknown>;
+  return typeof r.spend === "string" && /^\d{1,15}(\.\d{1,6})?$/.test(r.spend) &&
+    typeof r.date_start === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.date_start) &&
+    (r.campaign_name === undefined || typeof r.campaign_name === "string") &&
+    (r.publisher_platform === undefined || typeof r.publisher_platform === "string");
 }
 
 function sameHost(link: string): boolean {
@@ -582,8 +826,22 @@ function sameHost(link: string): boolean {
 }
 
 /**
+ * The daily pass's mark (C1 cost audit, 12 November 2026): a run that walked
+ * every connected store and found none due keeps PASS_KEY, holding the
+ * generation it read, until the first moment one can be due again (the next
+ * UTC day, or the earliest wait out of a problem). Each five-minute run before
+ * then reads only the mark and the generation, one command, instead of two
+ * keys of every connected store (1 + 2M commands, 288 runs a day, for a read
+ * owed once a day). Whatever makes a store due before then moves GEN_KEY on in
+ * the same write (a new connection, another account chosen), so the next run
+ * no longer finds its mark and walks. A run that did not see every store
+ * exactly (out of time, a reply it could not read, a store it could not look
+ * up) or asked Meta for anything leaves no mark: the next run walks, as before.
+ */
+/**
  * The daily pass, a few stores at a time, from the five-minute job: every
- * connected store not yet read today, and not waiting out a problem.
+ * connected store not yet read today, and not waiting out a problem. A store
+ * whose plan's costs are paused is tried again the next day.
  */
 export async function readMetaDue(
   deadline: number,
@@ -592,27 +850,66 @@ export async function readMetaDue(
 ): Promise<{ read: number; skipped: number }> {
   const counts = { read: 0, skipped: 0 };
   if (!isMetaConfigured() || !isRedisConfigured()) return counts;
-  const [members] = await redisPipeline([["SMEMBERS", STORES_KEY]]);
-  const stores = Array.isArray(members) ? (members as unknown[]).filter((m): m is string => typeof m === "string") : [];
-  const today = new Date().toISOString().slice(0, 10);
+  // The mark and the generation, read together: only the exact same generation skips the walk; anything else walks.
+  const marks = repliesFor(await redisPipeline([["MGET", PASS_KEY, GEN_KEY]]), 1)?.[0];
+  const pair = Array.isArray(marks) && marks.length === 2 ? marks : null;
+  const generation = pair && (pair[1] === null || (typeof pair[1] === "string" && /^\d{1,20}$/.test(pair[1]))) ? (pair[1] ?? "0") : null;
+  if (generation !== null && pair?.[0] === generation) return counts;
+  // Read exactly (CX-123 rule 24): an unknown list throws, so the daily job says it failed and the next run reads it.
+  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", STORES_KEY]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores with Meta connected");
+  const now = Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  // The next UTC day, when every store read today is due again.
+  let wake = Date.parse(`${today}T00:00:00Z`) + 86_400_000;
+  let whole = generation !== null;
+  let paused = false;
+  let seen = 0;
   for (const statsId of stores) {
     if (Date.now() >= deadline) break;
-    const [rawConn, rawRead] = await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]);
-    const c = parseConnection(rawConn);
-    if (!c) {
+    seen += 1;
+    const replies = repliesFor(await redisPipeline([["GET", connKey(statsId)], ["GET", readKey(statsId)]]), 2);
+    // Only a connection confirmed absent takes the store off the list; one that cannot be read is skipped this time.
+    if (replies && replies[0] === null) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;
     }
-    const read = parseRead(rawRead);
-    if (c.broken || !c.account || read?.day === today || (read?.after ?? 0) * 1000 > Date.now()) continue;
+    // In the shape readMetaSpend reads (whole), so a record it would refuse is skipped here, not tried every run.
+    const c = replies ? parseConnection(replies[0], true) : null;
+    if (!replies || !c) {
+      counts.skipped += 1;
+      whole = false;
+      continue;
+    }
+    const read = parseRead(replies[1]);
+    if (c.broken || !c.account || read?.day === today) continue;
+    if ((read?.after ?? 0) * 1000 > Date.now()) {
+      wake = Math.min(wake, (read?.after ?? 0) * 1000);
+      continue;
+    }
     const store = await storeFor(c.sid).catch(() => null);
     if (!store || store.statsId !== statsId) {
       counts.skipped += 1;
+      whole = false;
       continue;
     }
-    const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken);
+    // One store's connection that cannot be read just now is skipped this time (rule 24), never the whole pass.
+    const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return "skipped" as const;
+      throw error;
+    });
     if (result === "read") counts.read += 1;
     else counts.skipped += 1;
+    // Paused (lib/integration-pause.ts): tried again the next day. Anything else asked of this pass is looked at
+    // again by the next run, which finds what it wrote and only then may leave the mark.
+    if (result !== "paused") whole = false;
+    else paused = true;
+  }
+  if (whole && seen === stores.length) {
+    // A paused store starts again on its own once its payment is recorded, and nothing moves GEN_KEY then: with one
+    // paused, the mark lasts at most PAUSED_PASS_SECONDS, so it is read within the hour, not the next day.
+    const seconds = Math.min(paused ? PAUSED_PASS_SECONDS : Infinity, Math.max(1, Math.ceil((wake - Date.now()) / 1000)));
+    await redisPipeline([["SET", PASS_KEY, generation as string, "EX", seconds]]);
   }
   return counts;
 }

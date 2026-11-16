@@ -1,0 +1,649 @@
+{
+ "lote": 5,
+ "main": "d7bbf9d35",
+ "pedido": "C1-20261105-1919-C4-1 / C4-20261105-1925-C5-3",
+ "itens": [
+  {
+   "n": 309,
+   "etiqueta": "EM1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:8531 (cabeçalho) com 'Estado: na fila.' e linha 8745 'Estado inicial: na fila'; topo da fila queue.md:1-30 e 19-149 registram unidades EM1/#1502 em andamento em 04/11/2026 ('P1 geral parcial', 'Único PR empilhado #2020'). #1502 incorporado em 04/11/2026 21:06 UTC (1ebcd9fceaacdcc3bb6b77b800c47aa58ec7fead), #2020 empilhado ainda aberto; complementos de 30/10, 01/11 01h21/01h23/01h25 sem construção.",
+   "correcao_estado": "PR #1502 (parcial), commit 1ebcd9fceaacdcc3bb6b77b800c47aa58ec7fead, 04/11/2026 18h06 Fortaleza; o item continua em andamento",
+   "pedidos": [
+    {
+     "o_que": "Passo 1: separar e-mails de serviço e de lista no código, com teste",
+     "situacao": "presente",
+     "prova": "lib/email.ts:551 (sendListBatch, só Amazon, listOnly) e lib/email.ts:377 (sendEmail)/sendBatch para serviço; lib/mail.ts:551 (sendTo usa sendListBatch); lib/broadcasts.ts:692 e lib/flows.ts:1256 (campanhas e sequências por sendTo); tests/mail-reservation.test.ts:114 e :132",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 2: e-mails de serviço com Amazon primeiro e Resend em seguida",
+     "situacao": "presente",
+     "prova": "lib/email.ts:377-391; a queda ao Resend fica fechada pela trava de revisão paga (CURRENT_RESEND_FALLBACK_REVIEW = null, lib/resend-fallback-budget.ts:23), por decisão do dono de 31/10 18h40 (unidade 2); construída e fechada por trava",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 3: e-mail de lista nunca pelo Resend; espera e nova tentativa sozinho, respeitando cota/taxa da Amazon",
+     "situacao": "presente",
+     "prova": "lib/email.ts:562-570 (listOnly devolve waiting); lib/broadcasts.ts:722-726 (status waiting, SENDER_WAIT_NOTE, retomado pelo job agendado); lib/flows.ts:1268-1280 (waitOrStop); lib/mail.ts:528-531 (dailyRoom/sesBulkRoom); tests/mail-reservation.test.ts:114,132",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 3: cada e-mail sai no máximo uma vez pela marca nl:ses:did",
+     "situacao": "presente",
+     "prova": "lib/ses.ts:53; lib/email.ts:593 (notYetTaken); tests/ses-sender.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 3: aviso ao criador no estúdio quando um envio para lista fica parado mais de 72 horas, com opção de cancelar",
+     "situacao": "falta",
+     "prova": "Cancelar existe (lib/broadcasts.ts:467 cancelBroadcast), mas grep por 72/waitingSince/stuck em lib/broadcasts.ts, lib/mail.ts, lib/flows.ts, components/email-studio.tsx não acha marca do início da espera nem aviso de 72 horas; nenhum outro item da fila carrega o aviso",
+     "onde_deveria_estar": "lib/broadcasts.ts (marca do início da espera e nota de 72 h), lib/flows.ts e components/email-studio.tsx"
+    },
+    {
+     "o_que": "Passo 4: capacidade total da plataforma calculada da cota lida da Amazon; soma dos limites das lojas pagantes abaixo de uma fração segura, recusando nova assinatura ou troca de plano acima dela",
+     "situacao": "falta",
+     "prova": "Só existe SES_BULK_SHARE = 0,8 da cota diária no envio (lib/ses.ts:452-460); grep por soma de limites/capacidade de venda em lib e app/api sem resultado; tests/plan-capacity-review.ts:24 só devolve 'unreviewed'; a exigência só aparece no próprio 309 (queue.md:8698)",
+     "onde_deveria_estar": "lib/mail.ts ou lib/ses.ts (capacidade mensal) e a criação/troca de assinatura do plano (checkout de plano em app/api/billing)"
+    },
+    {
+     "o_que": "Passo 5: custo de pior caso dos e-mails de lista pela SES com fontes oficiais datadas (US$0,10/mil, dados por GB, SNS, VDM/IP dedicado), sem cota grátis",
+     "situacao": "prevista",
+     "prova": "PER_EMAIL continua 0,0009 (Resend) em tests/plan-cost-registry.ts:137; já há o custo SNS das notificações (tests/plan-cost-registry.ts:158-198, docs/ses-callback-cost-2026-11-05.md); a troca do custo depende das unidades 1 e 2 incorporadas e publicadas (complemento 31/10 18h40, unidade 3) e da regra LC de AGENTS.md",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 6 (+21h25 e EI): recalcular planos e subir limites de lista de Studio/Scale, avaliar limite do Store, atualizar lib/plan.ts, docs/value-presentation e docs/margin-alignment",
+     "situacao": "prevista",
+     "prova": "lib/plan.ts:221-233 ainda 7.000/10.000 e Store 0; o recálculo está registrado em 475 [TX5] (queue.md:1856) e na ordem de 324 [TK6] (queue.md:9261)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento EI: equivalente semanal ao lado do número de e-mails (preços, estúdio)",
+     "situacao": "presente",
+     "prova": "lib/email-equivalence.ts:27-38 (divisor 5, entregue por 459 [EL3]); components/home-parts.tsx:189 (cartões de preço); components/email-studio.tsx:493; app/studio/email/page.tsx:169",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento EI: comparação datada de volume semanal com Kajabi, beehiiv, Kit e Shopify em docs/value-presentation-2026-10-18.md",
+     "situacao": "prevista",
+     "prova": "grep 'beehiiv'/'weekly' em docs/value-presentation-2026-10-18.md: 0 ocorrências; pertence à execução do passo 6, ainda prevista com TX5/TK6",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Passo 7: proteções de entregabilidade mantidas (2% devoluções, 0,08% reclamações, descadastro em um clique, endereço postal)",
+     "situacao": "presente",
+     "prova": "lib/mail-health-rules.ts:14-18; app/terms/page.tsx:373-385",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Conferir se as configurações AWS_SES_* existem em produção sem expor valores",
+     "situacao": "presente",
+     "prova": "Registro do #1514 na fila (queue.md:8790): os quatro nomes SES e a chave Resend existem em produção; PR #1514 incorporado em 01/11/2026",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes: lista nunca pelo Resend; nada duplicado/descartado; serviço caindo no Resend",
+     "situacao": "presente",
+     "prova": "tests/mail-reservation.test.ts:114,132,154; tests/ses-sender.test.ts; tests/resend-fallback-transport.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Testes: custo de lista igual ao preço oficial e nenhum plano abaixo do piso",
+     "situacao": "prevista",
+     "prova": "dependem dos passos 5 e 6 (TX5/TK6)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Teste: venda recusada quando a soma dos limites passa da capacidade segura",
+     "situacao": "falta",
+     "prova": "sem a regra do passo 4 não há teste; grep sem resultado em tests/",
+     "onde_deveria_estar": "tests/ (junto da regra do passo 4)"
+    },
+    {
+     "o_que": "Complemento 31/10 18h40, unidade 1: prova de envio real pela SES e contagens SES/Resend no mesmo período",
+     "situacao": "presente",
+     "prova": "lib/resend-usage.ts, lib/ses-provider-usage.ts, tests/resend-usage.test.ts, tests/ses-provider-usage.test.ts; PR #1514 incorporado 01/11/2026 11:22 UTC",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 31/10 18h40, unidade 2: teto atômico do Resend na cota de 50.000 do plano Pro; acima dele o e-mail espera na fila e sai pela SES",
+     "situacao": "presente",
+     "prova": "lib/resend-fallback-budget.ts:19-23 (RESEND_FALLBACK_MAX_EMAILS, revisão null = fechado); lib/resend-fallback-transport.ts; lib/order-confirmation-outbox.ts e lib/shipment-mail-outbox.ts (fila durável, construída e inativa); continuação empilhada no PR #2020 aberto",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 31/10 18h40, unidade 3: e-mail de pedido ao preço SES de US$0,23/mil no modelo, regenerando documentos",
+     "situacao": "prevista",
+     "prova": "ORDER_COST = 2 × PER_EMAIL em tests/plan-cost-registry.ts:315; condicionado às unidades 1 e 2 incorporadas e publicadas e às proteções (regra LC)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 31/10 18h40, unidade 4: mesma qualidade e testes de nada perdido/duplicado/acima do teto",
+     "situacao": "presente",
+     "prova": "tests/ses-sender.test.ts, tests/order-email-fallback.test.ts, tests/shipment-mail-outbox.test.ts, tests/resend-fallback-budget.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 1: trava da conta inteira (3% devoluções, 0,06% reclamações) pausando só as lojas acima da média",
+     "situacao": "falta",
+     "prova": "lib/mail-health.ts e lib/mail-health-rules.ts só têm a trava por loja (BOUNCE_RATE 0,02, COMPLAINT_RATE 0,0008); grep por média/plataforma/conta inteira sem resultado",
+     "onde_deveria_estar": "lib/mail-health.ts"
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 2: EnforcementStatus em revisão (PROBATION) aplicando a trava da conta com metade dos limites",
+     "situacao": "falta",
+     "prova": "lib/ses.ts:321-327 lê EnforcementStatus e trata PROBATION como saudável, sem trava reduzida",
+     "onde_deveria_estar": "lib/ses.ts e lib/mail-health.ts"
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 3: dupla confirmação para toda inscrição em lista",
+     "situacao": "incerto",
+     "prova": "Pedido gratuito com link de confirmação existe (lib/contacts.ts:8-9); compra com caixa marcada e importação com declaração do criador não têm confirmação por e-mail; o pedido isenta quando a origem comprova consentimento, e não está claro se a declaração/caixa bastam",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 3: recusa de endereços descartáveis e de domínios sem MX na inscrição e na importação",
+     "situacao": "falta",
+     "prova": "grep 'disposable', resolveMx, MX em lib/: nada ligado a contatos",
+     "onde_deveria_estar": "lib/contacts.ts, lib/imports.ts, lib/free.ts"
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 3: proteção contra robôs e limite de inscrições por IP e por loja",
+     "situacao": "presente",
+     "prova": "lib/free.ts:99-100,193 (limite por IP e loja); app/api/store/free/route.ts:85-93",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 3: importação só com declaração de consentimento do criador",
+     "situacao": "presente",
+     "prova": "lib/imports.ts:354-358",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 3: Termos proíbem listas compradas, alugadas ou emprestadas",
+     "situacao": "presente",
+     "prova": "app/terms/page.tsx:374-377",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 4: higiene de 180 dias sem clique nem compra, com e-mail único perguntando se quer continuar",
+     "situacao": "falta",
+     "prova": "grep 180 days/sunset/re-permission em lib/ sem resultado; 461 [EL5] (queue.md:12710) só cria filtro de segmento, não a higiene automática",
+     "onde_deveria_estar": "lib/contacts.ts, lib/broadcasts.ts/lib/mail.ts e um job em app/api/cron"
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 5: links de e-mail de lista conferidos contra lista de bloqueio de domínios antes do envio, com aviso no estúdio",
+     "situacao": "falta",
+     "prova": "grep blocklist/spamhaus/dnsbl em lib/: nada",
+     "onde_deveria_estar": "lib/mail.ts (render/sendTo) e components/email-studio.tsx"
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 6: envio somente pelo papel IAM AWS_SES_ROLE_ARN",
+     "situacao": "presente",
+     "prova": "lib/ses.ts:35,76",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 30/10 16h43, 7: relatório automático ao dono com o texto pronto para responder à Amazon se a conta for pausada",
+     "situacao": "fora do escopo",
+     "prova": "depende do relatório automático ao dono de 465 [MR2], que a fila deixa para depois da abertura (queue.md:9926); a resposta à Amazon exige o dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 1: verificação dos domínios no Google Postmaster Tools e leitura diária pela API",
+     "situacao": "fora do escopo",
+     "prova": "exige conta Google e registro DNS do dono, com 'sim' dele",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 1: cabeçalho Feedback-ID (ses:feedback-id-a/b) em todo e-mail de lista identificando a loja, ausente nos de serviço",
+     "situacao": "falta",
+     "prova": "grep feedback-id em lib/, app/, tests/: nada",
+     "onde_deveria_estar": "lib/mail.ts (healthTags/render) e lib/ses.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 2: recusa de endereços de função (abuse@, admin@, support@...) na importação, com contagem no estúdio",
+     "situacao": "falta",
+     "prova": "isRoleAddress existe só para outreach (lib/outreach-rules.ts:154); lib/imports.ts não o usa",
+     "onde_deveria_estar": "lib/imports.ts e a tela de importação do estúdio"
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 3: supressão para listas por devoluções temporárias repetidas",
+     "situacao": "falta",
+     "prova": "lib/sns.ts:175 recebe DeliveryDelay/devolução temporária, mas lib/mail-health.ts não conta repetições nem suprime",
+     "onde_deveria_estar": "lib/mail-health.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 4: conferência diária dos nossos domínios em listas de bloqueio públicas, com desvio do tráfego",
+     "situacao": "falta",
+     "prova": "grep spamhaus/dnsbl/blocklist: nada",
+     "onde_deveria_estar": "job em app/api/cron e lib/ses.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 5: barrar encurtadores de link e links disfarçados, mostrando o link exato no estúdio",
+     "situacao": "falta",
+     "prova": "grep bit.ly/shortener: só um comentário em lib/call-place.ts:19",
+     "onde_deveria_estar": "lib/mail.ts ou lib/mail-links.ts e components/email-studio.tsx"
+    },
+    {
+     "o_que": "Complemento 01/11 01h21, 6: degraus também na primeira campanha de loja nova",
+     "situacao": "falta",
+     "prova": "startRamp só é chamado após importação (lib/imports.ts:1283-1314) e após pausa (lib/mail-health.ts:220)",
+     "onde_deveria_estar": "lib/mail-health.ts e lib/broadcasts.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h23, 1: ritmo por provedor de destino com recuo e retomada a partir das entregas adiadas",
+     "situacao": "falta",
+     "prova": "lib/sns.ts:140-175 interpreta DeliveryDelay, sem nenhum recuo por provedor",
+     "onde_deveria_estar": "lib/mail.ts e lib/sns.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h23, 2: campanha sai primeiro aos mais engajados e para sozinha se a primeira porção passar das travas",
+     "situacao": "falta",
+     "prova": "grep engaged/recentClick em lib/broadcasts.ts, lib/mail.ts, lib/mail-clicks.ts: nada",
+     "onde_deveria_estar": "lib/broadcasts.ts e lib/mail.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h23, 3: Termos e página de regras com os assuntos proibidos em e-mails de lista (enriquecimento rápido, cripto, jogos de azar, remédios, adulto, captura de senhas)",
+     "situacao": "falta",
+     "prova": "app/terms/page.tsx:373-385 só proíbe listas compradas; grep gambling/cryptocurrenc em app/ e lib/: nada",
+     "onde_deveria_estar": "app/terms/page.tsx"
+    },
+    {
+     "o_que": "Complemento 01/11 01h25, 1: levar o DMARC por etapas até p=reject",
+     "situacao": "fora do escopo",
+     "prova": "mudança de DNS exige acesso e 'sim' do dono",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Complemento 01/11 01h25, 1: conferência diária automática de DMARC/SPF/DKIM bloqueando o envio de lista por domínio com autenticação quebrada",
+     "situacao": "falta",
+     "prova": "grep dmarc em lib/ e app/: nada",
+     "onde_deveria_estar": "job em app/api/cron e lib/mail.ts"
+    },
+    {
+     "o_que": "Complemento 01/11 01h25, 2: campanha grande espera após troca do e-mail de login ou aparelho novo, aviso aos dois endereços com link que cancela e encerra sessões, identificador do aparelho em lib/person-data.ts, Privacidade e Termos",
+     "situacao": "falta",
+     "prova": "grep new device/deviceId: só avisos de notificação (lib/account-notice.ts:160); nada segura campanhas",
+     "onde_deveria_estar": "lib/broadcasts.ts, lib/account-notice.ts, lib/person-data.ts, app/privacy, app/terms"
+    }
+   ],
+   "complemento": "Complemento de completude (05/11/2026, C1-20261105-1919-C4-1): falta (a) o aviso ao criador no estúdio quando um envio para lista fica parado mais de 72 horas (lib/broadcasts.ts, lib/flows.ts, components/email-studio.tsx; cancelar já existe); (b) a capacidade total de e-mails de lista da plataforma, calculada da cota lida da Amazon, com recusa automática de nova assinatura ou troca de plano quando a soma dos limites passar da fração segura, e o teste correspondente (lib/mail.ts/lib/ses.ts e o checkout de plano); (c) do complemento de 30/10 16h43: a trava da conta inteira (3%/0,06%) pausando só as lojas acima da média, a mesma trava com metade dos limites quando o EnforcementStatus for PROBATION (lib/mail-health.ts, lib/ses.ts:321-327), a recusa de descartáveis e de domínios sem MX na inscrição e na importação (lib/contacts.ts, lib/imports.ts, lib/free.ts), a higiene de 180 dias com o e-mail único de confirmação e a conferência dos links contra lista de bloqueio de domínios antes do envio; (d) do complemento de 01/11 01h21: cabeçalho Feedback-ID nos e-mails de lista (lib/mail.ts, lib/ses.ts), recusa de endereços de função na importação (lib/imports.ts, reaproveitando isRoleAddress de lib/outreach-rules.ts:154), supressão por devoluções temporárias repetidas (lib/mail-health.ts), conferência diária dos nossos domínios em listas de bloqueio públicas, bloqueio de encurtadores e links disfarçados com aviso no estúdio, e degraus na primeira campanha de loja nova (startRamp hoje só após importação ou pausa); (e) do complemento de 01/11 01h23: recuo por provedor de destino a partir das entregas adiadas (lib/sns.ts já as lê), envio primeiro aos mais engajados com parada na primeira porção, e a lista de assuntos proibidos nos Termos (app/terms/page.tsx); (f) do complemento de 01/11 01h25: conferência diária de DMARC/SPF/DKIM que bloqueia o envio de lista do domínio quebrado, e a espera de campanha grande após troca do e-mail de login ou aparelho novo, com aviso e link de cancelar/encerrar sessões e o identificador do aparelho registrado em lib/person-data.ts, Privacidade e Termos. Dependem do dono e ficam fora: Postmaster Tools, mudança da política DMARC no DNS e o texto à Amazon no relatório de 465 [MR2]; custo SES, novos limites e comparação semanal seguem previstos em TX5/TK6 e na unidade 3 de 31/10 18h40."
+  },
+  {
+   "n": 310,
+   "etiqueta": "AX2",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:8862 'Estado: na fila, com prioridade logo após os pedidos já recebidos', mas queue.md:8864 'Em andamento pelo Claude 2: 31/10/2026 20h20 Fortaleza, §6 (declaração honesta)' e queue.md:8858-8860 (reserva e validação da unidade NVDA do Codex, 01/11/2026); queue.md:322 '#1509 (310 [AX2] §6 + DA1: página /accessibility honesta ... merge 2b1dfd49)'. PRs AX2 incorporados: #863, #864, #865, #866, #867, #868 (24/10/2026), #1509 (01/11/2026 00:13 UTC) e correções recentes do Codex (por exemplo #2292, #2595). Itens 1–5 e 7 seguem abertos; queue.md:1570 liga as partes 4 e 5 ao 17 [D15].",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "§1 Inventário de todas as rotas de app/ gerado pelo código, em docs/accessibility-inventory.json, conferido por tests/accessibility-inventory.test.ts",
+     "situacao": "presente",
+     "prova": "tests/accessibility-inventory.test.ts:17-22 (páginas, layouts, erro/loading/not-found, componentes e rotas de API mapeados); scripts/accessibility-route-inventory.mjs (generateInventory, routeOfPage); docs/accessibility-inventory.json (135 modelos de página, todos com status 'AAA review not completed' ou parcial)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§1 Cobrir cada rota em todos os estados (vazio, carregando, erro, sucesso, aberto, fechado, desativado), modais e menus, com dados sintéticos",
+     "situacao": "prevista",
+     "prova": "docs/accessibility-inventory.json openWork 'All page/process states and integration failures': 'inventory made; complete AAA/manual evaluation pending'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§1 CI falha se uma rota existir sem teste de acessibilidade correspondente",
+     "situacao": "prevista",
+     "prova": "tests/accessibility-inventory.test.ts:17-22 só exige que a rota esteja mapeada no inventário, não que tenha teste; o próprio inventário registra a lacuna ('source generator never certifies untested pages', linha 30)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§2 axe com regras A, AA e AAA",
+     "situacao": "presente",
+     "prova": "tests/e2e/accessibility-public-matrix.mjs:106 tags wcag2a/aa/aaa, wcag21*/wcag22*",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§2 Playwright em Chromium, Firefox e WebKit, larguras 320/390/768/1280/1920, reflow 320, espaçamento de texto, redução de movimento, forced-colors e modo escuro",
+     "situacao": "presente",
+     "prova": ".github/workflows/accessibility-public-matrix.yml:55 browser: [chromium, firefox, webkit] (idem nas outras quatro matrizes); tests/e2e/accessibility-public-matrix.mjs:20-45 (cinco larguras e modos baseline/text-spacing/reduced-motion/forced-colors/reflow-320/dark)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§2 Matriz completa em TODAS as rotas do inventário (hoje só jornadas selecionadas, por exemplo /, /pricing e /signin na matriz pública), zoom real de 200% e 400%",
+     "situacao": "prevista",
+     "prova": "tests/e2e/accessibility-public-matrix.mjs:20 percorre só ['/','/pricing','/signin']; :218 'reflow320 is not real browser400% zoom'; inventário openWork 'Keyboard,focus,zoom,reflow...: full cross-route/device evidence pending'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§2 Execução diária completa e em cada mudança",
+     "situacao": "presente",
+     "prova": ".github/workflows/accessibility-public-matrix.yml:4-5 schedule cron '37 5 * * *' (idem nas demais matrizes e em accessibility-real-readers.yml:4-5)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§3 Nível de leitura (3.1.5), legendas/transcrições/audiodescrição das mídias próprias, PDFs validados com veraPDF, EPUB com Ace, e-mails em HTML acessível com versão em texto",
+     "situacao": "prevista",
+     "prova": "lib/tagged-pdf.ts:12 e tests/tagged-pdf.test.ts:8 ('Not proven here: a veraPDF run'); nenhuma execução de veraPDF/Ace nem verificação de nível de leitura em scripts/ ou .github/workflows/; e-mails já têm versão em texto (lib/email.ts:235), sem verificação sistemática; inventário openWork 'Cognitive usability, plain language ... media alternatives: systematic human/content review pending'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§4 Guidepup comandando NVDA (Windows) e VoiceOver (macOS) no GitHub Actions, registrando o anunciado",
+     "situacao": "presente",
+     "prova": ".github/workflows/accessibility-real-readers.yml:86 (guidepup install); tooling/screen-reader/entry-pilot.mjs:52 (/signin e /signin?to=login), :76 AX2_REAL_READER_RESULT; docs/accessibility-screen-reader-evidence.json e docs/accessibility-screen-reader-results.json",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§4 Leitores reais nas sete tarefas principais (cadastro/acesso, criar loja, criar e publicar produto, comprar, entrar num curso, cancelar assinatura, pedir reembolso)",
+     "situacao": "prevista",
+     "prova": "tooling/screen-reader/entry-pilot.mjs:76 escopo 'Entry headings only'; inventário openWork 'Screen readers ... pilot only: CI entry trial ... on /signin'; docs/accessibility-real-reader-protocol.md define as sete tarefas",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§4 Custo dos minutos Windows/macOS pela página oficial do GitHub, com data, e parada automática",
+     "situacao": "presente",
+     "prova": "queue.md:12137-12139 (fontes docs.github.com consultadas em 25/10/2026, Linux US$0,006/min, Windows US$0,010/min, macOS US$0,062/min; 25 min Windows e 25 macOS por execução); .github/workflows/accessibility-real-readers.yml:20,48,101 timeout-minutes",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§5 JAWS (licença paga), TalkBack em Android real, VoiceOver em iPhone real e testes com pessoas com deficiência: custo e passo exato em 'Depende do dono'",
+     "situacao": "presente",
+     "prova": "docs/accessibility-real-reader-protocol.md:27-32 (JAWS com preço oficial de 23/10/2026, TalkBack, iPhone); docs/accessibility-real-people-plan.md; queue.md:8128. A execução em si exige licença, aparelhos e pessoas reais: fora do escopo",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§6 Página pública /accessibility honesta, com listas vindas dos registros, data da revisão, como pedir ajuda, sem selos proibidos",
+     "situacao": "presente",
+     "prova": "app/accessibility/page.tsx:4,15,84 (mailto support@marktmorgen.com); lib/accessibility-statement.ts:28 ACCESSIBILITY_CHECKS, :102 STATEMENT_REVIEW; tests/accessibility-statement.test.ts:61 (proíbe 'fully accessible', 'ADA compliant' etc.); app/sitemap.ts:46; components/site-footer.tsx:102",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§7 Cada falha corrigida ou registrada como item; impossibilidade AAA registrada em docs/accessibility-programme.md",
+     "situacao": "prevista",
+     "prova": "trabalho contínuo do item (correções recentes #2292, #2595 e reservas do Codex H); nenhum caso de impossibilidade AAA registrado em docs/accessibility-programme.md (busca por 'impossib' sem resultado), o que é coerente com a regra de só registrar impossibilidade demonstrada",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 312,
+   "etiqueta": "HQ1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:8965 'Estado: na fila.'; queue.md:8967 'Andamento (Claude 2, 01/11/2026): conferência pedida antes de construir, nas fontes oficiais do Stripe lidas em 01/11/2026 ... **Depende do dono:** ... cabe ao dono confirmar ... ou limitar ao valor da tarifa.' Nenhum código construído (busca por early_fraud_warning em lib/, app/, components/ e tests/ sem resultado).",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Conferir em fonte oficial datada como funcionam os avisos, a tarifa de contestação e se o reembolso ainda pode gerar contestação",
+     "situacao": "presente",
+     "prova": "queue.md:8967 itens (1)–(3), fontes docs.stripe.com lidas em 01/11/2026",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Conferir se o evento chega pelos webhooks do Connect para cobranças diretas em contas Standard",
+     "situacao": "incerto",
+     "prova": "queue.md:8967 item (4): 'Não confirmado nas páginas lidas ... fica desconhecido e reprova até a fonte'",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Planos do Marktmorgen: reembolso automático idempotente ao receber o aviso, encerramento da assinatura e registro do efeito na reserva de contestação",
+     "situacao": "prevista",
+     "prova": "aguarda a decisão do dono registrada em queue.md:8967 (devolver todo aviso ou só cobranças até o valor da tarifa); nenhum handler radar.early_fraud_warning em lib/ ou app/api/",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Vendas dos criadores: venda marcada no estúdio com 'Refund this order', e-mail ao criador, opção desligada por padrão de reembolso automático, fechamento de acesso por lib/refunds.ts",
+     "situacao": "prevista",
+     "prova": "depende da confirmação do item (4) de queue.md:8967; nada construído",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nunca devolver cobrança contestada, já devolvida ou de outra conta; ignorar contas desconectadas; testes com Stripe simulado",
+     "situacao": "prevista",
+     "prova": "parte da construção ainda não iniciada",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Termos e política de reembolso dizendo que cobrança apontada como fraudulenta pode ser devolvida e encerrada",
+     "situacao": "prevista",
+     "prova": "parte da construção ainda não iniciada",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 313,
+   "etiqueta": "CV1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:9038 'Estado: na fila.', mas queue.md:9036 'Depende do dono (Claude 2, 1/11/2026), unidade 3 (PR #1496, rascunho)' e unidades no próprio item (queue.md:9046-9052). Incorporados: #1495 (unidade 1b, 31/10/2026 21:46 UTC), #1515 (4a), #1538 (4b), #1542 (4c, 01/11/2026 05:04 UTC); #1496 (unidade 3) segue aberto em rascunho. queue.md:21494-21498: 579 é duplicado deste item.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Imagens servidas pelo Cloudflare R2 por domínio próprio, com cópia das fotos novas e endereço pelo domínio (desligado até existir teto de pedidos)",
+     "situacao": "presente",
+     "prova": "lib/picture-r2.ts:59 PICTURE_R2_CEILING null, :77 pictureR2Config, :125 copyPictureToR2, :153 pictureR2Url; lib/picture-r2-copy.ts:9; app/api/store/image/route.ts:1; lib/picture-served.ts:8; tests/picture-r2.test.ts:72-76, tests/picture-r2-copy.test.ts, tests/picture-served.test.ts (construído e fechado por trava)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Ligar o R2: criar bucket, domínio, regra de limite de pedidos, token e variáveis (passo de painel do dono)",
+     "situacao": "fora do escopo",
+     "prova": "queue.md:9052 registra o passo exato em 'Depende do dono'; exige conta e configuração reais",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Guardar no CDN a página HTML inteira da loja",
+     "situacao": "presente",
+     "prova": "substituído por decisão registrada (regra DR, queue.md:9047 unidade 1): não guardar por causa do nonce da CSP; não é falta",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Dados públicos da loja em cache com etiqueta e renovação ao salvar (1c), depois de ler o preço oficial da Vercel/Upstash",
+     "situacao": "prevista",
+     "prova": "queue.md:9047 condiciona ao preço oficial (vercel.com bloqueado pela rede)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Menos comandos ao banco por visita, contagem exata e no máximo uma vez",
+     "situacao": "presente",
+     "prova": "lib/capped-count.ts:25-34,73,80 (script lê o tamanho uma vez; 28 → 12–14 comandos); scripts/test_capped_count_redis.py:117-125 (1.000 casos aleatórios no Redis real); PR #1495 incorporado",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Fotos fora da tela com loading='lazy' e tamanho reservado; cache longo nos arquivos estáticos",
+     "situacao": "presente",
+     "prova": "components/store-product.tsx:1150; components/store-collections.tsx:108; app/api/image/[folder]/[file]/route.ts:42 e app/api/photo/[id]/route.ts:39 'public, max-age=31536000, immutable' (unidade 2, queue.md:9049)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Modelo de custo contando cada script EVAL como 1 + cada redis.call (unidade 3)",
+     "situacao": "prevista",
+     "prova": "PR #1496 aberto em rascunho, à espera da decisão do dono (queue.md:9036); tests/traffic-cost.ts:92-122 ainda com o modelo anterior (frontCount 12, laterCount 8)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§4 Medir antes e depois no site publicado e atualizar tests/traffic-cost.ts só com o medido",
+     "situacao": "prevista",
+     "prova": "próxima etapa do item; ainda não feita",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§5 Recalcular os planos e subir os limites de visitas",
+     "situacao": "prevista",
+     "prova": "depende da unidade 3 e da decisão do dono (queue.md:9036); mudança de limite visível hoje travada por MR/TX",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "§6 Desempenho no celular e acessibilidade sem piorar",
+     "situacao": "incerto",
+     "prova": "sem medição específica do item registrada; as unidades incorporadas não mudam o HTML servido enquanto o R2 está desligado",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 331,
+   "etiqueta": "RC1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:9396 'Estado: na fila. ... executar logo depois de320 [TK2], em conjunto com a cobrança própria de320 e o passo2 de315 [MG2]'; queue.md:773 'sem mudança'; queue.md:12155 'Ainda não: ... o Stripe Tax pela API de 331 [RC1]'. Nenhum uso de tax/calculations ou tax/transactions em lib/ ou app/.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 334,
+   "etiqueta": "RE2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:9473 'Estado: na fila. ... executar logo depois de333 [RE1]'; queue.md:776 'sem mudança'. lib/billing.ts:354 ainda pede 3D Secure só quando cycle === 'year'; lib/assistant-billing.ts:97 no assistente.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 335,
+   "etiqueta": "FR1",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:9527 'Estado: na fila. ... Executar depois do Bloco de abertura'; complemento FR2 queue.md:9570 'registro documental; não implementado'; queue.md:777 MQ2 A#19. Nenhum gerador de relatório fiscal (5472, Delaware, IRPF, INSS) em lib/ ou scripts/: lib/llc-fixed-costs.ts cita o 5472 só como custo fixo. PRs FR1/FR2 encontrados (#898, #1045) são só de registro na fila.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 338,
+   "etiqueta": "HZ3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:9805 'Estado: na fila, ligado275[FX1] e proteção operacional'; queue.md:780 MQ2 A#81; docs/queue-audit-2026-10-30.md:192 ('depende da fatura real'). Nenhum inventário de consumo do projeto hazelsong em docs/ e nenhum PR HZ3.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 345,
+   "etiqueta": "RN3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:9953-9960 'Estado: na fila, depois do Bloco de abertura/pedidos anteriores e344[RN2]. Estudar temas de loja pagos ... não construir nem pôr à venda'; queue.md:17332 LQ15 'Reaberto ... Mesmo número, texto, escopo, estado e posição anteriores' (cancelamento LQ14 de queue.md:17324 superado); queue.md:16955 tabela LQ 'reaberto'; queue.md:787 '345 [RN3] | sem mudança | FIM1: cauda vigente ... FIM1#50'; queue.md:1483 'FIM1 | 50 | 345 [RN3] | 39 | f | estudo de temas pagos'. Nenhum documento de estudo de temas pagos no main (busca em docs/ por theme/tema/RN3/marketplace sem resultado; só docs/ht15-template-library.md, de outro item) e nenhum PR do estudo (busca 'RN3' só acha PR #987, que apenas registrou o complemento RF na fila).",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 378,
+   "etiqueta": "TB4",
+   "estado": "feito",
+   "prova_do_estado": "queue.md:11073 'Estado: em andamento pela Claude 2 (1/11/2026 ...)' descreve três unidades: 1 (servidor, rotação), 3 (reenvio manual) e 2 (tela e textos). As três foram incorporadas: #1557 (unidade 1, merge 8d6cbaed09bab41d1979880ff56a6135eb3b6879, 01/11/2026 03h18 Fortaleza), #1568 (unidade 3, merge 58562747d90c42bfaeac5da6df2ecde5d71053ca, 01/11/2026 09h42 Fortaleza) e #1572 (unidade 2, a última, merge 31113c2b227754e2e4279f84b39921c78ba45a0c, 01/11/2026 10h44 Fortaleza). Nenhuma outra unidade planejada na fila.",
+   "correcao_estado": "Concluído nas unidades originais: PRs #1557, #1568 e #1572 (último: commit 31113c2b227754e2e4279f84b39921c78ba45a0c, 01/11/2026 10h44 Fortaleza); complementos posteriores ao item ficam pendentes (C4-20261105-2015-C5-5)",
+   "pedidos": [
+    {
+     "o_que": "Rotação do segredo sem interrupção: o novo mostrado uma vez, o anterior assina junto por 24 h (dois v1 no cabeçalho), entrega em trânsito sai com os dois, depois o anterior sai",
+     "situacao": "presente",
+     "prova": "lib/webhooks.ts:222 ROTATION_HOURS = 24, :420 signatureFor, :962 rotateSecret; app/api/store/webhooks/route.ts:43; tests/webhook-rotation.test.ts:109-139",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Nenhum segredo na tela, no registro ou na exportação",
+     "situacao": "presente",
+     "prova": "tests/webhook-rotation.test.ts:6,114 ('the studio sees neither secret'); lib/webhooks.ts:952,973 (segredo só no retorno da rotação)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Reenvio MANUAL de entrega que falhou, uma vez, da própria loja, mesmo id de evento, contando a entrega do mês e dividindo o limite por minuto, pausado como o teste",
+     "situacao": "presente",
+     "prova": "lib/webhooks.ts:1017 resendDelivery, :114 TESTS_PER_MINUTE, :1108; app/api/store/webhooks/route.ts:73-77; tests/webhook-resend.test.ts:100-168",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Tela: botão 'New secret' com confirmação e 'Send again' em cada entrega que falhou; explicação de aceitar qualquer v1 durante a troca, no estúdio e na página pública",
+     "situacao": "presente",
+     "prova": "components/webhook-editor.tsx:123,231-237,332,355-356; lib/feature-pages.ts:1572-1573; tests/webhook-studio-words.test.ts",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Endpoints sem acesso a rede privada (SSRF), sem seguir redirecionamento; registro com retenção limitada",
+     "situacao": "presente",
+     "prova": "lib/webhooks.ts:54-56 ('Every request goes through lib/safe-fetch.ts ... private network is refused, and none follows a redirect'; cada entrega guardada por uma semana), :76 import safeFetch",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 402,
+   "etiqueta": "WX3",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:11288 \"Estado: na fila\". O cancelamento de 28/10 (LQ7, tabela em 17127) foi desfeito: LQ13 reabriu os cancelados pelo LQ7 (queue.md:15218 e seguintes, \"Reaberto por decisão do dono em 28/10/2026, 23h26 (LQ13)\") e LQ17 (queue.md:17353) devolveu todo item tocado por LQ1–LQ15 ao estado anterior. A linha \"na fila\" está certa; nenhuma correção.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 414,
+   "etiqueta": "KX1",
+   "estado": "em andamento",
+   "prova_do_estado": "queue.md:11478 'Em andamento pelo Claude: 30/10/2026, 14h45 Fortaleza'; queue.md:11479-11484 (PR #1295 incorporado, textos oficiais em #1315/#1316/#1318/#1319, PR #1296 'segue SEM incorporar'); queue.md:20900 '414 [KX1] segue com o PR #1296 aberto até os textos oficiais da Califórnia, do Oregon e do Canadá'; PR #1494 (Oregon) incorporado em 31/10/2026; #1296 continua aberto.",
+   "correcao_estado": "",
+   "pedidos": [
+    {
+     "o_que": "Matriz legal oficial datada (estados dos EUA, FTC, UE, Reino Unido, Canadá) com a quem se aplica, janela, contagem de dias e conteúdo do aviso",
+     "situacao": "presente",
+     "prova": "docs/kx1-renewal-legal-matrix-2026-10-30.md §1-§2 (linhas 11-45), §6-§13 (linhas 139-478: Utah, Illinois, Virgínia, Massachusetts, Colorado, DC, Minnesota, Nova York, FTC, Reino Unido, Alemanha, Oregon)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Leitura oficial de Califórnia e Canadá/Ontário e textos da UE na EUR-Lex",
+     "situacao": "prevista",
+     "prova": "docs/kx1-renewal-legal-matrix-2026-10-30.md:435-478 ('California and Canada are still unread'); queue.md:322 (sites oficiais recusados pela rede do ambiente, Depende do dono)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Auditoria do código existente de avisos, cancelamento e consentimento",
+     "situacao": "presente",
+     "prova": "docs/kx1-renewal-legal-matrix-2026-10-30.md §3 (linha 51 em diante, lacunas G1–G11) e §4 (linha 106, ordem dos próximos PRs)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Aviso antes de cada renovação anual e de fim de teste, aviso de mudança de preço, lembrete anual, sem upsell e com link direto para cancelar",
+     "situacao": "prevista",
+     "prova": "PR #1296 aberto (G1); lacunas G11–G17 em docs/kx1-renewal-legal-matrix-2026-10-30.md:65,242,294,301,342,378; ordem dos PRs em §4",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Cancelamento online total e imediato para comprador e planos, sem a oferta de permanência esconder o botão (G5, G8, G10)",
+     "situacao": "prevista",
+     "prova": "docs/kx1-renewal-legal-matrix-2026-10-30.md:97,123 (próximo PR de cancelamento)",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Consentimento afirmativo específico à recorrência com prova guardada por 3 anos ou até 1 ano após o término, o que for maior",
+     "situacao": "prevista",
+     "prova": "previsto na ordem de PRs da matriz; ainda não construído",
+     "onde_deveria_estar": ""
+    },
+    {
+     "o_que": "Custo dos avisos extras no pior caso de cada plano, com teto antes do envio",
+     "situacao": "presente",
+     "prova": "docs/kx1-renewal-legal-matrix-2026-10-30.md:209-211 ('None so far: one annual notice on one day meets every window read'), a rever se G12/G13 exigirem mais avisos",
+     "onde_deveria_estar": ""
+    }
+   ],
+   "complemento": ""
+  },
+  {
+   "n": 426,
+   "etiqueta": "BX2",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:11668-11670 '426. [BX2] Painel de ganhos por mês e fonte. Estado: na fila.'; queue.md:11686 'BX425–426 incorporados como fila, não implementados/ativados'; queue.md:868 '426 [BX2] | B | ... MQ2(30/10/2026,10h58): B#155'; queue.md:1367 'B | 155 | 426 [BX2] | 172 | e | painel de ganhos'; queue.md:17131 tabela LQ 'mantido'. No main não há tela de ganhos por mês e fonte com patrocínios ES1, receitas externas declaradas e CSV: app/studio/totals/page.tsx soma lojas por janelas de 7/30/90 dias (outro item, decisão de 04/11/2026, C4-18), sem fonte manual nem filtro por mês. Busca de PRs por 'BX2' só acha PR #1003, que apenas gravou BX425–426 na fila.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  },
+  {
+   "n": 435,
+   "etiqueta": "PV5",
+   "estado": "não iniciado",
+   "prova_do_estado": "queue.md:12001-12010 texto de PV5 (a)–(f); queue.md:12075 'Prioridade vigente PV: AB(a) INTEGRAL → estudo363[EI1] →431[PV1]→...→435[PV5]'; queue.md:14732 (AV1) 'Passam para depois da abertura, na ordem já existente: 363 [EI1], 431 a 435 [PV1–PV5] ...'; item 435 'Estado dos431–435: na fila; nenhum pagamento,recurso,gasto de fornecedor,migração ou redução de custo/reserva ativado'; queue.md:877 '435 [PV5] | B | MQ1(d)'; queue.md:17134/17213-17214 LQ8 (PV5(b) sem exigência de UE; PV5(f)(1) consulta à Receita cancelada por TX), mantido depois da LQ17. No main, docs/cost-savings.md:8 e :22 registram apenas o inventário inicial criado no registro (PR #1030): 'PV5: estudos infraUE/tax/câmbio/adquirência/fixos | Encontrado no pedido; na fila | ... Desconhecido; nenhum fixo removido'. O que avançou nesse documento é PV8(a)–(c) (exceção expressa do dono), não PV5.",
+   "correcao_estado": "",
+   "pedidos": [],
+   "complemento": ""
+  }
+ ]
+}

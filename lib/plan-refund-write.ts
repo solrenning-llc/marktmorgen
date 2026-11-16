@@ -35,6 +35,7 @@ import { MAX_PARTS, READ_BUDGET_MS, readPlanRefund } from "@/lib/plan-refund";
 import { isRedisConfigured } from "@/lib/redis";
 import { LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
 import type { Store } from "@/lib/store";
+import { StripeListUnreadable, ownField, readStripePage } from "@/lib/stripe-list";
 
 const AT = "2024-06-20";
 /** The lock of one store's plan refund. */
@@ -50,7 +51,22 @@ export type PlanRefundMade =
   | { ok: false; reason: "busy" | "no_lock" | "not_owed" | "unknown" | "pending" | "failed" | "changed" };
 
 type Row = Record<string, unknown>;
-const rows = (page: Row): Row[] => (Array.isArray(page.data) ? (page.data as unknown[]).filter((r): r is Row => Boolean(r) && typeof r === "object") : []);
+const REFUND_STATES = ["succeeded", "failed", "canceled", "pending", "requires_action"];
+/**
+ * A charge's refunds, read whole: the page in its exact shape (lib/stripe-list.ts), to its end, every row readable
+ * with a refund's id and a state Stripe gives. Anything else throws, and no refund is made on it: "none pending" is a "no", which only a
+ * whole, readable list may say.
+ */
+function wholeRefunds(page: unknown): Row[] {
+  // A row is a refund only with a refund's own id (Codex CX1 on #2759): another id is not readable, so nothing is made.
+  const read = readStripePage(
+    page,
+    (row) => typeof ownField(row, "status") === "string" && REFUND_STATES.includes(ownField(row, "status") as string),
+    REFUND_ID,
+  );
+  if (read.hasMore || read.unreadable) throw new StripeListUnreadable(read.hasMore ? "more refunds than one page" : "a refund not readable");
+  return read.rows;
+}
 
 /**
  * `expectCents`: the amount the creator was shown and confirmed (the review page). When the policy gives another
@@ -85,9 +101,7 @@ export async function refundPlanPayment(
     for (const part of parts) {
       let refunds: Row[];
       try {
-        const page = await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`);
-        if (page.has_more !== false) return { ok: false, reason: "failed" };
-        refunds = rows(page);
+        refunds = wholeRefunds(await onPlatformAt(AT, "GET", `/refunds?${new URLSearchParams({ charge: part.chargeId, limit: "100" })}`));
       } catch (error) {
         console.error("reading a plan payment's refunds failed", error);
         return { ok: false, reason: "failed" };

@@ -11,8 +11,8 @@
  *     writing to each other never fill an inbox.
  */
 import { alertCreator } from "@/lib/phone-alerts";
+import { claimMark } from "@/lib/claim-mark";
 import { sendEmail } from "@/lib/email";
-import { redisPipeline } from "@/lib/redis";
 import { courseSender, studentEmail } from "@/lib/learn";
 import { CREATOR_AUTHOR, type LessonComment } from "@/lib/lesson-comments-rules";
 import type { Listing, Store } from "@/lib/store";
@@ -54,8 +54,8 @@ export async function tellStudent(input: {
   if (reply.by !== CREATOR_AUTHOR || parent.by === CREATOR_AUTHOR) return false;
   const to = await studentEmail(courseId, parent.by);
   if (!to) return false;
-  const [fresh] = await redisPipeline([["SET", `nl:lc:${courseId}:mail:${parent.by}:${parent.lesson}`, "1", "NX", "EX", MAIL_GAP_SECONDS]]);
-  if (fresh === null) return false;
+  // One email a gap: ours only on OK or our own value read back (CX-123 rule 24, L9); anything else sends nothing.
+  if ((await claimMark(`nl:lc:${courseId}:mail:${parent.by}:${parent.lesson}`, MAIL_GAP_SECONDS)) !== "ours") return false;
   const link = `${origin}/@${store.handle}/course/${product.id}/${parent.lesson}#c-${reply.id}`;
   // To the student, in the store's language (lib/buyer-words/courses.ts).
   const w = coursesWords(store.language);

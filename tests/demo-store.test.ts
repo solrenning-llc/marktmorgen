@@ -262,7 +262,7 @@ async function main(): Promise<void> {
   const editor = withoutComments(read("components/product-image-editor.tsx"));
   is("the studio makes the copy when a picture is added, and sends it with the picture", /await shrink\(file, SMALL_LONG_SIDE\)/.test(editor) && /\.\.\.\(small \? \{ small \} : \{\}\)/.test(editor), true);
   const attach = withoutComments(read("app/api/store/image/route.ts"));
-  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /del\(imagePaths\(result\.removed\)\)/.test(attach), true);
+  is("what is attached is checked as the picture is, and deleted with it", /smallWidth < width/.test(attach) && /copyKind === copy\.contentType/.test(attach) && /const replaced = imagePaths\(result\.removed\)/.test(attach) && /del\(replaced\)/.test(attach), true);
 
   part("Its checkout is the real one, on the demo's own account and key");
   is("the demo's account is asked with the demo's key", keyFor(DEMO_CONNECTED_ACCOUNT), DEMO_KEY);
@@ -313,7 +313,7 @@ async function main(): Promise<void> {
   emails.length = 0;
   const keys = async () => ((await redis.pipeline([["SCAN", "0", "MATCH", "*", "COUNT", 100000]]))[0] as [string, string[]])[1].length;
   const keysBefore = await keys();
-  is("no sign-in link is made for its owner", await sendSignInLink(HOUSE_OWNER, "https://marktmorgen.com"), false);
+  is("no sign-in link is made for its owner", (await sendSignInLink(HOUSE_OWNER, "https://marktmorgen.com")).sent, false);
   is("nothing is written and nothing is sent", [await keys(), emails.length], [keysBefore, 0]);
   is("it takes no reviews, and a creator's store does", [takesReviews(store), takesReviews(theirs)], [false, true]);
   stripe.length = 0;
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
   const plans = withoutComments(read("lib/billing-sync.ts"));
   is("the daily check of plans asks only about a store that names a subscription", /if \(!store\.subscriptionActive \|\| !store\.subscriptionId \|\|/.test(plans), true);
   const studio = withoutComments(read("app/studio/page.tsx"));
-  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*await readSubscription/.test(studio), true);
+  is("and so does the studio", /store\?\.subscriptionId && isBillingConfigured\(\)\s*\?\s*(?:await |early\()readSubscription/.test(studio), true);
 
   part("Its pages are the pages every store has, and say that it is a demo");
   const layout = withoutComments(read("app/[handle]/layout.tsx"));

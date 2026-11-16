@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { creatorFrom } from "@/lib/studio-route";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { readStats, salesCsv, sourcesCsv, studioStats, visitsCsv, readsSales } from "@/lib/stats";
@@ -9,6 +10,21 @@ import { ENDED_STORE_EXPORTS } from "@/lib/plan-closing-rules";
 /** How long the count of whole exports since a plan ended is kept: past its closing day and the week a late last notice adds. */
 const ENDED_EXPORT_SECONDS = 60 * 86_400;
 import { takeAllowance } from "@/lib/store-allowance";
+
+/**
+ * The count a window round gave (lib/window-count.ts), only in its exact
+ * shape (CX-123 rule 24): two replies, a whole count from one up and the
+ * EXPIRE NX's 0 or 1. Anything else, or no answer at all, is null: unknown, never a count
+ * under the limit.
+ */
+function countFrom(reply: unknown): number | null {
+  return reply === null ? null : windowCountOf(reply);
+}
+
+const unanswered = (error: unknown) => {
+  console.error("counting an export failed", error);
+  return null;
+};
 
 /** Files one store may take in ten minutes: each sales file is up to a hundred reads of Stripe. */
 const EXPORTS_PER_WINDOW = 10;
@@ -35,11 +51,14 @@ export async function GET(request: NextRequest) {
 
   if (isRedisConfigured() && store.statsId) {
     const key = `nl:rl:export:${store.statsId}`;
-    const [, count] = await redisPipeline([
-      ["SET", key, "0", "EX", 600, "NX"],
-      ["INCR", key],
-    ]);
-    if (Number(count) > EXPORTS_PER_WINDOW) return plain(429, "That is a lot of files in ten minutes. Try again in a few minutes.");
+    const count = countFrom(await redisPipeline(windowCount(key, 600)).catch(unanswered));
+    // A count that could not be read makes no file: nothing was read, and the answer says so.
+    if (count === null) {
+      return what === "store"
+        ? plain(503, "Your store's file could not be made just now. Try again in a minute.")
+        : plain(502, "Stripe or our records did not answer just now. Nothing is lost; try again in a moment.");
+    }
+    if (count > EXPORTS_PER_WINDOW) return plain(429, "That is a lot of files in ten minutes. Try again in a few minutes.");
   }
 
   const day = new Date().toISOString().slice(0, 10);
@@ -64,12 +83,20 @@ export async function GET(request: NextRequest) {
       if (!isRedisConfigured() || !store.statsId) return plain(503, "Your store's file could not be made just now. Try again in a minute.");
       const ended = Date.parse(store.planEndedAt) || 0;
       const key = `nl:rl:export:${store.statsId}:ended:${ended}`;
-      const [, taken] = await redisPipeline([["SET", key, "0", "EX", ENDED_EXPORT_SECONDS, "NX"], ["INCR", key]]);
-      if (Number(taken) > ENDED_STORE_EXPORTS) {
-        return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS} times since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
+      const taken = countFrom(await redisPipeline(windowCount(key, ENDED_EXPORT_SECONDS)).catch(unanswered));
+      if (taken === null) return plain(503, "Your store's file could not be made just now. Try again in a minute.");
+      if (taken > ENDED_STORE_EXPORTS) {
+        return plain(429, `You have downloaded your store's main data ${ENDED_STORE_EXPORTS === 1 ? "once" : `${ENDED_STORE_EXPORTS} times`} since your plan ended, which is what a store whose plan has ended keeps for this. Your list, your sales and your numbers still download one by one below, and starting a plan again lets you download it again.`);
       }
     } else {
-      const took = await takeAllowance(store, "studio", exportUnits(await exportShape(store)));
+      let shape;
+      try {
+        shape = await exportShape(store);
+      } catch (error) {
+        console.error("measuring a store export failed", error);
+        return plain(503, "Your store's file could not be measured just now. Try again in a minute.");
+      }
+      const took = await takeAllowance(store, "studio", exportUnits(shape));
       if (!took.ok) return plain(429, took.message);
     }
     return new Response(storeExport(store), {

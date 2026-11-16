@@ -19,7 +19,7 @@ const link = "text-black underline underline-offset-2 hover:no-underline";
  */
 export default function ZoomGuidePage() {
   return (
-    <LegalPage title="Zoom for Marktmorgen" lastUpdated="October 5, 2026">
+    <LegalPage title="Zoom for Marktmorgen" lastUpdated="November 8, 2026">
       <p>
         Marktmorgen is a link-in-bio store where creators sell digital
         products, courses, memberships and paid video calls. The Zoom app lets
@@ -96,8 +96,10 @@ export default function ZoomGuidePage() {
         <ul className="list-disc space-y-2 pl-6">
           <li>
             <strong className="text-black">From your studio.</strong> Open Video calls and click{" "}
-            <strong className="text-black">Disconnect</strong> under Zoom. We revoke our token with Zoom, which ends our access, and
-            delete what we kept about the connection.
+            <strong className="text-black">Disconnect</strong> under Zoom. We ask Zoom to cancel our token. When Zoom confirms it,
+            our access ends. We also disconnect the account here and delete what we kept about the connection. If Zoom does not
+            confirm it, we tell you on the screen and in the email to the store&apos;s owner, and you can remove the app yourself
+            in Zoom, as the next step shows.
           </li>
           <li>
             <strong className="text-black">From Zoom.</strong> Sign in at{" "}

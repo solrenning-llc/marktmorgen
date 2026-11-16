@@ -42,6 +42,7 @@ import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { dataBytes } from "@/lib/store-data-rules";
 import { StoreFullError } from "@/lib/store-full";
 import { type ProductFile, parseProductFile } from "@/lib/product-file";
@@ -62,6 +63,8 @@ import { deliveredIds, parseBundleItems, parsePick } from "@/lib/bundle-rules";
 import { type ExtraNotes, allExtraNotes } from "@/lib/extras-notes";
 import { parsePairs } from "@/lib/store-collections";
 import type { Store } from "@/lib/store";
+// Read as a namespace, so it never clashes with a named import of the same helpers.
+import * as redisReply from "@/lib/redis-reply";
 
 /**
  * How many things one store may list: two thousand.
@@ -645,13 +648,34 @@ export async function listingsNamed(store: Store, meta: Record<string, string | 
 
 // ---- Reading ----------------------------------------------------------------
 
-/** Many GETs, in pipelines of a few hundred sent side by side. */
+/**
+ * Many GETs, in pipelines of a few hundred sent side by side: one reply for each key, in its own envelope, or
+ * UnknownReplyError (CX-123 rule 24), never a list cut short whose missing replies would read as "no record".
+ */
 async function getMany(keys: string[]): Promise<unknown[]> {
   if (keys.length === 0) return [];
   const chunks: string[][] = [];
   for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
-  const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((key) => ["GET", key]))));
+  const answers = await Promise.all(
+    chunks.map(async (chunk) => {
+      const replies = repliesFor(await redisPipeline(chunk.map((key) => ["GET", key])), chunk.length);
+      if (!replies) throw new UnknownReplyError("a store's product records");
+      return replies;
+    }),
+  );
   return answers.flat();
+}
+
+/**
+ * One product's listing as GET answered it: null only for an explicit nil (no record). A reply of another type, a
+ * record that is not JSON, not a listing, or another product's throws UnknownReplyError (CX-123 rule 24; Claude 5's
+ * ALTO on PayPal hand-over), never "the store has no such product".
+ */
+function listingRead(raw: unknown, id: string): Listing | null {
+  if (raw === null) return null;
+  const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
+  if (!listing || listing.id !== id) throw new UnknownReplyError("a product's listing");
+  return listing;
 }
 
 function parseJson(raw: unknown): unknown {
@@ -676,33 +700,81 @@ function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
 
 /**
  * Listings, in the order asked (every product in the creator's order when no
- * ids are given). Ids the store does not have are left out. Whatever the head
- * holds is not read again.
+ * ids are given). Ids the store does not have are left out, and so is one
+ * whose record Redis answers is not there; a record or reply that does not
+ * read throws UnknownReplyError (listingRead). Whatever the head holds is not
+ * read again.
  */
 export async function readListings(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  return (await readListingsMeasured(store, ids)).listings;
+}
+
+/** readListings, and how many bytes of listing records it read from Redis (0 for those the store record holds whole). */
+export async function readListingsMeasured(store: Store, ids?: Iterable<string>): Promise<{ listings: Listing[]; bytes: number }> {
   const asked = wanted(store, ids);
   const catalog = store.catalog;
   if (catalog.inline) {
     const byId = new Map(catalog.inline.map((p) => [p.id, p]));
-    return asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf);
+    return { listings: asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf), bytes: 0 };
   }
-  if (asked.length === 0) return [];
+  if (asked.length === 0) return { listings: [], bytes: 0 };
   const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
   const missing = asked.filter((id) => !found.has(id));
+  let bytes = 0;
   if (missing.length && catalog.id && isRedisConfigured()) {
     const raws = await getMany(missing.map((id) => listingKey(catalog.id!, id)));
+    bytes = raws.reduce<number>((sum, raw) => sum + (typeof raw === "string" ? Buffer.byteLength(raw, "utf8") : 0), 0);
     missing.forEach((id, i) => {
-      const listing = parseListing(parseJson(raws[i]));
-      if (listing && listing.id === id) found.set(id, listing);
+      const listing = listingRead(raws[i], id);
+      if (listing) found.set(id, listing);
     });
   }
-  return asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l));
+  return { listings: asked.map((id) => found.get(id)).filter((l): l is Listing => Boolean(l)), bytes };
+}
+
+/**
+ * What these products' listing records weigh now, in bytes (STRLEN), on
+ * Redis's exact answer only (one whole number per product), so a read can be
+ * paid for at what it will read; null when it cannot be known. Products the
+ * store record holds whole (inline, or in the head) weigh 0: nothing is read.
+ */
+export async function listingSizes(store: Store, ids: string[]): Promise<number[] | null> {
+  const catalog = store.catalog;
+  if (catalog.inline || !ids.length) return ids.map(() => 0);
+  if (!catalog.id || !isRedisConfigured()) return null;
+  const head = new Set(catalog.head.map((listing) => listing.id));
+  const asked = ids.filter((id) => !head.has(id));
+  const replies: unknown = asked.length ? await redisPipeline(asked.map((id) => ["STRLEN", listingKey(catalog.id!, id)])) : [];
+  if (!Array.isArray(replies) || replies.length !== asked.length || replies.some((n) => typeof n !== "number" || !Number.isSafeInteger(n) || n < 0)) return null;
+  const sizes = new Map(asked.map((id, i) => [id, replies[i] as number]));
+  return ids.map((id) => sizes.get(id) ?? 0);
 }
 
 /** One listing, or null when the store has no such product (or no id was given). */
 export async function readListing(store: Store, id: string | null | undefined): Promise<Listing | null> {
   if (typeof id !== "string" || !id) return null;
   return (await readListings(store, [id]))[0] ?? null;
+}
+
+/**
+ * One listing read exactly (CX-123 rule 24; Claude 3 on #2910): null only when the store has no such product or its
+ * own record is confirmed absent (an exact null), "unknown" when that record answered anything but one record of this
+ * very product (no reply, a number, a list, text that is not a listing, another product's). A request that fails
+ * throws, as readListing does. What the store record holds whole (inline, or in the head) is not read again.
+ */
+export async function readListingExactly(store: Store, id: string | null | undefined): Promise<Listing | null | "unknown"> {
+  if (typeof id !== "string" || !id) return null;
+  const catalog = store.catalog;
+  if (catalog.inline || !productIds(store).includes(id)) return readListing(store, id);
+  const inHead = catalog.head.find((listing) => listing.id === id);
+  if (inHead) return inHead;
+  // A store record that names a product held elsewhere, but no place to read it from, cannot say it is gone.
+  if (!catalog.id || !isRedisConfigured()) return "unknown";
+  const replies = repliesFor(await redisPipeline([["GET", listingKey(catalog.id, id)]]), 1);
+  if (!replies) return "unknown";
+  if (replies[0] === null) return null;
+  const listing = typeof replies[0] === "string" && replies[0] ? parseListing(parseJson(replies[0])) : null;
+  return listing && listing.id === id ? listing : "unknown";
 }
 
 /** One listing when it is a course, or null; a store of null answers null. */
@@ -723,13 +795,53 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   const raws = await getMany(asked.flatMap((id) => [listingKey(catalog.id!, id), extrasKey(catalog.id!, id)]));
   const out: Product[] = [];
   asked.forEach((id, i) => {
-    const listing = parseJson(raws[i * 2]);
-    if (!listing || typeof listing !== "object") return;
-    const extras = parseJson(raws[i * 2 + 1]);
-    const product = parseProduct({ ...(listing as object), ...(extras && typeof extras === "object" ? extras : {}) });
-    if (product && product.id === id) out.push(product);
+    const product = productRead(raws[i * 2], raws[i * 2 + 1], id);
+    if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * The extras record exactly as productWrites writes it: a JSON record whose own keys are "fields" (a list), "funnel"
+ * (null or one that reads) and, on a product the creator ships, "legal" (#3004). Anything else, a key of the listing (a
+ * title, a price, an id, "__proto__") among them, is null: spread over the listing it would replace the listing's own
+ * value, and the next edit would write it into the listing for good (Codex P on #3888). Only the validated values are
+ * returned, with "legal" as written (parseProduct reads it).
+ */
+function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown; legal?: unknown } | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  if (!keys.includes("fields") || !keys.includes("funnel") || keys.some((key) => !EXTRAS_KEYS.has(key))) return null;
+  const { fields, funnel, legal } = parsed as { fields: unknown; funnel: unknown; legal?: unknown };
+  if (!Array.isArray(fields) || (funnel !== null && !parseFunnel(funnel))) return null;
+  // The legal information (#3004, 618 [SZ2]) is the full record's own, never a listing key; parseProduct reads it.
+  return keys.includes("legal") ? { fields, funnel, legal } : { fields, funnel };
+}
+
+/** The keys productWrites puts in a product's extras record: fields and funnel always, legal when filled (#3004). */
+const EXTRAS_KEYS = new Set(["fields", "funnel", "legal"]);
+
+/**
+ * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no
+ * record); an extras nil is a product with no checkout questions and no funnel. Any other reply (not text, text that
+ * is not a JSON record, extras without their list of questions or with a funnel that does not read, a record that is
+ * not a product or is another product's) throws UnknownReplyError. Every product edit writes back what this read
+ * (lib/store.ts, onProduct), so extras taken for "none" would DEL the creator's questions and funnel, and a listing
+ * taken for "none" would drop the product from a store copy's batch.
+ */
+function productRead(rawListing: unknown, rawExtras: unknown, id: string): Product | null {
+  if (rawListing === null) return null;
+  const listing = typeof rawListing === "string" ? parseJson(rawListing) : null;
+  if (!listing || typeof listing !== "object" || Array.isArray(listing)) throw new UnknownReplyError("a product's listing");
+  let extras: { fields: unknown[]; funnel: unknown } | Record<string, never> = {};
+  if (rawExtras !== null) {
+    const parsed = typeof rawExtras === "string" ? exactExtras(parseJson(rawExtras)) : null;
+    if (!parsed) throw new UnknownReplyError("a product's checkout questions and funnel");
+    extras = parsed;
+  }
+  const product = parseProduct({ ...(listing as object), ...extras });
+  if (!product || product.id !== id) throw new UnknownReplyError("a product's records");
+  return product;
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */
@@ -758,6 +870,69 @@ export function listingFinder(store: Store): (id: string | undefined) => Promise
 /** Listings of every product of one kind, in the creator's order. */
 export async function readKind(store: Store, kind: Kind): Promise<Listing[]> {
   return readListings(store, idsOfKind(store, kind));
+}
+
+/**
+ * readListings for code that must not take a product unread for no product
+ * (rule 24): the same listings, but a product the store record lists whose
+ * listing record answers missing, garbled or for another id, or a reply not
+ * one per key asked, throws UnknownReplyError instead of leaving it out.
+ * What the store record holds (inline, or in the head) is not read again.
+ */
+export async function readListingsExact(store: Store, ids?: Iterable<string>): Promise<Listing[]> {
+  return (await readListingsExactMeasured(store, ids)).listings;
+}
+
+/**
+ * readListingsExact, and how many bytes of listing records it read from Redis
+ * (0 for those the store record holds whole), so a reading paid for at its
+ * most is settled at what it read (the MCP tool list_bundle_choices, 631
+ * [AA1] (a)).
+ */
+export async function readListingsExactMeasured(store: Store, ids?: Iterable<string>): Promise<{ listings: Listing[]; bytes: number }> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    return { listings: asked.map((id) => byId.get(id)).filter((p): p is Product => Boolean(p)).map(listingOf), bytes: 0 };
+  }
+  if (asked.length === 0) return { listings: [], bytes: 0 };
+  let bytes = 0;
+  const found = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const missing = asked.filter((id) => !found.has(id));
+  if (missing.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a catalog's listings: no catalog to read");
+    const keys = missing.map((id) => listingKey(catalog.id!, id));
+    const chunks: string[][] = [];
+    for (let i = 0; i < keys.length; i += 400) chunks.push(keys.slice(i, i + 400));
+    const answers = await Promise.all(chunks.map((chunk) => redisPipeline(chunk.map((key) => ["GET", key]))));
+    const raws: unknown[] = [];
+    answers.forEach((answer, i) => {
+      const replies = repliesFor(answer, chunks[i].length);
+      if (!replies) throw new UnknownReplyError("a catalog's listings: not one reply per product");
+      raws.push(...replies);
+    });
+    missing.forEach((id, i) => {
+      const raw = raws[i];
+      // Redis's own null: the listing is confirmed not there, so the product is left out, as getMany does. Only that
+      // exact null; any other reply that is not this product's listing is unknown and throws.
+      if (raw === null) return;
+      const listing = typeof raw === "string" ? parseListing(parseJson(raw)) : null;
+      if (!listing || listing.id !== id) throw new UnknownReplyError("a catalog's listing of a product it lists");
+      bytes += Buffer.byteLength(raw as string, "utf8");
+      found.set(id, listing);
+    });
+  }
+  const listings = asked.flatMap((id) => {
+    const listing = found.get(id);
+    return listing ? [listing] : [];
+  });
+  return { listings, bytes };
+}
+
+/** readKind, read exactly (readListingsExact): a product of that kind that could not be read throws, never drops out; one Redis confirms is not there is left out. */
+export async function readKindExact(store: Store, kind: Kind): Promise<Listing[]> {
+  return readListingsExact(store, idsOfKind(store, kind));
 }
 
 /** The product a delivery id names, and the option when it is one. */
@@ -807,22 +982,40 @@ export const STORE_SEARCH_LIMIT = STORE_PAGE_SIZE * 2;
 /** The longest search the store page takes. */
 export const MAX_STORE_SEARCH = 80;
 
-/** Words as a search compares them: no accents, no case, letters and digits only. */
+/** Letters NFD does not take apart, as a buyer types them on a plain keyboard. */
+const PLAIN_LETTERS: Record<string, string> = { "\u00df": "ss", "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+
+/**
+ * Words as a search compares them: no accents, no case, letters and digits only. An apostrophe is part of its
+ * word ("Beginner’s" is "beginners", as typed without it), and the letters NFD keeps whole are spelled plainly.
+ */
 export function searchWords(text: string): string[] {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc`]/g, "")
+    .replace(/[\u00df\u0142\u00f8\u00e6\u0153\u0111\u00f0\u00fe\u0131]/g, (letter) => PLAIN_LETTERS[letter])
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }
 
-/** Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one). */
+/** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
+const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
+
+/**
+ * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
+ * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
+ */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
-  const asked = searchWords(query);
-  if (asked.length === 0) return false;
-  const has = searchWords(`${listing.title} ${listing.summary}`);
-  return asked.every((word) => has.some((one) => one.startsWith(word)));
+  const text = `${listing.title} ${listing.summary}`;
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
+  return [searchWords(query), searchWords(unhyphened(query))].some(
+    (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
+  );
 }
 
 /**
@@ -908,9 +1101,133 @@ export async function readCards(store: Store): Promise<Map<string, Card>> {
   return found;
 }
 
+/**
+ * The cached cards of just these ids, in one HMGET and nothing more: no
+ * listing is read and nothing is healed, so its cost is known before it is
+ * sent (the MCP tool list_bundle_choices, a page at a time; Codex A3 on
+ * #1933). An id whose card is not cached yet, or not in its shape, answers
+ * null. Read exactly (CX-123 rule 24): anything but one answer to the one
+ * command, holding one text or nil for each id, throws UnknownReplyError,
+ * never a stretch searched short. `bytes` is what the cards read weighed.
+ */
+export async function cachedCards(store: Store, ids: string[]): Promise<{ cards: Map<string, Card | null>; bytes: number }> {
+  const cards = new Map<string, Card | null>();
+  if (!ids.length) return { cards, bytes: 0 };
+  const catalog = store.catalog;
+  if (catalog.inline) {
+    const inline = new Map(catalog.inline.map((p) => [p.id, { id: p.id, title: p.title, priceCents: p.priceCents, page: p.page } as Card]));
+    for (const id of ids) cards.set(id, inline.get(id) ?? null);
+    return { cards, bytes: 0 };
+  }
+  if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cached cards: no catalog to read");
+  // One command, one answer: more or fewer is not Redis's (Codex A3 on #1933).
+  const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...ids]]), 1);
+  const slots = replies ? redisReply.repliesFor(replies[0], ids.length) : null;
+  if (!slots || slots.some((v) => v !== null && typeof v !== "string")) throw new redisReply.UnknownReplyError("the products' cached cards");
+  let bytes = 0;
+  ids.forEach((id, i) => {
+    const raw = slots[i];
+    if (typeof raw === "string") bytes += Buffer.byteLength(raw, "utf8");
+    cards.set(id, typeof raw === "string" ? parseCard(id, raw) : null);
+  });
+  return { cards, bytes };
+}
+
 /** Just the names, for the screens that want nothing else. */
 export async function readTitles(store: Store): Promise<Map<string, string>> {
   return new Map([...(await readCards(store))].map(([id, card]) => [id, card.title]));
+}
+
+/**
+ * The cards of these products only, by id: what a list of a few named products
+ * wants (the affiliate book names each membership payment by its product),
+ * without reading a listing record of up to MAX_PRODUCT_BYTES for a title.
+ * Ids the store does not have are left out, as readListings leaves them out;
+ * what the store record holds (inline, or in the head) is not read. The rest
+ * comes in one HMGET of the card hash, read exactly: anything but one string or
+ * nil for each product throws UnknownReplyError (rule 24), never a name. A
+ * product without a card in its shape (written before the cards existed) is
+ * read from its listing, once, and its card left behind, as readCards heals.
+ */
+export async function readCardsFor(store: Store, ids: Iterable<string>): Promise<Map<string, Card>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  const found = new Map<string, Card>();
+  if (catalog.inline) {
+    const byId = new Map(catalog.inline.map((p) => [p.id, p]));
+    for (const id of asked) {
+      const product = byId.get(id);
+      if (product) found.set(id, cardOf(product));
+    }
+    return found;
+  }
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  for (const id of asked) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  const rest = asked.filter((id) => !head.has(id));
+  if (!rest.length || !catalog.id || !isRedisConfigured()) return found;
+  const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+  const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+  if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+  const heal: string[] = [];
+  rest.forEach((id, i) => {
+    const raw = slots[i];
+    if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+    const card = raw === null ? null : parseCard(id, raw);
+    if (card) found.set(id, card);
+    else heal.push(id);
+  });
+  if (!heal.length) return found;
+  const listings = await readListings(store, heal);
+  for (const listing of listings) found.set(listing.id, cardOf(listing));
+  if (listings.length) {
+    await redisPipeline([["HSET", titlesKey(catalog.id), ...listings.flatMap((l) => [l.id, JSON.stringify([l.title, l.priceCents, l.page ? 1 : 0])])]]).catch((error) =>
+      console.error("filling the product cards failed", error),
+    );
+  }
+  return found;
+}
+
+/**
+ * Every product's card, in the creator's order, for the studio's search (766
+ * [STN13], lib/studio-search.ts): what the store record holds (inline, or in
+ * the head) with no read, the rest in one HMGET of the card hash, read
+ * exactly. Never filled in from the products' own records, so a search's
+ * reads stay one command whatever the store: a product whose card is absent
+ * or in an older shape is counted in `missing` and left out (the studio's
+ * Sales pages fill them, readCards). Anything but one string or nil for each
+ * product throws UnknownReplyError (rule 24), never "no products".
+ */
+export async function readCardsExact(store: Store): Promise<{ cards: Card[]; missing: number }> {
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  if (catalog.inline) return { cards: catalog.inline.map(cardOf), missing: 0 };
+  const ids = productIds(store);
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const rest = ids.filter((id) => !head.has(id));
+  const found = new Map<string, Card>();
+  for (const id of ids) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  let missing = 0;
+  if (rest.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cards");
+    const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+    const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+    if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+    rest.forEach((id, i) => {
+      const raw = slots[i];
+      if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+      const card = raw === null ? null : parseCard(id, raw);
+      if (card) found.set(id, card);
+      else missing += 1;
+    });
+  }
+  return { cards: ids.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])), missing };
 }
 
 /** When the studio's list is one page of a longer one, as the studio page read it. */
@@ -979,9 +1296,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;
@@ -1075,9 +1396,13 @@ export function movedMark(catalog: string, count: number): Command {
 /** How many products the index listed when this catalog was last written, or null when it was never moved. */
 export async function movedCount(catalog: string): Promise<number | null> {
   if (!CATALOG_ID_PATTERN.test(catalog) || !isRedisConfigured()) return null;
-  const [found] = await redisPipeline([["GET", movedKey(catalog)]]);
-  if (typeof found !== "string") return null;
-  return /^\d{1,6}$/.test(found) ? Number(found) : 0;
+  // Read exactly (rule 24): only GET's exact null is "never moved" and only digits are a count. Anything else throws, so
+  // moveToRecords writes nothing, never null or 0 that skipped its guard and wrote a lost index over the products.
+  const read = repliesFor(await redisPipeline([["GET", movedKey(catalog)]]), 1);
+  const found = read?.[0];
+  if (read && found === null) return null;
+  if (!read || typeof found !== "string" || !/^\d{1,6}$/.test(found)) throw new UnknownReplyError("how many products a moved catalog listed");
+  return Number(found);
 }
 
 /** Sends writes in pipelines of a few hundred. */
@@ -1162,12 +1487,11 @@ export async function readProductsStrict(store:Store,ids:readonly string[]):Prom
  return asked.map((id,index)=>{
   const listing=parseJson(raws[index*2]);
   const rawExtras=raws[index*2+1];
-  const extras=rawExtras===null?null:parseJson(rawExtras);
-  if(!listing||typeof listing!=="object"||Array.isArray(listing)||rawExtras!==null&&(!extras||typeof extras!=="object"||Array.isArray(extras)))throw new Error("Product records are invalid");
-  const x=extras as {funnel?:unknown;fields?:unknown}|null;
-  if(x&&(!Array.isArray(x.fields)||x.funnel!==null&&!parseFunnel(x.funnel)))throw new Error("Product offer record is invalid");
+  const extras=rawExtras===null?null:exactExtras(parseJson(rawExtras));
+  if(!listing||typeof listing!=="object"||Array.isArray(listing))throw new Error("Product records are invalid");
+  if(rawExtras!==null&&!extras)throw new Error("Product offer record is invalid");
   if(typeof raws[index*2]!=="string"||rawExtras!==null&&typeof rawExtras!=="string"||new TextEncoder().encode(String(raws[index*2])+(rawExtras??"")).length>MAX_PRODUCT_BYTES)throw new Error("Product record exceeds its bound");
-  const product=parseProduct({...listing,...((extras as Record<string,unknown>|null)??{})});
+  const product=parseProduct({...listing,...(extras??{})});
   if(!product||product.id!==id)throw new Error("Product association is invalid");
   return product;
  });

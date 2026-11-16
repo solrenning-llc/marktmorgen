@@ -18,6 +18,7 @@
 export type LessonBlock =
   | { kind: "paragraph"; lines: string[] }
   | { kind: "list"; items: string[] }
+  | { kind: "html"; source: string }
   | { kind: "code"; language: string; code: string };
 
 const LANGUAGE = /^[A-Za-z0-9+#.-]{1,20}$/;
@@ -78,7 +79,11 @@ export function lessonBlocks(text: string): LessonBlock[] {
     out.push(...prose(outside.join("\n")));
     outside = [];
     const code = lines.slice(i + 1, end).join("\n");
-    if (code.trim()) out.push({ kind: "code", language: open.language, code });
+    if (code.trim()) {
+      out.push(open.language === "html-preview"
+        ? { kind: "html", source: code }
+        : { kind: "code", language: open.language, code });
+    }
     i = end;
   }
   out.push(...prose(outside.join("\n")));

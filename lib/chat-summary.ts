@@ -22,6 +22,7 @@
  *   nl:chatsum:<statsId>   sealed address
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { seal, unseal } from "@/lib/secret-box";
 
 import { type ChatKind, chatKind } from "@/lib/chat-kind";
@@ -62,11 +63,15 @@ export async function chatSetup(statsId: string | null): Promise<ChatKind | null
   return url ? chatKind(url) : null;
 }
 
-/** The kept address, opened; null with none, or one that can no longer be read. */
+/**
+ * The kept address, opened; null with none, or one that can no longer be read. A GET of no exact shape (neither a
+ * string nor a confirmed absent key) throws UnknownReplyError (CX-123 rule 24); the jobs that post then post nothing.
+ */
 export async function chatAddress(statsId: string | null): Promise<string | null> {
   if (!statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", key(statsId)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const [raw] = repliesFor(await redisPipeline([["GET", key(statsId)]]), 1) ?? [undefined];
+  if (raw !== null && typeof raw !== "string") throw new UnknownReplyError("the chat summary address");
+  if (!raw) return null;
   const opened = unseal(raw, context(statsId));
   return opened.ok && chatKind(opened.value) ? opened.value : null;
 }
@@ -74,18 +79,24 @@ export async function chatAddress(statsId: string | null): Promise<string | null
 /**
  * Keeps an address, after a first message to it went through; or forgets it
  * (empty). "invalid" for an address of neither kind, "refused" when the chat
- * did not take the first message.
+ * did not take the first message. "removed" only when the DEL answered a
+ * whole 0 or 1, and "saved" only when the SET answered "OK": any other reply
+ * throws UnknownReplyError (CX-123 rule 24), so the creator is never told the
+ * posting stopped while the address stays and the jobs keep posting to it.
  */
 export async function setChatAddress(statsId: string, storeName: string, raw: unknown): Promise<"saved" | "removed" | "invalid" | "refused"> {
   const url = typeof raw === "string" ? raw.trim() : "";
   if (!url) {
-    await redisPipeline([["DEL", key(statsId)]]);
+    const [deleted] = repliesFor(await redisPipeline([["DEL", key(statsId)]]), 1) ?? [undefined];
+    const count = countOf(deleted);
+    if (count !== 0 && count !== 1) throw new UnknownReplyError("the chat summary removal");
     return "removed";
   }
   if (!chatKind(url)) return "invalid";
   const ok = await postToChat(url, `Marktmorgen will post ${storeName}'s numbers here: the week every Monday, and the month on the 1st.`);
   if (!ok) return "refused";
-  await redisPipeline([["SET", key(statsId), seal(url, context(statsId))]]);
+  const [kept] = repliesFor(await redisPipeline([["SET", key(statsId), seal(url, context(statsId))]]), 1) ?? [undefined];
+  if (kept !== "OK") throw new UnknownReplyError("the chat summary address save");
   return "saved";
 }
 

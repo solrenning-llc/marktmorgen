@@ -36,6 +36,7 @@ import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
@@ -114,6 +115,9 @@ async function signInWithPasskey(key: ReturnType<typeof makePasskey>): Promise<s
 }
 
 async function main(): Promise<void> {
+  // The lock waits (lib/redis-lock.ts) and the short pauses below pass on a virtual clock, in the order the real
+  // one would give: every check of the time still sees the whole wait.
+  const clock = installVirtualClock({ maxMs: 1_000 });
   redis.clear();
   is("the passkey wait is the app's wait", REMOVAL_DAYS, RESET_DAYS);
 
@@ -972,6 +976,19 @@ async function main(): Promise<void> {
   const pkfSecond = await signInWithPasskey(pkfKey);
   is("the next one lands on the address with the store", await emailForSession(pkfSecond), PKF);
 
+  part("A passkey login whose broken move cannot be repaired opens no session");
+  const PKUF = "pku-from@example.com";
+  const PKUT = "pku-dest@example.com";
+  await claimHandle(PKUF, "pku-from", "Pku", "");
+  const pkuKey = makePasskey(PKUT, "cred-pku");
+  await pkuKey.keep();
+  // A move still running on both addresses: repairMove refuses to settle it and answers false.
+  const pkuMark = await markMoving(PKUF, PKUT);
+  await markBrokenMove(PKUF, PKUT);
+  const pkuTry = await signInWithPasskey(pkuKey);
+  is("a live move mark keeps the broken move unrepaired", [Boolean(pkuMark), await isMoving(PKUF), await isMoving(PKUT)], [true, true, true]);
+  is("no session is opened while the move is unresolved", pkuTry, "");
+
   part("A store left on both addresses goes back with its other stores, unless one copy was edited");
   const EXF = "exf-from@example.com";
   const EXT = "exf-dest@example.com";
@@ -1026,7 +1043,7 @@ async function main(): Promise<void> {
   await turnOnApp(RSF, "rsf-backup@example.org");
   const rsfRecord = `nl:2fa:${hex(`nimbus-2fa:${RSF}`).slice(0, 40)}`;
   const [rsfRaw] = await redis.pipeline([["GET", rsfRecord]]);
-  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), reset: Date.now() - 1_000 })]]);
+  await redis.pipeline([["SET", rsfRecord, JSON.stringify({ ...JSON.parse(String(rsfRaw)), since: Date.now() - (RESET_DAYS + 1) * 86_400_000, reset: Date.now() - 1_000 })]]);
   const rsfMark = await markMoving(RSF, "rsf-elsewhere@example.com");
   const tokenRsf = hex(String(Math.random()));
   await redis.pipeline([["SET", `nl:auth:link:${hex(`nimbus-auth-link:${tokenRsf}`).slice(0, 40)}`, RSF, "EX", 900]]);
@@ -1279,6 +1296,7 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  clock.restore();
   done();
 }
 

@@ -8,6 +8,7 @@ import { checkUploadedImage } from "@/lib/uploaded-image";
 import { dropTakenPictures, takePictureDoor } from "@/lib/picture-door";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 
 /**
  * A link's own small picture (lib/store-link.ts, LinkImage): put on after
@@ -40,13 +41,24 @@ export async function POST(request: NextRequest) {
     if (action === "attach") {
       const store = await storeForEmail(ref);
       if (!store) return Response.json({ ok: false, error: "none" }, { status: 400 });
+      const link = store.links.find((each) => each.id === id);
       // A new picture deletes the one there: not from a session let in without its second step (lib/two-step.ts).
-      if ((await lockedFor(request, "page", "replace")) && store.links.some((link) => link.id === id && link.image)) return refusedJson("locked");
+      const lock = await lockRead(lockedFor(request, "page", "replace"));
+      if (lock instanceof Response) return lock;
+      if (lock && link?.image) return refusedJson("locked");
       const path = text(body.path, 200);
       if (!ownsImagePath(path, await imageFolder(ref))) {
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
       fresh = await takePictureDoor([path]);
+      // A link that is not there answers "unknown" before any other refusal. Only a picture fresh from the door is
+      // deleted then (dropFresh): one of a product, another link or a page is never touched. A fresh one is not kept for
+      // later: the door's note ends in a day, nothing sweeps such pictures and the studio uploads each under a new
+      // name (Claude 5's correction on #2657, which withdrew the refusal before the door).
+      if (!link) {
+        await dropFresh(path);
+        return Response.json({ ok: false, error: "unknown" }, { status: 404 });
+      }
       const side = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && n > 0 && n <= LINK_IMAGE_SIDE ? n : 0);
       const width = side(body.width);
       const height = side(body.height);
@@ -58,6 +70,12 @@ export async function POST(request: NextRequest) {
       if (!checked.ok) {
         await dropFresh(path);
         return Response.json({ ok: false, error: checked.error }, { status: checked.error === "too_big" ? 413 : 400 });
+      }
+      // A name in the shared folder that is neither fresh from the door nor this link's own may be a product's,
+      // another link's, a page's, a buyer's review photo or an email's picture: refused and kept, so taking this
+      // link or its picture off later can never delete it (lib/picture-door.ts).
+      if (!fresh.has(path) && link.image?.path !== path) {
+        return Response.json({ ok: false, error: "in_use" }, { status: 400 });
       }
       image = { path, width, height, bytes: checked.bytes };
     }

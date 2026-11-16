@@ -23,6 +23,7 @@
  *   nl:sold:<statsId>   {"at": ms, "p": {"<product>": sales}, "t": what buyers also bought (lib/also-bought.ts)}, for SOLD_KEEP_SECONDS
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import type { Store } from "@/lib/store";
 import { type Together, parseTogether } from "@/lib/also-bought";
 
@@ -44,22 +45,30 @@ export function soldWords(count: number | undefined): string | null {
   return `Bought ${count.toLocaleString("en-US")} times`;
 }
 
-/** What was kept for this store, or null; the caller decides whether it is fresh enough. */
+/**
+ * What was kept for this store, or null when nothing is kept (or the store does not show it); the caller decides
+ * whether it is fresh enough. A reply in another shape is not "nothing kept": it throws UnknownReplyError
+ * (CX-123 rule 24), and a caller that only shows the count takes the throw as nothing to say.
+ */
 export async function readSoldCounts(store: Store): Promise<SoldCounts | null> {
   if (!store.look.sold || !store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", soldKey(store.statsId)]]);
-  if (typeof raw !== "string" || !raw) return null;
+  const replies = repliesFor(await redisPipeline([["GET", soldKey(store.statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("the sales count");
+  const raw = replies[0];
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("the sales count");
+  let value: { at?: unknown; p?: unknown; t?: unknown };
   try {
-    const value = JSON.parse(raw) as { at?: unknown; p?: unknown; t?: unknown };
-    if (typeof value.at !== "number" || !value.p || typeof value.p !== "object") return null;
-    const byProduct: Record<string, number> = {};
-    for (const [id, n] of Object.entries(value.p as Record<string, unknown>)) {
-      if (typeof n === "number" && Number.isInteger(n) && n > 0) byProduct[id] = n;
-    }
-    return { at: value.at, byProduct, together: parseTogether(value.t) };
+    value = JSON.parse(raw) as typeof value;
   } catch {
-    return null;
+    throw new UnknownReplyError("the sales count");
   }
+  if (!value || typeof value !== "object" || typeof value.at !== "number" || !value.p || typeof value.p !== "object") throw new UnknownReplyError("the sales count");
+  const byProduct: Record<string, number> = {};
+  for (const [id, n] of Object.entries(value.p as Record<string, unknown>)) {
+    if (typeof n === "number" && Number.isInteger(n) && n > 0) byProduct[id] = n;
+  }
+  return { at: value.at, byProduct, together: parseTogether(value.t) };
 }
 
 /** Whether a reading should be taken again. */

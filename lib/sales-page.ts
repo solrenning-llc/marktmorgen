@@ -108,7 +108,9 @@ export type BlockKind =
   | "quotes"
   | "form"
   | "row"
-  | "booking";
+  | "booking"
+  | "divider"
+  | "space";
 
 export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "hero", label: "Hero", hint: "The big headline at the top, with the product's picture or a video." },
@@ -134,6 +136,9 @@ export const BLOCK_KINDS: { kind: BlockKind; label: string; hint: string }[] = [
   { kind: "form", label: "Form", hint: "One of your forms, surveys or quizzes, made under Forms: the questions, and where the answers lead. On your own pages." },
   // On a product's page only: not in SITE_KINDS (lib/site-page-rules.ts) nor in a saved section (lib/saved-blocks.ts, NOT_IN_SECTIONS).
   { kind: "row", label: "Columns", hint: "One to three columns side by side, each with headings, words, a list, icons, buttons, pictures or a video. One column on a phone." },
+  // On a product's page and a store's own pages (SITE_KINDS, lib/site-page-rules.ts).
+  { kind: "divider", label: "Divider", hint: "A thin line across the page, between two parts. Nothing to write." },
+  { kind: "space", label: "Space", hint: "Extra empty room between two parts of the page, on top of the usual gap: small, medium or large. Nothing to write." },
 ];
 
 export type VideoProvider = "youtube" | "vimeo" | "loom";
@@ -363,11 +368,14 @@ export type FeatureBlock = { id: string; kind: "feature"; heading: string; body:
  * (quoteUrl). On a phone the columns become one, in reading order: the first
  * column's elements, then the second's, then the third's.
  *
+ * A video can also sit behind a button of its own words and open in a
+ * window over the page (unit 5): the same three players, loaded only once the
+ * button is pressed, in a dialog built the way the picture viewer's is
+ * (components/video-window.tsx after components/picture-viewer.tsx).
+ *
  * Left out, and why: audio (no block keeps an audio file of its own; a file
  * would need the claim and delete rules pictures have in
- * lib/sales-page-store.ts) and a video that opens in a window (the page has
- * no such window for a video yet; the picture viewer's dialog,
- * components/picture-viewer.tsx, is the pattern to reuse when it comes).
+ * lib/sales-page-store.ts).
  */
 export const MIN_ROW_COLUMNS = 1;
 export const MAX_ROW_COLUMNS = 3;
@@ -432,11 +440,37 @@ export type RowElement =
   | { kind: "icon"; name: RowIcon; label: string }
   | { kind: "button"; label: string; url: string }
   | { kind: "image"; picture: Picture; decorative: boolean }
-  | { kind: "video"; video: Video; title: string };
+  | { kind: "video"; video: Video; title: string }
+  /**
+   * A video behind a button (unit 5): the button's own words open a window
+   * with the player. A kind of its own, not a flag on "video", so every
+   * switch over the parts has to say how it draws, reads and copies one,
+   * and a part made before it can never be read as one.
+   */
+  | { kind: "video-window"; video: Video; title: string; label: string };
 export type RowElementKind = RowElement["kind"];
-export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video"];
+export const ROW_ELEMENT_KINDS: readonly RowElementKind[] = ["heading", "subheading", "paragraph", "list", "icon", "button", "image", "video", "video-window"];
 
 export type RowBlock = { id: string; kind: "row"; columns: RowElement[][] };
+
+/**
+ * Two blocks that only arrange the page (375 [TB1], fifth complement, 29
+ * October 2026): a divider, one line across it, and a space, empty room of
+ * one of three sizes. Neither holds a word, a file or an address of the
+ * creator's, so neither has anything to translate, copy, check or pay for;
+ * each is drawn by the page's own markup and style, never the creator's.
+ * They count toward the page's MAX_BLOCKS like any other block.
+ */
+export type DividerBlock = { id: string; kind: "divider" };
+export type SpaceSize = "small" | "medium" | "large";
+export const SPACE_SIZES: { value: SpaceSize; label: string }[] = [
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+];
+/** What a space is when no size, or one it does not know, was sent. */
+export const DEFAULT_SPACE_SIZE: SpaceSize = "medium";
+export type SpaceBlock = { id: string; kind: "space"; size: SpaceSize };
 
 /**
  * Where a block shows (added 8 October 2026): on every screen, which is
@@ -483,6 +517,8 @@ export type PageBlock = { screens?: BlockShow; saved?: string } & (
   | FormBlock
   | RowBlock
   | BookingBlock
+  | DividerBlock
+  | SpaceBlock
 );
 
 export type SalesPage = {
@@ -772,15 +808,17 @@ export function readVideo(raw: string): Video | null {
 }
 
 /** The only frame addresses a page ever gets, one per player, built from the id alone. */
-export function embedUrl(video: Video): string {
+export function embedUrl(video: Video, { autoplay = true }: { autoplay?: boolean } = {}): string {
+  // Off only for a visitor who asked for less motion (components/video-window.tsx): the player loads and waits for its own play button.
+  const play = autoplay ? 1 : 0;
   if (video.provider === "youtube") {
     // enablejsapi lets the page hear where the player is, for how far the video is watched (components/page-depth.tsx).
-    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+    return `https://www.youtube-nocookie.com/embed/${video.id}?autoplay=${play}&rel=0&modestbranding=1&enablejsapi=1`;
   }
   if (video.provider === "vimeo") {
-    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=1${video.hash ? `&h=${video.hash}` : ""}`;
+    return `https://player.vimeo.com/video/${video.id}?dnt=1&autoplay=${play}${video.hash ? `&h=${video.hash}` : ""}`;
   }
-  return `https://www.loom.com/embed/${video.id}?autoplay=1&hide_owner=true&hide_share=true&hide_title=true`;
+  return `https://www.loom.com/embed/${video.id}?autoplay=${play}&hide_owner=true&hide_share=true&hide_title=true`;
 }
 
 /** The address a person would open the video at, for the studio's field. */
@@ -892,6 +930,11 @@ export function parseRowElement(raw: unknown): RowElement | null {
       const video = parseVideo(value.video);
       return video ? { kind: "video", video, title: line(value.title, MAX_HEADING) } : null;
     }
+    case "video-window": {
+      const video = parseVideo(value.video);
+      const label = line(value.label, MAX_CTA_LABEL);
+      return video && label ? { kind: "video-window", video, title: line(value.title, MAX_HEADING), label } : null;
+    }
     default:
       return null;
   }
@@ -947,6 +990,8 @@ function rowElementWhole(raw: unknown, kept: RowElement): boolean {
     }
     case "video":
       return whole(value.title) === kept.title;
+    case "video-window":
+      return whole(value.title) === kept.title && whole(value.label) === kept.label;
   }
 }
 
@@ -1124,6 +1169,11 @@ function parseBlock(raw: unknown): PageBlock | null {
     // Kept whole or not at all: without a call it books nothing, and its heading is never cut short (blocksProblem tells it back).
     case "booking":
       return bookingSentWhole(value) ? { id, kind: "booking", product: value.product as string, heading } : null;
+    // Only arrangement: its id, and a space's size, one of the three or the default. Nothing else sent is kept.
+    case "divider":
+      return { id, kind: "divider" };
+    case "space":
+      return { id, kind: "space", size: SPACE_SIZES.some((s) => s.value === value.size) ? (value.size as SpaceSize) : DEFAULT_SPACE_SIZE };
     default:
       return null;
   }
@@ -1376,6 +1426,10 @@ export function emptyBlock(kind: BlockKind, id = newBlockId()): PageBlock {
       return { id, kind, columns: [[], []] };
     case "booking":
       return { id, kind, product: "", heading: "" };
+    case "divider":
+      return { id, kind };
+    case "space":
+      return { id, kind, size: DEFAULT_SPACE_SIZE };
   }
 }
 

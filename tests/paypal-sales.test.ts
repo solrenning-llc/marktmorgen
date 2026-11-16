@@ -304,6 +304,11 @@ async function main(): Promise<void> {
   is("now standing on the second", (await importedFor(store, "buyer@example.com")).map((p) => p.job), [`paypal:${sixth.order}`]);
   captures.set(twice.paid.capture, "REFUNDED");
   await due();
+  // The course first, then the purchase (Codex G on #2781; rule 30): a course removal that fails keeps the purchase
+  // and the order on the watch, so the next run takes both away again.
+  await watchPayPal(store, Date.now() + 10_000, { ...on, dropStart: async () => { throw new Error("the ledger did not answer"); } }).catch(() => null);
+  is("a course removal that fails keeps the purchase for the next run", (await importedFor(store, "buyer@example.com")).length, 1);
+  await due();
   is("both refunded: taken back", (await watchPayPal(store, Date.now() + 10_000, on)).revoked, 1);
   is("from their purchases and their course", [(await importedFor(store, "buyer@example.com")).length, dropped], [0, [`buyer@example.com|${product.id}`]]);
   is("the paid record stays, for the thanks page and PayPal's id", (await readPaid(second.order))?.capture, paid.paid.capture);

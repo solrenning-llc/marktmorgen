@@ -23,7 +23,7 @@
  * signed or not): not with a price the buyer names, a payment plan, a gift
  * or a group purchase, and it delivers no file, link, course or call
  * besides. A limited quantity and the boxes at checkout work as they do on
- * any product. At one price and not limited, it goes in a cart with other
+ * any product. At one price, limited or not, it goes in a cart with other
  * products the creator ships, to one address in a country they all ship to
  * (lib/cart-shipping.ts; 513 [PF1], unit 2b, 2 November 2026); not yet with
  * products handed over online (shipsWithOnline).

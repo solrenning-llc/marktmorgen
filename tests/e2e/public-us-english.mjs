@@ -1,4 +1,5 @@
 import {checkPublicKeyboardCycle} from "./accessibility-public-keyboard.mjs";
+import {checkPublicKeyboardFocusRegressions} from "./public-keyboard-focus-regression.mjs";
 /** Native page text, excluding comments and persisted identifiers. No writes or provider calls. */
 export async function checkPublicAmericanEnglish({browser,LOCAL,is}){
  const context=await browser.newContext({serviceWorkers:"block"});
@@ -16,6 +17,7 @@ export async function checkPublicAmericanEnglish({browser,LOCAL,is}){
   return route.continue();
  });
  try{
+  if(keyboardEnabled)await checkPublicKeyboardFocusRegressions({browser});
   const page=await context.newPage();
   const cases=[["/","its own checkout and its own delivery"],["/mission","but not a checkbox"],["/help","with revenue only if you select it"],["/privacy","members wrote when canceling"],["/platform/calls","select who hosts it"],["/platform/email","buttons in your store\'s color"],["/platform/insights","reason for canceling"],["/platform/bundles","buyer selects that many"],["/platform/sales-pages","with check marks, crosses"]];
   for(const [path,expected] of cases){

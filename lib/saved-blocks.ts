@@ -39,9 +39,11 @@ export const MAX_SECTION_BYTES = 40_000;
 /**
  * The kinds a section never holds. A row of columns (375 [TB1]) may hold
  * pictures among its parts, which a section never keeps (sectionBlocks), so
- * it stays on the page it was made on.
+ * it stays on the page it was made on. A booking block names one of this
+ * store's calls, which another page or store may not sell, and it is not
+ * offered yet (552 [BB1]; inbox C4-19 (b)).
  */
-export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews", "row"];
+export const NOT_IN_SECTIONS: readonly BlockKind[] = ["hero", "reviews", "row", "booking"];
 
 /** Whether a block may go into a section: the one rule the studio offers by and every function here keeps. */
 export const savable = (block: Pick<PageBlock, "kind">): boolean => !NOT_IN_SECTIONS.includes(block.kind);

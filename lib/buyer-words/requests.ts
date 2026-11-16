@@ -28,7 +28,7 @@ const en = {
   report: "Report this request",
   visit: (store: string) => `Visit ${store}'s store`,
   paidTitle: "Paid. Thank you",
-  paidBody: (amount: string, store: string, date: string) => `${amount} was paid to ${store} on ${date}. A receipt was emailed to you.`,
+  paidBody: (amount: string, store: string, date: string) => `${amount} was paid to ${store} on ${date}. This page is your receipt.`,
   reference: "Reference",
   print: "Print or save as PDF",
   refundedTitle: "Refunded",
@@ -63,6 +63,8 @@ const en = {
   receiptSubject: (store: string, amount: string) => `Receipt from ${store}: ${amount}`,
   receiptLead: (store: string, amount: string, date: string) => `Thank you. You paid ${store} ${amount} on ${date}, for:`,
   receiptLink: "Your receipt, to print or save:",
+  /** Sales tax added on top of a request's lines, on its receipt (audit R48). */
+  receiptTax: (amount: string) => `Sales tax or VAT: ${amount}`,
   statement: (store: string) => `The charge shows on your statement under the name of ${store}'s business.`,
 };
 
@@ -87,7 +89,7 @@ const es: RequestWords = {
   report: "Denunciar esta solicitud",
   visit: (store) => `Visitar la tienda de ${store}`,
   paidTitle: "Pagado. Gracias",
-  paidBody: (amount, store, date) => `Se pagaron ${amount} a ${store} el ${date}. Te enviamos un recibo por correo.`,
+  paidBody: (amount, store, date) => `Se pagaron ${amount} a ${store} el ${date}. Esta página es tu recibo.`,
   reference: "Referencia",
   print: "Imprimir o guardar como PDF",
   refundedTitle: "Reembolsado",
@@ -121,6 +123,7 @@ const es: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Gracias. Pagaste ${amount} a ${store} el ${date}, por:`,
   receiptLink: "Tu recibo, para imprimirlo o guardarlo:",
+  receiptTax: (amount) => `IVA o impuesto sobre ventas: ${amount}`,
   statement: (store) => `El cargo aparece en tu extracto con el nombre del negocio de ${store}.`,
 };
 
@@ -143,7 +146,7 @@ const fr: RequestWords = {
   report: "Signaler cette demande",
   visit: (store) => `Voir la boutique de ${store}`,
   paidTitle: "Payé. Merci",
-  paidBody: (amount, store, date) => `${amount} ont été payés à ${store} le ${date}. Un reçu vous a été envoyé par e-mail.`,
+  paidBody: (amount, store, date) => `${amount} ont été payés à ${store} le ${date}. Cette page est votre reçu.`,
   reference: "Référence",
   print: "Imprimer ou enregistrer en PDF",
   refundedTitle: "Remboursé",
@@ -177,6 +180,7 @@ const fr: RequestWords = {
   receiptSubject: (store, amount) => `Reçu de ${store} : ${amount}`,
   receiptLead: (store, amount, date) => `Merci. Vous avez payé ${amount} à ${store} le ${date}, pour :`,
   receiptLink: "Votre reçu, à imprimer ou à enregistrer :",
+  receiptTax: (amount) => `TVA ou taxe de vente : ${amount}`,
   statement: (store) => `Le débit apparaît sur votre relevé sous le nom de l'entreprise de ${store}.`,
 };
 
@@ -199,7 +203,7 @@ const de: RequestWords = {
   report: "Diese Anforderung melden",
   visit: (store) => `Zum Shop von ${store}`,
   paidTitle: "Bezahlt. Danke",
-  paidBody: (amount, store, date) => `${amount} wurden am ${date} an ${store} bezahlt. Eine Quittung wurde dir per E-Mail geschickt.`,
+  paidBody: (amount, store, date) => `${amount} wurden am ${date} an ${store} bezahlt. Diese Seite ist deine Quittung.`,
   reference: "Referenz",
   print: "Drucken oder als PDF speichern",
   refundedTitle: "Erstattet",
@@ -233,6 +237,7 @@ const de: RequestWords = {
   receiptSubject: (store, amount) => `Quittung von ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Danke. Du hast ${store} am ${date} ${amount} bezahlt, für:`,
   receiptLink: "Deine Quittung zum Drucken oder Speichern:",
+  receiptTax: (amount) => `Umsatzsteuer: ${amount}`,
   statement: (store) => `Die Abbuchung steht auf deinem Kontoauszug unter dem Namen des Unternehmens von ${store}.`,
 };
 
@@ -255,7 +260,7 @@ const it: RequestWords = {
   report: "Segnala questa richiesta",
   visit: (store) => `Visita il negozio di ${store}`,
   paidTitle: "Pagato. Grazie",
-  paidBody: (amount, store, date) => `${amount} sono stati pagati a ${store} il ${date}. Ti abbiamo inviato una ricevuta via email.`,
+  paidBody: (amount, store, date) => `${amount} sono stati pagati a ${store} il ${date}. Questa pagina è la tua ricevuta.`,
   reference: "Riferimento",
   print: "Stampa o salva come PDF",
   refundedTitle: "Rimborsato",
@@ -289,6 +294,7 @@ const it: RequestWords = {
   receiptSubject: (store, amount) => `Ricevuta da ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Grazie. Hai pagato ${amount} a ${store} il ${date}, per:`,
   receiptLink: "La tua ricevuta, da stampare o salvare:",
+  receiptTax: (amount) => `IVA o imposta sulle vendite: ${amount}`,
   statement: (store) => `L'addebito compare sul tuo estratto conto con il nome dell'attività di ${store}.`,
 };
 
@@ -311,7 +317,7 @@ const nl: RequestWords = {
   report: "Dit verzoek melden",
   visit: (store) => `Naar de winkel van ${store}`,
   paidTitle: "Betaald. Bedankt",
-  paidBody: (amount, store, date) => `${amount} is op ${date} aan ${store} betaald. Er is een ontvangstbewijs naar je gemaild.`,
+  paidBody: (amount, store, date) => `${amount} is op ${date} aan ${store} betaald. Deze pagina is je ontvangstbewijs.`,
   reference: "Referentie",
   print: "Afdrukken of als pdf opslaan",
   refundedTitle: "Terugbetaald",
@@ -345,6 +351,7 @@ const nl: RequestWords = {
   receiptSubject: (store, amount) => `Ontvangstbewijs van ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Bedankt. Je hebt op ${date} ${amount} aan ${store} betaald, voor:`,
   receiptLink: "Je ontvangstbewijs, om af te drukken of op te slaan:",
+  receiptTax: (amount) => `Btw of omzetbelasting: ${amount}`,
   statement: (store) => `De afschrijving staat op je afschrift onder de naam van het bedrijf van ${store}.`,
 };
 
@@ -367,7 +374,7 @@ const pt: RequestWords = {
   report: "Denunciar este pedido",
   visit: (store) => `Visitar a loja de ${store}`,
   paidTitle: "Pago. Obrigado",
-  paidBody: (amount, store, date) => `${amount} foram pagos a ${store} a ${date}. Foi-lhe enviado um recibo por email.`,
+  paidBody: (amount, store, date) => `${amount} foram pagos a ${store} a ${date}. Esta página é o seu recibo.`,
   reference: "Referência",
   print: "Imprimir ou guardar como PDF",
   refundedTitle: "Reembolsado",
@@ -401,6 +408,7 @@ const pt: RequestWords = {
   receiptSubject: (store, amount) => `Recibo de ${store}: ${amount}`,
   receiptLead: (store, amount, date) => `Obrigado. Pagou ${amount} a ${store} a ${date}, por:`,
   receiptLink: "O seu recibo, para imprimir ou guardar:",
+  receiptTax: (amount) => `IVA ou imposto sobre vendas: ${amount}`,
   statement: (store) => `A cobrança aparece no seu extrato com o nome da empresa de ${store}.`,
 };
 

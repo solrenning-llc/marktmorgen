@@ -43,6 +43,10 @@ const en = {
       title: "Something went wrong on our side",
       body: "Nothing was changed. Try again in a moment.",
     },
+    unconfirmed: {
+      title: "We could not confirm the switch",
+      body: "Stripe's answer did not say whether it went through. Look at your membership below before you try again: it shows the plan you are on now.",
+    },
     expired: {
       title: "This link has expired",
       body: "A link to your membership works for one hour. Ask for a new one below; it takes a few seconds.",
@@ -72,6 +76,14 @@ const en = {
       body: "Wait a moment and look at your membership below before trying again.",
     },
     currency: { title: "This membership stays on its plan", body: "It is paid in a different currency from the one the store's plans use now, so it stays on its current plan. Nothing was changed, and you can still cancel it on your membership page." },
+    cancelled: {
+      title: "Your membership is canceled",
+      body: "Nothing more is charged. What it includes stays open to you until the date shown below.",
+    },
+    unsure: {
+      title: "We could not confirm the cancellation",
+      body: "Stripe's answer did not say whether it went through. Look at your membership below: if it says “Canceled”, it is. If not, press Cancel again.",
+    },
     "cannot-switch": {
       title: "That switch cannot be made",
       body: "The plan may no longer be offered, or the membership may be canceled or waiting on a payment. Nothing was changed.",
@@ -85,10 +97,10 @@ const en = {
   payEmailLabel: "The email you pay with",
   emailMeLink: "Email me a link to my membership",
   linkNote: (store: string, hours: number) =>
-    `If that address has a membership with ${store}, a link to it usually arrives within a minute. It works for ${hours === 1 ? "one hour" : `${hours} hours`}. We say the same thing whether or not it does, so nobody can use this page to find out who is a member.`,
+    `If that address has a membership with ${store}, we try to email a link to it. It works for ${hours === 1 ? "one hour" : `${hours} hours`}. We say the same thing whether or not it does, so nobody can use this page to find out who is a member.`,
   checkInbox: "Check your inbox",
   sentBody: (store: string) =>
-    `If that address has a membership with ${store}, the link is on its way. It comes from ${store} via Marktmorgen and usually arrives within a minute. If it is not there, look in spam.`,
+    `If that address has a membership with ${store}, the link is on its way. It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   tryOther: "Nothing arrived? You may pay with a different address: the one you typed when you joined. Try that one below.",
 
   // ---- Managing: the memberships behind the link -----------------------------------
@@ -96,6 +108,10 @@ const en = {
   /** "a month", "every 3 months": how often a membership is paid for. */
   every: (interval: Interval, count: number) => (count === 1 ? `a ${interval}` : `every ${count} ${interval}s`),
   ends: (date: string) => `Ends ${date}`,
+  /** The word only a cancelled membership's line shows, which the "unsure" notice points at. */
+  canceledMark: "Canceled",
+  endsCanceled: (date: string) => `Canceled. Ends ${date}`,
+  endsAfterLast: (date: string) => `Ends ${date}, after the last payment`,
   cancel: "Cancel",
   switchPlan: "Switch plan",
   switchCurrencyNote: "Switching plans is not offered on this membership: it is paid in a different currency from the one the store's plans use now.",
@@ -135,6 +151,9 @@ const en = {
   } as Record<string, Notice>,
   cancelNote:
     "If you cancel, the membership stays on until the end of the period you have already paid for, and nothing more is charged.",
+  /** Under Cancel on a membership sold as a number of payments: the store's own page cancels it, with no Stripe page after. */
+  fixedCancelNote: (date: string) =>
+    `It stays on until ${date}, the end of what you have already paid for or of your free trial. None of the payments still to come is taken.`,
 
   // ---- Asking why before a member cancels (added 12 October 2026) --------------------------
   leaveTitle: "Before you go",
@@ -225,6 +244,8 @@ const en = {
     unavailable: "This offer cannot be used for this membership any more. You can still come back at the usual price below, if it is offered.",
     refused: "The offer could not be applied just now. You can come back at the usual price below, or reply to the email it came in.",
     limited: "Too many tries for now. Wait a few minutes and press the button again.",
+    /** The link could not be checked just now (CX-123 rule 24): never said as an offer that ended. */
+    unknown: "We could not check this offer right now. Nothing was charged. Please try again in a moment.",
   } as Record<string, string>,
   membershipLabel: "Membership",
   endedBody: (title: string) =>
@@ -372,6 +393,7 @@ const en = {
     canceled: { title: "Nothing was changed", body: "You left Stripe's page before saving a card. Press the button to try again." },
     expired: { title: "This link has expired", body: "Ask for a link to your membership on its page; from there you can change your card." },
     error: { title: "Something went wrong on our side", body: "Nothing was changed. Try again in a moment." },
+    unsure: { title: "We couldn't confirm your new card", body: "We couldn't confirm that your membership now uses your new card, so nothing was paid with it. Press the button to try again in a moment." },
   } as Record<string, Notice>,
 };
 
@@ -399,6 +421,10 @@ const es: MembershipWords = {
     error: {
       title: "Algo salió mal por nuestra parte",
       body: "No se cambió nada. Vuelve a intentarlo en un momento.",
+    },
+    unconfirmed: {
+      title: "No pudimos confirmar el cambio",
+      body: "La respuesta de Stripe no dijo si se hizo. Mira tu membresía abajo antes de intentarlo de nuevo: muestra el plan que tienes ahora.",
     },
     expired: {
       title: "Este enlace ha expirado",
@@ -429,6 +455,14 @@ const es: MembershipWords = {
       body: "Espera un momento y revisa tu membresía abajo antes de volver a intentarlo.",
     },
     currency: { title: "Esta membresía se queda en su plan", body: "Se paga en una moneda distinta de la que usan ahora los planes de la tienda, así que se queda en su plan actual. No se cambió nada, y aún puedes cancelarla en la página de tu membresía." },
+    cancelled: {
+      title: "Tu membresía está cancelada",
+      body: "No se cobra nada más. Lo que incluye sigue abierto para ti hasta la fecha que ves abajo.",
+    },
+    unsure: {
+      title: "No pudimos confirmar la cancelación",
+      body: "La respuesta de Stripe no dijo si se completó. Mira tu membresía abajo: si dice “Cancelada”, lo está. Si no, pulsa Cancelar otra vez.",
+    },
     "cannot-switch": {
       title: "Ese cambio no se puede hacer",
       body: "Puede que el plan ya no se ofrezca, o que la membresía esté cancelada o pendiente de un pago. No se cambió nada.",
@@ -442,10 +476,10 @@ const es: MembershipWords = {
   payEmailLabel: "El email con el que pagas",
   emailMeLink: "Envíame un enlace a mi membresía",
   linkNote: (store, hours) =>
-    `Si esa dirección tiene una membresía en ${store}, el enlace suele llegar en menos de un minuto. Funciona durante ${hours === 1 ? "una hora" : `${hours} horas`}. Decimos lo mismo tanto si la tiene como si no, para que nadie pueda usar esta página para averiguar quién es miembro.`,
+    `Si esa dirección tiene una membresía en ${store}, intentamos enviarle un enlace por email. Funciona durante ${hours === 1 ? "una hora" : `${hours} horas`}. Decimos lo mismo tanto si la tiene como si no, para que nadie pueda usar esta página para averiguar quién es miembro.`,
   checkInbox: "Revisa tu bandeja de entrada",
   sentBody: (store) =>
-    `Si esa dirección tiene una membresía en ${store}, el enlace va de camino. Lo envía ${store} a través de Marktmorgen y suele llegar en menos de un minuto. Si no está, mira en la carpeta de spam.`,
+    `Si esa dirección tiene una membresía en ${store}, el enlace va de camino. Lo envía ${store} a través de Marktmorgen. Si no está, mira en la carpeta de spam.`,
   tryOther: "¿No llegó nada? Puede que pagues con otra dirección: la que escribiste al hacerte miembro. Prueba con esa abajo.",
 
   yourMemberships: "Tus membresías",
@@ -454,6 +488,9 @@ const es: MembershipWords = {
       ? { day: "al día", week: "a la semana", month: "al mes", year: "al año" }[interval]
       : `cada ${count} ${{ day: "días", week: "semanas", month: "meses", year: "años" }[interval]}`,
   ends: (date) => `Termina el ${date}`,
+  canceledMark: "Cancelada",
+  endsCanceled: (date) => `Cancelada. Termina el ${date}`,
+  endsAfterLast: (date) => `Termina el ${date}, después del último pago`,
   cancel: "Cancelar",
   switchPlan: "Cambiar de plan",
   switchCurrencyNote: "Esta membresía no ofrece cambiar de plan: se paga en una moneda distinta de la que usan ahora los planes de la tienda.",
@@ -492,6 +529,8 @@ const es: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Si cancelas, la membresía sigue activa hasta el final del periodo que ya pagaste, y no se cobra nada más.",
+  fixedCancelNote: (date) =>
+    `Sigue activa hasta el ${date}, el final de lo que ya pagaste o de tu prueba gratis. No se cobra ninguno de los pagos que faltan.`,
 
   leaveTitle: "Antes de irte",
   leaveHead: (title) => `¿Cancelar ${title}?`,
@@ -581,6 +620,7 @@ const es: MembershipWords = {
     unavailable: "Esta oferta ya no se puede usar para esta membresía. Todavía puedes volver al precio habitual, abajo, si se ofrece.",
     refused: "No se pudo aplicar la oferta en este momento. Puedes volver al precio habitual, abajo, o responder al email en el que llegó.",
     limited: "Demasiados intentos por ahora. Espera unos minutos y vuelve a pulsar el botón.",
+    unknown: "No pudimos comprobar esta oferta en este momento. No se cobró nada. Vuelve a intentarlo en un momento.",
   },
   membershipLabel: "Membresía",
   endedBody: (title) =>
@@ -716,6 +756,7 @@ const es: MembershipWords = {
     canceled: { title: "No se ha cambiado nada", body: "Saliste de la página de Stripe antes de guardar una tarjeta. Pulsa el botón para intentarlo de nuevo." },
     expired: { title: "Este enlace ha caducado", body: "Pide un enlace a tu membresía en su página; desde allí puedes cambiar tu tarjeta." },
     error: { title: "Algo salió mal por nuestra parte", body: "No se ha cambiado nada. Inténtalo de nuevo en un momento." },
+    unsure: { title: "No pudimos confirmar tu nueva tarjeta", body: "No pudimos confirmar que tu membresía ya use tu nueva tarjeta, así que no se pagó nada con ella. Pulsa el botón para intentarlo de nuevo en un momento." },
   },
 };
 
@@ -741,6 +782,10 @@ const fr: MembershipWords = {
     error: {
       title: "Un problème est survenu de notre côté",
       body: "Rien n'a été modifié. Réessayez dans un instant.",
+    },
+    unconfirmed: {
+      title: "Nous n'avons pas pu confirmer le changement",
+      body: `La réponse de Stripe ne disait pas s'il a été fait. Regardez votre abonnement ci-dessous avant de réessayer${S}: il montre la formule que vous avez maintenant.`,
     },
     expired: {
       title: "Ce lien a expiré",
@@ -771,6 +816,14 @@ const fr: MembershipWords = {
       body: "Patientez un instant et consultez votre abonnement ci-dessous avant de réessayer.",
     },
     currency: { title: "Cet abonnement garde sa formule", body: "Il est payé dans une autre devise que celle des formules actuelles de la boutique, il garde donc sa formule actuelle. Rien n'a été modifié, et vous pouvez toujours l'annuler sur la page de votre abonnement." },
+    cancelled: {
+      title: "Votre abonnement est annulé",
+      body: "Plus rien n'est débité. Ce qu'il comprend reste ouvert pour vous jusqu'à la date indiquée ci-dessous.",
+    },
+    unsure: {
+      title: "Nous n'avons pas pu confirmer l'annulation",
+      body: `La réponse de Stripe ne disait pas si elle a abouti. Regardez votre abonnement ci-dessous${S}: s'il indique «${S}Annulé${S}», il l'est. Sinon, appuyez de nouveau sur Annuler.`,
+    },
     "cannot-switch": {
       title: "Ce changement est impossible",
       body: "La formule n'est peut-être plus proposée, ou l'abonnement est peut-être annulé ou en attente d'un paiement. Rien n'a été modifié.",
@@ -784,10 +837,10 @@ const fr: MembershipWords = {
   payEmailLabel: "L'e-mail avec lequel vous payez",
   emailMeLink: "M'envoyer un lien vers mon abonnement",
   linkNote: (store, hours) =>
-    `Si cette adresse a un abonnement chez ${store}, un lien arrive généralement en moins d'une minute. Il fonctionne pendant ${hours < 2 ? "une heure" : `${hours}${S}heures`}. Nous affichons le même message dans tous les cas, pour que personne ne puisse utiliser cette page pour savoir qui est membre.`,
+    `Si cette adresse a un abonnement chez ${store}, nous essayons de lui envoyer un lien par e-mail. Il fonctionne pendant ${hours < 2 ? "une heure" : `${hours}${S}heures`}. Nous affichons le même message dans tous les cas, pour que personne ne puisse utiliser cette page pour savoir qui est membre.`,
   checkInbox: "Consultez votre boîte de réception",
   sentBody: (store) =>
-    `Si cette adresse a un abonnement chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute. S'il n'y est pas, regardez dans les spams.`,
+    `Si cette adresse a un abonnement chez ${store}, le lien est en route. Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   tryOther: `Rien reçu${S}? Vous payez peut-être avec une autre adresse${S}: celle que vous avez saisie lors de votre inscription. Essayez-la ci-dessous.`,
 
   yourMemberships: "Vos abonnements",
@@ -801,6 +854,9 @@ const fr: MembershipWords = {
           year: `tous les ${count}${S}ans`,
         }[interval],
   ends: (date) => `Se termine le ${date}`,
+  canceledMark: "Annulé",
+  endsCanceled: (date) => `Annulé. Se termine le ${date}`,
+  endsAfterLast: (date) => `Se termine le ${date}, après le dernier paiement`,
   cancel: "Annuler",
   switchPlan: "Changer de formule",
   switchCurrencyNote: "Cet abonnement ne propose pas de changer de formule, car il est payé dans une autre devise que celle des formules actuelles de la boutique.",
@@ -839,6 +895,8 @@ const fr: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Si vous annulez, l'abonnement reste actif jusqu'à la fin de la période déjà payée, et plus rien n'est débité.",
+  fixedCancelNote: (date) =>
+    `Il reste actif jusqu'au ${date}, la fin de ce que vous avez déjà payé ou de votre essai gratuit. Aucun des paiements restants n'est débité.`,
 
   leaveTitle: "Avant de partir",
   leaveHead: (title) => `Annuler ${title}${S}?`,
@@ -931,6 +989,7 @@ const fr: MembershipWords = {
     unavailable: "Cette offre ne peut plus être utilisée pour cet abonnement. Vous pouvez toujours revenir au prix habituel ci-dessous, s'il est proposé.",
     refused: "L'offre n'a pas pu être appliquée pour le moment. Vous pouvez revenir au prix habituel ci-dessous, ou répondre à l'e-mail dans lequel elle est arrivée.",
     limited: "Trop de tentatives pour le moment. Attendez quelques minutes et appuyez à nouveau sur le bouton.",
+    unknown: "Nous n'avons pas pu vérifier cette offre pour le moment. Rien n'a été débité. Réessayez dans un instant.",
   },
   membershipLabel: "Abonnement",
   endedBody: (title) =>
@@ -1068,6 +1127,7 @@ const fr: MembershipWords = {
     canceled: { title: "Rien n'a été modifié", body: "Vous avez quitté la page de Stripe avant d'enregistrer une carte. Appuyez sur le bouton pour réessayer." },
     expired: { title: "Ce lien a expiré", body: `Demandez un lien vers votre abonnement sur sa page${S}; de là, vous pouvez changer de carte.` },
     error: { title: "Un problème est survenu de notre côté", body: "Rien n'a été modifié. Réessayez dans un instant." },
+    unsure: { title: "Nous n'avons pas pu confirmer votre nouvelle carte", body: "Nous n'avons pas pu confirmer que votre abonnement utilise désormais votre nouvelle carte, donc aucun paiement n'a été effectué avec celle-ci. Appuyez sur le bouton pour réessayer dans un instant." },
   },
 };
 
@@ -1093,6 +1153,10 @@ const de: MembershipWords = {
     error: {
       title: "Bei uns ist etwas schiefgelaufen",
       body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
+    },
+    unconfirmed: {
+      title: "Wir konnten den Wechsel nicht bestätigen",
+      body: "Die Antwort von Stripe sagte nicht, ob er durchging. Sehen Sie sich Ihre Mitgliedschaft unten an, bevor Sie es noch einmal versuchen: Dort steht Ihr aktueller Tarif.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -1123,6 +1187,14 @@ const de: MembershipWords = {
       body: "Warten Sie einen Moment und sehen Sie sich unten Ihre Mitgliedschaft an, bevor Sie es erneut versuchen.",
     },
     currency: { title: "Diese Mitgliedschaft bleibt bei ihrem Tarif", body: "Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden, und bleibt deshalb bei ihrem Tarif. Es wurde nichts geändert, und Sie können sie weiterhin auf der Seite Ihrer Mitgliedschaft kündigen." },
+    cancelled: {
+      title: "Ihre Mitgliedschaft ist gekündigt",
+      body: "Es wird nichts mehr berechnet. Was sie umfasst, bleibt für Sie bis zu dem Datum unten offen.",
+    },
+    unsure: {
+      title: "Wir konnten die Kündigung nicht bestätigen",
+      body: "Die Antwort von Stripe sagte nicht, ob sie durchgegangen ist. Sehen Sie sich Ihre Mitgliedschaft unten an: Steht dort „Gekündigt“, ist sie es. Wenn nicht, tippen Sie erneut auf Kündigen.",
+    },
     "cannot-switch": {
       title: "Dieser Wechsel ist nicht möglich",
       body: "Der Tarif wird möglicherweise nicht mehr angeboten, oder die Mitgliedschaft ist gekündigt oder wartet auf eine Zahlung. Es wurde nichts geändert.",
@@ -1136,10 +1208,10 @@ const de: MembershipWords = {
   payEmailLabel: "Die E-Mail-Adresse, mit der Sie bezahlen",
   emailMeLink: "Link zu meiner Mitgliedschaft per E-Mail senden",
   linkNote: (store, hours) =>
-    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, kommt ein Link dazu meist innerhalb einer Minute an. Er funktioniert ${hours === 1 ? "eine Stunde" : `${hours} Stunden`} lang. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand mit dieser Seite herausfinden kann, wer Mitglied ist.`,
+    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, versuchen wir, einen Link dorthin per E-Mail zu senden. Er funktioniert ${hours === 1 ? "eine Stunde" : `${hours} Stunden`} lang. Wir sagen dasselbe, ob das der Fall ist oder nicht, damit niemand mit dieser Seite herausfinden kann, wer Mitglied ist.`,
   checkInbox: "Sehen Sie in Ihrem Posteingang nach",
   sentBody: (store) =>
-    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen und trifft meist innerhalb einer Minute ein. Falls er nicht da ist, sehen Sie im Spam-Ordner nach.`,
+    `Wenn diese Adresse eine Mitgliedschaft bei ${store} hat, ist der Link unterwegs. Er kommt von ${store} über Marktmorgen. Falls er nicht da ist, sehen Sie im Spam-Ordner nach.`,
   tryOther:
     "Nichts angekommen? Vielleicht bezahlen Sie mit einer anderen Adresse: der, die Sie beim Beitritt eingegeben haben. Versuchen Sie es unten mit dieser.",
 
@@ -1149,6 +1221,9 @@ const de: MembershipWords = {
       ? { day: "pro Tag", week: "pro Woche", month: "pro Monat", year: "pro Jahr" }[interval]
       : `alle ${count} ${{ day: "Tage", week: "Wochen", month: "Monate", year: "Jahre" }[interval]}`,
   ends: (date) => `Endet am ${date}`,
+  canceledMark: "Gekündigt",
+  endsCanceled: (date) => `Gekündigt. Endet am ${date}`,
+  endsAfterLast: (date) => `Endet am ${date}, nach der letzten Zahlung`,
   cancel: "Kündigen",
   switchPlan: "Tarif wechseln",
   switchCurrencyNote: "Bei dieser Mitgliedschaft ist kein Tarifwechsel möglich: Sie wird in einer anderen Währung bezahlt als der, in der die Tarife des Shops jetzt angeboten werden.",
@@ -1188,6 +1263,8 @@ const de: MembershipWords = {
   } as Record<string, Notice>,
   cancelNote:
     "Wenn Sie kündigen, läuft die Mitgliedschaft bis zum Ende des bereits bezahlten Zeitraums weiter, und es wird nichts mehr berechnet.",
+  fixedCancelNote: (date) =>
+    `Sie läuft bis zum ${date}, dem Ende dessen, was Sie schon bezahlt haben, oder Ihrer kostenlosen Testphase. Keine der noch ausstehenden Zahlungen wird berechnet.`,
 
   leaveTitle: "Bevor Sie gehen",
   leaveHead: (title) => `${title} kündigen?`,
@@ -1288,6 +1365,7 @@ const de: MembershipWords = {
     refused:
       "Das Angebot konnte gerade nicht angewendet werden. Sie können unten zum normalen Preis zurückkehren oder auf die E-Mail antworten, mit der es kam.",
     limited: "Vorerst zu viele Versuche. Warten Sie ein paar Minuten und drücken Sie die Schaltfläche erneut.",
+    unknown: "Wir konnten dieses Angebot gerade nicht prüfen. Es wurde nichts berechnet. Versuchen Sie es gleich noch einmal.",
   },
   membershipLabel: "Mitgliedschaft",
   endedBody: (title) =>
@@ -1426,6 +1504,7 @@ const de: MembershipWords = {
     canceled: { title: "Es wurde nichts geändert", body: "Sie haben die Seite von Stripe verlassen, bevor eine Karte gespeichert war. Drücken Sie den Knopf, um es erneut zu versuchen." },
     expired: { title: "Dieser Link ist abgelaufen", body: "Fordern Sie auf der Seite Ihrer Mitgliedschaft einen Link an; von dort können Sie Ihre Karte ändern." },
     error: { title: "Bei uns ist etwas schiefgegangen", body: "Es wurde nichts geändert. Versuchen Sie es gleich noch einmal." },
+    unsure: { title: "Wir konnten Ihre neue Karte nicht bestätigen", body: "Wir konnten nicht bestätigen, dass Ihre Mitgliedschaft jetzt Ihre neue Karte nutzt, daher wurde nichts damit bezahlt. Drücken Sie gleich noch einmal auf den Knopf." },
   },
 };
 
@@ -1457,6 +1536,10 @@ const it: MembershipWords = {
       title: "Qualcosa è andato storto da parte nostra",
       body: "Non è stato modificato nulla. Riprova tra un momento.",
     },
+    unconfirmed: {
+      title: "Non abbiamo potuto confermare il cambio",
+      body: "La risposta di Stripe non diceva se è andato a buon fine. Guarda la tua iscrizione qui sotto prima di riprovare: mostra il piano che hai adesso.",
+    },
     expired: {
       title: "Questo link è scaduto",
       body: "Un link al tuo abbonamento funziona per un'ora. Chiedine uno nuovo qui sotto; ci vogliono pochi secondi.",
@@ -1486,6 +1569,14 @@ const it: MembershipWords = {
       body: "Aspetta un momento e controlla il tuo abbonamento qui sotto prima di riprovare.",
     },
     currency: { title: "Questo abbonamento resta sul suo piano", body: "È pagato in una valuta diversa da quella dei piani attuali del negozio, quindi resta sul suo piano attuale. Non è stato modificato nulla, e puoi ancora annullarlo dalla pagina del tuo abbonamento." },
+    cancelled: {
+      title: "Il tuo abbonamento è annullato",
+      body: "Non ti viene addebitato altro. Quello che include resta aperto per te fino alla data indicata qui sotto.",
+    },
+    unsure: {
+      title: "Non siamo riusciti a confermare l'annullamento",
+      body: "La risposta di Stripe non diceva se è andato a buon fine. Guarda il tuo abbonamento qui sotto: se dice “Annullato”, lo è. Altrimenti, premi di nuovo Annulla.",
+    },
     "cannot-switch": {
       title: "Quel cambio non si può fare",
       body: "Il piano potrebbe non essere più offerto, oppure l'abbonamento potrebbe essere annullato o in attesa di un pagamento. Non è stato modificato nulla.",
@@ -1499,10 +1590,10 @@ const it: MembershipWords = {
   payEmailLabel: "L'email con cui paghi",
   emailMeLink: "Inviami un link al mio abbonamento",
   linkNote: (store, hours) =>
-    `Se quell'indirizzo ha un abbonamento con ${store}, di solito il link arriva entro un minuto. Funziona per ${hours === 1 ? "un'ora" : `${hours} ore`}. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi è membro.`,
+    `Se quell'indirizzo ha un abbonamento con ${store}, proviamo a inviare un link via email. Funziona per ${hours === 1 ? "un'ora" : `${hours} ore`}. Diciamo la stessa cosa in ogni caso, così nessuno può usare questa pagina per scoprire chi è membro.`,
   checkInbox: "Controlla la tua casella di posta",
   sentBody: (store) =>
-    `Se quell'indirizzo ha un abbonamento con ${store}, il link è in arrivo. Lo invia ${store} tramite Marktmorgen e di solito arriva entro un minuto. Se non c'è, guarda nella cartella spam.`,
+    `Se quell'indirizzo ha un abbonamento con ${store}, il link è in arrivo. Lo invia ${store} tramite Marktmorgen. Se non c'è, guarda nella cartella spam.`,
   tryOther:
     "Non è arrivato nulla? Forse paghi con un altro indirizzo: quello che hai inserito al momento dell'iscrizione. Prova con quello qui sotto.",
 
@@ -1512,6 +1603,9 @@ const it: MembershipWords = {
       ? { day: "al giorno", week: "a settimana", month: "al mese", year: "all'anno" }[interval]
       : `ogni ${count} ${{ day: "giorni", week: "settimane", month: "mesi", year: "anni" }[interval]}`,
   ends: (date) => `Termina ${il(date)}`,
+  canceledMark: "Annullato",
+  endsCanceled: (date) => `Annullato. Termina ${il(date)}`,
+  endsAfterLast: (date) => `Termina ${il(date)}, dopo l'ultimo pagamento`,
   cancel: "Annulla",
   switchPlan: "Cambia piano",
   switchCurrencyNote: "Questo abbonamento non può cambiare piano: è pagato in una valuta diversa da quella dei piani attuali del negozio.",
@@ -1550,6 +1644,8 @@ const it: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Se annulli, l'abbonamento resta attivo fino alla fine del periodo che hai già pagato, e non ti viene addebitato altro.",
+  fixedCancelNote: (date) =>
+    `Resta attivo fino ${al(date)}, la fine di ciò che hai già pagato o della prova gratuita. Nessuno dei pagamenti rimanenti ti viene addebitato.`,
 
   leaveTitle: "Prima di andare",
   leaveHead: (title) => `Annullare ${title}?`,
@@ -1642,6 +1738,7 @@ const it: MembershipWords = {
     unavailable: "Questa offerta non può più essere usata per questo abbonamento. Puoi comunque tornare al prezzo normale qui sotto, se è offerto.",
     refused: "Non è stato possibile applicare l'offerta in questo momento. Puoi tornare al prezzo normale qui sotto, o rispondere all'email con cui è arrivata.",
     limited: "Troppi tentativi per ora. Aspetta qualche minuto e premi di nuovo il pulsante.",
+    unknown: "Non è stato possibile verificare questa offerta in questo momento. Non è stato addebitato nulla. Riprova tra un momento.",
   },
   membershipLabel: "Abbonamento",
   endedBody: (title) =>
@@ -1779,6 +1876,7 @@ const it: MembershipWords = {
     canceled: { title: "Non è cambiato nulla", body: "Hai lasciato la pagina di Stripe prima di salvare una carta. Premi il pulsante per riprovare." },
     expired: { title: "Questo link è scaduto", body: "Chiedi un link al tuo abbonamento dalla sua pagina; da lì puoi cambiare la carta." },
     error: { title: "Qualcosa è andato storto da parte nostra", body: "Non è cambiato nulla. Riprova tra un momento." },
+    unsure: { title: "Non siamo riusciti a confermare la tua nuova carta", body: "Non siamo riusciti a confermare che il tuo abbonamento usi ora la tua nuova carta, quindi non è stato effettuato alcun pagamento. Premi di nuovo il pulsante tra un momento." },
   },
 };
 
@@ -1804,6 +1902,10 @@ const nl: MembershipWords = {
     error: {
       title: "Er ging bij ons iets mis",
       body: "Er is niets gewijzigd. Probeer het zo opnieuw.",
+    },
+    unconfirmed: {
+      title: "We konden de wissel niet bevestigen",
+      body: "Het antwoord van Stripe zei niet of die gelukt is. Kijk hieronder naar je lidmaatschap voordat je het opnieuw probeert: daar staat het abonnement dat je nu hebt.",
     },
     expired: {
       title: "Deze link is verlopen",
@@ -1834,6 +1936,14 @@ const nl: MembershipWords = {
       body: "Wacht even en bekijk hieronder je lidmaatschap voordat je het opnieuw probeert.",
     },
     currency: { title: "Dit lidmaatschap blijft bij zijn abonnement", body: "Het wordt betaald in een andere valuta dan die van de huidige abonnementen van de winkel, dus het blijft bij zijn huidige abonnement. Er is niets gewijzigd, en je kunt het nog steeds opzeggen op de pagina van je lidmaatschap." },
+    cancelled: {
+      title: "Je lidmaatschap is opgezegd",
+      body: "Er wordt niets meer afgeschreven. Wat erbij hoort, blijft voor je open tot de datum hieronder.",
+    },
+    unsure: {
+      title: "We konden de opzegging niet bevestigen",
+      body: "Het antwoord van Stripe zei niet of het gelukt is. Kijk hieronder naar je lidmaatschap: staat er “Opgezegd”, dan is het opgezegd. Zo niet, druk dan nog eens op Opzeggen.",
+    },
     "cannot-switch": {
       title: "Die overstap kan niet",
       body: "Het abonnement wordt misschien niet meer aangeboden, of het lidmaatschap is misschien opgezegd of wacht op een betaling. Er is niets gewijzigd.",
@@ -1847,10 +1957,10 @@ const nl: MembershipWords = {
   payEmailLabel: "Het e-mailadres waarmee je betaalt",
   emailMeLink: "Mail me een link naar mijn lidmaatschap",
   linkNote: (store, hours) =>
-    `Als dat adres een lidmaatschap bij ${store} heeft, komt er meestal binnen een minuut een link aan. Die werkt ${hours === 1 ? "een uur" : `${hours} uur`}. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie lid is.`,
+    `Als dat adres een lidmaatschap bij ${store} heeft, proberen we er per e-mail een link naartoe te sturen. Die werkt ${hours === 1 ? "een uur" : `${hours} uur`}. We zeggen hetzelfde, of dat nu zo is of niet, zodat niemand via deze pagina kan uitzoeken wie lid is.`,
   checkInbox: "Kijk in je inbox",
   sentBody: (store) =>
-    `Als dat adres een lidmaatschap bij ${store} heeft, is de link onderweg. Hij komt van ${store} via Marktmorgen en komt meestal binnen een minuut aan. Staat hij er niet, kijk dan in je spam.`,
+    `Als dat adres een lidmaatschap bij ${store} heeft, is de link onderweg. Hij komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   tryOther: "Niets ontvangen? Misschien betaal je met een ander adres: het adres dat je invulde toen je lid werd. Probeer dat hieronder.",
 
   yourMemberships: "Je lidmaatschappen",
@@ -1859,6 +1969,9 @@ const nl: MembershipWords = {
       ? { day: "per dag", week: "per week", month: "per maand", year: "per jaar" }[interval]
       : `elke ${count} ${{ day: "dagen", week: "weken", month: "maanden", year: "jaar" }[interval]}`,
   ends: (date) => `Eindigt op ${date}`,
+  canceledMark: "Opgezegd",
+  endsCanceled: (date) => `Opgezegd. Eindigt op ${date}`,
+  endsAfterLast: (date) => `Eindigt op ${date}, na de laatste betaling`,
   cancel: "Opzeggen",
   switchPlan: "Abonnement wijzigen",
   switchCurrencyNote: "Bij dit lidmaatschap kun je niet van abonnement wisselen: het wordt betaald in een andere valuta dan die van de huidige abonnementen van de winkel.",
@@ -1897,6 +2010,8 @@ const nl: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Als je opzegt, loopt het lidmaatschap door tot het einde van de periode die je al hebt betaald, en wordt er niets meer afgeschreven.",
+  fixedCancelNote: (date) =>
+    `Het loopt door tot ${date}, het einde van wat je al hebt betaald of van je gratis proefperiode. Geen van de betalingen die nog komen wordt afgeschreven.`,
 
   leaveTitle: "Voordat je gaat",
   leaveHead: (title) => `${title} opzeggen?`,
@@ -1989,6 +2104,7 @@ const nl: MembershipWords = {
     unavailable: "Dit aanbod kan niet meer voor dit lidmaatschap worden gebruikt. Je kunt hieronder nog steeds terugkomen tegen de gewone prijs, als die wordt aangeboden.",
     refused: "Het aanbod kon nu niet worden toegepast. Je kunt hieronder terugkomen tegen de gewone prijs, of de e-mail beantwoorden waarin het kwam.",
     limited: "Even te veel pogingen. Wacht een paar minuten en druk dan opnieuw op de knop.",
+    unknown: "We konden dit aanbod nu niet controleren. Er is niets afgeschreven. Probeer het zo meteen opnieuw.",
   },
   membershipLabel: "Lidmaatschap",
   endedBody: (title) =>
@@ -2124,6 +2240,7 @@ const nl: MembershipWords = {
     canceled: { title: "Er is niets gewijzigd", body: "Je hebt de pagina van Stripe verlaten voordat er een kaart was opgeslagen. Druk op de knop om het opnieuw te proberen." },
     expired: { title: "Deze link is verlopen", body: "Vraag op de pagina van je lidmaatschap een link aan; van daaruit kun je je kaart wijzigen." },
     error: { title: "Er ging aan onze kant iets mis", body: "Er is niets gewijzigd. Probeer het zo opnieuw." },
+    unsure: { title: "We konden je nieuwe kaart niet bevestigen", body: "We konden niet bevestigen dat je lidmaatschap nu je nieuwe kaart gebruikt, dus er is niets mee betaald. Druk zo nog een keer op de knop." },
   },
 };
 
@@ -2149,6 +2266,10 @@ const pt: MembershipWords = {
     error: {
       title: "Algo correu mal do nosso lado",
       body: "Nada foi alterado. Tente novamente daqui a pouco.",
+    },
+    unconfirmed: {
+      title: "Não conseguimos confirmar a mudança",
+      body: "A resposta do Stripe não disse se ela foi feita. Veja a sua subscrição abaixo antes de tentar de novo: mostra o plano que tem agora.",
     },
     expired: {
       title: "Esta ligação expirou",
@@ -2179,6 +2300,14 @@ const pt: MembershipWords = {
       body: "Aguarde um momento e veja a sua subscrição abaixo antes de tentar novamente.",
     },
     currency: { title: "Esta subscrição mantém o plano atual", body: "É paga numa moeda diferente da dos planos atuais da loja, por isso mantém o plano atual. Nada foi alterado, e pode ainda cancelá-la na página da sua subscrição." },
+    cancelled: {
+      title: "A sua subscrição está cancelada",
+      body: "Não é cobrado mais nada. O que inclui continua aberto para si até à data indicada abaixo.",
+    },
+    unsure: {
+      title: "Não conseguimos confirmar o cancelamento",
+      body: "A resposta da Stripe não dizia se foi concluído. Veja a sua subscrição abaixo: se disser “Cancelada”, está. Se não, prima Cancelar outra vez.",
+    },
     "cannot-switch": {
       title: "Essa mudança não pode ser feita",
       body: "O plano pode já não estar disponível, ou a subscrição pode estar cancelada ou à espera de um pagamento. Nada foi alterado.",
@@ -2192,10 +2321,10 @@ const pt: MembershipWords = {
   payEmailLabel: "O email com que paga",
   emailMeLink: "Enviar-me uma ligação para a minha subscrição",
   linkNote: (store, hours) =>
-    `Se esse endereço tiver uma subscrição com ${store}, a ligação costuma chegar em menos de um minuto. Funciona durante ${hours === 1 ? "uma hora" : `${hours} horas`}. Dizemos o mesmo quer tenha quer não, para que ninguém possa usar esta página para descobrir quem é membro.`,
+    `Se esse endereço tiver uma subscrição com ${store}, tentamos enviar-lhe uma ligação por email. Funciona durante ${hours === 1 ? "uma hora" : `${hours} horas`}. Dizemos o mesmo quer tenha quer não, para que ninguém possa usar esta página para descobrir quem é membro.`,
   checkInbox: "Verifique a sua caixa de entrada",
   sentBody: (store) =>
-    `Se esse endereço tiver uma subscrição com ${store}, a ligação está a caminho. É enviada por ${store} através da Marktmorgen e costuma chegar em menos de um minuto. Se não estiver lá, veja na pasta de spam.`,
+    `Se esse endereço tiver uma subscrição com ${store}, a ligação está a caminho. É enviada por ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   tryOther: "Não chegou nada? Talvez pague com outro endereço: o que introduziu quando aderiu. Experimente esse abaixo.",
 
   yourMemberships: "As suas subscrições",
@@ -2204,6 +2333,9 @@ const pt: MembershipWords = {
       ? { day: "por dia", week: "por semana", month: "por mês", year: "por ano" }[interval]
       : `a cada ${count} ${{ day: "dias", week: "semanas", month: "meses", year: "anos" }[interval]}`,
   ends: (date) => `Termina a ${date}`,
+  canceledMark: "Cancelada",
+  endsCanceled: (date) => `Cancelada. Termina a ${date}`,
+  endsAfterLast: (date) => `Termina a ${date}, após o último pagamento`,
   cancel: "Cancelar",
   switchPlan: "Mudar de plano",
   switchCurrencyNote: "Esta subscrição não pode mudar de plano: é paga numa moeda diferente da dos planos atuais da loja.",
@@ -2242,6 +2374,8 @@ const pt: MembershipWords = {
     },
   } as Record<string, Notice>,
   cancelNote: "Se cancelar, a subscrição mantém-se ativa até ao fim do período que já pagou, e não é cobrado mais nada.",
+  fixedCancelNote: (date) =>
+    `Mantém-se ativa até ${date}, o fim do que já pagou ou do seu período de teste grátis. Nenhum dos pagamentos que faltam é cobrado.`,
 
   leaveTitle: "Antes de sair",
   leaveHead: (title) => `Cancelar ${title}?`,
@@ -2334,6 +2468,7 @@ const pt: MembershipWords = {
     unavailable: "Esta oferta já não pode ser usada nesta subscrição. Ainda pode voltar ao preço habitual, abaixo, se estiver disponível.",
     refused: "Não foi possível aplicar a oferta neste momento. Pode voltar ao preço habitual, abaixo, ou responder ao email em que ela chegou.",
     limited: "Demasiadas tentativas por agora. Aguarde alguns minutos e carregue novamente no botão.",
+    unknown: "Não foi possível verificar esta oferta neste momento. Não foi cobrado nada. Tente novamente daqui a pouco.",
   },
   membershipLabel: "Subscrição",
   endedBody: (title) =>
@@ -2469,6 +2604,7 @@ const pt: MembershipWords = {
     canceled: { title: "Nada foi alterado", body: "Saiu da página da Stripe antes de guardar um cartão. Prima o botão para tentar de novo." },
     expired: { title: "Este link expirou", body: "Peça um link para a sua subscrição na página dela; a partir daí pode alterar o seu cartão." },
     error: { title: "Algo correu mal do nosso lado", body: "Nada foi alterado. Tente de novo dentro de momentos." },
+    unsure: { title: "Não conseguimos confirmar o seu novo cartão", body: "Não conseguimos confirmar que a sua subscrição já usa o seu novo cartão, por isso nada foi pago com ele. Prima o botão para tentar de novo dentro de momentos." },
   },
 };
 

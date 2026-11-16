@@ -1,3 +1,4 @@
+import {checkContentFocusTarget} from "./skip-content-focus.mjs";
 import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {readFileSync,mkdtempSync,rmSync} from "node:fs";
@@ -98,6 +99,7 @@ try{
    if(report.incomplete.length)gaps.push({path,width,mode,manualReview:report.incomplete});
    console.log("STUDIO_MATRIX_CASE:"+JSON.stringify({engine,path,width,mode,viewportWidth,writes,foreign,...report,errors}));
    if(report.violations.length||errors.length||writes)failed++;
+   if(mode==="baseline"&&width===390)await checkContentFocusTarget({context,origin,path});
   }catch(error){failed++;console.error("STUDIO_MATRIX_FAILURE:"+JSON.stringify({engine,path,width,mode,error:String(error)}));}
   finally{cases++;await context.close();}
  }

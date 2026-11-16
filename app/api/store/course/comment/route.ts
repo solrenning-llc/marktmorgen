@@ -1,12 +1,13 @@
 import type { NextRequest } from "next/server";
 import { DataRoomError } from "@/lib/store-data";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { originFrom } from "@/lib/request-origin";
 import { fromAnotherSite } from "@/lib/studio-route";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey, storeKey } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { limited, withinLimit } from "@/lib/request-guard";
 import { readCourseListing } from "@/lib/catalog";
 import { addComment, commentsOn, deleteComment, readComment, setHidden } from "@/lib/lesson-comments";
@@ -56,12 +57,14 @@ export async function POST(request: NextRequest) {
   const owner = access.learner.owner;
   const by = owner ? CREATOR_AUTHOR : emailKey(access.learner.email);
   if (!owner) {
-    const passed = await passedQuizzes(course.id, by);
+    const passed = await passedForGate(course.id, by);
     if (heldBack(course, passed).has(lessonId)) return new Response(null, { status: 303, headers: { Location: base } });
   }
   if (!(await commentsOn(course.id))) return back("off");
   // The creator deleting a comment, from a session let in without its second step, waits (lib/two-step.ts).
-  if (owner && action === "delete" && (await lockedFor(request, "products", "cm-delete"))) return back("locked");
+  const lock = owner && action === "delete" ? await lockRead(lockedFor(request, "products", "cm-delete"), { back: `${base}/${lessonId}#comments`, to: "the lesson" }) : false;
+  if (lock instanceof Response) return lock;
+  if (lock) return back("locked");
 
   // Each act here is one of the store's buyer actions, or the creator's
   // studio requests (lib/buyer-actions.ts); a student deleting their own

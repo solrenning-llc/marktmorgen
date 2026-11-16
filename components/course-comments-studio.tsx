@@ -1,5 +1,6 @@
 "use client";
 
+import { StudioEmptyState } from "@/components/empty-state";
 import { useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { whenWords } from "@/lib/community-text";
@@ -91,8 +92,7 @@ export function CourseCommentsStudio({
       </div>
       <p className="mt-2 max-w-2xl text-ink-soft">
         Students ask questions and share what they made under each lesson, under a name they choose; their email address
-        is never shown. Only students of this course and you can read them. An answer from you here or on the lesson
-        appears as {storeName}, and the student gets an email with it.
+        is never shown. Only students of this course and you can read them. Your answers appear under the lesson as {storeName}.
       </p>
       <label className="mt-4 flex min-h-[44px] items-center gap-3 font-semibold text-ink">
         <input
@@ -114,7 +114,7 @@ export function CourseCommentsStudio({
       {error ? <p className="notice notice-error mt-4" role="alert">{error}</p> : null}
 
       {comments.length === 0 ? (
-        <p className="mt-6 text-sm text-ink-soft">No comments yet. The newest ones will show here, with a way to answer each.</p>
+        <StudioEmptyState title="No comments yet" body="The newest ones will show here, with a way to answer each." className="mt-6" />
       ) : (
         <ol className="mt-6 space-y-4">
           {comments.map((c) => (
@@ -137,7 +137,7 @@ export function CourseCommentsStudio({
 
               {c.answerTo === null && !c.fromCreator && !c.hidden ? (
                 answered.has(c.id) ? (
-                  <p className="mt-3 text-sm font-semibold text-ink" role="status">Answered. The student gets an email with your words.</p>
+                  <p className="mt-3 text-sm font-semibold text-ink" role="status">Answered. Your reply is under the lesson.</p>
                 ) : (
                   <form
                     className="mt-3 space-y-2"

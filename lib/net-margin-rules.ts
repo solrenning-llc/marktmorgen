@@ -48,6 +48,10 @@ export function customerCostSnapshot(record:unknown):CustomerWorstCase['costCeil
    if(!field||!Object.hasOwn(field,"value")||!field.enumerable)return null;
    costs[key]=field.value;
   }
+  // Probe the ORIGINAL map only after every field is a validated scalar amount.
+  // A Proxy cannot hide an extra liability or disguise an accessor; a plain
+  // map has only these eleven own numeric data fields, so no getter is cloned.
+  if(CUSTOMER_COST_CATEGORIES.every(key=>money(costs[key])))structuredClone(record);
   return costs;
  }catch{return null;}
 }

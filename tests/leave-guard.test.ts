@@ -1,7 +1,8 @@
 /**
  * Unsaved work is asked about before it is left (components/leave-guard.ts):
  * the editors whose changes wait for a Save use it, only while there are
- * changes and not while saving.
+ * changes. Page-order drafts stay protected until their save is confirmed;
+ * the legacy page/funnel wiring is recorded separately below.
  */
 import { readFileSync } from "node:fs";
 import { done, is, part } from "./check";
@@ -11,6 +12,7 @@ async function main(): Promise<void> {
   for (const [file, line] of [
     ["components/page-editor.tsx", "useLeaveGuard(dirty && !busy);"],
     ["components/funnel-editor.tsx", "useLeaveGuard(dirty && !busy);"],
+    ["components/page-order-editor.tsx", "useLeaveGuard(changed);"],
   ]) {
     is(file, readFileSync(file, "utf8").includes(line), true);
   }

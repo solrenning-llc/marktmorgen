@@ -16,8 +16,11 @@
  * What is read is kept for ten minutes (CACHE_SECONDS), so a busy booking
  * page asks the calendar at most once in that time; only the busy times are
  * kept, never a title, a guest or a place. A calendar that fails to answer
- * blocks nothing new: the last good reading is used for up to six hours
- * (STALE_SECONDS), after that nothing, and the studio says what went wrong.
+ * keeps its last good reading for up to six hours (STALE_SECONDS); a file
+ * that cannot be read (CalendarTooComplex), or a calendar with no good
+ * reading left, closes its whole window, since its busy times are not known,
+ * and the studio says what went wrong. A failure is kept CACHE_SECONDS, as a
+ * reading is, and a refused file that has not changed is not parsed again.
  * Bookings never wait on it for more than FEED_TIMEOUT_MS.
  *
  * Out: every store gets a private address of its own,
@@ -30,22 +33,34 @@
  *   nl:cal:tok:<hash>          statsId, for the subscription address
  *   nl:cal:busy:<feed>         the last reading, ten minutes
  *   nl:cal:good:<feed>         the last good reading, six hours
- *   nl:cal:err:<feed>          the last failure, for the studio
- *   nl:cal:out:<statsId>       the subscription file, five minutes
+ *   nl:cal:err:<feed>          the last failure, for the studio { at, message,
+ *                              refused?, print?, printAt? }, six hours
+ *   nl:cal:out:<statsId>       the last good copy of the subscription file,
+ *                              { at, ics }, CALENDAR_COPY_SECONDS (40 days)
+ *   nl:cal:pace:<statsId>:<h>  the feed's answers in hour h, an hour
+ *   nl:cal:builds:<statsId>:<d> the file's makings on UTC day d, two days
+ *   nl:cal:chg:<handle>        when the bookings last changed, ms (written by
+ *                              lib/call-records.ts, bookingsChangedKey)
  */
 import { placeIcsLines, placeLine } from "@/lib/call-place";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { type Busy, isTimeZone, roomFor, seatsAt } from "@/lib/call-setup";
 import { SafeFetchError, checkUrl, problemWords, safeFetch } from "@/lib/safe-fetch";
-import { type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
-import type { Listing, Store } from "@/lib/store";
+import { CalendarTooComplex, type Interval, looksLikeCalendar, parseIcs } from "@/lib/ics-parse";
+import { type Listing, type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
 import { idsOfKind, readListing, recordListings } from "@/lib/catalog";
 import { type RoomAsk, VIDEO_ROOM_NOTE, isVideoRoom, roomsFor } from "@/lib/call-rooms";
 import { SITE_URL } from "@/lib/site-url";
 import { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS } from "@/lib/calendar-limits";
+import { CALENDAR_CREDITS_PER_DAY, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR, CALENDAR_RETRIES_PER_DAY } from "@/lib/calendar-limits";
 import { fold, icsText, icsTime } from "@/lib/ics-write";
+import { bookingCreditsKey, bookingsChangedKey } from "@/lib/call-records";
+import { MEET_STORES } from "@/lib/meet-links";
 
 /** Calendars one store may read, and how far ahead (lib/calendar-limits.ts, which the studio and the feature page read too). */
 export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
@@ -53,8 +68,43 @@ export { CACHE_SECONDS, LOOKAHEAD_DAYS, MAX_FEEDS, STALE_SECONDS };
 export const FEED_MAX_BYTES = 2_000_000;
 /** How long a calendar may take to answer, redirects included. */
 export const FEED_TIMEOUT_MS = 8_000;
-/** How long the subscription file is reused before it is made again. */
-const OUT_SECONDS = 300;
+/**
+ * Events the subscription file holds at the most (4 November 2026, C4-4): so
+ * the file kept, read on every answer and sent on, has a size its feed's
+ * ceiling can be priced at (lib/read-ceilings.ts). Those still to come are
+ * kept first (keptSlots): past it, the oldest sessions already over (up to a
+ * week back) are left out of the file, then the furthest ahead.
+ */
+export const CALENDAR_MAX_EVENTS = 1_000;
+/** How long the last good copy of the subscription file is kept for the calendar app (bookedCalendarFeed). */
+export const CALENDAR_COPY_SECONDS = 40 * 86_400;
+/**
+ * The copy is made again when a booking changed (lib/call-records.ts,
+ * bookingsChangedKey: a booking made or moved, a time let go, or a call
+ * refunded in full, a cancellation included, lib/call-meetings.ts, which
+ * reads the refunds of every store whose feed is read, meeting rooms or not),
+ * or once it is this old. What marks nothing yet (a live session the creator
+ * adds: its path is another agent's file) shows at the next making: within
+ * this, or up to a day when the UTC day's makings (CALENDAR_BUILDS_PER_DAY)
+ * are spent. A
+ * booking whose dispute was lost stays in the file: it reads the payment
+ * (lib/calls.ts, callFromRow), which a lost dispute does not show refunded.
+ */
+export const CALENDAR_REFRESH_SECONDS = 12 * 3_600;
+/** How long after a making the store's refunds are read for its feed (lib/call-meetings.ts, readRefunds). */
+export const FEED_REFUNDS_SECONDS = 2 * 86_400;
+/** Times a store's file may be made again in a UTC day, every reason together. */
+export const CALENDAR_BUILDS_PER_DAY = 2;
+/** More makings a UTC day, one for each booking made, moved or let go (lib/calendar-limits.ts, CALENDAR_CREDITS_PER_DAY). */
+export { CALENDAR_CREDITS_PER_DAY, CALENDAR_RETRIES_PER_DAY };
+/** Answers and refusals an hour (lib/calendar-limits.ts, where the studio's editor reads them too). */
+export { CALENDAR_POLLS_PER_HOUR, CALENDAR_REFUSED_PER_HOUR };
+/**
+ * The largest copy kept and sent, in bytes: CALENDAR_MAX_EVENTS events at
+ * 2 KB and the bookings of five Stripe pages (lib/calls.ts, MAX_PAGES) at
+ * 512 bytes each. A review ceiling of the file's lines; larger is refused.
+ */
+export const CALENDAR_FILE_MAX_BYTES = CALENDAR_MAX_EVENTS * 2_048 + 5 * 100 * 512;
 /** The longest address accepted. Google's secret addresses are about 150 characters. */
 export const MAX_FEED_URL = 1000;
 
@@ -62,8 +112,9 @@ const TOKEN_PATTERN = /^[0-9a-f]{48}$/;
 const FEED_ID_PATTERN = /^[0-9a-f]{16}$/;
 
 type Feed = { id: string; url: string; addedAt: string };
-type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string };
-export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean };
+/** `callsId`: the store's id for its calls (lib/store.ts), which its bookings' changed mark is kept by; written with the handle. */
+type Config = { handle: string; feeds: Feed[]; token: string | null; tokenAt: string; callsId?: string | null; stoppedAt?: string };
+export type Reading = { at: number; busy: [number, number][]; events: number; unsupported: number; truncated: boolean; unreadable?: number };
 
 const cfgKey = (statsId: string) => `nl:cal:cfg:${statsId}`;
 const tokenKey = (token: string) => `nl:cal:tok:${createHash("sha256").update(`nimbus-cal:${token}`).digest("hex").slice(0, 40)}`;
@@ -78,6 +129,17 @@ export function calendarKeys(raw: unknown): string[] {
   return [...(typeof value.token === "string" && value.token ? [tokenKey(value.token)] : []), ...feeds.flatMap((id) => [busyKey(id), goodKey(id), errKey(id), lockKey(id)])];
 }
 const outKey = (statsId: string) => `nl:cal:out:${statsId}`;
+/**
+ * The feed's answers of the last hour (a sorted set of their times: a sliding
+ * hour), the file's makings in one UTC day, and the makings used from its
+ * bookings' credits that day, each the store's.
+ */
+const paceKey = (statsId: string) => `nl:cal:pace:${statsId}`;
+const buildsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}`;
+const creditsUsedKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:c`;
+const retriesKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:r`;
+/** Every try of a making a UTC day, made or failed: never more than the priced figure (inbox C4-53). */
+export const calendarAttemptsKey = (statsId: string, day: string) => `nl:cal:builds:${statsId}:${day}:a`;
 
 function parseConfig(raw: unknown): Config | null {
   if (typeof raw !== "string" || !raw) return null;
@@ -93,9 +155,61 @@ function parseConfig(raw: unknown): Config | null {
       feeds: feeds.slice(0, MAX_FEEDS),
       token: typeof value.token === "string" && TOKEN_PATTERN.test(value.token) ? value.token : null,
       tokenAt: typeof value.tokenAt === "string" ? value.tokenAt : "",
+      callsId: typeof value.callsId === "string" && /^[0-9a-f]{8,40}$/.test(value.callsId) ? value.callsId : null,
+      ...(typeof value.stoppedAt === "string" && value.stoppedAt ? { stoppedAt: value.stoppedAt } : {}),
     };
   } catch {
     return null;
+  }
+}
+
+/**
+ * The window a reading covers, as one busy stretch: what a calendar answers
+ * while its busy times are not known, so no time it may hold is offered.
+ */
+function unknownWindow(now: number): [number, number][] {
+  return [[now - 86_400_000, now + LOOKAHEAD_DAYS * 86_400_000]];
+}
+
+/** What a failure kept for the studio says; `print` and `printAt` name a refused file and when it was parsed. */
+type Failure = { at: number; message: string; refused?: boolean; print?: string; printAt?: number };
+
+/** A kept failure: null when there is none, "unknown" for any other shape than the one calendarBusy writes (rule 24). */
+function failureOf(raw: unknown): Failure | null | "unknown" {
+  if (raw === null) return null;
+  if (typeof raw !== "string") return "unknown";
+  try {
+    const value = JSON.parse(raw) as Partial<Failure> | null;
+    if (!value || typeof value !== "object" || typeof value.at !== "number" || typeof value.message !== "string") return "unknown";
+    return {
+      at: value.at,
+      message: value.message,
+      ...(value.refused === true ? { refused: true } : {}),
+      ...(typeof value.print === "string" && typeof value.printAt === "number" ? { print: value.print, printAt: value.printAt } : {}),
+    };
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * A calendar file's size and hash, with the zone it is read in: a refused file that has not changed is not parsed
+ * again. A DTSTAMP line's value is left out: it names only when the file was made (calendar services stamp every
+ * export with the time), lib/ics-parse.ts never reads it, and the line itself still counts.
+ */
+function feedPrint(text: string, fallbackTz: string): string {
+  const kept = text.replace(/^DTSTAMP[;:][^\r\n]*/gim, "DTSTAMP:");
+  return `${kept.length}:${createHash("sha256").update(fallbackTz).update("\0").update(kept).digest("hex").slice(0, 32)}`;
+}
+
+/** A calendar file refused as too complex, with its print; `parsed` is false when the same file's refusal was reused. */
+export class FeedTooComplex extends CalendarTooComplex {
+  readonly print: string;
+  readonly parsed: boolean;
+  constructor(print: string, parsed: boolean) {
+    super();
+    this.print = print;
+    this.parsed = parsed;
   }
 }
 
@@ -110,15 +224,25 @@ function parseReading(raw: unknown): Reading | null {
   }
 }
 
+/**
+ * The store's calendar settings, or null only when Redis confirms there are none. Any other answer, or text that
+ * is not the object changeConfig stores (with its list of calendars), throws (rule 24): read as none, the rewrite
+ * that follows (ensureFeedToken, newFeedToken, addFeed) erased the creator's calendars.
+ */
 async function readConfig(store: Store): Promise<Config | null> {
   if (!store.statsId || !isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", cfgKey(store.statsId)]]);
-  return parseConfig(raw);
-}
-
-async function writeConfig(store: Store, config: Config): Promise<void> {
-  if (!store.statsId) return;
-  await redisPipeline([["SET", cfgKey(store.statsId), JSON.stringify({ ...config, handle: store.handle })]]);
+  const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+  if (reply && reply[0] === null) return null;
+  const raw = reply?.[0];
+  let value: unknown;
+  try {
+    value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+  } catch {
+    value = undefined;
+  }
+  const config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+  if (!config) throw new UnknownReplyError("a store's calendar settings");
+  return config;
 }
 
 /** The zone for all-day and floating times, when a calendar names none. */
@@ -136,11 +260,13 @@ export function providerOf(url: string): string {
   } catch {
     return "Calendar";
   }
+  // The domain itself or a name under it: "evilicloud.com" is not iCloud.
+  const on = (domain: string) => host === domain || host.endsWith(`.${domain}`);
   if (host === "calendar.google.com" || host.endsWith(".google.com")) return "Google Calendar";
-  if (host.endsWith("outlook.office365.com") || host.endsWith("outlook.live.com") || host.endsWith("outlook.office.com")) return "Outlook";
-  if (host.endsWith("icloud.com")) return "iCloud";
-  if (host.endsWith("fastmail.com")) return "Fastmail";
-  if (host.endsWith("calendly.com")) return "Calendly";
+  if (on("outlook.office365.com") || on("outlook.live.com") || on("outlook.office.com")) return "Outlook";
+  if (on("icloud.com")) return "iCloud";
+  if (on("fastmail.com")) return "Fastmail";
+  if (on("calendly.com")) return "Calendly";
   return host.replace(/^www\./, "");
 }
 
@@ -148,9 +274,11 @@ export function providerOf(url: string): string {
 
 /**
  * Fetches and reads one calendar. Throws a SafeFetchError, or an Error with a
- * sentence for the creator, when it cannot be read.
+ * sentence for the creator, when it cannot be read; a file too complex to read
+ * throws FeedTooComplex with its print. `refused`: the print of a file already
+ * refused, which is then refused again without being parsed.
  */
-export async function readFeed(url: string, fallbackTz: string, now: number, fetchOptions: FetchHooks = {}): Promise<Reading> {
+export async function readFeed(url: string, fallbackTz: string, now: number, fetchOptions: FetchHooks = {}, refused: string | null = null): Promise<Reading> {
   const answer = await safeFetch(url, {
     maxBytes: FEED_MAX_BYTES,
     timeoutMs: FEED_TIMEOUT_MS,
@@ -165,13 +293,22 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
   if (!looksLikeCalendar(text)) {
     throw new Error("That address answers with a web page, not a calendar file. Use the calendar's private iCal (.ics) address (Google calls it the secret address in iCal format).");
   }
-  const parsed = parseIcs(text, { from: now - 86_400_000, to: now + LOOKAHEAD_DAYS * 86_400_000, fallbackTz });
+  const print = feedPrint(text, fallbackTz);
+  if (refused !== null && print === refused) throw new FeedTooComplex(print, false);
+  let parsed: ReturnType<typeof parseIcs>;
+  try {
+    parsed = parseIcs(text, { from: now - 86_400_000, to: now + LOOKAHEAD_DAYS * 86_400_000, fallbackTz });
+  } catch (error) {
+    if (error instanceof CalendarTooComplex) throw new FeedTooComplex(print, true);
+    throw error;
+  }
   return {
     at: now,
     busy: parsed.busy.map((b) => [b.start, b.end]),
     events: parsed.events,
     unsupported: parsed.unsupported,
     truncated: parsed.truncated,
+    ...(parsed.unreadable ? { unreadable: parsed.unreadable } : {}),
   };
 }
 
@@ -179,35 +316,68 @@ export async function readFeed(url: string, fallbackTz: string, now: number, fet
 export type FetchHooks = Pick<Parameters<typeof safeFetch>[1], "resolve" | "agent">;
 
 /**
- * The busy times from every calendar the creator added, never throwing. A
- * reading under ten minutes old is used as it is; an older one is refreshed,
- * by one request at a time per calendar.
+ * The busy times from every calendar the creator added, never throwing: a
+ * read that fails on the way (the settings, the zone of all-day times, the
+ * kept readings, a lock) closes every window rather than reading as none. A
+ * reading under CACHE_SECONDS old is used as it is; an older one is refreshed,
+ * by one request at a time per calendar. A calendar whose busy times are not
+ * known closes its whole window (unknownWindow): a file refused as too
+ * complex, a calendar with no good reading left, or a reply read in no known
+ * shape (rule 24); a calendar that stopped answering keeps its last good
+ * reading for STALE_SECONDS.
  */
 export async function calendarBusy(
   store: Store,
   now = Date.now(),
   hooks: FetchHooks = {},
 ): Promise<{ busy: Busy[]; failing: number }> {
+  const asBusy = (lists: [number, number][][]): Busy[] => lists.flat().map(([start, end]) => ({ start, end }));
   let config: Config | null;
   try {
     config = await readConfig(store);
   } catch {
-    return { busy: [], failing: 0 };
+    // Settings read in no known shape: whether calendars hold this store's times is not known.
+    return { busy: asBusy([unknownWindow(now)]), failing: 1 };
   }
   if (!config || !config.feeds.length) return { busy: [], failing: 0 };
-  const fallbackTz = await homeZone(store);
-  const cached = await redisPipeline(config.feeds.flatMap((f) => [["GET", busyKey(f.id)], ["GET", goodKey(f.id)]])).catch(() => null);
+  const feeds = config.feeds;
+  // Every calendar's window closed: what answers when a read on the way fails (rule 24), never "nothing busy".
+  const allUnknown = () => ({ busy: asBusy(feeds.map(() => unknownWindow(now))), failing: feeds.length });
+  // The zone of all-day and floating times, from the call listing: a failed read leaves those times unknown.
+  const fallbackTz = await homeZone(store).catch(() => null);
+  if (fallbackTz === null) return allUnknown();
+  // One MGET (one command) for every calendar's reading, good reading and failure, read exactly (rule 24).
+  const keys = feeds.flatMap((f) => [busyKey(f.id), goodKey(f.id), errKey(f.id)]);
+  const reply = await redisPipeline([["MGET", ...keys]]).catch(() => null);
+  const outer = repliesFor(reply, 1);
+  const cached = outer ? listSlots(outer[0]) : null;
+  if (!cached || cached.length !== keys.length) return allUnknown();
   let failing = 0;
+  // A calendar's reading that throws on the way (its lock, its release) closes every window: this never rejects.
   const lists = await Promise.all(
-    config.feeds.map(async (feed, i): Promise<[number, number][]> => {
-      const fresh = cached ? parseReading(cached[i * 2]) : null;
+    feeds.map(async (feed, i): Promise<[number, number][]> => {
+      const [busyRaw, goodRaw, errRaw] = [cached[i * 3], cached[i * 3 + 1], cached[i * 3 + 2]];
+      const fresh = parseReading(busyRaw);
       if (fresh) return fresh.busy;
-      const good = cached ? parseReading(cached[i * 2 + 1]) : null;
-      // Somebody else is reading it right now: the last good reading will do.
-      const [mine] = await redisPipeline([["SET", lockKey(feed.id), "1", "NX", "EX", 20]]).catch(() => [null]);
-      if (mine === null) return good?.busy ?? [];
+      const good = goodRaw === null ? null : parseReading(goodRaw);
+      const failure = failureOf(errRaw);
+      // A reading or a good reading in no known shape: this calendar's busy times are not known, and nothing is spent.
+      if (busyRaw !== null || (goodRaw !== null && !good)) {
+        failing += 1;
+        return unknownWindow(now);
+      }
+      const closed = failure === "unknown" || failure?.refused === true || !good;
+      // Somebody else is reading it right now: the last good reading will do, unless what was last read is not known.
+      // Read exactly (lib/claim-mark.ts, CX-123 rule 24): only a lock known to be this read's own reads the calendar.
+      const lock = claimValue();
+      if ((await claimMark(lockKey(feed.id), 20, lock)) !== "ours") return closed || !good ? unknownWindow(now) : good.busy;
+      // The print of a file refused within STALE_SECONDS: the same file is refused again without being parsed. A
+      // failure read in no known shape gives none, and the file is parsed (inside the priced reading).
+      const known = failure && failure !== "unknown" && failure.refused && failure.print && typeof failure.printAt === "number" && failure.printAt <= now && now - failure.printAt < STALE_SECONDS * 1000
+        ? { print: failure.print, printAt: failure.printAt }
+        : null;
       try {
-        const reading = await readFeed(feed.url, fallbackTz, now, hooks);
+        const reading = await readFeed(feed.url, fallbackTz, now, hooks, known?.print ?? null);
         const text = JSON.stringify(reading);
         await redisPipeline([
           ["SET", busyKey(feed.id), text, "EX", CACHE_SECONDS],
@@ -217,21 +387,25 @@ export async function calendarBusy(
         return reading.busy;
       } catch (error) {
         failing += 1;
+        const refused = error instanceof CalendarTooComplex;
         const message = error instanceof SafeFetchError ? problemWords(error) : error instanceof Error ? error.message : "The calendar could not be read.";
-        // The failure is remembered for the studio, and the calendar is not
-        // asked again for two minutes, so a broken one is not hammered.
+        const print = error instanceof FeedTooComplex ? { print: error.print, printAt: error.parsed ? now : known?.printAt ?? now } : {};
+        // A file that cannot be read, or a calendar with no good reading left, closes its window; one that stopped
+        // answering keeps its last good reading. Either is kept CACHE_SECONDS, as a reading is, so a calendar that
+        // fails is asked no more often than one that answers; the failure is remembered for the studio.
+        const busy = refused || !good ? unknownWindow(now) : good.busy;
         await redisPipeline([
-          ["SET", errKey(feed.id), JSON.stringify({ at: now, message: message.slice(0, 300) }), "EX", STALE_SECONDS],
-          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy: good?.busy ?? [], events: 0, unsupported: 0, truncated: false }), "EX", 120],
+          ["SET", errKey(feed.id), JSON.stringify({ at: now, message: message.slice(0, 300), ...(refused ? { refused: true } : {}), ...print }), "EX", STALE_SECONDS],
+          ["SET", busyKey(feed.id), JSON.stringify({ at: now, busy, events: 0, unsupported: 0, truncated: false }), "EX", CACHE_SECONDS],
         ]).catch(() => {});
-        return good?.busy ?? [];
+        return busy;
       } finally {
-        await redisPipeline([["DEL", lockKey(feed.id)]]).catch(() => {});
+        await releaseMark(lockKey(feed.id), lock);
       }
     }),
-  );
-  const busy: Busy[] = lists.flat().map(([start, end]) => ({ start, end }));
-  return { busy, failing };
+  ).catch(() => null);
+  if (!lists) return allUnknown();
+  return { busy: asBusy(lists), failing };
 }
 
 // ---- The studio --------------------------------------------------------------
@@ -246,30 +420,38 @@ export type FeedView = {
   message: string;
   busyTimes: number;
   unsupported: number;
+  /** Repeating events whose rule is too large to read: each blocks from its first time to the end of the window. */
+  unreadable: number;
+  /** "error" with no time of the window offered: the file cannot be read, or no good reading is left. */
+  closed: boolean;
 };
 
 export type CalendarView = {
   feeds: FeedView[];
   /** The private subscription address, or null before one is made. */
   subscribeUrl: string | null;
+  /** When the address before this one was stopped for being asked too often (CALENDAR_REFUSED_PER_HOUR), or null. */
+  stoppedAt: string | null;
 };
 
 /** What the studio shows: the calendars, without their addresses, and how each last went. */
 export async function calendarView(store: Store): Promise<CalendarView> {
   const config = await readConfig(store);
-  if (!config) return { feeds: [], subscribeUrl: null };
+  if (!config) return { feeds: [], subscribeUrl: null, stoppedAt: null };
   const replies = config.feeds.length
     ? await redisPipeline(config.feeds.flatMap((f) => [["GET", goodKey(f.id)], ["GET", errKey(f.id)]]))
     : [];
   const feeds = config.feeds.map((feed, i): FeedView => {
     const good = parseReading(replies[i * 2]);
-    let failure: { at: number; message: string } | null = null;
+    let failure: { at: number; message: string; refused?: unknown } | null = null;
     try {
-      failure = typeof replies[i * 2 + 1] === "string" ? (JSON.parse(replies[i * 2 + 1] as string) as { at: number; message: string }) : null;
+      failure = typeof replies[i * 2 + 1] === "string" ? (JSON.parse(replies[i * 2 + 1] as string) as { at: number; message: string; refused?: unknown }) : null;
     } catch {
       failure = null;
     }
     const failedLast = failure && (!good || failure.at >= good.at);
+    // As calendarBusy answers: a file that cannot be read, or no good reading left, closes the window.
+    const closed = Boolean(failedLast && failure && (failure.refused === true || !good));
     return {
       id: feed.id,
       provider: providerOf(feed.url),
@@ -279,9 +461,11 @@ export async function calendarView(store: Store): Promise<CalendarView> {
       message: failedLast && failure ? failure.message : "",
       busyTimes: good?.busy.length ?? 0,
       unsupported: good?.unsupported ?? 0,
+      unreadable: typeof good?.unreadable === "number" ? good.unreadable : 0,
+      closed,
     };
   });
-  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null };
+  return { feeds, subscribeUrl: config.token ? subscribeUrl(config.token) : null, stoppedAt: config.stoppedAt ?? null };
 }
 
 export function subscribeUrl(token: string): string {
@@ -290,26 +474,98 @@ export function subscribeUrl(token: string): string {
 
 export type AddFeedResult =
   | { ok: true; view: CalendarView; busyTimes: number }
-  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable"; message: string };
+  | { ok: false; reason: "full" | "duplicate" | "long" | "invalid" | "unavailable" | "busy"; message: string };
+
+/**
+ * A store's calendar settings written only over the exact text they were read as (ARGV[1] "1", ARGV[2] that text),
+ * or only while still absent when they were read absent (ARGV[1] "0"); ARGV[3] is what is written. 1: written; 0:
+ * changed by someone else since, nothing written (issue #3984). Billed as the script plus its GET and its SET: 3
+ * commands written, 2 not.
+ */
+export const CALENDAR_CONFIG_SWAP = `-- marktmorgen:calendar-config-swap:v1
+local now = redis.call('GET', KEYS[1])
+if ARGV[1] == '1' then
+  if now ~= ARGV[2] then return 0 end
+elseif now then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1`;
+
+/** How many times a change is read and made in all, when other changes keep writing the settings first, before "busy". */
+const CONFIG_TRIES = 3;
+/** What the studio shows when every try lost to another change: nothing was changed. */
+const CALENDAR_CHANGE_BUSY = "Your calendars were being changed somewhere else at the same moment, so nothing was changed. Try again.";
+/** Thrown by removeFeed and newFeedToken when every try lost to another change, with nothing changed: the route's "busy". */
+export class CalendarChangeBusyError extends Error {
+  constructor() {
+    super(CALENDAR_CHANGE_BUSY);
+    this.name = "CalendarChangeBusyError";
+  }
+}
+
+/**
+ * Changes a store's calendar settings without losing a change made at the same moment (issue #3984): reads them
+ * exactly (rule 24, as readConfig: an unknown read throws), asks `change` what to write from what was read, and
+ * writes it only over that exact text, or only while still absent (CALENDAR_CONFIG_SWAP). On a lost race the
+ * settings are read and the change made again, CONFIG_TRIES times in all, then "busy" with nothing written.
+ * `change` answers a null config to write nothing; its result comes back with "written" or "unchanged". Given a
+ * store, what is written names its handle and calls; given only its id (the feed's stop), exactly what `change` gave.
+ * `tries` is CONFIG_TRIES unless a writer that runs again on its own next time takes one (ensureFeedToken, stopFeedToken).
+ */
+async function changeConfig<T>(
+  store: (Store & { statsId: string }) | { statsId: string },
+  change: (config: Config | null) => { config: Config | null; result: T } | Promise<{ config: Config | null; result: T }>,
+  tries = CONFIG_TRIES,
+): Promise<{ state: "written" | "unchanged"; result: T } | { state: "busy" }> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    const reply = repliesFor(await redisPipeline([["GET", cfgKey(store.statsId)]]), 1);
+    const raw = reply?.[0];
+    let config: Config | null = null;
+    if (!(reply && raw === null)) {
+      let value: unknown;
+      try {
+        value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+      } catch {
+        value = undefined;
+      }
+      config = value && typeof value === "object" && !Array.isArray(value) && Array.isArray((value as { feeds?: unknown }).feeds) ? parseConfig(raw) : null;
+      if (!config) throw new UnknownReplyError("a store's calendar settings");
+    }
+    const next = await change(config);
+    if (!next.config) return { state: "unchanged", result: next.result };
+    const text = JSON.stringify("handle" in store ? { ...next.config, handle: store.handle, callsId: store.callsId ?? null } : next.config);
+    const read = typeof raw === "string" ? ["1", raw] : ["0", ""];
+    const swapped = repliesFor(await redisPipeline([["EVAL", CALENDAR_CONFIG_SWAP, 1, cfgKey(store.statsId), ...read, text]]), 1);
+    if (swapped?.[0] === 1) return { state: "written", result: next.result };
+    if (swapped?.[0] !== 0) throw new UnknownReplyError("a store's calendar settings written over what was read");
+  }
+  return { state: "busy" };
+}
 
 /**
  * Adds a calendar, after reading it once: an address that cannot be read is
  * refused with the reason, so a creator never leaves the studio believing a
- * calendar is blocking times when it is not.
+ * calendar is blocking times when it is not. The remote read (up to
+ * FEED_TIMEOUT_MS) comes before the settings are read for the write, so a
+ * change made meanwhile is never written over (issue #3984).
  */
 export async function addFeed(store: Store, raw: string, now = Date.now(), hooks: FetchHooks = {}): Promise<AddFeedResult> {
-  if (!store.statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
+  const statsId = store.statsId;
+  if (!statsId) return { ok: false, reason: "invalid", message: "Open the studio once more and try again." };
   const text = raw.trim();
   if (text.length > MAX_FEED_URL) return { ok: false, reason: "long", message: "That address is longer than any calendar address we know of." };
+  const full: AddFeedResult = { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  const duplicate: AddFeedResult = { ok: false, reason: "duplicate", message: "That calendar is already added." };
   const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
-  if (config.feeds.length >= MAX_FEEDS) return { ok: false, reason: "full", message: `A store can read ${MAX_FEEDS} calendars. Remove one first.` };
+  if (config.feeds.length >= MAX_FEEDS) return full;
   let url: string;
   try {
     url = checkUrl(text).toString();
   } catch (error) {
     return { ok: false, reason: "invalid", message: problemWords(error) };
   }
-  if (config.feeds.some((f) => f.url === url)) return { ok: false, reason: "duplicate", message: "That calendar is already added." };
+  if (config.feeds.some((f) => f.url === url)) return duplicate;
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "unavailable", message: "Calendar changes are temporarily unavailable. Try again later." };
   let reading: Reading;
   try {
@@ -318,7 +574,15 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
     return { ok: false, reason: "invalid", message: error instanceof Error ? error.message : "The calendar could not be read." };
   }
   const feed: Feed = { id: randomBytes(8).toString("hex"), url, addedAt: new Date(now).toISOString() };
-  await writeConfig(store, { ...config, feeds: [...config.feeds, feed] });
+  // Read again for the write: a calendar removed or added while this one was read is kept as it now is.
+  const changed = await changeConfig({ ...store, statsId }, (current): { config: Config | null; result: AddFeedResult | null } => {
+    const base = current ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    if (base.feeds.length >= MAX_FEEDS) return { config: null, result: full };
+    if (base.feeds.some((f) => f.url === url)) return { config: null, result: duplicate };
+    return { config: { ...base, feeds: [...base.feeds, feed] }, result: null };
+  });
+  if (changed.state === "busy") return { ok: false, reason: "busy", message: CALENDAR_CHANGE_BUSY };
+  if (changed.result) return changed.result;
   const saved = JSON.stringify(reading);
   await redisPipeline([
     ["SET", busyKey(feed.id), saved, "EX", CACHE_SECONDS],
@@ -327,44 +591,79 @@ export async function addFeed(store: Store, raw: string, now = Date.now(), hooks
   return { ok: true, view: await calendarView(store), busyTimes: reading.busy.length };
 }
 
-/** Stops reading a calendar and forgets its address and everything read from it. */
+/**
+ * Stops reading a calendar and forgets its address and everything read from it, written only over the settings it
+ * read (issue #3984); CalendarChangeBusyError when other changes kept winning, with nothing changed.
+ */
 export async function removeFeed(store: Store, id: string): Promise<CalendarView> {
-  const config = await readConfig(store);
-  if (config && config.feeds.some((f) => f.id === id)) {
-    await writeConfig(store, { ...config, feeds: config.feeds.filter((f) => f.id !== id) });
-    await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
-  }
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
+  const changed = await changeConfig({ ...store, statsId }, (config) => ({
+    config: config && config.feeds.some((f) => f.id === id) ? { ...config, feeds: config.feeds.filter((f) => f.id !== id) } : null,
+    result: null,
+  }));
+  if (changed.state === "busy") throw new CalendarChangeBusyError();
+  if (changed.state === "written") await redisPipeline([["DEL", busyKey(id), goodKey(id), errKey(id)]]);
   return calendarView(store);
 }
 
 /**
  * Makes the store's subscription address, or a new one in place of the old,
- * which stops answering at once.
+ * which stops answering at once. Once the settings read exactly, the new
+ * address's key is written (it answers only once the settings name it:
+ * storeIdForToken), then the settings only over what was read (issue #3984),
+ * and the replaced address's key deleted after; CalendarChangeBusyError when
+ * other changes kept winning, the new key deleted again.
  */
-export async function newFeedToken(store: Store): Promise<CalendarView> {
-  const config = (await readConfig(store)) ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+export async function newFeedToken(store: Store, keepStopped = false): Promise<CalendarView> {
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return calendarView(store);
   const token = randomBytes(24).toString("hex");
-  const commands: (string | number)[][] = [["SET", tokenKey(token), store.statsId as string]];
-  if (config.token) commands.push(["DEL", tokenKey(config.token)]);
-  if (store.statsId) commands.push(["DEL", outKey(store.statsId)]);
-  await redisPipeline(commands);
-  await writeConfig(store, { ...config, token, tokenAt: new Date().toISOString() });
+  let keyed = false;
+  // A new address the creator asked for clears the note that the one before was stopped; one made in its place does not.
+  const changed = await changeConfig({ ...store, statsId }, async (read) => {
+    if (!keyed) {
+      await redisPipeline([["SET", tokenKey(token), statsId]]);
+      keyed = true;
+    }
+    const { stoppedAt, ...rest } = read ?? { handle: store.handle, feeds: [], token: null, tokenAt: "" };
+    return { config: { ...rest, ...(keepStopped && stoppedAt ? { stoppedAt } : {}), token, tokenAt: new Date().toISOString() }, result: read?.token ?? null };
+  });
+  if (changed.state === "busy") {
+    await redisPipeline([["DEL", tokenKey(token)]]);
+    throw new CalendarChangeBusyError();
+  }
+  if (changed.result) await redisPipeline([["DEL", tokenKey(changed.result)]]);
+  // The last copy stays, so the new address answers at once even when the day's makings are spent; only a
+  // tombstone (the store's handle once led elsewhere) goes, since this store is plainly its handle's own.
+  const [kept] = await redisPipeline([["GET", outKey(statsId)]]);
+  if (parseKept(kept).gone) await redisPipeline([["DEL", outKey(statsId)]]);
   return calendarView(store);
 }
 
-/** Makes the subscription address the first time the studio needs one. */
+/**
+ * Makes the subscription address the first time the studio needs one. Renamed, or written before the settings named
+ * the store's calls: written again, so the feed reads its marks, only over the settings it read (review of #4007), so
+ * a calendar removed meanwhile is never restored. One try: lost to another change, the refresh is left to the next
+ * opening or making, which checks again (GET and the swap: 4 commands, lib/read-ceilings.ts).
+ */
 export async function ensureFeedToken(store: Store): Promise<void> {
-  if (!store.statsId || !isRedisConfigured()) return;
-  const config = await readConfig(store);
-  if (config?.token) {
-    if (config.handle !== store.handle) await writeConfig(store, config);
-    return;
-  }
-  await newFeedToken(store);
+  const statsId = store.statsId;
+  if (!statsId || !isRedisConfigured()) return;
+  const changed = await changeConfig(
+    { ...store, statsId },
+    (config) => ({
+      config: config?.token && (config.handle !== store.handle || (config.callsId ?? null) !== (store.callsId ?? null)) ? config : null,
+      result: Boolean(config?.token),
+    }),
+    1,
+  );
+  if (changed.state === "busy" || changed.result) return;
+  await newFeedToken(store, true);
 }
 
 /** The store a subscription address belongs to, or null. */
-export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string } | null> {
+export async function storeIdForToken(token: string): Promise<{ statsId: string; handle: string; callsId: string | null; token: string } | null> {
   if (!TOKEN_PATTERN.test(token) || !isRedisConfigured()) return null;
   const [statsId] = await redisPipeline([["GET", tokenKey(token)]]);
   if (typeof statsId !== "string" || !statsId) return null;
@@ -373,7 +672,7 @@ export async function storeIdForToken(token: string): Promise<{ statsId: string;
   // A replaced token is deleted, and this second check covers a lookup that
   // raced the replacement.
   if (!config || config.token !== token) return null;
-  return { statsId, handle: config.handle };
+  return { statsId, handle: config.handle, callsId: config.callsId ?? null, token };
 }
 
 // ---- Clashes the studio points out -----------------------------------------
@@ -393,7 +692,24 @@ export type BookedCall = {
   email: string | null;
   name: string | null;
   moves: number;
+  /** The buyer deleted their details from the store (lib/suppression.ts): the time stays, the person is not named. */
+  erased?: boolean;
+  /** Not named, the store having no list to look a deleted person up in (app/api/store/calendar/[token]): "A buyer". */
+  unnamed?: boolean;
 };
+
+/**
+ * The booked calls with every buyer who deleted their details from the store
+ * (their print in nl:erased, lib/suppression.ts) left unnamed: Stripe keeps
+ * the booking, so the feed would name them again (review of #2111). One
+ * HMGET; when it cannot be read, nothing is made (the caller's reading fails).
+ */
+export async function withoutErasedBookers(store: Pick<Store, "listId">, calls: BookedCall[]): Promise<BookedCall[]> {
+  const emails = [...new Set(calls.map((c) => c.email).filter((e): e is string => Boolean(e)))];
+  if (!emails.length) return calls;
+  const gone = await suppressedAmong(store.listId, emails);
+  return gone.size ? calls.map((c) => (c.email && gone.has(c.email) ? { ...c, email: null, name: null, erased: true } : c)) : calls;
+}
 
 /**
  * Every booked call and dated session still to come (and those of the last
@@ -428,7 +744,8 @@ export function bookedCalendar(
       if (end > since && !slots.has(key)) slots.set(key, { product: product.id, start: session.start, end, people: [] });
     }
   }
-  const who = (c: BookedCall) => (c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address");
+  const who = (c: BookedCall) =>
+    c.erased ? "A buyer whose details were deleted" : c.unnamed ? "A buyer" : c.name && c.email ? `${c.name} <${c.email}>` : c.name ?? c.email ?? "A buyer who gave no address";
   const lines = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
@@ -436,10 +753,10 @@ export function bookedCalendar(
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsText(`${store.name} bookings`)}`,
-    "REFRESH-INTERVAL;VALUE=DURATION:PT15M",
-    "X-PUBLISHED-TTL:PT15M",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT30M",
+    "X-PUBLISHED-TTL:PT30M",
   ];
-  for (const slot of [...slots.values()].sort((a, b) => a.start - b.start)) {
+  for (const slot of keptSlots([...slots.values()], now)) {
     const product = listings.find((p) => p.id === slot.product);
     const title = product?.title ?? "A call that is no longer listed";
     const setup = product?.call ?? null;
@@ -460,6 +777,8 @@ export function bookedCalendar(
         : `${title} (no one booked yet)`;
     const description = [
       ...(slot.people.length ? [slot.people.length === 1 ? "Booked by:" : "Booked:", ...slot.people.map(who)] : ["Nobody has booked this yet."]),
+      // Unnamed for lack of a list (never a deleted person's booking): said, and that the names come back.
+      ...(slot.people.some((p) => p.unnamed) ? ["", "Names show here once your store's details are up to date."] : []),
       ...(place ? ["", `In person, at: ${placeLine(place)}`] : room ? ["", `Join: ${room}`] : []),
       ...(video ? [VIDEO_ROOM_NOTE] : []),
       ...(!room && setup?.video ? ["", "A private video room is made for it when the first person books."] : []),
@@ -504,11 +823,350 @@ export async function slotRooms(store: Store, calls: BookedCall[], listings: Lis
   return new Map(asks.map((a, i) => [a.key, rooms[i]]));
 }
 
-/** The subscription file, made at most every five minutes per store. */
-export async function cachedBookedCalendar(statsId: string, make: () => Promise<string>): Promise<string> {
-  const [cached] = await redisPipeline([["GET", outKey(statsId)]]);
-  if (typeof cached === "string" && cached) return cached;
-  const text = await make();
-  await redisPipeline([["SET", outKey(statsId), text, "EX", OUT_SECONDS]]).catch(() => {});
-  return text;
+/**
+ * The CALENDAR_MAX_EVENTS events the file holds, in time order: those still to
+ * come first, the soonest first, then the latest of those over. A store past
+ * it leaves out its oldest past sessions (up to a week back) before anything
+ * still to come, and only then the furthest ahead.
+ */
+export function keptSlots<T extends { start: number; end: number }>(slots: T[], now: number): T[] {
+  const ahead = slots.filter((s) => s.end > now).sort((a, b) => a.start - b.start);
+  const over = slots.filter((s) => s.end <= now).sort((a, b) => b.start - a.start);
+  return [...ahead, ...over].slice(0, CALENDAR_MAX_EVENTS).sort((a, b) => a.start - b.start);
+}
+
+/** The last good copy of a store's file, and when it was begun. */
+/**
+ * The last good copy of a store's file: when it was begun, the file, and what
+ * the store's handle led to when it was made (`ref`, the handle's key as read),
+ * so a copy is answered only while the handle still leads to the store that
+ * made it. Or, once the handle was found to lead to another store, a
+ * tombstone (`gone: true`, nothing of either store in it), so the feed
+ * answers 404 at once without making anything again.
+ */
+type Copy = { at: number; ics: string; ref: string; sid: string };
+type Kept = { copy: Copy | null; gone: boolean };
+function parseKept(raw: unknown): Kept {
+  if (typeof raw !== "string" || !raw) return { copy: null, gone: false };
+  try {
+    const value = JSON.parse(raw) as Partial<Copy> & { gone?: unknown };
+    if (value.gone === true || typeof value.gone === "string") return { copy: null, gone: true };
+    const copy = typeof value.at === "number" && typeof value.ics === "string" && value.ics
+      ? { at: value.at, ics: value.ics, ref: typeof value.ref === "string" ? value.ref : "", sid: typeof value.sid === "string" ? value.sid : "" }
+      : null;
+    return { copy, gone: false };
+  } catch {
+    return { copy: null, gone: false };
+  }
+}
+
+/**
+ * A count with a ceiling, taken whole or not at all: SET NX with its expiry,
+ * INCRBY, EXPIRE NX, and DECRBY when over. A count that cannot be made is a refusal.
+ */
+async function takeCounted(key: string, ceiling: number, seconds: number): Promise<boolean> {
+  try {
+    // The expiry is set after the count too (NX: only where there is none), so a count that lost it gets it back.
+    const [, raw] = await redisPipeline([["SET", key, "0", "NX", "EX", seconds], ["INCRBY", key, 1], ["EXPIRE", key, seconds, "NX"]]);
+    const n = Number(raw);
+    if (!Number.isSafeInteger(n) || n < 1) return false;
+    if (n <= ceiling) return true;
+    await redisPipeline([["DECRBY", key, 1]]).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A count's unit given back: DECRBY, and a count found below zero (it had
+ * expired) set back to zero with its expiry, so a day is counted higher,
+ * never lower.
+ */
+async function giveCounted(key: string, seconds: number): Promise<void> {
+  try {
+    const [left] = await redisPipeline([["DECRBY", key, 1]]);
+    const after = Number(left);
+    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", key, -after], ["EXPIRE", key, seconds]]);
+  } catch {
+    // Counted higher, never lower.
+  }
+}
+
+/**
+ * The copy written only while the store's calendar settings exist (KEYS[1];
+ * else 0) and nobody it names was deleted from the store (their prints,
+ * ARGV[3..], in KEYS[3], nl:erased; one found: the copy goes, 2), in one step
+ * with the write: SET with its expiry (KEYS[2]; 1). A person's erasure writes
+ * their print and then deletes the copy, so a file made before it and kept
+ * after it would name them again (review of #2111). lib/redis-memory.ts runs
+ * it the same way. Billed 1 + EXISTS + HMGET + SET or DEL (lib/read-ceilings.ts).
+ */
+export const KEEP_COPY = `-- marktmorgen:calendar-copy:v2
+if redis.call("EXISTS", KEYS[1]) == 0 then return 0 end
+if #ARGV > 2 then
+  local found = redis.call("HMGET", KEYS[3], unpack(ARGV, 3))
+  for i = 1, #found do
+    if found[i] then
+      redis.call("DEL", KEYS[2])
+      return 2
+    end
+  end
+end
+redis.call("SET", KEYS[2], ARGV[1], "EX", ARGV[2])
+return 1`;
+
+/**
+ * A feed's file as `make` gives it: the file, the store's list (where its
+ * deleted people's prints are) and the address of everyone the file may name,
+ * checked again where the copy is written (KEEP_COPY).
+ */
+export type MadeFeed = { ics: string; listId: string | null; named: string[] };
+
+/** Thrown by a feed's `make` when the store behind its token is not the one that kept it. */
+export class FeedGone extends Error {}
+
+/**
+ * One more answer within the last sixty minutes, a sliding hour: its time
+ * added to the store's set (ZADD), the older ones let go (ZREMRANGEBYSCORE),
+ * the rest counted (ZCARD) and the set's expiry (EXPIRE); taken back (ZREM)
+ * when past CALENDAR_POLLS_PER_HOUR. Never more than the pace, however late in
+ * an hour an app asks. A count that cannot be made is a refusal.
+ */
+const refusedKey = (statsId: string) => `nl:cal:refused:${statsId}`;
+
+/**
+ * The address let go for being asked too often: its token deleted, the settings told when, so the studio says so;
+ * the settings written only over what was read (review of #4007), so a calendar removed meanwhile is never restored.
+ * One try (GET, the swap, DEL, DEL: 6 commands, within the one more refused answer that prices the stop): lost to
+ * another change, nothing is deleted, so the studio never names a token already gone, and the refusal count left
+ * in place stops it at the next refused answer.
+ */
+async function stopFeedToken(statsId: string, token: string, now: number): Promise<void> {
+  const changed = await changeConfig(
+    { statsId },
+    (config) => ({ config: config?.token === token ? { ...config, token: null, stoppedAt: new Date(now).toISOString() } : null, result: null }),
+    1,
+  );
+  if (changed.state === "busy") return;
+  await redisPipeline([["DEL", tokenKey(token)], ["DEL", refusedKey(statsId)]]);
+}
+
+async function withinPace(statsId: string, now: number, token?: string): Promise<boolean> {
+  const key = paceKey(statsId);
+  // One answer's mark: its time and a few random bytes, nothing about who asked.
+  const mark = `${now}:${randomBytes(4).toString("hex")}`;
+  try {
+    const [, , n] = await redisPipeline([
+      ["ZADD", key, now, mark],
+      ["ZREMRANGEBYSCORE", key, "-inf", now - 3_600_000],
+      ["ZCARD", key],
+      ["EXPIRE", key, 3_600],
+    ]);
+    const count = Number(n);
+    if (!Number.isSafeInteger(count)) return false;
+    if (count <= CALENDAR_POLLS_PER_HOUR) return true;
+    // Refused: its mark goes, and it is counted; past CALENDAR_REFUSED_PER_HOUR in the hour the address stops.
+    const [, refused] = await redisPipeline([["ZREM", key, mark], ["INCR", refusedKey(statsId)], ["EXPIRE", refusedKey(statsId), 3_600, "NX"]]).catch(() => [null, 0]);
+    if (token && Number(refused) > CALENDAR_REFUSED_PER_HOUR) await stopFeedToken(statsId, token, now).catch(() => {});
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+export type FeedAnswer = { state: "copy" | "made"; ics: string } | { state: "paced" | "none" | "gone" };
+
+/**
+ * What a store's private feed answers a calendar app (4 November 2026, C4-4;
+ * owner's rule MR). An app asks on its own (every thirty minutes, as the file says), so asking
+ * must never spend anything the creator sees counted (their studio's
+ * requests): it is answered from the last good copy of the file, kept
+ * CALENDAR_COPY_SECONDS, and the file is made again (`make`, which reads the
+ * store and its Stripe account) only when a booking was made or moved, or a
+ * time let go, since the copy was begun (lib/call-records.ts,
+ * bookingsChangedKey), or the copy is CALENDAR_REFRESH_SECONDS old; at most
+ * CALENDAR_BUILDS_PER_DAY times a store a UTC day, counted before it is made.
+ * Past that, or when making it fails, the copy is answered as it is. One
+ * feed is answered CALENDAR_POLLS_PER_HOUR times an hour, counted before its
+ * copy is read; past them it is asked to come back ("paced"). A store
+ * deleted or closed is "gone" at once, with the same read as its copy (its
+ * handle is let go: lib/store.ts, handleLeadsToStore): its copy, which names
+ * buyers, is never answered again. A file larger than CALENDAR_FILE_MAX_BYTES
+ * is neither kept nor sent. All of it is one cost line of its own
+ * (tests/plan-cost-registry.ts, calendar-feed). "none" when there is no copy
+ * and none could be made.
+ */
+/**
+ * Forgets a deleted store's feed at once (app/api/store/stores, its delete):
+ * its settings, its subscription address, its feeds' readings and the last
+ * copy of its file, which names its buyers, as a closed store's are
+ * (lib/closed-store-data.ts, calendarKeys).
+ */
+/**
+ * A person's erasure (lib/person-erasure.ts, a step of every door; review of
+ * #2111): the feed's kept file goes, which names who booked, and one of the
+ * day's own makings is given back, so the app's next check makes it again from
+ * the store's bookings (which Stripe keeps) even when the day's makings were
+ * used; the day's tries (calendarAttemptsKey) still bound what is read.
+ */
+export async function forgetFeedCopyPerson(statsId: string | null, now = Date.now()): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const [gone] = await redisPipeline([["DEL", outKey(statsId)]]);
+  if (Number(gone) > 0) await giveCounted(buildsKey(statsId, new Date(now).toISOString().slice(0, 10)), 2 * 86_400);
+  return Number(gone) || 0;
+}
+
+export async function forgetStoreCalendar(statsId: string | null | undefined): Promise<void> {
+  if (!statsId || !isRedisConfigured()) return;
+  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
+  let parsed: unknown = null;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  await redisPipeline([["DEL", cfgKey(statsId), outKey(statsId), ...calendarKeys(parsed)]]);
+}
+
+export async function bookedCalendarFeed(owner: { statsId: string; handle: string; callsId?: string | null; token?: string }, make: () => Promise<MadeFeed>, now = Date.now()): Promise<FeedAnswer> {
+  if (!(await withinPace(owner.statsId, now, owner.token))) return { state: "paced" };
+  const day = new Date(now).toISOString().slice(0, 10);
+  let raw: unknown[];
+  try {
+    // The changed mark and the day's credits are kept by the store's calls id (lib/call-records.ts), which a
+    // rename does not change; settings written before they named it have neither, and the refresh stands.
+    // The day's counts are read in the same MGET, so an answer with no making left takes no count at all (C4-53).
+    const marks = owner.callsId ? [bookingsChangedKey(owner.callsId), bookingCreditsKey(owner.callsId, day)] : ["", ""];
+    const counts = [calendarAttemptsKey(owner.statsId, day), buildsKey(owner.statsId, day), creditsUsedKey(owner.statsId, day)];
+    raw = await redisPipeline([["MGET", outKey(owner.statsId), storeHandleKey(owner.handle), ...counts, ...marks.filter(Boolean)]]);
+    // Read only when whole: one entry for each key asked, each nothing or text. A read that is not whole is nothing
+    // answered, never a store taken for gone (its copy deleted and 404 answered; Codex E on #2111).
+    const asked = 2 + counts.length + marks.filter(Boolean).length;
+    if (!Array.isArray(raw) || raw.length !== 1 || !Array.isArray(raw[0]) || raw[0].length !== asked || !raw[0].every((v) => v === null || typeof v === "string")) return { state: "none" };
+  } catch {
+    return { state: "none" };
+  }
+  const values = raw[0] as unknown[];
+  const [copyRaw, handleRaw, attemptsRaw, ownRaw, creditsUsedRaw, changedRaw, creditsRaw] = [0, 1, 2, 3, 4, 5, 6].map((i) => values[i] ?? null);
+  // The store was deleted or closed (its handle let go): what it kept, which names its buyers, goes now.
+  if (!handleLeadsToStore(handleRaw)) {
+    await redisPipeline([["DEL", outKey(owner.statsId)]]).catch(() => {});
+    return { state: "gone" };
+  }
+  const ref = handleRaw as string;
+  const kept = parseKept(copyRaw);
+  // Already found to lead to another store: 404 at once, nothing made, nothing of the old store's shown.
+  if (kept.gone) return { state: "gone" };
+  // A copy is answered only while the handle leads to the store that made it; otherwise the file is made again,
+  // and `make` reads the store behind the handle and compares its id with the feed's (FeedGone when it is another store).
+  // Both what the handle led to and the feed's own store id must match. A copy without them (none was ever kept
+  // so: the copy carried both from its first release) or one made before the owner's account moved (lib/store.ts,
+  // moveAccount: the handle then leads to the new address) is set aside once and made again.
+  const copy = kept.copy && kept.copy.ref === ref && kept.copy.sid === owner.statsId ? kept.copy : null;
+  // A count is read only in its own shape: digits (a counter INCR wrote), or nothing for one not taken yet. Any
+  // other answer is unknown, never a number below a ceiling (rule 24 audit of Claude 4, C4-20261105-2000-C3-2).
+  const countOf = (raw: unknown): number | null => {
+    if (raw === null) return 0;
+    if (typeof raw !== "string" || !/^\d{1,15}$/.test(raw)) return null;
+    return Number(raw);
+  };
+  const changed = countOf(changedRaw) ?? 0;
+  const changedSince = copy !== null && changed > copy.at;
+  const fresh = copy !== null && !changedSince && now - copy.at < CALENDAR_REFRESH_SECONDS * 1000;
+  if (fresh) return { state: "copy", ics: copy.ics };
+  // A booking made, moved or let go since the copy: one of the day's credits, which bookings give, up to
+  // CALENDAR_CREDITS_PER_DAY. Otherwise (or with none left) one of the day's own CALENDAR_BUILDS_PER_DAY.
+  const credits = Math.min(countOf(creditsRaw) ?? 0, CALENDAR_CREDITS_PER_DAY);
+  const creditKey = creditsUsedKey(owner.statsId, day);
+  const ownKey = buildsKey(owner.statsId, day);
+  const attemptsKey = calendarAttemptsKey(owner.statsId, day);
+  const tries = CALENDAR_BUILDS_PER_DAY + CALENDAR_CREDITS_PER_DAY;
+  // No making left by the counts just read: the copy, with no count taken (an answer's priced shape has none). Only
+  // at the moment the day's last try is taken can an answer read room and lose the take (its SET NX, INCRBY, EXPIRE
+  // NX and DECRBY): once a day, a few commands, inside the making's own shape (CALENDAR_BUILD_SHAPE counts 4 for it).
+  // An unknown count is no room: nothing is made (the copy, or nothing).
+  const roomFor = (used: unknown, ceiling: number) => {
+    const count = countOf(used);
+    return count !== null && count < ceiling;
+  };
+  if (!roomFor(attemptsRaw, tries) || !((changedSince && roomFor(creditsUsedRaw, credits)) || roomFor(ownRaw, CALENDAR_BUILDS_PER_DAY))) {
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  // Every try of the day, made or failed, or refused by a making that ran at the same moment, is one of the priced
+  // makings (inbox C4-53): a failure given back below tries again inside this figure, never past it.
+  if (!(await takeCounted(attemptsKey, tries, 2 * 86_400))) {
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  const taken =
+    changedSince && credits > 0 && (await takeCounted(creditKey, credits, 2 * 86_400)) ? creditKey
+    : (await takeCounted(ownKey, CALENDAR_BUILDS_PER_DAY, 2 * 86_400)) ? ownKey
+    : null;
+  // Refused by a making that ran at the same moment: the try stays counted, so its commands are priced.
+  if (!taken) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  let made: MadeFeed;
+  try {
+    made = await make();
+  } catch (error) {
+    // The handle leads to another store now: the old copy goes, a tombstone answers 404 from now on.
+    if (error instanceof FeedGone) {
+      await redisPipeline([["SET", outKey(owner.statsId), JSON.stringify({ gone: true }), "EX", CALENDAR_COPY_SECONDS]]).catch(() => {});
+      return { state: "gone" };
+    }
+    // Stripe did not answer: the making is given back once a day, so the app's next check tries again; past that
+    // one it stays counted. The try itself stays counted either way (calendarAttemptsKey), so what it read is priced
+    // (inbox C4-53). The copy stands.
+    if (await takeCounted(retriesKey(owner.statsId, day), CALENDAR_RETRIES_PER_DAY, 2 * 86_400)) await giveCounted(taken, 2 * 86_400);
+    if (copy) return { state: "copy", ics: copy.ics };
+    throw error;
+  }
+  const { ics } = made;
+  const file = JSON.stringify({ at: now, ics, ref, sid: owner.statsId });
+  if (Buffer.byteLength(file, "utf8") > CALENDAR_FILE_MAX_BYTES) {
+    console.error("a booking calendar file is larger than its ceiling, so it is neither kept nor sent", owner.statsId);
+    return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  }
+  // Kept only while the store's settings are still there: a deletion that ran while this was being made
+  // (forgetStoreCalendar) is not undone by a copy written after it, with its buyers' names; and what was made is
+  // not answered either (inbox C4-48, medium 1). When the step cannot be run, the old copy is answered if there is
+  // one, otherwise nothing: the app asks again. Nor is a file kept or answered that names someone deleted from the
+  // store since `make` looked (review of #2111): their prints are checked in the same step (2), the old copy goes
+  // with it, and nothing is answered; the next making leaves them out. The making stays counted.
+  // A file that names someone with no list to look them up in (a store from before lists, whose list could not be
+  // made: the route makes it first) is answered while the settings exist, but never kept: its check cannot be made.
+  const listId = made.listId;
+  const named = [...new Set(made.named)];
+  // Each reply read only when it is one of the answers its step gives (0, 1 or 2): one that cannot be run or answers
+  // anything else is neither "gone" (Number(null) is 0, which answered 404) nor kept (Codex E on #2111).
+  let written: unknown;
+  if (!listId && named.length) {
+    const [settings] = await redisPipeline([["EXISTS", cfgKey(owner.statsId)]]).catch(() => [null]);
+    written = settings === 0 || settings === 1 ? settings : null;
+  } else {
+    const prints = listId ? named.map((email) => suppressionPrint(listId, email)) : [];
+    const erased = listId ? suppressedKey(listId) : "nl:none";
+    [written] = await redisPipeline([["EVAL", KEEP_COPY, 3, cfgKey(owner.statsId), outKey(owner.statsId), erased, file, CALENDAR_COPY_SECONDS, ...prints]]).catch(() => [null]);
+  }
+  if (written !== 0 && written !== 1 && written !== 2) return copy ? { state: "copy", ics: copy.ics } : { state: "none" };
+  if (written === 0) return { state: "gone" };
+  if (written === 2) {
+    // Its copy gone with nothing kept in its place, the erasure's own DEL may find none and give no making back
+    // (review of fe4cb5e56): this one is given back, so the app's next check makes the file again without them.
+    // The try stays counted (calendarAttemptsKey), so what it read stays inside the priced figure.
+    await giveCounted(taken, 2 * 86_400);
+    return { state: "none" };
+  }
+
+  // A store whose feed is read has its refunds read by the five-minute job, meeting rooms or not, so a call refunded
+  // or cancelled marks its bookings changed and the feed is made again at the app's next check (inbox C4-33, M3):
+  // for FEED_REFUNDS_SECONDS after each making, which a feed that is read makes at least every CALENDAR_REFRESH_SECONDS.
+  // Never lowered: a meeting further ahead keeps the score its booking gave (lib/meet-links.ts).
+  if (owner.callsId) {
+    const storeEntry = `${owner.callsId}|${owner.handle}`;
+    const until = now + FEED_REFUNDS_SECONDS * 1000;
+    await redisPipeline([["ZSCORE", MEET_STORES, storeEntry]])
+      .then(([score]) => (Number(score) >= until ? undefined : redisPipeline([["ZADD", MEET_STORES, until, storeEntry]])))
+      .catch(() => {});
+  }
+  return { state: "made", ics };
 }

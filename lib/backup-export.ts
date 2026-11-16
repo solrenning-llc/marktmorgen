@@ -99,10 +99,16 @@ export async function exportSnapshot(limits: ExportLimits): Promise<ExportResult
     if (replies.length !== 2 * part.length) return { ok: false, reason: "unreadable", commands };
     for (let i = 0; i < part.length; i += 1) {
       const dump = replies[2 * i];
-      const ends = Number(replies[2 * i + 1]);
-      // Gone between the walk and its copy, or ended by the time of the copy: left out, never copied empty.
-      if (dump === null || ends === -2 || (ends !== -1 && ends <= now)) continue;
-      if (typeof dump !== "string" || !dump || !BASE64.test(dump) || !Number.isSafeInteger(ends) || ends < -1) return { ok: false, reason: "unreadable", commands };
+      // PEXPIRETIME's own integer only: true, [1] or "01" would read as a time long past and leave the key out unseen.
+      const ends = typeof replies[2 * i + 1] === "number" ? (replies[2 * i + 1] as number) : Number.NaN;
+      // Gone between the walk and its copy (DUMP answered nil): left out, never copied empty.
+      if (dump === null) continue;
+      // The ending is checked in its shape before it can leave a key out (Codex G's audit of #2175, as #2734 in
+      // lib/backup-parts.ts): a safe integer, -1 (no ending), -2 (gone) or a time; anything else is unknown and refused.
+      if (!Number.isSafeInteger(ends) || ends < -2) return { ok: false, reason: "unreadable", commands };
+      // Gone, or ended by the time of the copy: left out.
+      if (ends === -2 || (ends !== -1 && ends <= now)) continue;
+      if (typeof dump !== "string" || !dump || !BASE64.test(dump)) return { ok: false, reason: "unreadable", commands };
       bytes += part[i].length + dump.length + ROW_OVERHEAD;
       if (bytes > maxBytes) return { ok: false, reason: "too_big", commands };
       rows.push({ key: part[i], dump, expiresAt: ends === -1 ? null : ends });

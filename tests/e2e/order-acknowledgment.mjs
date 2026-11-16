@@ -1,3 +1,21 @@
+/** Exercise the existing guard through an actual navigation link and unload event. */
+export async function checkOrderDraftProtection({page,is,label}){
+ const before=page.url();
+ const order=()=>page.locator("#order [data-order-part]").evaluateAll(nodes=>nodes.map(node=>node.getAttribute("data-order-part")));
+ const draft=await order();
+ is("unsaved order protects unload "+label,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),true);
+ const notices=[];
+ const dismiss=async dialog=>{notices.push(dialog.message());await dialog.dismiss();};
+ page.on("dialog",dismiss);
+ try{
+  const path=page.getByRole("link",{name:"Path",exact:true});
+  await path.focus();await path.press("Enter");
+ }finally{page.off("dialog",dismiss);}
+ is("unsaved order asks before leaving "+label,notices,["You have changes that are not saved. Leave without saving them?"]);
+ is("staying keeps the same document "+label,page.url(),before);
+ is("staying keeps the exact draft order "+label,await order(),draft);
+}
+
 /** All order mutations intercepted; never change creator content or public ordering. */
 export async function checkOrderAcknowledgment({browser,LOCAL,fixture,is}){
  const usual=["products","quotes","links","tips","signup","faq","contact","community"];
@@ -31,9 +49,11 @@ export async function checkOrderAcknowledgment({browser,LOCAL,fixture,is}){
    await page.waitForFunction(()=>document.querySelector("#order")?.getAttribute("data-order-ready")==="true");
    is("order controls ready before activation "+width,await section.getByRole("button",{name:"Move What you sell down",exact:true}).isEnabled(),true);
    is("order starts with existing identifiers "+width,await order(),usual);
+   is("unchanged order does not block unload "+width,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
    await section.getByRole("button",{name:"Move What you sell down",exact:true}).click();
    await page.waitForFunction(expected=>JSON.stringify([...document.querySelectorAll("#order [data-order-part]")].map(node=>node.getAttribute("data-order-part")))===JSON.stringify(expected),moved);
    is("draft order moved "+width,await order(),moved);
+   await checkOrderDraftProtection({page,is,label:"local move/"+width});
    for(const reset of [false,true])for(const scenario of cases){
     const expected=reset?usual:moved,retained=moved;
     let release;const held=new Promise(resolve=>{release=resolve;});pending={scenario,release:held};
@@ -44,17 +64,20 @@ export async function checkOrderAcknowledgment({browser,LOCAL,fixture,is}){
      is("page order exact request "+name,(await seen).postDataJSON(),{order:expected});
      is("page order busy "+name,await section.getAttribute("aria-busy"),"true");
      for(const control of await section.locator("button").all())is("page order all controls lock "+name,await control.isDisabled(),true);
+     if(!reset)await checkOrderDraftProtection({page,is,label:"pending/"+name});
     }finally{release();}
     await page.waitForFunction(()=>document.querySelector("#order")?.getAttribute("aria-busy")==="false");
     if(scenario.confirmed){
      is("page order confirms "+name,await section.getByRole("alert").count(),0);
      is("page order confirmed identifiers "+name,await order(),expected);
      is("page order saved baseline "+name,await section.getByRole("button",{name:"Save the order",exact:true}).isDisabled(),true);
+     is("confirmed order releases unload protection "+name,await page.evaluate(()=>!window.dispatchEvent(new Event("beforeunload",{cancelable:true}))),false);
      if(reset)is("page order usual reset completed "+name,await section.getByRole("button",{name:"Back to the usual order",exact:true}).count(),0);
     }else{
      const alert=section.getByRole("alert");await alert.waitFor();
      is("page order uncertainty honest "+name,(await alert.innerText()).includes("Reload this page to check before trying again"),true);
      is("page order draft identifiers retained "+name,await order(),retained);
+     if(!reset&&["HTTP","malformed","lost"].includes(scenario.name))await checkOrderDraftProtection({page,is,label:name});
     }
     is("page order fits "+name,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
    }

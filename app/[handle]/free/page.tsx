@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DigitalConsentBox } from "@/components/digital-consent-box";
+import { WithdrawalWhere } from "@/components/withdrawal-where";
 import { consentKind, deliversDigitally } from "@/lib/digital-consent";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -10,6 +11,7 @@ import { welcomeFor } from "@/lib/welcome-offer-send";
 import { welcomeWords } from "@/lib/buyer-words/welcome";
 import { WelcomeCountdown } from "@/components/welcome-countdown";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { StoreTracking } from "@/components/store-tracking";
 import { readListing } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
@@ -45,6 +47,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  */
 async function nextProduct(store: Store, free: Listing | null): Promise<Listing | null> {
   if (!free?.page) return null;
+  // A page whose read is not known names no next product: the card is optional, and leaving out what could not be
+  // confirmed says nothing is missing (C4-20261106-2610-C6-153, unit B).
   const page = await readPage(store.statsId, free.id).catch(() => null);
   const next = page?.next && pageShown(page) ? await readListing(store, page.next) : null;
   return next && next.priceCents > 0 && canSellProduct(store, next) ? next : null;
@@ -91,6 +95,8 @@ export default async function FreePage({ params, searchParams }: Params) {
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
   if (!store) notFound();
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page.
+  if (store.suspended) return <StoreResting store={store} suspended />;
 
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token : "";
@@ -106,7 +112,9 @@ export default async function FreePage({ params, searchParams }: Params) {
   const claimed = claim
     ? await readListing(store, claim.productId) ?? null
     : null;
-  const asked = await readListing(store, productId) ?? null;
+  // Named only while it is on the store: a draft is never named to whoever only knows its id (MM-SA-30).
+  const listed = await readListing(store, productId) ?? null;
+  const asked = listed && !listed.hidden ? listed : null;
   const stillFree = claimed !== null && claimed.priceCents === 0;
   // Signed up from a step of a funnel of pages (lib/page-funnel.ts): the way on
   // to its next step, in place of the one paid product the page names.
@@ -241,7 +249,7 @@ export default async function FreePage({ params, searchParams }: Params) {
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="token" value={token} />
                   {/* The box to start access at once (lib/digital-consent.ts), before the offer's checkout opens. */}
-                  {deliversDigitally(welcome.product) ? <DigitalConsentBox id="dc-welcome" kind={consentKind(welcome.product)} lang={store.language} refused={query.welcome === "consent"} className="mb-4" /> : null}
+                  {deliversDigitally(welcome.product) ? <DigitalConsentBox id="dc-welcome" kind={consentKind(welcome.product)} lang={store.language} refused={query.welcome === "consent"} className="mb-4" /> : <WithdrawalWhere lang={store.language} className="mb-4" />}
                   <button type="submit" className="btn st-btn btn-lg">
                     {ww.button(welcome.percent)}
                   </button>

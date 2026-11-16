@@ -56,6 +56,8 @@ async function main() {
     is("missing counter is unavailable", await reserveQuizSubmission(sid), "unavailable");
     redis.pipeline = async () => [1, 0];
     is("unconfirmed retention is unavailable", await reserveQuizSubmission(sid), "unavailable");
+    redis.pipeline = async () => [1, 1, 1];
+    is("an extra pipeline answer is unavailable", await reserveQuizSubmission(sid), "unavailable");
     redis.pipeline = async () => { throw Error("network"); };
     is("network failure is unavailable", await reserveQuizSubmission(sid), "unavailable");
   } finally { redis.pipeline = original; }

@@ -118,3 +118,55 @@ test("an unreadable count of kept events: createEvent adds nothing to the index"
   assert.ok(outcome instanceof UnknownReplyError, `an unknown count is refused as unknown, got ${String(outcome)}`);
   assert.equal(sent.some((b) => b.some((c) => c[0] === "ZADD" && c[1] === `nl:cm:${COMMUNITY}:evs`)), false, "no event added on an unknown count");
 });
+
+// Claude 5's second MÉDIO on #3845 (6908545844): readEvents dropped an index entry whose event did not read, so the prune
+// let it stay, still added the new event, and the index sat past the cap for good, so every member's erasure threw.
+// The prune now reads each entry exactly: one whose event answered nil leaves the index with its keys, one that is
+// not an event id leaves the index only, and one in an unknown shape is not counted as room made.
+async function prunedCalendar(orphan: string, alter?: (batch: Batch, real: unknown[]) => unknown[] | null): Promise<{ made: string; kept: number }> {
+  redis.clear();
+  const old = Date.now() - 30 * 86_400_000;
+  const ids = Array.from({ length: MAX_KEPT_EVENTS - 1 }, (_, i) => (i + 1).toString(16).padStart(12, "0"));
+  await pipeline([["ZADD", `nl:cm:${COMMUNITY}:evs`, String(old - 1000), orphan]]);
+  await pipeline(ids.flatMap((e, i) => [
+    ["ZADD", `nl:cm:${COMMUNITY}:evs`, String(old + i), e],
+    ["SET", `nl:cm:${COMMUNITY}:ev:${e}`, JSON.stringify({ id: e, start: old + i, minutes: 60 })],
+  ]));
+  if (alter) {
+    redis.pipeline = (async (batch: Batch) => {
+      const real = await pipeline(batch);
+      return alter(batch, real) ?? real;
+    }) as typeof redis.pipeline;
+  }
+  let made: string;
+  try {
+    const community = { community: { id: COMMUNITY }, sid: store.sid } as unknown as Store;
+    made = await createEvent(community, { title: "Synthetic", about: "A synthetic call.", minutes: 60, tz: "UTC", where: "room", link: "", meet: null, only: [], start: Date.now() + 86_400_000, cap: 0 } as never)
+      .then((r) => (r.ok ? "made" : r.reason), (e: unknown) => `threw ${e instanceof Error ? e.constructor.name : String(e)}`);
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  const kept = Number((await pipeline([["ZCARD", `nl:cm:${COMMUNITY}:evs`]]))[0]);
+  return { made, kept };
+}
+
+test("an orphan entry at the oldest end: the prune takes it out, so the index never passes the cap", async () => {
+  const orphan = "fffffffffff0";
+  const { made, kept } = await prunedCalendar(orphan);
+  assert.equal(made, "made");
+  assert.ok(kept <= MAX_KEPT_EVENTS, `index kept ${kept}, past the cap`);
+  assert.equal((await pipeline([["ZSCORE", `nl:cm:${COMMUNITY}:evs`, orphan]]))[0], null, "the orphan left the index");
+});
+
+test("an entry that is not an event id: it leaves the index, so the index never passes the cap", async () => {
+  const { made, kept } = await prunedCalendar("not-an-event");
+  assert.equal(made, "made");
+  assert.ok(kept <= MAX_KEPT_EVENTS, `index kept ${kept}, past the cap`);
+});
+
+test("the prune's reads answered short: nothing counts as room made, and the index never passes the cap", async () => {
+  const orphan = "fffffffffff0";
+  const { made, kept } = await prunedCalendar(orphan, (batch, real) => (batch.every((c) => c[0] === "GET") && batch.length > 0 ? [] : real));
+  assert.ok(kept <= MAX_KEPT_EVENTS, `index kept ${kept}, past the cap (${made})`);
+  assert.notEqual(made, "made", "no event made without the room");
+});

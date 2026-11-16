@@ -20,7 +20,13 @@ import { type FlowMapLayout, LINE_HEIGHT } from "@/lib/flow-map";
 
 const FONT = 14;
 
-export function WorkflowDiagram({ layout, steps }: { layout: FlowMapLayout; steps: number }) {
+/**
+ * With `onBox`, a click or tap on a step's box opens that step in the editor
+ * (391 [CX2], unit 2), as the "Edit step" button beside it in the list does.
+ * The box is only a bigger target for a pointer: the picture stays one image
+ * to assistive technology, and the list's buttons are the way in by keyboard.
+ */
+export function WorkflowDiagram({ layout, steps, onBox }: { layout: FlowMapLayout; steps: number; onBox?: (index: number) => void }) {
   const id = useId();
   const head = `${id}-head`;
   const title = `${id}-title`;
@@ -43,15 +49,21 @@ export function WorkflowDiagram({ layout, steps }: { layout: FlowMapLayout; step
         fill="none"
         stroke="currentColor"
       >
-        <title id={title}>{`Picture of the ${steps === 1 ? "step" : `${steps} steps`} and where each one leads. The same steps are listed after it.`}</title>
+        <title id={title}>{`Picture of the ${steps === 1 ? "step" : `${steps} steps`} and where each one leads. The same steps are listed after it${onBox ? ", each with its Edit button" : ""}.`}</title>
         <defs>
           <marker id={head} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor" stroke="none" />
           </marker>
         </defs>
         {layout.boxes.map((box) => (
-          <g key={box.index}>
-            <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={box.end ? box.h / 2 : 8} strokeWidth={box.end ? 2 : 1.5} />
+          <g
+            key={box.index}
+            data-step-box={box.end ? undefined : box.index}
+            onClick={onBox && !box.end ? () => onBox(box.index) : undefined}
+            className={onBox && !box.end ? "cursor-pointer" : undefined}
+          >
+            {/* "transparent" is still painted, so a click anywhere inside a box that opens its step lands on it. */}
+            <rect x={box.x} y={box.y} width={box.w} height={box.h} rx={box.end ? box.h / 2 : 8} strokeWidth={box.end ? 2 : 1.5} fill={onBox && !box.end ? "transparent" : "none"} />
             {box.lines.map((line, k) => (
               <text
                 key={k}

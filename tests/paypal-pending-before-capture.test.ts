@@ -234,7 +234,7 @@ async function main(): Promise<void> {
   is("paid, handed over, one receipt, counted once, off pending, not owed, captured once", await state(healthy, "healthy@example.com"), {
     paid: true, owned: 1, receipts: 1, sales: 1, pending: false, owed: false, captured: 1,
   });
-  is("one step put it in pending and renewed its record, the commands tests/plan-cost-registry.ts prices", [watchSent.length, watchSent[0]?.length], [1, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
+  is("one step put it in pending and renewed its record, after the step that counted the try, the commands tests/plan-cost-registry.ts prices", [watchSent.length, watchSent[0]?.length, PAYPAL_CAPTURE_WATCH.countCommandsPerTry + PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked], [1, PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked, PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked]);
   is("the tries an order may ask, the bound lib/paypal-sales.ts holds, as tests/plan-cost-registry.ts prices them", (paypalSales as Record<string, unknown>).CAPTURE_TRIES_PER_ORDER, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost);
   is("all of them together inside a tenth of the order's own work (ORDER_COMPUTE)", PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked * COMMAND < ORDER_COMPUTE / 10, true);
   is("a sweep after it hands nothing over again", await sweep(), 0);
@@ -507,6 +507,116 @@ async function main(): Promise<void> {
   is("PayPal is not asked to take anything, as for a record that does not read", captures.get(miscounted) ?? 0, 0);
   is("and the buyer is never shown the thanks page as paid", miscountedBack.location.includes("/thanks?paypal="), false);
   is("nothing written: not watched, not in pending", [watchSent.length, await pending(miscounted), Boolean(await readPaid(miscounted))], [0, false, false]);
+
+  /**
+   * Sends `count` returns of one order at once, each read of the order's record and count held until all of them have
+   * read it (Claude 5's probe on #3411, Codex X2's MEDIUM 2): every one reads the count before any try is counted.
+   * Returns what each return was shown and every pipeline sent meanwhile with its replies.
+   */
+  const together = async (order: string, count: number) => {
+    const pipeline: Pipeline = redis.pipeline.bind(redis);
+    const sent: { commands: Commands; replies: unknown[] }[] = [];
+    const waiting: (() => void)[] = [];
+    let read = 0;
+    const isRead = (commands: Commands) =>
+      commands.length === 2 && commands[0][0] === "GET" && commands[0][1] === `nl:ppsell:o:${order}` && commands[1][0] === "GET" && commands[1][1] === `nl:ppsell:try:${order}`;
+    redis.pipeline = (async (commands: Commands) => {
+      const replies = await pipeline(commands);
+      sent.push({ commands, replies });
+      if (isRead(commands)) {
+        read += 1;
+        if (read < count) await new Promise<void>((resolve) => waiting.push(resolve));
+        else for (const resolve of waiting.splice(0)) resolve();
+      }
+      return replies;
+    }) as typeof redis.pipeline;
+    try {
+      const shown = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=${store.handle}&token=${order}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": `203.0.113.${i + 1}` } }))
+            .then((response) => ({ status: response.status, location: response.headers.get("location") ?? "" }))
+            .catch(() => ({ status: 500, location: "" })),
+        ),
+      );
+      return { shown, sent, read };
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  };
+  const tryCommand = (command: (string | number)[]) => /^(INCR|EXPIREAT)$/.test(String(command[0])) && String(command[1]).startsWith("nl:ppsell:try:");
+  /** A command that puts the order in pending, or renews its record, before PayPal is asked (watchLater's SET and ZADD after an answer are not). */
+  const watchCommand = (command: (string | number)[], commands: Commands) =>
+    (command[0] === "EXPIREAT" && String(command[1]).startsWith("nl:ppsell:o:")) ||
+    (command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:") && !commands.some((other) => other[0] === "SET" && String(other[1]).startsWith("nl:ppsell:o:")));
+
+  part("Claude 5's probe on #3411 (Codex X2's MEDIUM 2): eight returns of one order at once, each read before any try is counted");
+  captureWith = "pending";
+  const raced = await open("raced@example.com");
+  const eight = await together(raced, 8);
+  const all = eight.sent.flatMap(({ commands }) => commands.map((command) => ({ command, commands })));
+  const watchWrites = all.filter(({ command, commands }) => watchCommand(command, commands)).length;
+  const tryWrites = all.filter(({ command }) => tryCommand(command)).length;
+  is("all eight read the order's count before any of them counted a try", eight.read, 8);
+  is("control: PayPal is asked to take the payment three times, the bound", captures.get(raced), PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost);
+  is("only the three admitted tries put the order in pending or renew its record", watchWrites, PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.watchCommandsPerCaptureAsked);
+  is("the admitted tries together send at most what the registry prices for the order (3 x 4 = 12)", watchWrites + PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.countCommandsPerTry <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked, true);
+  is("each refused return sends only its count, the refused path the registry prices per return", tryWrites, 8 * PAYPAL_CAPTURE_WATCH.countCommandsPerTry);
+  is("every watch and count command of the eight together: 3 x 4 + 5 x 2, not 8 x 4", watchWrites + tryWrites <= PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost * PAYPAL_CAPTURE_WATCH.commandsPerCaptureAsked + 5 * PAYPAL_CAPTURE_WATCH.commandsPerRefusedReturnAtMost, true);
+  is("every return lands on the thanks page: a capture PayPal holds is under watch", eight.shown.every((shown) => shown.status === 303 && shown.location.includes("/thanks?paypal=")), true);
+  is("the order stands in pending, never written down as paid", [await pending(raced), Boolean(await readPaid(raced))], [true, false]);
+
+  part("Codex X2's MEDIUM 2: two returns at once with one try left, PayPal declines: only the admitted one adds to pending, and the order is not put back");
+  captureWith = "decline";
+  const lastSlot = await open("last-slot@example.com");
+  await redis.pipeline([["SET", `nl:ppsell:try:${lastSlot}`, String(PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost - 1), "EX", 86_400]]);
+  const pair = await together(lastSlot, 2);
+  const adds = pair.sent.flatMap(({ commands }) => commands).filter((command) => command[0] === "ZADD" && String(command[1]).startsWith("nl:ppsell:pending:")).length;
+  is("both read the count with one try left", pair.read, 2);
+  is("PayPal is asked once", captures.get(lastSlot), 1);
+  is("only one return sends the order to pending", adds, 1);
+  is("declined: the order is not left in pending, nothing paid", [await pending(lastSlot), Boolean(await readPaid(lastSlot))], [false, false]);
+
+  part("Codex X2's MEDIUM 1 (Claude 5: LEVE): past the bound after confirmed refusals, the return does not say PayPal is still taking it");
+  captureWith = "decline";
+  const refused = await open("refused@example.com");
+  for (let i = 0; i < PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost; i += 1) {
+    const shown = await returnFor(store, refused, "none");
+    is(`try ${i + 1}: shown as declined`, shown.location.includes("status=paypal-declined"), true);
+  }
+  is("declined three times, off pending", [captures.get(refused), await pending(refused)], [3, false]);
+  const fourth = await returnFor(store, refused, "none");
+  is("a fourth return asks PayPal nothing", captures.get(refused), 3);
+  is("and is not sent to the thanks page, which would say PayPal is still taking it", fourth.location.includes("/thanks?paypal="), false);
+  is("it is sent to the store's notice, which tells the buyer to write to the store if PayPal shows money taken", fourth.location.includes("status=paypal-error"), true);
+  is("nothing written: not put back in pending, not watched", [await pending(refused), watchSent.length], [false, 0]);
+
+  part("Control: past the bound with a capture really under watch, the return still lands on the thanks page");
+  captureWith = "lost";
+  const watched = await open("watched@example.com");
+  orders.set(watched, { id: watched, status: "APPROVED" });
+  for (let i = 0; i < PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost; i += 1) await returnFor(store, watched, "none");
+  const past = await returnFor(store, watched, "none");
+  is("PayPal asked three times, the order in pending", [captures.get(watched), await pending(watched)], [3, true]);
+  is("the return past the bound lands on the thanks page and writes nothing", [past.location.includes("/thanks?paypal="), watchSent.length], [true, 0]);
+
+  part("Rule 24: past the bound, the read of where the order stands answers in a shape not known");
+  const strange = await open("strange@example.com");
+  orders.set(strange, { id: strange, status: "APPROVED" });
+  await redis.pipeline([["SET", `nl:ppsell:try:${strange}`, String(PAYPAL_CAPTURE_WATCH.capturesAskedPerOrderAtMost), "EX", 86_400]]);
+  const stock: Pipeline = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: Commands) => {
+    const replies = await stock(commands);
+    return commands.some((command) => command[0] === "ZSCORE" && String(command[1]).startsWith("nl:ppsell:pending:")) ? replies.map(() => 7) : replies;
+  }) as typeof redis.pipeline;
+  let strangeShown: { status: number; location: string };
+  try {
+    strangeShown = await paypalReturn(new NextRequest(`https://marktmorgen.com/api/store/paypal/return?store=${store.handle}&token=${strange}`, { headers: { host: "marktmorgen.com", "x-forwarded-for": "203.0.113.99" } }))
+      .then((response) => ({ status: response.status, location: response.headers.get("location") ?? "" }))
+      .catch(() => ({ status: 500, location: "" }));
+  } finally {
+    redis.pipeline = stock;
+  }
+  is("an unknown answer is taken for neither: PayPal is not asked, nothing is written, the buyer is not told where it stands", [captures.get(strange) ?? 0, await pending(strange), strangeShown.status], [0, false, 500]);
 
   done();
 }

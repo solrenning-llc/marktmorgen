@@ -68,6 +68,7 @@ export class MemoryRedis {
     if (Array.isArray(held) && (held.length === 0 || typeof held[0] === "string")) return held as string[];
     const made: string[] = [];
     this.data.set(key, made);
+    this.made.add(key);
     return made;
   }
 
@@ -76,6 +77,7 @@ export class MemoryRedis {
     if (held instanceof Map) return held;
     const made = new Map<string, string>();
     this.data.set(key, made);
+    this.made.add(key);
     return made;
   }
 
@@ -84,6 +86,7 @@ export class MemoryRedis {
     if (held instanceof Set) return held;
     const made = new Set<string>();
     this.data.set(key, made);
+    this.made.add(key);
     return made;
   }
 
@@ -94,11 +97,36 @@ export class MemoryRedis {
     }
     const made: { score: number; member: string }[] = [];
     this.data.set(key, made);
+    this.made.add(key);
     return made;
+  }
+
+  /** Keys whose empty collection a command made by reading or writing them, pruned after it (run). */
+  private made = new Set<string>();
+
+  /**
+   * Redis keeps no empty list, hash, set or sorted set: reading one that is not there makes no key, and one whose
+   * last member goes is deleted. After each command, its key and every key it made a collection for are dropped
+   * when that collection is empty, so EXISTS, DEL, TYPE and SCAN answer as Redis does.
+   */
+  private pruneEmpty(key: string): void {
+    for (const one of [key, ...this.made]) {
+      const held = this.data.get(one);
+      if ((Array.isArray(held) && held.length === 0) || ((held instanceof Map || held instanceof Set) && held.size === 0)) this.data.delete(one);
+    }
+    this.made.clear();
   }
 
   /** Runs one command, the way redisPipeline runs each of its own. */
   run(command: (string | number)[]): unknown {
+    try {
+      return this.runCommand(command);
+    } finally {
+      this.pruneEmpty(String(command[1] ?? ""));
+    }
+  }
+
+  private runCommand(command: (string | number)[]): unknown {
     const [rawName, ...rest] = command;
     const name = String(rawName).toUpperCase();
     const key = String(rest[0] ?? "");

@@ -198,7 +198,9 @@ async function main(): Promise<void> {
   const early = browserName(folder, "pdf");
   is("the door opens", (await ask(early)).status, 200);
   is("handed in before the browser's PUT landed: missing", await handIn(early), "missing");
-  is("the name is held for the sweep", await held(early), true);
+  // Since #2836 the file is measured before its door is taken: a hand-in that finds no file takes nothing, so the name
+  // stays on the doors' list for the sweep (and the same file can still be handed in once it lands), never held.
+  is("not taken: its name stays on the doors' list for the sweep", [await listed(early), await held(early)], [true, false]);
   store(early);
   const late = await sweepTaskUploads(deleteFile, Date.now() + DAY_MS + 3_600_000);
   is("the file that landed later is swept the next day", [late.includes(early), files.has(early)], [true, false]);

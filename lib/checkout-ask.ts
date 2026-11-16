@@ -75,6 +75,8 @@ export const ASKS_PER_ADDRESS_HOUR = 3;
 export const ASKS_PER_STORE_DAY = 200;
 /** An ask not sent this long after it was due is dropped: the moment has gone. */
 const STALE_SECONDS = 6 * 60 * 60;
+/** How late an ask may still go, for the person's copy to say how long it waits (lib/person-copy.ts). */
+export const ASK_STALE_SECONDS = STALE_SECONDS;
 
 const QUEUE = "nl:recover:asks";
 

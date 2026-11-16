@@ -46,8 +46,8 @@ export function WelcomeOfferEditor({
   products: { id: string; title: string }[];
   connected: boolean;
   suggestedAddress: string;
-  /** How many people have been offered it so far. */
-  offered: number;
+  /** How many people have been offered it so far; null when the count did not read (rule 24), never shown as 0. */
+  offered: number | null;
 }) {
   const router = useRouter();
   const on = offer.percent > 0 && offer.coupon !== "";
@@ -98,7 +98,7 @@ export function WelcomeOfferEditor({
         {bullet("Stripe takes the discount off the first payment, for the address the free copy went to.")}
         {bullet("With the reminder on, one email goes before the end, only to someone who agreed to hear from you and confirmed their address, with your list's one-click unsubscribe.")}
       </ul>
-      {on ? <p className="mt-4 text-sm font-semibold text-ink">{`Offered so far: ${offered}.`}</p> : null}
+      {on ? <p className="mt-4 text-sm font-semibold text-ink">{`Offered so far: ${offered === null ? "Not counted just now" : offered}.`}</p> : null}
 
       {!connected ? (
         <p className="mt-5 text-sm text-ink-soft">Connect your Stripe account first, and this can be switched on.</p>

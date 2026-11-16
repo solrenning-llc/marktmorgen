@@ -22,6 +22,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { createHash } from "node:crypto";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, storeForId } from "@/lib/store";
 import { type Listing, readListing, readProduct } from "@/lib/catalog";
@@ -251,8 +252,11 @@ export async function sendWelcomeReminders(deadline: number, nowSeconds = Math.f
 /** How many people have been offered it, for the studio. */
 export async function welcomesOffered(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24): absent is nothing sent yet; any other shape is unknown, never 0 shown to the creator.
+  const reply = repliesFor(await redisPipeline([["GET", countKey(store.statsId)]]), 1);
+  const n = reply ? textCountOf(reply[0]) : null;
+  if (n === null) throw new UnknownReplyError("the welcome offers counter");
+  return n === "absent" ? 0 : n;
 }
 
 export type OpenResult = { ok: true; url: string } | { ok: false; reason: "expired" | "unavailable" | "refused" | "consent" };

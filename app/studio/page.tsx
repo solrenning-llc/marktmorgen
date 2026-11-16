@@ -2218,7 +2218,7 @@ export default async function StudioPage({
                 {may("settings") ? <StoreLanguageEditor language={store.language} handle={store.handle} /> : null}
 
                 {givesAway && may("settings") ? (async () => {
-                  const offered = welcomesOffered(store).catch(() => 0);
+                  const offered = welcomesOffered(store).catch(() => null);
                   return (
                     <WelcomeOfferEditor
                       offer={store.welcomeOffer}
@@ -2247,7 +2247,7 @@ export default async function StudioPage({
                       <NudgeEditor
                         nudge={store.nudge}
                         suggestedAddress={store.mail?.address || store.winback.address || store.recovery.address || ""}
-                        sent={await nudgesThisMonth(store).catch(() => 0)}
+                        sent={await nudgesThisMonth(store).catch(() => null)}
                       />
                     ))()}
                     {(async () => {
@@ -2256,7 +2256,7 @@ export default async function StudioPage({
                         <YearlyAskEditor
                           ask={store.yearlyAsk}
                           suggestedAddress={store.nudge.address || store.mail?.address || store.winback.address || store.recovery.address || ""}
-                          sent={await yearlyAsksThisMonth(store).catch(() => 0)}
+                          sent={await yearlyAsksThisMonth(store).catch(() => null)}
                           offersYearly={(await recurring).some((p) => activeYearly(p, store.tiers) !== null)}
                         />
                       );
@@ -2268,7 +2268,7 @@ export default async function StudioPage({
                         winback={store.winback}
                         connected={Boolean(current?.stripeAccountId)}
                         suggestedAddress={store.recovery.address || store.mail?.address || ""}
-                        sent={await winbacksSent(store).catch(() => 0)}
+                        sent={await winbacksSent(store).catch(() => null)}
                       />
                     ))()}
                   </>

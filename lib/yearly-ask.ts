@@ -19,8 +19,9 @@
  *   nl:yearask:cursor                         where the last run stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
 import { types } from "node:util";
-import { UnknownReplyError } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
@@ -176,8 +177,11 @@ export async function askStore(store: Store, deadline: number, now = Date.now())
 /** How many yearly offers a store sent this month. */
 export async function yearlyAsksThisMonth(store: Store, now = Date.now()): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24): absent is nothing sent yet; any other shape is unknown, never 0 shown to the creator.
+  const reply = repliesFor(await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]), 1);
+  const n = reply ? textCountOf(reply[0]) : null;
+  if (n === null) throw new UnknownReplyError("the yearly offers counter");
+  return n === "absent" ? 0 : n;
 }
 
 /** The daily run: every store with it on, from where the last run stopped. */

@@ -16,6 +16,8 @@
  *   nl:nudge:cursor                          where the last run stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storesAfter } from "@/lib/store";
@@ -126,8 +128,11 @@ export async function nudgeStore(store: Store, deadline: number, now = Date.now(
 /** How many come-back emails a store sent this month. */
 export async function nudgesThisMonth(store: Store, now = Date.now()): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24): absent is nothing sent yet; any other shape is unknown, never 0 shown to the creator.
+  const reply = repliesFor(await redisPipeline([["GET", countKey(store.statsId, monthOf(now))]]), 1);
+  const n = reply ? textCountOf(reply[0]) : null;
+  if (n === null) throw new UnknownReplyError("the nudges counter");
+  return n === "absent" ? 0 : n;
 }
 
 /** The daily run: every store with it on, from where the last run stopped. */

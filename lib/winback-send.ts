@@ -23,6 +23,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
@@ -302,8 +303,11 @@ async function sweepStore(store: Store, deadline: number, now: number): Promise<
 /** How many come-back emails a store has sent. */
 export async function winbacksSent(store: Store): Promise<number> {
   if (!store.statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["GET", countKey(store.statsId)]]);
-  return Number(n) || 0;
+  // Read exactly (rule 24): absent is nothing sent yet; any other shape is unknown, never 0 shown to the creator.
+  const reply = repliesFor(await redisPipeline([["GET", countKey(store.statsId)]]), 1);
+  const n = reply ? textCountOf(reply[0]) : null;
+  if (n === null) throw new UnknownReplyError("the come-back offers counter");
+  return n === "absent" ? 0 : n;
 }
 
 /** The daily run: every store with the offer on, from where the last run stopped. */

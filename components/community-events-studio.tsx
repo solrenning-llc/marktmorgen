@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { UrlField } from "@/components/url-field";
@@ -18,6 +18,7 @@ import {
 } from "@/lib/community-text";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { NewTab } from "@/components/new-tab";
+import { ConfirmAction } from "@/components/confirm-action";
 
 /** One event, as the studio shows it: everything but the member-facing page's checks. */
 export type StudioEvent = {
@@ -143,9 +144,13 @@ function inAWeek(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** What canceling says about who is emailed, from the same count the row shows. */
+const cancelWho = (event: StudioEvent) =>
+  event.going === null ? " Anyone coming will be emailed once." : event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
+
 const small = "inline-flex min-h-11 -my-2.5 items-center text-sm font-semibold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:no-underline disabled:opacity-40";
 
-/** The community's live events, in the studio: scheduling, changing, cancelling, replays, and who is coming. */
+/** The community's live events, in the studio: scheduling, changing, canceling, replays, and who is coming. */
 export function CommunityEventsStudio({
   events,
   past,
@@ -176,6 +181,15 @@ export function CommunityEventsStudio({
   const [error, setError] = useState<{ where: string; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const upcoming = events.filter((e) => !e.cancelled).length;
+  // 485 [IT2], unit 3: once a deleted event's row is gone from the refreshed lists, the focus goes to the
+  // section's heading (2.4.3), never to the top of the page.
+  const deleted = useRef<string | null>(null);
+  useEffect(() => {
+    const id = deleted.current;
+    if (id === null || events.some((e) => e.id === id) || past.some((e) => e.id === id)) return;
+    deleted.current = null;
+    document.getElementById("cm-events-title")?.focus();
+  }, [events, past]);
 
   async function run(where: string, payload: Record<string, unknown>, done: string | ((a: Answer) => string)): Promise<boolean> {
     setBusy(where);
@@ -191,6 +205,12 @@ export function CommunityEventsStudio({
     return true;
   }
 
+  // Asked on the page first (ConfirmAction): only "Yes, delete for good" comes here.
+  async function deleteEvent(event: StudioEvent) {
+    const ok = await run(`e-${event.id}`, { action: "delete", event: event.id }, "Deleted.");
+    if (ok) deleted.current = event.id;
+  }
+
   const problem = (where: string) =>
     error?.where === where ? (
       <p className="notice notice-error mt-4" role="alert">{error.text}</p>
@@ -199,7 +219,7 @@ export function CommunityEventsStudio({
   return (
     <section id="events" className="card mt-8 scroll-mt-24 p-6 sm:p-8" aria-labelledby="cm-events-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="cm-events-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Live events</h2>
+        <h2 id="cm-events-title" tabIndex={-1} className="text-lg font-semibold tracking-[-0.02em] text-ink">Live events</h2>
         <span className={`tag ${upcoming ? "tag-brand" : ""}`}>{upcoming ? `${upcoming} coming up` : "None coming up"}</span>
       </div>
       <p className="mt-2 text-ink-soft">
@@ -284,21 +304,18 @@ export function CommunityEventsStudio({
                     setError(null);
                     setEditing(event.id);
                   }}
-                  onCancelEvent={() => {
-                    const who = event.going === null ? " Anyone coming will be emailed once." : event.going ? ` The ${event.going === 1 ? "person" : `${event.going} people`} coming will be emailed once.` : "";
-                    if (window.confirm(`Cancel "${event.title}"?${who} This cannot be undone.`)) {
-                      run(`e-${event.id}`, { action: "cancel", event: event.id }, (a) =>
-                        a.notice === "failed"
-                          ? `Canceled, ${UNSENT}`
-                          : a.notice === "waiting" || event.going === null
-                            ? "Canceled. Anyone coming is being emailed."
-                            : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.",
-                      );
-                    }
-                  }}
-                  onDelete={() => {
-                    if (window.confirm(`Delete "${event.title}" for good?`)) run(`e-${event.id}`, { action: "delete", event: event.id }, "Deleted.");
-                  }}
+                  cancelQuestion={`Cancel "${event.title}"?${cancelWho(event)} This cannot be undone.`}
+                  onCancelEvent={() =>
+                    run(`e-${event.id}`, { action: "cancel", event: event.id }, (a) =>
+                      a.notice === "failed"
+                        ? `Canceled, ${UNSENT}`
+                        : a.notice === "waiting" || event.going === null
+                          ? "Canceled. Anyone coming is being emailed."
+                          : event.going ? "Canceled. Everyone coming is being emailed." : "Canceled.",
+                    )
+                  }
+                  deleteQuestion={`Delete "${event.title}" for good?`}
+                  onDelete={() => deleteEvent(event)}
                   run={run}
                 />
               )}
@@ -322,10 +339,10 @@ export function CommunityEventsStudio({
                   canManage={canManage}
                   busy={busy}
                   onEdit={() => {}}
+                  cancelQuestion=""
                   onCancelEvent={() => {}}
-                  onDelete={() => {
-                    if (window.confirm(`Delete "${event.title}" and its replay link for good?`)) run(`e-${event.id}`, { action: "delete", event: event.id }, "Deleted.");
-                  }}
+                  deleteQuestion={`Delete "${event.title}" and its replay link for good?`}
+                  onDelete={() => deleteEvent(event)}
                   run={run}
                 />
                 {problem(`e-${event.id}`)}
@@ -350,7 +367,9 @@ function EventRow({
   busy,
   onEdit,
   onCancelEvent,
+  cancelQuestion,
   onDelete,
+  deleteQuestion,
   run,
 }: {
   handle: string;
@@ -360,8 +379,12 @@ function EventRow({
   canManage: boolean;
   busy: string | null;
   onEdit: () => void;
-  onCancelEvent: () => void;
-  onDelete: () => void;
+  /** Done only on "Yes, cancel the event", after cancelQuestion was asked on the page (485 [IT2]). */
+  onCancelEvent: () => void | Promise<unknown>;
+  cancelQuestion: string;
+  /** Done only on "Yes, delete for good", after deleteQuestion was asked on the page. */
+  onDelete: () => void | Promise<unknown>;
+  deleteQuestion: string;
   run: (where: string, payload: Record<string, unknown>, done: string) => Promise<boolean>;
 }) {
   const [replay, setReplay] = useState(event.replayUrl);
@@ -430,11 +453,15 @@ function EventRow({
         {canManage && !event.over && !event.cancelled ? (
           <>
             <button type="button" className={small} disabled={busy !== null} onClick={onEdit}>Edit or move</button>
-            <button type="button" className={small} disabled={busy !== null} onClick={onCancelEvent}>Cancel the event</button>
+            <ConfirmAction className={small} disabled={busy !== null} busy={busy === `e-${event.id}`} question={cancelQuestion} yes="Yes, cancel the event" keep="Keep the event" onConfirm={onCancelEvent}>
+              Cancel the event
+            </ConfirmAction>
           </>
         ) : null}
         {canManage && (event.over || event.cancelled) ? (
-          <button type="button" className={small} disabled={busy !== null} onClick={onDelete}>Delete</button>
+          <ConfirmAction className={small} disabled={busy !== null} busy={busy === `e-${event.id}`} question={deleteQuestion} yes="Yes, delete for good" onConfirm={onDelete}>
+            Delete
+          </ConfirmAction>
         ) : null}
       </div>
 

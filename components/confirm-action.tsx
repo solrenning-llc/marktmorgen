@@ -16,6 +16,7 @@ export function ConfirmAction({
   busy = false,
   className = "btn btn-ghost btn-sm",
   label,
+  keep = "Keep it",
 }: {
   /** What the first button says, as before. */
   children: ReactNode;
@@ -29,6 +30,8 @@ export function ConfirmAction({
   className?: string;
   /** The first button's accessible name, when its words alone do not say what it acts on. */
   label?: string;
+  /** The words of the safe choice, when "Keep it" alone does not say what is kept: "Keep the event" (485 [IT2]). */
+  keep?: string;
 }) {
   const [asking, setAsking] = useState(false);
   // When the question closes (Keep it, Escape, or done), the focus goes back to the button that opened it (2.4.3),
@@ -63,7 +66,7 @@ export function ConfirmAction({
       </button>
       {/* The safe choice takes focus, so Enter pressed twice by mistake keeps it. */}
       <button type="button" className="btn btn-ghost btn-sm" autoFocus onClick={() => setAsking(false)}>
-        Keep it
+        {keep}
       </button>
     </span>
   );

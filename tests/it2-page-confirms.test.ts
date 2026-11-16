@@ -103,7 +103,6 @@ part("No browser confirmation comes back elsewhere");
 // access ones in files other open PRs hold. Each line a file and how many it has today.
 const LEFT: Record<string, number> = {
   "components/community-composer.tsx": 1,
-  "components/community-events-studio.tsx": 3,
   "components/community-studio.tsx": 3,
   "components/email-studio.tsx": 2,
   // Leaving the page with unsaved changes: once left, nothing is there to undo (unit 0, item 15).

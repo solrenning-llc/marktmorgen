@@ -57,6 +57,7 @@ import { onAccount } from "@/lib/stripe-account";
 import { STRIPE_LIST_VERSION, plainObject, readStripePage } from "@/lib/stripe-list";
 import { currentMeta } from "@/lib/tier-rules";
 import { type Listing, type Store, saleHandles } from "@/lib/store";
+import { currencyRule } from "@/lib/money";
 
 /** Public requests one check takes from the store's month, before it reads: the next product after a purchase's own count. */
 export const MEMBER_PRICE_REQUEST_UNITS = NEXT_OFFER_REQUEST_UNITS;
@@ -218,9 +219,11 @@ export async function memberPriceFor(store: Store, product: Listing, cookies: Co
   if (kinds.size === 0) return NONE;
   const found = await heldHere(store, email, kinds);
   if (found === null) return UNKNOWN;
-  const percent = memberOffFrom(store.memberPrices, product, found.held);
+  // Never below what the store's currency can be charged (DISC-S-1, as a sale and a fair price).
+  const floor = currencyRule(store.currency).minCharge;
+  const percent = memberOffFrom(store.memberPrices, product, found.held, floor);
   // A larger rule may rest on a purchase not read: said as unknown, never as no.
-  const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()));
+  const most = memberOffFrom(store.memberPrices, product, new Set(kinds.keys()), floor);
   if (percent < most && !found.complete) return UNKNOWN;
   return percent > 0 ? { state: "member", percent, email } : NONE;
 }

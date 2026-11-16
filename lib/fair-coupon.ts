@@ -8,8 +8,11 @@
  * shows the buyer beside the amount taken off.
  *
  * A member price (lib/member-price.ts, 620 [SZ4]) is taken off the same way,
- * with its own coupons (mm_member_<percent>, named "Member price").
+ * with its own coupons (mm_member_<percent>, named "Member price"), and its
+ * checkout belongs to a customer made on the same account with the proved
+ * address (memberCustomer), so the buyer cannot type another one over it.
  */
+import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { fairCouponId } from "@/lib/fair-price";
@@ -57,4 +60,40 @@ async function percentCoupon(account: string, percent: number, id: string, key: 
   }
   await redisPipeline([["SET", key, "1"]]).catch(() => undefined);
   return id;
+}
+
+const CUSTOMER_ID = /^cus_[A-Za-z0-9]{6,64}$/;
+/** An address as lib/auth.ts normaliseEmail keeps it (trimmed, lower case), without importing the sign-in module here. */
+const sameAddress = (email: string) => email.trim().toLowerCase();
+/** Calls to the creator's Stripe account a member's checkout makes for its customer, inside the member price's read (tests/member-price.test.ts). */
+export const MEMBER_CUSTOMER_STRIPE_CALLS = 1;
+
+/**
+ * The customer a member price's checkout belongs to (620 [SZ4]; Codex X4 on
+ * #2999): made on the creator's own account with the address the member
+ * price was proved for. customer_email is only a prefill the buyer may type
+ * over on Stripe's page, and the delivery reads the address typed there
+ * first; a customer that already has an address is shown and cannot be
+ * changed, so the purchase at the member price is the member's own.
+ *
+ * One call, with a key for the account and the address, so a retry within
+ * Stripe's day of keys finds the same customer rather than making another.
+ * Throws when Stripe made none, or answered with an id not in a customer's
+ * shape or an address other than the one sent (rule 24): the checkout then
+ * does not open at the member price.
+ */
+export async function memberCustomer(account: string, email: string): Promise<string> {
+  const key = `mm-member-customer:${createHash("sha256").update(`${account}\n${email}`).digest("hex")}`;
+  const made = await onAccount(
+    "POST",
+    account,
+    "/customers",
+    new URLSearchParams({ email, "metadata[made_by]": "marktmorgen", "metadata[purpose]": "member-price" }),
+    undefined,
+    key,
+  );
+  if (typeof made.id !== "string" || !CUSTOMER_ID.test(made.id) || typeof made.email !== "string" || sameAddress(made.email) !== sameAddress(email)) {
+    throw new Error("Stripe answered a member's customer in an unknown shape");
+  }
+  return made.id;
 }

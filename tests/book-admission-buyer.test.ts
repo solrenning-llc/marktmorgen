@@ -22,6 +22,7 @@ import { POST as bookRoute } from "@/app/api/store/book/route";
 import { POST as moveRoute } from "@/app/api/store/book/move/route";
 import EmbedCard from "@/app/embed/[handle]/[product]/page";
 import { StoreResting } from "@/components/store-resting";
+import { bookedHere } from "@/lib/book-page-admission";
 import { bookTimesUnits, bookingDiaryKey } from "@/lib/book-page-rules";
 import { speech } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -282,6 +283,32 @@ async function main(): Promise<void> {
 
   part("The buyer's proof reads lib/calls.ts's own diary");
   is("the diary key is lib/calls.ts's busyKey", readFileSync("lib/calls.ts", "utf8").includes("const busyKey = (callsId: string) => `nl:call:busy:${callsId}`;") && bookingDiaryKey("abc") === "nl:call:busy:abc", true);
+
+  part("Claude 3's MEDIUM on #3478: a diary read that fails is not \"no such booking\" (rule 24)");
+  const unread = await shop("admitunread");
+  const KEPT = `cs_test_${"u".repeat(24)}`;
+  booking(unread, KEPT);
+  const failing = async <T>(run: () => Promise<T>): Promise<T> => {
+    const before = redis.pipeline.bind(redis);
+    redis.pipeline = async (cmds) => {
+      if (cmds.some((c) => c[0] === "HEXISTS" && String(c[1]).startsWith("nl:call:busy:"))) throw new Error("timed out (synthetic)");
+      return before(cmds);
+    };
+    try {
+      return await run();
+    } finally {
+      redis.pipeline = before;
+    }
+  };
+  is("bookedHere: a diary read that fails is not known (null), never \"not here\"", await failing(() => bookedHere(unread.store, KEPT)), null);
+  is("control: the same booking read is there", await bookedHere(unread.store, KEPT), true);
+  const moveWords = bookingWords(unread.store.language);
+  const shown = html((await failing(() => book(unread, { move: KEPT }, "198.51.100.210"))).result);
+  const escaped = (text: string) => renderToStaticMarkup(text as never);
+  is("the move page says the booking could not be read, never that it does not exist", [shown.includes(escaped(moveWords.unreadable)), shown.includes(escaped(moveWords.notFound))], [true, false]);
+  const routed = (await failing(() => post(unread, moveRoute, "/api/store/book/move", { session: KEPT, start: START }, "203.0.113.210"))).result as Response;
+  is("the move route answers \"error\" for it, never \"unknown\"", routed.headers.get("location")?.includes("status=error"), true);
+  is("Claude 3's LEVE: times that do not fit the window say \"unavailable\", not the buyer's \"slow\"", readFileSync("app/api/store/book/move/route.ts", "utf8").includes('if (!(await payBookTimes(store, "buyer"))) return back("unavailable");'), true);
 
   part("(e) The help says what a call's booking times count");
   is("the help names the booking times' requests", /booking times/.test(readFileSync("lib/help-content.ts", "utf8")), true);

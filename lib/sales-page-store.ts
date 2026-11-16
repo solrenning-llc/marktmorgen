@@ -215,6 +215,31 @@ export async function keptPageBytes(statsId: string, productId: string): Promise
   }
 }
 
+/** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
+export class PageGrown extends Error {
+  constructor() {
+    super("The page changed while it was being read. Try again in a moment.");
+    this.name = "PageGrown";
+  }
+}
+
+/**
+ * A product's page, read no further than `most` bytes (what keptPageBytes measured and the caller counted): a page grown
+ * since is read cut, cannot be read, and throws PageGrown, so never more is read than was paid for.
+ */
+export async function readPageWithin(statsId: string | null, productId: string, most: number): Promise<SalesPage> {
+  if (!statsId || !isRedisConfigured() || most <= 0) return { ...EMPTY_PAGE, blocks: [] };
+  const [raw] = repliesFor(await redisPipeline([["GETRANGE", pageKey(statsId, productId), 0, most - 1]]), 1) ?? [undefined];
+  if (typeof raw !== "string") throw new UnknownReplyError("a page");
+  if (!raw) return { ...EMPTY_PAGE, blocks: [] };
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new PageGrown();
+  }
+  return pageOf(raw);
+}
+
 /** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
   if (raw === null) return { ...EMPTY_PAGE, blocks: [] };

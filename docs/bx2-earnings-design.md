@@ -231,7 +231,11 @@ source and currency only).
    record carries `stripe:…` or `paypal:…`. Each list returns `reachedBack`; a row or record that
    cannot be read stops its list there (the newer months stay known, the paid invoices too, dated
    by their invoice: "Renewal dates"); a page in another shape, an id twice, rows out of order or a
-   failure make the list unread. The reading's time is taken once every list was read. Kept as the
+   failure make the list unread. A refund is taken off in the month it was made whether it went
+   through, is on its way or failed later (its money left the balance then; a failure's money back
+   is `reinstated`, said not read), so a pending refund that fails never rewrites a month shown;
+   one waiting on the buyer (`requires_action`) or of a status not documented stops the list there,
+   and a canceled one took nothing (Codex N1's MEDIUM on #3022). The reading's time is taken once every list was read. Kept as the
    fourth reading kind (`READING_KINDS` 3 to 4, `HEAVY_KINDS` in lib/store-readings.ts), taken as
    one of the day's two heavy readings before anything is read; a kept copy of another time zone
    is taken as none, fresh or stale (`keptReading`'s `accept`, the first review of #3022). Cost, measured: the store-readings line +US$ 0.0000011

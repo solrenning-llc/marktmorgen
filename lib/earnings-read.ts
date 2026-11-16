@@ -33,6 +33,12 @@
  *   - answered in another shape, out of order, with an id twice, or failed:
  *     unread, and every month of its source unknown.
  *
+ * A refund is taken off in the month it was made whether it went through, is
+ * on its way or failed later: its money left the balance then, and a failure
+ * gives it back later (`reinstated`, said not read), so a month shown is never
+ * rewritten by a pending refund failing (Codex N1 on #3022). One waiting on
+ * the buyer or of a status not documented is a record not understood.
+ *
  * Paid invoices are dated by when their invoice was made (`created`), as
  * readRenewals does, the date Stripe lists them by (Claude 3 on #3022): no
  * bound on how late an invoice is paid is proved (Stripe's retries can run
@@ -144,11 +150,15 @@ function takers(store: Store): Record<keyof typeof EARNINGS_STRIPE_PAGES, (row: 
       const event = money(row, "amount_paid", created);
       return event && event.cents === 0 ? "skip" : event;
     },
-    // A refund on the account that went through or is on its way.
+    // A refund on the account whose money left the balance when it was made: gone through, on its way, or failed
+    // later. A failed one stays in the month it was made, so a month shown is never rewritten when a pending refund
+    // fails (Codex N1's MEDIUM on #3022); the money given back then is `reinstated`, said not read. A canceled one
+    // (only a refund waiting on the buyer can be) never took money: nothing. One waiting on the buyer
+    // (`requires_action`) may yet go out, and a status not documented is not understood: unknown, never skipped.
     refunds: (row, created) => {
       const status = text(row, "status");
-      if (status === null) return null;
-      return status === "succeeded" || status === "pending" ? money(row, "amount", created) : "skip";
+      if (status === "succeeded" || status === "pending" || status === "failed") return money(row, "amount", created);
+      return status === "canceled" ? "skip" : null;
     },
   };
 }

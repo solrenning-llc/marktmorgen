@@ -196,9 +196,9 @@ async function main(): Promise<void> {
     const e = kept?.value ?? null;
     is("read now, not stale, twelve months from June 2031", [kept?.stale, kept?.at, e?.months.length, e?.months[0].month, e?.months[11].month], [false, NOW, 12, "2031-06", "2030-07"]);
     is("the reading begins at the oldest month's floor", e?.since, readingSince(NOW, "UTC"));
-    is("Stripe, June: the store's paid checkouts and extras, every paid invoice of its memberships made in June but the first (the switch), refunds; disputes and money given back said not read", of(e, "2031-06", "stripe"), {
+    is("Stripe, June: the store's paid checkouts and extras, every paid invoice of its memberships made in June but the first (the switch), refunds (the one that failed too: its money left in June, coming back is money given back, not read); disputes and money given back said not read", of(e, "2031-06", "stripe"), {
       source: "stripe", state: "read",
-      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 64100, enteredCents: 0, refundCents: 1000, disputeCents: 0, reinstatedCents: 0, netCents: 69600 }], leftOut: ["dispute", "reinstated"], partly: [],
+      lines: [{ currency: "usd", salesCents: 6500, renewalCents: 64100, enteredCents: 0, refundCents: 1800, disputeCents: 0, reinstatedCents: 0, netCents: 68800 }], leftOut: ["dispute", "reinstated"], partly: [],
     });
     is("the disputes list is never read: no page of it is spent", pagesOf["/disputes"] ?? 0, 0);
     is("June's words say disputes are not taken off and money given back is not added", netWords(month(e, "2031-06")?.sources ?? []),
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
     is("a month with nothing, read in full: a confirmed zero, not unknown", [of(e, "2031-02", "stripe")?.state, (of(e, "2031-02", "stripe") as { lines?: unknown[] })?.lines?.length], ["read", 0]);
     is("the oldest month: Stripe is read, every list listed by the date it is dated by", of(e, "2030-07", "stripe")?.state, "read");
     is("the oldest month: PayPal is read", of(e, "2030-07", "paypal")?.state, "read");
-    is("the oldest month a confirmed zero; June's total adds Stripe and PayPal in dollars", [month(e, "2030-07")?.totals, month(e, "2031-06")?.totals], [[], [{ currency: "usd", salesCents: 10500, renewalCents: 64100, enteredCents: 0, refundCents: 5000, disputeCents: 0, reinstatedCents: 0, netCents: 69600 }]]);
+    is("the oldest month a confirmed zero; June's total adds Stripe and PayPal in dollars", [month(e, "2030-07")?.totals, month(e, "2031-06")?.totals], [[], [{ currency: "usd", salesCents: 10500, renewalCents: 64100, enteredCents: 0, refundCents: 5800, disputeCents: 0, reinstatedCents: 0, netCents: 68800 }]]);
     is("every Stripe list read in the version its shapes are written for", [...versions], ["2026-08-26.dahlia"]);
     is("nothing ranks the creator by revenue (561 [NE1])", /best|growth|rank|status|level|badge/i.test(JSON.stringify(Object.keys(month(e, "2031-06") ?? {}))), false);
 

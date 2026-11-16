@@ -1,9 +1,10 @@
 import { DESCRIPTION_FROM_WORDS, type SearchSnippet, TITLE_FROM_WORDS, WAITING_WORDS } from "@/lib/product-search-snippet";
 
 /**
- * "What search engines are given" under a product page's search fields in the
- * studio (248 [ST1]): the exact title and description its public page sends,
- * from the same rule as the page's metadata (lib/product-search-snippet.ts),
+ * "What search engines are given" under a page's search fields in the studio
+ * (248 [ST1]), for a product's page or one of the store's own: the exact title
+ * and description its public page sends, from the same rule as the page's
+ * metadata (lib/product-search-snippet.ts),
  * and where each part comes from. It follows what is typed above it, shows
  * what the page will send once it is saved, and promises nothing about how a
  * search engine lays out or ranks a result.
@@ -19,7 +20,7 @@ export function SearchSnippetPreview({ snippet }: { snippet: SearchSnippet }) {
       </p>
       {snippet.waiting ? (
         <p className="mt-2 max-w-[80ch] text-xs font-semibold leading-relaxed text-ink" data-snippet-waiting="">
-          {WAITING_WORDS}
+          {WAITING_WORDS[snippet.kind]}
         </p>
       ) : null}
       <dl className="mt-3 space-y-3 text-sm">
@@ -28,7 +29,7 @@ export function SearchSnippetPreview({ snippet }: { snippet: SearchSnippet }) {
           <dd className="mt-0.5 break-words text-ink" data-snippet-title={snippet.titleFrom}>
             {snippet.title}
           </dd>
-          <dd className="mt-0.5 max-w-[80ch] text-xs leading-relaxed text-ink-soft">{TITLE_FROM_WORDS[snippet.titleFrom]}</dd>
+          <dd className="mt-0.5 max-w-[80ch] text-xs leading-relaxed text-ink-soft">{TITLE_FROM_WORDS[snippet.kind][snippet.titleFrom]}</dd>
         </div>
         <div>
           <dt className="font-semibold text-ink">Description</dt>

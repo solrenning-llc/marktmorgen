@@ -109,6 +109,8 @@ export default async function StudioSitePage({ searchParams }: Params) {
                       about=""
                       look={store.look}
                       storeName={store.name}
+                      // What the public page falls back to for its search description (248 [ST1]).
+                      siteSearch={{ bio: store.bio }}
                       photo={store.photoId ? photoUrl(store.photoId) : null}
                       pageHref={`/@${store.handle}/${selected.slug}`}
                       shareUrl={`${base}/${selected.slug}`}

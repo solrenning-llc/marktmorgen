@@ -17,7 +17,8 @@
  */
 
 export type TitleFrom = "yours" | "default";
-export type DescriptionFrom = "yours" | "summary" | "about" | "general";
+/** A product page: summary, About, general. A store page (sitePageSnippet): subheadline, store description, sentence. */
+export type DescriptionFrom = "yours" | "summary" | "about" | "general" | "subheadline" | "bio" | "sentence";
 
 export type SearchSnippet = {
   title: string;
@@ -29,6 +30,8 @@ export type SearchSnippet = {
    * is what is shown and what search engines get (lib/sales-page.ts, livePage), so the page's own search words wait.
    */
   waiting: boolean;
+  /** A product's page, or one of the store's own pages, whose rule and words differ. */
+  kind: "product" | "site";
 };
 
 export type SnippetInput = {
@@ -49,28 +52,79 @@ export type SnippetInput = {
 
 /** What the product page gives search engines, and where each part comes from. */
 export function productSearchSnippet(input: SnippetInput): SearchSnippet {
-  // The studio sends both fields trimmed (components/page-editor.tsx) and the
-  // page keeps what was sent, so a field of spaces counts as empty here too.
   // A page kept from visitors is read as none by the public page, its search words included.
   const waiting = input.shown === false;
-  const seoTitle = waiting ? "" : input.seoTitle.trim();
-  const seoDescription = waiting ? "" : input.seoDescription.trim();
+  const seoTitle = waiting ? "" : flat(input.seoTitle);
+  const seoDescription = waiting ? "" : flat(input.seoDescription);
   const titleFrom: TitleFrom = seoTitle ? "yours" : "default";
   const title = seoTitle || `${input.productTitle} — ${input.storeName}`;
-  if (seoDescription) return { title, titleFrom, description: seoDescription, descriptionFrom: "yours", waiting };
-  if (input.summary) return { title, titleFrom, description: input.summary, descriptionFrom: "summary", waiting };
-  if (input.aboutLine) return { title, titleFrom, description: input.aboutLine, descriptionFrom: "about", waiting };
-  return { title, titleFrom, description: input.general, descriptionFrom: "general", waiting };
+  const kind = "product";
+  if (seoDescription) return { title, titleFrom, description: seoDescription, descriptionFrom: "yours", waiting, kind };
+  if (input.summary) return { title, titleFrom, description: input.summary, descriptionFrom: "summary", waiting, kind };
+  if (input.aboutLine) return { title, titleFrom, description: input.aboutLine, descriptionFrom: "about", waiting, kind };
+  return { title, titleFrom, description: input.general, descriptionFrom: "general", waiting, kind };
+}
+
+/**
+ * A field as the page keeps it once saved: lib/sales-page.ts parses each of
+ * these lines to one line of single spaces, trimmed, so what is typed is
+ * compared as it will be kept, and a field of spaces is empty.
+ */
+function flat(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+/** The most of a store page's description its metadata gives (app/[handle]/[slug]/page.tsx). */
+export const SITE_DESCRIPTION_MAX = 300;
+
+export type SiteSnippetInput = {
+  seoTitle: string;
+  seoDescription: string;
+  /** The page's title, as its menu names it. */
+  pageTitle: string;
+  /** The subheadline of the page's first block when that block is a hero; "" otherwise. */
+  subheadline: string;
+  /** The store's description, the line under its name. */
+  storeBio: string;
+  storeName: string;
+  /** Whether the page is on the store: it has a block and is not kept back. */
+  shown: boolean;
+};
+
+/**
+ * What one of the store's own pages (lib/site-page-rules.ts) gives search
+ * engines, in its page's order (app/[handle]/[slug]/page.tsx): own title, else
+ * "<page> — <store>"; own description, else the first hero's subheadline, else
+ * the store's description, else "<page>, from <store>."; at most 300
+ * characters. A page with no block, or kept back, is not on the store at all:
+ * `waiting`, with what it will give once it shows.
+ */
+export function sitePageSnippet(input: SiteSnippetInput): SearchSnippet {
+  const seoTitle = flat(input.seoTitle);
+  const seoDescription = flat(input.seoDescription);
+  const subheadline = flat(input.subheadline);
+  const titleFrom: TitleFrom = seoTitle ? "yours" : "default";
+  const title = seoTitle || `${input.pageTitle} — ${input.storeName}`;
+  const [description, descriptionFrom]: [string, DescriptionFrom] = seoDescription
+    ? [seoDescription, "yours"]
+    : subheadline
+      ? [subheadline, "subheadline"]
+      : input.storeBio
+        ? [input.storeBio, "bio"]
+        : [`${input.pageTitle}, from ${input.storeName}.`, "sentence"];
+  return { title, titleFrom, description: description.slice(0, SITE_DESCRIPTION_MAX), descriptionFrom, waiting: !input.shown, kind: "site" };
 }
 
 /** Said above the parts while the page is kept from visitors. */
-export const WAITING_WORDS =
-  "This page is hidden, so visitors and search engines get the product's plain page. The title and description above are given once the page shows.";
+export const WAITING_WORDS: Record<SearchSnippet["kind"], string> = {
+  product: "This page is hidden, so visitors and search engines get the product's plain page. The title and description above are given once the page shows.",
+  site: "This page is not on your store yet, because it is hidden or has no blocks, so search engines get nothing from it. Once it shows, it gives them this title and description.",
+};
 
 /** Where a part came from, in plain words for the studio. */
-export const TITLE_FROM_WORDS: Record<TitleFrom, string> = {
-  yours: "From the title above.",
-  default: "From the product's name and your store's name.",
+export const TITLE_FROM_WORDS: Record<SearchSnippet["kind"], Record<TitleFrom, string>> = {
+  product: { yours: "From the title above.", default: "From the product's name and your store's name." },
+  site: { yours: "From the title above.", default: "From the page's title and your store's name." },
 };
 
 export const DESCRIPTION_FROM_WORDS: Record<DescriptionFrom, string> = {
@@ -78,4 +132,7 @@ export const DESCRIPTION_FROM_WORDS: Record<DescriptionFrom, string> = {
   summary: "From the product's one-line summary.",
   about: "From the start of the product's About text.",
   general: "A general sentence, because the product has no summary or About text. Write a description above to use your own words.",
+  subheadline: "From the subheadline of the page's first block.",
+  bio: "From your store's description, the line under its name.",
+  sentence: "A general sentence, because the page's first block has no subheadline and your store has no description. Write a description above to use your own words.",
 };

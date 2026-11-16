@@ -120,7 +120,7 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
-import { productSearchSnippet } from "@/lib/product-search-snippet";
+import { productSearchSnippet, sitePageSnippet } from "@/lib/product-search-snippet";
 import { SearchSnippetPreview } from "@/components/search-snippet-preview";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
@@ -297,6 +297,7 @@ export function PageEditor({
   featurable = [],
   site,
   searchLine,
+  siteSearch,
   startTest = false,
 }: {
   /** Opened from "Worth knowing" to test a second headline (lib/insights.ts): the test is switched on, ready to write. */
@@ -350,6 +351,8 @@ export function PageEditor({
    * page, whose metadata is not a product's.
    */
   searchLine?: { aboutLine: string; general: string };
+  /** For one of the store's own pages: its description, which the page falls back to after its first subheadline. */
+  siteSearch?: { bio: string };
 }) {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>(() => toDrafts(templateDraft ?? initial));
@@ -2764,6 +2767,19 @@ export function PageEditor({
                     general: searchLine.general,
                     // As the public page reads it once saved (lib/sales-page.ts, livePage): hidden until its time.
                     shown: !hidden || (showFrom > 0 && clock > 0 && showFrom * 1000 <= clock),
+                  })}
+                />
+              ) : site && siteSearch ? (
+                <SearchSnippetPreview
+                  snippet={sitePageSnippet({
+                    seoTitle,
+                    seoDescription,
+                    pageTitle: product.title,
+                    subheadline: drafts[0]?.block.kind === "hero" ? drafts[0].block.sub : "",
+                    storeBio: siteSearch.bio,
+                    storeName,
+                    // On the store only with a block, and not while kept back (app/[handle]/[slug]/page.tsx).
+                    shown: drafts.length > 0 && (!hidden || (showFrom > 0 && clock > 0 && showFrom * 1000 <= clock)),
                   })}
                 />
               ) : null}

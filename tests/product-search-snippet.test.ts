@@ -33,7 +33,7 @@ const OWNER = "search-snippet@example.com";
 const ORIGIN = "https://marktmorgen.com";
 const ABOUT = "Forty weeknight dinners, each ready in thirty minutes, with a shopping list for every week of the year and notes on what keeps.";
 
-type Snippet = { title: string; description: string; titleFrom: string; descriptionFrom: string; waiting?: boolean };
+type Snippet = { title: string; description: string; titleFrom: string; descriptionFrom: string; waiting?: boolean; kind?: string };
 type Input = { seoTitle: string; seoDescription: string; productTitle: string; summary: string; storeName: string; aboutLine: string; general: string; shown?: boolean };
 const rule = (snippetModule as Record<string, unknown>).productSearchSnippet as ((input: Input) => Snippet) | undefined;
 const Preview = (previewModule as Record<string, unknown>).SearchSnippetPreview as ((props: { snippet: Snippet }) => React.ReactElement) | undefined;
@@ -63,23 +63,23 @@ async function main(): Promise<void> {
 
   part("The rule, in the page's order");
   is("nothing of its own: the product's and store's names, and the general sentence", snippet(base), {
-    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: base.general, descriptionFrom: "general", waiting: false,
+    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: base.general, descriptionFrom: "general", waiting: false, kind: "product",
   });
   is("the start of About comes before the general sentence", snippet({ ...base, aboutLine: "Forty dinners." }), {
-    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Forty dinners.", descriptionFrom: "about", waiting: false,
+    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Forty dinners.", descriptionFrom: "about", waiting: false, kind: "product",
   });
   is("the summary comes before About", snippet({ ...base, aboutLine: "Forty dinners.", summary: "Dinners in thirty minutes." }), {
-    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Dinners in thirty minutes.", descriptionFrom: "summary", waiting: false,
+    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Dinners in thirty minutes.", descriptionFrom: "summary", waiting: false, kind: "product",
   });
   const own = { ...base, aboutLine: "Forty dinners.", summary: "Dinners in thirty minutes.", seoTitle: "Forty fast dinners", seoDescription: "A year of weeknight dinners." };
   is("the page's own words come first", snippet(own), {
-    title: "Forty fast dinners", titleFrom: "yours", description: "A year of weeknight dinners.", descriptionFrom: "yours", waiting: false,
+    title: "Forty fast dinners", titleFrom: "yours", description: "A year of weeknight dinners.", descriptionFrom: "yours", waiting: false, kind: "product",
   });
   is("a field of spaces is empty, as the studio saves it", snippet({ ...base, seoTitle: "   ", seoDescription: "  \n" }), {
-    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: base.general, descriptionFrom: "general", waiting: false,
+    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: base.general, descriptionFrom: "general", waiting: false, kind: "product",
   });
   is("a page kept from visitors gives none of its own words, and says it waits", snippet({ ...own, shown: false }), {
-    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Dinners in thirty minutes.", descriptionFrom: "summary", waiting: true,
+    title: "Dinner guide — Harbor Kitchen", titleFrom: "default", description: "Dinners in thirty minutes.", descriptionFrom: "summary", waiting: true, kind: "product",
   });
 
   part("The real product page's metadata is the rule, for each source of the description");

@@ -29,6 +29,7 @@ import { FunnelBeacon } from "@/components/store-beacon";
 import { funnelMark } from "@/lib/page-funnel";
 import { funnelHere } from "@/lib/page-funnel-store";
 import { funnelWords } from "@/lib/buyer-words/funnel";
+import { sitePageSnippet } from "@/lib/product-search-snippet";
 
 type Params = {
   params: Promise<{ handle: string; slug: string }>;
@@ -62,17 +63,25 @@ export async function generateMetadata({ params }: Pick<Params, "params">): Prom
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store, page, blocks } = found;
   if (blocks === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
-  const title = blocks.seoTitle || `${page.title} — ${store.name}`;
   const hero = blocks.blocks[0]?.kind === "hero" ? blocks.blocks[0] : null;
-  const description = blocks.seoDescription || hero?.sub || store.bio || `${page.title}, from ${store.name}.`;
+  // The same rule the studio shows under the page's search fields (248 [ST1], lib/product-search-snippet.ts).
+  const { title, description } = sitePageSnippet({
+    seoTitle: blocks.seoTitle,
+    seoDescription: blocks.seoDescription,
+    pageTitle: page.title,
+    subheadline: hero?.sub ?? "",
+    storeBio: store.bio,
+    storeName: store.name,
+    shown: true,
+  });
   const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}` : null;
   const canonical = ownDomain ? `${ownDomain}/${page.slug}` : `/@${store.handle}/${page.slug}`;
   return {
     title,
-    description: description.slice(0, 300),
+    description,
     alternates: { canonical },
     robots: { index: true, follow: true },
-    openGraph: { type: "website", title, description: description.slice(0, 300), url: canonical },
+    openGraph: { type: "website", title, description, url: canonical },
   };
 }
 

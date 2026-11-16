@@ -552,10 +552,14 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
     // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
     // Merge of main into #2803 (16 November 2026): main's outbox and this PR's Blob costs together; computed, still above zero (MR).
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #2803 (16 November 2026, Claude 5 fix H): main's latest model and this PR's Blob costs together; computed, not chosen, each still above zero (MR).
     // #2801 (thumbnail copies) merged again with its base #2803 (16 November 2026): the thumbnail's Blob lines with main's
     // model and #2803's upload costs together; computed, not chosen, each still above zero (MR).
     is("11: Store, Studio and Scale keep 44.32, 311.85 and 697.32 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.32", "311.85", "697.32"]);

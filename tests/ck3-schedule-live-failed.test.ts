@@ -17,6 +17,8 @@ const originalFetch = globalThis.fetch;
 let active = false;
 let stopFails = false;
 let stops = 0;
+/** A switch-on that lands at Stripe but whose answer is lost (a 500 after the write), as #4466's other door. */
+let onLost = false;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   if (!url.startsWith("http://127.0.0.1:4996/")) throw Error("Unexpected external request " + url);
@@ -31,6 +33,10 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   }
   if (path.startsWith("/promotion_codes/")) {
     const want = new URLSearchParams(body).get("active") === "true";
+    if (want && onLost) {
+      active = true;
+      return json(500, { error: { message: "synthetic outage after the write" } });
+    }
     if (!want) {
       stops += 1;
       if (stopFails) return json(500, { error: { message: "synthetic outage" } });
@@ -130,6 +136,27 @@ async function main() {
     is("RED: every try is paid for at scheduling", rules.SCHEDULE_UNITS, ACTIVATION_TRIES + stopTries);
     is("RED: out of the due list once its stop tries are used", await isDue(), false);
     is("RED: kept as failed with its stop unconfirmed, never a plain failure", [entry?.failed, entry?.stopUnconfirmed], [true, true]);
+
+    // Claude 4 cloud U on #4522 (6894719098, MEDIUM): activateCode answers false for a refusal and for a 5xx, a
+    // timeout or a lost reply alike; in the last three the switch-on may have landed. The last try then kept the
+    // schedule as failed with the code possibly live, and a code link still applied it.
+    part("A switch-on whose answer is lost may be live: the last try switches it off before the failure is final");
+    await reset();
+    active = false;
+    await sched.scheduleCode(shop, asked, { start, end }, NOW);
+    onLost = true;
+    clock = start;
+    try {
+      for (let i = 0; i < ACTIVATION_TRIES; i += 1) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+        clock += RETRY_SECONDS;
+      }
+    } finally {
+      onLost = false;
+    }
+    is("control: Stripe holds the switch-on whose answer was lost", stops > 0 || active, true);
+    is("kept as failed", await failedFlag(), true);
+    is("a failed schedule leaves no usable code", [active, await livePromotionId(shop.stripeAccountId, "TESTCODE")], [false, null]);
 
     part("A pending stop past the end is left to Stripe's own expiry, with no call");
     await reset();

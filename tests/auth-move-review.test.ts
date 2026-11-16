@@ -354,6 +354,28 @@ async function main() {
     ["https://marktmorgen.com/studio?address=moved-keys-open", true, true],
   );
 
+  // Codex X2's proposal on #3326 (rule 24): the clean-up (dropMemberships) can answer { settled: false, unswept: [] }, a
+  // store it could not read that had no sweep left over from the carry. Its keys are then not known as held, so the move
+  // never says they are: "keys safe" needs the clean-up settled AND nothing left open.
+  let paccRefused = false;
+  const unsettledClean = await move(
+    null,
+    (from, _t, sid) => [
+      // The place stays on the old address (its restrictions could not be read once): nothing was taken off, nothing left to sweep.
+      (commands) => (!paccRefused && commands.some((c) => c[0] === "HGET" && String(c[1]).startsWith("nl:crm:pacc:")) ? ((paccRefused = true), Promise.reject(new Error("refused once"))) : null),
+      // At the clean-up the store answers in an unknown shape: dropMemberships says it is not settled, with no sweep open.
+      atCleanUp(from, (commands) => commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === `nl:store:id:${sid}`, (commands) => real(commands).then(() => [42])),
+    ],
+    false,
+    "",
+    { from: "admin" },
+  );
+  is(
+    "the clean-up unsettled with nothing listed open: the keys are not said as held, on the page and in both notices",
+    [unsettledClean.location, unsettledClean.toldFrom.includes("may still work"), unsettledClean.mails.find((m) => m.to === unsettledClean.to)?.text.includes("may still work") ?? false],
+    ["https://marktmorgen.com/studio?address=moved-no-teams-keys-open", true, true],
+  );
+
   part("the studio's notices that ask for action: a status, a heading, a link that says where it goes");
   const studio = readFileSync("app/studio/page.tsx", "utf8");
   const shown = studio.slice(studio.indexOf("{actionNotice ? ("), studio.indexOf(") : notice ? (", studio.indexOf("{actionNotice ? (")));

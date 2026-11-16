@@ -44,6 +44,17 @@ export const MAX_BENEFIT_TEXT = 120;
 /** Marks one press may make. */
 export const MAX_GIVE_AT_ONCE = 200;
 
+/** Pages of 100 running memberships read at most, for the list and for each press. */
+export const BENEFIT_STRIPE_PAGES = 10;
+/**
+ * Studio requests each page of running memberships takes, counted just before it is read from the creator's Stripe
+ * account (tests/plan-cost-registry.ts, benefitsRead; Claude 7's cost MEDIUM on #3014): the page waited on, and for its
+ * hundred members their deleted-person look-up and the marks of every row they are owed (lib/tier-benefits.ts,
+ * readOwedMarks), with the reading's own share. So a store with few members pays for one page, and one with
+ * BENEFIT_STRIPE_PAGES pages pays for each. Every page load that lists them and every give or undo press reads them.
+ */
+export const BENEFIT_PAGE_UNITS = 6;
+
 export const CADENCES = ["once", "monthly"] as const;
 export type Cadence = (typeof CADENCES)[number];
 export const CADENCE_NAMES: Record<Cadence, string> = { once: "Once", monthly: "Every month" };

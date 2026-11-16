@@ -13,7 +13,7 @@
  * and refused past it.
  *
  * Who is owed what is read, every time, from the running memberships on the
- * creator's own Stripe account: at most MAX_PAGES pages of 100, each read in
+ * creator's own Stripe account: at most BENEFIT_STRIPE_PAGES pages of 100, each read in
  * its exact shape (lib/stripe-list.ts). Stripe down, a page in another shape,
  * a membership that cannot be read or one page too many is said as such:
  * the list is "unknown" or "incomplete", never "nobody waiting". A person's
@@ -40,8 +40,11 @@ import { normaliseEmail } from "@/lib/auth";
 import { personKey } from "@/lib/person-key";
 import { giveData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
+import { countStudio } from "@/lib/studio-route";
 import {
   BENEFIT_ID,
+  BENEFIT_STRIPE_PAGES,
+  BENEFIT_PAGE_UNITS,
   MAX_BENEFITS_KEPT,
   MAX_BENEFITS_PER_TIER,
   MAX_GIVE_AT_ONCE,
@@ -55,8 +58,13 @@ import {
   parseBenefit,
 } from "@/lib/tier-benefit-rules";
 
-/** Pages of 100 running memberships read at most, for the list and for each press. */
-const MAX_PAGES = 10;
+/** Takes `units` of the store's studio requests; false, with the figure's own words, when it may not. */
+export type BenefitsCharge = (units: number) => Promise<{ ok: true } | { ok: false; message: string }>;
+const chargeStudio = (store: Store): BenefitsCharge => async (units) => {
+  const counted = await countStudio(store, null, units).catch(() => null);
+  if (counted?.ok) return { ok: true };
+  return { ok: false, message: counted ? counted.message : "" };
+};
 /** Where the marks are counted in the store's data room. */
 const SLOT = "tb";
 const SUB_ID = /^sub_[A-Za-z0-9]{6,64}$/;
@@ -135,8 +143,13 @@ function legible(row: Record<string, unknown>): boolean {
   return typeof ownField(row, "status") === "string" && (meta === null || meta === undefined || plainObject(meta));
 }
 
-/** The store's running memberships on its Stripe account, at most MAX_PAGES pages; null when Stripe could not be read. */
-async function runningMemberships(store: Store, statsId: string, nowSeconds: number): Promise<{ members: Member[]; complete: boolean; unreadable: number } | null> {
+/** The store's running memberships on its Stripe account, at most BENEFIT_STRIPE_PAGES pages; null when Stripe could not be read. */
+async function runningMemberships(
+  store: Store,
+  statsId: string,
+  nowSeconds: number,
+  charge: BenefitsCharge,
+): Promise<{ members: Member[]; complete: boolean; unreadable: number } | { used: string } | null> {
   const account = store.stripeAccountId;
   if (!account) return { members: [], complete: true, unreadable: 0 };
   const handles = saleHandles(store);
@@ -144,7 +157,11 @@ async function runningMemberships(store: Store, statsId: string, nowSeconds: num
   let unreadable = 0;
   let after = "";
   try {
-    for (let page = 0; page < MAX_PAGES; page += 1) {
+    for (let page = 0; page < BENEFIT_STRIPE_PAGES; page += 1) {
+      // Each page's studio requests counted before it is read (BENEFIT_PAGE_UNITS): past the figure, nothing more is
+      // read and nothing is shown, never a list cut short as if it were whole.
+      const taken = await charge(BENEFIT_PAGE_UNITS);
+      if (!taken.ok) return { used: taken.message };
       const query = new URLSearchParams({ limit: "100" });
       query.append("expand[]", "data.customer");
       if (after) query.set("starting_after", after);
@@ -207,6 +224,36 @@ async function readMarks(statsId: string, people: string[]): Promise<Map<string,
   return out;
 }
 
+/**
+ * The marks of the rows owed, and only those (Claude 7's cost MEDIUM on #3014): one HMGET a person, of the exact
+ * fields of their rows owed now, so a reading never grows with the months a person was marked before; a person's
+ * whole hash is read only for their copy (readMarks). A reply in another shape, or a mark that does not read, makes
+ * that person's marks "unknown".
+ */
+async function readOwedMarks(statsId: string, wanted: Map<string, string[]>): Promise<Map<string, Map<string, Given> | "unknown">> {
+  const out = new Map<string, Map<string, Given> | "unknown">();
+  const people = [...wanted.keys()];
+  for (let i = 0; i < people.length; i += 200) {
+    const slice = people.slice(i, i + 200);
+    const replies = repliesFor(await redisPipeline(slice.map((p) => ["HMGET", marksKey(statsId, p), ...(wanted.get(p) ?? [])])).catch(() => null), slice.length);
+    slice.forEach((person, n) => {
+      const fields = wanted.get(person) ?? [];
+      const values: unknown = replies ? replies[n] : null;
+      if (!Array.isArray(values) || values.length !== fields.length) return out.set(person, "unknown");
+      const marks = new Map<string, Given>();
+      for (let j = 0; j < fields.length; j += 1) {
+        const value: unknown = values[j];
+        if (value === null) continue;
+        const given = typeof value === "string" ? parseGiven(value) : null;
+        if (!given) return out.set(person, "unknown");
+        marks.set(fields[j], given);
+      }
+      out.set(person, marks);
+    });
+  }
+  return out;
+}
+
 function parseGiven(raw: string): Given | null {
   try {
     const value = JSON.parse(raw) as unknown;
@@ -242,6 +289,8 @@ export type Waiting = { trial: number; unpaid: number; paused: number };
 export type DueView =
   | { state: "none" }
   | { state: "unknown"; why: "benefits" | "stripe" | "erased" }
+  /** The studio requests a page of Stripe takes (BENEFIT_PAGE_UNITS) could not be taken: nothing is shown; the figure's words. */
+  | { state: "used"; message: string }
   | {
       state: "ok";
       benefits: Benefit[];
@@ -255,13 +304,14 @@ export type DueView =
     };
 
 /** Who is owed each benefit right now, read from Stripe and the marks. */
-export async function benefitsDue(store: Store, now = Date.now()): Promise<DueView> {
+export async function benefitsDue(store: Store, now = Date.now(), charge: BenefitsCharge = chargeStudio(store)): Promise<DueView> {
   const benefits = await readBenefits(store);
   if (benefits === null) return { state: "unknown", why: "benefits" };
   if (!benefits.length || !store.statsId) return { state: "none" };
   const nowSeconds = Math.floor(now / 1000);
-  const read = await runningMemberships(store, store.statsId, nowSeconds);
+  const read = await runningMemberships(store, store.statsId, nowSeconds, charge);
   if (read === null) return { state: "unknown", why: "stripe" };
+  if ("used" in read) return { state: "used", message: read.used };
   // A person deleted from the store keeps their membership on the creator's Stripe: never listed here by address
   // again (Claude 1 on #3014), as lib/membership-numbers.ts leaves them out. A list of the deleted that cannot be read
   // is unknown, never "nobody deleted".
@@ -283,7 +333,9 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
       else if (due.why === "trial" || due.why === "unpaid" || due.why === "paused") waiting[benefit.id][due.why] += 1;
     }
   }
-  const marks = await readMarks(store.statsId, [...new Set(owed.map((r) => r.person))]);
+  const wanted = new Map<string, string[]>();
+  for (const r of owed) wanted.set(r.person, [...(wanted.get(r.person) ?? []), field(r.benefit, r.sub, r.period)]);
+  const marks = await readOwedMarks(store.statsId, wanted);
   const rows: DueRow[] = owed.map((r) => {
     const held = marks.get(r.person);
     return { ...r, given: held === undefined || held === "unknown" ? "unknown" : (held.get(field(r.benefit, r.sub, r.period)) ?? null) };
@@ -296,7 +348,7 @@ export async function benefitsDue(store: Store, now = Date.now()): Promise<DueVi
 
 export type GiveResult =
   | { ok: true; given: number; already: number; notOwed: number; unknown: number }
-  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "full" | "room" | "unknown"; message?: string };
+  | { ok: false; reason: "too_many" | "missing" | "benefits" | "stripe" | "erased" | "used" | "full" | "room" | "unknown"; message?: string };
 
 
 /**
@@ -305,12 +357,13 @@ export type GiveResult =
  * twice, or two people pressing at once, marks it once. Says exactly how
  * many were marked, were already, were not owed, or could not be read.
  */
-export async function giveBenefit(store: Store, by: string, benefit: unknown, items: unknown, now = Date.now()): Promise<GiveResult> {
+export async function giveBenefit(store: Store, by: string, benefit: unknown, items: unknown, now = Date.now(), charge: BenefitsCharge = chargeStudio(store)): Promise<GiveResult> {
   if (!Array.isArray(items) || items.length > MAX_GIVE_AT_ONCE) return { ok: false, reason: "too_many" };
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   const statsId = store.statsId;
-  const due = await benefitsDue(store, now);
+  const due = await benefitsDue(store, now, charge);
   if (due.state === "unknown") return { ok: false, reason: due.why };
+  if (due.state === "used") return { ok: false, reason: "used", message: due.message };
   if (due.state === "none" || !due.benefits.some((b) => b.id === benefit)) return { ok: false, reason: "missing" };
   const rows = new Map(due.rows.filter((r) => r.benefit === benefit).map((r) => [`${r.sub}:${r.period}`, r]));
   const seen = new Set<string>();
@@ -401,11 +454,19 @@ out[#out + 1] = redis.call("SADD", KEYS[2], ARGV[2])
 return out`;
 
 /** Takes one mark back, for a row owed right now; says whether there was one. */
-export async function undoGiven(store: Store, benefit: unknown, sub: unknown, period: unknown, now = Date.now()): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "erased" | "unknown" }> {
+export async function undoGiven(
+  store: Store,
+  benefit: unknown,
+  sub: unknown,
+  period: unknown,
+  now = Date.now(),
+  charge: BenefitsCharge = chargeStudio(store),
+): Promise<{ ok: true; undone: boolean } | { ok: false; reason: "missing" | "not_owed" | "benefits" | "stripe" | "erased" | "unknown" } | { ok: false; reason: "used"; message: string }> {
   if (typeof benefit !== "string" || !BENEFIT_ID.test(benefit) || !store.statsId) return { ok: false, reason: "missing" };
   if (typeof sub !== "string" || !SUB_ID.test(sub) || typeof period !== "string" || !PERIOD.test(period)) return { ok: false, reason: "not_owed" };
-  const due = await benefitsDue(store, now);
+  const due = await benefitsDue(store, now, charge);
   if (due.state === "unknown") return { ok: false, reason: due.why };
+  if (due.state === "used") return { ok: false, reason: "used", message: due.message };
   const row = due.state === "ok" ? due.rows.find((r) => r.benefit === benefit && r.sub === sub && r.period === period) : undefined;
   if (!row) return { ok: false, reason: "not_owed" };
   const f = field(benefit, sub, period);

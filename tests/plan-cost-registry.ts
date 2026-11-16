@@ -47,6 +47,7 @@ import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 import { paidStorageBytes } from "@/lib/storage-rules";
 import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES, type AllowanceKind } from "@/lib/store-allowance-rules";
 import { ESSENTIAL_PER_DAY, STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
+import { MAX_BENEFITS_KEPT, MAX_BENEFIT_TEXT } from "@/lib/tier-benefit-rules";
 import { EXTRA_REQUESTS, REQUESTS_PER_VISIT, SHARE_COMMANDS_PER_REQUEST, TRIAL_EXTRA_REQUESTS, TRIAL_VISITS } from "@/lib/traffic-rules";
 import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
@@ -843,6 +844,37 @@ export const COMPANIES_REQUEST = request("heavy", 12 + 2 * TAKE_COMMANDS, MAX_CO
 export const COMPANIES_PAGE_READ = request("heavy", 4 + 2 * TAKE_COMMANDS, MAX_COMPANIES_BYTES);
 /** What sending STUDIO_UNIT_SENT_BYTES on to the browser costs: within one studio request. */
 export const STUDIO_UNIT_SENT = STUDIO_UNIT_SENT_BYTES * ORIGIN_PER_BYTE;
+/**
+ * One reading of who is owed a membership benefit (lib/tier-benefits.ts, benefitsDue; Claude 7's cost MEDIUM on
+ * #3014), on every page load that lists them and every give or undo press, when it reads `pages` pages of running
+ * memberships (at most BENEFIT_STRIPE_PAGES): each page, customers expanded, waited on one after another at 2 GB
+ * (STRIPE_LIST_PAGE) after its studio take; the benefits (MAX_BENEFITS_KEPT, each at BENEFIT_ROW_BYTES) and the
+ * store's list made if it had none (BENEFITS_LIST_COMMANDS), once; for each of the page's hundred members, their
+ * deleted-person look-up (a print sent and a reply) and the marks of every row owed (readOwedMarks: one HMGET, of at
+ * most MAX_BENEFITS_KEPT fields of BENEFIT_MARK_FIELD_BYTES, each answered with at most BENEFIT_MARK_VALUE_BYTES), one
+ * trip to the database a page at the most. Counted as BENEFIT_PAGE_UNITS studio requests before each page;
+ * tests/plan-cost-registry.test.ts holds them above it at every number of pages, and no higher than needed.
+ */
+export const BENEFIT_PAGE_MEMBERS = 100;
+/** A benefit's record: its id, and its JSON with MAX_BENEFIT_TEXT characters escaped at six bytes each at the most. */
+export const BENEFIT_ROW_BYTES = 13 + 6 * MAX_BENEFIT_TEXT + 200;
+/** A mark's field, `<benefit>:<sub>:<period>`: 13 + 1 + 68 + 1 + 11 bytes at the most. */
+export const BENEFIT_MARK_FIELD_BYTES = 94;
+/** A mark, `{"at":<seconds>,"by":"<address>"}`: the address at 320 characters, each escaped to two bytes at the most. */
+export const BENEFIT_MARK_VALUE_BYTES = 32 + 2 * 320;
+/** A person's marks key, and a store's deleted-person print, at the most. */
+export const BENEFIT_PERSON_BYTES = 96;
+export const BENEFITS_LIST_COMMANDS = 4;
+export function benefitsRead(pages: number): number {
+  const members = pages * BENEFIT_PAGE_MEMBERS;
+  return request(
+    "heavy",
+    1 + BENEFITS_LIST_COMMANDS + 1 + pages * TAKE_COMMANDS + members,
+    MAX_BENEFITS_KEPT * BENEFIT_ROW_BYTES
+      + 2 * members * BENEFIT_PERSON_BYTES
+      + members * (BENEFIT_PERSON_BYTES + MAX_BENEFITS_KEPT * (BENEFIT_MARK_FIELD_BYTES + BENEFIT_MARK_VALUE_BYTES)),
+  ) + pages * (STRIPE_LIST_PAGE + ROUND_TRIP_SECONDS * MEMORY_SECOND);
+}
 /**
  * One reading of a store's buyers from the creator's Stripe account at the
  * most (lib/segments.ts, buyerLedger), when its one-hour copy ran out: its

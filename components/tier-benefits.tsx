@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
-import { CADENCE_NAMES, MAX_BENEFIT_TEXT, type Benefit, type Cadence } from "@/lib/tier-benefit-rules";
+import { BENEFIT_PAGE_UNITS, CADENCE_NAMES, MAX_BENEFIT_TEXT, type Benefit, type Cadence } from "@/lib/tier-benefit-rules";
 
 /** One row as the page hands it over: no person key, and the address only to a role that may see buyers. */
 export type BenefitRow = {
@@ -18,6 +18,7 @@ export type BenefitRow = {
 export type BenefitsPanel =
   | { state: "none" }
   | { state: "unknown"; why: "benefits" | "stripe" | "erased" }
+  | { state: "used"; message: string }
   | {
       state: "ok";
       benefits: Benefit[];
@@ -133,7 +134,13 @@ export function TierBenefits({
         ) : null}
       </div>
 
-      {panel.state === "unknown" ? (
+      {panel.state === "used" ? (
+        <p className="notice notice-error mt-4" role="alert">
+          {panel.message
+            ? `Who is waiting is read from your Stripe account, and each reading takes ${BENEFIT_PAGE_UNITS} of your studio requests for every 100 memberships. ${panel.message} Nothing was changed.`
+            : "Your studio requests could not be counted just now, so who is waiting is not shown. Nothing was changed. Reload the page in a minute."}
+        </p>
+      ) : panel.state === "unknown" ? (
         <p className="notice notice-error mt-4" role="alert">
           {panel.why === "stripe"
             ? "Your memberships could not be read from Stripe just now, so who is waiting is not known. Nothing was changed. Reload the page in a minute."

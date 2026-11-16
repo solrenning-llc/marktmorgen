@@ -26,6 +26,10 @@ export async function POST(request: NextRequest) {
   const unread = "Your Stripe account could not be read just now, so nothing was changed. Try again in a minute.";
   const benefitsUnread = "Your benefits could not be read just now, so nothing was changed. Try again in a minute.";
   const erasedUnread = "We could not check which people you deleted from your store just now, so nothing was changed. Try again in a minute.";
+  // Who is owed is read from Stripe with studio requests (BENEFITS_READ_UNITS), taken first: the figure's own words
+  // when there are not enough; when they could not be counted, that.
+  const used = (message: string | undefined): [string, number] =>
+    message ? [`${message} Nothing was changed.`, 429] : ["Your studio requests could not be counted just now, so nothing was changed. Try again in a minute.", 503];
 
   if (body.action === "add") {
     const done = await addBenefit(store, { product: body.product, text: body.text, cadence: body.cadence });
@@ -54,6 +58,7 @@ export async function POST(request: NextRequest) {
       benefits: [benefitsUnread, 502],
       stripe: [unread, 502],
       erased: [erasedUnread, 502],
+      used: used(done.message),
       full: [done.message ?? "Your store's data room is full, so nothing was marked.", 409],
       room: ["Your store's data room could not be counted just now, so nothing was marked. Try again in a minute.", 502],
       unknown: ["Nothing was marked just now. Try again in a minute.", 502],
@@ -69,6 +74,7 @@ export async function POST(request: NextRequest) {
       benefits: [benefitsUnread, 502],
       stripe: [unread, 502],
       erased: [erasedUnread, 502],
+      used: used(done.reason === "used" ? done.message : undefined),
       unknown: ["The mark could not be taken back just now. Try again in a minute.", 502],
     };
     return refuse(done.reason, words[done.reason][0], words[done.reason][1]);

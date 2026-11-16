@@ -23,7 +23,8 @@ import {
   monthWindow,
   owedNow,
 } from "@/lib/tier-benefit-rules";
-import { addBenefit, benefitsDue, forgetBenefitPerson, giveBenefit, readBenefits, retireBenefit, undoGiven } from "@/lib/tier-benefits";
+import { type BenefitsCharge, addBenefit, benefitsDue, forgetBenefitPerson, giveBenefit, readBenefits, retireBenefit, undoGiven } from "@/lib/tier-benefits";
+import { BENEFIT_PAGE_UNITS } from "@/lib/tier-benefit-rules";
 import { personKey } from "@/lib/person-key";
 import { ERASERS } from "@/lib/person-erasure";
 import { PERSON_DATA } from "@/lib/person-data";
@@ -184,7 +185,7 @@ async function main(): Promise<void> {
   const annKey = personKey(store.statsId!, "ann@example.com");
   redis.pipeline = (async (commands: (string | number)[][]) => {
     const replies = await real(commands);
-    return commands.map((c, i) => (c[0] === "HGETALL" && String(c[1]).endsWith(annKey) ? { not: "a list" } : replies[i]));
+    return commands.map((c, i) => ((c[0] === "HGETALL" || c[0] === "HMGET") && String(c[1]).endsWith(annKey) ? { not: "a list" } : replies[i]));
   }) as typeof redis.pipeline;
   const blind = await benefitsDue(store, NOW * 1000);
   is("a person's marks unreadable: their rows say unknown", blind.state === "ok" ? blind.rows.filter((r) => r.sub === "sub_active00001").map((r) => r.given) : null, ["unknown", "unknown"]);
@@ -193,6 +194,48 @@ async function main(): Promise<void> {
   await redis.pipeline([["HSET", `nl:tben:${store.statsId}`, "b123456789abc", "{not json"]]);
   is("a benefit that cannot be read: the list is unknown", [await readBenefits(store), (await benefitsDue(store, NOW * 1000)).state], [null, "unknown"]);
   await redis.pipeline([["HDEL", `nl:tben:${store.statsId}`, "b123456789abc"]]);
+
+  part("Each page of Stripe is paid for in studio requests before it is read (Claude 7's cost MEDIUM on #3014)");
+  const takes: number[] = [];
+  const counting: BenefitsCharge = async (units) => {
+    takes.push(units);
+    return { ok: true };
+  };
+  stripeCalls = 0;
+  await benefitsDue(store, NOW * 1000, counting);
+  is("one page read, one page paid for", [takes, stripeCalls], [[BENEFIT_PAGE_UNITS], 1]);
+  mode = "endless";
+  takes.length = 0;
+  stripeCalls = 0;
+  await benefitsDue(store, NOW * 1000, counting);
+  is("ten pages read, ten paid for", [takes.length, stripeCalls], [10, 10]);
+  let allowed = 1;
+  const short: BenefitsCharge = async () => (allowed-- > 0 ? { ok: true } : { ok: false, message: "Your studio requests for this month are used." });
+  stripeCalls = 0;
+  const cut = await benefitsDue(store, NOW * 1000, short);
+  is("past the figure: nothing shown, never a list cut short", [cut.state, cut.state === "used" ? cut.message : "", stripeCalls], ["used", "Your studio requests for this month are used.", 1]);
+  mode = "ok";
+  const none: BenefitsCharge = async () => ({ ok: false, message: "No studio requests left." });
+  stripeCalls = 0;
+  is("none left: Stripe is never read", [(await benefitsDue(store, NOW * 1000, none)).state, stripeCalls], ["used", 0]);
+  is("and nothing is marked", await giveBenefit(store, by, print.benefit.id, [{ sub: "sub_active00001", period: "once" }], NOW * 1000, none), { ok: false, reason: "used", message: "No studio requests left." });
+  is("nor taken back", await undoGiven(store, print.benefit.id, "sub_active00001", "once", NOW * 1000, none), { ok: false, reason: "used", message: "No studio requests left." });
+
+  part("Only the marks owed are read, never a person's whole history (Claude 7's cost MEDIUM on #3014)");
+  const oldField = `${print.benefit.id}:sub_active00001:m1000000000`;
+  await redis.pipeline([["HSET", `nl:tben:given:${store.statsId}:${annKey}`, oldField, JSON.stringify({ at: 1, by: "old@example.com" })]]);
+  const sent: (string | number)[][] = [];
+  const passing = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    sent.push(...commands);
+    return passing(commands);
+  }) as typeof redis.pipeline;
+  const owedOnly = await benefitsDue(store, NOW * 1000);
+  redis.pipeline = passing;
+  const markReads = sent.filter((c) => String(c[1] ?? "").startsWith("nl:tben:given:"));
+  is("one HMGET a person, of their rows owed now only", [markReads.length > 0, markReads.every((c) => c[0] === "HMGET"), markReads.some((c) => c.includes(oldField))], [true, true, false]);
+  is("and the rows still read as before", owedOnly.state === "ok" ? owedOnly.rows.filter((r) => r.sub === "sub_active00001").length : -1, 2);
+  await redis.pipeline([["HDEL", `nl:tben:given:${store.statsId}:${annKey}`, oldField]]);
 
   part("Retiring a benefit keeps what was owed before");
   is("retired", await retireBenefit(store, call.benefit.id, NOW * 1000), { ok: true });

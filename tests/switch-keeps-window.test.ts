@@ -552,6 +552,8 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
@@ -569,14 +571,15 @@ async function main(): Promise<void> {
     // zero (MR); cost is not lowered.
     // Merge of main into #4246 (15 November 2026): this PR's costs and main's together cost Studio's monthly worst month
     // one cent more (the sum crosses a rounding step): 311.75 where 311.76 was; still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.10, 311.75 and 700.19 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "311.75", "700.19"]);
+    // Merge of main into #4246 again (16 November 2026): with main's webhook outbox (#4319); figures as the model computes them.
+    is("11: Store, Studio and Scale keep 45.09, 311.73 and 700.11 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.09", "311.73", "700.11"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // The same SES waits (#4246) on the yearly month: 37.05, 257.27 and 577.69 where 37.06, 258.71 and 579.99 were.
     // The same on the yearly month: Studio 256.74 and Scale 577.10 where 257.27 and 577.69 were; Store unchanged.
     // The same on the yearly month: Studio 256.74 → 256.64, Scale 577.10 → 576.93; Store unchanged.
     // And the yearly month with them merged: Store 37.04, Studio 256.63, Scale 576.92.
-    is("11: and 37.04, 256.63 and 576.92 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "256.63", "576.92"]);
+    is("11: and 37.04, 256.61 and 576.84 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "256.61", "576.84"]);
   } finally {
     Date.now = realNow;
   }

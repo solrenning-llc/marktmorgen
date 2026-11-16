@@ -61,7 +61,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:fuse:m:", "nl:gift:", "nl:gift:pi:", "nl:goal:", "nl:grp:", "nl:grp:pi:", "nl:grp:take:",
   "nl:gsc:conn", "nl:gsc:q:", "nl:gsc:state:", "nl:health:", "nl:heard:done:", "nl:heard:off",
   "nl:hooks:anchor:", "nl:hooks:cfg:", "nl:hooks:d:", "nl:hooks:evt:", "nl:hooks:log:", "nl:hooks:pos",
-  "nl:hooks:q", "nl:hooks:stores", "nl:hooks:wait:", "nl:host:claims:", "nl:hostcal:cfg:", "nl:hostcal:err:",
+  "nl:hooks:q", "nl:hooks:stores", "nl:hooks:wait:", "nl:hookout:", "nl:hookout:due", "nl:host:claims:", "nl:hostcal:cfg:", "nl:hostcal:err:",
   "nl:hostcal:good:", "nl:hostcal:lock:", "nl:house:seed", "nl:house:seed:lock", "nl:import:",
   "nl:imports:active", "nl:imports:busy:", "nl:imports:cf:", "nl:imports:cf:lock:", "nl:imports:list:",
   "nl:imports:lock", "nl:imports:moved:", "nl:imports:rows:", "nl:inbound:seen:", "nl:indexnow:sent", "nl:join:t:",
@@ -84,8 +84,8 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:forget:q", "nl:forget:kept", "nl:forget:month:",
   "nl:phone:st:", "nl:pictures:doors:", "nl:pinv:", "nl:pk:", "nl:pk:auth:", "nl:pk:cred:", "nl:pk:drop:", "nl:pk:lock:", "nl:pk:reg:", "nl:plan-disputes:seen", "nl:plan-refund:", "nl:plan-refund:ending", "nl:plan-refund:next", "nl:plan-withdraw:", "nl:plan:closing:",
   "nl:plan:closing:after", "nl:plan:ended", "nl:plan:paying", "nl:plans:lock", "nl:plans:pending",
-  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
-  "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:",
+  "nl:pod:n:", "nl:pod:ok:", "nl:pp:", "nl:pp:item:", "nl:pp:open:", "nl:pp:settle:after", "nl:pp:stores", "nl:pp:unk:month:", "nl:ppsell:o:",
+  "nl:ppsell:canceled:", "nl:ppsell:handover:", "nl:ppsell:own:", "nl:ppsell:paid:", "nl:ppsell:pending:", "nl:ppsell:refunded:", "nl:ppsell:reversed:", "nl:ppsell:sales:", "nl:ppsell:tell",
   "nl:ppsell:watch:", "nl:pre:", "nl:pre:give:", "nl:pre:jobs", "nl:pre:pi:", "nl:pwyw:", "nl:quiet:at:",
   "nl:quiet:lock", "nl:quiet:seen:", "nl:quiet:sent:", "nl:quiz:usage:", "nl:recent:", "nl:recent:feed:",
   "nl:recount:", "nl:recount:ids", "nl:recount:lock", "nl:recount:state", "nl:recount:sum",
@@ -280,6 +280,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:heard:done:": X(30), "nl:heard:off": I,
   "nl:hooks:anchor:": E, "nl:hooks:cfg:": E, "nl:hooks:d:": T("prepare", 7), "nl:hooks:evt:": X(30), "nl:hooks:log:": E,
   "nl:hooks:pos": C, "nl:hooks:q": I, "nl:hooks:stores": I, "nl:hooks:wait:": E,
+  // A kept event (lib/webhook-outbox.ts) lives a week at most; a closed store's is let go by the replay (its store gone).
+  "nl:hookout:": X(7), "nl:hookout:due": I,
   "nl:host:claims:": D("prepare"),
   "nl:hostcal:cfg:": D("prepare"), "nl:hostcal:err:": D("prepare"), "nl:hostcal:good:": D("prepare"), "nl:hostcal:lock:": D("prepare"),
   "nl:house:seed": C, "nl:house:seed:lock": C,
@@ -365,9 +367,14 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:plan-disputes:seen": C, "nl:plan-refund:": C, "nl:plan-refund:ending": C, "nl:plan-refund:next": C, "nl:plan-withdraw:": Cr(400), "nl:plan:closing:": Cr(400), "nl:plan:closing:after": C, "nl:plan:ended": I, "nl:plan:paying": I,
   "nl:plans:lock": C, "nl:plans:pending": I,
   "nl:pod:": E, "nl:pod:by:": E, "nl:pod:n:": X(2), "nl:pod:ok:": E, "nl:pod:t:": T("nl:pod:by:"),
-  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
+  // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
+  "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
   "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
+  // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the
+  // order, written once and gone within thirty days; the company's line of its notices the sender refused, each member
+  // gone once sent, once its store is gone or another store now (retryPayPalCancelNotices), or within thirty days.
+  "nl:ppsell:canceled:": X(30), "nl:ppsell:tell": Cr(30),
   // A PayPal receipt tried again (lib/paypal-delivery.ts, lib/email.ts sendEmailPinned): the time of its first try,
   // named by the order and holding only that time, gone within RECEIPT_MARK_SECONDS; the sender kept for its key, the company's, a day.
   "nl:ppsell:receipt:": X(7), "nl:mail:pin:": Cr(1),

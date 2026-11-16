@@ -9,14 +9,14 @@ import test from 'node:test';
 import {NextRequest} from 'next/server';
 import {POST} from '@/app/api/store/companies/route';
 import {SESSION_COOKIE,openSession} from '@/lib/auth';
-import {addCompany,changeCompanies,dropCompany,forgetCompanyPerson,linkPerson,readCompanies,restoreCompany} from '@/lib/crm-companies';
+import {addCompany,changeCompanies,companyGoneKey,dropCompany,forgetCompanyPerson,linkPerson,readCompanies,restoreCompany} from '@/lib/crm-companies';
 import {claimHandle,ensureStatsId,ensureStoreId,setSubscription,storeForEmail} from '@/lib/store';
 import {erasePerson} from '@/lib/person-erasure';
 import {personKey} from '@/lib/person-key';
 import {orderRoom,upsertContact} from '@/lib/contacts';
 import {restoredSentence} from '@/lib/crm-companies-rules';
 import {isSuppressed} from '@/lib/suppression';
-import {store as redis} from './redis-stub';
+import {advance,store as redis} from './redis-stub';
 import {paidPeriod} from './billing-period-fixture';
 
 const who = 'erased-buyer@example.test';
@@ -237,3 +237,24 @@ for (const [what, roomOf] of [["the store's room", (s: NonNullable<Awaited<Retur
     assert.notEqual(refused.status, 200, 'and no company can take them');
   });
 }
+
+// Merge of main into #4026 (16 November 2026): main's waitlist confirmation writes its yes through the fenced script
+// (CONTACT_FENCED_WRITE_IF, #4268). That script lifts the companies' mark in the same step as the suppression too,
+// so a person who comes back by confirming a waitlist link issued after their erasure can be put on a company again.
+test("a yes confirmed through a fenced link issued after the erasure lifts the companies' mark too", async () => {
+  const s = await seed();
+  await erase(who);
+  const store = await storeForEmail(owner);
+  assert.ok(store?.listId);
+  assert.equal(await redis.pipeline([['EXISTS', companyGoneKey(s.statsId, who)]]).then((r) => r[0]), 1, 'the erasure marks the person off every company');
+  // The link is issued two seconds after the erasure, on Redis's clock, which is the clock the fence is placed on.
+  advance(2_000);
+  const fence = 'nl:test:fenced-yes-link';
+  await redis.pipeline([['SET', fence, '1', 'EX', 3_600]]);
+  const added = await upsertContact(store.listId, who, {agreed: true, explicit: true, source: 'free', at: new Date().toISOString(), fence: {key: fence, seconds: 3_600}}, store);
+  assert.notEqual(added.gone, true, JSON.stringify(added));
+  assert.equal(await isSuppressed(store.listId, who), false);
+  assert.equal(await redis.pipeline([['EXISTS', companyGoneKey(s.statsId, who)]]).then((r) => r[0]), 0, "the companies' mark is lifted with the suppression");
+  const linked = await post({action: 'link', id, person: s.person});
+  assert.equal(linked.status, 200, JSON.stringify(await linked.clone().json()));
+});

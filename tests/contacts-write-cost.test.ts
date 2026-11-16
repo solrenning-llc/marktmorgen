@@ -11,7 +11,7 @@
  * by the data room's line and are left out of every count here.
  */
 import { readFileSync } from "node:fs";
-import { CONTACT_COMMANDS_MOST, CONTACT_WRITE_CALLS, CONTACT_WRITE_IF, leadsKey, noteProduct, takeBackClicks, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
+import { CONTACT_COMMANDS_MOST, CONTACT_FENCED_WRITE_CALLS, CONTACT_FENCED_WRITE_IF, CONTACT_WRITE_CALLS, CONTACT_WRITE_IF, leadsKey, noteProduct, takeBackClicks, tokensFor, unsubscribe, upsertContact } from "@/lib/contacts";
 import { store as redis } from "./redis-stub";
 import { ROOM } from "./data-room";
 import { COMMAND, ORDER_COMPUTE } from "./plan-cost-registry";
@@ -29,6 +29,7 @@ function billed(commands: Commands, scriptCalls: number): number {
     if (c[0] !== "EVAL") total += 1;
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
     else if (head.startsWith("-- marktmorgen:contact-write-if:v2")) total += 1 + scriptCalls;
+    else if (head.startsWith("-- marktmorgen:contact-fenced-write-if:v4")) total += 1 + CONTACT_FENCED_WRITE_CALLS;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
     else total += 1000; // a script this test does not know is not free
   }
@@ -61,12 +62,17 @@ async function main() {
     // Nine since #4026 (Claude 7, 15 November 2026): the companies' deletion mark is lifted in the same step as the
     // suppression, one DEL more, raising every figure built on it; none is lowered.
     is("and it is the nine it was reviewed at: two reads, the row, the lifted mark, the companies' lifted mark, both counts, the stores joined (2)", CONTACT_WRITE_CALLS, 9);
+    const fenced = (CONTACT_FENCED_WRITE_IF.match(/redis\.call\(/g) ?? []).length;
+    is("CONTACT_FENCED_WRITE_CALLS is the most redis.call a run of CONTACT_FENCED_WRITE_IF makes (the INCR/DECR pair counted once)", CONTACT_FENCED_WRITE_CALLS, fenced - 1);
+    // Merge of main into #4026 (16 November 2026): the fenced script lifts the companies' mark with the print too.
+    is("and it is CONTACT_WRITE_CALLS with the fence's PTTL and TIME (#4268): eleven, the companies' lifted mark included (#4026)", CONTACT_FENCED_WRITE_CALLS, 11);
   }
 
   part("the worst case of each path, scripts counted by what they run");
   {
     const t = CONTACT_COMMANDS_MOST;
-    is("a sign-up's round: its 3 reads, the mark's time, the script and its calls", t.upsertRound, 3 + 1 + 1 + CONTACT_WRITE_CALLS);
+    is("a sign-up's round: its 3 reads, the mark's time, the script and its calls, at the dearer (fenced) script", t.upsertRound, 3 + 1 + 1 + CONTACT_FENCED_WRITE_CALLS);
+    is("the fenced script costs at least the unfenced one", CONTACT_FENCED_WRITE_CALLS >= CONTACT_WRITE_CALLS, true);
     is("a sign-up at the most: 3 rounds lost, and the 2 reads that read an unknown answer back", t.upsert, t.tries * t.upsertRound + 2);
     is("an unsubscribe round: the link, the row, the script and its 3 calls (row, row written, left)", t.unsubscribeRound, 1 + 1 + 1 + 3);
     is("an unsubscribe at the most", t.unsubscribe, t.tries * t.unsubscribeRound);
@@ -85,6 +91,10 @@ async function main() {
     is("and it stays inside a later page's commands, as a public request's work does", first + 2 <= COMMANDS.laterPage + COMMANDS.laterCount, true);
     const again = await measure(() => upsertContact(list, email, { agreed: true, explicit: true, source: "free", sid, productId: "p1", title: "T" }, ROOM));
     is("a sign-up over an existing row, no race", again <= CONTACT_COMMANDS_MOST.upsertRound, true);
+    redis.run(["SET", "cost:fence", "1", "EX", 3600]);
+    const fencedRound = await measure(() => upsertContact(list, "fenced@example.com", { agreed: true, explicit: true, source: "free", sid, fence: { key: "cost:fence", seconds: 3600 } }, ROOM));
+    is("a fenced sign-up (a waitlist confirmation), no race", fencedRound <= CONTACT_COMMANDS_MOST.upsertRound, true);
+    is("(control) the fenced sign-up was written", typeof redis.run(["HGET", leadsKey(list), "fenced@example.com"]), "string");
     const note = await measure(() => noteProduct(list, email, "p2", "Two", { sid: "", statsId: "", handle: "" }));
     is("a purchase noted", note <= CONTACT_COMMANDS_MOST.noteProductRound, true);
     const token = (await tokensFor(list, [email], "h")).get(email) ?? "";

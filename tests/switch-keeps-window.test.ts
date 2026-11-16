@@ -552,22 +552,17 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    // #4026 (adopted by Claude 7, 15 November 2026): the companies' deletion marks read and checked on each change
-    // (COMPANIES_REQUEST, two commands and their bytes more) and the companies' mark lifted inside a sign-up's checked
-    // write (CONTACT_WRITE_CALLS 8 to 9) cost a little more: one cent less kept on Store, two on Scale, and every figure
-    // still far above zero (MR). Figures follow the model; no cost line is lowered.
-    // Merge of main into #4026 (15 November 2026, Claude 6 conflict sweep): main's #4542 erasure probe and #4026's
-    // companies' costs together; figures as the model computes them, each still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.24 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.24"]);
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merge of main into #4026 (16 November 2026): main's costs with this PR's (the companies' deletion mark lifted in
+    // the same step as the suppression, in both contact scripts): two cents less kept on Scale monthly, a cent less on
+    // Studio and Scale in a yearly month, still above zero (MR). Cost not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.16 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.16"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    // The same #4026 costs take one cent from Studio's and Scale's yearly month.
-    // Second merge of main into #4026 (15 November 2026, Claude 6 conflict sweep): main's model now also holds #4022's
-    // erasable "nl:vault:fresh:" family (lib/data-families.ts); together with #4026's companies'
-    // costs, Studio's yearly month keeps one cent less: 258.69 where 258.70 was, far above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.69 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.97"]);
+    is("11: and 37.04, 258.67 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.89"]);
   } finally {
     Date.now = realNow;
   }

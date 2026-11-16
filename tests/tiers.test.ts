@@ -29,6 +29,9 @@ import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { consentMetaValue } from "@/lib/digital-consent";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 const emails: { to: string | string[]; text: string; subject: string }[] = [];
 const calls: { method: string; path: string; body: URLSearchParams }[] = [];
@@ -64,6 +67,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
+      // Altered 2026-11-09 (rule 23): a Stripe list carries has_more, and subsOf now reads the page in its exact shape (readStripePage).
+      has_more: false,
     });
   }
   if (method === "POST" && path === "/prices") return json({ id: "price_Tier00000001" });

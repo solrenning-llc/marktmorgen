@@ -33,7 +33,7 @@ const byKey = new Map<string, { status: number; body: unknown }>();
 const bySender = new Map<string, string>();
 let batches = 0;
 /** Stripe's refunds as readBook reads them (review of Codex G on #2681, second GRAVE). */
-let stripeState = "normal" as "normal" | "down" | "refunded";
+const stripeState = "normal" as "normal" | "down" | "refunded";
 let posts = 0;
 /** The receivers of each POST, in order (review of Codex H2 on #2681). */
 let receivers: string[][] = [];

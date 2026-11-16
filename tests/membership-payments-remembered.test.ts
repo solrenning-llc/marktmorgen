@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   part("The three doors open their checkout through createCheckout");
   for (const [door, file] of [["the welcome offer", "lib/welcome-offer-send.ts"], ["the come-back offer", "lib/winback-send.ts"], ["the moved-members link", "lib/move-members.ts"]]) {
     const source = readFileSync(file, "utf8");
-    is(`${door} (${file}) opens it with createCheckout and does not write the plan down itself`, [/createCheckout\(store, product, origin/.test(source), source.includes("rememberPlan")], [true, false]);
+    is(`${door} (${file}) opens it with createCheckout (or createCheckoutUnlessHeld, which calls it) and does not write the plan down itself`, [/createCheckout(?:UnlessHeld)?\(store, product, origin/.test(source), source.includes("rememberPlan")], [true, false]);
   }
 
   part("createCheckout, called as each door calls it");

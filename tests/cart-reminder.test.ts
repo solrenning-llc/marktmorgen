@@ -125,6 +125,20 @@ async function main(): Promise<void> {
   is("no marks or cart note remain for a second erasure", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 0);
   is("nor with the products named", await forgetRecoveryPerson((await load()).statsId, [a, b], "ana@example.com"), 0);
   is("so the mark no longer holds back that cart", await remindAbandoned(await load(), left("cs_test_cartleft000005", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
+  // Codex X7 on #3929 (MÉDIO): a carts-note member not in the one shape a reminder writes ("cart:" and its sorted ids)
+  // is a reply that does not read: the erasure is not finished, and the note, the only way to the real mark, is kept.
+  {
+    const noteKeys = ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:carts:*"]]))[0] as [string, string[]])[1];
+    is("the cart reminder wrote its note", noteKeys.length, 1);
+    const marksBefore = ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:once:*"]]))[0] as [string, string[]])[1].length;
+    await redis.pipeline([["SADD", noteKeys[0], "garbled"]]);
+    const refused = await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com").then(() => "finished", (error: Error) => error.name);
+    is("a note with a member of another shape refuses the erasure", refused, "UnknownReplyError");
+    is("and keeps the note and the mark it leads to", [(await redis.pipeline([["EXISTS", noteKeys[0]]]))[0], ((await redis.pipeline([["SCAN", "0", "MATCH", "nl:recover:once:*"]]))[0] as [string, string[]])[1].length], [1, marksBefore]);
+    await redis.pipeline([["SREM", noteKeys[0], "garbled"]]);
+    is("once the note reads, the retry erases the cart's mark", await forgetRecoveryPerson((await load()).statsId, [], "ana@example.com"), 1);
+    is("and the cart can be reminded of again", await remindAbandoned(await load(), left("cs_test_cartleft000016", { metadata: { store: "harbor", product: b, bump: a, cart: "yes" } }) as never), "sent");
+  }
   // The note naming a cart's mark outlives the mark: its expiry is set just before the mark is taken.
   const keysOf = async (pattern: string) => ((await redis.pipeline([["SCAN", "0", "MATCH", pattern]]))[0] as [string, string[]])[1];
   const ttls = async (keys: string[]) => keys.length ? (await redis.pipeline(keys.map((k) => ["TTL", k]))) as number[] : [];

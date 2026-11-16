@@ -562,6 +562,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:dir:builds@lib/directory-index.ts": company("The directory's builds counted in a window", "One key for the company's own page, a count ending an hour after the window's first build (lib/affiliate-directory.ts, DIRECTORY_BUILDS_PER_HOUR)."),
   "nl:dir:last@lib/directory-index.ts": company("The directory's last good build, kept two hours", "One key for the company's own page: the rows it showed, with each row's store id (lib/affiliate-directory.ts, readDirectory)."),
   "nl:dir:listed@lib/directory-index.ts": company("The stores listed in the directory", "One set for every store."),
+  "nl:dir:numbers@lib/directory-index.ts": company("The listed stores that show their program's numbers", "One set for every store, written only by a save of the program (lib/directory-index.ts, rememberListing)."),
   "nl:dir:page@lib/directory-index.ts": company("The directory's page, cached", "The company's own page."),
   "nl:dc:ok:@lib/discord-access.ts": short("A buyer's Discord access, answered", "request", 1, 512, REQ("page")),
   "nl:dc:addr:@lib/discord-store.ts": { what: "The Discord account an address brought in", parts: [item(KEY, "One a buyer.", "membership")] },

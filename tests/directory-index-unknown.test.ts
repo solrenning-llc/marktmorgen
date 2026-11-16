@@ -325,13 +325,14 @@ async function main(): Promise<void> {
   let again: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
   seen = await counted(async () => void (again = await readDirectoryPage()), storeFails);
   is("an hour later, one build reads the store again, and still leaves it out", [seen.SSCAN, again.rows.length, again.omitted], [1, 2, 1]);
+  // Checked twice: the listed set, and the numbers' consent of the rows that carry them (Claude 5's MEDIUM on #3062).
   is("a save of a program in the window drops the kept page; the hour's build is spent, so the last good build is shown, checked, with its count", await (async () => {
     const store = await storeForEmail("bravoshop@example.com");
     if (store) await rememberListing(store);
     let page: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
     const built = await counted(async () => void (page = await readDirectoryPage()), storeFails);
     return [built.SSCAN ?? 0, built.SMISMEMBER ?? 0, page.rows.length, page.omitted];
-  })(), [0, 1, 2, 1]);
+  })(), [0, 2, 2, 1]);
 
   redis.clear();
   for (const name of SHOPS) await selling(`${name}@example.com`, name, name, true);

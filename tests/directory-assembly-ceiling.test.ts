@@ -118,7 +118,7 @@ async function main(): Promise<void> {
   is("the window's count and the last good build have their keys", [keys.DIRECTORY_BUILDS, keys.DIRECTORY_LAST], ["nl:dir:builds", "nl:dir:last"]);
   const line = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_BUILDS_PER_HOUR ?? "";
   is("the registry prices the builds by name", line.length > 0, true);
-  is("with the worst build, the builds in 30 days, the commands and the dollars", ["12,074", "720", "8,693,280", "US$17.39"].map((figure) => line.includes(figure)), [true, true, true, true]);
+  is("with the worst build, the builds in 30 days, the commands and the dollars", ["12,075", "720", "8,694,000", "US$17.39"].map((figure) => line.includes(figure)), [true, true, true, true]);
   is("and with what a visit costs when it is not built", ["nl:dir:last", "SMISMEMBER"].map((word) => line.includes(word)), [true, true]);
   const scanLine = (NOT_A_COST as Record<string, string | undefined>).DIRECTORY_SCAN_PAGES ?? "";
   is("the scan line no longer says the rate is not bounded", /not bounded|needs its own item/.test(scanLine), false);

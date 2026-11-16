@@ -712,6 +712,13 @@ async function deliver(
   return outcome === "sent" ? "sent" : "failed";
 }
 
+/** Whether a carts-note member is in the one shape deliver writes it: "cart:" and its ids, each a cart id, unique, sorted. */
+function cartMember(member: string): boolean {
+  if (!member.startsWith("cart:")) return false;
+  const ids = member.slice("cart:".length).split(",");
+  return readCartIds(ids).length === ids.length && ids.join(",") === [...ids].sort().join(",");
+}
+
 /**
  * Forgets that one person heard a reminder about each product this week
  * (lib/person-erasure.ts). Their press of "stop" is kept: it is their own
@@ -726,6 +733,10 @@ export async function forgetRecoveryPerson(statsId: string | null, productIds: s
   const noted = repliesFor(await redisPipeline([["SMEMBERS", cartsKey(statsId, email)]]), 1);
   const carts = noted ? stringList(noted[0]) : null;
   if (!carts) throw new UnknownReplyError("the carts an address was reminded of");
+  // Each member only in the one shape a reminder writes it (deliver's onceFor: "cart:" and its sorted ids): any other
+  // is a reply that does not read, so the note, the only way to the real mark, is kept and the erasure is not finished
+  // (Codex X7 on #3929), never a wrong key deleted and the note with it.
+  if (!carts.every(cartMember)) throw new UnknownReplyError("a cart an address was reminded of");
   const marks = [...productIds, ...carts].map((p) => onceKey(statsId, email, p));
   // No product and no noted cart: nothing to delete, and a DEL with no key is an error, not "nothing here".
   if (!marks.length) return 0;

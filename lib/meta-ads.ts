@@ -38,6 +38,9 @@
  *   nl:stats:<statsId>:spend:meta the lines read (lib/ad-spend.ts adds them in)
  *   nl:metaads:state:<hash>       one consent in progress, ten minutes
  *   nl:metaads:user:<hash>        the stores a Meta user connected
+ *   nl:metaads:gone:<hash>        when Meta last told us a user removed the app or
+ *                                 asked for a deletion, a day: a consent flow begun
+ *                                 before it keeps nothing (finishMeta)
  *   nl:metaads:stores             the stores connected, for the daily read
  */
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -107,6 +110,20 @@ export type MetaAdsView = {
 };
 
 const STATE_SECONDS = 600;
+/**
+ * The longest a consent flow may run, from beginMeta to the write that keeps its connection: the state is taken
+ * within STATE_SECONDS (takeMeta), and the calls to Meta after it are each bounded by REQUEST_MS. A flow older than
+ * this keeps nothing, so a deletion's mark, kept GONE_SECONDS, always outlasts every flow it has to stop.
+ */
+const FLOW_MS = 2 * STATE_SECONDS * 1000;
+/** How long a deletion's mark is kept: far longer than any flow it has to stop (FLOW_MS). */
+const GONE_SECONDS = 86_400;
+/**
+ * The room left for the clocks of two servers (the one that began the flow and the one Meta's notice reached): a
+ * flow is taken as begun before a deletion unless it began more than this after it. A reconnection begun within it
+ * is refused, honestly, and can simply be made again a few seconds later.
+ */
+const GONE_MARGIN_MS = 10_000;
 const KEEP_SECONDS = 400 * 86_400;
 const REQUEST_MS = 10_000;
 // Marketing API's supported version, not the latest Graph API version.
@@ -119,6 +136,7 @@ const readKey = (statsId: string) => `nl:metaads:read:${statsId}`;
 export const linesKey = (statsId: string) => `nl:stats:${statsId}:spend:meta`;
 const stateKey = (state: string) => `nl:metaads:state:${hash(`metaads-state:${state}`)}`;
 const userKey = (user: string) => `nl:metaads:user:${hash(`metaads-user:${user}`)}`;
+const goneKey = (user: string) => `nl:metaads:gone:${hash(`metaads-gone:${user}`)}`;
 const STORES_KEY = "nl:metaads:stores";
 /** The daily pass's mark and the generation it holds (readMetaDue). */
 const PASS_KEY = "nl:metaads:pass";
@@ -281,6 +299,74 @@ function parseRead(raw: unknown): MetaRead | null {
 }
 
 /**
+ * A connection read exactly (exactConnection: null only when confirmed absent, an unknown reply or a record out of
+ * shape throws) with the exact text it was read as, the text a write made only while it is there is held to
+ * (writeIfConnected).
+ */
+async function exactConnectionAsSeen(statsId: string, whole = false): Promise<{ c: Connection; seen: string } | null> {
+  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
+  if (!read) throw new UnknownReplyError("a Meta connection");
+  if (read[0] === null) return null;
+  const c = parseConnection(read[0], whole);
+  if (!c || typeof read[0] !== "string") throw new UnknownReplyError("a Meta connection");
+  return { c, seen: read[0] };
+}
+
+/**
+ * KEYS[1] the connection, KEYS[2] the key written, KEYS[3..] keys deleted with it; ARGV[1] the connection exactly as
+ * it was read, ARGV[2] the value, ARGV[3] the seconds it is kept ("0": no expiry, else a whole number of at most nine
+ * digits). 1 written, 0 the connection is no longer the one read (forgotten, reconnected, another account chosen) and
+ * nothing is written, -1 a call of any other shape (fewer than two keys, not exactly three arguments, an expiry Redis
+ * would refuse), refused before anything is read or written (as lib/path-atomic.ts does). Mirrored for tests in
+ * lib/redis-memory.ts.
+ */
+const WRITE_IF_CONNECTED = `-- marktmorgen:meta-if-connected:v1
+if #KEYS < 2 or #ARGV ~= 3 or (ARGV[3] ~= "0" and (#ARGV[3] > 9 or not string.match(ARGV[3], "^[1-9]%d*$"))) then return -1 end
+if redis.call("GET", KEYS[1]) ~= ARGV[1] then return 0 end
+if ARGV[3] == "0" then redis.call("SET", KEYS[2], ARGV[2]) else redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3]) end
+for i = 3, #KEYS do redis.call("DEL", KEYS[i]) end
+return 1`;
+
+/**
+ * KEYS[1] the connection, KEYS[2] the last read's record, KEYS[3] the stores connected, KEYS[4] the stores the Meta
+ * user connected, KEYS[5] that user's deletion mark (forgetMetaUser); ARGV[1] the new connection, ARGV[2] the cutoff:
+ * the time, in milliseconds, at or after which a deletion of that user stops this flow (finishMeta), ARGV[3] the
+ * store. 1 the connection is kept, its record dropped and the store added to both sets; 0 a deletion at or after the
+ * cutoff (or a mark that does not read as a time) and nothing is written; -1 a call of any other shape, refused
+ * before anything is read or written. Both sets are checked to be sets (or absent) before the connection is written:
+ * Redis does not undo a script that stops half-way, so a SADD failing on a key of another kind after the SET would
+ * keep the connection, sealed token and all, outside the person's index (Claude 2 on #3322); such a key is Redis's
+ * own WRONGTYPE error with nothing written. Mirrored for tests in lib/redis-memory.ts.
+ */
+const FINISH_UNLESS_GONE = `-- marktmorgen:meta-finish:v1
+if #KEYS ~= 5 or #ARGV ~= 3 or #ARGV[2] > 16 or not string.match(ARGV[2], "^[1-9]%d*$") or ARGV[3] == "" then return -1 end
+local gone = redis.call("GET", KEYS[5])
+if gone and (#gone > 16 or not string.match(gone, "^%d+$") or tonumber(gone) >= tonumber(ARGV[2])) then return 0 end
+for i = 3, 4 do
+  local kind = redis.call("TYPE", KEYS[i])["ok"]
+  if kind ~= "set" and kind ~= "none" then return redis.error_reply("WRONGTYPE Operation against a key holding the wrong kind of value") end
+end
+redis.call("SET", KEYS[1], ARGV[1])
+redis.call("DEL", KEYS[2])
+redis.call("SADD", KEYS[3], ARGV[3])
+redis.call("SADD", KEYS[4], ARGV[3])
+return 1`;
+
+/**
+ * Writes `value` at `key` (and deletes `drop`) only while the store's connection is still exactly the one read, in
+ * one step with that check (CX-123 rule 30). Checking first and writing after let a deletion confirmed to Meta in
+ * between (forgetMetaUser, disconnectMeta) have what was read from Meta, or the connection itself, written again,
+ * with no index left to find it. True when written, false when the connection is no longer that one; a reply in any
+ * other shape is unknown (UnknownReplyError), never taken as written or as refused.
+ */
+async function writeIfConnected(statsId: string, seen: string, key: string, value: string, seconds: number, drop: string[] = []): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["EVAL", WRITE_IF_CONNECTED, 2 + drop.length, connKey(statsId), key, ...drop, seen, value, seconds]]), 1);
+  const written = replies ? countOf(replies[0]) : null;
+  if (written !== 0 && written !== 1) throw new UnknownReplyError("a Meta write made only while its connection is there");
+  return written === 1;
+}
+
+/**
  * The lines read from Meta, for lib/ad-spend.ts: only while the store is
  * still connected, so nothing read from an account outlives its connection.
  */
@@ -351,8 +437,11 @@ export async function beginMeta(input: { statsId: string; sid: string; sessionCo
   return url.toString();
 }
 
-/** Takes the consent a state names, once, if it was started by this session and person. */
-export async function takeMeta(state: string, input: { sessionCookie: string; email: string }): Promise<{ statsId: string; sid: string; redirect: string } | null> {
+/**
+ * Takes the consent a state names, once, if it was started by this session and person; `at` is when it was started
+ * (milliseconds), which finishMeta holds a deletion confirmed since against.
+ */
+export async function takeMeta(state: string, input: { sessionCookie: string; email: string }): Promise<{ statsId: string; sid: string; redirect: string; at: number } | null> {
   if (!/^[A-Za-z0-9_-]{40,64}$/.test(state) || !isRedisConfigured()) return null;
   const [raw] = await redisPipeline([["GETDEL", stateKey(state)]]);
   if (typeof raw !== "string") return null;
@@ -361,7 +450,8 @@ export async function takeMeta(state: string, input: { sessionCookie: string; em
     if (p.session !== hash(`metaads-session:${input.sessionCookie}`)) return null;
     if (p.email !== input.email.toLowerCase()) return null;
     if (Date.now() - p.at > STATE_SECONDS * 1000) return null;
-    return { statsId: p.statsId, sid: p.sid, redirect: p.redirect };
+    if (!Number.isSafeInteger(p.at) || p.at <= 0) return null;
+    return { statsId: p.statsId, sid: p.sid, redirect: p.redirect, at: p.at };
   } catch {
     return null;
   }
@@ -374,9 +464,28 @@ export function accountToUse(accounts: (MetaAccount & { active?: boolean })[], c
   return fits.length === 1 ? fits[0].id : "";
 }
 
-export type MetaConnectResult = { ok: true; view: MetaAdsView; account: MetaAccount | null } | { ok: false; error: "seal" | "refused" | "permission" | "accounts" };
+export type MetaConnectResult =
+  | { ok: true; view: MetaAdsView; account: MetaAccount | null }
+  | { ok: false; error: "seal" | "refused" | "permission" | "accounts" | "expired" | "removed" };
 
-/** Trades the code for a long-lived token, lists the ad accounts and keeps the connection, sealed. */
+/** Whether a flow begun at `startedAt` (milliseconds) is still young enough to keep its connection (FLOW_MS). */
+const flowFresh = (startedAt: number): boolean => {
+  const age = Date.now() - startedAt;
+  return Number.isSafeInteger(startedAt) && startedAt > GONE_MARGIN_MS && age <= FLOW_MS && age >= -GONE_MARGIN_MS;
+};
+
+/**
+ * Trades the code for a long-lived token, lists the ad accounts and keeps the connection, sealed.
+ *
+ * Meta's notice that the person removed the app or asked for their data to be deleted (forgetMetaUser) may land at
+ * any moment of this flow, between its calls to Meta. So the connection is kept only in one step with a check of
+ * that person's deletion mark: a deletion confirmed at or after the flow began (`startedAt`, from beginMeta, less
+ * GONE_MARGIN_MS for the clocks of two servers) keeps nothing, gives the token back to Meta and says so ("removed").
+ * The flow's start, not the consent on Meta's page, is the line, because the consent's own moment is not known
+ * here: a deletion between the two is taken as the later word. A flow begun after the deletion (by more than the
+ * margin) is the person's new choice and connects. A flow older than FLOW_MS keeps nothing ("expired"), so the
+ * mark, kept GONE_SECONDS, outlasts every flow it has to stop.
+ */
 export async function finishMeta(input: {
   statsId: string;
   sid: string;
@@ -385,8 +494,11 @@ export async function finishMeta(input: {
   by: string;
   owner: { email: string; handle: string };
   currency: string;
+  /** When the consent flow began (beginMeta), in milliseconds. */
+  startedAt: number;
 }): Promise<MetaConnectResult> {
   if (!canSeal()) return { ok: false, error: "seal" };
+  if (!flowFresh(input.startedAt)) return { ok: false, error: "expired" };
   let short: string;
   try {
     const traded = await call("GET", "/oauth/access_token", { client_id: appId(), client_secret: appSecret(), redirect_uri: input.redirect, code: input.code });
@@ -433,21 +545,25 @@ export async function finishMeta(input: {
     owner: input.owner,
     broken: "",
   };
-  // The new connection's write confirmed (CX-123 rule 24; Claude 6 on #3069): "OK" and a count for each other command.
-  // Otherwise it throws before anything of the old connection is given back, unlisted or deleted, so a write that may
-  // not have landed never leaves the kept connection with its token revoked, and the reconnect answers an error.
-  const written = repliesFor(
-    await redisPipeline([
-      ["SET", connKey(input.statsId), JSON.stringify(connection)],
-      ["DEL", readKey(input.statsId)],
-      ["SADD", STORES_KEY, input.statsId],
-      // Due now: the daily pass's mark no longer holds (readMetaDue).
-      ["INCR", GEN_KEY],
-      ["SADD", userKey(user), input.statsId],
-    ]),
-    5,
-  );
-  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta connection written");
+  if (!flowFresh(input.startedAt)) {
+    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    return { ok: false, error: "expired" };
+  }
+  const keys = [connKey(input.statsId), readKey(input.statsId), STORES_KEY, userKey(user), goneKey(user)];
+  const replies = repliesFor(await redisPipeline([["EVAL", FINISH_UNLESS_GONE, keys.length, ...keys, JSON.stringify(connection), input.startedAt - GONE_MARGIN_MS, input.statsId]]), 1);
+  const kept = replies ? countOf(replies[0]) : null;
+  if (kept !== 0 && kept !== 1) throw new UnknownReplyError("keeping a Meta connection only while its user was not deleted since");
+  if (kept === 0) {
+    // Deleted since the flow began: nothing is kept, and the permission this flow was holding goes back to Meta.
+    await call("DELETE", "/me/permissions", {}, token).catch(() => ({}));
+    return { ok: false, error: "removed" };
+  }
+  // Due now: the daily pass's mark no longer holds (readMetaDue). Moved on once the connection is kept, never before,
+  // so a pass that reads the new generation already finds the store.
+  // Its reply confirmed too (CX-123 rule 24; main's exact write, Claude 6 on #3069): a count, or it throws before anything
+  // of the old connection is given back, unlisted or deleted (merged with main of 15 November 2026, Claude 1 cloud O).
+  const bumped = repliesFor(await redisPipeline([["INCR", GEN_KEY]]), 1);
+  if (!bumped || countOf(bumped[0]) === null) throw new UnknownReplyError("a Meta connection written");
   // Another person's token in its place: theirs is given back.
   if (before && before.user !== user) {
     await giveBack(input.statsId, before).catch(() => {});
@@ -467,20 +583,17 @@ export async function finishMeta(input: {
  */
 export async function chooseAccount(statsId: string, id: unknown): Promise<boolean> {
   if (!isRedisConfigured() || typeof id !== "string") return false;
-  const c = await exactConnection(statsId, true);
-  if (!c || !c.accounts.some((a) => a.id === id)) return false;
+  const read = await exactConnectionAsSeen(statsId, true);
+  if (!read) return false;
+  const { c, seen } = read;
+  if (!c.accounts.some((a) => a.id === id)) return false;
   if (c.account === id) return true;
-  const written = repliesFor(
-    await redisPipeline([
-      ["SET", connKey(statsId), JSON.stringify({ ...c, account: id })],
-      ["DEL", readKey(statsId)],
-      ["DEL", linesKey(statsId)],
-      // Due now: the daily pass's mark no longer holds (readMetaDue).
-      ["INCR", GEN_KEY],
-    ]),
-    4,
-  );
-  if (!written || written[0] !== "OK" || written.slice(1).some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a Meta ad account chosen");
+  // Only onto the connection read: one forgotten in between is not written back with the account chosen. A reply in
+  // another shape throws (writeIfConnected), never "chosen" unseen.
+  if (!(await writeIfConnected(statsId, seen, connKey(statsId), JSON.stringify({ ...c, account: id }), 0, [readKey(statsId), linesKey(statsId)]))) return false;
+  // Due now: the daily pass's mark no longer holds (readMetaDue). Its reply confirmed too (CX-123 rule 24).
+  const bumped = repliesFor(await redisPipeline([["INCR", GEN_KEY]]), 1);
+  if (!bumped || countOf(bumped[0]) === null) throw new UnknownReplyError("a Meta ad account chosen");
   return true;
 }
 
@@ -571,12 +684,7 @@ function confirmDeleted(replies: unknown, commands: number, what: string): void 
  * forgetting read without it, so a damaged account list never stops a connection being ended.
  */
 async function exactConnection(statsId: string, whole = false): Promise<Connection | null> {
-  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
-  if (!read) throw new UnknownReplyError("a Meta connection");
-  if (read[0] === null) return null;
-  const c = parseConnection(read[0], whole);
-  if (!c) throw new UnknownReplyError("a Meta connection");
-  return c;
+  return (await exactConnectionAsSeen(statsId, whole))?.c ?? null;
 }
 
 /**
@@ -593,6 +701,13 @@ async function exactConnection(statsId: string, whole = false): Promise<Connecti
  * callback walks the rest; the index goes only once every store was walked
  * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
  * stores it already forgot, so their owners are still told (Claude 5 on #2869).
+ *
+ * First, in the same pipeline as the read of their stores, it marks the user
+ * as deleted now (goneKey, kept GONE_SECONDS), so a consent flow still on its
+ * way (finishMeta) keeps nothing: one that wrote before the mark is in the
+ * stores read here and forgotten with them, one that writes after it is
+ * refused. A mark that is not confirmed written is unknown (UnknownReplyError),
+ * never a deletion said to be done.
  */
 export async function forgetMetaUser(
   user: string,
@@ -603,7 +718,9 @@ export async function forgetMetaUser(
   if (!isRedisConfigured() || !user) return [];
   // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
   const kept: string[] = [];
-  const stores = stringList(repliesFor(await redisPipeline([["SMEMBERS", userKey(user)]]), 1)?.[0]);
+  const read = repliesFor(await redisPipeline([["SET", goneKey(user), String(Date.now()), "EX", GONE_SECONDS], ["SMEMBERS", userKey(user)]]), 2);
+  if (!read || read[0] !== "OK") throw new UnknownReplyError("the mark of a Meta user's deletion");
+  const stores = stringList(read[1]);
   if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
   // A store kept (connected after the notice) stays in the index, so a pass that always took the same first
@@ -666,11 +783,12 @@ export type MetaBrokenHook = (owner: { email: string; handle: string }) => Promi
  * before the owner is told, so a connection is never said broken without the mark kept, nor left healthy by guess.
  */
 async function markBroken(statsId: string, c: Connection, why: string, onBroken?: MetaBrokenHook): Promise<void> {
-  const now = await exactConnection(statsId, true);
-  if (!now || now.connectedAt !== c.connectedAt || now.broken) return;
-  const marked = repliesFor(await redisPipeline([["SET", connKey(statsId), JSON.stringify({ ...now, broken: why })]]), 1);
-  if (!marked || marked[0] !== "OK") throw new UnknownReplyError("a Meta connection marked broken");
-  await onBroken?.(now.owner).catch(() => {});
+  const read = await exactConnectionAsSeen(statsId, true);
+  if (!read || read.c.connectedAt !== c.connectedAt || read.c.broken) return;
+  // Only onto the connection read: one forgotten in between is not written back, and its owner is not told. A reply in
+  // another shape throws (writeIfConnected) before the owner is told.
+  if (!(await writeIfConnected(statsId, read.seen, connKey(statsId), JSON.stringify({ ...read.c, broken: why }), 0))) return;
+  await onBroken?.(read.c.owner).catch(() => {});
 }
 
 /**
@@ -683,8 +801,10 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   // Read exactly (CX-123 rule 24): "none" only for a confirmed nil or no account chosen yet. An unknown reply, a record
   // out of shape, or a chosen account not among the kept ones throws before Meta is asked, never "not connected", a
   // chosen account dropped, or a connection taken as healthy because why it broke could not be read.
-  const c = await exactConnection(statsId, true);
-  if (!c || c.broken || !c.account) return c?.broken ? "broken" : "none";
+  const found = await exactConnectionAsSeen(statsId, true);
+  if (!found || found.c.broken || !found.c.account) return found?.c.broken ? "broken" : "none";
+  // Everything this read writes is held to the connection exactly as read here (writeIfConnected).
+  const { c, seen } = found;
   const account = c.accounts.find((a) => a.id === c.account);
   if (!account) throw new UnknownReplyError("a Meta connection's chosen ad account");
   // Resolve the connection's own current store, including calls made by the
@@ -706,9 +826,6 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   }
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
-    // Written only while that very connection is still there, read exactly: an unknown reply throws (CX-123 rule 24).
-    const still = await exactConnection(statsId, true);
-    if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return false;
     // The last read: a reply in another shape is unknown. A kept record that does not parse is replaced, as it always
     // was: what it held is only the figures of an earlier read, and keeping it would stop every later note.
     const beforeReply = repliesFor(await redisPipeline([["GET", readKey(statsId)]]), 1);
@@ -717,9 +834,9 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     // by "not read yet" (no day, so the studio shows no amount), never kept under its day with an amount never read.
     const before = parseRead(beforeReply[0]) ?? NOT_READ;
     const next: MetaRead = { ...before, problem: "", after: 0, ...read };
-    const noted = repliesFor(await redisPipeline([["SET", readKey(statsId), JSON.stringify(next), "EX", KEEP_SECONDS]]), 1);
-    if (!noted || noted[0] !== "OK") throw new UnknownReplyError("Meta's last read noted");
-    return true;
+    // Written only while that very connection is still there, in one step with that check; a reply in another shape
+    // throws (writeIfConnected), never taken as noted.
+    return writeIfConnected(statsId, seen, readKey(statsId), JSON.stringify(next), KEEP_SECONDS);
   };
   try {
     if (c.expires && c.expires * 1000 <= now) {
@@ -773,11 +890,9 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     const kept = !keptReply ? null : keptReply[0] === null ? [] : parseLines(keptReply[0]);
     if (!kept) throw new UnknownReplyError("the Meta ad spend lines kept");
     const merged = mergeLines(kept, fresh, window.from, window.to);
-    // Still that very connection, read exactly: an unknown reply is an error tried again, never "none" (rule 24).
-    const still = await exactConnection(statsId, true);
-    if (!still || still.connectedAt !== c.connectedAt || still.account !== c.account) return "none";
-    const written = repliesFor(await redisPipeline([["SET", linesKey(statsId), JSON.stringify(merged), "EX", KEEP_SECONDS]]), 1);
-    if (!written || written[0] !== "OK") throw new UnknownReplyError("the Meta ad spend lines written");
+    // Kept only while that very connection is still there, in one step with that check. An unknown reply is an error
+    // tried again (writeIfConnected throws), never "none" (rule 24).
+    if (!(await writeIfConnected(statsId, seen, linesKey(statsId), JSON.stringify(merged), KEEP_SECONDS))) return "none";
     await note({
       day: window.to,
       at: Math.floor(now / 1000),

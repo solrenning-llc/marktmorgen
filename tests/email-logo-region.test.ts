@@ -73,8 +73,9 @@ part("A refunded first year stays under the owner's US$65 with the logo at the d
   const kept = (paidStorageBytes(tier) / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
   const year = worstCost(tier) + providerFeeUsd(PRICES_WITHOUT_COMMISSION[tier].year) + kept;
   const extra = Math.max(0, floorFor(tier) - (line ? line.monthlyUsd(tier) : 0));
-  is(`a refunded Store first year, repriced at the dearest region, is under US$65 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
-    year + extra < 65, true);
+  // The owner raised this ceiling to US$66.00 on 16 November 2026, 02h15 Fortaleza ("sim, US$66", BROADCAST-262); it rises no further without a new owner text.
+  is(`a refunded Store first year, repriced at the dearest region, is under US$66 (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)})`,
+    year + extra < 66, true);
 }
 
 done();

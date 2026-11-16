@@ -558,13 +558,16 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
       if (block.yes.length === 0 && block.no.length === 0) return null;
       const w = blockWords(ctx.lang ?? DEFAULT_LANGUAGE);
       const both = block.yes.length > 0 && block.no.length > 0;
+      // Each side is a heading under the block's own (h3 under h2), or a section heading itself when the creator left
+      // that one empty, so the outline never skips a level (WCAG 1.3.1, 2.4.10; tests/fit-block-headings.test.ts).
+      const Side = block.heading ? "h3" : "h2";
       return (
         <section className="sp-section">
           <Heading text={block.heading} />
           <div className={`sp-fit ${both ? "sp-fit-2" : ""} ${block.heading ? "mt-5" : ""}`}>
             {block.yes.length ? (
               <div className="sp-fit-side sp-fit-yes">
-                <h3 className="text-lg font-bold">{block.yesLabel || w.fitYes}</h3>
+                <Side className="text-lg font-bold">{block.yesLabel || w.fitYes}</Side>
                 <ul>
                   {block.yes.map((item, i) => (
                     <li key={i}>
@@ -579,7 +582,7 @@ export function BlockView({ block, ctx, reviews }: { block: PageBlock; ctx: Bloc
             ) : null}
             {block.no.length ? (
               <div className="sp-fit-side sp-fit-no">
-                <h3 className="text-lg font-bold">{block.noLabel || w.fitNo}</h3>
+                <Side className="text-lg font-bold">{block.noLabel || w.fitNo}</Side>
                 <ul>
                   {block.no.map((item, i) => (
                     <li key={i}>

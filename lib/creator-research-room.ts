@@ -23,6 +23,12 @@
  * holds both.
  */
 export const RESEARCH_ANSWER_MAX_BYTES = 12_288;
+/**
+ * New answers the list takes in one UTC day, from everyone together, well under RESEARCH_MAX_ANSWERS: whoever
+ * rotates connections can spend at most one day's share, never fill the list that stays closed for up to 24 months
+ * (Claude 7 on #3584). Real creators answer a handful a day.
+ */
+export const RESEARCH_ANSWERS_PER_DAY = 40;
 export const RESEARCH_MAX_ANSWERS = 320;
 export const RESEARCH_MAX_BYTES = RESEARCH_ANSWER_MAX_BYTES * RESEARCH_MAX_ANSWERS;
 

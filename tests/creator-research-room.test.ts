@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { POST } from "@/app/api/creators/route";
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES } from "@/lib/creator-research-room";
+import { RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, RESEARCH_MAX_BYTES } from "@/lib/creator-research-room";
 import { LIMITS } from "@/lib/creator-research";
 import { BACKUP_MAX_BYTES } from "@/lib/backup-export";
 import { store } from "./redis-stub";
@@ -36,12 +36,12 @@ const payload = {
 };
 
 let ip = 0;
-async function ask(body: unknown): Promise<[number, string]> {
+async function ask(body: unknown, from?: string): Promise<[number, string]> {
   ip += 1;
   const response = await POST(
     new NextRequest("https://marktmorgen.com/api/creators", {
       method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "https://marktmorgen.com", Host: "marktmorgen.com", "x-forwarded-for": `198.51.100.${ip}` },
+      headers: { "Content-Type": "application/json", Origin: "https://marktmorgen.com", Host: "marktmorgen.com", "x-forwarded-for": from ?? `198.51.100.${ip % 250}` },
       body: JSON.stringify(body),
     }),
   );
@@ -150,6 +150,47 @@ async function main() {
     is("writes applied with their replies lost leave the list at 320, never past it", (await rows()).length, MAX_ANSWERS);
     is("and none is said saved: a lost reply is not a confirmation", lost.some(([status]) => status === 201), false);
     is("a later healthy answer is refused as full and the list stays at 320", [await ask(payload), (await rows()).length], [[503, "full"], MAX_ANSWERS]);
+  }
+
+  part("One IPv6 /64 rotating its addresses cannot fill the list, and a real creator still saves (Claude 7 on #3584)");
+  {
+    await fill(0);
+    const warned: string[] = [];
+    console.error = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    const flood: [number, string][] = [];
+    // Claude 7's probe: 64 addresses of one /64, five asks each.
+    for (let host = 1; host <= 64; host += 1) for (let n = 0; n < 5; n += 1) flood.push(await ask(payload, `2001:db8:1:2::${host.toString(16)}`));
+    console.error = original;
+    const saved = flood.filter(([status]) => status === 201).length;
+    is("the whole /64 is one connection: five kept, the rest refused as too many", [saved, flood.filter(([status, error]) => status === 429 && error === "rate_limited").length], [5, 315]);
+    is("the list holds those five", (await rows()).length, 5);
+    is("a real creator from another address after it still saves", await ask(payload, "203.0.113.77"), [201, "saved"]);
+  }
+
+  part("A day takes at most RESEARCH_ANSWERS_PER_DAY new answers, well under the list's ceiling, and the owner is told");
+  {
+    await fill(0);
+    const warned: string[] = [];
+    console.error = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    const day: [number, string][] = [];
+    // One answer from each of many connections (IPv4 and distinct /64s): the day's cap, not each connection's, stops them.
+    for (let n = 0; n < RESEARCH_ANSWERS_PER_DAY + 5; n += 1) day.push(await ask(payload, n % 2 ? `192.0.2.${n}` : `2001:db8:${n.toString(16)}::1`));
+    console.error = original;
+    is("at most the day's cap is kept", [day.filter(([status]) => status === 201).length, (await rows()).length], [RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWERS_PER_DAY]);
+    is("the rest of the day is refused as busy, never kept and never said full", day.slice(RESEARCH_ANSWERS_PER_DAY).map(([status, error]) => `${status} ${error}`), Array(5).fill("429 busy"));
+    is("the cap is well under the list's ceiling: one day can never fill it", RESEARCH_ANSWERS_PER_DAY * 4 <= RESEARCH_MAX_ANSWERS, true);
+    is("the owner is told, in the log, that the day's cap was reached", warned.some((line) => /creator research: today's cap/.test(line)), true);
+  }
+
+  part("A full list tells the owner, in the log, every time it refuses an answer");
+  {
+    await fill(MAX_ANSWERS);
+    const warned: string[] = [];
+    console.error = (...args: unknown[]) => void warned.push(args.map(String).join(" "));
+    const got = await ask(payload);
+    console.error = original;
+    is("refused as full", got, [503, "full"]);
+    is("and logged for the owner", warned.some((line) => /creator research: the list is full/.test(line)), true);
   }
 
   part("An answer past its byte ceiling is refused before anything is kept");

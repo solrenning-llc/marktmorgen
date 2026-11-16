@@ -6,7 +6,7 @@ import { JOIN_TOKEN, confirmJoin, readJoinToken } from "@/lib/store-join";
 import { enroll } from "@/lib/flows";
 import { queuePerson } from "@/lib/email-sync";
 import { allowedBy, newLeadId, sendServerLead, sendsFromServer } from "@/lib/ad-events";
-import { emitEvent } from "@/lib/webhooks";
+import { emitOrKeep } from "@/lib/webhook-outbox";
 import { recordLead } from "@/lib/affiliate-leads";
 
 /** The button on the page an emailed sign-up link opens: the address joins the creator's list. */
@@ -47,8 +47,9 @@ export async function POST(request: NextRequest) {
       }
       // The creator's webhooks hear of it once, however often the button is pressed.
       const grant = result.grant;
+      // One that could not be queued now is kept, and the five-minute job tries it again (lib/webhook-outbox.ts, #4275).
       after(() =>
-        emitEvent(store, "list.joined", `join|${grant.e}|${grant.at}`, {
+        emitOrKeep(store, "list.joined", `join|${grant.e}|${grant.at}`, {
           email: grant.e,
           // The second box: they allowed their link use in sequences to be seen (lib/mail-clicks.ts).
           allowed_link_tracking: grant.k === true,
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
           // The creator's own site it was asked from, through the checkout script (lib/embed-sites.ts).
           site: grant.w ?? null,
           requested_at: grant.at || null,
-        }).catch((error) => console.error("queueing the list.joined webhook failed", error)),
+        }),
       );
       const at = Date.now();
       after(() =>

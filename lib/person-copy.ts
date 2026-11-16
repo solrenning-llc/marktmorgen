@@ -195,6 +195,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/community-polls.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your votes in community polls are in your community part" },
   "lib/studio-demo.ts": { how: "notThePerson", why: "Kept about a visitor trying the studio without an account, by a network address and a random code, never by a store's buyer's address" },
   "lib/plan-withdrawal.ts": { how: "notThePerson", why: "Kept about the creator's own plan with Marktmorgen, not about the store's buyers" },
+  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "A request to move your purchases to another address, with both addresses and when each confirmed it, kept for its day and one more; found only by the links emailed to the two addresses" },
 };
 
 /** True only when every module is copied or holds only marks: the condition for giving the copy to anybody. */

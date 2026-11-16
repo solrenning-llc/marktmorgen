@@ -578,7 +578,9 @@ async function main(): Promise<void> {
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 36.44, 257.37 and 576.28 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.44", "257.37", "576.28"]);
+    // Merge of main into #2843 (16 November 2026, 16h): main's newer costs with the stack's Blob lines leave Store and Scale one
+    // cent less in a yearly month: 36.43 and 576.27 where 36.44 and 576.28 were; still above zero (MR). Cost is not lowered.
+    is("11: and 36.43, 257.37 and 576.27 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.43", "257.37", "576.27"]);
   } finally {
     Date.now = realNow;
   }

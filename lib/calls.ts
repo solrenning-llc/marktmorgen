@@ -632,8 +632,12 @@ type OwnBusy = TeamBusy & { own?: string };
  * have two locks. So an ordinary weekly booking claims its store owner's time
  * on that same list, in the same atomic script (CLAIM_HOST_TIMES), under this
  * store's ref; and the owner's claims other stores made are busy times here,
- * on the page, at the checkout and for a move (elsewhere). A claims list that cannot be
- * read is never read as free: nothing is offered or held (rule 24).
+ * at the checkout and for a move (elsewhere), both inside the order they are
+ * admitted as (ORDER_COMPUTE). The call's page and the move page do not read
+ * them on a visit (owner's decision of 16 November 2026 on #3490, "ler só no
+ * checkout"): a time sold on another store meanwhile is refused at the hold or
+ * the move as just taken, with nothing charged. A claims list that cannot be
+ * read is never read as free: nothing is held or moved (rule 24).
  *
  * A one-seat booking has its own claim for life, moved in place with the
  * booking and let go when its hold is given back or it is refunded in full.
@@ -671,10 +675,21 @@ async function ownerClaims(store: Store, now: number): Promise<HostClaim[]> {
  * The owner's claims as busy times, but those this store's bookings and holds already stand for (`busy`, by claim id):
  * those are counted there, and a group call's seats share theirs. So every claim another store made is busy, and so is
  * one of this store's that outlived its booking's entry (a team hold's CLAIM_MARGIN_MS), which the script refuses too.
+ *
+ * For a group call (`group`), its own shared claims are left out as well: its seats are counted in `busy`, and a new
+ * seat takes the same claim, which the script lets it take again. So a time whose every seat was refunded is sold
+ * again for that call; its claim stays (never let go early), so other stores and this store's other calls still see
+ * the owner taken then, failing closed (Claude 6's money review of #3490, LOW 1).
  */
-function elsewhere(claims: HostClaim[], busy: OwnBusy[]): Busy[] {
+function elsewhere(claims: HostClaim[], busy: OwnBusy[], group?: { callsId: string; productId: string } | null): Busy[] {
   const known = new Set(busy.flatMap((b) => [b.own, b.claim]).filter(Boolean));
-  return claims.filter((c) => !known.has(c.claim)).map((c) => ({ start: c.start, end: c.end }));
+  const ours = (c: HostClaim) => (group ? c.claim === ownGroupClaim(group.callsId, group.productId, c.start) : false);
+  return claims.filter((c) => !known.has(c.claim) && !ours(c)).map((c) => ({ start: c.start, end: c.end }));
+}
+
+/** The call whose own shared claims `elsewhere` leaves out: a group call of this store, else none. */
+function groupOf(store: Store, product: { id: string; call: CallSetup }): { callsId: string; productId: string } | null {
+  return store.callsId && product.call.seats > 1 ? { callsId: store.callsId, productId: product.id } : null;
 }
 
 /**
@@ -1401,7 +1416,7 @@ export async function holdAndCheckout(input: {
         const read = await readBusy(store, now);
         // Weekly hours: the owner's time other stores claimed is busy too, read once the lock is ours (ownerClaims).
         if (setup.kind === "weekly") claims = await ownerClaims(store, now);
-        busy = against(product, read.busy, read.sessions, [...read.blocked, ...elsewhere(claims, read.busy)], ownerOf(store));
+        busy = against(product, read.busy, read.sessions, [...read.blocked, ...elsewhere(claims, read.busy, groupOf(store, product))], ownerOf(store));
       } catch {
         return { ok: false, reason: "error" };
       }
@@ -1545,9 +1560,9 @@ export async function slotsForProduct(store: Store, product: CallListing, pick?:
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true });
       return { days: teamDays(product.call, ctx, now), left: {}, sessions: [], paid, hosts, picked, team: true };
     }
-    // Weekly hours: the owner's time other stores claimed is not offered; claims that cannot be read offer nothing (null).
-    const away = product.call.kind === "weekly" ? elsewhere(await ownerClaims(store, now), busy) : [];
-    return { ...offerFrom(product, now, busy, sessions, [...blocked, ...away], ownerOf(store)), paid, team: false };
+    // The owner's time other stores claimed is not read here, on every visit: the hold reads it, inside the order, and
+    // refuses a time sold there meanwhile as just taken (owner's decision of 16 November 2026 on #3490).
+    return { ...offerFrom(product, now, busy, sessions, blocked, ownerOf(store)), paid, team: false };
   } catch {
     return null;
   }
@@ -1584,8 +1599,8 @@ export async function slotsForMove(
       const ctx = await teamContext(store, product, team, [...busy, ...sessions, ...blocked], now, { refresh: true, except: { session, claim: own.claim } });
       return { days: teamMoveDays(product.call, ctx, own.hosts, current, now), left: {}, sessions: [] };
     }
-    const away = product.call.kind === "weekly" ? elsewhere(await ownerClaims(store, now), busy) : [];
-    const offer = offerFrom(product, now, busy.filter((b) => b.session !== session), sessions, [...blocked, ...away], ownerOf(store));
+    // The owner's time other stores claimed is read by the move itself, inside the order (moveBooking), not on a visit.
+    const offer = offerFrom(product, now, busy.filter((b) => b.session !== session), sessions, blocked, ownerOf(store));
     return {
       days: offer.days
         .map((day) => ({ ...day, starts: day.starts.filter((start) => start !== current) }))
@@ -1751,7 +1766,7 @@ export async function moveBooking(input: {
       } catch {
         return { ok: false, reason: "error" };
       }
-      const others = against(product, busy.filter((b) => b.session !== session), sessions, [...blocked, ...elsewhere(claims, busy)], ownerOf(store));
+      const others = against(product, busy.filter((b) => b.session !== session), sessions, [...blocked, ...elsewhere(claims, busy, groupOf(store, product))], ownerOf(store));
       if (!isBookable(at, now, others, start, product.id)) return { ok: false, reason: "taken" };
       if (at.kind === "weekly") {
         const mine = busy.find((b) => b.session === session && b.own);

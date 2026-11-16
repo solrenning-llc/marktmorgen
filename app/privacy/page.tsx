@@ -304,7 +304,9 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
@@ -397,8 +399,9 @@ export default function PrivacyPage() {
           that names the booking and its time, and we keep a mark that each
           reminder was sent for 14 days. If the buyer moves the booking
           to another time from the link in their email, we keep the new time
-          and how many times it was moved, tied to that checkout, for 200
-          days. The line in the creator&apos;s diary that keeps the time taken
+          and how many times it was moved, tied to that checkout, until 200
+          days after the call it was moved to, and never longer than two
+          years. The line in the creator&apos;s diary that keeps the time taken
           is let go {PAST_CALL_DAYS} days after the call ends; the booking
           itself stays on the creator&apos;s Stripe account. The same kind of cookie, for
           the same 32 minutes, is set when someone starts to buy a product sold
@@ -785,7 +788,16 @@ export default function PrivacyPage() {
           when the creator is trying two, each sent to a part of the list
           chosen at random. The tag is the same for everyone who got that
           email or that subject line: it lets the store count visits and sales
-          by email, and says nothing about who you are. Which of a
+          by email, and says nothing about who you are. In a one-off email
+          sent since November 6, 2026, each link first opens an address of
+          ours, the same for everyone who got the email, so the creator can
+          change where a wrong link leads after sending. Opening it counts as
+          one request of the store, as a page of the store does. Nothing about
+          who opened it, or when, is kept for that email or shown to the
+          creator. As on every page of the store, to limit abuse, a one-way
+          hash of the network address it is opened from is counted with that
+          day&apos;s requests from the same address, never with the email.
+          Which of a
           creator&apos;s automatic emails reach you is decided by what their
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you
@@ -1207,7 +1219,10 @@ export default function PrivacyPage() {
           creator&apos;s choice and responsibility. We keep each address and its
           signing secret until the creator removes it, a mark of each event
           sent for 30 days so it is never sent twice, and each delivery, with
-          the answer the address gave, for up to seven days.
+          the answer the address gave, for up to seven days. When a free copy
+          or a list sign-up could not be passed on to those addresses at once,
+          we keep that event, with the same details, for up to seven days to
+          try again, and never send it about someone deleted from the store.
         </p>
         <p id="store-forms">
           <strong className="text-black">Forms and quizzes on a store&apos;s pages.</strong>{" "}
@@ -1583,7 +1598,10 @@ export default function PrivacyPage() {
           and delete the connection, its token and every figure read from
           it. If they remove our app in their Facebook settings, or ask Meta
           for their data to be deleted, Meta tells us and we do the same at
-          once, and tell the store&apos;s owner.
+          once, and tell the store&apos;s owner. We then keep, for one day,
+          a scrambled form of that Meta user ID and the time Meta told us,
+          only so that a connection being finished at that very moment is
+          not kept either.
         </p>
         <p id="comparisons" className="scroll-mt-24">
           <strong className="text-black">Comparisons between stores.</strong>{" "}
@@ -2251,7 +2269,9 @@ export default function PrivacyPage() {
             link that opens a page for a day or less; the list of addresses an
             email already going out is sent down, which passes a deleted address
             over (until it finishes, at most 60 days); a reminder waiting for its
-            hour, which is then not sent (at most a week); an import&apos;s file
+            hour, which is then not sent (at most a week); an event for the
+            creator&apos;s webhooks still waiting to be sent, which is then not
+            sent (at most a week); an import&apos;s file
             (14 days after it began); the events a store&apos;s webhooks already
             sent to the creator (7 days); and one-way marks that limit how often
             something is sent or asked (at most 32 days).
@@ -2262,6 +2282,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

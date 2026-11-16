@@ -31,11 +31,12 @@ import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
-import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
+import { clearBrokenMoveByHand, describeMove, repairMove } from "@/lib/move-repair";
 import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { installVirtualClock } from "./slow-test-virtual-clock";
 
 process.env.NIMBUS_DATA_KEY ??= "tests-only-not-a-real-deployment-secret";
 process.env.RESEND_API_KEY = "re_test_second_step_gate_only";
@@ -114,6 +115,9 @@ async function signInWithPasskey(key: ReturnType<typeof makePasskey>): Promise<s
 }
 
 async function main(): Promise<void> {
+  // The lock waits (lib/redis-lock.ts) and the short pauses below pass on a virtual clock, in the order the real
+  // one would give: every check of the time still sees the whole wait.
+  const clock = installVirtualClock({ maxMs: 1_000 });
   redis.clear();
   is("the passkey wait is the app's wait", REMOVAL_DAYS, RESET_DAYS);
 
@@ -972,6 +976,19 @@ async function main(): Promise<void> {
   const pkfSecond = await signInWithPasskey(pkfKey);
   is("the next one lands on the address with the store", await emailForSession(pkfSecond), PKF);
 
+  part("A passkey login whose broken move cannot be repaired opens no session");
+  const PKUF = "pku-from@example.com";
+  const PKUT = "pku-dest@example.com";
+  await claimHandle(PKUF, "pku-from", "Pku", "");
+  const pkuKey = makePasskey(PKUT, "cred-pku");
+  await pkuKey.keep();
+  // A move still running on both addresses: repairMove refuses to settle it and answers false.
+  const pkuMark = await markMoving(PKUF, PKUT);
+  await markBrokenMove(PKUF, PKUT);
+  const pkuTry = await signInWithPasskey(pkuKey);
+  is("a live move mark keeps the broken move unrepaired", [Boolean(pkuMark), await isMoving(PKUF), await isMoving(PKUT)], [true, true, true]);
+  is("no session is opened while the move is unresolved", pkuTry, "");
+
   part("A store left on both addresses goes back with its other stores, unless one copy was edited");
   const EXF = "exf-from@example.com";
   const EXT = "exf-dest@example.com";
@@ -1279,6 +1296,45 @@ async function main(): Promise<void> {
   is("logging in with the passkey meanwhile", [busyIn.status, ((await busyIn.json()) as { error?: string }).error], [503, "busy"]);
   await releaseLock(blocking);
 
+  part("A broken move's repair whose logout of the away address is unknown keeps the record (issue 4366)");
+  const REA = "rep-away@example.com";
+  const REB = "rep-home@example.com";
+  await claimHandle(REB, "rep-home", "Rep Home", "");
+  const reaSession = await openSession(REA);
+  await markBrokenMove(REA, REB);
+  const reaSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${REA}`).slice(0, 40)}`;
+  const beforeRepair = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === reaSet ? [42] : beforeRepair(commands)) as typeof redis.pipeline;
+  const reaRepaired = await repairMove(REA);
+  redis.pipeline = beforeRepair;
+  is("control: the old session on the away address is still open", await emailForSession(reaSession), REA);
+  is("the repair does not report success while the away address was not logged out", reaRepaired, false);
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(REA)) !== null, await isMoving(REA), await isMoving(REB)], [true, true, true]);
+  is("a later try whose logout is confirmed repairs it", [await repairMove(REA), await emailForSession(reaSession), await readBrokenMove(REA), await isMoving(REA), await isMoving(REB)], [true, null, null, false, false]);
+
+  part("Clearing a broken move by hand whose logout of one address is unknown keeps the record");
+  const HCA = "hand-a@example.com";
+  const HCB = "hand-b@example.com";
+  const hcaSession = await openSession(HCA);
+  const hcbSession = await openSession(HCB);
+  await markBrokenMove(HCA, HCB);
+  const hcbSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${HCB}`).slice(0, 40)}`;
+  const beforeHand = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === hcbSet ? [42] : beforeHand(commands)) as typeof redis.pipeline;
+  const hcCleared = await clearBrokenMoveByHand(HCA, HCA);
+  redis.pipeline = beforeHand;
+  is("control: the old session on the address whose logout was unknown is still open", await emailForSession(hcbSession), HCB);
+  is("it does not report cleared while an address was not logged out", hcCleared, "logout");
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(HCA)) !== null, await isMoving(HCA), await isMoving(HCB)], [true, true, true]);
+  is(
+    "a later try whose logouts are confirmed clears it",
+    [await clearBrokenMoveByHand(HCA, HCA), await emailForSession(hcaSession), await emailForSession(hcbSession), await readBrokenMove(HCA), await isMoving(HCA), await isMoving(HCB)],
+    ["cleared", null, null, null, false, false],
+  );
+
+  clock.restore();
   done();
 }
 

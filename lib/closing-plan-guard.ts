@@ -105,13 +105,16 @@ const INVOICE_STATUSES: ReadonlySet<unknown> = new Set(["draft", "open", "paid",
 /** Every status Stripe gives a refund: another one is not known, never taken as "no refund". */
 const REFUND_STATUSES: ReadonlySet<unknown> = new Set(["pending", "requires_action", "succeeded", "failed", "canceled"]);
 /**
- * An invoice row read in its exact shape (CX-123 rule 24): its status, one of Stripe's own; its `amount_paid`, a whole
+ * An invoice row of this subscription (rule 30), read in its exact shape (CX-123 rule 24): its status, one of Stripe's own; its `amount_paid`, a whole
  * number whatever the status (Stripe lets an invoice be paid in parts, and money then sits on an `open` one, or on one
  * marked `uncollectible`: docs.stripe.com/invoicing/partial-payments, read 08/11/2026); and for one that holds money
  * (paid, or any status with `amount_paid` above zero) every field a refund is decided by. One that does not read is
  * never taken as "no payment".
  */
-const invoiceKnown = (row: Record<string, unknown>) => {
+const invoiceKnown = (subscription: string) => (row: Record<string, unknown>) => {
+  // This plan's own invoice (rule 30): a row of another subscription in the reply is not this list, so the whole list
+  // is not known, and nothing of it is refunded, voided or written to the creator about.
+  if (ownField(row, "subscription") !== subscription) return false;
   const status = ownField(row, "status");
   if (!INVOICE_STATUSES.has(status)) return false;
   const amountPaid = ownField(row, "amount_paid");
@@ -461,8 +464,22 @@ type ChargeOutcome = { settled: boolean; returned: number; disputed: number; cur
 async function giveBack(id: string, key: string, intent: string, least = 1): Promise<ChargeOutcome | null> {
   if (!OBJECT_ID.test(intent)) return { settled: false, returned: 0, disputed: 0, currency: "" };
   const pi = await onPlatform("GET", `/payment_intents/${encodeURIComponent(intent)}?expand[]=latest_charge`, undefined, { version: AT });
+  // Only this payment's own reply, and its own charge, decide what is refunded (rules 24 and 30, #4423): an answer
+  // for another payment throws before any refund is read or asked for, and settleOne keeps the plan in line, never
+  // sized, refunded or reported from someone else's charge. The charge must prove it is this payment's own: its
+  // payment_intent, as an id or as an expanded object with its own id, exactly the one asked for. Absent, null, an
+  // object without an id, another shape or another id is unknown, never taken as this payment's (Codex P on #4423).
+  if (!pi || typeof pi !== "object" || !Object.hasOwn(pi, "id") || (pi as { id?: unknown }).id !== intent) throw new Error("Stripe answered for another payment");
   const charge = pi.latest_charge as Record<string, unknown> | null | undefined;
   if (!charge || typeof charge.id !== "string" || !OBJECT_ID.test(charge.id)) return { settled: false, returned: 0, disputed: 0, currency: "" };
+  const named = Object.hasOwn(charge, "payment_intent") ? charge.payment_intent : undefined;
+  const namedId =
+    typeof named === "string"
+      ? named
+      : named !== null && typeof named === "object" && !Array.isArray(named) && Object.hasOwn(named, "id")
+        ? (named as { id?: unknown }).id
+        : undefined;
+  if (typeof namedId !== "string" || namedId !== intent) throw new Error("Stripe answered with an unproven payment's charge");
   // Each field the refund is decided by, in its exact shape (CX-123 rule 24): one that does not read throws, and
   // settleOne keeps the plan in line, never settled as refunded with nothing given back.
   const amount = ownField(charge, "amount");
@@ -536,7 +553,7 @@ export async function settleOne(id: string, recheck = false, onStopped?: () => v
     const cutoff = before ? entry.since : (entry.ended ?? entry.since);
     // Every page read before anything is voided, deleted or refunded; a list not known in full throws, and the
     // plan is kept in line (catch below), never settled as having had no payment.
-    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown, 10, OBJECT_ID);
+    const invoices = await allRows("/invoices", new URLSearchParams({ subscription: id, limit: "100" }), invoiceKnown(id), 10, OBJECT_ID);
     let settled = true;
     let returned = 0;
     let disputed = 0;

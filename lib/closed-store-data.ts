@@ -40,6 +40,13 @@
  * whatever number closes. Each step can be run again; the walk is resumable
  * from where it stopped, page by page, and a key already gone is passed over.
  *
+ * A store its owner deletes from the studio (lib/store.ts deleteStore) takes
+ * the same walk instead of closing (Claude 6's probe P3 on #3643): its entry
+ * is written under its lock before its record goes (queueDeleted), waits for
+ * the next walk to begin and joins it once its record is gone
+ * (admitDeleted), and is taken out of the batch when the walk is done, with
+ * no closing record and no email (it was deleted, not closed).
+ *
  *   nl:closed:due     sorted set  a store's key -> when its records came due (ms)
  *   nl:closed:batch   hash        a store's key -> what the walk needs of it (JSON), while its walk runs
  *   nl:closed:walk    hash        cursor, started, finished
@@ -52,8 +59,9 @@
  * with the orders that sold them (ORDER_COST).
  */
 import { onAccount } from "@/lib/stripe-account";
+import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -61,11 +69,12 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
+import { forgetBoth, queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -124,6 +133,12 @@ export type Batched = {
    * is never walked by its ids again, since by then another store may hold its address or key.
    */
   unfinished?: number;
+  /** Deleted from the studio (queueDeleted), not closed: no closing record is written and nobody is emailed when its walk is done. */
+  deleted?: true;
+  /** Waits for the next walk to begin (admitDeleted): it is never walked or finished by a walk already under way, which may have passed its keys. */
+  queued?: true;
+  /** A deleted store's addresses that still led to it when it was deleted, held back again at its admission (settleDeletedStore). */
+  holds?: string[];
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -199,8 +214,19 @@ export async function deleteSalesTraces(store: Store): Promise<number> {
   return keys.length;
 }
 
+/**
+ * Deletes the keys a batch at a time, each batch's count read exactly (rule 24; issue #4390): one integer from 0 to the
+ * batch's size. Any other answer (none, text, an envelope, a count past the batch) throws UnknownReplyError before the
+ * walk's cursor moves, so the store stays in the batch and the next run repeats the same page, never counting as
+ * deleted what a reply that said nothing may have left.
+ */
 async function del(keys: string[]): Promise<void> {
-  for (let i = 0; i < keys.length; i += DEL_BATCH) await redisPipeline([["DEL", ...keys.slice(i, i + DEL_BATCH)]]);
+  for (let i = 0; i < keys.length; i += DEL_BATCH) {
+    const batch = keys.slice(i, i + DEL_BATCH);
+    const replies = repliesFor(await redisPipeline([["DEL", ...batch]]), 1);
+    const gone = replies ? countOf(replies[0]) : null;
+    if (gone === null || gone > batch.length) throw new UnknownReplyError("deleting a closing store's keys");
+  }
 }
 
 /**
@@ -217,16 +243,16 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   const team = store.sid ? await readTeam(store.sid) : { members: [], invites: [] };
   const own = new Set(marks);
   for (const host of [store.email, ...team.members.map((m) => m.email)].map(hostId)) {
-    let cursor = "0";
-    for (let round = 0; round < 50; round += 1) {
-      const [reply] = await redisPipeline([["HSCAN", claimsKey(host), cursor, "COUNT", 500]]);
-      const [next, flat] = Array.isArray(reply) ? [String(reply[0]), (reply[1] as unknown[]).map(String)] : ["0", []];
+    // Every page read exactly and the walk to cursor zero (scanAll), each HDEL confirmed as one whole count from 0 to
+    // the fields asked: anything else is unknown (rule 24, #4391), it throws before the record is closed, and the next
+    // run removes what is left. A claim left here would keep the host's slot taken for a store declared erased.
+    await scanAll("HSCAN", claimsKey(host), async (flat) => {
       const mine: string[] = [];
       for (let i = 0; i + 1 < flat.length; i += 2) if (pieces(flat[i + 1]).some((part) => own.has(part))) mine.push(flat[i]);
-      if (mine.length) await redisPipeline([["HDEL", claimsKey(host), ...mine]]);
-      cursor = next;
-      if (cursor === "0") break;
-    }
+      if (!mine.length) return;
+      const gone = countOf(repliesFor(await redisPipeline([["HDEL", claimsKey(host), ...mine]]), 1)?.[0]);
+      if (gone === null || gone > mine.length) throw new UnknownReplyError("the closing walk's removal of a host's claims");
+    });
   }
   // A host's own calendar is the host's, across the stores they serve: it goes with the last of them. A read
   // that fails is never "no other store" (rule 24): it throws, and the walk tries this store again later.
@@ -272,13 +298,149 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   return entry;
 }
 
+/**
+ * How long a deleted store's entry waits for its record to go: deleteStore writes it under the store's lock, held
+ * LOCK_SECONDS at the most, and deletes the record right after. A record still there past this was never deleted
+ * (the person was told it went wrong), and its entry is dropped, never walked.
+ */
+export const DELETE_SETTLES_MS = 60 * 60 * 1000;
+
+/**
+ * A store deleted from the studio (lib/store.ts deleteStore, app/api/store/stores): what the walk needs of it, written
+ * under its lock before its record goes, so its keys named by its ids (its page photo, its list, its data room...) are
+ * erased by the walk as a closed store's are (Claude 6's probe P3 on #3643, rule 30). Until then they stayed for good,
+ * with nothing naming them. It waits for the next walk to begin (`queued`). Only HSET's own count is a write: any
+ * other answer throws, and the store is not deleted (rule 24).
+ */
+export async function queueDeleted(store: Store, now = Date.now()): Promise<Batched> {
+  const ref = storeRef(store);
+  const { marks } = await marksOf(store);
+  const entry: Batched = {
+    ref,
+    email: store.email,
+    sid: store.sid,
+    statsId: store.statsId,
+    name: store.name,
+    handle: store.handle,
+    handles: [...saleHandles(store)],
+    holds: [store.handle, ...store.previousHandles],
+    marks,
+    endedAt: now,
+    at: now,
+    deleted: true,
+    queued: true,
+  };
+  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
+  if (written !== 0 && written !== 1) throw new UnknownReplyError("a deleted store's walk entry written");
+  return entry;
+}
+
+/**
+ * One entry of the batch changed only while it is still exactly the text read, in one step (a compare-and-set):
+ * ARGV[3] written in its place, or, when ARGV[3] is empty, the field dropped. 1 changed, 0 not (another write landed
+ * meanwhile, such as a retried delete's fresh entry, and is kept). Modelled by lib/redis-memory.ts.
+ */
+export const BATCH_SWAP = `-- marktmorgen:closed-batch-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+return 1`;
+
+/** BATCH_SWAP's answer read exactly: true changed, false kept (changed meanwhile), null unknown (rule 24). */
+async function swapEntry(ref: string, read: string, next: string): Promise<boolean | null> {
+  const reply = repliesFor(await redisPipeline([["EVAL", BATCH_SWAP, 1, BATCH_KEY, ref, read, next]]), 1)?.[0];
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
+
+/**
+ * Before a walk begins: deleted stores waiting in the batch join it once Redis says their record is gone (nil). One
+ * whose record still stands is never walked: it waits while its delete may be under way (DELETE_SETTLES_MS), and is
+ * then dropped. A record not read, or a write not confirmed, leaves the entry waiting and the run unsure (rule 24).
+ *
+ * Each change is made only over the exact entry read (BATCH_SWAP), never by a plain HSET or HDEL: this takes no store
+ * lock, and a retried delete may write a fresh entry into the same field under its own lock after this read the old
+ * one (Codex T and reviewer 2 on #3670). The old entry's hour then said nothing about the new delete, and dropping or
+ * rewriting the field lost the fresh entry, so the deleted store's id-named keys stayed for good. A field that changed
+ * meanwhile is left as it is, for the next walk to read again.
+ *
+ * Its record read gone (Redis's own nil), this exact read stands in for any the delete could not make, so what the
+ * delete does once the record is gone is done again here, before its entry joins the walk (Claude 6's two LOWs and
+ * reviewer C3 on #3670): its addresses held back and its places released (settleDeletedStore), which a delete that
+ * answered `unsure` never tried again; and its webhooks, API keys and assistant notes forgotten (forgetBoth), which a
+ * delete whose record went with a reply lost, and whose read after it failed too, never forgot, while its API key's
+ * lookup (family "prepare") is not erased by the walk. A forget that fails leaves the entry waiting, since the walk
+ * erases the API keys' list that leads to the lookups, and goes in the line the daily job tries again
+ * (queueStoreForget). Each step can run again; one not confirmed leaves the entry waiting and the run unsure.
+ */
+async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number, deadline: number): Promise<{ admitted: number; sure: boolean }> {
+  let admitted = 0;
+  let sure = true;
+  for (const [ref, entry] of entries) {
+    if (!entry.queued) continue;
+    // Past the run's time, the rest wait for the next run.
+    if (Date.now() > deadline) {
+      sure = false;
+      break;
+    }
+    const read = raws.get(ref);
+    if (read === undefined) {
+      sure = false;
+      continue;
+    }
+    let standing: Store | null;
+    try {
+      standing = await storeExactly(ref);
+    } catch (error) {
+      console.error("a deleted store's record could not be read; its walk waits", error);
+      sure = false;
+      continue;
+    }
+    if (!standing) {
+      let settled: boolean;
+      try {
+        settled = await settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] });
+      } catch (error) {
+        console.error("a deleted store's addresses held back and its places released: not confirmed; its walk waits", error);
+        settled = false;
+      }
+      if (!settled) {
+        sure = false;
+        continue;
+      }
+      try {
+        await forgetBoth(entry.statsId ?? null, entry.sid);
+      } catch (error) {
+        // Not admitted: the walk would erase the API keys' list (nl:api:keys:<sid>), the only way to their lookups,
+        // and a later try would then find none to forget (reviewer C3's LEVE on #3670). The entry waits for the next
+        // run's try; the daily job's line tries meanwhile, while the list still stands.
+        console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; its walk waits, and it is put in line to try again", error);
+        sure = false;
+        try {
+          await queueStoreForget(entry.statsId ?? null, entry.sid);
+        } catch (queued) {
+          console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
+        }
+        continue;
+      }
+      const walkable: Batched = { ...entry };
+      delete walkable.queued;
+      const set = await swapEntry(ref, read, JSON.stringify(walkable));
+      if (set === true) admitted += 1;
+      else if (set === null) sure = false;
+      continue;
+    }
+    if (now - entry.at <= DELETE_SETTLES_MS) continue;
+    if ((await swapEntry(ref, read, "")) === null) sure = false;
+  }
+  return { admitted, sure };
+}
+
 /** Who owns a key: the closing store one of whose ids names it. */
 type Owners = { byMark: Map<string, string>; byHandle: Map<string, string>; byRef: Map<string, string> };
 
 function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
-    if (entry.unfinished) continue;
+    if (entry.unfinished || entry.queued) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
     for (const handle of entry.handles) owners.byHandle.set(handle, entry.ref);
     owners.byRef.set(entry.ref, entry.ref);
@@ -622,17 +784,21 @@ export async function walkPage(keys: string[], batch: Map<string, Batched>, owne
  * stores left as 0 from it too (Claude 5's second money review of #3279). An entry that does not read is kept and
  * counted in `unreadable`, so the count of stores left is never lowered past it.
  */
-async function readBatch(): Promise<{ entries: Map<string, Batched>; unreadable: number }> {
+async function readBatch(): Promise<{ entries: Map<string, Batched>; raws: Map<string, string>; unreadable: number }> {
   const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
   if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch (HGETALL)");
   const entries = new Map<string, Batched>();
+  // Each entry's text exactly as read, so a change is made only over it (admitDeleted, BATCH_SWAP).
+  const raws = new Map<string, string>();
   let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
     const value = json(list[i + 1]) as Batched | null;
-    if (value && Array.isArray(value.marks)) entries.set(list[i], value);
-    else unreadable += 1;
+    if (value && Array.isArray(value.marks)) {
+      entries.set(list[i], value);
+      raws.set(list[i], list[i + 1]);
+    } else unreadable += 1;
   }
-  return { entries, unreadable };
+  return { entries, raws, unreadable };
 }
 
 /**
@@ -662,8 +828,11 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
   let confirmed = true;
   for (const [ref, entry] of entries) {
     if (Date.now() > deadline) return null;
+    // A deleted store waiting for the next walk was not walked by this one (admitDeleted).
+    if (entry.queued) continue;
     try {
-      await finish(entry, now);
+      // A deleted store has no closing record, and its owner deleted it: only a closed store is finished.
+      if (!entry.deleted) await finish(entry, now);
     } catch (error) {
       console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
       left += 1;
@@ -718,10 +887,11 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       if (Date.now() > deadline) break;
       let store: Store | null;
       try {
-        store = await storeForEmail(ref);
+        store = await storeForRefExact(ref);
       } catch (error) {
-        // Not read (rule 24): never "no store". It stays in line, moved back a walk so it does not hold the head of
-        // the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves the line.
+        // Not read (rule 24): a failed request, a record that does not parse or one under that key for another owner
+        // (storeForRefExact, lib/store.ts) is never "no store". It stays in line, moved back a walk so it does not hold
+        // the head of the line, and is prepared once its record reads; only a store Redis says is gone (nil) leaves it.
         console.error("a closed store's record could not be read; it waits for the next walk", error);
         if (!(await moveBack(ref, now))) unsure = true;
         continue;
@@ -741,8 +911,14 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       }
       await redisPipeline([["ZREM", DUE_KEY, ref]]);
     }
-    // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
-    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished)) return { ...report, done: !unsure };
+    // Deleted stores waiting since the last walk join this one, once their records are gone (admitDeleted).
+    const read = await readBatch();
+    const waiting = await admitDeleted(read.entries, read.raws, now, deadline);
+    report.stores += waiting.admitted;
+    if (!waiting.sure) unsure = true;
+    // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again; one
+    // still waiting is not walked.
+    if (![...(await readBatch()).entries.values()].some((entry) => !entry.unfinished && !entry.queued)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";
@@ -795,6 +971,23 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
  * RENEWALS_AT_ONCE at a time (each was priced with the order that sold it,
  * tests/plan-cost-registry.ts). Bounded by `until`; answers whether every one
  * was reached.
+ *
+ * The search asks only for what can still charge (Stripe's search query
+ * language: clauses joined by AND, one negated by a leading "-"; status is a
+ * subscription search field): an ended one never comes back, so a store that
+ * sold thousands over its life is not read past the same first pages on
+ * every run (Claude 2 on #3332), and each run starts again from the first
+ * page with what is left. A member stopped leaves that search, and a page may
+ * be cut short by the ones that just left it; so a pass of several pages that
+ * found any of the store's subscriptions is not taken for the last, and the
+ * handle is done only on a pass of one page, or a pass that found none.
+ * At the most, for N running on a handle and a run never out of time, each
+ * run reading at most RENEWAL_SEARCH_ROUNDS (50) pages of 100 a handle:
+ * pages that stay put take ceil(N / 5,000) runs, and one more that finds
+ * none; pages cut by an offset into what the search matches now still stop
+ * at least half of what is left (up to 5,000) on each run, so 5,000 running
+ * take 6 runs (tests/closed-store-renewals-exact.test.ts). Ended ones cost
+ * no search at all.
  */
 export async function stopRenewals(store: Store, until: number): Promise<{ done: boolean; stopped: number; subs: string[] }> {
   const account = store.stripeAccountId;
@@ -802,18 +995,46 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
   if (!account) return out;
   for (const handle of saleHandles(store)) {
     let page = "";
-    for (let round = 0; round < 50; round += 1) {
+    let reachedEnd = false;
+    // Pages read, and the store's own subscriptions they held, on this handle's pass.
+    let read = 0;
+    let found = 0;
+    for (let round = 0; round < RENEWAL_SEARCH_ROUNDS; round += 1) {
       if (Date.now() > until) return { ...out, done: false };
-      const query = encodeURIComponent(`metadata['store']:'${handle}'`);
-      const found = (await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`)) as Record<string, unknown>;
-      const rows = Array.isArray(found.data) ? (found.data as Record<string, unknown>[]) : [];
+      const query = encodeURIComponent(`metadata['store']:'${handle}' AND -status:'canceled' AND -status:'incomplete_expired'`);
+      const reply = await onAccount("GET", account, `/subscriptions/search?limit=100&query=${query}${page ? `&page=${encodeURIComponent(page)}` : ""}`);
+      // Read in its exact shape (rule 24/30, lib/stripe-list.ts): a reply with no `data` list or no boolean `has_more`
+      // is not "nothing to stop". It throws StripeListUnreadable, the closing day is held and the search asked again,
+      // so no member goes on being charged after the store closed (until 9 November 2026 it was read as an empty list).
+      const listed = readStripePage(reply, renewalRowReadable, RENEWAL_ID);
+      read += 1;
+      // A row that cannot be read may be a running member: the pass is not done (the readable ones are still stopped).
+      if (listed.unreadable > 0) {
+        console.error(`plan-closing: Stripe's search gave ${listed.unreadable} subscription(s) that could not be read; asked again`);
+        out.done = false;
+      }
       const toStop: string[] = [];
-      for (const sub of rows) {
-        const id = typeof sub.id === "string" ? sub.id : "";
-        const status = typeof sub.status === "string" ? sub.status : "";
-        if (!id || ["canceled", "incomplete_expired"].includes(status)) continue;
-        out.subs.push(id);
-        toStop.push(id);
+      for (const sub of listed.rows) {
+        // Only the store's own sales of the handle searched (rule 30, as lib/closing-holds.ts): another's is never ended.
+        // Another's only when it names another store as text (Codex CX1 on #3332): a store that is not named, or not as
+        // text, is not known, so nothing is ended on a guess and the pass is not done, asked again on the next run.
+        const named = (ownField(sub, "metadata") as Record<string, unknown>).store;
+        if (typeof named !== "string" || !named) {
+          // Ended already (the search catches up within moments): whoever's it is, nothing to stop.
+          if (["canceled", "incomplete_expired"].includes(ownField(sub, "status") as string)) continue;
+          console.error("plan-closing: Stripe's search gave a running subscription whose store is not known; asked again");
+          out.done = false;
+          continue;
+        }
+        if (named !== handle) {
+          console.error("plan-closing: Stripe's search gave a subscription of another store; left alone");
+          continue;
+        }
+        found += 1;
+        // Ended already, though the search, which catches up within moments, still gave it: nothing to stop.
+        if (["canceled", "incomplete_expired"].includes(ownField(sub, "status") as string)) continue;
+        out.subs.push(sub.id);
+        toStop.push(sub.id);
       }
       for (let i = 0; i < toStop.length; i += RENEWALS_AT_ONCE) {
         if (Date.now() > until) return { ...out, done: false };
@@ -821,10 +1042,34 @@ export async function stopRenewals(store: Store, until: number): Promise<{ done:
           onAccount("DELETE", account, `/subscriptions/${encodeURIComponent(id)}`, undefined, undefined, `closed-now:${id}`)));
         out.stopped += Math.min(RENEWALS_AT_ONCE, toStop.length - i);
       }
-      page = typeof found.next_page === "string" ? found.next_page : "";
-      if (found.has_more !== true || !page) break;
+      if (!listed.hasMore) {
+        reachedEnd = true;
+        break;
+      }
+      // More follow and the page does not say where: not the end, never read as one.
+      const next = ownField(reply as Record<string, unknown>, "next_page");
+      if (typeof next !== "string" || !next) {
+        console.error("plan-closing: Stripe's search said more subscriptions follow but not where; asked again");
+        return { ...out, done: false };
+      }
+      page = next;
     }
+    // The run's pages ran out before the search's did: the rest are asked for on the next run, from the first page,
+    // which no longer holds the ones stopped. The store's other handles are still searched on this run.
+    if (!reachedEnd) out.done = false;
+    // Several pages, and some of them held the store's subscriptions: a later page may have been cut short by the ones
+    // that left the search, so the end reached is not known to be the last. The next run's search must find none.
+    else if (read > 1 && found > 0) out.done = false;
   }
   return out;
+}
+
+/** Pages of one handle's search read in one run; past them the pass is not done and the next run starts again from the first. */
+const RENEWAL_SEARCH_ROUNDS = 50;
+/** A subscription id as Stripe writes it; it goes into the DELETE's path. */
+const RENEWAL_ID = /^sub_[A-Za-z0-9]{1,250}$/;
+/** A search row counts only with its status in text and its metadata as an object (to tell its store). */
+function renewalRowReadable(row: Record<string, unknown>): boolean {
+  return typeof ownField(row, "status") === "string" && plainObject(ownField(row, "metadata"));
 }
 

@@ -926,7 +926,14 @@ export async function forgetSubmissionsPerson(
     ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); }),
     ...entries.map((entry) => doorKey(folder, entry.id)),
   ];
-  const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
+  // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
+  const turns = [...lessons].flatMap((at) => {
+    const [courseId, lessonId] = at.split("|");
+    const slot = buyerSlotFor(folder, courseId, lessonId, who);
+    return slot ? [`${slot}|${courseId}|${lessonId}|${who}`] : [];
+  });
+  const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...(turns.length > 0 ? [["ZREM", slotsKey(folder), ...turns]] : [])];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
   if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
   // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not
   // known to be done leaves the erasure unfinished, to be pressed again.

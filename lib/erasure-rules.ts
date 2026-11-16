@@ -79,10 +79,11 @@ export type ErasureSize = {
  * list deleted, each open upload given up at the vault (its record read and
  * deleted, its storage reservation given back under its lock: at most eight
  * commands), their places' keys deleted, and each entry's door deleted again after
- * them (Claude 6 on #3570: 20 more). [commands, bytes], held by
+ * them (Claude 6 on #3570: 20 more), and their slots' turns taken off the
+ * store's list in one ZREM (Claude 6 on #3568). [commands, bytes], held by
  * tests/submission-erasure.test.ts to cover what it sends.
  */
-export const ERASE_SUBMISSIONS: readonly [number, number] = [280, 62_000];
+export const ERASE_SUBMISSIONS: readonly [number, number] = [281, 66_000];
 
 /**
  * Commands every erasure sends whatever the store: each module's own, workflows at their cap, a sync log at its length,

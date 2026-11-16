@@ -1324,8 +1324,11 @@ export const COST_LINES: CostLine[] = [
       // The store's deleted people, checked where a chunk of past buyers or members is written (review of #3383).
       { file: "lib/imported-purchases.ts", names: ["GRANT_UNLESS_ERASED", "grantUnlessErased"] },
       { file: "lib/move-members.ts", names: ["INVITE_UNLESS_ERASED"] },
+      // A HubSpot deals file (#2048): the same check, read once before the plan and once inside the deals' write.
+      { file: "lib/hubspot-import.ts", names: ["suppressedAmong", "ERASED_NOTE"] },
+      { file: "lib/crm.ts", names: ["IMPORT_CRM_DEALS"] },
     ],
-    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId).",
+    basis: "Every row of the month at its command and transfer ceiling, every upload at the fewest rows one counts, every start, step and report download; Store's own emails to people brought over (Studio and Scale send theirs from the monthly emails). Who was deleted from the store is read once a chunk of past buyers or members (CHUNK, 250 rows) before the repeat check and once more inside the script that writes the chunk (GRANT_UNLESS_ERASED, INVITE_UNLESS_ERASED: its EVAL and one HMGET), three commands a chunk; each row's own writes are the same HSETNX as before, moved inside that script, and a row found deleted there writes nothing and lets go of its repeat-check field (one HDEL in place of those writes). A store made before every store had a list is given one once (lib/store.ts ensureListId). A HubSpot deals file reads the store's deleted people once (one HMGET over the file's addresses, at most 1,000 prints of 32 bytes) before the plan, and once more inside the script that writes the deals (IMPORT_CRM_DEALS: one HMGET within its EVAL): two commands a file, carrying at most 1,000 prints of 32 bytes each.",
   },
   {
     id: "clickfunnels",

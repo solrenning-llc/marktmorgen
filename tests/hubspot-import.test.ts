@@ -34,9 +34,10 @@ import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { windowId } from "@/lib/allowance-window";
-import { claimHandle, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
+import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { TAKE_DATA, dataKey, dataUsed, noteData, takeData } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
+import { suppressCommand } from "@/lib/suppression";
 import { putMember } from "@/lib/team";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -61,18 +62,21 @@ async function paidStore(handle: string): Promise<{ store: Store; owner: string;
 
 /**
  * IMPORT_CRM_DEALS (lib/crm.ts) as Redis runs it, for the in-memory store this test uses: its own shim, so
- * lib/redis-memory.ts stays as it is on main. All or nothing: -4 when the CRM lock is not the import's own, -1
+ * lib/redis-memory.ts stays as it is on main. All or nothing: -4 when the CRM lock is not the import's own, -5 when
+ * a deal's address is among the store's deleted people, -1
  * when the pipelines changed, -2 when an id is taken (with each one there), -3 past the ceiling; otherwise the
  * pipelines (when sent) and every deal.
  */
 function runDealsImportLikeRedis(): void {
   const plain = redis.pipeline.bind(redis);
-  const isImport = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === IMPORT_CRM_DEALS && c[2] === 4 && c.length >= 12 && (c.length - 12) % 2 === 0;
+  const isImport = (c: (string | number)[]) => c[0] === "EVAL" && String(c[1]) === IMPORT_CRM_DEALS && c[2] === 5 && c.length >= 13 && (c.length - 13) % 3 === 0;
   const run = async (c: (string | number)[]): Promise<unknown> => {
-    const [deals, pipes, stages, lock, expected, next, copy, max, token, ...pairs] = c.slice(3).map(String);
+    const [deals, pipes, stages, lock, erased, expected, next, copy, max, token, ...triples] = c.slice(3).map(String);
     const [held] = await plain([["GET", pipes]]);
     const current = typeof held === "string" ? held : "";
-    const ids = pairs.filter((_, i) => i % 2 === 0);
+    const ids = triples.filter((_, i) => i % 3 === 0);
+    const pairs = triples.filter((_, i) => i % 3 !== 2);
+    const prints = triples.filter((_, i) => i % 3 === 2 && triples[i] !== "");
     const taken: string[] = [];
     for (const id of ids) {
       const [there] = await plain([["HGET", deals, id]]);
@@ -81,6 +85,8 @@ function runDealsImportLikeRedis(): void {
     // Only while the store's CRM lock is still the import's own, in the same step as the write (Codex J on #2048).
     const [owner] = await plain([["GET", lock]]);
     if (owner !== token) return [-4, current, ...taken];
+    // Only while no deal's address is among the store's deleted people (Claude 5 on #2048).
+    if (prints.length && ((await plain([["HMGET", erased, ...prints]]))[0] as unknown[]).some((v) => v !== null)) return [-5, current, ...taken];
     if (current !== expected) return [-1, current, ...taken];
     if (taken.length) return [-2, current, ...taken];
     const [size] = await plain([["HLEN", deals]]);
@@ -547,6 +553,54 @@ async function main(): Promise<void> {
   console.log("Codex J exhausted quota reproduction",JSON.stringify({status:refusedCost.status,error:refusedCost.body.error,wire:observed.length,slotCounts,billedLowerBound,rows:exhaustedRows}));
   is("refused file consumes no per-deal data-room writes after rows were already exhausted",[refusedCost.status,slotCounts.every(n=>n===0)],[429,true]);
 
+
+
+  part("Claude 5 on #2048: a person deleted from the store is never brought back by an import");
+  // A deleted person's print (lib/suppression.ts) is read before the plan and checked again where the deals are
+  // written (IMPORT_CRM_DEALS), as the sister imports do (GRANT_UNLESS_ERASED): their deal comes in without the address,
+  // and an erasure that lands between the read and the write sends nothing.
+  const gone = await paidStore("erasedhub");
+  const goneStore = (await ensureListId(gone.owner))!;
+  const goneId = goneStore.statsId!;
+  const adaFile = { header: HEADER, currency: "usd", rows: [row("7001", "Ada retainer", "New", "Sales", "", "", "Ada Lovelace (ada@example.com)"), row("7002", "Bob course", "New", "Sales", "", "", "Bob (bob@example.com)")] };
+  const firstIn = await call({ action: "save", ...adaFile }, gone.session);
+  is("control: before any deletion the deal keeps its address", [firstIn.status, (await readDeals(goneId, allStages(await readPipelines(goneId)))).map((d) => d.email).sort()], [200, ["ada@example.com", "bob@example.com"]]);
+  // What the deletion does to the CRM (forgetCrmPerson): the deal with the address goes.
+  await redis.pipeline([["HDEL", `nl:crm:deals:${goneId}`, hubSpotDealId("7001")]]);
+  await redis.pipeline([suppressCommand(goneStore.listId!, "ada@example.com")]);
+  is("control: the deletion took Ada's deal away", (await readDeals(goneId, allStages(await readPipelines(goneId)))).map((d) => d.email), ["bob@example.com"]);
+  const goneDry = await call({ action: "check", ...adaFile }, gone.session);
+  const goneDryText = JSON.stringify(goneDry.body);
+  is("the dry run never shows the deleted address", [goneDry.status, goneDryText.includes("ada@example.com")], [200, false]);
+  const secondIn = await call({ action: "save", ...adaFile }, gone.session);
+  const backIn = (await readDeals(goneId, allStages(await readPipelines(goneId)))).find((d) => d.id === hubSpotDealId("7001"));
+  is("the deleted person's deal comes in without their address", [secondIn.status, secondIn.body.summary?.added, backIn?.email], [200, 1, ""]);
+  is("nor does the summary name it", JSON.stringify(secondIn.body).includes("ada@example.com"), false);
+
+  const late = await paidStore("erasedlate");
+  const lateStore = (await ensureListId(late.owner))!;
+  const lateId = lateStore.statsId!;
+  const graceFile = { header: HEADER, currency: "usd", rows: [row("7101", "Grace workshop", "New", "Sales", "", "", "Grace (grace@example.com)")] };
+  const lateRowsKey = `nl:imports:rows:${lateStore.sid}:${windowId(lateStore, Date.now())}`;
+  const rowsBefore = Number((await redis.pipeline([["GET", lateRowsKey]]))[0] ?? 0);
+  const plainLate = redis.pipeline.bind(redis);
+  let printed = false;
+  let lateIn: { status: number; body: { error?: string; summary?: { written?: boolean } } };
+  try {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      if (!printed && commands.some((c) => c[0] === "EVAL" && String(c[1]).includes("crm-deals-import"))) {
+        printed = true;
+        await plainLate([suppressCommand(lateStore.listId!, "grace@example.com", 1)]);
+      }
+      return plainLate(commands);
+    }) as typeof redis.pipeline;
+    lateIn = await call({ action: "save", ...graceFile }, late.session);
+  } finally {
+    redis.pipeline = plainLate;
+  }
+  const lateDeals = await readDeals(lateId, allStages(await readPipelines(lateId)));
+  const lateRows = Number((await redis.pipeline([["GET", lateRowsKey]]))[0] ?? 0) - rowsBefore;
+  is("a deletion that lands before the write sends nothing: refused, no deal, the month's rows given back", [printed, lateIn.status, lateIn.body.error, lateDeals.length, lateRows], [true, 409, "erased", 0, 0]);
 
   done();
 }

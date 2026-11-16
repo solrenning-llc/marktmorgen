@@ -100,6 +100,11 @@ export class CrmSchemaConflict extends Error {
   constructor() { super("CRM configuration changed meanwhile"); this.name = "CrmSchemaConflict"; }
 }
 
+/** An import's deal names a person deleted from the store since the file was read: nothing was written (IMPORT_CRM_DEALS -5). */
+export class CrmPersonErased extends Error {
+  constructor() { super("a person in the import was deleted from the store meanwhile"); this.name = "CrmPersonErased"; }
+}
+
 const fieldsKey = (statsId: string) => `nl:crm:fields:${statsId}`;
 const valuesKey = (statsId: string, field: string) => `nl:crm:v:${statsId}:${field}`;
 const stagesKey = (statsId: string) => `nl:crm:stages:${statsId}`;
@@ -774,20 +779,25 @@ export class CrmDealsFull extends Error {
  * or pipeline changed meanwhile never gets a deal (-1); only deals whose ids
  * are all new (-2 when one is there: never overwritten); only when all of
  * them fit under the ceiling (-3); only while the store's CRM lock is still
- * the import's own (-4 otherwise, checked first). Then the pipelines (ARGV[2],
+ * the import's own (-4 otherwise, checked first); only while no deal's
+ * address is among the store's deleted people (-5: one HMGET of their prints,
+ * KEYS[5], as GRANT_UNLESS_ERASED in lib/imported-purchases.ts, so an erasure
+ * that lands after the import read the prints never gets its address back;
+ * Claude 5 on #2048). Then the pipelines (ARGV[2],
  * with the first one's stages copied for the board's old key, ARGV[3]; ""
  * keeps them) and every deal. Answers { how many deals were written } or,
- * when nothing was, { -1, -2, -3 or -4, the pipelines record as it is now
+ * when nothing was, { -1 to -5, the pipelines record as it is now
  * ("" for none), then each id already there and its deal as it is }, so the
  * room taken for the import goes back to what is really kept.
- *   KEYS: deals hash, pipelines record, first pipeline's stages copy, the CRM lock
- *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, the lock's token, then id, deal pairs
+ *   KEYS: deals hash, pipelines record, first pipeline's stages copy, the CRM lock, the store's deleted people's prints
+ *   ARGV: expected pipelines, new pipelines or "", stages copy, ceiling, the lock's token, then id, deal, print
+ *         triples (print "" for a deal with no address)
  */
-export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v3
+export const IMPORT_CRM_DEALS = `-- marktmorgen:crm-deals-import:v4
 local current = redis.call("GET", KEYS[2]) or ""
-local n = (#ARGV - 5) / 2
+local n = (#ARGV - 5) / 3
 local taken = {}
-for i = 6, #ARGV, 2 do
+for i = 6, #ARGV, 3 do
   local there = redis.call("HGET", KEYS[1], ARGV[i])
   if there then
     taken[#taken + 1] = ARGV[i]
@@ -800,6 +810,13 @@ local function refused(code)
   return reply
 end
 if redis.call("GET", KEYS[4]) ~= ARGV[5] then return refused(-4) end
+local prints = {}
+for i = 8, #ARGV, 3 do if ARGV[i] ~= "" then prints[#prints + 1] = ARGV[i] end end
+if #prints > 0 then
+  for _, found in ipairs(redis.call("HMGET", KEYS[5], unpack(prints))) do
+    if found then return refused(-5) end
+  end
+end
 if current ~= ARGV[1] then return refused(-1) end
 if #taken > 0 then return refused(-2) end
 if redis.call("HLEN", KEYS[1]) + n > tonumber(ARGV[4]) then return refused(-3) end
@@ -807,16 +824,16 @@ if ARGV[2] ~= "" then
   redis.call("SET", KEYS[2], ARGV[2])
   redis.call("SET", KEYS[3], ARGV[3])
 end
-for i = 6, #ARGV, 2 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
+for i = 6, #ARGV, 3 do redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 1]) end
 return {n}`;
 
 /** What IMPORT_CRM_DEALS answered: written, or refused with what is kept now; null when the answer is not one of those. */
-function importReply(reply: unknown, sent: number): { written: true } | { written: false; code: -1 | -2 | -3 | -4; current: string; there: Map<string, string> } | null {
+function importReply(reply: unknown, sent: number): { written: true } | { written: false; code: -1 | -2 | -3 | -4 | -5; current: string; there: Map<string, string> } | null {
   if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) return null;
   const answer: unknown[] = reply[0];
   if (answer.length === 1 && answer[0] === sent) return { written: true };
   const [code, current, ...pairs] = answer;
-  if ((code !== -1 && code !== -2 && code !== -3 && code !== -4) || typeof current !== "string" || pairs.length % 2 !== 0) return null;
+  if ((code !== -1 && code !== -2 && code !== -3 && code !== -4 && code !== -5) || typeof current !== "string" || pairs.length % 2 !== 0) return null;
   const there = new Map<string, string>();
   for (let i = 0; i < pairs.length; i += 2) {
     if (typeof pairs[i] !== "string" || typeof pairs[i + 1] !== "string") return null;
@@ -834,9 +851,11 @@ function importReply(reply: unknown, sent: number): { written: true } | { writte
  * goes back to what is kept: the pipelines' slot at the record as it is now,
  * a deal that is there at its own weight, every other deal's slot emptied.
  * Starts no workflow: a deal brought in from a file is not a deal entering a
- * stage.
+ * stage. `erased` is the store's deleted people's prints and how one address
+ * is printed (lib/suppression.ts); a deal whose address is printed there
+ * writes nothing and throws CrmPersonErased.
  */
-export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore): Promise<void> {
+export async function writeImport(statsId: string, held: Held, snapshotRaw: string, pipelines: Pipeline[] | null, deals: readonly Deal[], room: DataStore, erased: { key: string; print: (email: string) => string }): Promise<void> {
   // The lock may have run out on a slow request, or not be confirmed at all: then nothing is sent, and the room goes back.
   if (!(await stillHeld(held))) {
     await giveData(room, importRoom(snapshotRaw, pipelines, deals).back).catch(() => undefined);
@@ -846,9 +865,9 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   let reply: unknown;
   try {
     reply = await redisPipeline([[
-      "EVAL", IMPORT_CRM_DEALS, 4, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId), held.key,
+      "EVAL", IMPORT_CRM_DEALS, 5, dealsKey(statsId), pipesKey(statsId), stagesKey(statsId), held.key, erased.key,
       snapshotRaw, pipelines ? JSON.stringify(pipelines) : "", pipelines ? JSON.stringify(pipelines[0].stages) : "", MAX_DEALS, held.token,
-      ...deals.flatMap((deal) => [deal.id, JSON.stringify(deal)]),
+      ...deals.flatMap((deal) => [deal.id, JSON.stringify(deal), deal.email ? erased.print(deal.email) : ""]),
     ]]);
   } catch { throw new CrmDealWriteUnconfirmed(); }
   const answer = importReply(reply, deals.length);
@@ -861,7 +880,7 @@ export async function writeImport(statsId: string, held: Held, snapshotRaw: stri
   // Surely nothing was written: only what this import took goes back, by difference (importRoom), so the room of a
   // deal or a pipelines record another write keeps now is never touched.
   await giveData(room, importRoom(snapshotRaw, pipelines, deals).back).catch(() => undefined);
-  throw answer.code === -3 ? new CrmDealsFull() : answer.code === -4 ? new CrmLockLost() : new CrmSchemaConflict();
+  throw answer.code === -3 ? new CrmDealsFull() : answer.code === -4 ? new CrmLockLost() : answer.code === -5 ? new CrmPersonErased() : new CrmSchemaConflict();
 }
 
 /** The title and note of these deals as saved, by id (empty for one that is not there or cannot be read): what an import checks a deal it would bring in again against. */

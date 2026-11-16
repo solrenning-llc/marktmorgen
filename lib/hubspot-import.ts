@@ -58,7 +58,7 @@
  * (lib/crm.ts, forgetCrmPerson).
  */
 import { createHash } from "node:crypto";
-import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
+import { CrmDealReadUnavailable, CrmDealWriteUnconfirmed, CrmDealsFull, CrmLockLost, CrmPersonErased, CrmSchemaConflict, CrmSchemaReadUnavailable, CrmSchemaWriteUnconfirmed, importRoom, importSnapshot, readDealMarks, takeCrmLock, writeImport } from "@/lib/crm";
 import { type Deal, type Pipeline, type Stage, MAX_DEALS, MAX_PIPELINES, MAX_STAGES, allStages, newCrmId, parseDeal, parsePipelines, pipelineLimit } from "@/lib/crm-rules";
 import { HUBSPOT_LABELS, type HubSpotDealDraft, type HubSpotRefusal, STAGE_PAST_REASON, hubSpotDealColumns, hubSpotFileOf, oneLine, pipelineRoomReason, planHubSpotDeals, tooManyDealsSentence } from "@/lib/hubspot-csv";
 import { giveImportRows, takeImportRows } from "@/lib/imports";
@@ -66,7 +66,8 @@ import { rowsWords } from "@/lib/import-limits";
 import { type Held, LockBusyError, releaseLock } from "@/lib/redis-lock";
 import { DataRoomError, dataKey, monthOf, needData } from "@/lib/store-data";
 import { redisPipeline } from "@/lib/redis";
-import { repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { suppressedAmong, suppressedKey, suppressionPrint } from "@/lib/suppression";
 import { contentRoomFor, dataFullWords, dataRoomFor } from "@/lib/store-data-rules";
 import { largerPlanFor } from "@/lib/larger-plan";
 import type { Store } from "@/lib/store";
@@ -125,6 +126,7 @@ export type HubSpotImportRefusal =
   | "busy"
   | "lock_lost"
   | "changed"
+  | "erased"
   | "store_full"
   | "rows_month"
   | "unavailable"
@@ -143,9 +145,13 @@ export const HUBSPOT_IMPORT_WORDS: Record<Exclude<HubSpotImportRefusal, "too_man
   busy: "Your deals or pipelines are being changed right now, so nothing was brought in. Wait a moment, then bring the file in again.",
   lock_lost: "Saving could not start in time, so nothing was brought in. Bring the file in again.",
   changed: "Your pipelines changed while this file was being brought in, so nothing was brought in. Bring the file in again.",
+  erased: "Someone in this file asked your store to delete their data while it was being brought in, so nothing was brought in. Bring the file in again: their deal comes in without their email address.",
   unavailable: "Your deals could not be read just now, so nothing was brought in. Try again in a minute.",
   unconfirmed: "Saving could not be confirmed. Bring the same file in again: deals already here are never added twice.",
 };
+
+/** What a deal of a person deleted from the store came in without, said without the address. */
+export const ERASED_NOTE = "This deal came in without an email address: the person HubSpot associated with it asked your store to delete their data.";
 
 const refuse = (reason: HubSpotImportRefusal, message: string, limit?: number): HubSpotImportResult => ({ ok: false, reason, message, ...(limit === undefined ? {} : { limit }) });
 
@@ -369,6 +375,17 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // The deals that really come in are counted below, once the rows already here or past a pipeline are set aside.
     const plan = planHubSpotDeals(file, { currency: store.currency, statedCurrency: options.statedCurrency ?? "", pipelineRoom: fileRoom, dealRoom: Number.POSITIVE_INFINITY, firstPipeline });
     if (!plan.ok) return refuse("too_many", plan.sentence);
+    // A person deleted from the store is never brought back by a file (app/privacy/delete: "no import puts you back";
+    // Claude 5 on #2048): their deal comes in without the address, and neither the deal nor the summary names it. One
+    // HMGET of the store's prints, read exactly (an unknown reply refuses); checked again where the deals are written.
+    const addresses = [...new Set(plan.deals.map((d) => d.email).filter((e) => e))];
+    const erasedNow = await suppressedAmong(store.listId, addresses);
+    for (const d of plan.deals) {
+      if (d.email && erasedNow.has(d.email)) {
+        d.email = "";
+        d.emailNote = ERASED_NOTE;
+      }
+    }
     // A pipeline past what a store holds is past the plan's too: its rows say the plan's room.
     const planRoom = Math.max(0, Math.min(pipelineLimit(store, nowSeconds), MAX_PIPELINES) - snapshot.pipelines.length);
     for (const r of plan.refused) if (r.reason === pipelineRoomReason(fileRoom)) r.reason = pipelineRoomReason(planRoom);
@@ -398,16 +415,19 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     }
     counted = rows.counted;
     await needData(store, room.take);
-    await writeImport(statsId, held, snapshot.raw, pipelines, deals, store);
+    const listId = store.listId;
+    await writeImport(statsId, held, snapshot.raw, pipelines, deals, store, listId ? { key: suppressedKey(listId), print: (email) => suppressionPrint(listId, email) } : { key: suppressedKey("none"), print: () => "" });
     counted = 0;
     return { ok: true, summary: { ...summary, written: true } };
   } catch (error) {
     // The month's rows go back only when the step surely wrote nothing; unconfirmed, they stay counted, as the room does.
-    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError || error instanceof DataRoomError)) await giveImportRows(store, counted, now).catch(() => undefined);
+    if (counted && (error instanceof CrmSchemaConflict || error instanceof CrmPersonErased || error instanceof CrmDealsFull || error instanceof CrmLockLost || error instanceof LockBusyError || error instanceof DataRoomError)) await giveImportRows(store, counted, now).catch(() => undefined);
     if (error instanceof LockBusyError) return refuse("busy", HUBSPOT_IMPORT_WORDS.busy);
     if (error instanceof CrmLockLost) return refuse("lock_lost", HUBSPOT_IMPORT_WORDS.lock_lost);
     if (error instanceof DataRoomError) return refuse("store_full", error.message);
     if (error instanceof CrmSchemaConflict) return refuse("changed", HUBSPOT_IMPORT_WORDS.changed);
+    if (error instanceof CrmPersonErased) return refuse("erased", HUBSPOT_IMPORT_WORDS.erased);
+    if (error instanceof UnknownReplyError) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (error instanceof CrmDealsFull) return refuse("deals_full", HUBSPOT_IMPORT_WORDS.deals_full);
     if (error instanceof CrmSchemaReadUnavailable || error instanceof CrmDealReadUnavailable) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (error instanceof CrmSchemaWriteUnconfirmed || error instanceof CrmDealWriteUnconfirmed) return refuse("unconfirmed", HUBSPOT_IMPORT_WORDS.unconfirmed);

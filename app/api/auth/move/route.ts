@@ -23,6 +23,7 @@ import { holdsSecondStep } from "@/lib/second-step-gate";
 import { repairMove } from "@/lib/move-repair";
 import { movePhoneDevices } from "@/lib/phone-alerts";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { takeMove } from "@/lib/move-pace";
 
 /**
  * Finishes a move of the sign-in address.
@@ -69,6 +70,12 @@ export async function POST(request: NextRequest) {
   const { from, to } = moved;
   // A move left broken earlier is repaired first (lib/move-repair.ts); while it cannot be, nothing moves.
   if (!(await repairMove(from)) || !(await repairMove(to))) return away("/signin?status=move-error");
+  // One of the account's finished moves is taken before anything moves (lib/move-pace.ts): the end of a move sends
+  // company emails (tellMoved) and does company work, so their ceiling is counted first, by the store, not the address.
+  // Past it, or with the count unknown, nothing moves and nothing is sent.
+  const pace = await takeMove(from);
+  if (pace === "unknown") return away("/signin?status=move-unread");
+  if (pace === "exceeded") return away("/signin?status=move-limited");
   // Both addresses are marked as moving for the whole move (lib/auth.ts markMoving): the ways in leave
   // `from` before the store does, and in that gap `from` counts as having a second step, so a session opened
   // only by the emailed link adds no passkey and no app to it (lib/second-step-gate.ts; review of 8b4ddf6ee).
@@ -256,9 +263,10 @@ type LeftBehind = { recovery: boolean; teams: boolean; keys: boolean };
 /**
  * The notices at the end of a move. The old sign-in address is always told that the account now logs in with the new
  * one, with what did not come along; the new address is told only when something did not, with what to do. At most
- * two emails a move (tests/plan-cost-registry.ts, EMAIL_SITES). Neither ever names the recovery address. Best
- * effort, like every account notice: the studio says what did not come along on the page the move lands on
- * (app/studio/page.tsx), which is the notice that cannot be lost.
+ * MOVE_END_EMAILS (2) emails a move, on top of the two of its ask (lib/auth.ts sendMoveLink), and at most
+ * MOVES_PER_30_DAYS finished moves an account (lib/move-pace.ts; tests/plan-cost-registry.ts, EMAIL_SITES). Neither
+ * ever names the recovery address. Best effort, like every account notice: the studio says what did not come along
+ * on the page the move lands on (app/studio/page.tsx), which is the notice that cannot be lost.
  */
 async function tellMoved(from: string, to: string, link: string, left: LeftBehind): Promise<void> {
   const when = `When: ${new Date().toISOString().replace("T", " ").slice(0, 16)} UTC`;

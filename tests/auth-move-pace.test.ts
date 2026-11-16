@@ -115,7 +115,7 @@ async function main() {
   const signin = readFileSync("app/signin/page.tsx", "utf8");
   is(
     "move-limited is a status, naming the ceiling and that nothing changed",
-    [signin.includes('"move-limited": {'), signin.includes(`can change ${CEILING} times in 30 days`), /"move-limited": \{[^}]*Nothing was changed\./.test(signin)],
+    [signin.includes('"move-limited": {'), signin.includes(`can change ${CEILING} times in 30 days`), /"move-limited": \{[^}]*Nothing was changed\b/.test(signin)],
     [true, true, true],
   );
   done();

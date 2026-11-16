@@ -2105,6 +2105,7 @@ export const NOT_A_COST: Record<string, string> = {
   CALENDAR_ADDS_PER_TEN_MINUTES: "A burst limit per store on calendar adds, each one of the store's studio requests (line studio) that reads one remote calendar (R27): it only refuses, before the read.",
   CALENDAR_ADDS_PER_CONNECTION_TEN_MINUTES: "The same per connection, whatever store it is signed in to (R27): it only refuses, before the read.",
   TRIAL_MONTHLY_EMAILS: "The free trial's emails: in nonPayingWorst (line free-share).",
+  MOVES_PER_30_DAYS: "Moves of the sign-in address one account may finish in 30 days (lib/move-pace.ts, app/api/auth/move; Claude 7's review of #3326), counted by its store's id before the move does anything and refused when the count cannot be read: each finished move is at most MOVE_END_EMAILS (2) company emails at its end and the company's carrying work, held in SCOPES (move-done) as a company cost per account, not a plan allowance.",
   SUPPORT_PER_DAY: "The daily cap on \"Send this to support\" requests (lib/help-support.ts): two company emails each, nothing kept, held in SCOPES (help-support) as a company cost, not a plan allowance.",
   DAILY_CAPS: "The choices of a host's own daily booking cap: how many calls a host takes, not a cost.",
   KIT_PER_DAY: "A daily burst limit under the writing jobs an affiliate kit takes (line ai).",
@@ -2154,7 +2155,7 @@ export const SCOPES: Record<string, ScopeClass> = {
   // The studio's one search box (766 [STN13]): its counters, checked before the search's STUDIO_SEARCH_UNITS studio requests are taken and counted inside them when it is answered.
   "studio-search": BURST("studio"), "studio-search-day": BURST("studio"),
   // Sign-in and account security.
-  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
+  join: ACCOUNT, passkey: ACCOUNT, "google-signin": ACCOUNT, "google-signin-back": ACCOUNT, "passkey-change": ACCOUNT, "passkey-remove-locked": ACCOUNT, "move-ask": ACCOUNT, "move-done": ACCOUNT, "two-step": ACCOUNT, "two-step-backup": ACCOUNT, "two-step-change": ACCOUNT,
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
   "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
@@ -2220,9 +2221,11 @@ export const EMAIL_SITES: Record<string, string[]> = {
   "app/api/cron/mail-check/route.ts": COMPANY, "app/api/cron/monthly/route.ts": COMPANY, "app/api/cron/stripe-check/route.ts": COMPANY,
   "app/api/cron/usage/route.ts": COMPANY, "app/api/cron/weekly/route.ts": COMPANY, "lib/account-notice.ts": COMPANY, "lib/auth.ts": COMPANY,
   "lib/billing-reminders.ts": COMPANY, "lib/passkeys.ts": COMPANY, "lib/plan-closing.ts": COMPANY, "lib/closing-buyers.ts": COMPANY, "lib/closing-plan-guard.ts": COMPANY, "lib/plan-refund-flow.ts": COMPANY, "lib/plan-pause.ts": COMPANY,
-  // The end of a move of the sign-in address: at most two company emails a move, as before (lib/auth.ts sendMoveLink
-  // sends the two of its start). The old address is told every time that the account now logs in with the new one;
-  // the new address only when something did not come along (app/api/auth/move tellMoved). Moves are paced by move-ask.
+  // The end of a move of the sign-in address: at most MOVE_END_EMAILS (2) company emails a move (app/api/auth/move
+  // tellMoved: the old address every time, the new one only when something did not come along), on top of the two
+  // of its ask (lib/auth.ts sendMoveLink), so up to four a finished move. Finished moves are counted before any of it,
+  // at most MOVES_PER_30_DAYS (10) an account, by its store's id (lib/move-pace.ts, scope move-done; Claude 7's review
+  // of #3326): at most 2 x 10 x 2 = 40 end emails an account in any calendar month. The asks are paced by move-ask.
   "app/api/auth/move/route.ts": COMPANY,
   "lib/recovery-address.ts": COMPANY, "lib/stats-report.ts": COMPANY, "lib/store-alerts.ts": COMPANY, "lib/takedown.ts": COMPANY,
   "lib/trial-nudges.ts": COMPANY, "lib/two-step.ts": COMPANY, "lib/verify-mail.ts": COMPANY, "lib/yearly-offer.ts": COMPANY,

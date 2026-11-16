@@ -24,6 +24,11 @@ export type SearchSnippet = {
   description: string;
   titleFrom: TitleFrom;
   descriptionFrom: DescriptionFrom;
+  /**
+   * Whether the page is kept from visitors (hidden, or not yet at its time to show): then the product's plain page
+   * is what is shown and what search engines get (lib/sales-page.ts, livePage), so the page's own search words wait.
+   */
+  waiting: boolean;
 };
 
 export type SnippetInput = {
@@ -38,31 +43,39 @@ export type SnippetInput = {
   aboutLine: string;
   /** The general sentence in the store's language, for a product with none of the above. */
   general: string;
+  /** Whether visitors are shown the page (lib/sales-page.ts, pageShown); false while it is hidden. Shown if left out. */
+  shown?: boolean;
 };
 
 /** What the product page gives search engines, and where each part comes from. */
 export function productSearchSnippet(input: SnippetInput): SearchSnippet {
   // The studio sends both fields trimmed (components/page-editor.tsx) and the
   // page keeps what was sent, so a field of spaces counts as empty here too.
-  const seoTitle = input.seoTitle.trim();
-  const seoDescription = input.seoDescription.trim();
+  // A page kept from visitors is read as none by the public page, its search words included.
+  const waiting = input.shown === false;
+  const seoTitle = waiting ? "" : input.seoTitle.trim();
+  const seoDescription = waiting ? "" : input.seoDescription.trim();
   const titleFrom: TitleFrom = seoTitle ? "yours" : "default";
   const title = seoTitle || `${input.productTitle} — ${input.storeName}`;
-  if (seoDescription) return { title, titleFrom, description: seoDescription, descriptionFrom: "yours" };
-  if (input.summary) return { title, titleFrom, description: input.summary, descriptionFrom: "summary" };
-  if (input.aboutLine) return { title, titleFrom, description: input.aboutLine, descriptionFrom: "about" };
-  return { title, titleFrom, description: input.general, descriptionFrom: "general" };
+  if (seoDescription) return { title, titleFrom, description: seoDescription, descriptionFrom: "yours", waiting };
+  if (input.summary) return { title, titleFrom, description: input.summary, descriptionFrom: "summary", waiting };
+  if (input.aboutLine) return { title, titleFrom, description: input.aboutLine, descriptionFrom: "about", waiting };
+  return { title, titleFrom, description: input.general, descriptionFrom: "general", waiting };
 }
+
+/** Said above the parts while the page is kept from visitors. */
+export const WAITING_WORDS =
+  "This page is hidden, so visitors and search engines get the product's plain page. The title and description above are given once the page shows.";
 
 /** Where a part came from, in plain words for the studio. */
 export const TITLE_FROM_WORDS: Record<TitleFrom, string> = {
   yours: "From the title above.",
-  default: "The title above is empty, so the page uses the product's name and your store's name.",
+  default: "From the product's name and your store's name.",
 };
 
 export const DESCRIPTION_FROM_WORDS: Record<DescriptionFrom, string> = {
   yours: "From the description above.",
-  summary: "The description above is empty, so the page uses the product's one-line summary.",
-  about: "The description above is empty and the product has no one-line summary, so the page uses the start of its About text.",
-  general: "This product has no description, summary or About text, so the page uses a general sentence. Write a description above to use your own words.",
+  summary: "From the product's one-line summary.",
+  about: "From the start of the product's About text.",
+  general: "A general sentence, because the product has no summary or About text. Write a description above to use your own words.",
 };

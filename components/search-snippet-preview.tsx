@@ -1,4 +1,4 @@
-import { DESCRIPTION_FROM_WORDS, type SearchSnippet, TITLE_FROM_WORDS } from "@/lib/product-search-snippet";
+import { DESCRIPTION_FROM_WORDS, type SearchSnippet, TITLE_FROM_WORDS, WAITING_WORDS } from "@/lib/product-search-snippet";
 
 /**
  * "What search engines are given" under a product page's search fields in the
@@ -17,6 +17,11 @@ export function SearchSnippetPreview({ snippet }: { snippet: SearchSnippet }) {
       <p className="mt-1 max-w-[80ch] text-xs leading-relaxed text-ink-soft">
         Once you save, the page gives search engines and shared links this title and description. Search engines decide what they show and where; nobody can promise a place in results.
       </p>
+      {snippet.waiting ? (
+        <p className="mt-2 max-w-[80ch] text-xs font-semibold leading-relaxed text-ink" data-snippet-waiting="">
+          {WAITING_WORDS}
+        </p>
+      ) : null}
       <dl className="mt-3 space-y-3 text-sm">
         <div>
           <dt className="font-semibold text-ink">Title</dt>

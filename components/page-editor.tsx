@@ -2762,6 +2762,8 @@ export function PageEditor({
                     storeName,
                     aboutLine: searchLine.aboutLine,
                     general: searchLine.general,
+                    // As the public page reads it once saved (lib/sales-page.ts, livePage): hidden until its time.
+                    shown: !hidden || (showFrom > 0 && clock > 0 && showFrom * 1000 <= clock),
                   })}
                 />
               ) : null}

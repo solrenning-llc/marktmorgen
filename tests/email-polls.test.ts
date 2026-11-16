@@ -51,6 +51,28 @@ const closesAt = now + 7 * DAY;
   redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "EXPIREAT" ? 0 : run(c));
   is("a vote whose end was not set: unknown, never kept without its end", await recordVote(BC, 6, 0, closesAt, now), "unknown");
   redis.run = run;
+  // The first vote of a poll (Codex X4 on #3673, reproduced by Claude 5): the vote and its end are one step, so a
+  // vote whose end was not set leaves nothing behind, never a key with no end, and is never counted.
+  const FIRST = "a0123456789abcdef0123456";
+  const firstKey = `nl:mail:bc:${FIRST}:poll`;
+  redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "EXPIREAT" ? 0 : run(c));
+  is("the first vote whose end was not set: unknown", await recordVote(FIRST, 2, 1, closesAt, now), "unknown");
+  redis.run = run;
+  // Read before any HGET: the stand-in's hash reads make an empty hash, which Redis never does.
+  is("no key without an end", Number(redis.run(["TTL", firstKey])), -2);
+  is("no vote left behind for that place", redis.run(["HGET", firstKey, "2"]), null);
+  is("the vote not counted in the results", await pollResults(FIRST, 2), { known: true, counts: [0, 0], votes: 0 });
+  // A changed vote whose end was not set keeps the answer it had, and the poll's end with it.
+  redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "EXPIREAT" ? 0 : run(c));
+  is("a changed vote whose end was not set: unknown", await recordVote(BC, 3, 0, closesAt, now), "unknown");
+  redis.run = run;
+  is("the answer it had is kept", redis.run(["HGET", key, "3"]), "2");
+  is("and the poll still has its end", Number(redis.run(["TTL", key])) > 0, true);
+  // A new place in a poll that has votes, whose end was not set, is taken back.
+  redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "EXPIREAT" ? 0 : run(c));
+  is("a new place whose end was not set: unknown", await recordVote(BC, 12, 1, closesAt, now), "unknown");
+  redis.run = run;
+  is("no vote left for the new place", redis.run(["HGET", key, "12"]), null);
   redis.run = (c: (string | number)[]) => (String(c[0]).toUpperCase() === "HVALS" ? null : run(c));
   is("results that do not read", await pollResults(BC, 3), { known: false });
   redis.run = run;

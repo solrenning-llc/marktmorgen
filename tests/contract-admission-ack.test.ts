@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import {prepareRestartActivation,type RestartContractActivation} from '@/lib/contract-restart-activation';
 import {CONTRACT_KEYS,CONTRACT_FUNDING_RULES,contractFundingConfiguration} from '@/lib/contract-funding-rules';
 import {reserveContractFunding,reserveSwitchContractFunding,activateCheckoutContract,claimRestartIntent,contractFundingBinding,ownedRestartIntentFromAcknowledgement} from '@/lib/contract-funding';
 import {contractFixture} from './contract-funding-fixture';
 import {reset,setTransform,seed,calls,ledger,retained} from './contract-admission-ack-world';
+// contractFixture() names the review month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again at every acknowledgement (lib/contract-funding.ts): a run crossing 00:00 UTC on a month's
+// last day failed "no retry/readback/compensation". Only Date is stopped, for the whole run (the test that moves the
+// clock moves this one and puts it back); timers and performance.now() run as usual.
+const STARTED=Date.now();
+mock.timers.enable({apis:['Date'],now:STARTED});
 function setup(){
  const f=contractFixture(),config=contractFundingConfiguration(f.policy,f.context,f.now);assert.ok(config);
  const now=Math.floor(Date.now()/1000),charge=config.grantCents.creator_month,sourceGrantId='ctr_AckRestartSource';
@@ -80,21 +86,20 @@ test('actual first-owner claim requires an own outer ACK and preserves a committ
   assert.equal(calls.length,2);assert.equal(getters,0);assert.equal(members,0);
  }
 });
-test('actual admission and claim keep their post-ACK deadlines and backwards-clock checks',async t=>{
+test('actual admission and claim keep their post-ACK deadlines and backwards-clock checks',async()=>{
  for(const kind of ['reservation','claim'] as const)for(const clock of ['deadline','backwards'] as const){
   const f=kind==='reservation'?start():setup();
-  t.mock.timers.enable({apis:['Date'],now:Date.now()});
   try{
    if(kind==='reservation'){
-    setTransform(null,()=>t.mock.timers.setTime(clock==='deadline'?Date.now()+301000:Date.now()-1));
+    setTransform(null,()=>mock.timers.setTime(clock==='deadline'?Date.now()+301000:Date.now()-1));
     assert.equal(await reserveContractFunding('admission','creator','month','checkout',f.policy,f.context,'ctr_LateAck'),null);
     assert.equal(ledger.get(ledgerKey)?.get('pending:admission'),'ctr_LateAck');
    }else{
     const owned=f as ReturnType<typeof setup>,intent=owned.activation.armed.intent;
-    reset(null,()=>t.mock.timers.setTime(clock==='deadline'?intent.grant.submitUntilSeconds*1000+1:Date.now()-1),owned.frame);
+    reset(null,()=>mock.timers.setTime(clock==='deadline'?intent.grant.submitUntilSeconds*1000+1:Date.now()-1),owned.frame);
     assert.equal(await claimRestartIntent({grant:intent.grant,ref:intent.ref,handle:intent.handle,paused:intent.paused,claim:intent.claim,sourceGrantId:owned.frame.sourceGrant},owned.policy,owned.context),null);
     assert.ok(retained.has('claim'));
    }
-  }finally{t.mock.timers.reset();}
+  }finally{mock.timers.setTime(STARTED);}
  }
 });

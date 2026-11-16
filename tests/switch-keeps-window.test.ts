@@ -563,7 +563,14 @@ async function main(): Promise<void> {
     // Merge of the pending affiliate link's branch into #3485 (16 November 2026): both together, figures as the model
     // computes them, the same as that branch's (703.1749 and 579.9019 kept on Scale): the second tier's reads and writes
     // sit inside the order's ORDER_COMPUTE (tests/plan-cost-registry.ts). Still above zero (MR). Cost is not lowered.
+    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
+    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
+    // figures as the model computes them; still above zero (MR), cost not lowered.
+    // Merge of #3479's new head (with main of 16 November 2026) into #3485: figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
     is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.17"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.

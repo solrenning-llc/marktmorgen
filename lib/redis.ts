@@ -3,6 +3,7 @@
 // Each pipeline is given up after REDIS_TIMEOUT_MS (lib/fetch-timeout.ts),
 // failing as a network failure does, so no page or job hangs on Redis.
 import { REDIS_TIMEOUT_MS, timed } from "@/lib/fetch-timeout";
+import { spendCommands } from "@/lib/redis-ceiling";
 
 type Command = (string | number)[];
 
@@ -22,6 +23,8 @@ export function isRedisConfigured(): boolean {
 export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
   const config = getConfig();
   if (!config) throw new Error("Redis is not configured");
+  // Held to the command ceiling of the work it runs in, if any (lib/redis-ceiling.ts), before anything is sent.
+  spendCommands(commands.length);
 
   const results = await timed(REDIS_TIMEOUT_MS, async (signal) => {
     const response = await fetch(`${config.url}/pipeline`, {
@@ -59,6 +62,7 @@ export async function redisPipeline(commands: Command[]): Promise<unknown[]> {
 export async function redisPipelineBase64(commands: Command[]): Promise<unknown[]> {
   const config = getConfig();
   if (!config) throw new Error("Redis is not configured");
+  spendCommands(commands.length);
   const results = await timed(REDIS_TIMEOUT_MS, async (signal) => {
     const response = await fetch(`${config.url}/pipeline`, {
       method: "POST",

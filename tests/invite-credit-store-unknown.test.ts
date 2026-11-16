@@ -168,7 +168,7 @@ async function main(): Promise<void> {
 
   part("The owed list answered in another shape is a failed, incomplete run, never an empty list");
   owe("bonus_listunknown", ana.sid, 200);
-  const smembers = await runWith((commands, replies) => replies.map((reply, i) => (commands[i]?.[0] === "SMEMBERS" && commands[i]?.[1] === OWED_KEY ? 1 : reply)));
+  const smembers = await runWith((commands, replies) => replies.map((reply, i) => ((commands[i]?.[0] === "SMEMBERS" || commands[i]?.[0] === "SRANDMEMBER") && commands[i]?.[1] === OWED_KEY ? 1 : reply)));
   is("one failure, not complete, nothing added", [smembers.failed, smembers.complete, smembers.added], [1, false, 0]);
   is("still owed", [recordOf("bonus_listunknown")?.state, owed("bonus_listunknown")], ["owed", 1]);
   await runWith(null);

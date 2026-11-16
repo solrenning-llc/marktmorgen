@@ -34,6 +34,7 @@
  * from 2025 on, which is why the version is pinned here.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { CommandCeilingError, withCommandCeiling } from "@/lib/redis-ceiling";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark } from "@/lib/claim-mark";
 import { isBillingConfigured, onPlatformAt } from "@/lib/billing";
@@ -532,58 +533,122 @@ async function putOnPlan(id: string, history: Map<string, Map<string, string>>, 
  * The daily run. Bounded by `deadline`; the walk through invited stores
  * carries on the next day from where it stopped.
  */
+/**
+ * The most Redis commands one run of the job sends, in all (Claude 7's and Claude 5's MEDIUM on #4514; rule MR/FX275:
+ * a cost is bounded before it is spent, never unknown): held in code by lib/redis-ceiling.ts, whatever module sends
+ * them, and priced by tests/plan-cost-registry.ts invite-credit-reads at 31 runs a month. Of it, INVITE_WALK_COMMANDS
+ * go to the invited stores and INVITE_OWED_COMMANDS to the credits owed; the rest is the run's own reads and its place.
+ * A run that reaches a ceiling stops there, is not complete, and keeps its place: the next run starts at the store it
+ * did not finish. A store whose own reading passes the whole walk's ceiling alone fails, and the walk goes past it, so
+ * it never holds the stores after it (as a customer past INVOICE_PAGES does: it is never credited until handled).
+ */
+export const INVITE_WALK_COMMANDS = 1_500;
+export const INVITE_OWED_COMMANDS = 480;
+/** The run's own: the list's size and place, at most two windows of it, the place written, and the owed credits read. */
+const INVITE_RUN_OWN_COMMANDS = 6;
+export const INVITE_RUN_COMMANDS = INVITE_WALK_COMMANDS + INVITE_OWED_COMMANDS + INVITE_RUN_OWN_COMMANDS;
+/**
+ * The most invited stores and owed credits one run reads by name: each costs at least one command, so no run reaches
+ * more than its ceilings allow, and neither list is ever read whole (their bytes are bounded too).
+ */
+const INVITE_WALK_STORES = INVITE_WALK_COMMANDS;
+const INVITE_OWED_READ = INVITE_OWED_COMMANDS;
+
 export async function settleInvites(deadline: number, now = Date.now()): Promise<InviteCounts> {
   const counts: InviteCounts = { invited: 0, earned: 0, added: 0, failed: 0, complete: false };
   if (!isRedisConfigured() || !isBillingConfigured()) return counts;
+  return withCommandCeiling(INVITE_RUN_COMMANDS, () => settleWithin(deadline, now, counts));
+}
+
+async function settleWithin(deadline: number, now: number, counts: InviteCounts): Promise<InviteCounts> {
   const nowSeconds = Math.floor(now / 1000);
 
   // The two lists walked are read exactly (CX-123 rule 24, audit round 7): a list Redis answered in another shape is
-  // not an empty list. The run counts a failure and is not complete; the walk's place is kept for the next run.
-  const listed = repliesFor(await redisPipeline([["ZREVRANGE", ALL_KEY, 0, -1], ["GET", CURSOR_KEY]]), 2);
-  const sids = listed ? stringList(listed[0]) : null;
+  // not an empty list. The run counts a failure and is not complete; the walk's place is kept for the next run. Only a
+  // window of the invited list is read, from the walk's place, wrapping round once (#4514: never the whole list).
+  const head = repliesFor(await redisPipeline([["ZCARD", ALL_KEY], ["GET", CURSOR_KEY]]), 2);
+  const total = head ? countOf(head[0]) : null;
+  let sids: string[] | null = null;
+  let start = 0;
+  if (total !== null) {
+    start = Math.min(Number(head?.[1]) || 0, total);
+    if (start >= total) start = 0;
+    const take = Math.min(total, INVITE_WALK_STORES);
+    const first = Math.min(take, total - start);
+    const ranges: (string | number)[][] = [];
+    if (first > 0) ranges.push(["ZREVRANGE", ALL_KEY, start, start + first - 1]);
+    if (take > first) ranges.push(["ZREVRANGE", ALL_KEY, 0, take - first - 1]);
+    const read = ranges.length ? repliesFor(await redisPipeline(ranges), ranges.length) : [];
+    const lists = read ? read.map((reply) => stringList(reply)) : null;
+    sids = lists && lists.every((list) => list !== null) ? (lists as string[][]).flat() : null;
+    // The list changed between its size and its window: read again on the next run.
+    if (sids && sids.length !== take) sids = null;
+  }
   let walkedAll = false;
-  if (!sids) {
+  if (!sids || total === null) {
     counts.failed += 1;
     console.error("reading the invited creators failed", new UnknownReplyError("invite credits: the invited list"));
   } else {
-    const start = Math.min(Number(listed?.[1]) || 0, sids.length);
     let walked = 0;
-    for (let n = 0; n < sids.length; n += 1) {
-      if (Date.now() > deadline) break;
-      const sid = sids[(start + n) % sids.length];
-      try {
-        counts.earned += await earnFrom(sid, nowSeconds);
-      } catch (error) {
-        counts.failed += 1;
-        console.error("reading an invited creator's payments failed", error);
+    let spent = false;
+    await withCommandCeiling(INVITE_WALK_COMMANDS, async () => {
+      for (const sid of sids ?? []) {
+        if (Date.now() > deadline) break;
+        try {
+          counts.earned += await earnFrom(sid, nowSeconds);
+        } catch (error) {
+          if (error instanceof CommandCeilingError) {
+            spent = true;
+            // The first store of the walk passed the whole walk's ceiling alone: it fails and the walk goes past it.
+            if (walked === 0) {
+              counts.failed += 1;
+              counts.invited += 1;
+              walked += 1;
+              console.error("an invited creator's payments pass the run's command ceiling", error);
+            }
+            break;
+          }
+          counts.failed += 1;
+          console.error("reading an invited creator's payments failed", error);
+        }
+        counts.invited += 1;
+        walked += 1;
       }
-      counts.invited += 1;
-      walked += 1;
-    }
-    walkedAll = walked === sids.length;
-    await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, sids.length)]]);
+    });
+    walkedAll = !spent && walked === total;
+    await redisPipeline([["SET", CURSOR_KEY, walkedAll ? 0 : (start + walked) % Math.max(1, total)]]);
   }
 
-  const ids = stringList(repliesFor(await redisPipeline([["SMEMBERS", OWED_KEY]]), 1)?.[0]);
+  // At most INVITE_OWED_READ of the owed credits, never the whole set (#4514); SRANDMEMBER picks another draw each run,
+  // so every credit owed is reached in time.
+  const ids = stringList(repliesFor(await redisPipeline([["SRANDMEMBER", OWED_KEY, INVITE_OWED_READ]]), 1)?.[0]);
   const history = new Map<string, Map<string, string>>();
   let pushedAll = ids !== null;
   if (!ids) {
     counts.failed += 1;
     console.error("reading the owed invite credits failed", new UnknownReplyError("invite credits: the owed list"));
   }
-  for (const id of ids ?? []) {
-    if (Date.now() > deadline) {
-      pushedAll = false;
-      break;
+  await withCommandCeiling(INVITE_OWED_COMMANDS, async () => {
+    for (const id of ids ?? []) {
+      if (Date.now() > deadline) {
+        pushedAll = false;
+        break;
+      }
+      try {
+        if (await putOnPlan(id, history, nowSeconds)) counts.added += 1;
+      } catch (error) {
+        if (error instanceof CommandCeilingError) {
+          pushedAll = false;
+          break;
+        }
+        counts.failed += 1;
+        console.error("putting an invite credit on a plan failed", error);
+      }
     }
-    try {
-      if (await putOnPlan(id, history, nowSeconds)) counts.added += 1;
-    } catch (error) {
-      counts.failed += 1;
-      console.error("putting an invite credit on a plan failed", error);
-    }
-  }
-  // A store or credit that could not be read for sure is not a complete pass (Codex N on #2722).
+  });
+  // A store or credit that could not be read for sure is not a complete pass (Codex N on #2722); nor is a run that
+  // read only a draw of the owed credits, while more than it are owed.
+  if (ids && ids.length >= INVITE_OWED_READ) pushedAll = false;
   counts.complete = walkedAll && pushedAll && counts.failed === 0;
   return counts;
 }

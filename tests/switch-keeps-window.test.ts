@@ -578,7 +578,9 @@ async function main(): Promise<void> {
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of main 7aa1ce65a3 (16 November 2026, with #4319's outbox) into #3491: the yearly month is main's, 37.04,
     // 258.68 and 579.90, still above zero (MR). Cost is not lowered.
-    is("11: and 37.04, 258.68 and 579.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.90"]);
+    // Merge of main into #3491 (16 November 2026, third pass): main's newer cost lines with this PR's deletion-print read
+    // cost Scale's yearly month one cent more: 579.89 where main shows 579.90; still above zero (MR). Cost is not lowered.
+    is("11: and 37.04, 258.68 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.89"]);
   } finally {
     Date.now = realNow;
   }

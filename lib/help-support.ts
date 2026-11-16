@@ -13,15 +13,15 @@
  * Nothing is kept. The request is two emails on the company's meter (the support inbox, and the copy to the creator),
  * each under its own idempotency key made from the store and the request's number. The form makes the number once and
  * sends it with every try, so a try whose answer was lost and the next one are one request, never two (Codex U on
- * #3617); an email that did not confirm is said unconfirmed, never "nothing was sent" (rule 24). At most SUPPORT_PER_DAY requests a
- * store in 24 hours, counted before anything is sent, with a counter that says no when it cannot be read
+ * #3617); an email that did not confirm is said unconfirmed, never "nothing was sent" (rule 24).
+ * At most SUPPORT_PER_DAY requests a store in 24 hours, counted before anything is sent, with a counter that says no when it cannot be read
  * (lib/request-guard.ts, essentialLimitState): a count that cannot be read is never "room left" (rule 24).
  */
 import { randomBytes } from "node:crypto";
 import { NIMBUS_FROM, sendEmail } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { PLAN_TITLES } from "@/lib/plan";
-import { essentialLimitState } from "@/lib/request-guard";
+import { essentialLimitState, limitResetSeconds } from "@/lib/request-guard";
 import { SITE_URL } from "@/lib/site-url";
 import type { Store } from "@/lib/store";
 import {
@@ -33,6 +33,7 @@ import {
   cleanSupportText,
   supportNumberOf,
   supportScreen,
+  supportWaitWords,
 } from "@/lib/help-support-rules";
 
 export * from "@/lib/help-support-rules";
@@ -47,7 +48,7 @@ export type SupportProblem = "short" | "long" | "busy" | "unknown" | "unconfirme
 export const SUPPORT_PROBLEMS: Record<Exclude<SupportProblem, "unconfirmed">, string> = {
   short: "Write a few words about what you need first.",
   long: `That is too long to send. Keep it under ${MAX_SUPPORT_TEXT.toLocaleString("en-US")} characters.`,
-  busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day. Try again tomorrow, or write to ${SUPPORT_EMAIL}.`,
+  busy: `Your store has sent ${SUPPORT_PER_DAY} requests to support in the last 24 hours, the most a day.`,
   unknown: `We could not check how many requests your store sent today, so nothing was sent. Try again in a moment, or write to ${SUPPORT_EMAIL}.`,
 };
 
@@ -59,7 +60,9 @@ export function unconfirmedWords(number: string): string {
   return `We could not confirm that your request reached support, so it may or may not have been sent. Sending it again keeps the same request number, ${number}, so support can tell it is one request. Or write to ${SUPPORT_EMAIL} and give that number.`;
 }
 
-export type SupportResult = { ok: true; number: string; copied: boolean } | { ok: false; problem: SupportProblem; words: string; number?: string };
+export type SupportResult =
+  | { ok: true; number: string; copied: boolean }
+  | { ok: false; problem: SupportProblem; words: string; retryInSeconds?: number | null; number?: string };
 
 const refuse = (problem: Exclude<SupportProblem, "unconfirmed">): SupportResult => ({ ok: false, problem, words: SUPPORT_PROBLEMS[problem] });
 
@@ -81,7 +84,11 @@ export async function sendSupportRequest(
   if (text.length < MIN_SUPPORT_TEXT) return refuse("short");
   if (text.length > MAX_SUPPORT_TEXT) return refuse("long");
   const counted = await essentialLimitState("help-support", input.store.sid || input.store.handle, SUPPORT_PER_DAY, SUPPORT_WINDOW_SECONDS);
-  if (counted === "exceeded") return refuse("busy");
+  if (counted === "exceeded") {
+    // When the day's window starts again, read from the counter itself: the first request opened it, so it is not "tomorrow".
+    const retryInSeconds = await limitResetSeconds("help-support", input.store.sid || input.store.handle);
+    return { ok: false, problem: "busy", retryInSeconds, words: `${SUPPORT_PROBLEMS.busy} ${supportWaitWords(retryInSeconds)} Or write to ${SUPPORT_EMAIL}.` };
+  }
   if (counted !== "within") return refuse("unknown");
   const facts = [
     `Request ${number}, sent from the studio's help.`,

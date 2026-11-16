@@ -76,8 +76,9 @@ function centralAliases(file,root,here){
   aliases['@/lib/account-notice']=join(here,'meeting-disabled-world.ts');
  }
  if(file==='letter-members.test.ts'||file==='bv1-letter-preview.test.ts'){aliases['next/headers']=join(here,'letter-members-world.ts');aliases['next/server']=join(here,'next-server-after-world.ts');aliases['@/components/store-tracking']=join(here,'letter-members-world.ts');}
- if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(['public-reads-ceiling.test.ts','draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','course-preview-free-pause.test.ts','preview-video-free-pause.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='numbers-link-busy.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(file==='suspended-preview-file.test.ts'){aliases['next/headers']=join(here,'security/next-headers.ts');aliases['next/server']=join(here,'next-server-after-world.ts');}
  if(['draft-view.test.ts','draft-view-move-renew.test.ts','draft-view-waitlist.test.ts','pf1-paypal-thanks-honest.test.ts','page-show-unknown.test.ts','page-show-unknown-b2.test.ts'].includes(file))aliases['next/server']=join(here,'next-server-after-world.ts');
  if(file==='failure-cleanup-paths.test.ts'||file==='picture-owner-paths.test.ts'||file==='picture-owner-followup.test.ts'||file==='picture-door-replies.test.ts'||file==='encanto-tone-route.test.ts'||file==='picture-door-ceiling.test.ts')for(const name of ['@/lib/blob','@vercel/blob/client'])aliases[name]=join(here,'failure-cleanup-world.ts');
  if(file==='alt-ai-order.test.ts'||file==='alt-ai-order-page.test.ts')aliases['@/lib/blob']=join(here,'alt-ai-order-world.ts');
@@ -111,7 +112,7 @@ function centralAliases(file,root,here){
  if(file==='upload-budget-routes.test.ts'){
   aliases['@/lib/redis']=join(here,'upload-budget-redis.ts');
   aliases['@/lib/upload-budget-policy']=join(here,'upload-budget-approved-policy.ts');
-  for(const name of ['store','catalog','course','delivery','storage-quota','stream','vault','vault-storage','request-guard','store-request','studio-route','blob','metered-limits'])aliases['@/lib/'+name]=join(here,'upload-route-world.ts');
+  for(const name of ['store','catalog','course','delivery','storage-quota','stream','vault','vault-storage','request-guard','store-request','studio-route','blob','metered-limits','two-step'])aliases['@/lib/'+name]=join(here,'upload-route-world.ts');
   aliases['@vercel/blob/client']=join(here,'upload-route-world.ts');
  }
  if(file==='path-wording-route.test.ts'){
@@ -154,6 +155,7 @@ function centralAliases(file,root,here){
  if(file==='storage-measurement.test.ts')for(const name of ['blob','vault','stream'])aliases['@/lib/'+name]=join(here,'storage-provider-stub.ts');
  if(file==='blob-download-attachment.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
  if(file==='sg2-l1-serve-file.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
+ if(file==='preview-video-free-pause.test.ts')aliases['@/lib/blob']=join(here,'blob-download-attachment-world.ts');
  if(file==='picture-takedown.test.ts')aliases['@/lib/blob']=join(here,'picture-takedown-world.ts');
  if(file==='sg2-l1-outreach-order.test.ts')aliases['@/lib/contract-resource-window']=join(here,'sg2-l1-reserve-world.ts');
  if(['exposure-budget.test.ts','exposure-provider.test.ts'].includes(file))aliases['@/lib/redis']=join(here,'exposure-budget-redis.ts');

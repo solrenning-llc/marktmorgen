@@ -127,9 +127,11 @@ async function main(): Promise<void> {
   is("the room is A's like alone: given back once, never twice", await used(), withA);
   is("exactly one press took M's like back; the other changed nothing (no point taken from the author twice)", [both.filter((b) => b === false).length, both.filter((b) => b === null).length], [1, 1]);
   is("(the room was taken for A's like)", (withA ?? 0) > (base ?? 0), true);
-  // The point moved with the like into pressLike (lib/community.ts), which both of the route's like actions call.
+  // The point moved with the like into pressLike (lib/community.ts), which both of the route's like actions call; since
+  // #3819 the like and the point change in one step (LIKE_PRESS), and the author earns only when the press changed it
+  // (tests/community-like-press-atomic.test.ts).
   const route = readFileSync("app/api/store/community/route.ts", "utf8");
-  is("a press that changed nothing awards nothing, for a post's like and a comment's", [readFileSync("lib/community.ts", "utf8").includes("if (added !== null && author !== who)"), route.includes("pressLike(id, post.id, null, key, post.a,"), route.includes("pressLike(id, post.id, comment.id, key, comment.a,")], [true, true, true]);
+  is("a press that changed nothing awards nothing, for a post's like and a comment's", [readFileSync("lib/community.ts", "utf8").includes("const earns = author !== who ? likePoint(id, author) : null;"), route.includes("pressLike(id, post.id, null, key, post.a,"), route.includes("pressLike(id, post.id, comment.id, key, comment.a,")], [true, true, true]);
   await real([["DEL", likes, trace, `nl:cm:${ID}:tr:${A}`]]);
 
   part("Codex P on #3819: a like whose trace entry was already there gives back the trace room it took");

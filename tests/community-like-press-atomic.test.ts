@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     const used = await dataUsed(ROOM);
     const keptLike = await liked();
     is("the like and the author's point agree", await agree(), true);
-    is("a like kept is a like counted in the room", keptLike ? used > 0 : true, true);
+    is("a like kept is a like counted in the room", keptLike ? (used?.used ?? 0) > 0 : true, true);
   }
   done();
 }

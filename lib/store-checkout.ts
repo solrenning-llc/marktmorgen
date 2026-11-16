@@ -1252,7 +1252,7 @@ export async function listSales(store: Store): Promise<SaleList> {
       "GET",
       store.stripeAccountId as string,
       // Each payment's charge comes on the same read, for its risk (647 [WG7]).
-      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge`,
+      `/checkout/sessions?limit=${ORDERS_PAGE_SIZE}&expand[]=data.payment_intent.latest_charge&expand[]=data.payment_intent.latest_charge.review`,
     );
   } catch (error) {
     console.error("listing orders failed", error);
@@ -1327,7 +1327,7 @@ export async function listSales(store: Store): Promise<SaleList> {
     const intents = await onAccount(
       "GET",
       store.stripeAccountId as string,
-      `/payment_intents?limit=${ORDERS_PAGE_SIZE}&expand[]=data.latest_charge`,
+      `/payment_intents?limit=${ORDERS_PAGE_SIZE}&expand[]=data.latest_charge&expand[]=data.latest_charge.review`,
     );
     const page = readStripePage(intents, (pi) => plainObject(ownField(pi, "metadata")) && typeof ownField(pi, "status") === "string");
     if (page.unreadable > 0) return { state: "error" };

@@ -9,8 +9,8 @@
  * - The risk is read off `charge.outcome.risk_level`: "normal", "elevated" or
  *   "highest" as Stripe says it; anything else ("not_assessed", "unknown",
  *   no outcome, a value Stripe does not send) is "not available", never
- *   "normal" and never "low". A charge in Stripe's manual review (or with an
- *   open review) is "in review", whatever level it carries. No 0-100 score: that is Radar for Fraud Teams,
+ *   "normal" and never "low". A charge whose review is open (read expanded) is
+ *   "in review", whatever level it carries; a closed review gives the level. No 0-100 score: that is Radar for Fraud Teams,
  *   billed by Stripe to the creator.
  * - A store keeps at most three simple rules, each kind once, read back whole
  *   or not at all: ask for verification above an amount, ask for it on the
@@ -43,9 +43,21 @@ export function riskLevelOf(charge: unknown): RiskLevel {
   const c = record(charge);
   if (!c || c.object !== "charge" || typeof c.id !== "string" || !c.id) return "not_available";
   const outcome = record(c.outcome);
-  // A charge Stripe put in manual review (a Radar rule of the creator's) often
-  // still says "normal": the open review, not the level, is what decides.
-  if (outcome?.type === "manual_review" || (c.review !== null && c.review !== undefined)) return "in_review";
+  // A charge a Radar rule of the creator's sent to manual review often still says "normal": while the review is open,
+  // it decides, not the level. Stripe keeps outcome.type and charge.review after the creator closes the review, so
+  // only the review itself, read expanded, says it is still open (Claude 7 on #3647). Closed: the level Stripe gave.
+  // A review that cannot be read (not expanded, another shape, or sent to review with no review given) is not
+  // available, never "in review" for good and never "normal".
+  const review = c.review;
+  const reviewRead = record(review);
+  if (reviewRead) {
+    if (reviewRead.object !== "review" || typeof reviewRead.open !== "boolean") return "not_available";
+    if (reviewRead.open) return "in_review";
+  } else if (review !== null && review !== undefined) {
+    return "not_available";
+  } else if (outcome?.type === "manual_review") {
+    return "not_available";
+  }
   const level = outcome?.risk_level;
   return typeof level === "string" && STRIPE_LEVELS.has(level) ? (level as RiskLevel) : "not_available";
 }
@@ -55,7 +67,7 @@ export const RISK_WORDS: Record<RiskLevel, string> = {
   normal: "Risk: normal",
   elevated: "Risk: elevated",
   highest: "Risk: highest",
-  in_review: "Risk: in review by Stripe",
+  in_review: "Risk: waiting for your review in Stripe",
   not_available: "Risk: not available",
 };
 

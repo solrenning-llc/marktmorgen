@@ -465,6 +465,37 @@ async function main(): Promise<void> {
     is("control: a store that never sold through either has no PayPal month", of(nothing, "2031-06", "paypal"), undefined);
   }
 
+  part("Codex N1's MEDIUM (#3022 at 16673a3d9a): a refund pending, then failed, never rewrites the month already shown");
+  reset();
+  {
+    const shop = makeStore(false);
+    const MAY = Date.UTC(2031, 4, 20, 12);
+    // A refund of 10.00 on its way in May: the money left the balance when it was made.
+    stripe["/refunds"] = [refund("pending01", Date.UTC(2031, 4, 10), 1000, { status: "pending" })];
+    const first = (await readEarningsYear(shop, "UTC", MAY, true))?.value ?? null;
+    const mayRefund = (e: Earnings | null) => (of(e, "2031-05", "stripe") as { lines?: { refundCents: number; netCents: number }[] })?.lines?.[0];
+    is("read in May: May shows the pending refund taken off", [mayRefund(first)?.refundCents, mayRefund(first)?.netCents], [1000, -1000]);
+    // The same refund, failed in June: Stripe gives the money back then (the reinstatement, said not read).
+    stripe["/refunds"] = [refund("pending01", Date.UTC(2031, 4, 10), 1000, { status: "failed" })];
+    const again = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    is("read fresh in June after it failed: May still shows the same refund, never rewritten to zero", [mayRefund(again)?.refundCents, mayRefund(again)?.netCents], [1000, -1000]);
+    is("June says the money given back is not read, so it is not added (not taken out of May instead)", [of(again, "2031-06", "stripe")?.state, (of(again, "2031-06", "stripe") as { leftOut?: string[] })?.leftOut?.includes("reinstated")], ["read", true]);
+  }
+  for (const [status, why] of [["requires_action", "a refund waiting on the buyer may yet go out"], ["refunded_somehow", "a status Stripe never documented"]] as const) {
+    reset();
+    const shop = makeStore(false);
+    stripe["/refunds"] = [refund("newer01", Date.UTC(2031, 5, 5), 300), refund("waits01", Date.UTC(2031, 3, 10), 1000, { status })];
+    const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    is(`a ${status} refund (${why}): its month and before unknown, never skipped as nothing; newer months exact`, [states(e, "stripe").slice(0, 4), (of(e, "2031-06", "stripe") as { lines?: { refundCents: number }[] })?.lines?.[0]?.refundCents], [["read", "read", "not_reached", "not_reached"], 300]);
+  }
+  reset();
+  {
+    const shop = makeStore(false);
+    stripe["/refunds"] = [refund("cancel01", Date.UTC(2031, 3, 10), 1000, { status: "canceled" })];
+    const e = (await readEarningsYear(shop, "UTC", NOW, true))?.value ?? null;
+    is("a canceled refund (only one waiting on the buyer can be, so no money left): nothing taken off, every month read", [states(e, "stripe"), of(e, "2031-04", "stripe")?.state === "read" && !(of(e, "2031-04", "stripe") as { lines?: unknown[] }).lines?.length], [Array(12).fill("read"), true]);
+  }
+
   done();
 }
 

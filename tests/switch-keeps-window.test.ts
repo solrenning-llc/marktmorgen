@@ -567,6 +567,7 @@ async function main(): Promise<void> {
     // Merge of main into #2848 (16 November 2026): the stack's Blob lines (#2843's studio-blob, #2848's blob-list, one
     // listing a UTC day since the owner's "Medir só 1x por dia") cost more a month; figures as the model computes them,
     // still above zero (MR). Cost is not lowered.
+    // #2843's fix merged into #2848 (16 November 2026): a trial store's studio picture work in nonPayingWorst (Claude 7's MEDIUM 2 on #2852) with this PR's blob-list line; figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
     // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
@@ -574,14 +575,23 @@ async function main(): Promise<void> {
     // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
     // figures as the model computes them, still above zero (MR). Cost is not lowered.
     // Merge of main into #2848 (16 November 2026, second pass): main's #4291 vault release line and the stack's Blob lines together; figures as the model computes them, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 44.37, 312.25 and 698.90 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.37", "312.25", "698.90"]);
+    // Merge of main into #2803 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #2801 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Merge of main into #2843 (16 November 2026): main's latest model and this PR's costs together; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    // Claude 7's MEDIUM 2 on #2852: a trial store's studio picture work (studioBlobMonthly at its studio figure) is now in
+    // nonPayingWorst, which every paying store carries a share of: one cent less a month on each plan; still above zero (MR).
+    // #2843's fix merged into #2848 (16 November 2026): a trial store's studio picture work in nonPayingWorst (Claude 7's MEDIUM 2 on #2852) with this PR's blob-list line; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 44.36, 312.24 and 698.89 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.36", "312.24", "698.89"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #2848 (16 November 2026, 18h): main's newer costs leave Scale's yearly month one cent less: 575.62
     // where 575.63 was; still above zero (MR). Cost is not lowered.
-    is("11: and 36.31, 257.13 and 575.62 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.31", "257.13", "575.62"]);
+    // Merge of main into #2843 (16 November 2026, 16h): main's newer costs with the stack's Blob lines leave Store and Scale one
+    // cent less in a yearly month: 36.43 and 576.27 where 36.44 and 576.28 were; still above zero (MR). Cost is not lowered.
+    // #2843's fix merged into #2848 (16 November 2026): a trial store's studio picture work in nonPayingWorst (Claude 7's MEDIUM 2 on #2852) with this PR's blob-list line; figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: and 36.30, 257.11 and 575.61 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.30", "257.11", "575.61"]);
   } finally {
     Date.now = realNow;
   }

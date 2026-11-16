@@ -512,6 +512,16 @@ export function pictureCheckBlob(bytes: number): number {
  *     than PICTURE_DOOR_MAX a store (the door keeps only the newest): counted on top, at the dearest check each.
  * Every check is counted at MAX_IMAGE_BYTES, the most the door lets any file be (a thumbnail's is smaller).
  */
+/**
+ * All the studio pictures' Blob work a paying store carries in a month: its own studio-blob line, and its share of a
+ * trial store's (nonPayingWorst, 1/PAID_STORES_PER_FREE_STORE of it; Claude 7 on #2852). What the owner's dollar over
+ * US$ 65 is room for (DONO-156, BROADCAST-262), so the sizing checks that leave the studio pictures out leave both out.
+ */
+export function studioPictureWork(tier: Tier): number {
+  const line = COST_LINES.find((l) => l.id === "studio-blob")?.monthlyUsd(tier) ?? Number.NaN;
+  return line + studioBlobMonthly(NON_PAYING_ALLOWANCES.trial.studio) / PAID_STORES_PER_FREE_STORE;
+}
+
 export function studioBlobMonthly(studio: number): number {
   const check = pictureCheckBlob(MAX_IMAGE_BYTES);
   const page = (MAX_PAGE_PICTURES * (STUDIO_DOOR_BLOB + check)) / (MAX_PAGE_PICTURES + 1);
@@ -2271,6 +2281,8 @@ export function nonPayingWorst(): number {
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
     // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
     + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
+    // Its studio picture doors, checks and page saves, at its own studio figure (line studio-blob; Claude 7 on #2852).
+    + studioBlobMonthly(allowances.studio)
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

@@ -15,7 +15,7 @@
 import { render } from "@/lib/mail";
 import * as emailThemeModule from "@/lib/email-theme";
 import * as registry from "./plan-cost-registry";
-import { COST_LINES } from "./plan-cost-registry";
+import { COST_LINES, studioPictureWork } from "./plan-cost-registry";
 import { providerFeeUsd, worstCost, GB, STORAGE_PER_GB } from "./plan-cost-model";
 import { MAX_PHOTO_BYTES } from "@/lib/photo-limits";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
@@ -78,8 +78,9 @@ part("A refunded first year stays under the owner's ceiling with the logo at the
   // studio-blob line (#2843) in place of the base's picture-uploads and picture-thumbnails lines (#2803, #2801). So the year
   // with that line stays under US$ 66, and without it, under US$ 65 as before. A missing line is NaN and fails.
   // #2848: blob-list (the Blob listing of a vault open, at most once a UTC day) is left out with it, as
-  // tests/read-ceilings.test.ts leaves it out on this branch. The US$ 66 does not move.
-  const blob = ["studio-blob", "blob-list"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd(tier) ?? Number.NaN), 0);
+  // tests/read-ceilings.test.ts leaves it out on this branch. The US$ 66 does not move. With a trial store's studio
+  // picture work, carried by each paying store (studioPictureWork; Claude 7 on #2852).
+  const blob = studioPictureWork(tier) + (COST_LINES.find((l) => l.id === "blob-list")?.monthlyUsd(tier) ?? Number.NaN);
   is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the studio pictures' Blob lines and US$66 with them (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, those lines ${blob.toFixed(4)})`,
     year + extra - blob < 65 && year + extra < 66, true);
 }

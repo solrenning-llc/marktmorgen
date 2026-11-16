@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   const result = grant ? await confirmSpot(token, store) : { ok: false as const };
   const handle = store?.handle ?? grant?.h ?? "";
   const target = handle
-    ? `${origin}/@${handle}/waitlist?product=${encodeURIComponent(grant?.p ?? "")}&status=${result.ok ? "confirmed" : "expired"}`
+    ? `${origin}/@${handle}/waitlist?product=${encodeURIComponent(grant?.p ?? "")}&status=${result.ok ? "confirmed" : "reason" in result && result.reason === "busy" ? "busy" : "expired"}`
     : `${origin}/`;
   return new Response(null, { status: 303, headers: { Location: target, "Cache-Control": "no-store" } });
 }

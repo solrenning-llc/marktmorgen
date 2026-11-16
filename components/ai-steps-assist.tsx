@@ -28,6 +28,13 @@ import { freshChecks } from "@/lib/ai-draft-review";
  * replaces the page on its own: the box says so and asks "Use this draft"
  * or "Keep my page". The words never say when Stop was pressed: it may have
  * been pressed during the reading and read by the server too late.
+ *
+ * The steps drawn are the ones sent when the run began (`runSteps`), kept
+ * until the next run: a page that passes other steps mid-run (the creator
+ * checking "Read the first 10 pages" while it writes) never shows a step or a
+ * Stop the server does not have, nor hides a Stop that works (Claude 5 on
+ * #3435, MEDIUM). `extra` may take `busy`, so what it holds can be made
+ * unavailable while a run is on.
  */
 
 export type StepView = "waiting" | "running" | "done" | "skipped";
@@ -142,7 +149,8 @@ export function AiStepsAssist<T>({
   steps: AiStep[];
   onResult: (value: T) => void;
   done: string;
-  extra?: React.ReactNode;
+  /** Drawn above the notes; given `busy`, so a choice the run was sent with can be made unavailable while it runs. */
+  extra?: React.ReactNode | ((busy: boolean) => React.ReactNode);
   allowEmpty?: boolean;
   validateResult?: (value: unknown) => value is T;
 }) {
@@ -166,6 +174,8 @@ export function AiStepsAssist<T>({
   const [drafted, setDrafted] = useState(false);
   const [checks, setChecks] = useState<boolean[]>(freshChecks);
   const runRef = useRef("");
+  // The steps the run was sent with, fixed when it starts: what is drawn while it runs and after it ends.
+  const runSteps = useRef<AiStep[]>(steps);
   // Whether a run is going on now, read after an await, when `busy` is a stale copy.
   const busyRef = useRef(false);
   const stopRequested = useRef(false);
@@ -191,9 +201,11 @@ export function AiStepsAssist<T>({
   if (!ai.on) return null;
 
   const showSteps = busy || Object.keys(states).length > 0;
-  const canStop = busy && steps.length > 1 && steps.some((s) => (states[s.id] ?? "waiting") === "waiting") && Object.keys(states).length > 0;
+  // A run's own steps while it runs and once it ended; the page's current ones only before any run.
+  const shown = showSteps ? runSteps.current : steps;
+  const canStop = busy && shown.length > 1 && shown.some((s) => (states[s.id] ?? "waiting") === "waiting") && Object.keys(states).length > 0;
   // Once the job has started, Stop stays drawn until it ends, unavailable when nothing is left to stop.
-  const stopShown = busy && steps.length > 1 && Object.keys(states).length > 0;
+  const stopShown = busy && shown.length > 1 && Object.keys(states).length > 0;
 
   function finish(message: { error?: string; said?: string }) {
     focusResult.current = stopRef.current !== null && document.activeElement === stopRef.current;
@@ -203,7 +215,7 @@ export function AiStepsAssist<T>({
 
   // Any step not done when the job ended was not run and not charged.
   function settleSteps() {
-    setStates((now) => Object.fromEntries(steps.map((s) => [s.id, now[s.id] === "done" ? "done" : "skipped"])) as Partial<Record<AiStepId, StepView>>);
+    setStates((now) => Object.fromEntries(runSteps.current.map((s) => [s.id, now[s.id] === "done" ? "done" : "skipped"])) as Partial<Record<AiStepId, StepView>>);
   }
 
   function ended(line: AiStepLine) {
@@ -275,11 +287,12 @@ export function AiStepsAssist<T>({
 
   function stepLine(line: AiStepLine) {
     if (!("step" in line)) return;
-    const index = steps.findIndex((s) => s.id === line.step);
+    const sent = runSteps.current;
+    const index = sent.findIndex((s) => s.id === line.step);
     if (index < 0) return;
     setStates((now) => ({ ...now, [line.step]: line.state === "started" ? "running" : "done" }));
     if (line.state !== "started") return;
-    const step = `Step ${index + 1} of ${steps.length}: ${steps[index].label}`;
+    const step = `Step ${index + 1} of ${sent.length}: ${sent[index].label}`;
     // A step that starts after Stop was pressed: the stop reached the server too late for it, and that is said at once.
     setAnnounce(stopRequested.current ? `${LATE_STOP} so it will finish and count toward this month. ${step}` : step);
   }
@@ -306,6 +319,8 @@ export function AiStepsAssist<T>({
     }
     const id = crypto.randomUUID().replace(/-/g, "");
     runRef.current = id;
+    // Fixed with the payload below: the steps drawn are the ones the server is asked to run.
+    runSteps.current = steps;
     startedAt.current = Date.now();
     setElapsed(0);
     setStates({});
@@ -394,7 +409,7 @@ export function AiStepsAssist<T>({
       </summary>
       <div className="mt-2 space-y-3 pb-1">
         <p className="text-sm text-ink-soft">{hint}</p>
-        {extra}
+        {typeof extra === "function" ? extra(busy) : extra}
         <label className="block">
           <span className="sr-only">What it should say</span>
           <textarea className="field" rows={4} maxLength={MAX_AI_NOTES} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={placeholder} />
@@ -409,7 +424,7 @@ export function AiStepsAssist<T>({
         </div>
         {showSteps ? (
           <AiStepsProgress
-            steps={steps}
+            steps={shown}
             states={states}
             announce={announce}
             elapsed={elapsed}

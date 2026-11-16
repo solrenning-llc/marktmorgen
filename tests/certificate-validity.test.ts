@@ -51,6 +51,11 @@ for (const lang of ["es", "fr", "de", "it", "nl", "pt"]) is(`${lang}: its own`, 
 const page = readFileSync("app/[handle]/certificate/[id]/page.tsx", "utf8");
 is("the page says expired, in a status", page.includes('standingOf(certificate') && page.includes("w.expiredOn("), true);
 is("the PDF says until when", readFileSync("app/[handle]/certificate/[id]/pdf/route.ts", "utf8").includes("w.validUntil("), true);
+// The printed sheet is the page's .cert-sheet only (the status above it is
+// .cert-noprint): an expired certificate printed or saved from the browser
+// must say until when it was valid, as the PDF does, or it reads as standing.
+const proof = /<div className="cert-proof">([\s\S]*?)<\/div>/.exec(page)?.[1] ?? "";
+is("the printed sheet says until when, as the PDF does", proof.includes("w.validUntil("), true);
 is("the issue fixes it from the course", readFileSync("lib/certificate.ts", "utf8").includes("certificate.validUntil = monthsAfter(certificate.issuedAt, input.course.certificateMonths)"), true);
 
 async function main(): Promise<void> {

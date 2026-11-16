@@ -172,6 +172,24 @@ async function main(): Promise<void> {
   } finally {
     globalThis.fetch = stripeFetch;
   }
+  // A page asked with limit=100 that answers more rows than that is not the list read whole, whatever its has_more
+  // says: the form's own refund may be past them, and "none yet" would send a second refund for a form already used
+  // (Codex N1 on #3678, reproduced by Claude 6: got [null, 2]).
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname.endsWith("/refunds") && (init?.method ?? "GET") === "GET") {
+      const data = Array.from({ length: 101 }, (_, i) => ({ id: `re_other_${i}`, object: "refund", amount: 1, charge: CHARGE, currency: "usd", status: "succeeded", metadata: {} }));
+      return Response.json({ object: "list", data, has_more: false });
+    }
+    return stripeFetch(input, init);
+  }) as typeof fetch;
+  try {
+    const beforePosts = refundPosts().length;
+    const overfull = await post({ charge: CHARGE, token: T1, amount: "12.50", reason: "requested_by_customer" });
+    is("a used form whose refunds page answers 101 rows with has_more false: unavailable, never a second refund", [overfull.body.error, stripe.made.length, refundPosts().length - beforePosts], ["unavailable", 1, 0]);
+  } finally {
+    globalThis.fetch = stripeFetch;
+  }
 
   part("Two clicks at the same moment on a new form: one refund");
   const [a, b] = await Promise.all([post({ charge: CHARGE, token: T2, amount: "10" }), post({ charge: CHARGE, token: T2, amount: "10" })]);

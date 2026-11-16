@@ -437,6 +437,40 @@ async function main(): Promise<void> {
   is("and one after it is complete", after, 1);
   is("no state write before the start: the first part's charge is saved with the upload", files.log.slice(0, createAt).filter((l) => l === stateKey).length <= 1, true);
 
+  part("a part read in a run cut before its save is charged again in the next run, never read uncharged (Claude 3's MEDIUM on #3340)");
+  {
+    fresh([{ store: S, roomBytes: 100_000_000 }]);
+    const cut = { key: `stores/${S}/cut.mp4`, etag: '"c1"', bytes: big(2 * BACKUP_FILES_PART_BYTES + 1_000, 5) };
+    setListing("blob", S, [cut]);
+    // The store's state write fails once each time part 2 has just gone in: the run stops before the part is saved.
+    const stateKey = `state/stores/${S}.json`;
+    let armed = false;
+    const partFault = files.partFault;
+    files.partFault = (n) => {
+      if (n === 2) armed = true;
+      return partFault(n);
+    };
+    files.putFault = (key) => {
+      if (key === stateKey && armed) {
+        armed = false;
+        return "throw";
+      }
+      return undefined;
+    };
+    for (let hour = 1; hour <= 6; hour++) report = await runAt(0, hour);
+    files.putFault = () => undefined;
+    files.partFault = partFault;
+    const read = world.calls
+      .filter((c) => c.url.startsWith("https://src.test/") && c.range)
+      .reduce((n, c) => {
+        const m = /bytes=(\d+)-(\d+)/.exec(c.range ?? "");
+        return n + (m ? Number(m[2]) - Number(m[1]) + 1 : 0);
+      }, 0);
+    const state = files.json(stateKey) as { read?: { bytes?: number }[] } | null;
+    const charged = (state?.read ?? []).reduce((n, d) => n + (d.bytes ?? 0), 0);
+    is("every byte read from the source was charged before it was read", charged >= read, true);
+  }
+
   part("a listing cut short by the run's budget while deleting is not listed again the same day (Claude 5's MEDIUM 3 on #3340)");
   fresh([{ store: S, roomBytes: 100_000_000 }]);
   const many = objects("blob", S, 1000);

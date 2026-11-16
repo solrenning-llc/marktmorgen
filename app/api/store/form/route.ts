@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
   if (one("website").trim()) return go(done("", false));
 
   const ip = clientAddress(request);
-  const room = await withinStore("form-ip", `${statsId}:${ip}`, PER_HOUR, 3_600, store).catch(unknownLimit);
+  const room = await withinStore("form-ip", `${statsId}|${ip}`, PER_HOUR, 3_600, store).catch(unknownLimit);
   if (room === "unknown") return back("error");
   if (!room) return back("limited");
 

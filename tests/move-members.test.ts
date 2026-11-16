@@ -34,7 +34,11 @@ type Sent = { to: string | string[]; subject: string; text: string };
 const emails: Sent[] = [];
 const checkouts: URLSearchParams[] = [];
 const customersByEmail = new Map<string, string>();
-const liveSubs = new Map<string, { status: string; metadata: Record<string, string> }[]>();
+const liveSubs = new Map<string, { id: string; status: string; metadata: Record<string, string> }[]>();
+/** A customer's membership list answered in another shape, or in part (review of #4121, rule 24). */
+const oddSubs = new Map<string, unknown>();
+/** One customer's next page, after a given membership. */
+let pagedAfter: { customer: string; after: string; reply: unknown } | null = null;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -50,7 +54,13 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const id = customersByEmail.get(url.searchParams.get("email") ?? "");
     return answer({ object: "list", data: id ? [{ id }] : [], has_more: false });
   }
-  if (path === "/subscriptions") return answer({ object: "list", data: liveSubs.get(url.searchParams.get("customer") ?? "") ?? [], has_more: false });
+  if (path === "/subscriptions") {
+    const customer = url.searchParams.get("customer") ?? "";
+    if (pagedAfter && customer === pagedAfter.customer && url.searchParams.get("starting_after") === pagedAfter.after) return answer(pagedAfter.reply);
+    const odd = oddSubs.get(customer);
+    if (odd !== undefined) return answer(odd);
+    return answer({ object: "list", data: liveSubs.get(customer) ?? [], has_more: false });
+  }
   if (path === "/checkout/sessions" && method === "POST") {
     checkouts.push(new URLSearchParams(String(init?.body)));
     return answer({ id: `cs_test_${"m".repeat(20)}${checkouts.length}`, url: "https://checkout.stripe.com/c/pay/test" });
@@ -178,7 +188,7 @@ async function main(): Promise<void> {
 
   part("One reminder, never to somebody who kept it");
   customersByEmail.set("hal@example.com", "cus_Hal000001");
-  liveSubs.set("cus_Hal000001", [{ status: "trialing", metadata: { store: "harbor", product: club.product.id } }]);
+  liveSubs.set("cus_Hal000001", [{ id: "sub_Hal0000001", status: "trialing", metadata: { store: "harbor", product: club.product.id } }]);
   const sentBefore = emails.length;
   // From the renewal date itself, so the hour the test runs at changes nothing.
   const early = await sendMoveReminders(Date.now() + 30_000, (in20 - 4 * DAY) * 1000);
@@ -189,6 +199,45 @@ async function main(): Promise<void> {
   const again = await sendMoveReminders(Date.now() + 30_000, (in20 - 2 * DAY) * 1000);
   is("and it is sent once", [again.sent, emails.length], [0, sentBefore + 1]);
   is("the studio counts who was invited and who kept it", await moveCounts(store), { invited: 3, kept: 1 });
+
+  part("A link already used to keep it opens no second membership");
+  const hal = emails.find((e) => [e.to].flat()[0] === "hal@example.com")!;
+  const halLink = hal.text.match(/\/move\/([A-Za-z0-9_-]+)\?k=([0-9a-f]{40})/);
+  if (!halLink) throw new Error("no link for Hal");
+  const checkoutsBefore = checkouts.length;
+  const halAgain = await openMove(store, halLink[1], halLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  is("Hal, noted as having kept it, gets no checkout from the same link", [halAgain.ok ? "opened" : halAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
+  // Ada paid through her link; the thanks page has not noted it yet, but her membership is live on the creator's account.
+  customersByEmail.set("ada@example.com", "cus_Ada000001");
+  liveSubs.set("cus_Ada000001", [{ id: "sub_Ada0000001", status: "trialing", metadata: { store: "harbor", product: club.product.id, moved: "yes" } }]);
+  const adaAgain = await openMove(store, adaLink[1], adaLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  is("Ada, whose membership is live, gets no second checkout either", [adaAgain.ok ? "opened" : adaAgain.reason, checkouts.length], ["kept", checkoutsBefore]);
+  is("and her invitation is noted as kept", await moveCounts(store), { invited: 3, kept: 2 });
+
+  part("Memberships that cannot be read whole open nothing (review of #4121, rule 24)");
+  // Ben's link is still his; his customer is found, but what Stripe answers about his memberships is not all known.
+  customersByEmail.set("ben@example.com", "cus_Ben000001");
+  const benTries: [string, unknown][] = [
+    ["a list whose data is not a list", { object: "list", data: "none", has_more: false }],
+    ["a list with no data at all", { object: "list" }],
+    ["a list that says there is more and never ends", { object: "list", data: [{ id: "sub_Ben0000001", status: "canceled", metadata: { store: "harbor", product: club.product.id } }], has_more: true }],
+    ["a row whose status Stripe has no name for", { object: "list", data: [{ id: "sub_Ben0000002", status: "maybe", metadata: { store: "harbor", product: club.product.id } }], has_more: false }],
+    ["a list whose has_more is missing", { object: "list", data: [] }],
+  ];
+  for (const [what, reply] of benTries) {
+    oddSubs.set("cus_Ben000001", reply);
+    const before = checkouts.length;
+    const benAgain = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+    is(`Ben, whose memberships came back as ${what}, gets no checkout`, [benAgain.ok ? "opened" : benAgain.reason, checkouts.length], ["refused", before]);
+  }
+  oddSubs.delete("cus_Ben000001");
+  // A second page holding the live one: read, so it is found and nothing opens.
+  liveSubs.set("cus_Ben000001", []);
+  oddSubs.set("cus_Ben000001", { object: "list", data: [{ id: "sub_Ben0000003", status: "canceled", metadata: { store: "harbor", product: club.product.id } }], has_more: true });
+  pagedAfter = { customer: "cus_Ben000001", after: "sub_Ben0000003", reply: { object: "list", data: [{ id: "sub_Ben0000004", status: "active", metadata: { store: "harbor", product: club.product.id } }], has_more: false } };
+  const beforePaged = checkouts.length;
+  const benPaged = await openMove(store, benLink[1], benLink[2], "https://marktmorgen.com", now, TEST_CONSENT);
+  is("Ben, whose live membership is on the second page, is found to have kept it", [benPaged.ok ? "opened" : benPaged.reason, checkouts.length], ["kept", beforePaged]);
 
   done();
 }

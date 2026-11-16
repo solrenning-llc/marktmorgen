@@ -68,9 +68,15 @@ export function listensToSales(store: Store): boolean {
   return Boolean(store.stripeAccountId) && (store.phoneSales || store.emailSync !== null || store.chatSales || store.recentSales);
 }
 
-/** An amount as the checkout charged it: in its own currency, the store's when Stripe did not say. */
-function money(amount: number, currency: unknown, store: Store): string {
-  return formatMoney(amount, typeof currency === "string" && currency ? currency : store.currency);
+/**
+ * An amount as the checkout charged it, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never
+ * below zero, in a three-letter currency. Anything else is unknown and answers null, so the line leaves the amount
+ * out: never "$0", and never the store's own currency in place of the one charged.
+ */
+function charged(amount: unknown, currency: unknown): string | null {
+  return Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+    ? formatMoney(Number(amount), currency)
+    : null;
 }
 
 /**
@@ -98,7 +104,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
     inside.length ? readListings(store, inside) : Promise.resolve([] as Listing[]),
   ]);
   const title = product?.title ?? meta.title ?? "A product";
-  const amount = typeof record.amount_total === "number" ? record.amount_total : 0;
+  const paid = charged(record.amount_total, record.currency);
   const at = typeof record.created === "number" ? record.created * 1000 : Date.now();
 
   // The store's own pages, where the creator shows its latest purchases (lib/recent-sales.ts).
@@ -109,7 +115,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
       store,
       "sale",
       {
-        title: `${meta.kind === "tip" ? "New support" : "New sale"}: ${money(amount, record.currency, store)}`,
+        title: `${meta.kind === "tip" ? "New support" : "New sale"}${paid ? `: ${paid}` : ""}`,
         body: [title, ...bumps.map((added) => added.title)].join(" + "),
         url: studioAt(store, "#numbers"),
       },
@@ -125,7 +131,7 @@ async function tell(store: Store, record: SaleRecord, session: string): Promise<
     if (url) {
       const what = meta.kind === "call" ? "New booking" : meta.kind === "tip" ? "New support" : "New sale";
       const channel = meta.utm_source || (meta.channel && meta.channel !== "direct" ? meta.channel : "");
-      const line = `${what} on ${store.name}: ${money(amount, record.currency, store)}, ${[title, ...bumps.map((added) => added.title)].join(" + ")}${channel ? ` (from ${channelName(channel)})` : ""}`;
+      const line = `${what} on ${store.name}: ${paid ? `${paid}, ` : ""}${[title, ...bumps.map((added) => added.title)].join(" + ")}${channel ? ` (from ${channelName(channel)})` : ""}`;
       await postToChat(url, line).catch(() => false);
     }
   }
@@ -216,19 +222,19 @@ export async function noteOfferSale(store: Store, product: Listing, payment: Rec
   if (!store.phoneSales && !store.chatSales) return;
   const id = typeof payment.id === "string" ? payment.id : "";
   if (!id) return;
-  const amount = typeof payment.amount === "number" ? payment.amount : 0;
+  const paid = charged(payment.amount, payment.currency);
   if (store.chatSales && isRedisConfigured()) {
     // Once, like the phone's: the payment's own mark.
     // Ours only on an exact claim (lib/claim-mark.ts): an unknown answer posts nothing.
     const fresh = await claimMark(toldKey(id), TOLD_SECONDS);
     const url = fresh === "ours" ? await chatAddress(store.statsId).catch(() => null) : null;
-    if (url) await postToChat(url, `New sale on ${store.name}: ${money(amount, payment.currency, store)}, ${product.title} (one-click offer)`).catch(() => false);
+    if (url) await postToChat(url, `New sale on ${store.name}: ${paid ? `${paid}, ` : ""}${product.title} (one-click offer)`).catch(() => false);
   }
   if (!store.phoneSales) return;
   await alertCreator(
     store,
     "sale",
-    { title: `New sale: ${money(amount, payment.currency, store)}`, body: `${product.title} (one-click offer)`, url: studioAt(store, "#numbers") },
+    { title: `New sale${paid ? `: ${paid}` : ""}`, body: `${product.title} (one-click offer)`, url: studioAt(store, "#numbers") },
     { seed: id, at: typeof payment.created === "number" ? payment.created * 1000 : Date.now() },
   );
 }

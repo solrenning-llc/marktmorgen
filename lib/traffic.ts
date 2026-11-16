@@ -262,15 +262,26 @@ export async function isResting(store: Store, now = Date.now(), who: "public" | 
  * UnknownReplyError (rule 24): never "the window is spent" and never room.
  */
 async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<boolean> {
+  return (await countRequestWhy(folder, store, window, who, now, units, client, giveBack)) === "ok";
+}
+
+/**
+ * A public request's take, said three ways (outage drill, 13 November 2026): "ok" counted within the window; "over"
+ * refused by a figure that was read (the window, the connection's share, a free store's place); "unknown" when the
+ * count could not be made, so a caller can say "not checked just now" instead of "too many". Both refuse.
+ */
+export type RequestTake = "ok" | "over" | "unknown";
+
+async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<RequestTake> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return false;
-  if (!Number.isSafeInteger(units) || units < 1) return false;
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "unknown";
+  if (!Number.isSafeInteger(units) || units < 1) return "unknown";
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return false;
+  if (!(await admitNonPaying(store, now))) return "over";
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return false;
+  if (client && (await overShare(folder, window, whole, client, units, now))) return "over";
   const key = requestsKey(folder, window.id);
   const replies = repliesFor(await redisPipeline([["INCRBY", key, units]]), 1);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
@@ -283,7 +294,7 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
-  return n <= limit;
+  return n <= limit ? "ok" : "over";
 }
 
 /**
@@ -337,17 +348,45 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
   return takePublic(store, "public", now, units, false, true).catch(unknownIsNo);
 }
 
+/**
+ * The yes or no of takePublicRequestExact (rule 24; follow-up of #3067): a count or a share that came back in a shape
+ * that cannot be read throws UnknownReplyError; anything else that keeps the count from being made (no Redis, no
+ * window, no funded period, Redis not reached) refuses, as it always has.
+ */
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
   if (!isRedisConfigured()) return false;
   try {
     const window = allowanceWindow(store, now);
     if (!window) return false;
     if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
+    return (await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack)) === "ok";
   } catch (error) {
     if (error instanceof UnknownReplyError) throw error;
     return false;
   }
+}
+
+/**
+ * The same take said three ways (RequestTake, outage drill of 13 November 2026), for a page that tells "too many"
+ * apart from "not checked just now": an unreadable count or share (UnknownReplyError) and a count that could not be
+ * made at all are both "unknown".
+ */
+async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<RequestTake> {
+  if (!isRedisConfigured()) return "unknown";
+  try {
+    const window = allowanceWindow(store, now);
+    if (!window) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "over";
+    return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
+  } catch {
+    // Redis or the store's folder could not be reached: a count that was not made, never room, and never "too many".
+    return "unknown";
+  }
+}
+
+/** takePublicRequest, said three ways (RequestTake): for a page that tells "too many" apart from "not checked just now". */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now()): Promise<RequestTake> {
+  return takePublicWhy(store, who, now, 1, false, false);
 }
 
 /**

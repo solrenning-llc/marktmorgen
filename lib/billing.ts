@@ -497,6 +497,8 @@ export type StartedSubscription = {
   shared: boolean;
   /** The period paid for, which the store's allowances follow (lib/allowance-window.ts); null when Stripe did not say. */
   period: BillingPeriod | null;
+  /** Stripe could not be asked about the subscription: `active` is false because nothing is known, never because it stopped. */
+  unknown?: true;
 };
 
 /**
@@ -582,7 +584,7 @@ export async function readStartedSubscription(
     try{subscription=await subscriptionRecord(subscriptionId);}
     catch(error){
       console.error("reading the subscription failed",error);
-      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null};
+      return {customerId,subscriptionId,active:false,tier:"creator",cycle:"month",trialEnds:0,shared:false,period:null,unknown:true};
     }
     const meta=subscription?.metadata as Record<string,unknown>|null|undefined;
     if(meta?.funding_grant!==undefined||meta?.funding_review!==undefined)return null;
@@ -2135,8 +2137,13 @@ export async function refundsOnIntent(paymentIntent: string): Promise<{ returned
     const listed = await onPlatform("GET", `/refunds?${query}`, undefined, { version: CHARGE_VERSION });
     if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.has_more !== false) return null;
     const out = { returned: 0, inFlight: 0, failed: 0, paid: intent.amount_received as number };
+    // Each refund counts once, by its own id: a list that repeats an id cannot
+    // prove its rows are distinct, so it is unreadable, never a doubled sum
+    // that would close a debt only partly returned (issue #4452).
+    const seen = new Set<string>();
     for (const row of listed.data as Record<string, unknown>[]) {
-      if (!row || row.object !== "refund" || typeof row.id !== "string") return null;
+      if (!row || row.object !== "refund" || typeof row.id !== "string" || !/^re_[A-Za-z0-9]{8,64}$/.test(row.id) || seen.has(row.id)) return null;
+      seen.add(row.id);
       const intent = typeof row.payment_intent === "string" ? row.payment_intent : (row.payment_intent as { id?: unknown } | null | undefined)?.id;
       if (intent !== paymentIntent) return null;
       if (row.status === "succeeded") {

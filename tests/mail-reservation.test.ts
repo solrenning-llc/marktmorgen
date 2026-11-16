@@ -2,7 +2,7 @@ import { dispatch } from './mail-reservation-email';
 import { sesObservation } from './mail-reservation-ses';
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from '@/lib/store';
 import { upsertContact } from '@/lib/contacts';
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
 import { UnknownReplyError } from '@/lib/redis-reply';
 import assert from 'node:assert/strict';
 import { reserve, reserveDay, usedThisMonth, monthlyAllowance, sendTo, takeFromMonth } from '@/lib/mail';
@@ -12,6 +12,10 @@ import { store as memory } from './redis-stub';
 import { paidPeriod } from './billing-period-fixture';
 import { windowId } from '@/lib/allowance-window';
 import { ROOM } from "./data-room";
+import { installVirtualClock } from "./slow-test-virtual-clock";
+// The pace between list batches (lib/mail.ts, 1.5 s) passes on a virtual clock, in the order the real one would give.
+const clock=installVirtualClock({maxMs:1_500});
+after(()=>clock.restore());
 const actual=memory.pipeline.bind(memory);
 let reply: unknown[]|undefined;
 let dayRead: {value:unknown}|undefined;
@@ -125,11 +129,13 @@ test('list dispatch uses only SES and known no-send waits keep recipients and al
  assert.equal(waiting.stopped,'sender');assert.deepEqual(waiting.rest,['reader@example.com']);
  assert.equal(waiting.uncertain,undefined);assert.deepEqual(waiting.done,[]);
  assert.equal(dispatch.calls,1);assert.equal(dispatch.listCalls,1);
- const cleanupStart=pipelines.findIndex(commands=>commands.some(command=>command[0]==='DECRBY'));
+ // A give-back is a DECRBY or, since release keeps the counts from going below zero, the give-back-floor EVAL.
+ const givesBack=(command:unknown[])=>command[0]==='DECRBY'||(command[0]==='EVAL'&&String(command[1]).includes('marktmorgen:give-back-floor'));
+ const cleanupStart=pipelines.findIndex(commands=>commands.some(givesBack));
  assert.ok(cleanupStart>=0);
  assert.ok(pipelines.slice(cleanupStart).reduce((sum,commands)=>sum+commands.length,0)<=4,'cleanup is bounded by the existing release and portion-return operations');
  assert.equal(await usedThisMonth(made.listId,windowId(made)),before,'confirmed no-send returns the monthly reservation');
- assert.equal(pipelines.filter(commands=>commands.some(command=>command[0]==='DECRBY')).length,1,'one existing two-counter release, not a retry loop');
+ assert.equal(pipelines.filter(commands=>commands.some(givesBack)).length,1,'one existing two-counter release, not a retry loop');
  dispatch.outcome='sent';
  const recovered=await sendTo(made,['reader@example.com'],'Synthetic','Test only','known-no-send');
  assert.equal(recovered.stopped,null);assert.deepEqual(recovered.done,['reader@example.com']);

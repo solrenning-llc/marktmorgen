@@ -12,6 +12,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { essentialLimitState, withinLimit, withinMonth } from "@/lib/request-guard";
+import { withinChallengeWrites } from "@/lib/community-challenges";
 import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -48,6 +49,32 @@ async function main(): Promise<void> {
     is("after it, uses are counted again from one", [await count(), await count(), await count()], [true, true, true]);
   }
 
+  // Review of #3452 (Claude 4 cloud Z, MEDIUM): a creator's changes to challenges in an hour (lib/community-challenges.ts,
+  // withinChallengeWrites) counted with the same SET NX EX + INCR pair, so a key that expired between them locked the
+  // creator out of making or deleting challenges for good.
+  part("withinChallengeWrites: the hour's count expires between the two commands");
+  {
+    redis.clear();
+    const keys = () => (redis.run(["SCAN", "0", "MATCH", "*:chw", "COUNT", 10_000]) as [string, string[]])[1];
+    is("the first change is within", await withinChallengeWrites("synthetic-community"), true);
+    expireBetween = true;
+    await withinChallengeWrites("synthetic-community");
+    is("no count is left without an expiry", keys().filter((k) => redis.run(["TTL", k]) === -1), []);
+    is("and a change is still counted within afterward", await withinChallengeWrites("synthetic-community"), true);
+  }
+
+  part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");
+  // Without NX every use would give the key its whole window again: a steady caller would never see the count end.
+  redis.clear();
+  is("the first use opens a window of 60 seconds", await withinLimit("synthetic-fixed", "203.0.113.9", 100, 60), true);
+  const key = (redis.run(["SCAN", "0", "MATCH", "nl:rl*", "COUNT", 10_000]) as [string, string[]])[1][0];
+  advance(40_000);
+  await withinLimit("synthetic-fixed", "203.0.113.9", 100, 60);
+  const secondsLeft = redis.run(["TTL", key]) as number;
+  is("a use 40 seconds in leaves the window's end where it was (20 seconds left, not 60)", secondsLeft > 0 && secondsLeft <= 20, true);
+  advance(21_000);
+  is("and once it ends, the count starts again from one", redis.run(["GET", key]), null);
+
   part("No limiter counts with SET NX then INCR in a pipeline any more");
   const files: string[] = [];
   const walk = (dir: string) => {
@@ -59,7 +86,10 @@ async function main(): Promise<void> {
   };
   walk("lib");
   walk("app");
-  const pair = /\["SET", ([^,\]]+), "0", "EX", [^\]]+, "NX"\],\s*\["INCR(?:BY)?", \1/;
+  // Either order of the SET's options: `"EX", n, "NX"` and `"NX", "EX", n` race the same way (Claude 7 on #3369).
+  // A pair followed at once by the key's own EXPIRE … NX gives the key its expiry back whatever happened, so it is safe
+  // (lib/calendar-sync.ts, the day's key in lib/store-readings.ts).
+  const pair = /\["SET", ([^,\]]+), "0", (?:"EX", [^\]]+, "NX"|"NX", "EX", [^\]]+)\],\s*\["INCR(?:BY)?", \1[^\]]*\](?!,\s*\["EXPIRE", \1, [^\]]+, "NX"\])/;
   const left = files.filter((f) => f !== join("lib", "redis-memory.ts") && pair.test(readFileSync(f, "utf8"))).sort();
   // Reserved by other agents (docs/reservations/): their owners move them to lib/window-count.ts in their own units.
   // lib/letter-access.ts keeps the pattern on purpose (no EXPIRE option, tests/letter-members.test.ts) and reads the

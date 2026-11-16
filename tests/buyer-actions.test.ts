@@ -150,6 +150,7 @@ test("every route a buyer acts through takes from the store's month before it wr
   const routes: [string, RegExp][] = [
     ["app/api/store/community/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/rsvp/route.ts", /takeBuyerAction\(store\)/],
+    ["app/api/store/community/challenge/route.ts", /takeBuyerAction\(store\)/],
     ["app/api/store/community/chat/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/messages/route.ts", /takeBuyerAction\(store, owner \? "owner" : "buyer"\)/],
     ["app/api/store/community/push/route.ts", /takeBuyerAction\(store, viewer\.owner \? "owner" : "buyer"\)/],

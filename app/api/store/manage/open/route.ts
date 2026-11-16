@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
 
   let handle = "";
   let token = "";
+  // Which membership's page, when the member has several customers (R43 F1 on #2985); none is the newest one's.
+  let subscription = "";
   try {
     const form = await (await limited(request, MAX_BODY_BYTES)).formData();
     const read = (name: string) => {
@@ -31,6 +33,7 @@ export async function POST(request: NextRequest) {
     };
     handle = normaliseHandle(read("handle"));
     token = read("token").slice(0, 80);
+    subscription = read("subscription").slice(0, 80);
   } catch {
     return new Response("Bad request", { status: 400 });
   }
@@ -54,7 +57,7 @@ export async function POST(request: NextRequest) {
   if (room === "unknown") return back("error");
   if (!room) return back("limited");
 
-  const result = await openPortal(store, token, linkOrigin(request, store));
+  const result = await openPortal(store, token, linkOrigin(request, store), subscription);
   if (!result.ok) return back(result.reason);
   return new Response(null, {
     status: 303,

@@ -1,4 +1,4 @@
-import { withinStore } from "@/lib/metered-limits";
+import { withinStoreWhy } from "@/lib/metered-limits";
 import type { NextRequest } from "next/server";
 import { preorderWords } from "@/lib/buyer-words/preorder";
 import { type Listing, type Store, normaliseHandle, storeForHandle } from "@/lib/store";
@@ -105,15 +105,16 @@ export async function GET(request: NextRequest) {
       status: 429,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "600", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
-  const room = await withinStore("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
-  // A count that could not be read is never "too often" (rule 24): "We could not check this order right now".
-  if (room === "unknown") {
-    return new Response(say.error, {
+  // The short window's count unknown throws (withinLimit, #3067) and reads as "unknown" too (unknownLimit).
+  const counted = await withinStoreWhy("download", `${store.handle}:${link}`, OPENS_PER_HOUR, 3600, store, "buyer").catch(unknownLimit);
+  // A count that could not be made refuses as well, but says so, with a short wait: never "opened very many times".
+  if (counted === "unknown") {
+    return new Response(say.purchaseCheckFailed, {
       status: 503,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "60", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "30", "Cache-Control": "no-store", "X-Robots-Tag": "noindex" },
     });
   }
-  if (!room) return tooOften();
+  if (counted !== "ok") return tooOften();
   if (token) {
     // Only the purchase asked for is read, by its reference, paid for before each read (lib/buyer-orders.ts, findPurchase):
     // a store with no room left for it is answered as too often, and nothing more is asked of Stripe.

@@ -636,13 +636,14 @@ async function main(): Promise<void> {
   const heavy = await paidStore("hubsheavy");
   const heavyId = heavy.store.statsId!;
   const heavyStages = allStages(await readPipelines(heavyId));
-  const fat = (n: number) => "\u20ac\"".repeat(Math.ceil(n / 2)).slice(0, n);
+  const fat = (n: number) => "\u20ac".repeat(n);
+  const quoted = `${'"'.repeat(64)}@${'"'.repeat(186)}."""`;
   const fatDeals = Array.from({ length: MAX_DEALS }, (_, i) => parseDeal({
-    id: hubSpotDealId(String(8000 + i)), title: fat(90), email: `${"q".repeat(60)}@${"d".repeat(180)}.com`, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
-    note: `${hubSpotDealNote(String(8000 + i), "", false)}\n${fat(480)}`, nextAction: fat(200), dueDate: "2026-12-31", assignee: `${"a".repeat(60)}@${"b".repeat(180)}.com`,
-    formResponseRef: "f".repeat(64), createdAt: 1_799_999_999, updatedAt: 1_799_999_999,
+    id: hubSpotDealId(String(8000 + i)), title: fat(90), email: quoted, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
+    note: `${hubSpotDealNote(String(8000 + i), "", false)}\n${fat(480)}`, nextAction: fat(200), dueDate: "2026-12-31", assignee: quoted,
+    formResponseRef: "f".repeat(64), createdAt: Number.MAX_SAFE_INTEGER, updatedAt: Number.MAX_SAFE_INTEGER,
   }, heavyStages)!);
-  is("control: every deal reads at the most a stored deal weighs", fatDeals.every((d) => Buffer.byteLength(JSON.stringify(d)) <= DEAL_JSON_MAX_BYTES), true);
+  is("control: every deal reads at the most a stored deal weighs, its addresses kept", [fatDeals.every((d) => Buffer.byteLength(JSON.stringify(d)) <= DEAL_JSON_MAX_BYTES), fatDeals[0].email.length, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))], [true, 254, Math.max(...fatDeals.map((d) => Buffer.byteLength(JSON.stringify(d))))]);
   await redis.pipeline([["HSET", `nl:crm:deals:${heavyId}`, ...fatDeals.flatMap((d) => [d.id, JSON.stringify(d)])]]);
   const heavyReal = redis.pipeline.bind(redis);
   let heavyCommands = 0;

@@ -312,11 +312,13 @@ function planAgainst(
 }
 
 /**
- * The most one stored deal's JSON weighs (parseDeal, lib/crm-rules.ts): its title, note, next action and two
- * addresses at their caps, each UTF-16 unit at most 3 bytes (a quote or a new line is 2 once escaped), with its ids,
- * stage, dates, amount and keys. tests/hubspot-import.test.ts holds a deal at every cap under it.
+ * The most one stored deal's JSON weighs (parseDeal, lib/crm-rules.ts): its title (90), note (500) and next action
+ * (200) at 3 bytes a UTF-16 unit, the most one takes in JSON once control characters are gone (a new line or a quote
+ * is 2); its two addresses at 254 characters, every one but "@" and "." a quote (2 bytes); its form reference, ids,
+ * stage, due date, the largest amount, two dates of 16 digits and the keys: 3,666 bytes, rounded up.
+ * tests/hubspot-import.test.ts holds a deal at every cap under it.
  */
-export const DEAL_JSON_MAX_BYTES = 4_096;
+export const DEAL_JSON_MAX_BYTES = 3_700;
 
 /**
  * What a dry run reads at the most (Claude 5's cost MEDIUM on #2048): the store's pipelines and the ids of its deals
@@ -324,7 +326,7 @@ export const DEAL_JSON_MAX_BYTES = 4_096;
  * here, whole (readDealMarks), each at DEAL_JSON_MAX_BYTES. Priced as the check it is counted as (tests/plan-cost-registry.ts,
  * line clickfunnels, "import-preview-month").
  */
-export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_JSON_MAX_BYTES + 64) + 64 * 1024;
+export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_JSON_MAX_BYTES + 32) + 64 * 1024;
 
 /** The commands one dry-run request sends at the most, the route's own (session, allowances) included. */
 export const HUBSPOT_CHECK_COMMANDS = 14;

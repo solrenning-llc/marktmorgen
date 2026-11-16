@@ -171,9 +171,12 @@ const DIGITS = /(?<![\p{L}\p{N}_.,])[$€£]?\d+(?:[.,]\d+)*(?:\s?%|[kKmMbB](?![
  * "ranked 3rd", "our 10th-year anniversary", "our 1000th customer" (Codex G's
  * MEDIUM on #3437: a short list of claimed nouns let every other one through).
  * Only the order of a part of the draft is left out, the same parts PART_LABEL
- * numbers, and a draft, an edition or a round.
+ * numbers, and a draft, an edition or a round. Never a time: "by your 3rd
+ * week", "by the 30th day" and "after the 5th session" are deadlines as often
+ * as an order, so a day, a week or a session is listed to check (Claude 7's
+ * MEDIUM on #3437).
  */
-const ORDINAL_OF_A_PART = /(?:st|nd|rd|th)\s+(?:weeks?|days?|steps?|modules?|lessons?|parts?|chapters?|emails?|sessions?|drafts?|editions?|rounds?|sections?|pages?|units?|classes?|videos?|episodes?)(?![\p{L}\p{N}])/iuy;
+const ORDINAL_OF_A_PART = /(?:st|nd|rd|th)\s+(?:steps?|modules?|lessons?|parts?|chapters?|emails?|drafts?|editions?|rounds?|sections?|pages?|units?|classes?|videos?|episodes?)(?![\p{L}\p{N}])/iuy;
 const SHAPE = /D(?![\p{L}\p{N}])/uy;
 const sticky = (pattern: RegExp, text: string, at: number) => ((pattern.lastIndex = at), pattern.test(text));
 const notAFigureAfter = (text: string, at: number) => sticky(ORDINAL_OF_A_PART, text, at) || sticky(SHAPE, text, at);

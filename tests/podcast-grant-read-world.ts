@@ -23,6 +23,7 @@ const unexpected = () => {
 };
 
 export const orderWrite = unexpected;
+export const orderWriteOnce = unexpected;
 export const withinStore = unexpected;
 export const withinLimit = unexpected;
 export const withinEssentialLimit = unexpected;

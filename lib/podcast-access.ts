@@ -35,7 +35,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
-import { orderWrite } from "@/lib/order-data";
+import { orderWrite, orderWriteOnce } from "@/lib/order-data";
 import { holdsProducts } from "@/lib/community-access";
 import { sendEmail } from "@/lib/email";
 import { essentialLimitState, withinLimit } from "@/lib/request-guard";
@@ -68,19 +68,19 @@ export async function feedToken(store: Store, productId: string, email: string):
   if (existing !== null && FEED_TOKEN.test(existing)) return withGrant(store, existing, grant);
   const token = randomBytes(24).toString("hex");
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
-  // Only "OK" made the index and only null says another token was kept first: any other reply is unknown, and
-  // writing a grant then could leave one holding the address that no index leads to, which an erasure never finds.
-  // The product is noted in the same counted write as the index (lib/order-data.ts takes its room first): a grant
-  // made from now on is never one that a person's deletion could not find.
-  const [set] = await orderWrite(store, [["SET", byKey(sid, productId, email), token, "NX"], ["SADD", pidsKey(sid), productId]]);
-  if (set === null) {
-    const again = await indexedToken(sid, productId, email);
-    return typeof again === "string" && FEED_TOKEN.test(again) ? withGrant(store, again, grant) : null;
-  }
-  if (set !== "OK") return null;
+  // The index, the product's note and the grant that holds the address are written in one script behind the index's
+  // SET NX (orderWriteOnce; Codex V on #4471): a person's deletion sees all three or none of them, so it never deletes
+  // an index whose grant is written after it, which would keep the address in a grant no index leads to. A refused
+  // command takes the index back in the same script, so no index is left without its grant.
+  const wrote = await orderWriteOnce(store, [
+    ["SET", byKey(sid, productId, email), token, "NX"],
+    ["SADD", pidsKey(sid), productId],
+    ["SET", tokenKey(token), JSON.stringify(grant), "NX"],
+  ]);
+  // Another call kept a token first: that one is handed out, once its grant is there.
+  if ("held" in wrote) return FEED_TOKEN.test(wrote.held) ? withGrant(store, wrote.held, grant) : null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
-  const [made] = await orderWrite(store, [["SET", tokenKey(token), JSON.stringify(grant)]]);
-  return made === "OK" ? token : null;
+  return wrote.replies[2] === "OK" ? token : null;
 }
 
 /**

@@ -231,10 +231,15 @@ export function paidPeriodOf(invoice: Record<string, unknown>, email: string, in
     if (typeof id === "string") intent = id;
   }
   if (invoice.status !== "paid" || typeof invoice.id !== "string" || !INVOICE_ID.test(invoice.id)) return null;
+  // A paid invoice's total and currency as Stripe gives them, whole smallest units and three letters: anything else is
+  // unknown and throws (CX-123 rule 24), so holdOne never passes it over for an older invoice's period; the member is
+  // held again the next day. A total Stripe says is 0 (a free invoice) is not a paid period.
+  const tot = invoice.amount_paid;
+  if (typeof tot !== "number" || !Number.isSafeInteger(tot) || tot < 0) throw new UnknownReplyError("a paid invoice's total");
+  if (typeof invoice.currency !== "string" || !/^[A-Za-z]{3}$/.test(invoice.currency)) throw new UnknownReplyError("a paid invoice's currency");
+  const cur = invoice.currency.toLowerCase();
   const line = membershipLineOf(invoice as Parameters<typeof membershipLineOf>[0]);
-  const tot = typeof invoice.amount_paid === "number" ? invoice.amount_paid : 0;
-  const cur = typeof invoice.currency === "string" ? invoice.currency.toLowerCase() : "";
-  if (!line || !(tot > 0) || !cur) return null;
+  if (!line || !(tot > 0)) return null;
   const direct = typeof invoice.payment_intent === "string" ? invoice.payment_intent : (invoice.payment_intent as { id?: unknown } | null)?.id;
   const pi = typeof direct === "string" && INTENT_ID.test(direct) ? direct : INTENT_ID.test(intent) ? intent : "";
   return { inv: invoice.id, ...(pi ? { pi } : {}), amt: line.amt, tot, cur, ps: line.ps, pe: line.pe, e: email };

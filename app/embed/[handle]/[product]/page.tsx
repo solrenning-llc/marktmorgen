@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isResting } from "@/lib/traffic";
 import { NewTab } from "@/components/new-tab";
 import { forVisitor } from "@/lib/visitor";
 import { connection } from "next/server";
@@ -24,6 +25,7 @@ import { speech } from "@/lib/buyer-words";
 import { scriptMode, withTags } from "@/lib/embed-sites";
 import { type ScriptOpen, readScriptOpen } from "@/lib/embed-open";
 import { EmbedMessenger } from "@/components/embed-messenger";
+import { StoreBeacon } from "@/components/store-beacon";
 import { SlotPicker } from "@/components/slot-picker";
 import { type CallListing, slotsForProduct } from "@/lib/calls";
 import { bookingLength, offeredLengths } from "@/lib/call-lengths";
@@ -153,8 +155,14 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const product = loaded.product;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = loaded.store ? await forVisitor(loaded.store) : null;
+  // One of the store's public requests, counted before anything else is read (#4634), as the store's own pages do
+  // (app/[handle]/p/[product]/page.tsx): the card is dynamic, so every render reached the reads below with no ceiling.
+  // Past the store's requests (or a count that cannot be made) the card reads nothing more.
+  const resting = store && product ? await isResting(store) : false;
   // Opened by the checkout script: counted, and what it may show (lib/embed-open.ts).
-  const open: ScriptOpen | null = mode && store ? await readScriptOpen(store, mode, query) : null;
+  // Its request already taken above when there is a product, so the open does not take a second one; without one
+  // (an unknown id or an unread listing) nothing above counted, so the open counts its own (Claude 7 on #4645).
+  const open: ScriptOpen | null = mode && store && !resting ? await readScriptOpen(store, mode, query, Boolean(product)) : null;
   // The card's own links, tagged as the code that opened it was.
   const tag = (url: string) => (open ? withTags(url, open.tags, { via: open.via }) : tagged(url, place));
   // As a page of its own, links stay in the tab; in a frame, they open a new one.
@@ -179,6 +187,20 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : (
             "This product is no longer on sale."
           )}
+        </p>
+      </div>
+    );
+  }
+
+  if (resting) {
+    return (
+      <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
+        <style>{SEE_THROUGH}</style>
+        <p lang={speech(store).lang.locale} className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+          {`${speech(store).w.cardUnread} `}
+          <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
+            {speech(store).w.seeStore(store.name)}
+          </a>
         </p>
       </div>
     );
@@ -272,6 +294,7 @@ export default async function EmbedCard({ params, searchParams }: Params) {
     return (
       <div lang={say.lang.locale} className={`st-page st-theme-${store.look.theme} h-screen overflow-y-auto`} style={lookStyle(store.look) as React.CSSProperties} data-embed-times="">
         <main id="content" className="p-4">
+          {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
           {/* Where focus starts once the times open in the frame (2.4.3): the frame's address names it. */}
           <h1 id="times-title" tabIndex={-1} className="font-display text-[1.0625rem] font-semibold leading-snug">{product.title}</h1>
           <p className="st-price mt-1 text-sm">{say.money(cents)}</p>
@@ -379,6 +402,8 @@ export default async function EmbedCard({ params, searchParams }: Params) {
 
   const card = (
       <article className={`st-card flex ${soldBy ? "min-h-full" : "h-full"} flex-col overflow-hidden p-4`} style={{ boxShadow: "none" }}>
+        {/* Opened by the checkout script: the visit, counted by the page itself through the host's browser check (lib/embed-open.ts). */}
+        {open ? <StoreBeacon handle={store.handle} front={false} /> : null}
         {image ? (
           <a href={page} {...aside} tabIndex={-1} className="em-cover -mx-4 -mt-4 mb-4 h-[160px] shrink-0 overflow-hidden" style={{ background: "var(--st-item)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -392,9 +417,9 @@ export default async function EmbedCard({ params, searchParams }: Params) {
               <img src={imageUrl(image)} alt={image.alt} width={64} height={64} className="h-16 w-16 rounded-2xl object-cover" decoding="async" />
             </a>
           ) : null}
-          <div className="min-w-0 flex-1">
+          <div className="relative min-h-11 min-w-0 flex-1">
             <h1 className="font-display line-clamp-2 text-[1.0625rem] font-semibold leading-snug">
-              <a href={page} {...aside} className="st-title-link">
+              <a href={page} {...aside} className="st-title-link em-title">
                 {product.title}
               </a>
             </h1>

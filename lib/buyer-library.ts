@@ -44,7 +44,7 @@ import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
-import { withinLimit } from "@/lib/request-guard";
+import { essentialLimitState } from "@/lib/request-guard";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { joinedKeys, personKeys, personWrite } from "@/lib/joined-stores";
 
@@ -84,6 +84,15 @@ export async function storesKnownFor(email: string): Promise<string[]> {
 }
 
 /**
+ * The commands that forget that this address bought from the store with this id, in every quarter it can be in, and
+ * not that it joined it: what a PayPal hand-over takes back of what it wrote for a person deleted at their own request
+ * during it (lib/paypal-delivery.ts). Each answers 0 or 1. None for an id that is not a store's.
+ */
+export function forgetBoughtCommands(sid: string, email: string): (string | number)[][] {
+  return STORE_ID.test(sid) ? libraryKeys(email).map((key) => ["SREM", key, sid]) : [];
+}
+
+/**
  * Forgets that this address bought from or joined the store with this id (lib/person-erasure.ts): in every quarter it
  * can be in. Each SREM reply is read in its exact shape (rule 24): 0 or 1, one per command. Anything else throws
  * UnknownReplyError, so the erasure says this part could not finish and can be asked again, never "erased, 0 records"
@@ -92,9 +101,10 @@ export async function storesKnownFor(email: string): Promise<string[]> {
 export async function forgetLibraryPerson(sid: string, email: string): Promise<number> {
   if (!STORE_ID.test(sid) || !isRedisConfigured()) return 0;
   const commands = [...libraryKeys(email), ...joinedKeys(email)].map((key) => ["SREM", key, sid]);
-  const replies = repliesFor(await redisPipeline(commands), commands.length);
-  const counts = replies?.map(countOf);
-  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("forgetting a library's store");
+  // One SREM of one member per quarter: each answers 0 or 1, and nothing else counts (CX-123 rule 24). Any other
+  // answer throws, so the erasure is said as not finished while the note may still be kept.
+  const counts = repliesFor(await redisPipeline(commands), commands.length)?.map(countOf);
+  if (!counts || counts.some((n) => n === null || n > 1)) throw new UnknownReplyError("the deletion of a person's library notes");
   return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }
 
@@ -136,8 +146,10 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!isRedisConfigured() || !isSenderConfigured()) return "error";
   const email = normaliseEmail(raw);
-  if (!(await withinLimit("library-ip", input.ip, 10, 3_600))) return "limited";
-  if (!(await withinLimit("library-address", sha(email), 5, 3_600))) return "limited";
+  const byIp = await essentialLimitState("library-ip", input.ip, 10, 3_600);
+  if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
+  const byAddress = await essentialLimitState("library-address", sha(email), 5, 3_600);
+  if (byAddress !== "within") return byAddress === "exceeded" ? "limited" : "error";
   // Only stores that are still open: one that has closed is gone, and is never shown.
   const stores: string[] = [];
   let charged: Store | null = null;
@@ -154,7 +166,10 @@ export async function requestLibraryLink(input: { email: string; ip: string; ori
   if (!stores.length) return unread ? "error" : "sent";
   if (!charged) return "error";
   const token = randomBytes(32).toString("hex");
-  await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]);
+  // The grant is the link: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other reply sends nothing and
+  // takes no store email, so nobody is emailed a link that does not open; the route answers "error".
+  const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LIBRARY_LINK_SECONDS]]), 1);
+  if (!written || written[0] !== "OK") throw new UnknownReplyError("a library link's grant");
   const link = `${input.origin}/library?token=${token}`;
   // One of the access emails of the store the address bought from first in the list (lib/store-allowance-rules.ts).
   const sent = await sendEmail({ meter: { by: "store", store: charged, kind: "transactional" },

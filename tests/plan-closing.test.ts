@@ -239,6 +239,21 @@ const clockAt = (ms: number) => {
   const shift = ms - realNow();
   Date.now = () => realNow() + shift;
 };
+/**
+ * lib/email.ts makes a sender asked to slow down (a 429) wait before it tries again: Resend 1 s then 2 s, Amazon 400 ms
+ * then 800 ms (its `pause`). Those two pauses, and no other timer (a request's cutoff stays on the real clock), are
+ * skipped here, with the test clock moved on by each, as if it had passed: the same tries, the same order and the same
+ * deadlines, without sitting through them.
+ */
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+  const stack = typeof ms === "number" && ms > 0 ? new Error().stack ?? "" : "";
+  if (/\bat pause\d* \(/.test(stack) && /\bat (?:async )?(?:resendOutcome|viaAmazon)\d* \(/.test(stack)) {
+    clockAt(Date.now() + ms!);
+    return realSetTimeout(fn, 0, ...args);
+  }
+  return realSetTimeout(fn, ms, ...args);
+}) as typeof setTimeout;
 
 async function main(): Promise<void> {
   // A synthetic company address, so the buyers' notice of a plan that ends from 31 October 2026 can go (lib/company-postal.ts).
@@ -538,7 +553,9 @@ async function main(): Promise<void> {
 
   part("Where it runs, and what the pages say");
   const job = read("app/api/cron/closing/route.ts");
-  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /"nl:closing:lock", "1", "NX"/.test(job), /closeEnded\(/.test(job)], [true, true, true]);
+  // Changed (claude5/fix-cron-locks, CX-123 rule 24): the lock was a SET NX of "1" read as ours on any answer but nil;
+  // it is now claimMark with this run's own value (lib/claim-mark.ts), held exactly in tests/cron-locks-twelve.test.ts.
+  is("the job is one of ours to run, one at a time", [/cronAllowed\(request\)/.test(job), /claimMark\("nl:closing:lock", /.test(job), /closeEnded\(/.test(job)], [true, true, true]);
   const crons = (JSON.parse(read("vercel.json")) as { crons: { path: string; schedule: string }[] }).crons;
   const at = (path: string) => crons.find((cron) => cron.path === path)?.schedule;
   is("every day, after the check of every store's plan", [at("/api/cron/plans"), at("/api/cron/closing")], ["0 9 * * *", "30 9 * * *"]);

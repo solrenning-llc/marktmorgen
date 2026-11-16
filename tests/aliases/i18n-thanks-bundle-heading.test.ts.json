@@ -1,0 +1,5 @@
+{
+  "next/headers": "security/next-headers.ts",
+  "next/server": "next-server-after-world.ts",
+  "@/lib/store-checkout": "i18n-thanks-bundle-heading-world.ts"
+}

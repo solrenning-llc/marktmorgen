@@ -87,15 +87,14 @@ export function planRefundLetter(o: { store: string; cents: number; currency: st
 }
 
 /**
- * When a refund the creator asked for was not made after all (the daily job found none, or could not tell for
- * GIVE_UP_DAYS): nothing was refunded, the stop set for it was taken back, the plan goes on; how to ask again.
+ * When a refund the creator asked for was not made after all (the daily job read Stripe's refunds and found none):
+ * nothing was refunded, the stop set for it was taken back, the plan goes on; how to ask again. Never sent for a
+ * refund whose outcome could not be read (rule 24): that one stays held and is read again every day.
  */
-export function planRefundNotMadeLetter(o: { store: string; undecided: boolean }): { subject: string; text: string } {
+export function planRefundNotMadeLetter(o: { store: string }): { subject: string; text: string } {
   const store = o.store || "your store";
   const lines = [
-    o.undecided
-      ? `We could not confirm the refund you asked for on your Marktmorgen plan for ${store}, so we did not end your plan.`
-      : `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
+    `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
     "",
     "Nothing was refunded and your plan goes on as before. It renews as usual unless you cancel it in your studio.",
     `To ask again, open your studio and choose "Refund my payment" under "What you pay us", or email ${SUPPORT_ADDRESS}.`,
@@ -103,6 +102,24 @@ export function planRefundNotMadeLetter(o: { store: string; undecided: boolean }
     "Marktmorgen",
   ];
   return { subject: `${store}: your refund was not made`, text: lines.join("\n") };
+}
+
+/**
+ * When a refund the creator asked for was not made, and the stop set for it already ended the plan at its period's
+ * end (the outcome stayed unread past it, rule 24): nothing was refunded and the plan has ended; never "it goes on"
+ * (Claude 1 on #3190).
+ */
+export function planRefundNotMadeEndedLetter(o: { store: string }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  const lines = [
+    `The refund you asked for on your Marktmorgen plan for ${store} was not made: our payment provider did not take it.`,
+    "",
+    "Nothing was refunded. Your plan ended at the end of the period you paid for, because it was set to stop while we waited to see the refund. Nothing more will be charged for it.",
+    `To use your plan again, start a plan again from your studio. If you have a question, email ${SUPPORT_ADDRESS}.`,
+    "",
+    "Marktmorgen",
+  ];
+  return { subject: `${store}: your refund was not made and your plan has ended`, text: lines.join("\n") };
 }
 
 /** When only part of a refund went through and the rest could not be made in GIVE_UP_DAYS: the plan stops at its period's end, support settles the rest. */
@@ -121,11 +138,14 @@ export function planRefundPartLetter(o: { store: string }): { subject: string; t
   };
 }
 
-/** Days the daily job keeps checking a refund it cannot decide (lib/plan-refund-flow.ts GIVE_UP_DAYS), said on the page. */
+/** Days after which the daily job logs a refund it still cannot decide (lib/plan-refund-flow.ts GIVE_UP_DAYS); it keeps checking it after them. */
 const CHECK_DAYS = 7;
 export const REFUND_CHECK_DAYS = CHECK_DAYS;
 
-const DECIDED_LATER = `We check it again every day and email you once it is decided, at most ${CHECK_DAYS} days from now: either the refund and the end of your plan, or that nothing was refunded and your plan goes on.`;
+// No deadline is promised: a refund whose outcome cannot be read stays held and is read again every day (rule 24).
+// Three outcomes are real: the refund and the end of the plan; nothing refunded and the plan as it was; or nothing
+// refunded and the plan already ended at the end of its period (Claude 1 on #3190). None is promised ahead.
+const DECIDED_LATER = "We check it again every day and email you once it is decided: whether a refund was made, and whether your plan continues or has ended.";
 
 /**
  * What the review page says about the refund route's answer (app/api/billing/refund) or a refund still being
@@ -145,3 +165,29 @@ export const REFUND_DONE: Record<string, { tone: "success" | "warn"; title: stri
   none: { tone: "warn", title: "Nothing was refunded", body: "The reason is below." },
   owner: { tone: "warn", title: "Only the store's owner can ask for this refund", body: "Ask the owner of this store to open this page." },
 };
+
+/**
+ * When a refund's record of what was still owed was damaged and stayed unreadable for GIVE_UP_DAYS: we do not know how
+ * much went through, so the letter says only that, the plan as Stripe shows it (or to check the studio when it cannot
+ * be read), and who settles it (Claude 4 on #2692 and #3585).
+ */
+export function planRefundUnknownLetter(o: { store: string; plan: "stops" | "renews" | "ended" | "unknown" }): { subject: string; text: string } {
+  const store = o.store || "your store";
+  return {
+    subject: `${store}: we could not confirm your refund`,
+    text: [
+      `We could not confirm how much of the refund you asked for on your Marktmorgen plan for ${store} went through.`,
+      "",
+      o.plan === "stops"
+        ? "Your plan is set to stop at the end of the period you paid for, and nothing more will be charged for it."
+        : o.plan === "renews"
+          ? "Your plan goes on and renews as usual unless you cancel it in your studio."
+          : o.plan === "ended"
+            ? "Your plan has ended, and nothing more will be charged for it."
+            : "We could not read your plan just now, so check your plan in your studio to see whether it renews.",
+      `Reply to this email or write to ${SUPPORT_ADDRESS}, and we will check your refund and settle anything still owed.`,
+      "",
+      "Marktmorgen",
+    ].join("\n"),
+  };
+}

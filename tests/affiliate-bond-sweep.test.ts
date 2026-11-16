@@ -69,6 +69,30 @@ async function main(): Promise<void> {
   is("nothing failed", counts.failed, 0);
   await sweepCheckouts(Date.now() + 20_000);
   is("another pass writes no second line", (await readBook(store)).lines.filter((l) => l.ref === BACK).length, 1);
+
+  // Claude 4 cloud X on #4413 (6900357653, MEDIUM, cost; Codex G, 6907732373): a store that keeps buyers passes every
+  // paid checkout with an address to noteSession, which reads the buyer's bond before its HSETNX writes nothing, and
+  // the walk reads the day's checkouts again every five minutes: 100 bond reads a page, every run. A session whose
+  // affiliate step ended with a known answer is not passed on again.
+  const many = Array.from({ length: 100 }, (_, i) => ({
+    id: `cs_test_sweepbondMany${String(i).padStart(5, "0")}`, object: "checkout.session", status: "complete", payment_status: "paid", mode: "payment",
+    created: NOW - 120 - i, amount_total: 5_000, amount_subtotal: 5_000, currency: "usd", total_details: { amount_tax: 0 },
+    payment_intent: `pi_sweepbondMany${String(i).padStart(5, "0")}`, customer_details: { email: `buyer${i}@example.com` },
+    metadata: { store: "sweepbond", product: course.product.id, title: "Bread Course" },
+    discounts: [],
+  }));
+  sessions = many;
+  await sweepCheckouts(Date.now() + 20_000);
+  const real = redis.pipeline.bind(redis);
+  let bondReads = 0;
+  redis.pipeline = (async (batch: (string | number)[][]) => {
+    for (const c of batch) if (c[0] === "HGET" && String(c[1]) === `nl:aff:${statsId}:bond`) bondReads += 1;
+    return real(batch);
+  }) as typeof redis.pipeline;
+  const again = await sweepCheckouts(Date.now() + 20_000);
+  redis.pipeline = real as typeof redis.pipeline;
+  is("the next pass reads no buyer's bond again for sessions already settled", bondReads, 0);
+  is("and nothing failed", again.failed, 0);
   done();
 }
 

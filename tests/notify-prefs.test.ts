@@ -175,6 +175,34 @@ async function main(): Promise<void> {
   is("switched on: sent once", [await checkQuiet(store, quietNow), emails.length, redis.run(["EXISTS", stretch])], ["sent", 1, 1]);
   is("with where to choose", emails[0]?.text.includes(`/studio/notifications?store=${store.sid}`), true);
 
+  part("A damaged choice holds the optional emails and is said in the log (Claude 7's LEVE on #3013 @1c4bc3047c)");
+  const logged: string[] = [];
+  const realError = console.error;
+  console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+  emails.length = 0;
+  stripeCalls = 0;
+  let damagedQuiet: string;
+  try {
+    damagedQuiet = await checkQuiet({ ...store, alertEmailsOff: null }, quietNow + DAY);
+  } finally {
+    console.error = realError;
+  }
+  is("quiet-sales: held, nothing emailed, nothing read from Stripe", [damagedQuiet, emails.length, stripeCalls], ["skipped", 0, 0]);
+  is("quiet-sales: the unreadable choice is said in the log", logged.some((line) => /alert email choice/i.test(line) && line.includes("notifyharbor")), true);
+  sessions = [paid("cs_test_notify00000001", 0, 60_000, now)];
+  await redis.pipeline([["DEL", `nl:alert:${store.statsId}:goal-reached:${month}`, `nl:alert:seen:${day(now)}:${store.statsId}`]]);
+  logged.length = 0;
+  posted.length = 0;
+  console.error = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
+  let damagedAlerts: { said: number };
+  try {
+    damagedAlerts = await checkAlerts({ ...store, alertEmailsOff: null }, now + 2_000);
+  } finally {
+    console.error = realError;
+  }
+  is("store alerts: still said in the chat, never emailed", [damagedAlerts.said > 0, posted.length > 0, emails.length], [true, true, 0]);
+  is("store alerts: the unreadable choice is said in the log", logged.some((line) => /alert email choice/i.test(line) && line.includes("notifyharbor")), true);
+
   part("The route: the signed-in owner, optional events only");
   const session = await openSession(OWNER);
   const post = async (body: unknown, cookie = `${SESSION_COOKIE}=${session}`) => {

@@ -596,11 +596,22 @@ export async function sendBatch(
    */
   only?: "resend" | "amazon",
   runtime: ResendTransportRuntime = {},
+  /** Filled in by the call: whether a "refused" was the meter's (BatchRefusal), so a caller never has to guess it. */
+  why?: BatchRefusal,
 ): Promise<"sent" | "retry" | "refused"> {
-  const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime);
+  const result = await dispatchBatch(messages, batchKey, meter, only, false, runtime, why);
   // A partial answer is a list batch's only (listOnly); never one here.
   return result === "waiting" || typeof result === "object" ? "retry" : result;
 }
+
+/**
+ * Why a batch was refused, written by the same call that refused it (Codex P's HIGH on #4473): `byMeter` when the
+ * email meter would not take the batch (a figure used up, a pool place or a count that is not known, a funded window not
+ * reserved), so nothing was handed to any sender and the same batch may go once the meter takes it. Otherwise a
+ * "refused" is the sender's. A caller must not ask the meter again to find this out: a later read can find room the
+ * refusal never had.
+ */
+export type BatchRefusal = { byMeter: boolean };
 
 /**
  * What Amazon said when it refused one email for that email's own sake,
@@ -688,6 +699,7 @@ export async function sendListBatch(
 async function dispatchBatch(
   messages: BatchMessage[], batchKey: string, meter: EmailMeter,
   only: "resend" | "amazon" | undefined, listOnly: boolean, runtime: ResendTransportRuntime = {},
+  why?: BatchRefusal,
 ): Promise<ListBatchOutcome> {
   if (!isSenderConfigured()) return listOnly ? "waiting" : "retry";
   if (messages.length === 0) return "sent";
@@ -721,8 +733,14 @@ async function dispatchBatch(
         ...(message.tags ? { tags: { ...message.tags } } : {}),
       }));
       authorization = lazyMeter(meter, going.length);
-      if (!(await authorization.preflight())) return "refused";
-    } else if (!(await metered(meter, going.length))) return "refused";
+      if (!(await authorization.preflight())) {
+        if (why) why.byMeter = true;
+        return "refused";
+      }
+    } else if (!(await metered(meter, going.length))) {
+      if (why) why.byMeter = true;
+      return "refused";
+    }
     else if (meter.by === "store") debited = going.length;
   }
   let idempotencyKey = batchKey;

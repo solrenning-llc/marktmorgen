@@ -16,7 +16,7 @@
  *     yet, so a certificate issued from such a kept answer is withdrawn too; it is acted on once it is older;
  *   - L3: the rows handled are kept by their time and trimmed below the place once the refunds are read to their end;
  *   - M2: the pages and lookups are priced in tests/plan-cost-registry.ts (per plan since the second review of #3409,
- *     line certificate-refund-pass), and LOST_DISPUTE_PAGES names six jobs;
+ *     line certificate-refund-pass), and LOST_DISPUTE_PAGES names seven jobs (six since main's purchases for several);
  *   - L2: the privacy policy and the pass say that a course paid through PayPal is not covered;
  *   - L4: the pass has a time slice of its own inside the sweep's deadline.
  *
@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   is("the pages and lookups are exported by the pass and cited by its plan line", ["CERTIFICATE_REFUND_PAGES_PER_STORE", "CERTIFICATE_REFUND_LOOKUPS_PER_STORE"].map((name) => name in exported && names.includes(name)), [true, true]);
   const basis = passLine?.basis ?? "";
   is("each run's and each row's commands are priced: the runs, the month's checks and each check's commands", ["CERTIFICATE_PASS_RUN_COMMANDS", "CERTIFICATE_REFUND_CHECKS_PER_MONTH", "CERTIFICATE_PASS_CHECK_COMMANDS"].every((word) => basis.includes(word)), true);
-  is("LOST_DISPUTE_PAGES names six jobs, the certificates' pass among them", /six five-minute jobs/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /6 x LOST_DISPUTE_PAGES/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /lib\/certificate-refunds\.ts/.test(NOT_A_COST.LOST_DISPUTE_PAGES), true);
+  is("LOST_DISPUTE_PAGES names seven jobs, the certificates' pass among them", /seven five-minute jobs/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /7 x LOST_DISPUTE_PAGES/.test(NOT_A_COST.LOST_DISPUTE_PAGES) && /lib\/certificate-refunds\.ts/.test(NOT_A_COST.LOST_DISPUTE_PAGES), true);
 
   part("L2: a course paid through PayPal is not covered, and the texts say so");
   const source = readFileSync("lib/certificate-refunds.ts", "utf8");

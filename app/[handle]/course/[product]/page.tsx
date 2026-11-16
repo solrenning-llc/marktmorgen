@@ -20,7 +20,7 @@ import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
 import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
-import { heldBack, passedForGate, requiredQuizLessons } from "@/lib/quiz";
+import { heldBack, passedOrUnknown, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
 import { canManage } from "@/lib/membership-manage";
 import { CourseOutline, WithDay } from "@/components/course-outline";
@@ -40,6 +40,8 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { seesDrafts } from "@/lib/draft-view";
 import { readCourseFacts, videoTotalLine } from "@/lib/course-facts";
 import { WhoAnswers } from "@/components/who-answers";
+import { AccessUncheckedNote } from "@/components/access-unchecked-note";
+import { closedDoor, forgetsOnDevice } from "@/lib/course-door";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -82,11 +84,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
   const access = await courseAccess(store, product, jar);
-  // A signed-in student whose access is not open: their places in this course's videos go from their device (650 [WG10]).
-  // Not while Stripe could not be read: that student may well still have the course.
-  const forgetKey = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? devicePlaceKey(course.id, access.learner.email) : null;
-  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2); not while unknown either.
-  const forgetPerson = access.state !== "open" && access.state !== "unknown" && access.learner && !access.learner.owner ? deviceLastKey(access.learner.email) : null;
+  // A signed-in student whose access is known not to be open: their places in this course's videos go from their device
+  // (650 [WG10]); never while it could not be checked (lib/course-door.ts), when they may well still have it.
+  const forgetKey = forgetsOnDevice(access) && access.learner ? devicePlaceKey(course.id, access.learner.email) : null;
+  // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
+  const forgetPerson = forgetsOnDevice(access) && access.learner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
@@ -97,14 +99,15 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A course still holding a ready structure's example titles is hidden and shown to its owner only (540 [CU1]).
   if (product.hidden && exampleTitlesLeft(course) > 0 && !(open && access.learner.owner)) redirect(`/@${store.handle}`);
   const who = studying ? emailKey(access.learner.email) : "";
-  // Null: the lessons done could not be read just now; said so, never shown as 0 done (rule 24).
+  // Null: the lessons done, or the quizzes passed, could not be read just now; said so, never shown as 0 done or as
+  // nothing passed (rule 24; Claude 1 cloud R on #4558).
   const [done, passed, certificate] = studying
     ? await Promise.all([
         doneLessonsOrUnknown(course.id, access.learner.email),
-        passedForGate(course.id, who),
+        passedOrUnknown(course.id, who),
         course.certificate ? certificateOf(course.id, who) : Promise.resolve(null),
       ])
-    : [new Set<string>() as Set<string> | null, new Set<string>(), null];
+    : [new Set<string>() as Set<string> | null, new Set<string>() as Set<string> | null, null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
     after(() => touchStudent(course.id, email, access.start, store));
@@ -115,9 +118,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
     // The first time a student opens it, what opening it starts (lib/course-finish.ts).
     after(() => noteIfOpened(store, product.id, course.id, email));
   }
-  // Lessons a quiz that has to be passed still holds shut, for this student.
-  const held = studying ? heldBack(course, passed) : new Map<string, string>();
-  const finished = studying && done !== null && hasFinished(course, done, passed);
+  // Lessons a quiz that has to be passed still holds shut, for this student: passes that do not read hold them, as a gate.
+  const held = studying ? heldBack(course, passed ?? new Set()) : new Map<string, string>();
+  const finished = studying && done !== null && hasFinished(course, done, passed ?? new Set()) && passed !== null;
   const mustPass = requiredQuizLessons(course).length;
   const certNotice = w.certNotices(MIN_CERT_NAME, MAX_CERT_NAME)[typeof query.cert === "string" ? query.cert : ""] ?? null;
   // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own
@@ -141,6 +144,9 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const preview = all.find(({ lesson }) => lesson.preview);
   const base = `/@${store.handle}/course/${product.id}`;
   const selling = canSellProduct(store, product);
+  // What stands in for the lessons when the course is not open: a student whose access could not be checked is told so,
+  // never offered to buy it (lib/course-door.ts).
+  const door = open ? null : closedDoor(access, selling, paypalReady(store, product));
   // Said with every term the checkout will apply: a trial, a set number of
   // payments, an introductory price, a price the buyer chooses.
   const price = product.recurring
@@ -224,18 +230,6 @@ export default async function CoursePage({ params, searchParams }: Params) {
             </div>
           ) : null}
 
-          {access.state === "unknown" ? (
-            <div className="st-note mt-6" role="status">
-              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUnknownTitle}</p>
-              <p className="mt-1 text-sm">{w.accessUnknownBody}</p>
-              <p className="mt-2 text-sm">
-                <Link href={base} className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4" style={{ color: "var(--st-text)" }}>
-                  {w.accessUnknownAgain}
-                </Link>
-              </p>
-            </div>
-          ) : null}
-
           {/* Their private lesson notes stay theirs once the course is no longer open to them (a refund, an ended
               membership; Claude 2's review of #3031, M4, and Claude 4's focal return, C4-2): download or delete them
               here, only while they keep notes on it (notesDownloadAfterAccess), never to any signed-in visitor (third
@@ -310,7 +304,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                         <button type="submit" className="btn st-btn">{w.getCertificate}</button>
                       </div>
                     </form>
-                  ) : done === null ? (
+                  ) : done === null || passed === null ? (
                     <p className="st-muted mt-1 text-sm">{w.certProgressUnknown}</p>
                   ) : (
                     <p className="st-muted mt-1 text-sm">{w.certHow(mustPass)}</p>
@@ -318,9 +312,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : access.state === "unknown" ? null : (
+          ) : door === "unchecked" ? (
+            <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={base} className="mt-6" />
+          ) : (
             <div className="mt-6 space-y-6">
-              {selling ? (
+              {door === "checkout" ? (
                 <form action="/api/store/checkout" method="post" target="_top" data-checkout="">
                   <input type="hidden" name="handle" value={store.handle} />
                   <input type="hidden" name="product" value={product.id} />
@@ -331,12 +327,13 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   <button type="submit" className="btn st-btn btn-lg btn-block">{w.buyCourse(access.state === "ended", price)}</button>
                   <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />
                 </form>
-              ) : paypalReady(store, product) ? (
+              ) : door === "paypal" ? (
                 <Link href={`/@${store.handle}/p/${productSegment(product)}#buy`} className="btn st-btn btn-lg btn-block">{w.buyWithPayPal(price)}</Link>
               ) : (
                 <p className="st-muted text-sm">{w.noPayments(store.name)}</p>
               )}
-              {preview ? (
+              {/* A free lesson leads to buying the course: not offered while the store is switched off after a report (lib/takedown.ts). */}
+              {preview && !store.suspended ? (
                 <p className="text-sm">
                   <Link href={`${base}/${preview.lesson.id}`} className="font-semibold underline underline-offset-2" style={{ color: "var(--st-text)" }}>
                     {w.tryFree(preview.lesson.title)}

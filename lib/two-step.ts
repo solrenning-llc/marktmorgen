@@ -68,7 +68,7 @@
  */
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, SESSION_COOKIE, SESSION_TTL_SECONDS, SessionsUnknownError, dropSecondStep, endSession, isMoving, normaliseEmail, openSession, sessionKeyOf } from "@/lib/auth";
-import { UnknownReplyError, countOf, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type Held, deleteIfHeldOnly, setIfHeldOnly, withLock } from "@/lib/redis-lock";
@@ -77,7 +77,7 @@ import { LOCKED_LIST } from "@/lib/locked-words";
 import { seal, unseal } from "@/lib/secret-box";
 import { SITE_URL } from "@/lib/site-url";
 import { newSecret, otpauthUri, stepOf } from "@/lib/totp";
-import { alignRecoveryLock, endRecoveryLock, hideAddress, keepRecoveryAddress, recoveryAddress } from "@/lib/recovery-address";
+import { alignRecoveryLock, bindLink, endRecoveryLock, hideAddress, keepRecoveryAddress, linkStillBound, recoveryAddress } from "@/lib/recovery-address";
 
 export { hideAddress };
 
@@ -152,8 +152,12 @@ const rescueKey = (token: string) => `nl:2fa:rescue:${sha(`nimbus-2fa-rescue:${t
 const onceKey = (email: string, what: string) => `nl:2fa:once:${sha(`nimbus-2fa-once:${normaliseEmail(email)}:${what}`).slice(0, 40)}`;
 
 async function spendOnce(email: string, what: string, seconds: number): Promise<boolean> {
-  const [taken] = await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]);
-  return taken !== null;
+  // Fresh only on SET NX's own "OK"; already there only on its null. Anything else is unknown (CX-123 rule 24):
+  // it may have landed for another login, so the code is never taken as fresh on it.
+  const replies = repliesFor(await redisPipeline([["SET", onceKey(email, what), "1", "NX", "EX", seconds]]), 1);
+  if (replies?.[0] === "OK") return true;
+  if (replies && replies[0] === null) return false;
+  throw new UnknownReplyError("a code's once-mark");
 }
 
 /**
@@ -191,28 +195,60 @@ const codeHash = (code: string) => sha(`nimbus-2fa-code:${code.toLowerCase().rep
  */
 type TwoStep = { s: string; since: number; codes: string[]; last: number; reset: number; backup: string };
 
+/**
+ * The record as read: null only when Redis says there is none (GET null). A reply in any other shape, or a
+ * record that does not parse, is unknown and throws (CX-123 rule 24): it is never read as "two-step login is
+ * off", which would open a session on the emailed link alone.
+ */
 function parse(raw: unknown): TwoStep | null {
-  if (typeof raw !== "string") return null;
+  if (raw === null) return null;
+  if (typeof raw !== "string") throw new UnknownReplyError("the two-step record");
+  let v: Partial<TwoStep>;
   try {
-    const v = JSON.parse(raw) as Partial<TwoStep>;
-    if (typeof v.s !== "string") return null;
-    return {
-      s: v.s,
-      since: typeof v.since === "number" ? v.since : 0,
-      codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
-      last: typeof v.last === "number" ? v.last : -1,
-      reset: typeof v.reset === "number" && v.reset > 0 ? v.reset : 0,
-      backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
-    };
+    v = JSON.parse(raw) as Partial<TwoStep>;
   } catch {
-    return null;
+    throw new UnknownReplyError("the two-step record");
   }
+  if (!v || typeof v !== "object" || typeof v.s !== "string") throw new UnknownReplyError("the two-step record");
+  return {
+    s: v.s,
+    since: typeof v.since === "number" ? v.since : 0,
+    codes: Array.isArray(v.codes) ? v.codes.filter((c): c is string => typeof c === "string" && /^[0-9a-f]{64}$/.test(c)) : [],
+    last: typeof v.last === "number" ? v.last : -1,
+    reset: resetOf(v.reset, v.since),
+    backup: typeof v.backup === "string" && EMAIL_PATTERN.test(v.backup) ? v.backup : "",
+  };
+}
+
+/**
+ * The earliest moment a record of this code can say it was turned on: the repository was created on 15 August 2026
+ * and two-step login shipped on 13 October 2026 (#318), and finishSetup writes `since: now`. A turn-on time before it
+ * was never written here, so it is no floor for a turn-off day (Claude 1 on #2896).
+ */
+const TURNED_ON_FROM = Date.UTC(2026, 7, 15);
+
+/**
+ * The day two-step login turns off by itself, read only in a shape this code writes (Claude 5 on #2896): 0 (none
+ * asked; an older record with no day reads so too), or a whole millisecond at least RESET_DAYS after it was turned
+ * on (enterLocked writes the moment of the first request plus RESET_DAYS). Any other value is unknown and throws,
+ * never a day already past that turns the second step off and opens a session on the emailed link alone. Once a
+ * day is set, `since` is its floor, so it too must be the whole millisecond finishSetup writes (Claude 1 on #2896):
+ * missing, text, null, a fraction, or a moment before this code existed (TURNED_ON_FROM; 1970 and zero included) is
+ * unknown and throws, never a floor at 1970.
+ */
+function resetOf(reset: unknown, since: unknown): number {
+  if (reset === undefined || reset === 0) return 0;
+  if (typeof since !== "number" || !Number.isSafeInteger(since) || since < TURNED_ON_FROM) throw new UnknownReplyError("the two-step record's turn-on time");
+  // An hour of room for one server's clock behind another's between turning it on and the first request.
+  if (typeof reset === "number" && Number.isSafeInteger(reset) && reset > 0 && reset >= since + RESET_DAYS * 86_400_000 - 3_600_000) return reset;
+  throw new UnknownReplyError("the two-step record's turn-off day");
 }
 
 async function read(email: string): Promise<TwoStep | null> {
   if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(email)]]);
-  return parse(raw);
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(email)]]), 1);
+  if (!replies) throw new UnknownReplyError("the two-step record");
+  return parse(replies[0]);
 }
 
 
@@ -329,7 +365,9 @@ export const LOCKED_NEEDS: readonly string[] = ["billing", "payments", "team", "
  *     (the questions the answers and the assistant missed) and "replace";
  *   - events: "cancel" and "delete" (an event, emailing everyone coming) and
  *     "move" (an edit that changes the time, emailing everyone coming);
- *   - community: "report-delete" (a reported post or comment), and, for the
+ *   - community: "report-delete" (a reported post or comment), "held-remove"
+ *     (a member's post or comment waiting for approval, not published:
+ *     app/api/store/community/approval), and, for the
  *     creator inside their own community (app/api/store/community, chat and
  *     the lesson comments, where the owner is known by the address and not
  *     by studioAccess), "email" (an announcement emailed to every member),
@@ -354,7 +392,7 @@ export const LOCKED_ACTIONS: Readonly<Record<string, readonly string[]>> = {
   products: ["remove", "clear", "detach", "replace", "launch", "lesson-remove", "module-remove", "media-remove", "task-remove", "quiz-remove", "withdraw", "cm-delete"],
   page: ["remove", "delete", "clear", "replace"],
   events: ["cancel", "delete", "move"],
-  community: ["report-delete", "email", "delete", "delete-comment", "unsay", "clear"],
+  community: ["report-delete", "held-remove", "email", "delete", "delete-comment", "unsay", "clear"],
   orders: ["remove", "unnote", "undeal", "unpipeline", "fields-remove", "resend"],
   stats: ["remove"],
   draft: ["drop", "segment-remove", "draft-remove"],
@@ -382,6 +420,13 @@ export async function lockedFor(
   return lockedOut(need, action) && (await lockedUntil(request.cookies.get(SESSION_COOKIE)?.value)) > 0;
 }
 
+/** A time in ms as this code writes it: digits only, no sign, space, exponent or leading zero, and safe; else null. */
+function timeOf(text: unknown): number | null {
+  if (typeof text !== "string" || !/^(0|[1-9][0-9]*)$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isSafeInteger(value) ? value : null;
+}
+
 /**
  * Until when a session is locked, in ms, or 0 for a session that is not.
  *
@@ -394,8 +439,12 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
   if (!session || !/^[0-9a-f]{64}$/.test(session) || !isRedisConfigured()) return 0;
   // One command (MGET): the session's lock, the accounts whose locked sessions are kept locked now, and the
   // session's owner. Every session of every other account stops here (review of #2556 at df8030300: one command).
-  const [reply] = await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY, await sessionKeyOf(session)]]);
-  const [raw, anyKept, ownerRaw] = Array.isArray(reply) && reply.length === 3 ? reply : [undefined, undefined, undefined];
+  const replies = repliesFor(await redisPipeline([["MGET", lockedKey(session), KEPT_ANY_KEY, await sessionKeyOf(session)]]), 1);
+  const values = repliesFor(replies?.[0], 3);
+  // An answer in any other shape is unknown (CX-123 rule 24): locked, never read as a session with no lock.
+  const unknown = () => now + SESSION_TTL_SECONDS * 1000;
+  if (!values || values.some((value) => value !== null && typeof value !== "string")) return unknown();
+  const [raw, anyKept, ownerRaw] = values;
   const owner = typeof ownerRaw === "string" && ownerRaw ? ownerRaw : null;
   if (typeof raw !== "string") {
     // No lock of its own: a lock written before 5 November 2026 lapsed on its day (review of #2556 at
@@ -407,17 +456,23 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
     return keptListed(session, owner, now);
   }
   // "<until>|<opened>"; a value written before 5 November 2026 is "<until>" alone, opened at an unknown time.
-  const [untilText, openedText] = raw.split("|");
-  const until = Number(untilText);
-  if (!Number.isFinite(until)) return 0;
+  const parts = raw.split("|");
+  const [untilText, openedText] = parts;
+  // A lock this code did not write is unknown too: locked, never set free.
+  const until = timeOf(untilText);
+  if (parts.length > 2 || until === null) return unknown();
   if (until > now) return until;
   if (!owner) return 0;
-  const [kept, left] = await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]);
+  const second = repliesFor(await redisPipeline([["GET", keptLockedKey(owner)], ["PTTL", lockedKey(session)]]), 2);
+  if (!second) return unknown();
+  const [kept, left] = second;
   if (kept === null) return 0;
-  const since = Number(kept);
-  const opened = openedText === undefined ? 0 : Number(openedText);
-  // A mark in another shape counts as kept (CX-123 rule 24): locked, never set free.
-  if (typeof kept === "string" && Number.isFinite(since) && Number.isFinite(opened) && opened > since) return 0;
+  // The mark and the opening time are read in the grammar this code writes them in (Codex J at f0399d65, Claude 5
+  // at 24ea9aa1): "", " ", "1e2" or "0x10" are no time, and a mark or an opening in another shape counts as kept
+  // (CX-123 rule 24): locked, never set free. An old lock with no opening time was not opened after any mark.
+  const since = timeOf(kept);
+  const opened = openedText === undefined ? null : timeOf(openedText);
+  if (since !== null && opened !== null && opened > since) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
 }
@@ -429,9 +484,14 @@ export async function lockedUntil(session: string | undefined, now = Date.now())
  * whether this session is a member; an answer of another shape counts as one.
  * Three commands, only for the sessions of such an account, for as long as its
  * mark lasts (at most SESSION_TTL_SECONDS and a day after the failed read).
+ * The three replies are read only in their exact shape (CX-123 rule 24): a
+ * pipeline cut short, with a reply too many, a hole, a getter or a Proxy is
+ * unknown, and an unknown lock is locked, never set free by a stray zero.
  */
 async function keptListed(session: string, owner: string, now: number): Promise<number> {
-  const [kept, member, left] = await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]);
+  const replies = repliesFor(await redisPipeline([["EXISTS", keptLockedKey(owner)], ["SISMEMBER", lockedSetKey(owner), session], ["PTTL", lockedSetKey(owner)]]), 3);
+  if (!replies) return now + SESSION_TTL_SECONDS * 1000;
+  const [kept, member, left] = replies;
   if (countOf(kept) === 0 || countOf(member) === 0) return 0;
   const ms = countOf(left);
   return now + (ms !== null && ms > 0 ? ms : SESSION_TTL_SECONDS * 1000);
@@ -449,11 +509,15 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   const email = held?.email ?? null;
   const record = email ? await read(email) : null;
   if (!email || !record) return null;
+  // Who is told, and everything else the notice needs, is read before anything is written (review of #2883; Claude 6
+  // on #2948): an unknown recovery address (rule 24) throws here, with the waiting login not spent, no reset day set
+  // and nothing opened, so two-step login never turns off on a login the owner was not told of.
+  const backup = await backupOf(email, record);
   const through = (to: "sign-in" | "recovery") =>
     held?.viaRecovery ? "a login link sent to your recovery address" : to === "sign-in" ? "a login link sent to this address" : "a login link sent to the sign-in address";
   // Spent, as a right code spends it: one waiting login, one session.
   const [removed] = await redisPipeline([["DEL", holdKey(token)]]);
-  if (Number(removed) !== 1) return null;
+  if (countOf(removed) !== 1) return null;
   const marked = await withTwoStep(email, async (held) => {
     const current = await read(email);
     if (!current) return null;
@@ -464,36 +528,81 @@ export async function enterLocked(token: string, now = Date.now()): Promise<{ se
   });
   if (!marked) return null;
   const { first, until } = marked;
-  const session = await openLockedSession(email, until, now);
-  // The same day for a later login through the recovery address, which then opens everything once it has passed.
-  await alignRecoveryLock(email, until, now);
+  // Nobody is let in and nobody told until the session opens and the recovery lock holds the same day. Short of that,
+  // the day this login set is taken back (Claude 5 on #2948): two-step login never turns off by itself on a login that
+  // never happened, of which the owner was never told. A day an earlier login set is left as it was.
+  let session = "";
+  try {
+    session = await openLockedSession(email, until, now);
+    // The same day for a later login through the recovery address, which then opens everything once it has passed.
+    await alignRecoveryLock(email, until, now);
+  } catch (error) {
+    if (session && !(await endSession(session).catch(() => false))) console.error("taking back a locked session whose recovery lock was not aligned failed");
+    if (first) await takeBackReset(email, until);
+    throw error;
+  }
   const opened = (to: "sign-in" | "recovery") => `Somebody who opened ${through(to)} said they no longer have your authenticator app, your recovery codes, a passkey or your recovery address, and was let in. Until ${day(until)}, ${LOCKED_LIST} are locked for them; after that, two-step login turns off.
 
 If that was you, keep working: everything else is open.
 
 If it was not you, somebody can read your email: log in with your app's code or a passkey, or open your studio in a browser that is still logged in and press Cancel. That logs them out and keeps two-step login on. Then change your email password.`;
-  // Told to the recovery address too: this path assumes somebody else may hold the sign-in inbox (MM-SA-19).
+  // Told to the recovery address too (MM-SA-19), read above before the login was spent.
   await tell(
     email,
     first ? "Your Marktmorgen account was opened without two-step login" : "Your Marktmorgen account was opened again without two-step login",
     opened("sign-in"),
-    await backupOf(email, record),
+    backup,
     opened("recovery"),
   );
   return { session, email, until };
+}
+
+/**
+ * Takes back the reset day a login without the second step set, when that login never opened: only while the record
+ * still holds that very day, under the record's lock. A failure here is logged, never thrown over the login's own.
+ */
+async function takeBackReset(email: string, until: number): Promise<void> {
+  try {
+    const undone = await withTwoStep(email, async (held) => {
+      const current = await read(email);
+      if (!current || current.reset !== until) return true;
+      return writeHeld(held, email, { ...current, reset: 0 });
+    });
+    if (!undone) console.error("taking back the reset day of a login without two-step that never opened failed");
+  } catch (error) {
+    console.error("taking back the reset day of a login without two-step that never opened failed", error);
+  }
 }
 
 /** Opens a session locked (LOCKED_NEEDS) until `until`, logged out by Cancel or a full login. */
 export async function openLockedSession(email: string, until: number, now = Date.now()): Promise<string> {
   const session = await openSession(email);
   const seconds = Math.max(60, Math.ceil((until - now) / 1000));
-  await redisPipeline([
-    // Kept as long as the session can last, with when it opened: past its day it says whether the session
-    // was opened before its account's locked sessions could not be logged out (lockedUntil).
-    ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
-    ["SADD", lockedSetKey(email), session],
-    ["EXPIRE", lockedSetKey(email), seconds + 86_400],
-  ]);
+  // Without its lock it is a full session: one whose lock is not confirmed is taken back, never handed out.
+  const takeBack = async () => {
+    if (!(await endSession(session))) console.error("taking back a locked session whose lock was not confirmed failed");
+  };
+  let replies: unknown[] | null;
+  try {
+    replies = repliesFor(await redisPipeline([
+      // Kept as long as the session can last, with when it opened: past its day it says whether the session
+      // was opened before its account's locked sessions could not be logged out (lockedUntil).
+      ["SET", lockedKey(session), `${until}|${now}`, "EX", Math.max(seconds, SESSION_TTL_SECONDS)],
+      ["SADD", lockedSetKey(email), session],
+      ["EXPIRE", lockedSetKey(email), seconds + 86_400],
+    ]), 3);
+  } catch (error) {
+    await takeBack();
+    throw error;
+  }
+  // The lock's SET answered "OK" and the account's locked set its 0 or 1 twice (CX-123 rule 24), as openSession
+  // reads its own writes; anything else fails the login, said by the callers as a failed login, and the session's
+  // id is never given out (review of #2948 at 929dec4d; tests/auth-sessions-exact.test.ts).
+  const counted = (reply: unknown) => countOf(reply) === 0 || countOf(reply) === 1;
+  if (!replies || replies[0] !== "OK" || !counted(replies[1]) || !counted(replies[2])) {
+    await takeBack();
+    throw new UnknownReplyError("a locked session's lock");
+  }
   return session;
 }
 
@@ -530,28 +639,48 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
   const sessions = stringList(members);
   if (!sessions) {
     console.error("logging out the sessions let in without a second step failed", new UnknownReplyError("the locked sessions"));
-    // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
-    // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
-    const [, listed] = await redisPipeline([
-      ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
-      // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
-      ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
-      ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
-    ]);
-    // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
-    // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
-    // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
-    if (listed !== 1) {
-      console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
-      const month = new Date(now).toISOString().slice(0, 7);
-      await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
-    }
+    await keepLocked(email, now);
     return false;
   }
-  for (const session of sessions) await endSession(session);
+  // Each logout read as endSession answers it (CX-123 rule 24): only one confirmed loses its lock and its place in
+  // the list. One not confirmed (a delete answering in another shape, or a failure) may still be open: its lock and
+  // its place stay, and the account is kept locked as when the list cannot be read, so it stays locked past its day
+  // and the owner is never told it was logged out.
+  const open: string[] = [];
+  for (const session of sessions) if ((await endSession(session)) !== true) open.push(session);
+  if (open.length) {
+    const ended = sessions.filter((session) => !open.includes(session));
+    if (ended.length) await redisPipeline([["DEL", ...ended.map((session) => lockedKey(session))], ["SREM", lockedSetKey(email), ...ended]]);
+    await keepLocked(email, now);
+    return false;
+  }
   await redisPipeline([["DEL", lockedSetKey(email), ...sessions.map((session) => lockedKey(session))]]);
   // A passkey removal one of them asked for stays: only "Keep it" calls one off (lib/passkeys.ts).
   return true;
+}
+
+/**
+ * Keeps an account's locked sessions locked when they could not all be logged out (endLocked): the list is kept
+ * and the account is marked with the moment, so that every locked session opened before it stays locked until it
+ * ends, past its day too (lockedUntil, keptListed).
+ */
+async function keepLocked(email: string, now: number): Promise<void> {
+  // Not read, only kept: the set outlives every session in it, so a lock that lapses on its day (one written
+  // before 5 November 2026) still finds its session listed (lockedUntil, keptListed).
+  const [, listed] = await redisPipeline([
+    ["SET", keptLockedKey(email), String(now), "EX", SESSION_TTL_SECONDS + 86_400],
+    // Listed by a one-way tag of the account, never its address: once, at most KEPT_ANY_MAX (KEEP_ANY).
+    ["EVAL", KEEP_ANY, 1, KEPT_ANY_KEY, accountTag(email), KEPT_ANY_MAX, SESSION_TTL_SECONDS + 86_400],
+    ["EXPIRE", lockedSetKey(email), SESSION_TTL_SECONDS + 86_400],
+  ]);
+  // The list past its ceiling ("*", or an answer of another shape): every session with no lock of its own now
+  // pays LOCKED_UNTIL_STAR_EXTRA (tests/plan-cost-registry.ts) on each lockedUntil. Said, and counted for the
+  // owner's report (keptStarMonth, keptStarLine; review of #2556 at 4d8ac350e), never only kept.
+  if (listed !== 1) {
+    console.error(`more than ${KEPT_ANY_MAX} accounts' locked sessions could not be logged out: every session with no lock of its own is checked, three commands more a load, until ${SESSION_TTL_SECONDS / 86_400 + 1} days after the last`);
+    const month = new Date(now).toISOString().slice(0, 7);
+    await redisPipeline([["INCR", keptStarKey(month)], ["EXPIRE", keptStarKey(month), 400 * 86_400]]);
+  }
 }
 
 /**
@@ -561,7 +690,7 @@ async function endLocked(email: string, now = Date.now()): Promise<boolean> {
  * until they end (endLocked); whoever says so to the owner never says they
  * were logged out (review of #2556).
  */
-export async function cancelReset(email: string, why: "login" | "studio"): Promise<boolean | "kept-locked"> {
+export async function cancelReset(email: string, why: "login" | "studio" | "recovery"): Promise<boolean | "kept-locked"> {
   const called = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0) return false;
@@ -573,7 +702,9 @@ export async function cancelReset(email: string, why: "login" | "studio"): Promi
   const canceled =
     why === "login"
       ? "Your account was just logged in with a code or a passkey, so the request to turn off two-step login was canceled"
-      : "The request to turn off two-step login was canceled from your studio";
+      : why === "recovery"
+        ? "The recovery address was changed from your studio, so the request to turn off two-step login was canceled"
+        : "The request to turn off two-step login was canceled from your studio";
   await tell(
     email,
     "Two-step login stays on for your Marktmorgen account",
@@ -593,8 +724,15 @@ export async function resetIfDue(email: string, now = Date.now()): Promise<boole
   const backup = await withTwoStep(email, async (held) => {
     const record = await read(email);
     if (!record || record.reset === 0 || now < record.reset) return null;
-    // Read before the record goes: an account from before kept its recovery address on it.
-    const kept = await backupOf(email, record);
+    // Read before the record goes: an account from before kept its recovery address on it. One that cannot be read
+    // (UnknownReplyError) is never taken for none: two-step login stays on and the day waits for a read that
+    // answers, so the turn-off is never told only to the sign-in inbox (MM-SA-19; VR2 audit).
+    const kept = await backupOf(email, record).catch((error: unknown) => {
+      if (!(error instanceof UnknownReplyError)) throw error;
+      console.error("reading the recovery address before turning two-step login off failed", error);
+      return null;
+    });
+    if (kept === null) return null;
     return (await deleteHeld(held, [recordKey(email), lockedSetKey(email)])) ? kept : null;
   });
   if (backup === null) return false;
@@ -715,9 +853,14 @@ export async function finishSetup(
   });
   if (made !== "made") return made;
   // The account's recovery address from now on, for losing the email too (lib/recovery-address.ts).
-  await keepRecoveryAddress(email, pending.b);
+  // Two-step login is on either way, and its codes are answered once: a keep Redis did not confirm is said as not
+  // kept, never as a way back in (review of #2883).
+  const keptBackup = await keepRecoveryAddress(email, pending.b);
   await redisPipeline([["DEL", setupKey(session)]]);
-  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`);
+  const way = keptBackup
+    ? `If you ever lose your phone and your recovery codes, a link sent to your recovery address (${hideAddress(pending.b)}) lets you back in.`
+    : `Your recovery address (${hideAddress(pending.b)}) could not be saved just now: add it again under Account in your studio, so a link sent there can let you back in if you ever lose your phone and your recovery codes.`;
+  await tell(email, "Two-step login is on for your Marktmorgen account", `Two-step login was turned on for your Marktmorgen account. From now on, logging in with the emailed link also asks for the code in your authenticator app. ${way}`);
   return { codes };
 }
 
@@ -737,6 +880,8 @@ export async function sendRescue(token: string, origin: string): Promise<"sent" 
   if (!backup) return "none";
   if (!(await withinLimit("two-step-rescue", normaliseEmail(email), 3, 60 * 60))) return "limited";
   const rescue = randomBytes(32).toString("hex");
+  // Tied to the address it goes to first: once the owner takes that address away or replaces it, it turns nothing off.
+  if (!(await bindLink("rescue", rescue, backup, 15 * 60))) return "unsent";
   await redisPipeline([["SET", rescueKey(rescue), normaliseEmail(email), "EX", 15 * 60]]);
   const sent = isSenderConfigured()
     ? await sendEmail({ meter: { by: "company" },
@@ -766,10 +911,13 @@ export async function spendRescue(token: string): Promise<string | null> {
   } catch {
     const [readBack] = await redisPipeline([["GET", rescueKey(token)]]);
     const [removed] = await redisPipeline([["DEL", rescueKey(token)]]);
-    email = Number(removed) === 1 ? readBack : null;
+    email = countOf(removed) === 1 ? readBack : null;
   }
   if (typeof email !== "string" || !email) return null;
   const address = email;
+  // Mailed to a recovery address the owner has since taken away or replaced: it turns nothing off.
+  const record = await read(address);
+  if (!record || !(await linkStillBound("rescue", token, await backupOf(address, record)))) return null;
   // Never for an address in a move, or left by one that broke (lib/auth.ts isMoving): its two-step login stays.
   const off = await withTwoStep(address, async (held) => !(await isMoving(address)) && (await twoStepOn(address)) && deleteHeld(held, [recordKey(address)]));
   if (!off) return null;
@@ -871,7 +1019,9 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
     hold = {};
   }
   if (typeof hold.e !== "string") return { ok: false, reason: "expired" };
-  const tries = Number(hold.n) || 0;
+  // The count of wrong codes, read only as the whole number this code writes (Claude 5 on #2896): any other shape
+  // spends the wait, never counts from zero again.
+  const tries = typeof hold.n === "number" && Number.isSafeInteger(hold.n) && hold.n >= 0 ? hold.n : TRIES;
   if (tries >= TRIES) {
     await redisPipeline([["DEL", key]]);
     return { ok: false, reason: "expired" };
@@ -880,7 +1030,7 @@ export async function finishSignIn(token: string, typed: string, now = Date.now(
   if (checked === "app" || checked === "recovery") {
     // Spent: only the caller whose delete removed it opens the session.
     const [removed] = await redisPipeline([["DEL", key]]);
-    if (Number(removed) !== 1) return { ok: false, reason: "expired" };
+    if (countOf(removed) !== 1) return { ok: false, reason: "expired" };
     // The owner has the second step after all: anything opened without it is called off.
     await cancelReset(hold.e, "login");
     await endRecoveryAccess(hold.e);

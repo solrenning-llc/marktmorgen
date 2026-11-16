@@ -131,6 +131,7 @@ export async function readFunnelFacts(
 ): Promise<{ ok: true; facts: FunnelFacts } | { ok: false; error: string; slot?: string }> {
   const free = new Set(idsOfKind(store, "free"));
   const calls = new Set(idsOfKind(store, "call"));
+  const bundles = new Set(idsOfKind(store, "bundle"));
   const hidden = new Set(idsOfKind(store, "hidden"));
   const recurring = new Set(idsOfKind(store, "recurring"));
   const paid = new Set(idsOfKind(store, "paid"));
@@ -139,7 +140,7 @@ export async function readFunnelFacts(
   const picked: Record<string, string> = {};
   for (const slot of choicesOf(type)) {
     const id = typeof chosen[slot.key] === "string" ? (chosen[slot.key] as string).slice(0, 40) : "";
-    const problem = slotProblem(slot, id && known.has(id) ? { free: free.has(id), call: calls.has(id) } : null);
+    const problem = slotProblem(slot, id && known.has(id) ? { free: free.has(id), call: calls.has(id), bundle: bundles.has(id) } : null);
     if (problem) return { ok: false, error: `slot_${problem}`, slot: slot.key };
     if (Object.values(picked).includes(id)) return { ok: false, error: "slot_twice", slot: slot.key };
     picked[slot.key] = id;

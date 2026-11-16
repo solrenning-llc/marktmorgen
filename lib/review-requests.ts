@@ -47,6 +47,7 @@ import { mintReviewLink, provePurchase } from "@/lib/review-proof";
 import { readReview, reviewId } from "@/lib/reviews";
 import { REVIEW_SITES, parseReviewElsewhere } from "@/lib/review-elsewhere";
 import { type Store, storeForHandle } from "@/lib/store";
+import { storeOrGone } from "@/lib/store-gone";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import { noteForErasure } from "@/lib/erasure-index";
@@ -67,6 +68,8 @@ export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
+export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 
@@ -263,7 +266,23 @@ export async function sendReviewRequests(
       await drop(member);
       continue;
     }
-    if (!stores.has(entry.handle)) stores.set(entry.handle, await load(entry.handle).catch(() => null));
+    // Only an exact nil (or a released name) at the store's address is "no store" (CX-123 rule 24, lib/store-gone.ts). A
+    // read that threw or answered in another shape is not known: the order waits, as it does when Stripe cannot be read,
+    // and the failure is not kept for the run, so the store's other orders are read again.
+    if (!stores.has(entry.handle)) {
+      const loaded = await storeOrGone(load, entry.handle).then(
+        (found) => ({ found }),
+        (error: unknown) => {
+          console.error("reading a store for a review request failed", error);
+          return null;
+        },
+      );
+      if (!loaded) {
+        await later(member, nowSeconds + RETRY_SECONDS.stripe);
+        continue;
+      }
+      stores.set(entry.handle, loaded.found);
+    }
     const store = stores.get(entry.handle) ?? null;
     if (!store || store.statsId !== entry.statsId || !store.reviewAsk.days) {
       await drop(member);

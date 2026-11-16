@@ -9,7 +9,7 @@ import { redisPipeline } from "@/lib/redis";
 
 export { setAssistantPlan };
 export const DAY = 86_400;
-export const NOW = Date.UTC(2026, 11, 2) / 1000;
+export const NOW = Math.floor(Date.now() / 1000);
 
 type Row = Record<string, unknown>;
 export const world = {
@@ -132,19 +132,19 @@ export async function paidShop(o: { at?: number; stopSet?: boolean } = {}) {
   await claimHandle(email, handle, `Flow ${n}`, "");
   await setSubscription(email, { customerId: customer, subscriptionId: subId, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
   world.customers.set(customer, email);
-  world.subs.set(subId, { id: subId, customer, status: "active", cancel_at_period_end: o.stopSet ?? false, metadata: { store: handle } });
+  world.subs.set(subId, { id: subId, customer, status: "active", cancel_at: null, cancel_at_period_end: o.stopSet ?? false, metadata: { store: handle }, items: { object: "list", data: [{ quantity: 1, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month", interval_count: 1 } } }] } });
   const at = o.at ?? NOW - 3 * DAY;
   const id = `ch_${handle}x1`;
   world.invoices.push({ id: `in_${handle}x1`, subscription: subId, status: "paid", created: at, total: 6_900, tax: null, billing_reason: "subscription_create", charge: id, status_transitions: { paid_at: at }, lines: { data: [{ type: "subscription", period: { start: at }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } });
   world.invoices.push({ id: `in_${handle}open`, subscription: subId, status: "open" }, { id: `in_${handle}draft`, subscription: subId, status: "draft" });
-  world.charges.push({ id, customer, invoice: `in_${handle}x1`, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } });
+  world.charges.push({ id, customer, invoice: `in_${handle}x1`, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { object: "balance_transaction", type: "charge", source: id, fee: 230, currency: "usd" } });
   const store = async () => (await storeForEmail(email))!;
   /** Another paid plan invoice and its charge (a renewal by default), `at` seconds. */
   const addPayment = (paidAt: number, reason = "subscription_cycle") => {
     const k = world.charges.length + 1;
     const cid = `ch_${handle}y${k}`;
     world.invoices.push({ id: `in_${handle}y${k}`, subscription: subId, status: "paid", created: paidAt, total: 6_900, tax: null, billing_reason: reason, charge: cid, status_transitions: { paid_at: paidAt }, lines: { data: [{ type: "subscription", period: { start: paidAt }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } });
-    world.charges.push({ id: cid, customer, invoice: `in_${handle}y${k}`, payment_intent: `pi_${handle}y${k}`, status: "succeeded", paid: true, currency: "usd", created: paidAt, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } });
+    world.charges.push({ id: cid, customer, invoice: `in_${handle}y${k}`, payment_intent: `pi_${handle}y${k}`, status: "succeeded", paid: true, currency: "usd", created: paidAt, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { object: "balance_transaction", type: "charge", source: cid, fee: 230, currency: "usd" } });
     return cid;
   };
   return {

@@ -20,7 +20,7 @@ async function main(){
   console.log("Partial GETDEL result",reply,result);
   is("control: underlying private certificate survives "+JSON.stringify(reply),(await readCertificate(id))?.email,"person@example.com");
   is("unknown deletion must not report a removed certificate "+JSON.stringify(reply),refused,true);
-  is("unconfirmed record must remain discoverable for retry "+JSON.stringify(reply),(await certificatesFor(course.id)).total,1);
+  is("unconfirmed record must remain discoverable for retry "+JSON.stringify(reply),(await certificatesFor(course.id))?.total,1);
   const retry=await forgetCertificatesPerson([course.id],"person@example.com",ROOM);
   is("retry can still erase the private record "+JSON.stringify(reply),[retry,await readCertificate(id)],[1,null]);
  }

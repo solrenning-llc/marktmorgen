@@ -3,6 +3,8 @@
 import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
+import { templatePublishMessage } from "@/lib/template-text-rules";
+import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -23,6 +25,7 @@ import type { ExtraNotes } from "@/lib/extras-notes";
 import type { BumpChoice, ProductPaging } from "@/lib/catalog";
 import { ProductUpdateBox } from "@/components/product-update-box";
 import { ShippingEditor } from "@/components/shipping-editor";
+import { PhysicalLegalEditor } from "@/components/physical-legal-editor";
 import { MAX_SHIPPING_SKU } from "@/lib/shipping";
 import { confirmsOptionWrite, OPTION_NOT_CONFIRMED, optionRefusalWords } from "@/lib/option-confirmation";
 import { CheckoutFieldsEditor } from "@/components/checkout-fields-editor";
@@ -57,6 +60,7 @@ import {
   MAX_OPTION_DETAIL_LENGTH,
   MAX_OPTION_LABEL_LENGTH,
   MAX_STORE_OPTIONS,
+  handOverRefusal,
   handsOver,
   optionDelivers,
 } from "@/lib/product-option";
@@ -85,12 +89,14 @@ import { imageUrl } from "@/lib/product-image";
 import { StoreField, useStudioHref, useStudioStore } from "@/components/studio-store-pin";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { productSegment } from "@/lib/product-slug";
+import { OptionLinkCopy } from "@/components/option-link-copy";
 import { feeWords } from "@/lib/fee-words";
 import { COMMISSION_LIVE } from "@/lib/plan";
 import { NewTab } from "@/components/new-tab";
 import { TermsCheckPanel } from "@/components/terms-check-panel";
 import { fastMoneyMessage } from "@/lib/terms-check-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
+import { aiDraftHold, freshChecks } from "@/lib/ai-draft-review";
 
 /** The sentences about amounts, in the store's own currency (lib/money.ts). */
 const optionPrice = (currency: Currency) => `Type an amount ${rangeWords(currency)}, like ${priceExample(currency, 39)}.`;
@@ -133,6 +139,12 @@ const MESSAGES: Record<string, string> = {
   outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
+  // A sales page published with a part still to write, marked ⟦…⟧ or in a campaign's [brackets] (Revisor 2 on #3593).
+  placeholder: "This product's sales page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Open it under Sales pages, replace each one with your own words, then publish it. Nothing was published.",
+  // A sales page added to a draft while it was being published (review of #3693): nothing was published.
+  page_changed: "This product's sales page changed while it was being published, so nothing was published. Publish it again.",
+  // A sales page whose size could not be read when publishing (Claude 6 on #3693): not "gone", only not checked.
+  page_unread: "Your sales page could not be checked just now. Nothing was published. Try again in a minute.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
@@ -157,6 +169,8 @@ const MESSAGES: Record<string, string> = {
   yearly_price: "Type a yearly price below twelve monthly payments, so paying yearly saves something, and at least the least your currency can charge.",
   free: "Something free is given once, for an email address, so it cannot be a membership or have several prices. Take those off first.",
   unknown: "That is no longer on your store.",
+  // The file named is an episode's audio of this product's podcast (app/api/store/file/attach).
+  in_use: "That file is already used on this product. Choose the file from your device again.",
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
@@ -288,6 +302,20 @@ async function send(
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
     }
+    if (data.error === "placeholder") {
+      // A part left to write on the draft's sales page (754 [STN1]), said with where it is.
+      const said = data as { field?: unknown; kind?: unknown; part?: unknown; product?: unknown };
+      const field = said.field === "block" || said.field === "search" || said.field === "test" ? said.field : null;
+      const kind = field === "block" && (said.kind === "booking" || BLOCK_KINDS.some((k) => k.kind === said.kind)) ? (said.kind as BlockKind) : null;
+      if (field && typeof said.part === "string" && said.part && (field !== "block" || kind)) {
+        return wrong(templatePublishMessage({ field, kind, part: said.part }, typeof said.product === "string" ? said.product : null));
+      }
+      return wrong(MESSAGES.placeholder);
+    }
+    // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
+    if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
+    // The studio's own words when its requests are used up (lib/studio-route.ts), as the server says them.
+    if (data.error === "studio_used" && typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) return wrong((data as { message: string }).message);
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -328,6 +356,10 @@ function ProductForm({
   const id = product?.id ?? "new";
   // A ready outline for the description of a new product (487 [IT4], item 5), decided when the form opens: it never comes and goes while typing.
   const [offerOutline, setOfferOutline] = useState(() => !product && !draft.about.trim());
+  // The checks under an AI draft of the descriptions (756 [STN3]): null while no draft is waiting.
+  const [aiChecks, setAiChecks] = useState<boolean[] | null>(null);
+  const [aiHeld, setAiHeld] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   const aboutField = useRef<HTMLTextAreaElement>(null);
   // The preview starts at a phone's width, where most product pages are read.
   const [phone, setPhone] = useState(true);
@@ -384,10 +416,24 @@ function ProductForm({
     : null;
   return (
     <form
+      ref={formRef}
+      id={`product-form-${id}`}
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        if (!busy) onSubmit();
+        if (busy) return;
+        // An AI draft is saved only once the creator has checked it; the focus goes to the first check left.
+        const held = aiDraftHold(aiChecks);
+        setAiHeld(held);
+        if (held) {
+          const first = formRef.current?.querySelector<HTMLInputElement>("[data-ai-review] input:not(:checked)");
+          // The checks sit in the AI box, which the creator may have closed: open it, or the focus goes nowhere.
+          const box = first?.closest("details");
+          if (box) box.open = true;
+          requestAnimationFrame(() => first?.focus());
+          return;
+        }
+        onSubmit();
       }}
       className="space-y-4 rounded-2xl border-2 border-violet-brand/30 bg-white p-4"
     >
@@ -434,6 +480,7 @@ function ProductForm({
                     : "download",
         })}
         onResult={(value) => setDraft({ ...draft, summary: value.summary, about: value.about })}
+        onReviewChange={(checked) => setAiChecks(checked ? [true, true, true] : freshChecks())}
         done="Both descriptions below are filled in. Read them, change anything, then save."
       />
 
@@ -827,6 +874,11 @@ function ProductForm({
           {error}
         </p>
       ) : null}
+      {aiHeld && aiDraftHold(aiChecks) ? (
+        <p className="notice notice-error" role="alert">
+          {aiHeld}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -859,6 +911,7 @@ function ProductForm({
  */
 function OptionsBlock({
   product,
+  handle,
   fileBusyId,
   percent,
   fileError,
@@ -870,6 +923,8 @@ function OptionsBlock({
   tiers,
 }: {
   product: Product;
+  /** The store's address, for each option's link with it chosen (630 [HN6](27)). */
+  handle: string;
   /** Whether sales tax or VAT is added on top of prices at checkout (lib/tax.ts). */
   taxOnTop: boolean;
   /** The plans members switch between (lib/tier-switch.ts): none offers an introductory or yearly price. */
@@ -1204,6 +1259,11 @@ function OptionsBlock({
                       <li key={at}>{line}</li>
                     ))}
                   </ul>
+                ) : null}
+
+                {/* A link that opens the product page with this option chosen, for a sales page or an email (630 [HN6](27)). */}
+                {opens || option.file || option.link ? (
+                  <OptionLinkCopy path={`/@${handle}/p/${productSegment(product)}`} optionId={option.id} label={option.label} />
                 ) : null}
 
                 {!opens && !option.file && !option.link ? (
@@ -1917,8 +1977,9 @@ export function ProductEditor({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as { ok?: boolean; error?: string };
+      const data = (await response.json()) as { ok?: boolean; error?: string; product?: unknown };
       if (data.ok) return null;
+      if (data.error === "last_delivery") return handOverRefusal(data.error, typeof data.product === "string" ? data.product : null);
       return MESSAGES[data.error ?? ""] ?? MESSAGES.server_error;
     } catch {
       return MESSAGES.server_error;
@@ -2282,7 +2343,8 @@ export function ProductEditor({
                   </dl>
                   <p className="mt-2">{review.note}</p>
                   {/* The confirmation is here, after what it confirms, so the reading and the focus order end on it. */}
-                  <button type="button" className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy} onClick={save}>
+                  {/* It submits the form itself, so an AI draft still unchecked holds it like Save does (756 [STN3]). */}
+                  <button type="submit" form={`product-form-${product.id}`} className="btn btn-primary btn-sm mt-3" disabled={busy} aria-busy={busy}>
                     Yes, save what buyers pay
                   </button>
                 </div>
@@ -2368,6 +2430,7 @@ export function ProductEditor({
                     <>
                       <a href={`/@${handle}/p/${productSegment(product)}`} target="_blank" rel="noopener noreferrer" className={quiet}>
                         Its page
+                        <span className="sr-only">{`: ${product.title}`}</span>
                       <NewTab /></a>
                       <button
                         type="button"
@@ -2508,10 +2571,12 @@ export function ProductEditor({
                 {product.call || product.course || product.shipping ? null : <BundleToggle product={product} />}
                 {/* A physical product the creator ships (lib/shipping.ts), on one that hands over nothing else. */}
                 <ShippingEditor product={product} />
+                {product.shipping ? <PhysicalLegalEditor product={product} /> : null}
                 {/* Shipped at several prices: sizes or versions, each shipped the same way. */}
                 {product.shipping ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}
@@ -2548,6 +2613,7 @@ export function ProductEditor({
                 {(isFree(product) || product.pwyw) && product.options.length === 0 ? null : (
                 <OptionsBlock
                   product={product}
+                  handle={handle}
                   taxOnTop={taxOnTop}
                   tiers={tiers}
                   fileBusyId={fileBusyId}
@@ -2573,6 +2639,7 @@ export function ProductEditor({
                 {(product.course || product.podcast) && !product.recurring && !isFree(product) && !product.pwyw ? (
                   <OptionsBlock
                     product={product}
+                    handle={handle}
                     taxOnTop={taxOnTop}
                     tiers={tiers}
                     fileBusyId={fileBusyId}

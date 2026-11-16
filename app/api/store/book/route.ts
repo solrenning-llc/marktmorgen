@@ -2,7 +2,7 @@ import { bookingLength } from "@/lib/call-lengths";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { adsCheckout } from "@/lib/ad-events";
 import { holdSession, prepareSession } from "@/lib/call-packages";
-import { isSoon } from "@/lib/waitlist";
+import { isComingSoon } from "@/lib/preorders";
 import { type NextRequest, after } from "next/server";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
@@ -16,7 +16,8 @@ import { viaCookieName } from "@/lib/affiliate-setting";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readProduct } from "@/lib/catalog";
 import { chargeNow } from "@/lib/call-deposit";
-import { type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
+import { DEPOSIT_CODE_REQUEST_UNITS, type DepositFigures, depositWithCode, readDepositCode } from "@/lib/deposit-code";
+import { takeBuyerRead } from "@/lib/buyer-actions";
 
 /** The checkout this browser last opened for a call, so going back frees it. */
 const HOLD_COOKIE = "nl_call_hold";
@@ -107,7 +108,9 @@ export async function POST(request: NextRequest) {
     });
 
   if (!canSellProduct(store, product)) return back("unavailable");
-  if (await isSoon(store, product.id).catch(() => false)) return back("unavailable");
+  const comingSoon = await isComingSoon(store, product.id).catch(() => null);
+  if (comingSoon === null) return back("error");
+  if (comingSoon) return back("unavailable");
   if (!Number.isFinite(start)) return back("invalid");
   // A length chosen comes with the price the page showed for it. One the creator took off meanwhile, or one sent with
   // no shown price (only ever a request the page did not make): said, never booked. A price changed meanwhile: said,
@@ -132,6 +135,9 @@ export async function POST(request: NextRequest) {
   if (typed.trim() && !pkg && store.hasDiscounts) {
     const due = chargeNow({ priceCents: product.priceCents, currency: store.currency, deposit: product.call.deposit ?? null, inPerson: Boolean(product.call.place) });
     if (due.rest > 0) {
+      // The ceiling before the spend (rule MR; audit G2): the read is one of the store's buyer requests, taken
+      // first; no room this month, or a count not known, reads nothing (lib/returning-code.ts does the same).
+      if (!(await takeBuyerRead(store, DEPOSIT_CODE_REQUEST_UNITS).catch(() => false))) return back("error");
       const found = store.stripeAccountId ? await readDepositCode(store.stripeAccountId, typed) : null;
       if (!found) return back("code-unknown");
       const figured = depositWithCode(found, { priceCents: product.priceCents, deposit: due.cents, currency: store.currency, nowSeconds: Math.floor(Date.now() / 1000) });
@@ -176,7 +182,10 @@ export async function POST(request: NextRequest) {
   if (prepared && prepared.ok && prepared.checkout) {
     const counted = await holdSession(store, prepared.checkout, result.session, Math.floor(Date.now() / 1000) + HOLD_SECONDS).catch(() => false);
     if (!counted) {
-      await releaseOwnHold(store, result.session).catch(() => {});
+      // This request opened that checkout: it is closed at Stripe even if the hold cannot be read, and a failure is logged.
+      await releaseOwnHold(store, result.session, { openedHere: true }).catch((error: unknown) => {
+        console.error("Call hold could not be released (pkg-used):", error instanceof Error ? error.message : error);
+      });
       return back("pkg-used");
     }
   }

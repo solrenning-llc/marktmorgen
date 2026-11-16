@@ -20,9 +20,10 @@ const filesBelow = (folder: string): string[] =>
 
 part("The store boundary owns the buyer's first route to content");
 is("the store layout imports the shared native link", /import \{ SkipLink \} from ["']@\/components\/skip-link["'];/.test(layout), true);
-is("the store layout renders exactly one link", (layout.match(/<SkipLink \/>/g) ?? []).length, 1);
-is("the link is before the nested buyer page", layout.indexOf("<SkipLink />") >= 0 && layout.indexOf("<SkipLink />") < layout.indexOf("{children}"), true);
-is("only an active resolved store receives the store-layout link", /\{store\s*&&\s*!store\.suspended\s*\?\s*<SkipLink \/>\s*:\s*null\}/.test(layout), true);
+// The store's own words and lang ride on it (lib/buyer-words/skip.ts, tests/store-layout-language.test.ts).
+is("the store layout renders exactly one link", (layout.match(/<SkipLink\b[^>]*\/>/g) ?? []).length, 1);
+is("the link is before the nested buyer page", layout.indexOf("<SkipLink") >= 0 && layout.indexOf("<SkipLink") < layout.indexOf("{children}"), true);
+is("only an active resolved store receives the store-layout link", /\{store\s*&&\s*!store\.suspended\s*\?\s*<SkipLink\b[^>]*\/>\s*:\s*null\}/.test(layout), true);
 
 part("A suspended store keeps the global fallback's single route instead");
 const suspendedUsesSiteNotFound = /if \(!store \|\| store\.suspended\) return <SiteNotFound \/>/.test(storeNotFound);

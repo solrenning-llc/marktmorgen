@@ -54,7 +54,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { orderWrite } from "@/lib/order-data";
 import { type DataStore, DataRoomError } from "@/lib/store-data";
-import { onAccount } from "@/lib/stripe-account";
+import { StripeError, onAccount } from "@/lib/stripe-account";
 // The one Stripe version these lists are read at, so their shape is the one checked here (Revisor 1 on #2464).
 import { STRIPE_VERSION } from "@/lib/stripe-connect";
 import { isSettled } from "@/lib/instant-pay";
@@ -103,10 +103,30 @@ type Row = Record<string, unknown>;
 
 /** A list from Stripe that is not one, or that has more than was read: whether the address holds anything is not known. */
 export class UnreadPurchasesError extends Error {
-  constructor(what: string) {
+  /**
+   * True when asking again gives the same answer: Stripe has more than the one page read of this address's
+   * checkouts or payments, or more customers for it than are asked (CUSTOMERS_READ). A reply that is not a list
+   * at all may be a passing fault, and is not.
+   */
+  readonly lasting: boolean;
+  constructor(what: string, lasting = false) {
     super(`the purchases could not be read in full: ${what}`);
     this.name = "UnreadPurchasesError";
+    this.lasting = lasting;
   }
+}
+
+/**
+ * Whether a strict door's "could not be asked" (holdsTicket, holdsAnyOf with `strict`) will be the same however
+ * often it is asked again, so a send waiting on it would wait for good (review of #3140, M2): an address whose
+ * purchases are more than is read (UnreadPurchasesError `lasting`), or a request Stripe refuses as such (400, 403
+ * or 404, or `account_invalid`: the store's Stripe account disconnected, or no longer reachable by us). Anything
+ * else (a timeout, a 429 or 5xx, Redis) may pass, and the caller tries again, a bounded number of times.
+ */
+export function askingAgainWontTell(error: unknown): boolean {
+  if (error instanceof UnreadPurchasesError) return error.lasting;
+  if (error instanceof StripeError) return error.code === "account_invalid" || error.status === 400 || error.status === 403 || error.status === 404;
+  return false;
 }
 
 /**
@@ -156,6 +176,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
     if (!listed.complete) complete = false;
@@ -202,7 +223,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   }
   // Nothing found, but not everything was read: unknown, never "holds none of them". A door that does not need to
   // know (not strict) lets nobody in on it and keeps no answer; a strict door says it could not be asked.
-  if (!complete) throw new UnreadPurchasesError("more than one page");
+  if (!complete) throw new UnreadPurchasesError("more than one page", true);
   return false;
 }
 
@@ -226,10 +247,16 @@ async function broughtOver(store: Store, email: string, ids: Set<string>): Promi
  * Stripe is asked at most once every five minutes per address (once a minute
  * while the answer is no); a change to the settings asks again at once.
  */
-export async function holdsTicket(store: Store, config: CommunityConfig, email: string): Promise<boolean> {
+export async function holdsTicket(store: Store, config: CommunityConfig, email: string, options: { strict?: boolean } = {}): Promise<boolean> {
   const id = store.community?.id;
-  if (!id || !isRedisConfigured()) return false;
-  return ticketFor(store, config.access, email, okKey(id, email), config.v);
+  if (!id) return false;
+  // `strict`, for deciding who an email goes to (lib/community-mail.ts, lib/community-event-mail.ts): an answer that
+  // could not be had throws instead of being a no, so nobody is left out of a batch counted as sent (rules 24 and 30).
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, config.access, email, okKey(id, email), config.v, options.strict === true);
 }
 
 /**
@@ -240,9 +267,14 @@ export async function holdsTicket(store: Store, config: CommunityConfig, email: 
  * (one while it is no), so a membership that lapses loses the event with the
  * community.
  */
-export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string): Promise<boolean> {
-  if (!store.community?.id || !isRedisConfigured()) return false;
-  return ticketFor(store, ids, email, cacheKey, version);
+export async function holdsAnyOf(store: Store, ids: string[], email: string, cacheKey: string, version: string, options: { strict?: boolean } = {}): Promise<boolean> {
+  if (!store.community?.id) return false;
+  // `strict` as holdsTicket's: an answer that could not be had throws, never a no.
+  if (!isRedisConfigured()) {
+    if (options.strict) throw new Error("the database is not set up");
+    return false;
+  }
+  return ticketFor(store, ids, email, cacheKey, version, options.strict === true);
 }
 
 /**
@@ -326,7 +358,57 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));
+  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v));
+}
+
+const spaceOkKey = (community: string, space: string, email: string) => `nl:cm:${community}:sp:ok:${space}:${emailKey(email)}`;
+
+/**
+ * One space's answer for one viewer, said as it is: let in, not let in, or
+ * not known just now (Stripe or the kept answer could not be read). The same
+ * rule and the same kept answer as maySeeSpace, asked strictly, so a failed
+ * request is never a no. The member's own community page uses it (review of
+ * #3007, M1): a member whose access could not be checked is never let in on a
+ * guess, and never shown the space locked with an offer to buy what they may
+ * already own; the page says it could not check.
+ */
+export type SpaceAnswer = "in" | "out" | "unknown";
+
+export async function spaceAnswer(
+  store: Store,
+  config: CommunityConfig,
+  space: { id: string; only: string[] },
+  viewer: { owner: boolean; email: string },
+): Promise<SpaceAnswer> {
+  if (viewer.owner) return "in";
+  const gate = spaceGate(space, config.access);
+  if (gate.open) return "in";
+  const id = store.community?.id;
+  if (!id || !isRedisConfigured()) return "out";
+  try {
+    return (await holdsProductsOrThrow(store, gate.needs, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v))) ? "in" : "out";
+  } catch (error) {
+    console.error("checking a community space's access failed", error);
+    return "unknown";
+  }
+}
+
+/**
+ * The spaces one viewer may see, in the creator's order, as visibleSpaces,
+ * and the kept spaces whose answer could not be read just now (`unchecked`):
+ * shut, as a no is, but never said to be kept for other buyers.
+ */
+export async function answeredSpaces(
+  store: Store,
+  config: CommunityConfig,
+  viewer: { owner: boolean; email: string },
+): Promise<{ spaces: Space[]; unchecked: Set<string> }> {
+  if (viewer.owner) return { spaces: config.spaces, unchecked: new Set() };
+  const gated = config.spaces.filter((s) => s.only.length);
+  const answers = await Promise.all(gated.map((s) => spaceAnswer(store, config, s, viewer)));
+  const mine = new Set(gated.filter((_, i) => answers[i] === "in").map((s) => s.id));
+  const unchecked = new Set(gated.filter((_, i) => answers[i] === "unknown").map((s) => s.id));
+  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked };
 }
 
 /**
@@ -554,5 +636,10 @@ export async function forgetAccessPerson(id: string, email: string, spaceIds: st
     ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
     ["HDEL", `nl:cm:${id}:wel`, key],
   ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(replies, 2);
+  const removed = countOf(exact?.[0]);
+  const welcomed = countOf(exact?.[1]);
+  if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
+  return removed + welcomed;
 }

@@ -38,12 +38,14 @@ async function storeOf(query: Query): Promise<Store | null> {
   }
   const community = param(query, "c");
   if (community) {
-    const found = COMMUNITY_UNSUB.test(community) ? await readCommunityUnsub(community) : null;
+    // A link that could not be read just now is spoken of in English, as one we do not know the store of.
+    const found = COMMUNITY_UNSUB.test(community) ? await readCommunityUnsub(community).catch(() => null) : null;
     return found ? storeForPage(found.handle) : null;
   }
   const update = param(query, "u");
   if (update) {
-    const found = UPDATE_STOP.test(update) ? await readUpdateStop(update) : null;
+    // A link that could not be read just now is spoken of in English, as one we do not know the store of.
+    const found = UPDATE_STOP.test(update) ? await readUpdateStop(update).catch(() => null) : null;
     return found?.handle ? storeForPage(found.handle) : null;
   }
   const token = param(query, "t") || param(query, "l");
@@ -68,13 +70,13 @@ const localeOf = (store: Store | null) => LANGUAGES[parseLanguage(store?.languag
 export default async function UnsubscribePage({ searchParams }: { searchParams: Promise<Query> }) {
   const query = await searchParams;
   const reminder = param(query, "r");
-  if (reminder) return <StopReminders token={reminder} />;
+  if (reminder) return <StopReminders token={reminder} notSaved={param(query, "done") === "0"} />;
   const review = param(query, "v");
   if (review) return <StopReviewRequests token={review} notSaved={param(query, "done") === "0"} />;
   const update = param(query, "u");
-  if (update) return <StopUpdates token={update} />;
+  if (update) return <StopUpdates token={update} notSaved={param(query, "done") === "0"} />;
   const community = param(query, "c");
-  if (community) return <StopAnnouncements token={community} />;
+  if (community) return <StopAnnouncements token={community} notSaved={param(query, "done") === "0"} />;
   const links = param(query, "l");
   if (links) return <StopLinkCounting token={links} store={await storeOf(query)} />;
   const token = param(query, "t");
@@ -82,6 +84,7 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
   const listStore = found ? await storeOf(query) : null;
   const name = listStore ? listStore.mail?.fromName || listStore.name : "";
   const a = wordsFor(listStore);
+  const notSaved = param(query, "done") === "0";
 
   return (
     <main id="content" lang={localeOf(listStore)} className="min-h-screen bg-paper px-4 py-20 text-ink">
@@ -108,6 +111,8 @@ export default async function UnsubscribePage({ searchParams }: { searchParams: 
           <>
             <h1 className="t-h3">{a.listAsk(name)}</h1>
             <p className="mt-3 text-ink-soft">{a.forEmail(found.email)}</p>
+            {/* done=0 on a link still found and not left: the last press was not saved (its read or write was unknown), so the button is offered again. */}
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?t=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.unsubscribeButton}</button>
@@ -157,9 +162,21 @@ async function StopLinkCounting({ token, store }: { token: string; store: Store 
   );
 }
 
-/** The same one button, for a community's emails: announcements and live event reminders. */
-async function StopAnnouncements({ token }: { token: string }) {
-  const found = COMMUNITY_UNSUB.test(token) ? await readCommunityUnsub(token) : null;
+/**
+ * The same one button, for a community's emails: announcements and live event reminders.
+ * `notSaved`: the route answered done=0, so the last press was not saved (its read or write was
+ * unknown). Said only while the link is still found and not stopped, with the button offered again.
+ * A link whose read was unknown (CX-123 rule 24) is never called unknown nor stopped: the page says
+ * it could not open it just now, in English, as the store is not known, and offers no button.
+ */
+async function StopAnnouncements({ token, notSaved }: { token: string; notSaved: boolean }) {
+  let unread = false;
+  const found = COMMUNITY_UNSUB.test(token)
+    ? await readCommunityUnsub(token).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const store = found ? await storeForPage(found.handle) : null;
   const config = found && store?.community?.id === found.community ? await readConfig(found.community) : null;
   const who = store ? store.mail?.fromName || store.name : "";
@@ -168,7 +185,12 @@ async function StopAnnouncements({ token }: { token: string }) {
   return (
     <main id="content" lang={localeOf(store)} className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {!found ? (
+        {unread ? (
+          <>
+            <h1 className="t-h3">{a.linkNotReadTitle}</h1>
+            <p className="mt-3 text-ink-soft">{a.linkNotReadBody}</p>
+          </>
+        ) : !found ? (
           <>
             <h1 className="t-h3">{a.unknownLink}</h1>
             <p className="mt-3 text-ink-soft">{a.unknownOtherBody}</p>
@@ -182,6 +204,7 @@ async function StopAnnouncements({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{a.communityAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.communityFor(found.member.e, where)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?c=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopEmails}</button>
@@ -194,8 +217,11 @@ async function StopAnnouncements({ token }: { token: string }) {
   );
 }
 
-/** The same one button, for a store's abandoned-checkout reminders. */
-async function StopReminders({ token }: { token: string }) {
+/**
+ * The same one button, for a store's abandoned-checkout reminders. `notSaved`: the route answered done=0, so the last
+ * press was not saved (its write was unknown); said only while the link is found and not stopped, with the button again.
+ */
+async function StopReminders({ token, notSaved }: { token: string; notSaved: boolean }) {
   const found = STOP_TOKEN.test(token) ? await readStopToken(token) : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
@@ -217,6 +243,7 @@ async function StopReminders({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{a.remindersAsk(who)}</h1>
             <p className="mt-3 text-ink-soft">{a.forEmail(found.email)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?r=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{a.stopReminders}</button>
@@ -269,9 +296,20 @@ async function StopReviewRequests({ token, notSaved }: { token: string; notSaved
   );
 }
 
-/** The same one button, for a store's emails telling its buyers of an update. */
-async function StopUpdates({ token }: { token: string }) {
-  const found = UPDATE_STOP.test(token) ? await readUpdateStop(token) : null;
+/**
+ * The same one button, for a store's emails telling its buyers of an update. `notSaved`: the route answered done=0, so
+ * the last press was not saved (its read or write was unknown); said while the link is found and not stopped.
+ */
+async function StopUpdates({ token, notSaved }: { token: string; notSaved: boolean }) {
+  // A link whose read was unknown (CX-123 rule 24) is never called unknown nor stopped: the page says it could not
+  // open it just now, in English, as the store is not known, and offers no button.
+  let unread = false;
+  const found = UPDATE_STOP.test(token)
+    ? await readUpdateStop(token).catch(() => {
+        unread = true;
+        return null;
+      })
+    : null;
   const store = found?.handle ? await storeForPage(found.handle) : null;
   const who = found?.storeName || "";
   const a = wordsFor(store);
@@ -279,7 +317,12 @@ async function StopUpdates({ token }: { token: string }) {
   return (
     <main id="content" lang={localeOf(store)} className="min-h-screen bg-paper px-4 py-20 text-ink">
       <div className="card mx-auto max-w-md p-7 sm:p-9">
-        {!found ? (
+        {unread ? (
+          <>
+            <h1 className="t-h3">{a.linkNotReadTitle}</h1>
+            <p className="mt-3 text-ink-soft">{a.linkNotReadBody}</p>
+          </>
+        ) : !found ? (
           <>
             <h1 className="t-h3">{a.unknownLink}</h1>
             <p className="mt-3 text-ink-soft">{a.unknownOtherBody}</p>
@@ -293,6 +336,7 @@ async function StopUpdates({ token }: { token: string }) {
           <>
             <h1 className="t-h3">{u.ask(who)}</h1>
             <p className="mt-3 text-ink-soft">{u.forEmail(found.email)}</p>
+            <p role="status" className={notSaved ? "mt-3 font-semibold" : "sr-only"}>{notSaved ? a.reviewsNotSaved : ""}</p>
             <form action={`/api/mail/unsubscribe?u=${token}`} method="post" className="mt-6">
               <input type="hidden" name="from" value="page" />
               <button type="submit" className="btn btn-primary btn-block">{u.button}</button>

@@ -59,7 +59,8 @@ is("paid work reserved against store and site ceilings before it starts", [says(
 part("Data export and deletion");
 // The export promise may name only what storeExport writes, and must name what it leaves out (review of #2114, C4-45).
 const exporter = read("lib/store-export.ts");
-const exportKeys = [...new Set([...exporter.matchAll(/[,{]\\?"(\w+)\\?":/g)].map((m) => m[1]))].filter((key) => !["exportedAt", "store", "unreadPart", "ordersNote", "notIncluded"].includes(key));
+// Rule 23: the notes that say a part could not be read (C4-2630) are notes like ordersNote, not parts the export promises.
+const exportKeys = [...new Set([...exporter.matchAll(/[,{]\\?"(\w+)\\?":/g)].map((m) => m[1]))].filter((key) => !["exportedAt", "store", "unreadPart", "ordersNote", "pagesNote", "aboutsNote", "thanksNote", "notIncluded"].includes(key));
 const exportAt = words.indexOf('"title":"A copy of your store');
 const exportCopy = exportAt < 0 ? "" : words.slice(exportAt, words.indexOf("}", exportAt));
 const copyText = exportCopy.toLowerCase();

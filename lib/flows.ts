@@ -1,8 +1,10 @@
 import { agreementsAllowed } from "@/lib/agreement-rules";
-import { readFlowListStrict } from "@/lib/flow-list";
+import { readFlowListRaw, readFlowListStrict } from "@/lib/flow-list";
+import { changesWhatItDoes, dropFlowVersions, flowHistorySize, keepFlowVersion, keepFlowVersionOnce, payFlowHistory, readFlowVersions, versionedFlowIds } from "@/lib/flow-versions";
+import { restoreBytes, restoreTryBytes } from "@/lib/flow-versions-rules";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
-import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
-import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
+import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
+import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
 import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
@@ -41,7 +43,8 @@ import { hasPlaceholder } from "@/lib/mail-body";
 import { createHash, randomBytes } from "node:crypto";
 import { normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { DataRoomError, needData, takeData } from "@/lib/store-data";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { DataRoomError, giveData, needData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { isMailable, leadsKey, mailable, parseContact } from "@/lib/contacts";
 import { MAX_MAIL_BODY, MAX_SUBJECT, giveBackToMonth, monthlyAllowance, sendTo, takeFromMonth } from "@/lib/mail";
@@ -67,7 +70,7 @@ import {
 } from "@/lib/flow-rules";
 import { changeLabels, readTags } from "@/lib/contacts";
 import { type ActionContext } from "@/lib/flow-rules";
-import { CrmDealReadUnavailable, readDealExact, readFields, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
+import { CrmDealReadUnavailable, readDealExact, readFieldsWhole, readPipelines, readStages, readDeals, setValue, writeDeal, writeDealOver } from "@/lib/crm";
 import { type Held, holdLock, releaseLock, takeLock } from "@/lib/redis-lock";
 import { type Deal, allStages, newCrmId, pipelineOf } from "@/lib/crm-rules";
 import { personKey } from "@/lib/person-key";
@@ -76,6 +79,8 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { usedLinkIn } from "@/lib/mail-clicks";
 import { courseProgress } from "@/lib/learn";
+// As a namespace, so it never clashes with a named import of the same helpers elsewhere in this file.
+import * as exactReply from "@/lib/redis-reply";
 
 export { MAX_FLOWS, MAX_STEPS };
 export const MAX_DELAY_HOURS = MAX_FLOW_WAIT_HOURS;
@@ -165,6 +170,37 @@ const QUEUE = "nl:mail:flowq";
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
 /**
+ * Moves each member from one sorted set to another, at a score, in one step (CX-123 rule 24): a member is written to
+ * KEYS[2] only by whoever took it off KEYS[1], and the answer is 1 or 0 for each, in order. Taking due runs off the
+ * queue into the lease, and putting them back, never leaves a run in neither: a reply lost after it ran leaves the run
+ * moved, where the next run's orphan pass (or the queue itself) finds it.
+ */
+export const FLOW_MOVE = `-- marktmorgen:flow-move:v1
+local out = {}
+for i = 2, #ARGV do
+  if redis.call('ZREM', KEYS[1], ARGV[i]) == 1 then
+    redis.call('ZADD', KEYS[2], ARGV[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Moves `members` from `from` to `to` at `score`: true for each one this call moved. An answer of another shape throws. */
+async function moveMembers(from: string, to: string, score: number, members: string[]): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply = repliesFor(await redisPipeline([["EVAL", FLOW_MOVE, 2, from, to, score, ...members]]), 1);
+  const moved = reply?.[0];
+  if (!Array.isArray(moved) || moved.length !== members.length) throw new UnknownReplyError("a move in the sequence queue");
+  return moved.map((value) => {
+    const n = countOf(value);
+    if (n !== 0 && n !== 1) throw new UnknownReplyError("a move in the sequence queue");
+    return n === 1;
+  });
+}
+
+/**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
  * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
@@ -212,22 +248,48 @@ function cleanStep(raw: unknown, known: (productId: string) => boolean, isFlow: 
 /** How many bytes the store's sequences hold, before they are read (lib/mcp-tools.ts, emailsTool); null when it did not come back. */
 export async function flowsBytes(listId: string | null): Promise<number | null> {
   if (!listId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["STRLEN", flowsKey(listId)]]);
-  const bytes = Number(n);
-  return Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  // Exactly one whole number from zero up (a list with none is 0); anything else did not come back (CX-123 rule 24).
+  const reply = exactReply.repliesFor(await redisPipeline([["STRLEN", flowsKey(listId)]]), 1);
+  return reply ? exactReply.countOf(reply[0]) : null;
 }
 
+/**
+ * The store's workflows, read exactly (CX-123 rule 24): none only when Redis says nil. A reply missing, extra, of
+ * another type or not a list of workflows throws UnknownReplyError, never "no workflows": a closed store's erasure
+ * (lib/closed-store-data.ts marksOf) and a person's copy (lib/person-copy.ts) must not go on without them. Callers
+ * that can do without (data-recount, buyer-profile, checkout-sweep) catch it themselves.
+ */
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);
-  if (typeof raw !== "string") return [];
-  try {
-    const list = JSON.parse(raw) as Flow[];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
+  return readFlowsExact(listId);
 }
+
+
+/**
+ * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
+ * or of another shape, a string that is not a JSON list, or a list with any element that is not a workflow, throws, so
+ * the due batch goes back in the queue for a later run instead of being dropped (CX-123 rule 24; a garbled '{', '{}'
+ * or '[1]' is unknown, not "no workflows" or "this workflow is gone": #2861).
+ */
+async function readFlowsExact(listId: string): Promise<Flow[]> {
+  const reply = repliesFor(await redisPipeline([["GET", flowsKey(listId)]]), 1);
+  if (!reply || (reply[0] !== null && typeof reply[0] !== "string")) throw new UnknownReplyError("the store's workflows");
+  if (reply[0] === null) return [];
+  let list: unknown;
+  try {
+    list = JSON.parse(reply[0]);
+  } catch {
+    throw new UnknownReplyError("the store's workflows");
+  }
+  if (!Array.isArray(list) || !list.every(isFlowShape)) throw new UnknownReplyError("the store's workflows");
+  return list as Flow[];
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A workflow as writeFlows stores it: a string id, a boolean active and a list of steps that are each an object. */
+const isFlowShape = (value: unknown): boolean =>
+  isRecord(value) && typeof value.id === "string" && typeof value.active === "boolean" && Array.isArray(value.steps) && value.steps.every(isRecord);
 
 export class FlowWriteUnconfirmed extends Error {
   constructor() {
@@ -240,23 +302,100 @@ export class FlowWriteUnconfirmed extends Error {
  * Writes the store's workflows, after taking their room in the store's data
  * room (DataRoomError when they do not fit; shorter ones give it back).
  */
-async function writeFlows(store: Store, listId: string, flows: Flow[]): Promise<void> {
+/**
+ * Writes the store's workflows only over the text they were read from
+ * (`expected`, null for none yet): 1 when written, 0 when they changed in
+ * between, so nothing is written over a change made meanwhile (a pause, a
+ * save, a removal; Codex G2 on #1927). What they were read as is sent as its
+ * SHA-1 (ARGV[2]), never as a second copy of them, so a save moves what it
+ * moved before (Claude 5 on #1927). Modelled by lib/redis-memory.ts.
+ */
+export const WRITE_FLOWS_IF = `-- marktmorgen:flows-write-if:v2
+local now = redis.call('GET', KEYS[1])
+if ARGV[1] == '0' then
+  if now then return 0 end
+elseif not now or redis.sha1hex(now) ~= ARGV[2] then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[3])
+return 1`;
+
+/**
+ * Three saves in a row lost to other changes of the same workflows: nothing was written (Claude 1 cloud's LOW 2 on
+ * #1927). A FlowWriteUnconfirmed, so every caller that handles one is unchanged; the mail route says it as busy.
+ */
+export class FlowsBusy extends FlowWriteUnconfirmed {
+  constructor() {
+    super();
+    this.message = "The workflows kept changing while this was being saved; nothing was saved";
+    this.name = "FlowsBusy";
+  }
+}
+
+/** The workflows changed between their read and this write: nothing was written. */
+class FlowsChanged extends Error {
+  constructor() {
+    super("The workflows changed while this was being saved");
+    this.name = "FlowsChanged";
+  }
+}
+
+async function writeFlows(store: Store, listId: string, flows: Flow[], expected: string | null): Promise<void> {
   const json = JSON.stringify(flows);
-  await needData(store, [{ slot: "wf:defs", bytes: dataBytes([json], 1 + flows.length), set: true }]);
+  const bytes = dataBytes([json], 1 + flows.length);
+  // The room only grows before the write and only shrinks once the write is confirmed: a write refused or not known
+  // never leaves it below what is kept (Claude 5 on #1927).
+  const before = expected === null ? 0 : dataBytes([expected], 1 + keptFlowCount(expected));
+  // The room is only ever moved by what this write changes, from the exact text it replaces (WRITE_FLOWS_IF checks
+  // it), never set: changes add up whatever order they land in, so a second save written and counted between this
+  // write and its room is never counted short (Claude 4 on #1927), and a save alone is counted once.
+  const grows = Math.max(0, bytes - before);
+  if (grows > 0) await needData(store, [{ slot: "wf:defs", bytes: grows }]);
   let replies: unknown;
   try {
-    replies = await redisPipeline([["SET", flowsKey(listId), json]]);
+    replies = await redisPipeline([["EVAL", WRITE_FLOWS_IF, 1, flowsKey(listId), expected === null ? "0" : "1", expected === null ? "" : createHash("sha1").update(expected, "utf8").digest("hex"), json]]);
   } catch {
     throw new FlowWriteUnconfirmed();
   }
-  if (!Array.isArray(replies) || replies.length !== 1 || replies[0] !== "OK") throw new FlowWriteUnconfirmed();
+  if (!Array.isArray(replies) || replies.length !== 1) throw new FlowWriteUnconfirmed();
+  if (replies[0] === 0) {
+    // Nothing was written: only what this write took is given back; what the other change kept stays counted by it.
+    if (grows > 0) await giveData(store, [{ slot: "wf:defs", bytes: grows }]);
+    throw new FlowsChanged();
+  }
+  if (replies[0] !== 1) throw new FlowWriteUnconfirmed();
+  // Confirmed: it replaced exactly what was read, so what it freed is given back (never throws; left counted if not).
+  if (before > bytes) await giveData(store, [{ slot: "wf:defs", bytes: before - bytes }]);
+}
+
+/** How many workflows a kept list holds, for its room; one that cannot be read counts none. */
+function keptFlowCount(raw: string): number {
+  try {
+    const value: unknown = JSON.parse(raw);
+    return Array.isArray(value) ? value.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Runs a change of the workflows again, read afresh, when they changed under it; past three tries it is unconfirmed. */
+async function changing<T>(run: () => Promise<T>): Promise<T> {
+  for (let tries = 1; ; tries += 1) {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof FlowsChanged)) throw error;
+      if (tries >= 3) throw new FlowsBusy();
+    }
+  }
 }
 
 const starterOf = (raw: unknown): Flow["starter"] => (raw === "welcome" || raw === "bought" ? raw : undefined);
 
 export type FlowResult =
-  | { ok: true; flows: Flow[] }
-  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" };
+  // `kept`, when putting a version back: whether the version it replaced was kept (false when nothing changed).
+  | { ok: true; flows: Flow[]; kept?: boolean }
+  | { ok: false; reason: "name" | "trigger" | "product" | "tag" | "form" | "steps" | "step" | "route" | "goal" | "too_many" | "active_limit" | "unknown" | "setup" | "plan" | "placeholder" | "stage" | "stage_taken" | "signed_taken" | "paid_request_taken" | "history_room" | "history_unconfirmed" };
 
 /**
  * Adds a sequence, or replaces one with the same id. Checked whole every time.
@@ -265,7 +404,27 @@ export type FlowResult =
  * the creator chose in the editor. Either way, switching on counts against
  * the plan's number of active workflows (lib/flow-limits.ts).
  */
-export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: { activate?: boolean } = {}): Promise<FlowResult> {
+export async function saveFlow(store: Store, raw: Record<string, unknown>, opts: SaveOptions = {}): Promise<FlowResult> {
+  let tries = 0;
+  return changing(async () => {
+    // A try again reads and writes everything again: putting a version back pays for it first (`again`).
+    if (tries++ > 0 && opts.again) await opts.again();
+    return saveFlowOnce(store, raw, opts);
+  });
+}
+
+/**
+ * `activate`: a new one is switched on. `restoring`: putting back an earlier
+ * version (restoreFlowVersion): the workflow keeps the on or off it has as it
+ * is written, read in the same step as the write, never one read before; and
+ * the version it replaces is kept first, or nothing is put back (Codex G2 on
+ * #1927), so the undo the studio promises is always there. `again`: what a
+ * try again after the workflows changed under it costs is taken first
+ * (restoreFlowVersion; Claude 5 on #1927).
+ */
+type SaveOptions = { activate?: boolean; restoring?: boolean; again?: () => Promise<void> };
+
+async function saveFlowOnce(store: Store, raw: Record<string, unknown>, opts: SaveOptions): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.listId || !store.mail) return { ok: false, reason: "setup" };
   const name = typeof raw.name === "string" ? raw.name.replace(/\s+/g, " ").trim().slice(0, MAX_FLOW_NAME) : "";
@@ -291,7 +450,8 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   }
   const formOutcome = trigger === "form" && typeof raw.formOutcome === "string" ? raw.formOutcome : "";
   // The store's fields and stages, for a step that sets one or moves a deal (lib/crm.ts).
-  const [crmFields, stages] = await Promise.all([readFields(store.statsId), readStages(store.statsId)]);
+  // Both exactly as saved: unknown ones throw CrmSchemaReadUnavailable, never "none" or the defaults (CX-123 rule 30).
+  const [crmFields, stages] = await Promise.all([readFieldsWhole(store.statsId), readStages(store.statsId)]);
   // A stage of one of the store's pipelines; one workflow a stage, so a deal entering it starts one run at the most.
   const stageId = trigger === "stage" && typeof raw.stageId === "string" ? raw.stageId : "";
   if (trigger === "stage" && !stages.some((st) => st.id === stageId)) return { ok: false, reason: "stage" };
@@ -305,7 +465,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const ctx: ActionContext = { field: (fid) => crmFields.find((f) => f.id === fid), isStage: (sid) => stages.some((st) => st.id === sid), isAssignee: (email) => assignees.has(email) };
   if (rawSteps.length === 0 || rawSteps.length > MAX_STEPS) return { ok: false, reason: "steps" };
   const known = (id: string) => hasProduct(store, id);
-  const flows = await readFlowListStrict(store.listId);
+  const { flows, raw: listRaw } = await readFlowListRaw(store.listId);
   const id = typeof raw.id === "string" && FLOW_ID.test(raw.id) ? raw.id : null;
   // Another of the store's sequences, never this one: starting itself would do nothing.
   const isFlow = (flowId: string) => flowId !== id && flows.some((f) => f.id === flowId);
@@ -335,7 +495,7 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   // The same for a paid payment request (lib/payment-flow-trigger.ts).
   if (trigger === "paid_request" && flows.some((f) => f.id !== id && f.trigger === "paid_request")) return { ok: false, reason: "paid_request_taken" };
   if (!id && flows.length >= MAX_FLOWS) return { ok: false, reason: "too_many" };
-  const active = at >= 0 ? raw.active === true : opts.activate === true;
+  const active = at >= 0 ? (opts.restoring ? flows[at].active : raw.active === true) : opts.activate === true;
   if (active && !(at >= 0 && flows[at].active) && flows.filter((f) => f.active && f.id !== id).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
   // Where a written-for-you sequence came from stays with it through an edit.
   const starter = starterOf(raw.starter) ?? (at >= 0 ? flows[at].starter : undefined);
@@ -358,19 +518,79 @@ export async function saveFlow(store: Store, raw: Record<string, unknown>, opts:
   const next = [...flows];
   if (at >= 0) next[at] = flow;
   else next.push(flow);
-  await writeFlows(store, store.listId, next);
-  return { ok: true, flows: next };
+  // Putting a version back keeps the one it replaces first: without room for it, nothing is put back. A version that
+  // is already what the workflow does replaces nothing, and keeps nothing (Claude 5 on #1927).
+  const replaces = Boolean(opts.restoring && at >= 0 && changesWhatItDoes(flows[at], flow));
+  if (replaces && !(await keepFlowVersion(store, store.listId, flows[at], flow))) return { ok: false, reason: "history_room" };
+  await writeFlows(store, store.listId, next, listRaw);
+  // What it did before this save, kept so it can be put back (lib/flow-versions.ts), at most once a pause of edits and
+  // paid for before the versions are read (Claude 5 on #1927); never stops the save.
+  if (at >= 0 && !opts.restoring) await keepFlowVersionOnce(store, store.listId, flows[at], flow);
+  return opts.restoring ? { ok: true, flows: next, kept: replaces } : { ok: true, flows: next };
+}
+
+export type RestoreResult = FlowResult | { ok: false; reason: "version" };
+
+/**
+ * Puts back one of a workflow's earlier versions (639 [GL7](19)), by when it
+ * was kept: an ordinary save of that version's content, checked whole against
+ * the store as it is now, keeping the workflow's on or off; the version it
+ * replaces is kept in turn, so this can be undone the same way.
+ *
+ * What it moves is measured first and paid for in studio requests before any
+ * of it is read (lib/flow-versions-rules.ts, restoreBytes; Claude 5 on
+ * #1927), and a try again pays for itself the same way: FlowHistoryNotPaid
+ * when the studio will not, with nothing read.
+ */
+export async function restoreFlowVersion(store: Store, id: string, at: number): Promise<RestoreResult> {
+  if (!store.listId) return { ok: false, reason: "unknown" };
+  const listId = store.listId;
+  await payFlowHistory(store, restoreBytes(await flowHistorySize(listId, id)));
+  const current = (await readFlowListStrict(listId)).find((f) => f.id === id);
+  if (!current) return { ok: false, reason: "unknown" };
+  const version = (await readFlowVersions(listId, id)).find((v) => v.at === at);
+  if (!version) return { ok: false, reason: "version" };
+  const again = async () => payFlowHistory(store, restoreTryBytes(await flowHistorySize(listId, id)));
+  // On or off is read again in the same step as the write (saveFlow, restoring), never taken from the read above.
+  return saveFlow(store, { ...version.flow, id } as unknown as Record<string, unknown>, { restoring: true, again });
 }
 
 export async function removeFlow(store: Store, id: string): Promise<FlowResult> {
   if (!store.listId) return { ok: false, reason: "unknown" };
-  const flows = await readFlowListStrict(store.listId);
-  if (!flows.some((f) => f.id === id)) return { ok: false, reason: "unknown" };
-  const next = flows.filter((f) => f.id !== id);
-  await writeFlows(store, store.listId, next);
-  // Its runs, their history, starts and queued steps: nothing of the people in it is kept.
-  await purgeFlow(store, flows.find((f) => f.id === id)!).catch((error) => console.error("erasing a removed workflow's runs failed", error));
-  return { ok: true, flows: next };
+  const listId = store.listId;
+  // Paused first, so nobody new starts it and nothing more of it is sent while its runs are erased; then its runs,
+  // their history, starts and queued steps, so nothing of the people in it is kept; and only once that is confirmed
+  // is it taken off the list. An erasure that cannot be confirmed throws with the workflow still listed (paused), so a
+  // removal tried again, a person's erasure request (forgetWorkflowPerson) or the store's deletion
+  // (forgetStoreWorkflows), which walk the listed workflows, still reach its runs (CX-123 rule 24). Each write of the
+  // list goes only over the text it was read from (writeFlows), read afresh when it changed in between (changing).
+  const flow = await changing(async () => {
+    const { flows, raw } = await readFlowListRaw(listId);
+    const found = flows.find((f) => f.id === id);
+    if (!found) return null;
+    if (found.active) await writeFlows(store, listId, flows.map((f) => (f.id === id ? { ...f, active: false } : f)), raw);
+    return found;
+  });
+  if (!flow) return { ok: false, reason: "unknown" };
+  await purgeFlow(store, flow);
+  const next = await changing(async () => {
+    const { flows, raw } = await readFlowListRaw(listId);
+    if (!flows.some((f) => f.id === id)) return null;
+    const left = flows.filter((f) => f.id !== id);
+    await writeFlows(store, listId, left, raw);
+    return left;
+  });
+  if (!next) return { ok: false, reason: "unknown" };
+  // Its earlier versions: a deletion that is not confirmed is said, never taken for done (Codex G on #1927); they stay in
+  // the list's index, so the store's forgetting still finds and deletes them.
+  const versionsGone = await dropFlowVersions(store, listId, id).then(
+    () => true,
+    (error: unknown) => {
+      console.error("forgetting a removed workflow's versions failed", error);
+      return false;
+    },
+  );
+  return versionsGone ? { ok: true, flows: next } : { ok: false, reason: "history_unconfirmed" };
 }
 
 /**
@@ -388,12 +608,24 @@ function queuedOf(store: Store, flow: Pick<Flow, "id">, emails: string[]): (stri
   return out;
 }
 
-/** Confirms a pipeline of deletions was answered in full; anything else is not an erasure. */
+/**
+ * Confirms a pipeline of deletions (DEL and ZREM only) was answered in full, read as a fresh list from the reply's own
+ * data slots (repliesFor: a Proxy, a hole, an inherited slot or a getter is refused, nothing of the reply is run),
+ * each reply the count its command answers, a whole number from zero up (countOf) and no more than the keys (DEL)
+ * or members (ZREM) it named; anything else, a null included, is not an erasure (Codex G and Revisor 2 on #1927;
+ * Codex M on #3083, CX-123 rule 24) and throws, so the workflow stays listed and its runs findable.
+ */
 async function erase(commands: (string | number)[][]): Promise<void> {
   for (let i = 0; i < commands.length; i += 500) {
     const chunk = commands.slice(i, i + 500);
-    const reply = await redisPipeline(chunk);
-    if (!Array.isArray(reply) || reply.length !== chunk.length) throw new FlowWriteUnconfirmed();
+    const replies = repliesFor(await redisPipeline(chunk), chunk.length);
+    if (!replies) throw new FlowWriteUnconfirmed();
+    for (let j = 0; j < chunk.length; j += 1) {
+      const count = countOf(replies[j]);
+      // No more than what the command named: a DEL counts at most its keys, a ZREM at most its members.
+      const most = chunk[j][0] === "ZREM" ? chunk[j].length - 2 : chunk[j].length - 1;
+      if (count === null || count > most) throw new FlowWriteUnconfirmed();
+    }
   }
 }
 
@@ -436,8 +668,15 @@ async function purgeFlow(store: Store, flow: Flow): Promise<void> {
 export async function forgetStoreWorkflows(store: Store): Promise<void> {
   if (!store.listId || !isRedisConfigured()) return;
   const flows = await readFlowListStrict(store.listId);
+  // Their runs first, while the workflows are still listed, so a run that fails is found again on the next try.
   for (const flow of flows) await purgeFlow(store, flow);
+  // Then the workflows (Codex G and Revisor 2 on #1927): a save already under way finds its workflow gone and keeps no
+  // version (KEEP_FLOW_VERSION answers 2), and one that kept a version before this is in the list's index.
   await erase([forgetHeldCommand(store.listId), ["DEL", flowsKey(store.listId)]]);
+  // Last, every workflow's earlier versions, found by the index (it outlives the workflows, so another try finds them
+  // again): those of a workflow already removed too. A failed deletion throws, never left behind.
+  const versioned = new Set([...flows.map((flow) => flow.id), ...(await versionedFlowIds(store.listId))]);
+  for (const id of versioned) await dropFlowVersions(null, store.listId, id);
 }
 
 /**
@@ -448,15 +687,18 @@ export async function forgetStoreWorkflows(store: Store): Promise<void> {
 export async function setFlowActive(store: Store, id: string, active: boolean): Promise<FlowResult> {
   if (monthlyAllowance(store) === 0) return { ok: false, reason: "plan" };
   if (!store.listId) return { ok: false, reason: "unknown" };
-  const flows = await readFlowListStrict(store.listId);
-  const at = flows.findIndex((f) => f.id === id);
-  if (at < 0) return { ok: false, reason: "unknown" };
-  if (flows[at].active === active) return { ok: true, flows };
-  if (active && !flows[at].steps.length) return { ok: false, reason: "steps" };
-  if (active && flows.filter((f) => f.active).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
-  const next = flows.map((f, i) => (i === at ? { ...f, active } : f));
-  await writeFlows(store, store.listId, next);
-  return { ok: true, flows: next };
+  const listId = store.listId;
+  return changing(async (): Promise<FlowResult> => {
+    const { flows, raw } = await readFlowListRaw(listId);
+    const at = flows.findIndex((f) => f.id === id);
+    if (at < 0) return { ok: false, reason: "unknown" };
+    if (flows[at].active === active) return { ok: true, flows };
+    if (active && !flows[at].steps.length) return { ok: false, reason: "steps" };
+    if (active && flows.filter((f) => f.active).length >= activeFlowLimit(store)) return { ok: false, reason: "active_limit" };
+    const next = flows.map((f, i) => (i === at ? { ...f, active } : f));
+    await writeFlows(store, listId, next, raw);
+    return { ok: true, flows: next };
+  });
 }
 
 export type FlowCounts = {
@@ -470,15 +712,25 @@ export type FlowCounts = {
   acted: number;
 };
 
-/** How many have started each sequence, how many of its emails went out, and how many ended it or skipped one. */
+/**
+ * How many have started each sequence, how many of its emails went out, and how many ended it or skipped one.
+ * Counts never written are 0 (an empty hash); a reply of any other shape throws UnknownReplyError, never zeros
+ * (CX-123 rule 24).
+ */
 export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>> {
   const out = new Map<string, FlowCounts>();
   if (!flows.length || !isRedisConfigured()) return out;
-  const rows = await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)]));
+  const rows = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["HGETALL", statsKey(f.id)])), flows.length);
+  if (!rows) throw new exactReply.UnknownReplyError("the sequences' counts");
   flows.forEach((f, i) => {
-    const raw = rows[i];
+    const raw = exactReply.stringList(rows[i]);
+    if (!raw || raw.length % 2 !== 0) throw new exactReply.UnknownReplyError("a sequence's counts");
     const map = new Map<string, number>();
-    if (Array.isArray(raw)) for (let j = 0; j + 1 < raw.length; j += 2) map.set(String(raw[j]), Number(raw[j + 1]) || 0);
+    for (let j = 0; j < raw.length; j += 2) {
+      const count = /^\d+$/.test(raw[j + 1]) ? Number(raw[j + 1]) : NaN;
+      if (!Number.isSafeInteger(count)) throw new exactReply.UnknownReplyError("a sequence's counts");
+      map.set(raw[j], count);
+    }
     out.set(f.id, { started: map.get("started") ?? 0, sent: map.get("sent") ?? 0, reached: map.get("reached") ?? 0, skipped: map.get("skipped") ?? 0, acted: map.get("acted") ?? 0 });
   });
   return out;
@@ -492,8 +744,11 @@ export async function flowStats(flows: Flow[]): Promise<Map<string, FlowCounts>>
 export async function flowsStartedFor(flows: Flow[], email: string): Promise<string[]> {
   if (!flows.length) return [];
   const address = normaliseEmail(email);
-  const found = await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)]));
-  return flows.filter((_, i) => Number(found[i]) === 1).map((f) => f.id);
+  // Exactly 1 or 0 for each: anything else is unknown, never "not started" (CX-123 rule 24).
+  const found = exactReply.repliesFor(await redisPipeline(flows.map((f) => ["EXISTS", enrolledKey(f.id, address)])), flows.length);
+  const starts = found?.map(exactReply.countOf);
+  if (!starts || starts.some((n) => n !== 0 && n !== 1)) throw new exactReply.UnknownReplyError("a person's sequence starts");
+  return flows.filter((_, i) => starts[i] === 1).map((f) => f.id);
 }
 
 /**
@@ -502,12 +757,13 @@ export async function flowsStartedFor(flows: Flow[], email: string): Promise<str
  */
 export async function enroll(store: Store, email: string, event: { joined: boolean; signed?: boolean; paidRequest?: boolean; productId?: string; tag?: string; finished?: string; form?: string; formOutcome?: string; started?: string; abandoned?: string; stage?: string }): Promise<void> {
   try {
-    if (!store.listId || monthlyAllowance(store) === 0) return;
+    if (!store.listId || monthlyAllowance(store) === 0 || !isRedisConfigured()) return;
     // Whether what they just got is sold for money: the store's own index
     // knows, so "bought" costs no read.
     const paid = Boolean(event.productId) && idsOfKind(store, "paid").includes(event.productId as string);
-    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts).
-    const flows = startableFlows(await readFlows(store.listId), activeFlowLimit(store)).filter(
+    // Only as many active workflows as the plan has start anybody (lib/flow-limits.ts). Read exactly: a reply that is
+    // not exactly nil or a list of sequences throws, and is logged below, never read as "no sequences" (rule 24).
+    const flows = startableFlows(await readFlowListStrict(store.listId), activeFlowLimit(store)).filter(
       (f) =>
         f.active &&
         f.steps.length > 0 &&
@@ -538,16 +794,26 @@ export async function enroll(store: Store, email: string, event: { joined: boole
  * Starts these sequences for these people, each person once per sequence:
  * the start is claimed before anything is lined up, so a sequence that
  * starts another, or a label given twice, never starts anybody a second time.
- * Says how many starts were new.
+ * Says how many starts were new; throws UnknownReplyError, after the
+ * definite starts, when a claim's reply was unknown.
  */
 async function startFlows(store: Store, flows: Flow[], addresses: string[]): Promise<number> {
   if (!store.listId || !addresses.length) return 0;
   const now = Math.floor(Date.now() / 1000);
   let started = 0;
+  let unknown = false;
   for (const flow of flows) {
     if (!flow.steps.length) continue;
-    const claims = await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400]));
-    const claimed = addresses.filter((_, i) => claims[i] !== null);
+    // Claimed only on exactly "OK", not on exactly nil (they are in it already); any other reply is unknown: that
+    // person is neither restarted nor sent anything, and the whole call says so once the definite starts are done
+    // (CX-123 rule 24).
+    const claims = repliesFor(await redisPipeline(addresses.map((address) => ["SET", enrolledKey(flow.id, address), "1", "NX", "EX", 400 * 86_400])), addresses.length);
+    if (!claims) {
+      unknown = true;
+      continue;
+    }
+    const claimed = addresses.filter((_, i) => claims[i] === "OK");
+    if (claims.some((claim) => claim !== "OK" && claim !== null)) unknown = true;
     if (!claimed.length) continue;
     // The store's runs a day (lib/flow-limits.ts): past it, nobody more is
     // started today, and their start is given back so a later moment can.
@@ -573,6 +839,7 @@ async function startFlows(store: Store, flows: Flow[], addresses: string[]): Pro
     ]);
     started += fresh.length;
   }
+  if (unknown) throw new UnknownReplyError("a sequence's once-only start");
   return started;
 }
 
@@ -644,9 +911,14 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     const ended: string[] = [];
     for (const email of emails) {
       try {
-        const reply = await redisPipeline(queuedOf(store, target, [email]));
-        const fromQueue = Number(reply[0]) || 0;
-        const fromLease = Number(reply[1]) || 0;
+        // Read exactly (CX-123 rule 24, as erase reads its own): every ZREM answers a whole count, the queue's and the
+        // lease's in turn. A reply missing, cut short or of another shape is not a removal, nor proof that they were not
+        // there: it throws, and the step is deferred and tried again, never recorded as "not waiting".
+        const removal = queuedOf(store, target, [email]);
+        const counts = (repliesFor(await redisPipeline(removal), removal.length) ?? []).map(countOf);
+        if (counts.length !== removal.length || counts.some((count) => count === null)) throw new FlowWriteUnconfirmed();
+        const fromQueue = counts.reduce<number>((sum, count, i) => (i % 2 === 0 ? sum + (count as number) : sum), 0);
+        const fromLease = counts.reduce<number>((sum, count, i) => (i % 2 === 1 ? sum + (count as number) : sum), 0);
         if (fromQueue > 0) {
           ended.push(email);
           out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”.` });
@@ -737,7 +1009,15 @@ async function actOnPeople(
   const statsId = store.statsId;
   if (!statsId) return each(emails, "failed", "This store has no records for people yet.");
   if (action.do === "field") {
-    const field = (await readFields(statsId)).find((f) => f.id === action.field);
+    let fields: Awaited<ReturnType<typeof readFieldsWhole>>;
+    try {
+      // Exactly as saved: a reply in an unknown shape is unknown, never "the field was removed" (CX-123 rule 24).
+      fields = await readFieldsWhole(statsId);
+    } catch {
+      // Nothing was written: tried again later, which is safe (never "uncertain", held for the creator, for a read).
+      return each(emails, "deferred", "Your fields could not be read; tried again in a few minutes.").map((o) => ({ ...o, wait: "retry" as const }));
+    }
+    const field = fields.find((f) => f.id === action.field);
     if (!field) return each(emails, "failed", "The field was removed from your store.");
     const out: Acted[] = [];
     for (const email of emails) {
@@ -829,10 +1109,13 @@ async function actOnDeals(
   at: { flow: Flow; step: FlowStep; index: number },
   held: Held | null,
 ): Promise<Acted[]> {
-  const pipelines = await readPipelines(statsId);
-  const stages = allStages(pipelines);
+  let pipelines: Awaited<ReturnType<typeof readPipelines>>;
+  let stages: ReturnType<typeof allStages>;
   let deals: Awaited<ReturnType<typeof readDeals>>;
   try {
+    // The store's own pipelines, or nothing: unknown ones are never read as the default stages (CX-123 rule 30).
+    pipelines = await readPipelines(statsId);
+    stages = allStages(pipelines);
     deals = await readDeals(statsId, stages);
   } catch {
     // Nothing was written: tried again later, which is safe.
@@ -960,6 +1243,9 @@ async function actOnDeals(
   return out;
 }
 
+/** What a step waiting on a store switched off after notices says (sendDueSteps; when it is looked at again: lib/flow-retry.ts). */
+const SWITCHED_OFF_WAIT = `Waiting: your store is switched off after notices about its content. This step is checked again by itself and goes on at the first check after your store is back on. If your store is still switched off ${MAX_WAIT_DAYS_PER_STEP} days after this step began to wait, the run stops here, with nothing done at this step.`;
+
 /**
  * People at a step that has to wait: each wait is counted on their run, and
  * each is tried again when lib/flow-retry.ts says, or stops there with
@@ -977,7 +1263,11 @@ async function waitOrStop(
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
   if (!people.length) return { queue, outcomes };
-  const counted = await countWaits(flowId, people.map((p) => p.email), index, nowSeconds);
+  // A look while the store is switched off is counted as half a wait (lib/flow-limits.ts, SWITCHED_OFF_LOOKS_PER_WAIT);
+  // a batch waits for one reason, but each person is counted by their own.
+  const off = people.filter((p) => p.reason === "switched_off").map((p) => p.email);
+  const whole = people.filter((p) => p.reason !== "switched_off").map((p) => p.email);
+  const counted = new Map([...(await countWaits(flowId, whole, index, nowSeconds)), ...(await countWaits(flowId, off, index, nowSeconds, true))]);
   for (const p of people) {
     const count = counted.get(p.email) ?? null;
     const stop = stopWaiting(count, nowSeconds);
@@ -985,7 +1275,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, known), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, p.reason === "switched_off" ? looksUsed(count) : count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };
@@ -1055,23 +1345,19 @@ export async function sendDueSteps(
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
-  if (orphans.length) {
-    const back = await redisPipeline(orphans.map((m) => ["ZREM", LEASE, m]));
-    const mine = orphans.filter((_, i) => Number(back[i]) === 1);
-    if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
-  }
+  if (orphans.length) await moveMembers(LEASE, QUEUE, Math.floor(Date.now() / 1000), orphans);
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
     const members = Array.isArray(due) ? (due as string[]) : [];
     if (!members.length) break;
     // Whoever removes a member from the queue is the one who sends it.
-    const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
-    const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    // Off the queue and into the lease in one step: an answer not read leaves them leased, sent by nobody this run,
+    // and the orphan pass puts them back once the lease runs out.
+    const taken = await moveMembers(QUEUE, LEASE, now + LEASE_SECONDS, members);
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
-      if (Number(taken[i]) !== 1) return;
+      if (!taken[i]) return;
       // listId|handle|flowId|step|address — an address may itself hold a "|".
       const parts = member.split("|");
       const group = parts.slice(0, 4).join("|");
@@ -1083,9 +1369,7 @@ export async function sendDueSteps(
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
-        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+        await moveMembers(LEASE, QUEUE, at, emails.map((email) => `${group}|${email}`));
       };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.
@@ -1133,7 +1417,7 @@ export async function sendDueSteps(
       counts.dropped += emails.length;
       return;
     }
-    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlows(listId));
+    if (!flowsFor.has(listId)) flowsFor.set(listId, await readFlowsExact(listId));
     const flow = flowsFor.get(listId)!.find((f) => f.id === flowId);
     const step = flow?.steps[index];
     if (!flow || !flow.active || !step || monthlyAllowance(store) === 0) {
@@ -1145,12 +1429,39 @@ export async function sendDueSteps(
       }
       return;
     }
+    // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
+    // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
+    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), each half a wait of MAX_WAITS_PER_RUN, then
+    // the run stops, saying why), queued only
+    // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
+    if (store.suspended) {
+      const waiting = await waitOrStop(flow.id, group, index, emails.map((email) => ({ email, reason: "switched_off" as const, note: SWITCHED_OFF_WAIT })), now);
+      const out = await queueHeld(waiting.queue);
+      const later = waiting.queue.filter((c) => !out.has(personIn(c))).length;
+      counts.later += later;
+      counts.dropped += emails.length - later;
+      const ended = waiting.outcomes.filter((o) => o.state === "failed");
+      await noteRuns(flow.id, ended.map((o) => ({ email: o.email, index, stepId: step.id, kind: step.action ? step.action.do : "email", state: "ended" as const, note: o.note, to: -1, status: "ended" as const })), now).catch((error) => console.error("writing workflow history failed", error));
+      return;
+    }
     // With the rows, who still holds this step's lease entry. Taken out by another workflow's step since this batch was
     // taken (act, "stop"): the stop wrote the run's end, so nothing is queued, noted or attempted for them, whatever
     // the step's condition says.
-    const [rows, ...scores] = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
-    const found = Array.isArray(rows) ? rows : [];
-    const held = new Set(emails.filter((_, i) => scores[i] !== null && scores[i] !== undefined));
+    const reply: unknown = await redisPipeline([["HMGET", leadsKey(listId), ...emails], ...emails.map((email) => ["ZSCORE", LEASE, `${group}|${email}`])]);
+    // Only an exact reply decides: a row that is exactly nil is "no longer on your list", a score that is exactly nil is
+    // "taken out". Any other shape is unknown: neither of those, and no go-ahead to send either. The batch goes back in
+    // the queue (sendDueSteps puts it back on a throw) and is done on a later run (CX-123 rule 24). Both the outer
+    // reply and the rows are read from their own slots (repliesFor): a hole, a getter or a Proxy is not a reply, so
+    // neither a missing row nor a missing score is ever read as nil or as held (Codex U on #3124).
+    const replies = repliesFor(reply, emails.length + 1);
+    const rows = replies ? repliesFor(replies[0], emails.length) : null;
+    const scores: unknown[] = replies ? replies.slice(1) : [];
+    const score = (s: unknown) => s === null || ((typeof s === "number" || (typeof s === "string" && s.trim() !== "")) && Number.isFinite(Number(s)));
+    if (!rows || rows.some((r) => r !== null && typeof r !== "string") || !scores.every(score)) {
+      throw new Error("A due workflow step's rows or lease entries could not be read");
+    }
+    const found: unknown[] = rows;
+    const held = new Set(emails.filter((_, i) => scores[i] !== null));
     counts.dropped += emails.length - held.size;
     // Who is still on the list, and of them, who has reached the sequence's
     // end and who this step is not for (lib/flow-rules.ts) — read from the
@@ -1262,6 +1573,20 @@ export async function sendDueSteps(
       const uncertain = new Set(result.uncertain ?? []);
       const rest = result.rest.filter((email) => !uncertain.has(email));
       const refused: Settled[] = [];
+      // Refused for good, address by address (lib/mail.ts sendTo, `refused`): known not sent, never uncertain;
+      // the run ends there, saying why. The others in the batch went and go on to the next step.
+      if (result.refused?.length) {
+        counts.dropped += result.refused.length;
+        refused.push(...result.refused.map((r) => ({
+          email: r.email,
+          state: "failed" as const,
+          note: r.removed
+            ? "The email service refused this address, so it was taken off your list and the run ended."
+            : "The email service did not accept this email for this address, so the run ended.",
+          to: -1,
+          status: "failed" as const,
+        })));
+      }
       let waiting: { queue: (string | number)[][]; outcomes: Settled[] } | null = null;
       const onQueue: (string | number)[][] = [];
       const tallies: (string | number)[][] = [];

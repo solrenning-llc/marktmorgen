@@ -36,12 +36,28 @@ export async function GET(request: NextRequest) {
   if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   try {
     const counts = await sendDripEmails(storeForHandle, readCourse, SITE_URL);
+    // Not swept (the list could not be read, or a reply was in an unknown shape): said in the log and the answer,
+    // never "0 swept", as the pictures below (#4279); the uploads stay on the list and the next run sweeps them.
     const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
-      return [] as string[];
+      return null;
     });
-    const pictures = await sweepCommunityUploads().catch(() => 0);
-    return Response.json({ ok: true, ...counts, unusedUploads: stale.length, unusedPictures: pictures }, { headers: { "Cache-Control": "no-store" } });
+    // Not swept (the list could not be read exactly): said in the log and the answer, never "0 swept"; the next run sweeps.
+    const pictures = await sweepCommunityUploads().catch((error: unknown) => {
+      console.error("could not sweep unused community pictures", error);
+      return null;
+    });
+    return Response.json(
+      {
+        ok: true,
+        ...counts,
+        unusedUploads: stale === null ? null : stale.length,
+        ...(stale === null ? { uploadsFailed: true } : {}),
+        unusedPictures: pictures,
+        ...(pictures === null ? { picturesFailed: true } : {}),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("sending course emails failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

@@ -16,6 +16,7 @@
  * description each would otherwise be carried by every visitor for nothing.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData, noteData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 
@@ -36,11 +37,30 @@ export function cleanAbout(raw: string, max = MAX_ABOUT_LENGTH): string {
     .slice(0, max);
 }
 
-/** The description of one product, or "" when it has none. */
+/**
+ * The description of one product, or "" when Redis confirms it has none (a GET
+ * that answers null). Any other answer (no reply, more than one, a slot that
+ * is not a text) throws UnknownReplyError, so an export or a page never says
+ * "no description" about one it could not read (CX-123 rule 24; Codex T's
+ * proof, 46e2cc9). A failed request throws as before.
+ */
 export async function readAbout(statsId: string | null, productId: string): Promise<string> {
   if (!statsId || !isRedisConfigured()) return "";
-  const [raw] = await redisPipeline([["GET", aboutKey(statsId, productId)]]);
-  return typeof raw === "string" ? raw.slice(0, MAX_ABOUT_LENGTH) : "";
+  const replies = repliesFor(await redisPipeline([["GET", aboutKey(statsId, productId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a description read");
+  return aboutOf(replies[0]);
+}
+
+/**
+ * A kept description from its GET or MGET slot: null is "none kept", a text is
+ * the description, anything else throws. Every text is a description:
+ * writeAbout stores the text it is given as it is (and never an empty one, which
+ * it deletes instead), so no text is refused; the length is cut as before.
+ */
+function aboutOf(raw: unknown): string {
+  if (raw === null) return "";
+  if (typeof raw !== "string") throw new UnknownReplyError("a kept description");
+  return raw.slice(0, MAX_ABOUT_LENGTH);
 }
 
 /**
@@ -57,21 +77,27 @@ export async function readAboutExact(statsId: string, productId: string): Promis
   return typeof reply[0] === "string" ? reply[0].slice(0, MAX_ABOUT_LENGTH) : "";
 }
 
-/** Values of many keys, a hundred at a command (MGET): what the whole export reads (lib/store-export.ts). */
+/**
+ * Values of many keys, a hundred at a command (MGET): what the whole export
+ * reads (lib/store-export.ts). Each command must answer exactly one list with
+ * one slot per key asked, or the whole read throws UnknownReplyError.
+ */
 async function readMany(keys: string[]): Promise<unknown[]> {
   const out: unknown[] = [];
   for (let i = 0; i < keys.length; i += 100) {
-    const [raw] = await redisPipeline([["MGET", ...keys.slice(i, i + 100)]]);
-    const values = Array.isArray(raw) ? raw : [];
-    for (let n = 0; n < Math.min(100, keys.length - i); n += 1) out.push(values[n] ?? null);
+    const asked = keys.slice(i, i + 100);
+    const replies = repliesFor(await redisPipeline([["MGET", ...asked]]), 1);
+    const values = replies ? repliesFor(replies[0], asked.length) : null;
+    if (!values) throw new UnknownReplyError("a batch of description reads");
+    out.push(...values);
   }
   return out;
 }
 
-/** The long descriptions of many products, in their order, a hundred at a command. */
+/** The long descriptions of many products, in their order, a hundred at a command; throws like readAbout when any answer is unknown. */
 export async function readAbouts(statsId: string | null, productIds: string[]): Promise<string[]> {
   if (!statsId || !isRedisConfigured()) return productIds.map(() => "");
-  return (await readMany(productIds.map((id) => aboutKey(statsId, id)))).map((raw) => (typeof raw === "string" ? raw.slice(0, MAX_ABOUT_LENGTH) : ""));
+  return (await readMany(productIds.map((id) => aboutKey(statsId, id)))).map(aboutOf);
 }
 
 /**

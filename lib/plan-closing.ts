@@ -78,11 +78,12 @@ import { PICTURE_BYTES } from "@/lib/community-picture-rules";
 import { ENDED_INDEX, SETUP_STORAGE_BYTES, standingOf } from "@/lib/plan-standing";
 import { editPodcast, readPodcast, savePodcast } from "@/lib/podcast";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForEmail, storeRef } from "@/lib/store";
+import { type Store, imageFolder, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -93,7 +94,7 @@ import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/cl
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
-import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing } from "@/lib/closing-plan-guard";
+import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing, shutOf } from "@/lib/closing-plan-guard";
 
 export { CLOSING_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS };
 
@@ -159,6 +160,51 @@ function parseState(raw: unknown): State {
   }
 }
 
+/**
+ * A closing state as Redis answered it, read only in its exact shape (CX-123
+ * rule 24): null is no record yet, {}; anything else must be the text of a
+ * JSON object whose every field is a finite number, buyersAfter a string, as
+ * State is written. A reply of another shape (cut short, a number, an object
+ * not its text, a list, a field of another type, a missing reply) throws
+ * UnknownReplyError: it is never "nothing written down yet", so no closing
+ * day, notice, refund, access or deletion is decided on it.
+ */
+function readState(raw: unknown): State {
+  if (raw === null) return {};
+  let value: unknown;
+  try {
+    if (typeof raw !== "string") throw new Error("not text");
+    value = JSON.parse(raw);
+  } catch {
+    throw new UnknownReplyError("a store's closing state");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new UnknownReplyError("a store's closing state");
+  for (const [name, field] of Object.entries(value)) {
+    if (name === "buyersAfter" ? typeof field !== "string" : typeof field !== "number" || !Number.isFinite(field)) throw new UnknownReplyError("a store's closing state");
+  }
+  return parseState(raw);
+}
+
+/**
+ * A store's score in the final line (ZSCORE): null when it is not in it, the
+ * day its plan ended (ms), or UnknownReplyError. A plan end time is a positive
+ * number, so 0 or a negative score is unknown too, the same rule as
+ * closingScore (lib/closing-holds.ts).
+ */
+function finalScoreOf(raw: unknown): number | null {
+  if (raw === null) return null;
+  const value = typeof raw === "number" ? raw : typeof raw === "string" && /^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(raw) ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(value) || value <= 0) throw new UnknownReplyError("a store's place in the final closing line");
+  return value;
+}
+
+/** A pipeline's replies, exactly one for each command sent, or UnknownReplyError. */
+function exactly(replies: unknown, count: number, what: string): unknown[] {
+  const list = repliesFor(replies, count);
+  if (!list) throw new UnknownReplyError(what);
+  return list;
+}
+
 /** The day what a store keeps is removed, from the day its plan ended: both in ms. */
 export function removalDay(endedAt: number): number {
   return endedAt + CLOSING_DAYS * DAY_MS;
@@ -184,24 +230,28 @@ async function breakHolds(store: Store, nowSeconds: number): Promise<boolean> {
  * way the job counts it. Null when the store's plan has not ended, or when
  * what it kept has been removed already. Whether the store keeps more than
  * its room, which is what makes the day matter, is for the caller to measure.
+ * Throws when its record or its place in the final line is not answered in
+ * its exact shape (UnknownReplyError): the refunds and the checkout refuse
+ * then, never acting on a day made up from an unknown.
  */
 export async function closingOf(store: Store, now = Date.now()): Promise<{ endedAt: number; day: number; today?: boolean; buyers?: { by: number; done: boolean; untold: number } } | null> {
   // Its closing day has begun (queue item 307 [EC1]): it closes today, whatever the plan says.
   if (isRedisConfigured()) {
-    const [finalScore, rawFinal] = await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)], ["GET", stateKey(storeRef(store))]]);
-    if (finalScore !== null && finalScore !== undefined) {
-      const kept = parseState(rawFinal);
+    const [finalScore, rawFinal] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, storeRef(store)], ["GET", stateKey(storeRef(store))]]), 2, "a store's closing");
+    const finalEnded = finalScoreOf(finalScore);
+    if (finalEnded !== null) {
+      const kept = readState(rawFinal);
       // Removed already, and waiting for the walk that deletes its records.
       if (kept.removed) return null;
-      return { endedAt: Number(finalScore), day: kept.day ?? now, today: true };
+      return { endedAt: finalEnded, day: kept.day ?? now, today: true };
     }
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt) || !isRedisConfigured()) return null;
   // A break the creator chose keeps everything until it ends (lib/plan-pause.ts).
   if (await breakHolds(store, now / 1000)) return null;
-  const [raw] = await redisPipeline([["GET", stateKey(storeRef(store))]]);
-  const read = parseState(raw);
+  const [raw] = exactly(await redisPipeline([["GET", stateKey(storeRef(store))]]), 1, "a store's closing state");
+  const read = readState(raw);
   const state: State = read.of === endedAt ? read : {};
   if (state.removed) return null;
   // Never sooner than a week after the last notice, which, where it has not
@@ -575,8 +625,17 @@ const HANDS: Hands = {
  * Past `until` this stops where it is and says it was not seen through, and
  * the next day's run carries on from what is left in the folders.
  */
-export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY): Promise<{ files: number; clean: boolean }> {
-  const store = await storeForEmail(key);
+export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY, closing = false): Promise<{ files: number; clean: boolean }> {
+  // Only a record Redis says is not there (nil) has nothing left to remove. One that does not read (a failed request,
+  // a record that does not parse, or one under that key for another owner) is unknown (rule 24): nothing is deleted
+  // and it is not seen through, so the store is not written down as done and this runs again the next day.
+  let store: Store | null;
+  try {
+    store = await storeForRefExact(key);
+  } catch (error) {
+    console.error("removing what a store kept: its record could not be read; it is tried again tomorrow", error);
+    return { files: 0, clean: false };
+  }
   if (!store) return { files: 0, clean: true };
   const folder = await storeFolder(key);
   const gone: string[] = [];
@@ -667,7 +726,12 @@ export async function removeStored(key: string, hands: Pick<Hands, "list" | "rem
   // and its community's pictures (since 18 October 2026), which the
   // community's posts then show without.
   const pictures = store.community ? `community/${communityFolder(store.community.id)}/` : "";
-  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : [])]) {
+  // A store that closes takes its pictures with it (product, link and page pictures, email pictures, its buyers'
+  // review photos: images/<imageFolder>/), as the privacy policy says its files go that day (#closed-stores);
+  // app/api/image serves them to anybody with the address, whether the store is there or not. A store that stays
+  // (a plan ended before October 18, 2026) still shows them, so they are kept.
+  const images = closing ? `images/${await imageFolder(key)}/` : "";
+  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : []), ...(images ? [images] : [])]) {
     try {
       await removeAll(await hands.list(prefix));
       if (prefix === pictures && store.community) await forgetPictures(communityFolder(store.community.id));
@@ -703,7 +767,16 @@ export type Closing = {
 
 /** One store whose plan has ended, looked at for today. */
 export async function closeOne(key: string, now = Date.now(), hands: Hands = HANDS, until = Number.POSITIVE_INFINITY, mayObserve?: () => Promise<boolean>): Promise<Closing> {
-  const store = await storeForEmail(key);
+  // Only a record Redis says is not there (nil) is gone. One that does not read (a failed request, a record that does
+  // not parse, or one under that key for another owner) is unknown (rule 24): the store stays in its lines, its
+  // closing state kept, and is looked at again tomorrow (storeForRefExact, lib/store.ts).
+  let store: Store | null;
+  try {
+    store = await storeForRefExact(key);
+  } catch (error) {
+    console.error("a closing store's record could not be read; it stays in line and is looked at again tomorrow", error);
+    return { key, state: "held", note: "its record could not be read" };
+  }
   if (!store) {
     await redisPipeline([["ZREM", ENDED_INDEX, key], ["ZREM", FINAL_INDEX, key], ["DEL", stateKey(key)]]);
     return { key, state: "gone" };
@@ -711,15 +784,67 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // A closing day that has begun (its memberships ended at Stripe) is seen
   // through, whatever happens to the plan since: its buyers have lost what
   // they paid for, so it can no longer "stay open" (queue item 307 [EC1]).
-  const [finalScore] = await redisPipeline([["ZSCORE", FINAL_INDEX, key]]);
-  if (finalScore !== null && finalScore !== undefined && Number.isFinite(Number(finalScore))) {
-    const was = Number(finalScore);
-    const [rawFinal] = await redisPipeline([["GET", stateKey(key)]]);
-    const kept = parseState(rawFinal);
-    const final: State = kept.of === was ? kept : { of: was, renewals: now };
+  const [finalScore] = exactly(await redisPipeline([["ZSCORE", FINAL_INDEX, key]]), 1, "a store's place in the final closing line");
+  const was = finalScoreOf(finalScore);
+  if (was !== null) {
+    const [rawFinal] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
+    const kept = readState(rawFinal);
+    // A state missing, for another ending (two overlapping runs: one put the store in this line, the other saw a plan
+    // again and deleted the state) or with no day is never rebuilt as "renewals stopped" or with today as its day
+    // (Claude 7's hunt, MÉDIO money): today would give members back less than they paid for. Its day is the one its
+    // closing day marked on its address (markShut, below and in closingDay) for this same ending: with that mark, the
+    // closing day runs again on it. With none, its day is the earliest one its closing could have had, removalDay of
+    // its ending, so members are given back more, never less (rare: a state and its mark both lost; the extra comes
+    // from the creator's account, never more than what is still to give or what the charge took; ALL-160, the safe
+    // choice that waits on no person). Its buyers not told yet are told first, and its day's steps wait until
+    // BUYER_NOTICE_DAYS after the last was told: nothing is removed or given back without that notice.
+    // Each step of the closing day is safe to run twice: renewals already stopped are skipped, members already
+    // settled are skipped, and a refund still owed is made only after the refunds already on its payment are listed
+    // and what its charge gave back is read (giveBackUnused, lib/closing-refunds.ts), never on Stripe's idempotency
+    // key alone, which lasts 24 hours.
+    let final: State = kept.of === was ? kept : { of: was };
+    if (final.day === undefined) {
+      const mark = await shutOf(store.handle);
+      if (mark && mark.ended === was) {
+        final = { ...final, day: mark.since };
+        await redisPipeline([["SET", stateKey(key), JSON.stringify(final)]]);
+        console.error(`plan-closing: ${key}'s closing day was lost; it was read back from its address mark and its closing day runs again`);
+      } else {
+        console.error(`plan-closing: ${key}'s closing day and its address mark were lost; its earliest day is taken, after its buyers are told`);
+        const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
+        // Nobody is charged by a store that closes, while its buyers are told: stopRenewals skips what has ended.
+        try {
+          const stopped = await stopRenewals(store, until);
+          if (!stopped.done) return { key, state: "held", note: "its closing day was lost, and its members' renewals are not all stopped yet" };
+        } catch (error) {
+          console.error("stopping a closing store's renewals failed", error);
+          return { key, state: "held", note: "its closing day was lost, and Stripe could not be asked to stop its renewals" };
+        }
+        const earliest = removalDay(was);
+        if (tellsBuyers(was) && !final.buyersDone) {
+          // Those told before are written down by address (toldKey) and never written to again.
+          const named = Math.max(earliest, now + BUYER_NOTICE_DAYS * DAY_MS);
+          const cap = buyerNoticeCap(store.tier, paidBefore(store));
+          const told = await tellBuyers(store, was, named, final.buyersAfter ?? "", until, final.buyersPages ?? 0, buyerPagesCap(cap)).catch((error) => {
+            console.error("telling a closing store's buyers failed", error);
+            return null;
+          });
+          if (!told) return { key, state: "held", note: "its closing day was lost, and its buyers could not all be read or told yet" };
+          if (told.blocked === "postal") return { key, state: "held", note: "no company postal address for its buyers' notice" };
+          final = { ...final, buyersFrom: final.buyersFrom ?? now, buyersAfter: told.after, buyersPages: told.pages, untold: (final.untold ?? 0) + told.untold, ...(told.capped ? { buyersCapped: 1 } : {}), ...(told.done ? { buyersDone: now } : {}) };
+          await save(final);
+          if (!told.done) return { key, state: "told", note: "its closing day was lost: its buyers, in part" };
+        }
+        if (final.buyersDone && now < afterBuyersTold(earliest, final.buyersDone)) return { key, state: "waiting", note: "its closing day was lost: its buyers are told, and it closes a notice's length after" };
+        final = { ...final, day: earliest };
+        await save(final);
+      }
+    }
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
-    await markShut(store, final.day ?? now, was);
+    // Set above in every case; never today.
+    const finalDay = final.day ?? removalDay(was);
+    await markShut(store, finalDay, was);
     // The durable final index survives a late active snapshot, which clears
     // planEndedAt. Keep the original closing proof for the refund guard.
     const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
@@ -737,7 +862,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       return { key, state: "removed", note: "its records are deleted by the next walk" };
     }
     const folderFinal = await storeFolder(storeRef(store));
-    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
+    return closingDay(store, key, final, was, finalDay, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt)) {
@@ -750,8 +875,8 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   // nobody is written to until it ends. Nothing is written down either, so
   // the day after it ends this store is looked at as if for the first time.
   if (await onBreak(key, now / 1000)) return { key, state: "held", note: "on a break" };
-  const [raw] = await redisPipeline([["GET", stateKey(key)]]);
-  const read = parseState(raw);
+  const [raw] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
+  const read = readState(raw);
   // Notices about an earlier ending say nothing about this one.
   const state: State = read.of === endedAt ? read : { of: endedAt };
   const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
@@ -805,7 +930,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
     const cap = buyerNoticeCap(store.tier, paidBefore(store));
     await forgetTold(folder);
     await startClosingCredit(folder, cap * EMAILS_PER_BUYER_PER_ENDING);
-    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER);
+    await startCallBudget(folder, cap * STRIPE_CALLS_PER_MEMBER, endedAt);
     Object.assign(state, { holdFrom: now });
     await save(state);
   }
@@ -931,7 +1056,16 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
-    await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []);
+    // Not known in full: an open plan checkout could still be paid. Its members' renewals are still stopped
+    // below on this run (a renewal is a charge whose card fee never comes back); then the day is held, its
+    // `renewals` mark not written, so the next run reads the checkouts again (stopRenewals skips what is ended).
+    const checkoutsRead = await expirePlanCheckouts(store, store.stripeCustomerId ? [store.stripeCustomerId] : []).then(
+      () => true,
+      (error) => {
+        console.error("reading a closing store's open plan checkouts failed", error);
+        return false;
+      },
+    );
     try {
       const stopped = await stopRenewals(store, until);
       if (!stopped.done) return { key, state: "held", note: "the renewals it sold are not all stopped yet" };
@@ -939,6 +1073,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
       console.error("stopping a closing store's renewals failed", error);
       return { key, state: "held", note: "Stripe could not be asked to stop its renewals" };
     }
+    if (!checkoutsRead) return { key, state: "held", note: "its open plan checkouts could not all be read" };
     next = { ...next, renewals: now };
     await save(next);
   }
@@ -972,7 +1107,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     console.error("deleting what a closing store's files left failed", error);
     return { key, state: "held", note: "what its files left could not be deleted" };
   }
-  const done = await removeStored(key, hands, until);
+  const done = await removeStored(key, hands, until, true);
   if (!done.clean) return { key, state: "held", note: `removed ${done.files}, and something could not be removed` };
   const after = (await hands.measure(folder)) + (store.community && hands.pictures ? await hands.pictures(store.community.id) : 0);
   if (after > keptRoomFor(endedAt)) return { key, state: "held", note: `removed ${done.files} and it still keeps ${bytesWords(after)}` };
@@ -1041,8 +1176,8 @@ async function refuseLatePlans(store: Store): Promise<boolean> {
  */
 export async function finishClosed(entry: Batched, now = Date.now()): Promise<void> {
   const key = stateKey(entry.ref);
-  const [raw] = await redisPipeline([["GET", key]]);
-  await redisPipeline([["SET", key, JSON.stringify({ ...parseState(raw), erased: now }), "EX", ERASED_KEPT_DAYS * 86_400]]);
+  const [raw] = exactly(await redisPipeline([["GET", key]]), 1, "a closed store's closing state");
+  await redisPipeline([["SET", key, JSON.stringify({ ...readState(raw), erased: now }), "EX", ERASED_KEPT_DAYS * 86_400]]);
 }
 
 /** How long the closing record of a deleted store is kept: dates only, the company's. */
@@ -1122,10 +1257,18 @@ export async function closeEnded(deadline: number, now = Date.now(), hands: Hand
   let from: string = typeof saved === "string" && /^\d+$/.test(saved) ? saved : "0";
   const out = finals;
   for (;;) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]);
-    const flat = Array.isArray(raw) ? raw : [];
+    // Read exactly (rule 24, as the final walk above): a page out of shape is unknown, never an empty one. Taken
+    // for empty, the run ended as if every store whose plan ended had been looked at and let go of its place, so
+    // those stores were neither held, told nor closed, and nothing failed for anyone to see.
+    const flat = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", ENDED_INDEX, from, now, "WITHSCORES", "LIMIT", 0, PAGE]]), 1)?.[0]);
+    if (!flat || flat.length % 2 !== 0 || flat.length > 2 * PAGE) throw new UnknownReplyError("a page of the stores whose plan ended");
     const rows: { key: string; score: string }[] = [];
-    for (let i = 0; i + 1 < flat.length; i += 2) rows.push({ key: String(flat[i]), score: String(flat[i + 1]) });
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      // A score the shape test passes but no moment can be ("1e999", "1e20") is unknown too: taken as one,
+      // the next page began at "Infinity", read empty and ended the walk as complete, skipping every store after it.
+      if (!/^-?(0|[1-9][0-9]*)(\.[0-9]+)?(e[+-]?[0-9]+)?$/i.test(flat[i + 1]) || !Number.isSafeInteger(Math.floor(Number(flat[i + 1])))) throw new UnknownReplyError("a page of the stores whose plan ended");
+      rows.push({ key: flat[i], score: flat[i + 1] });
+    }
     for (const row of rows) {
       if (seen.has(row.key)) continue;
       if (Date.now() > deadline) {

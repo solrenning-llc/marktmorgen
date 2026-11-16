@@ -451,6 +451,54 @@ async function main(): Promise<void> {
     is("control: a buyer still there gets the door back after a refused close", typeof (await redis.pipeline([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0], "string");
   }
 
+  // Claude 6 on #3570 (MEDIUM): an erasure still running, between its per-entry door DEL and its final DEL of the
+  // buyer's index and places, lets a refused vault step put the door back with both checks passing; the door then
+  // outlives the erasure that said done. The erasure's final pipeline is held here until the put-back has run.
+  part("A refused vault step during a running erasure leaves no door after it says done");
+  for (const via of ["close", "abort"] as const) {
+    const who = (via === "close" ? "5" : "6").repeat(32);
+    const lessonId = lesson(via === "close" ? 46 : 47);
+    const original = redis.pipeline.bind(redis);
+    let reached!: () => void;
+    const atFinal = new Promise<void>((resolve) => (reached = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (list.some((c) => c[0] === "DEL" && c[1] === `nl:sub:who:${FOLDER}:${who}`)) {
+        reached();
+        await gate;
+      }
+      return original(list);
+    }) as typeof redis.pipeline;
+    let erasure: Promise<number> | null = null;
+    const vaultStep = async () => {
+      erasure = forgetSubmissionsPerson(FOLDER, who, [], world().steps, SHOP);
+      await atFinal;
+    };
+    const racing = world({
+      closeReservedVault: async () => (await vaultStep(), { ok: false as const, reason: "unavailable" as const }),
+      abortReservedVault: async () => (await vaultStep(), false),
+    });
+    try {
+      const opened = await openSubmissionDoor(ask(who, lessonId), world().steps);
+      if (!opened.ok) throw new Error(`open refused: ${opened.reason}`);
+      const id = opened.upload.pathname.split("/")[2].slice(4);
+      if (via === "close") {
+        await closeSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId, who, data: SHOP, note: "" }, opened.upload.pathname, ["e"], NOW, racing.steps);
+      } else {
+        await abortSubmissionDoor({ store: SHOP, folder: FOLDER, courseId: COURSE, lessonId, who, data: SHOP }, opened.upload.pathname, racing.steps, NOW);
+      }
+      release();
+      const erased = await (erasure as unknown as Promise<number>);
+      const door = (await original([["GET", `nl:sub:door:${FOLDER}:${id}`]]))[0];
+      is(`${via}: the erasure said done`, erased, 0);
+      is(`${via}: no door with the buyer's email is left after the erasure said done`, door, null);
+    } finally {
+      release();
+      redis.pipeline = original;
+    }
+  }
+
   done();
 }
 

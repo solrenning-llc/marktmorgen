@@ -348,7 +348,7 @@ async function main(): Promise<void> {
   {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allowed, with the room that existed: the first
     // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
-    // Rule 23 (C4-20261106-2640-DONO-156): the ceiling is US$ 66 since 6 November 2026, US$ 65 before. The dollar more
+    // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before. The dollar more
     // is room for the picture-uploads line (the Blob operations of every picture upload), not for more readings: the
     // figure is still the one sized under US$ 65, where, without that line, one more heavy reading a day would pass it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);

@@ -51,7 +51,10 @@ const ACTIONS = new Set(["attach", "remove", "alt", "display"]);
  * browser made for phones (lib/product-image.ts, SMALL_LONG_SIDE). It is
  * held to every check the picture itself is, and has to be narrower than it;
  * one that fails any of them is deleted and left out, and the picture is
- * attached without it — a copy is never worth refusing a picture for.
+ * attached without it — a copy is never worth refusing a picture for. A copy
+ * whose check meets an unknown (a head or a read that fails, a passing outage
+ * of the file store) is left out too, and kept: only what the store proves is
+ * not a copy we keep is deleted.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 2_000);
@@ -120,9 +123,10 @@ export async function POST(request: NextRequest) {
       const checked = checkedSizes(product.image);
       const keptSize = (name: string) => (fresh.has(name) ? undefined : checked.get(name));
       // A name it shows whose size the record cannot vouch for (checkedSizes) is not taken as checked, and not read on
-      // its say-so either: refused, nothing written or deleted; sent fresh through the door it is checked as any (rule 24).
-      const named = [path, ...(smallOwned ? [smallPath] : []), ...(thumbOwned ? [thumbPath] : [])];
-      if (named.some((name) => !fresh.has(name) && own.has(name) && !checked.has(name))) {
+      // its say-so either; sent fresh through the door it is checked as any (rule 24). The picture itself: refused,
+      // nothing written or deleted. One of its copies: left out, unread, as a copy that fails is (Claude 2 on #2843, LOW 2).
+      const unvouched = (name: string) => !fresh.has(name) && own.has(name) && !checked.has(name);
+      if (unvouched(path)) {
         await dropFresh([path, smallPath, thumbPath]);
         return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       }
@@ -158,7 +162,7 @@ export async function POST(request: NextRequest) {
       // The smaller copy for phones, checked exactly as the picture was.
       let small: SmallCopy | null = null;
       // A smaller copy named that is neither fresh nor this product's own is left out, and kept.
-      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath))) {
+      if (smallOwned && (fresh.has(smallPath) || own.has(smallPath)) && !unvouched(smallPath)) {
         const smallWidth = side(sent?.width);
         const kept = keptSize(smallPath);
         // This product's own copy, checked when it was put on: its size from the record, its width held to its place.
@@ -178,14 +182,14 @@ export async function POST(request: NextRequest) {
           if (good) small = { path: smallPath, width: smallWidth, bytes: copy.size };
           else await dropFresh([smallPath]);
         } catch (error) {
-          console.error("checking a picture's smaller copy failed; attached without it", error);
-          await dropFresh([smallPath]);
+          // Unknown, not "not a picture": left out and kept, never deleted (lib/uploaded-image.ts, firstBytes).
+          console.error("checking a picture's smaller copy failed; attached without it, and the copy kept", error);
         }
       }
       // The thumbnail copy (Encanto 5b-2), checked exactly as the smaller copy, within MAX_THUMB_BYTES and narrower
       // than the copy above it; one that fails is dropped and never written.
       let thumb: SmallCopy | null = null;
-      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath))) {
+      if (thumbOwned && (fresh.has(thumbPath) || own.has(thumbPath)) && !unvouched(thumbPath)) {
         const thumbWidth = side(sentThumb?.width);
         const kept = keptSize(thumbPath);
         // This product's own copy, checked when it was put on: its size from the record, its width held to its place.
@@ -206,8 +210,8 @@ export async function POST(request: NextRequest) {
           if (good) thumb = { path: thumbPath, width: thumbWidth, bytes: copy.size };
           else await dropFresh([thumbPath]);
         } catch (error) {
-          console.error("checking a picture's thumbnail copy failed; attached without it", error);
-          await dropFresh([thumbPath]);
+          // Unknown, not "not a picture": left out and kept, never deleted, as the smaller copy is.
+          console.error("checking a picture's thumbnail copy failed; attached without it, and the copy kept", error);
         }
       }
       // Checked above: exact, or none.

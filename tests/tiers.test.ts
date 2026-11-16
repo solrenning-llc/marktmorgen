@@ -44,6 +44,10 @@ let tierA = "";
 let priceMeta: Record<string, string> = {};
 // The currency the member pays in: the store's, unless it changed its currency since (22 [E5], unit 2b).
 let paidIn = "usd";
+// A pause the member chose: Stripe holds the charges (void) while the subscription stays "active" (lib/membership-pause.ts).
+let pausedSub = false;
+/** The pause as Stripe answers it; another shape is unknown and refuses a switch too (review of #4121, LOW). */
+let pauseShape: unknown = null;
 // A pause set on the membership (lib/membership-pause.ts): Stripe's pause_collection, and the day it starts (R43 F4).
 let pausedWith: Record<string, unknown> | null = null;
 let pauseMeta: Record<string, string> = {};
@@ -68,8 +72,10 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
           status: "active",
           customer: "cus_Member0001",
           created: 1,
-          metadata: { store: "harbor", product: tierA, ...pauseMeta },
-          pause_collection: pausedWith,
+          metadata: pausedSub ? { store: "harbor", product: tierA, pause_from: String(Math.floor(Date.now() / 1000) + 86_400) } : { store: "harbor", product: tierA, ...pauseMeta },
+          ...(pausedSub ? { pause_collection: { behavior: "void", resumes_at: Math.floor(Date.now() / 1000) + 31 * 86_400 } } : {}),
+          ...(pauseShape !== null ? { pause_collection: pauseShape } : {}),
+          ...(pausedWith !== null ? { pause_collection: pausedWith } : {}),
           items: { data: [{ id: "si_Member0001", price: { unit_amount: 1000, currency: paidIn, metadata: priceMeta, recurring: { interval: "month", interval_count: 1 } } }] },
         },
       ],
@@ -210,9 +216,32 @@ async function main(): Promise<void> {
   is("the member is told so in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.currency?.body.length > 40 && membershipWords(l).manageNotices.currency?.title.length > 10), true);
   paidIn = "usd";
 
-  part("A membership with a pause set (Claude 6, R43 F4)");
+  part("A membership with a pause asked for, started or still to start");
+  // Stripe holds its charges while it stays "active": a switch's prorated invoice would be voided, a move up given
+  // for nothing or a card called declined that was never tried, a move down promised a credit never given.
+  pausedSub = true;
+  const beforePause = calls.length;
+  const pausedList = (await membershipsFor(store, token))!;
+  is("no tier offered to it", [pausedList[0].pause !== null, choicesFor(store, pausedList[0], tiers)], [true, []]);
+  const pausedPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+  const pausedSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
+  is("a switch sent anyway changes nothing", [pausedPreview.ok ? "shown" : pausedPreview.reason, pausedSwitch.ok ? "switched" : pausedSwitch.reason], ["gone", "gone"]);
+  is("no price made, no preview asked, no subscription touched while paused", calls.slice(beforePause).filter((c) => c.method === "POST").map((c) => c.path), []);
+  pausedSub = false;
+  // A pause in a shape Stripe does not send (a string, a number, true): unknown, so refused as a pause, never read as none.
+  for (const shape of ["void", 1, true] as unknown[]) {
+    pauseShape = shape;
+    const beforeOdd = calls.length;
+    const oddPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+    const oddSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, Math.floor(Date.now() / 1000), TEST_CONSENT);
+    is(`a pause read as ${JSON.stringify(shape)} refuses the switch too`, [oddPreview.ok ? "shown" : oddPreview.reason, oddSwitch.ok ? "switched" : oddSwitch.reason, calls.slice(beforeOdd).filter((c) => c.method === "POST").length], ["gone", "gone", 0]);
+  }
+  pauseShape = null;
+
+  part("A membership with a pause set, by this code or by hand (Claude 6, R43 F4; answered as main has it)");
   // Stripe voids every invoice while pause_collection is "void" (lib/membership-pause.ts), so a switch's charge
-  // could be voided and the new tier handed over for nothing. Refused like the yearly move (lib/yearly-switch-rules.ts).
+  // could be voided and the new tier handed over for nothing. Refused like the yearly move (lib/yearly-switch-rules.ts),
+  // with main's answer, "gone" (the case above), and no tier offered even for a pause set on Stripe by hand.
   const nowS = Math.floor(Date.now() / 1000);
   for (const [label, pause, meta] of [
     ["a pause set to start when the paid period ends", { behavior: "void", resumes_at: nowS + 40 * 86_400 }, { pause_from: String(nowS + 10 * 86_400) }],
@@ -222,13 +251,13 @@ async function main(): Promise<void> {
   ] as const) {
     pausedWith = pause;
     pauseMeta = meta;
-    const beforePause = calls.length;
-    const pausedList = (await membershipsFor(store, token))!;
-    is(`${label}: no tier offered, on the member's page or the leaving one`, choicesFor(store, pausedList[0], tiers), []);
-    const pausedPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
-    const pausedSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, nowS, TEST_CONSENT);
-    is(`${label}: a link to a switch says why`, [pausedPreview.ok ? "shown" : pausedPreview.reason, pausedSwitch.ok ? "switched" : pausedSwitch.reason], ["paused", "paused"]);
-    is(`${label}: no price made, no preview asked, no subscription touched`, calls.slice(beforePause).filter((c) => c.method === "POST").map((c) => c.path), []);
+    const beforeSet = calls.length;
+    const setList = (await membershipsFor(store, token))!;
+    is(`${label}: no tier offered, on the member's page or the leaving one`, choicesFor(store, setList[0], tiers), []);
+    const setPreview = await previewSwitch(store, token, "sub_Member0001", b.product.id);
+    const setSwitch = await switchTier(store, token, "sub_Member0001", b.product.id, nowS, TEST_CONSENT);
+    is(`${label}: a link to a switch changes nothing`, [setPreview.ok ? "shown" : setPreview.reason, setSwitch.ok ? "switched" : setSwitch.reason], ["gone", "gone"]);
+    is(`${label}: no price made, no preview asked, no subscription touched`, calls.slice(beforeSet).filter((c) => c.method === "POST").map((c) => c.path), []);
   }
   const pausedForm = withConsent(new URLSearchParams({ handle: "harbor", token, sub: "sub_Member0001", to: b.product.id, at: String(nowS) }));
   const pausedBack = await switchRoute(new NextRequest("https://marktmorgen.com/api/store/manage/switch", {
@@ -236,13 +265,8 @@ async function main(): Promise<void> {
     headers: { Host: "marktmorgen.com", Origin: "https://marktmorgen.com", "Content-Type": "application/x-www-form-urlencoded", "x-forwarded-for": "203.0.113.9" },
     body: pausedForm.toString(),
   }));
-  // Never "paused": that status is the pause's own notice ("Your membership is paused ... an email with the dates").
-  is("the button: back to the member's page with its own notice", new URL(pausedBack.headers.get("location") ?? "https://x.invalid/").searchParams.get("status"), "switch-paused");
-  is("which says why in every language", (["en", "es", "fr", "de", "it", "nl", "pt"] as const).every((l) => membershipWords(l).switchProblems.paused?.body.length > 40 && membershipWords(l).switchProblems.paused?.title.length > 10), true);
-  is("in plain words", [membershipWords("en").switchProblems.paused?.title, membershipWords("en").switchProblems.paused?.body], [
-    "This membership has a pause set",
-    "So it stays on its plan until the pause ends. To switch sooner, resume it on your membership page first. Nothing was changed.",
-  ]);
+  // Main's answer for a pause: the member's page with "That switch cannot be made"; never "paused", the pause's own notice.
+  is("the button: back to the member's page, the switch refused", new URL(pausedBack.headers.get("location") ?? "https://x.invalid/").searchParams.get("status"), "cannot-switch");
   pausedWith = null;
   pauseMeta = {};
 

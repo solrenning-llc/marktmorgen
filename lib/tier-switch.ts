@@ -29,11 +29,11 @@
  * next charge (Claude 4 team review of #2912, A1).
  *
  * A membership with a pause set (lib/membership-pause.ts), started or still to
- * start, is not switched either ("paused"), as the yearly move is not
+ * start, is not switched either, as the yearly move is not
  * (lib/yearly-switch-rules.ts): Stripe voids every invoice under a "void"
  * pause, so the switch's charge could be voided and the new tier handed over
- * for nothing (Claude 6, R43 F4). It opens again once the pause is over or
- * the member resumes.
+ * for nothing (Claude 6, R43 F4). A link sent anyway answers "gone", as main
+ * has it. It opens again once the pause is over or the member resumes.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { StripeError, onAccount } from "@/lib/stripe-account";
@@ -45,7 +45,6 @@ import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from
 import { canTier, direction, dueNow, productOfSub } from "@/lib/tier-rules";
 import { formatMoney } from "@/lib/money";
 import { inPaidFreeDays } from "@/lib/member-free-days-rules";
-import { type PauseSub, pauseSet } from "@/lib/membership-pause-rules";
 import { membershipLine } from "@/lib/buyer-words";
 import { membershipWords } from "@/lib/buyer-words/membership";
 import { DEFAULT_LANGUAGE, LANGUAGES, parseLanguage } from "@/lib/store-language";
@@ -96,8 +95,10 @@ export function tierWords(store: Store, product: Listing, language: unknown = DE
 /** The tiers one membership can switch to; none when it cannot switch at all. */
 export function choicesFor(store: Store, membership: Membership, tiers: Listing[]): TierChoice[] {
   if (membership.endsAt !== null || membership.fixedEnd || !SWITCHABLE.has(membership.status)) return [];
-  // A pause set on it, of any kind: nothing is offered until it is over (find says why on a link).
-  if (membership.pauseSet) return [];
+  // A pause asked for, started or still to start: Stripe holds its charges, so a switch's prorated invoice would be
+  // voided (a move up for nothing, a move down promised a credit never given). None is offered, as for a yearly switch.
+  // A pause Stripe carries without the day it starts (set by hand, pauseSet) is refused here too, never read as none.
+  if (membership.pause !== null || membership.pauseSet) return [];
   // Paid in another currency than the store's now (it changed its currency since): every tier is
   // priced in the store's, so a switch would change the subscription's currency. None is offered.
   if (membership.currency.toLowerCase() !== store.currency) return [];
@@ -304,12 +305,12 @@ export type Preview = {
   digital: boolean;
 };
 
-export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" | "error" };
+export type PreviewResult = { ok: true; preview: Preview } | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "error" };
 
 type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: string; from: Listing; to: Listing; trialing: boolean };
 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
-async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" }> {
+async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
   const grant = await grantOf(store, token);
   if (!grant) return { reason: "expired" };
@@ -318,8 +319,9 @@ async function find(store: Store, token: string, subscription: string, target: s
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
   // Paid, in free days: Stripe would prorate nothing, so nothing is switched until they end.
   if (inPaidFreeDays(sub as Record<string, unknown>)) return { reason: "freeDays" };
-  // A pause set on it: Stripe would void the switch's charge, so nothing is switched until it is over.
-  if (pauseSet(sub as PauseSub)) return { reason: "paused" };
+  // Its charges held by a pause (choicesFor): refused, whatever the page was sent. Stripe answers null or an object;
+  // anything else is unknown (rule 24) and refused as a pause, never read as none.
+  if (sub.pause_collection !== null && sub.pause_collection !== undefined) return { reason: "gone" };
   const itemId = typeof sub.items?.data?.[0]?.id === "string" ? (sub.items.data[0].id as string) : "";
   if (!itemId || (sub.items?.data?.length ?? 0) !== 1) return { reason: "gone" };
   // The new tier's Price is made in the store's currency (tierPrice); a subscription
@@ -369,7 +371,7 @@ export async function previewSwitch(store: Store, token: string, subscription: s
 
 export type SwitchResult =
   | { ok: true; title: string }
-  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "paused" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
+  | { ok: false; reason: "expired" | "gone" | "tier" | "currency" | "freeDays" | "stale" | "declined" | "busy" | "consent" | "unconfirmed" | "error" };
 
 /**
  * Makes the switch, at the second the preview was worked out for. The card on

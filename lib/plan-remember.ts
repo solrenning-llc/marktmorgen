@@ -56,8 +56,8 @@ export async function rememberPlan(account: string, session: string, about?: { s
   if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) throw new Error("A plan's checkout cannot be written down: not a Stripe account and checkout session");
   const sid = about && STORE_ID.test(about.sid) ? about.sid : "";
   const product = about && PRODUCT_ID.test(about.product) ? about.product : "";
-  const member = memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false });
-  const replies = await redisPipeline([["SADD", PENDING, member]]);
+  const line = memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false });
+  const replies = await redisPipeline([["SADD", PENDING, line]]);
   const added = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
   if (added !== 0 && added !== 1) throw new Error("Redis did not confirm the plan's checkout was written down");
 }

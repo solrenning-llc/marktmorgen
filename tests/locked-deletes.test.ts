@@ -71,6 +71,7 @@ import { POST as rassistant_settings } from "@/app/api/store/assistant-settings/
 import { POST as rblog } from "@/app/api/store/blog/route";
 import { POST as rbundle } from "@/app/api/store/bundle/route";
 import { POST as rbusiness_tasks } from "@/app/api/store/business-tasks/route";
+import { POST as rcampaign_landing } from "@/app/api/store/campaign-landing/route";
 import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
 import { POST as rcommunity_events } from "@/app/api/store/community/events/route";
@@ -130,6 +131,7 @@ const ROUTES: Record<string, Handler> = {
   "blog": rblog as Handler,
   "bundle": rbundle as Handler,
   "business-tasks": rbusiness_tasks as Handler,
+  "campaign-landing": rcampaign_landing as Handler,
   "community": rcommunity as Handler,
   "community/chat": rcommunity_chat as Handler,
   "community/events": rcommunity_events as Handler,
@@ -326,6 +328,7 @@ async function main(): Promise<void> {
     ["option", { action: "remove", id: "x" }],
     ["podcast", { action: "remove", id: xid, episode: "x" }],
     ["page-funnels", { action: "remove", id: "x" }],
+    ["campaign-landing", { action: "remove", product: xid, campaign: "x" }],
     ["stream/captions", { action: "remove", lessonId: "x", lang: "en" }],
   ];
   for (const [path, body] of plainRoutes) is(`${path}: ${String(body.action)} is refused`, await answer(await (await route(path))(json(`/api/store/${path}`, locked, body))), LOCKED);
@@ -441,9 +444,11 @@ async function main(): Promise<void> {
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "business-tasks": ["act:settings:remove"],
     "calendar": ["need:settings"],
+    "campaign-landing": ["act:products:remove"],
     "community": ["lockedFor"],
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
+    "community/challenges": ["act:events:delete"],
     "community/approval": ["act:community:held-remove", "need:settings"],
     "community/manage": ["act:community:report-delete", "need:settings"],
     "community/push": ["not:a member's own device, signed up for notifications again at will"],
@@ -552,6 +557,7 @@ async function main(): Promise<void> {
     "business-tasks": { add: "open:adds", done: "open:reversible", edit: "open:edits", remove: "act:settings" },
     "assistant-memory": "need:settings",
     "calendar": "need:settings",
+    "campaign-landing": { remove: "act:products", save: "open:edits" },
     "community": {
       comment: "open:adds", delete: "lockedFor", "delete-comment": "lockedFor", edit: "open:edits", "edit-comment": "open:edits",
       hide: "open:reversible", "hide-comment": "open:reversible", like: "open:adds", "like-comment": "open:adds", mute: "open:reversible",
@@ -562,6 +568,7 @@ async function main(): Promise<void> {
     "community/approval": { approve: "open:adds", remove: "act:community:held-remove", setting: "need:settings" },
     "community/chat": { clear: "lockedFor", say: "open:adds", unsay: "lockedFor" },
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
+    "community/challenges": { create: "open:adds", delete: "act:events" },
     "community/manage": {
       access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",
@@ -569,7 +576,7 @@ async function main(): Promise<void> {
     },
     "community/push": "not:a member's own device, signed up for notifications again at will",
     "course": {
-      block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
+      "access-end": "open:edits", block: "open:reversible", body: "open:edits", cert: "open:reversible", "cert-months": "open:edits", "cm-delete": "act:products",
       "cm-hide": "open:reversible", "cm-on": "open:reversible", "cm-reply": "open:adds", disable: "open:only a course with nothing in it turns back into a product",
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
@@ -602,7 +609,8 @@ async function main(): Promise<void> {
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",
-      "flow-resolve": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send", import: "need:send",
+      "flow-resolve": "need:send", "flow-restore": "need:send", "flow-run": "need:send", "flow-runs": "need:send", "flow-sample": "need:send",
+       "flow-versions": "need:send", import: "need:send",
       keep: "need:send", "segment-remove": "act:draft", "segment-save": "open:edits", settings: "need:settings", starters: "need:send",
       test: "open:one email to the person who pressed it, at their own address",
     },

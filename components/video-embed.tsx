@@ -19,6 +19,7 @@ export function VideoEmbed({
   title,
   poster,
   inert = false,
+  priority = false,
   lang = "en",
 }: {
   video: Video;
@@ -30,6 +31,12 @@ export function VideoEmbed({
   poster: { src: string; alt: string; width: number; height: number } | null;
   /** In the studio's preview: drawn, never played. */
   inert?: boolean;
+  /**
+   * The video is the top of the page (a sales page's hero, always its first block): the still is what a phone paints
+   * largest first, so the browser is told to fetch it ahead of the rest, as the hero's picture is. Anywhere else,
+   * left out: one picture a page, or the hint means nothing (281 [SF1]).
+   */
+  priority?: boolean;
   /** The page's language, for the button and the frame's name (lib/buyer-words/blocks.ts). */
   lang?: string;
 }) {
@@ -56,7 +63,7 @@ export function VideoEmbed({
     <div className="sp-video">
       {poster ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={poster.src} alt="" width={poster.width} height={poster.height} className="sp-video-poster" />
+        <img src={poster.src} alt="" width={poster.width} height={poster.height} fetchPriority={priority ? "high" : undefined} className="sp-video-poster" />
       ) : (
         <span aria-hidden="true" className="sp-video-poster sp-video-colours" />
       )}

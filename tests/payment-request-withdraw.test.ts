@@ -140,6 +140,41 @@ async function main(): Promise<void> {
   is("an \"expired\" receipt naming another checkout: refused, still open", [await outcome(foreign), (await requestOf(store, foreign))?.state], ["error", "open"]);
   globalThis.fetch = realFetch;
 
+  part("Claude 5 on #4513 (MEDIUM): Stripe saying it does not know the checkout is not a checkout closed");
+  // The request does not keep which Stripe account its checkout was opened on: after the creator connects another
+  // account, the read goes there and answers 404, while the checkout stays open and payable on the first one.
+  await setStripeAccount(owner, "acct_1Withdrawyyyyyy", true, { expected: "acct_1Withdrawxxxxxx" });
+  const switched = await make();
+  await withSession(switched, "cs_test_onaccountA1", { status: "open", payment_status: "unpaid" });
+  delete sessions["cs_test_onaccountA1"];
+  const closedBefore = expired.length;
+  is("a 404 on the store's current account: refused, still open, nothing closed",
+    [await outcome(switched), (await requestOf(store, switched))?.state, expired.length - closedBefore], ["error", "open", 0]);
+  // Claude 4 on #4513 (LOW): a 200 reply with an empty body says nothing either.
+  const blank = await make();
+  await withSession(blank, "cs_test_blankwd1234", { status: "open", payment_status: "unpaid" });
+  sessions["cs_test_blankwd1234"] = {};
+  is("an empty 200 reply about an open checkout: refused, still open, nothing closed",
+    [await outcome(blank), (await requestOf(store, blank))?.state, expired.length - closedBefore], ["error", "open", 0]);
+
+  part("Claude 5 on #4513 (LOW): withdrawn only while its checkout is still the one closed");
+  // Past the hold's term, another "Pay" can write a new checkout before the withdrawal's write: never withdraw then.
+  const later = await make();
+  await withSession(later, "cs_test_firstchk123", { status: "open", payment_status: "unpaid" });
+  const unpatched = redis.pipeline.bind(redis);
+  let swapped = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!swapped && expired.includes("cs_test_firstchk123") && commands[0]?.[0] === "SET" && String(commands[0][1]) === `nl:payreq:w:${later}`) {
+      swapped = true;
+      redis.pipeline = unpatched;
+      await withSession(later, "cs_test_secondchk12", { status: "open", payment_status: "unpaid" });
+    }
+    return unpatched(commands);
+  }) as typeof redis.pipeline;
+  is("a new checkout written before the withdrawal: refused as busy, still open with the new checkout",
+    [await outcome(later), swapped, (await requestOf(store, later))?.state, (await requestOf(store, later))?.session], ["busy", true, "open", "cs_test_secondchk12"]);
+  redis.pipeline = unpatched;
+
   part("Nothing to close: withdrawn with no call to Stripe");
   const plain = await make();
   calls = 0;

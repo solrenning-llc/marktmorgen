@@ -344,6 +344,46 @@ async function main(): Promise<void> {
     is("a visit after the walk takes no room again for its pairs", await used(), walked);
   }
 
+  part("A pairs write that fails leaves the student unmarked, so a later visit writes them (Claude 5 on #3344, LOW)");
+  {
+    const store = await setup();
+    await registerDrip(store, PRODUCT as never, COURSE);
+    const email = "zadd-fails@example.com";
+    // The ZADD answered with an error and not run; every other command of the pipeline runs (Upstash runs each one).
+    inject = (commands) =>
+      commands.some((c) => c[0] === "ZADD")
+        ? (async () => {
+            const out: unknown[] = [];
+            for (const c of commands) out.push(c[0] === "ZADD" ? { error: "OOM command not allowed" } : (await original([c]))[0]);
+            return out;
+          })()
+        : null;
+    await quietly(() => touchStudent(COURSE.id, email, NOW, store, { course: COURSE, productId: PRODUCT.id }).catch(() => undefined));
+    inject = null;
+    const row = (await original([["HGET", `nl:course:${COURSE.id}:students`, emailKey(email)]]))[0];
+    is("the row is not marked indexed when its pairs were not written", typeof row === "string" ? (JSON.parse(row) as { i?: number }).i ?? 0 : "no row", 0);
+    await touchStudent(COURSE.id, email, NOW, store, { course: COURSE, productId: PRODUCT.id });
+    is("the next visit writes the pairs", (await entries(store)).includes(member(COURSE, email, "module000003")), true);
+  }
+
+  part("Pending courses that cannot be read never keep the others from their turn (Claude 5 on #3344, LOW)");
+  {
+    const store = await setup();
+    const stuck = Array.from({ length: L.DRIP_INDEX_PAGES_PER_RUN as number }, (_, n) => `${String(n).padStart(32, "0")}|${store.handle}|prod${String(n).padStart(8, "0")}`);
+    const later = `${"f".repeat(32)}|${store.handle}|${PRODUCT.id}`;
+    // Cards that cannot be read: an object where a card's JSON should be, so each stays pending, unknown.
+    for (const m of stuck) await original([["SET", `nl:drip:card:${m.split("|")[0]}`, "{not json"]]);
+    const lateCourse = courseOf("f".repeat(32), [{ id: "module000001", dripDays: 0 }, { id: "module000003", dripDays: 30 }]);
+    await registerDrip(store, PRODUCT as never, lateCourse);
+    await original([["SADD", pendingKey(store), ...stuck, later]]);
+    let walked = false;
+    for (let day = 0; day < 12 && !walked; day += 1) {
+      await quietly(() => run(store, NOW + day * DAY, async (id) => (id === lateCourse.id ? lateCourse : null)));
+      walked = !(await original([["SISMEMBER", pendingKey(store), later]]))[0];
+    }
+    is("the course behind them is walked within days", walked, true);
+  }
+
   part("A store that pays nothing is walked too, and its share prices the walk (Claude 5 on #3344, MEDIUM 3)");
   {
     const source = readFileSync("tests/plan-cost-registry.ts", "utf8");

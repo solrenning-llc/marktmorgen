@@ -21,6 +21,7 @@ import { revokeAllKeys } from "@/lib/api-keys";
 import { endLapsed, findStoreSubscriptions, isBillingConfigured } from "@/lib/billing";
 import { forgetPath } from "@/lib/path";
 import { queueStoreForget } from "@/lib/store-forget-retry";
+import { DELETED_STORE_DELETE_BATCH, DELETED_STORE_LIST_PAGES } from "@/lib/deleted-store-files";
 import { forgetStoreCalendar } from "@/lib/calendar-sync";
 import { forgetMemory } from "@/lib/assistant-memory-store";
 
@@ -30,8 +31,10 @@ import { forgetMemory } from "@/lib/assistant-memory-store";
  * (lib/plan-closing.ts removeStored reads the record first), so they go now. A delete that fails goes to the daily job
  * that deletes uploads nobody keeps (sweepTaskUploads, app/api/cron/courses); a folder that cannot be listed is said in
  * the log and answers false, and the route puts the store in the daily line of lib/store-forget-retry.ts, which lists
- * every folder again from the store's id (lib/deleted-store-files.ts; #4348). Its cost: one listing of each folder and
- * a delete per hundred files, once for a store.
+ * every folder again from the store's id (lib/deleted-store-files.ts; #4348). Its cost: each folder listed to
+ * DELETED_STORE_LIST_PAGES pages at most (a folder with more is not listed further, and goes in line), a delete per
+ * DELETED_STORE_DELETE_BATCH files, once for a store: the first pass of the line deleted-store-files
+ * (tests/plan-cost-registry.ts).
  */
 async function forgetStoreFiles(store: Store): Promise<boolean> {
   const ref = storeRef(store);
@@ -46,14 +49,14 @@ async function forgetStoreFiles(store: Store): Promise<boolean> {
   for (const prefix of prefixes) {
     let paths: string[];
     try {
-      paths = await listFiles(prefix);
+      paths = await listFiles(prefix, DELETED_STORE_LIST_PAGES);
     } catch (error) {
       console.error(`a deleted store's files under ${prefix.split("/")[0]}/ could not be listed; they go in line to try again`, error);
       listedAll = false;
       continue;
     }
-    for (let at = 0; at < paths.length; at += 100) {
-      const some = paths.slice(at, at + 100);
+    for (let at = 0; at < paths.length; at += DELETED_STORE_DELETE_BATCH) {
+      const some = paths.slice(at, at + DELETED_STORE_DELETE_BATCH);
       await deleteFile(some).catch(async (error: unknown) => {
         console.error("a deleted store's files could not be deleted now; they go to the daily job", error);
         for (const path of some) await noteTaskUpload(path, 0).catch((noteError: unknown) => console.error("a deleted store's file could not be handed to the daily job", noteError));

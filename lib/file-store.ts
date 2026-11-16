@@ -106,14 +106,21 @@ export async function writeFileWhole(pathname: string, bytes: Uint8Array, conten
  * Every path kept under a prefix, in the store the prefix belongs to. Throws when it cannot be read, or when a
  * page is not in its exact shape (CX-123 rule 24): "has more" without a new cursor, a cursor handed out twice, a
  * page that does not say whether more follows, or a path outside the prefix is unknown, never the end of the
- * folder, so a caller deleting what is listed never takes a partial folder for the whole one.
+ * folder, so a caller deleting what is listed never takes a partial folder for the whole one. `maxPages` (a
+ * thousand paths a page) bounds what one listing may ask: a folder with more throws, never read further.
  */
-export async function listFiles(prefix: string): Promise<string[]> {
+export async function listFiles(prefix: string, maxPages = Number.POSITIVE_INFINITY): Promise<string[]> {
   const out: string[] = [];
   const seen = new Set<string>();
+  let pages = 0;
+  const nextPage = () => {
+    if (pages >= maxPages) throw new Error("storage listing exceeded page limit");
+    pages += 1;
+  };
   if (prefix.startsWith(`${VAULT_PREFIX}/`)) {
     let cursor: string | undefined;
     do {
+      nextPage();
       const page = await listVault(prefix, cursor);
       if (!page) throw new Error("the file store could not be listed");
       out.push(...page.files.map((file) => file.pathname));
@@ -125,6 +132,7 @@ export async function listFiles(prefix: string): Promise<string[]> {
   }
   let cursor: string | undefined;
   for (;;) {
+    nextPage();
     const page = await blob.list({ prefix, cursor, limit: 1000 });
     if (!page || !Array.isArray(page.blobs) || typeof page.hasMore !== "boolean") throw new Error("invalid storage listing");
     for (const entry of page.blobs) {

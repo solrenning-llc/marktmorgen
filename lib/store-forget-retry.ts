@@ -36,6 +36,13 @@
  * whose try at the delete (held in tests/sg2-unknown-replies.test.ts) or at the walk's
  * admission failed; another round starts only when a try at the walk's admission fails
  * while the line no longer holds the store (each such try is the walk's: one a run).
+ *
+ * Since #4348 a try also deletes the store's files (lib/deleted-store-files.ts), whose Blob listings, deletes and
+ * Redis DEL are priced in the line deleted-store-files of tests/plan-cost-registry.ts: a pass the deadline cuts off
+ * (OutOfTime) spends no try up to FORGET_LATE_PASSES times a round, and counts as a failed try after that, so a round
+ * takes at most FORGET_TRIES tries and FORGET_LATE_PASSES late passes; and a round started while the store is among
+ * the given-up ones (nl:forget:kept, a round the walk starts) forgets its keys only, never its files again
+ * (`files: false`), so its files take one round's passes at most (review of #4348, Claude 7's MÉDIO on f0320f0425).
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor, stringList } from "@/lib/redis-reply";
@@ -48,6 +55,8 @@ import { COMMUNITY_ID } from "@/lib/community-text";
 
 /** Tries in all, the first one at the delete included: a week of daily runs and one more. */
 export const FORGET_TRIES = 8;
+/** Passes of a round the deadline may cut off (OutOfTime) without spending a try; past them, a cut-off pass is a failed try. */
+export const FORGET_LATE_PASSES = 8;
 /** Stores tried again in one run of the closing job. */
 export const FORGET_PER_RUN = 25;
 /** The most Redis commands one try can send (see above). */
@@ -64,8 +73,12 @@ const monthOf = (now: number) => new Date(now).toISOString().slice(0, 7);
 const STATS_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SID = /^[0-9a-f]{32}$/;
 
-/** `community`: the deleted store's community id, the one folder of its files not made from its id (lib/deleted-store-files.ts). */
-type Entry = { tries: number; first: number; last: number; community?: string };
+/**
+ * `community`: the deleted store's community id, the one folder of its files not made from its id
+ * (lib/deleted-store-files.ts); `late`: passes of this round the deadline cut off; `files: false`: a round started
+ * after one was given up, which forgets the keys only.
+ */
+type Entry = { tries: number; first: number; last: number; community?: string; late?: number; files?: false };
 
 function parseEntry(raw: unknown): Entry | null {
   if (typeof raw !== "string") return null;
@@ -73,7 +86,11 @@ function parseEntry(raw: unknown): Entry | null {
     const v = JSON.parse(raw) as Partial<Entry>;
     if (!Number.isSafeInteger(v.tries) || (v.tries as number) < 1 || !Number.isSafeInteger(v.first) || !Number.isSafeInteger(v.last)) return null;
     const community = typeof v.community === "string" && COMMUNITY_ID.test(v.community) ? { community: v.community } : {};
-    return { tries: v.tries as number, first: v.first as number, last: v.last as number, ...community };
+    if (v.late !== undefined && (!Number.isSafeInteger(v.late) || (v.late as number) < 0)) return null;
+    if (v.files !== undefined && v.files !== false) return null;
+    const late = v.late ? { late: v.late as number } : {};
+    const files = v.files === false ? { files: false as const } : {};
+    return { tries: v.tries as number, first: v.first as number, last: v.last as number, ...community, ...late, ...files };
   } catch {
     return null;
   }
@@ -93,7 +110,11 @@ function fieldOf(statsId: string | null, sid: string): string | null {
 export async function queueStoreForget(statsId: string | null, sid: string, now = Date.now(), community: string | null = null): Promise<void> {
   const field = fieldOf(statsId, sid);
   if (!field || !isRedisConfigured()) throw new Error("a deleted store's forgetting could not be put in line");
-  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}) };
+  // Given up before (the walk starting another round): its keys are tried again, its files are not.
+  const [kept] = await redisPipeline([["HEXISTS", KEPT, field]]);
+  const givenUp = countOf(kept);
+  if (givenUp === null) throw new Error("reading whether a deleted store's forgetting was given up answered in an unknown shape");
+  const entry: Entry = { tries: 1, first: now, last: now, ...(community && COMMUNITY_ID.test(community) ? { community } : {}), ...(givenUp === 1 ? { files: false as const } : {}) };
   const [added] = await redisPipeline([["HSETNX", QUEUE, field, JSON.stringify(entry)]]);
   const n = countOf(added);
   if (n === null) throw new Error("putting a deleted store's forgetting in line answered in an unknown shape");
@@ -105,7 +126,7 @@ export async function queueStoreForget(statsId: string | null, sid: string, now 
  * lib/api-keys.ts, lib/assistant-memory-store.ts). The assistant's notes give
  * their room back to the store's data room, which outlives the store.
  */
-export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number) => Promise<void>;
+export type ForgetWork = (statsId: string | null, sid: string, community: string | null, until: number, files: boolean) => Promise<void>;
 /** The Redis forgets alone: what the closing walk's admission does again (lib/closed-store-data.ts, admitDeleted). */
 export const forgetBoth = async (statsId: string | null, sid: string): Promise<void> => {
   await forgetStoreWebhooks(statsId);
@@ -114,13 +135,13 @@ export const forgetBoth = async (statsId: string | null, sid: string): Promise<v
   await forgetMemory(statsId, { sid, statsId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" });
 };
 /**
- * One try from the line: the Redis forgets, and its files: pictures, community pictures, anything left in its folders
- * (lib/deleted-store-files.ts), stopped at the line's deadline (OutOfTime) so a slow file store cannot run into the
- * closing job's own time.
+ * One try from the line: the Redis forgets, and, in its first round (`files`), its files: pictures, community
+ * pictures, anything left in its folders (lib/deleted-store-files.ts), stopped at the line's deadline (OutOfTime) so a
+ * slow file store cannot run into the closing job's own time.
  */
-const forgetTry: ForgetWork = async (statsId, sid, community, until) => {
+const forgetTry: ForgetWork = async (statsId, sid, community, until, files) => {
   await forgetBoth(statsId, sid);
-  await removeDeletedStoreFiles(sid, community, undefined, until);
+  if (files) await removeDeletedStoreFiles(sid, community, undefined, until);
 };
 
 /**
@@ -152,19 +173,22 @@ export async function retryStoreForgets(deadline: number, now = Date.now(), work
     const known = entry !== null && sid !== undefined && fieldOf(statsId, sid) === field;
     try {
       if (!known) throw new Error("an entry in an unknown shape");
-      await work(statsId, sid, entry?.community ?? null, deadline);
+      await work(statsId, sid, entry?.community ?? null, deadline, entry?.files !== false);
       await redisPipeline([["HDEL", QUEUE, field], ["HINCRBY", monthKey(monthOf(now)), "done", 1], ["EXPIRE", monthKey(monthOf(now)), MONTH_SECONDS]]);
       out.done += 1;
     } catch (error) {
-      if (known && error instanceof OutOfTime) {
-        // Cut off by the deadline, not failed: left for the next run, its tries untouched (review of #4348, MÉDIO 2).
+      const carried = { ...(entry?.community ? { community: entry.community } : {}), ...(entry?.files === false ? { files: false as const } : {}) };
+      if (known && entry && error instanceof OutOfTime && (entry.late ?? 0) < FORGET_LATE_PASSES) {
+        // Cut off by the deadline, not failed: left for the next run, its tries untouched (review of #4348, MÉDIO 2),
+        // up to FORGET_LATE_PASSES times a round; past them a cut-off pass is a failed try, so the round ends.
+        await redisPipeline([["HSET", QUEUE, field, JSON.stringify({ tries: entry.tries, first: entry.first, last: now, ...carried, late: (entry.late ?? 0) + 1 })]]);
         out.left += 1;
         continue;
       }
       const tries = (entry?.tries ?? FORGET_TRIES - 1) + 1;
       const gaveUp = !known || tries >= FORGET_TRIES;
       console.error(gaveUp ? "forgetting a deleted store's webhooks, keys and assistant notes was given up" : "forgetting a deleted store's webhooks, keys and assistant notes failed again", error);
-      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...(entry?.community ? { community: entry.community } : {}) });
+      const kept = JSON.stringify({ tries, first: entry?.first ?? now, last: now, ...carried, ...(entry?.late ? { late: entry.late } : {}) });
       // Given up: out of the daily line, into the kept ones, counted for the month.
       await redisPipeline(
         gaveUp

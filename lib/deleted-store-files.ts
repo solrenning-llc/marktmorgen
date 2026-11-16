@@ -22,8 +22,14 @@
  * Past `until` (the daily line's deadline) it stops before the next folder or batch and throws OutOfTime: what was
  * not reached is not a failure, and the line keeps the store for its next run without counting a try (MÉDIO 2).
  *
- * Its cost: one listing per folder page and one delete per hundred files, at the supplier's paid operation prices,
- * bounded by what the store kept (its storage brake) and run at most FORGET_TRIES times a deleted store.
+ * Its cost (review of #4348, Claude 7's MÉDIO on f0320f0425): a pass lists each folder at most
+ * DELETED_STORE_LIST_PAGES pages (a thousand paths a page; a folder with more fails the pass, which the line counts
+ * and finally gives up and reports, never lists further), sends at most one delete a DELETED_STORE_DELETE_BATCH
+ * files listed, and one Redis DEL for its community's picture count. The delete's own first try (app/api/store/stores,
+ * forgetStoreFiles) lists with the same ceiling. A deleted store takes at most FORGET_TRIES tries and
+ * FORGET_LATE_PASSES passes cut off by the deadline (lib/store-forget-retry.ts), its files only in its first round;
+ * all of them priced, at Blob's paid Advanced Operation price, in the line deleted-store-files of
+ * tests/plan-cost-registry.ts, held by tests/deleted-store-files-cost.test.ts.
  */
 import { deleteFile, listFiles } from "@/lib/file-store";
 import { communityFolder } from "@/lib/community-image";
@@ -33,7 +39,9 @@ import { imageFolder, storeFolder } from "@/lib/store";
 import { isVaultConfigured } from "@/lib/vault";
 
 /** Files deleted in one call. */
-const DELETE_BATCH = 100;
+export const DELETED_STORE_DELETE_BATCH = 100;
+/** Pages (a thousand paths each) one listing of a deleted store's folder may read: Blob's own page, as filesHeld bounds a store's folder. */
+export const DELETED_STORE_LIST_PAGES = 20;
 
 /** A deletion stopped at its deadline before every folder was seen to: not a failure, tried again whole next time. */
 export class OutOfTime extends Error {
@@ -53,7 +61,7 @@ export type FolderHands = {
 };
 
 const HANDS: FolderHands = {
-  list: listFiles,
+  list: (prefix) => listFiles(prefix, DELETED_STORE_LIST_PAGES),
   remove: deleteFile,
   vault: isVaultConfigured,
 };
@@ -92,12 +100,12 @@ export async function removeDeletedStoreFiles(sid: string, communityId: string |
     }
     try {
       const paths = await hands.list(prefix);
-      for (let at = 0; at < paths.length; at += DELETE_BATCH) {
+      for (let at = 0; at < paths.length; at += DELETED_STORE_DELETE_BATCH) {
         if (Date.now() > until) {
           late = true;
           break;
         }
-        const some = paths.slice(at, at + DELETE_BATCH);
+        const some = paths.slice(at, at + DELETED_STORE_DELETE_BATCH);
         await hands.remove(some);
         removed += some.length;
       }

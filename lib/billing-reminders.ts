@@ -89,6 +89,22 @@ async function walkList(
 }
 
 /**
+ * Whether a reminder's mark from before the plan, cycle and amount were in it is still held: "held" (that notice went
+ * for this date), "absent", or "unknown" when the store did not answer in a shape read exactly (rule 24).
+ */
+async function legacyHeld(legacy: string): Promise<"held" | "absent" | "unknown"> {
+  try {
+    const reply = repliesFor(await redisPipeline([["EXISTS", legacy]]), 1);
+    const count = reply ? countOf(reply[0]) : null;
+    if (count === 1) return "held";
+    if (count === 0) return "absent";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
  * Lets a reminder's mark go after its email did not go, so the next run tries again (rule 24, R24 crons item 6): tried
  * twice, and a mark still held is said (false, logged with its key), never swallowed, because it keeps that reminder
  * from being tried again until it runs out.
@@ -371,7 +387,18 @@ export async function sendReminders(nowSeconds = Math.floor(Date.now() / 1000)):
     const walked = await walkList(status, async (subscription) => {
       const reminder = dueReminder(subscription, nowSeconds);
       if (!reminder) return true;
-      const key = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
+      // Once per charge: its date, and the plan and amount it charges. A
+      // switch inside a trial keeps the trial's end, and one between plans
+      // of the same interval keeps the period's end, so the date alone would
+      // let the notice about the plan left stand for a charge of another
+      // amount. A mark from before the plan was in it (`legacy`) still
+      // counts for that date, so nobody is written to twice for it.
+      const legacy = `nl:remind:${reminder.kind}:${reminder.subscription}:${reminder.at}`;
+      const key = `${legacy}:${reminder.tier}:${reminder.cycle}:${reminder.amountCents}`;
+      // The old mark held: sent already. Unreadable: no email on a guess, read again on the next run (rule 24).
+      const before = await legacyHeld(legacy);
+      if (before === "held") return true;
+      if (before !== "absent") return false;
       // Ours, someone else's (sent already), or unknown: no email on a guess, read again on the next run (rule 24).
       const claimed = await claimMark(key, 60 * DAY);
       if (claimed === "taken") return true;

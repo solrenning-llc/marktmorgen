@@ -617,6 +617,10 @@ export const FAMILIES: Record<string, Family> = {
   "nl:wf:log:@lib/flow-runs.ts": { what: "A run's history", room: ["lib/flows.ts"] },
   "nl:wf:run:@lib/flow-runs.ts": { what: "A run", room: ["lib/flows.ts"] },
   "nl:wf:runs:@lib/flow-runs.ts": { what: "A workflow's runs", room: ["lib/flows.ts"] },
+  "nl:wf:ver:@lib/flow-versions.ts": { what: "A workflow's earlier versions", room: ["lib/flow-versions.ts"] },
+  "nl:wf:ver:idx:@lib/flow-versions.ts": { what: "Which workflows of a list have earlier versions kept, so forgetting the store finds them all", room: ["lib/flow-versions.ts"] },
+  "nl:wf:ver:pause:@lib/flow-versions.ts": short("A workflow's pause of edits after it kept a version, so an autosave inside it reads no versions: one key a workflow, FLOW_VERSION_PAUSE_SECONDS (ten minutes), counted as if each studio request left one for a day", "studio", 1, 128),
+  "nl:mail:flows:@lib/flow-versions.ts": { what: "The store's workflows, read in the push that keeps a version only while its workflow is there", room: ["lib/flows.ts"] },
   "nl:mail:flowstats:@lib/flow-stats.ts": { what: "A workflow's counts", parts: [capped(20 * KB, "A hash of counts for each of MAX_FLOWS.", src("lib/flow-limits.ts", "MAX_FLOWS"))] },
   "nl:mail:enr:@lib/flows.ts": { what: "Who started a workflow, 400 days", room: ["lib/flows.ts"] },
   "nl:flow-rotate:@lib/flows.ts": short("A store's lock while a workflow step shares its deals: one key a store, ROTATE_LOCK_SECONDS (two minutes), counted as if each run left one for a day", "run", 1, 128),
@@ -686,6 +690,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:lc:@lib/lesson-comments.ts": { what: "Lesson comments", room: ["lib/lesson-comments.ts"] },
   "nl:lnote:@lib/lesson-notes.ts": { what: "A student's private notes on lessons (290 [SQ1]): at most MAX_NOTES_PER_STUDENT of MAX_NOTE_CHARS each, MAX_NOTES_BYTES_PER_STUDENT a student, all students' notes in one slot (NOTES_TOTAL_FIELD) of at most studentNotesRoomFor, a tenth of the data room", room: ["lib/lesson-notes.ts"] },
   "nl:keys:@lib/licence-keys.ts": { what: "License keys: the pool, every key added, who got which", room: ["lib/licence-keys.ts"], parts: [item(512, "A key given: its record and who got it; or, in its place among the sales, the mark of a sale refunded before it had one (REFUNDED_SALE, shorter than a key; Claude 2's second review of #2868), or of one whose full refund is still pending (PENDING_REFUND_SALE, shorter than a key, turned into REFUNDED_SALE or cleared, never grown; Claude 2's focal review of #2868).", "membership"), capped(64 * KB, "The refunds already handled (sixty-one days after the last one read) and the marks.")] },
+  // 610 [WP9] unit 2: a key's devices, each a digest, taken in the room until the month the record expires in; its lock lives ten seconds.
+  "nl:keys:@lib/licence-activations.ts": { what: "The devices a license key runs on (one-way digests) and when the buyer freed one, and the lock of a change", room: ["lib/licence-activations.ts"] },
   // ---------------------------------------------------------------- lib/ m
   "nl:mail:clk:@lib/mail-clicks.ts": short("The emails whose links a person used, ninety days", "monthly", 90, 128, MAIL("list")),
   "nl:mail:mk:@lib/mail-clicks.ts": { what: "The stop token a link key was made from: one a contact, counted with it (TOKEN_BYTES)", room: ["lib/contacts.ts"] },
@@ -1082,7 +1088,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:upload-budget:v2:{YYYY-MM}@lib/upload-budget-policy.ts": company("The ledger's name", "The company's ledger."),
   "nl:upsell-slots:@lib/upsell.ts": short("The offers a checkout took", "order", 8, KEY),
   "nl:upsell:@lib/upsell.ts": short("An offer after paying: one or two an order", "order", 8, 2 * KB),
-  "nl:upsell:pending@lib/upsell.ts": company("Offers being charged", "One sorted set, minutes, each an order's."),
+  "nl:upsell:pending@lib/upsell.ts": company("Offers being charged", "One sorted set, each an order's, for minutes, or up to seven days while a bank payment clears."),
   "nl:@lib/usage-billing.ts": { what: "What a meter billed, is adding, told, a month", parts: [capped(3 * 3 * 14 * KEY, "Three meters, three marks, 400 days.")] },
   "nl:watch:monthly:@lib/usage-billing.ts": company("A subscription's monthly watching billed", "The company's billing of its own plan."),
   "nl:vault:fresh:@lib/vault.ts": short("A vault upload finished and not yet attached", "upload", 7, KEY),

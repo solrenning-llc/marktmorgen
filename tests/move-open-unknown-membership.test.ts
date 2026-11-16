@@ -100,20 +100,20 @@ async function main(): Promise<void> {
 
   part('Unknown membership rows must not become proof that no membership exists');
   const rows: [string, string, unknown, boolean | null][] = [
-    ['ada','unknown status',{status:'not-a-stripe-status',metadata:{product:productId}},null],
-    ['ben','active with omitted metadata',{status:'active'},null],
-    ['cy','active with null metadata',{status:'active',metadata:null},null],
-    ['dee','active with a numeric product',{status:'active',metadata:{product:17}},null],
-    ['eve','active matching control',{status:'active',metadata:{product:productId}},true],
-    ['fay','ended matching control',{status:'canceled',metadata:{product:productId}},false],
-    ['gus','active other product control',{status:'active',metadata:{product:'anotherproduct'}},false],
+    ['ada','unknown status',{id:'sub_Unknown0001',status:'not-a-stripe-status',metadata:{product:productId}},null],
+    ['ben','active with omitted metadata',{id:'sub_Unknown0002',status:'active'},null],
+    ['cy','active with null metadata',{id:'sub_Unknown0003',status:'active',metadata:null},null],
+    ['dee','active with a numeric product',{id:'sub_Unknown0004',status:'active',metadata:{product:17}},null],
+    ['eve','active matching control',{id:'sub_Control0001',status:'active',metadata:{product:productId}},true],
+    ['fay','ended matching control',{id:'sub_Control0002',status:'canceled',metadata:{product:productId}},false],
+    ['gus','active other product control',{id:'sub_Control0003',status:'active',metadata:{product:'anotherproduct'}},false],
   ];
   for(const [name,label,row,exists] of rows){
     paid.add(`${name}@example.com`);
     overrideSubscriptions={object:'list',data:[row],has_more:false};
     const before=checkouts.length;
     const response=await press(name);
-    const expected=exists===null?'refused':exists?'done':'opened';
+    const expected=exists===null?'refused':exists?'kept':'opened';
     is(`${label}: public opening and provider POST`,[response.ok?'opened':response.reason,checkouts.length-before],[expected,exists===false?1:0]);
     const kept=await keptAlready(store,`${name}@example.com`,productId).catch(()=> 'unknown');
     is(`${label}: reminder knowledge`,kept,exists===null?'unknown':exists);

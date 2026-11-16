@@ -162,7 +162,7 @@ async function main(): Promise<void> {
   advance((86_400 + 61) * 1000);
   const madeBefore = checkouts.length;
   const c2 = await press("cy");
-  is("after the mark: no second checkout; the link says it was moved", [c2.ok ? "opened" : c2.reason, checkouts.length - madeBefore], ["done", 0]);
+  is("after the mark: no second checkout; the link says it was kept (main's kept answer since #4121)", [c2.ok ? "opened" : c2.reason, checkouts.length - madeBefore], ["kept", 0]);
   is("and the invitation now reads as kept", (await readInvite(statsId, fields[people.indexOf("cy")]!))!.kept > 0, true);
   membershipsUnreadable = true;
   const e1 = await press("eve");
@@ -191,9 +191,9 @@ async function main(): Promise<void> {
   } finally {
     redis.pipeline = realPipe;
   }
-  is("the press says the membership was moved, and the mark is not left behind for a day", [failedOnce, h1, redis.run(["GET", mark("hal")])], [true, "done", null]);
+  is("the press says the membership was kept, and the mark is not left behind for a day", [failedOnce, h1, redis.run(["GET", mark("hal")])], [true, "kept", null]);
   const h2 = await press("hal");
-  is("the next press says it was moved too, and the invitation now reads as kept", [h2.ok ? "opened" : h2.reason, (await readInvite(statsId, fields[people.indexOf("hal")]!))!.kept > 0], ["done", true]);
+  is("the next press says it was kept too, and the invitation now reads as kept", [h2.ok ? "opened" : h2.reason, (await readInvite(statsId, fields[people.indexOf("hal")]!))!.kept > 0], ["kept", true]);
   done();
 }
 

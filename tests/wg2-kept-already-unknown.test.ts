@@ -9,7 +9,8 @@ import { done, is, part } from "./check";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_kept_only_a_stand_in";
 let customers: unknown = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
-let subscriptions: unknown = { object: "list", data: [{ status: "active", metadata: { product: "club000001" } }], has_more: false };
+// Each row with its id, as Stripe answers it: main's reader (readStripePage, since #4121) takes a row without one as unreadable.
+let subscriptions: unknown = { object: "list", data: [{ id: "sub_kept000001", status: "active", metadata: { product: "club000001" } }], has_more: false };
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input instanceof Request ? input.url : input));
   return new Response(JSON.stringify(url.pathname.endsWith("/customers") ? customers : subscriptions), { status: 200 });
@@ -46,7 +47,9 @@ async function main(): Promise<void> {
   is("the customers with more beyond the page", await ask(), "threw");
   customers = { object: "list", data: [{ id: "cus_kept000001" }] };
   is("the customers without has_more", await ask(), "threw");
-  customers = { object: "list", data: Array.from({ length: 11 }, (_, n) => ({ id: `cus_kept0000${String(n).padStart(2, "0")}` })), has_more: false };
+  // Altered in the merge of main (16/11/2026): main's keptAlready asks Stripe for a hundred records at a time (the PR
+  // asked for ten), so "more than were asked for" is now a hundred and one.
+  customers = { object: "list", data: Array.from({ length: 101 }, (_, n) => ({ id: `cus_kept000${String(n).padStart(3, "0")}` })), has_more: false };
   is("more customers than were asked for", await ask(), "threw");
   part("A row that does not read is unknown, never \"not kept\" (Codex CX1's MEDIUM on #3598)");
   customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
@@ -54,22 +57,22 @@ async function main(): Promise<void> {
     subscriptions = { object: "list", data: [sub], has_more: false };
     return ask();
   };
-  is("a status Stripe has no name for", await row({ status: "not-a-stripe-status", metadata: { product: "club000001" } }), "threw");
-  is("an active row with no metadata", await row({ status: "active" }), "threw");
-  is("an active row with null metadata", await row({ status: "active", metadata: null }), "threw");
-  is("an active row with a numeric product", await row({ status: "active", metadata: { product: 17 } }), "threw");
+  is("a status Stripe has no name for", await row({ id: "sub_kept000002", status: "not-a-stripe-status", metadata: { product: "club000001" } }), "threw");
+  is("an active row with no metadata", await row({ id: "sub_kept000003", status: "active" }), "threw");
+  is("an active row with null metadata", await row({ id: "sub_kept000004", status: "active", metadata: null }), "threw");
+  is("an active row with a numeric product", await row({ id: "sub_kept000005", status: "active", metadata: { product: 17 } }), "threw");
   is("a row that is not an object", await row("sub_kept000001"), "threw");
   subscriptions = { object: "list", data: [], has_more: false };
   customers = { object: "list", data: [{ object: "customer" }], has_more: false };
   is("a customer row with no id", await ask(), "threw");
   part("Rows that read, of another kind: not kept");
   customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
-  is("a canceled membership to the product", await row({ status: "canceled", metadata: { product: "club000001" } }), false);
-  is("a live membership to another product", await row({ status: "active", metadata: { product: "other000001" } }), false);
-  is("a live row with empty metadata", await row({ status: "active", metadata: {} }), false);
+  is("a canceled membership to the product", await row({ id: "sub_kept000006", status: "canceled", metadata: { product: "club000001" } }), false);
+  is("a live membership to another product", await row({ id: "sub_kept000007", status: "active", metadata: { product: "other000001" } }), false);
+  is("a live row with empty metadata", await row({ id: "sub_kept000008", status: "active", metadata: {} }), false);
   part("Controls, still");
   customers = { object: "list", data: [{ id: "cus_kept000001" }], has_more: false };
-  subscriptions = { object: "list", data: [{ status: "active", metadata: { product: "club000001" } }], has_more: false };
+  subscriptions = { object: "list", data: [{ id: "sub_kept000001", status: "active", metadata: { product: "club000001" } }], has_more: false };
   is("a whole list with a live membership: kept", await ask(), true);
   done();
 }

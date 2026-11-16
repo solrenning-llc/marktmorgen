@@ -129,7 +129,7 @@ export function CommunityStudio({
   products: ProductChoice[];
   queue: QueueRow[] | null;
   members: StudioMember[];
-  totals: { members: number; listed: number; posts: number; reach: number };
+  totals: { members: number; listed: number | null; posts: number | null; reach: number };
   canEmail: boolean;
   /**
    * Whether this person may set the community up (lib/team-roles.ts,
@@ -252,7 +252,7 @@ function Basics({
   busy: string | null;
   run: Runner;
   problem: Problem;
-  totals: { members: number; listed: number; posts: number; reach: number };
+  totals: { members: number; listed: number | null; posts: number | null; reach: number };
   canEmail: boolean;
 }) {
   const [name, setName] = useState(config.name);
@@ -276,7 +276,7 @@ function Basics({
           <p className="text-xs text-ink-soft">have come in</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.posts}</p>
+          <p className="text-xl font-semibold tabular-nums">{totals.posts === null ? "Not counted" : totals.posts}</p>
           <p className="text-xs text-ink-soft">posts</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">

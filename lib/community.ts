@@ -783,9 +783,15 @@ export async function directory(id: string, before: number | null, page: number)
   return { members, next: more ? scores[page - 1] : null };
 }
 
-export async function directorySize(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", dirKey(id)]]);
-  return Number(n) || 0;
+/** How many members chose to be listed; null when the count could not be read exactly (rule 24: never 0). */
+export async function directorySize(id: string): Promise<number | null> {
+  return exactCount(dirKey(id));
+}
+
+/** One ZCARD read in its exact shape: a whole number from zero up, or null for a failed read or any other reply. */
+async function exactCount(key: string): Promise<number | null> {
+  const replies = repliesFor(await redisPipeline([["ZCARD", key]]).catch(() => null), 1);
+  return replies ? countOf(replies[0]) : null;
 }
 
 /**
@@ -1057,9 +1063,9 @@ export async function feed(
   return { posts, next: more ? scores[page - 1] : null };
 }
 
-export async function postCount(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", feedKey(id)]]);
-  return Number(n) || 0;
+/** How many posts the feed holds; null when the count could not be read exactly (rule 24: never 0). */
+export async function postCount(id: string): Promise<number | null> {
+  return exactCount(feedKey(id));
 }
 
 /** How many liked each post, whether this member did, and how many comments each has. */

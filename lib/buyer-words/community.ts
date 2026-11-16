@@ -394,6 +394,7 @@ const en = {
   // ---- Members and the leaderboard -----------------------------------------------------------------
   listedTotal: (n: number) =>
     `${n} ${plural(n, "member has", "members have")} chosen to be listed. Only the name each chose is shown; nobody's email address is, ever.`,
+  listedPrivacy: "Only the name each listed member chose is shown; nobody's email address is, ever.",
   youListed: "You are listed.",
   youNotListed: "You are not listed.",
   changeThat: "Change that",
@@ -952,6 +953,7 @@ const es: CommunityWords = {
   keptNote: (count) => `Se guardan los últimos ${count} mensajes.`,
   listedTotal: (n) =>
     `${n} ${plural(n, "miembro ha", "miembros han")} elegido aparecer en la lista. Solo se muestra el nombre que eligió cada uno; la dirección de email de nadie, nunca.`,
+  listedPrivacy: "Solo se muestra el nombre que eligió cada miembro de la lista; la dirección de email de nadie, nunca.",
   youListed: "Apareces en la lista.",
   youNotListed: "No apareces en la lista.",
   changeThat: "Cambiarlo",
@@ -1503,6 +1505,7 @@ const fr: CommunityWords = {
   keptNote: (count) => `Les ${count}${S}derniers messages sont conservés.`,
   listedTotal: (n) =>
     `${n}${S}${frPlural(n, "membre a choisi", "membres ont choisi")} d'apparaître dans la liste. Seul le nom choisi par chacun est affiché${S}; jamais l'adresse e-mail de personne.`,
+  listedPrivacy: `Seul le nom choisi par chaque membre de la liste est affiché${S}; jamais l'adresse e-mail de personne.`,
   youListed: "Vous apparaissez dans la liste.",
   youNotListed: "Vous n'apparaissez pas dans la liste.",
   changeThat: "Modifier",
@@ -2054,6 +2057,7 @@ const de: CommunityWords = {
   keptNote: (count) => `Die letzten ${count} Nachrichten werden aufbewahrt.`,
   listedTotal: (n) =>
     `${n} ${plural(n, "Mitglied hat", "Mitglieder haben")} sich für die Liste entschieden. Gezeigt wird nur der Name, den jeder gewählt hat, niemals eine E-Mail-Adresse.`,
+  listedPrivacy: "Gezeigt wird nur der Name, den jedes Mitglied der Liste gewählt hat, niemals eine E-Mail-Adresse.",
   youListed: "Sie stehen in der Liste.",
   youNotListed: "Sie stehen nicht in der Liste.",
   changeThat: "Ändern",
@@ -2605,6 +2609,7 @@ const it: CommunityWords = {
   keptNote: (count) => `Vengono conservati gli ultimi ${count} messaggi.`,
   listedTotal: (n) =>
     `${n} ${plural(n, "membro ha", "membri hanno")} scelto di comparire nell'elenco. Si vede solo il nome scelto da ciascuno; l'indirizzo email di nessuno, mai.`,
+  listedPrivacy: "Si vede solo il nome scelto da ciascun membro dell'elenco; l'indirizzo email di nessuno, mai.",
   youListed: "Sei nell'elenco.",
   youNotListed: "Non sei nell'elenco.",
   changeThat: "Cambia",
@@ -3156,6 +3161,7 @@ const nl: CommunityWords = {
   keptNote: (count) => `De laatste ${count} berichten worden bewaard.`,
   listedTotal: (n) =>
     `${n} ${plural(n, "lid heeft", "leden hebben")} ervoor gekozen in de lijst te staan. Alleen de naam die ieder koos wordt getoond; nooit iemands e-mailadres.`,
+  listedPrivacy: "Alleen de naam die ieder lid in de lijst koos wordt getoond; nooit iemands e-mailadres.",
   youListed: "Je staat in de lijst.",
   youNotListed: "Je staat niet in de lijst.",
   changeThat: "Wijzigen",
@@ -3707,6 +3713,7 @@ const pt: CommunityWords = {
   keptNote: (count) => `As últimas ${count} mensagens ficam guardadas.`,
   listedTotal: (n) =>
     `${n} ${plural(n, "membro escolheu", "membros escolheram")} aparecer na lista. Só se mostra o nome que cada um escolheu; nunca o endereço de email de ninguém.`,
+  listedPrivacy: "Só se mostra o nome que cada membro da lista escolheu; nunca o endereço de email de ninguém.",
   youListed: "Está na lista.",
   youNotListed: "Não está na lista.",
   changeThat: "Alterar",

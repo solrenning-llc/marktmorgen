@@ -71,7 +71,7 @@ export default async function CommunityMembersPage({ params, searchParams }: Par
       <main id="content" className="mx-auto max-w-3xl px-4 pb-16 pt-6">
         <h1 className="font-display text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">{w.tabMembers}</h1>
         <p className="st-muted mt-2">
-          {w.listedTotal(total)}
+          {total === null ? w.listedPrivacy : w.listedTotal(total)}
         </p>
         {!viewer.owner ? (
           <p className="st-muted mt-1 text-sm">

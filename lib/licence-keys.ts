@@ -326,22 +326,30 @@ type SaleRead = SaleKey | { state: "refunded"; waiting: boolean } | { state: "pe
 
 async function readSale(store: Store, product: Listing, reference: string): Promise<SaleRead> {
   if (!store.statsId || !isRedisConfigured() || !reference) return null;
-  const [key, waiting] = await redisPipeline([
-    ["HGET", saleKey(store, product), reference],
-    ["HEXISTS", waitingKey(store, product), reference],
-  ]);
-  if (key === REFUNDED_SALE) return { state: "refunded", waiting: Number(waiting) === 1 };
+  // Each reply read in its exact shape (CX-123 rule 24): the sale's key as text or none, whether it waits as 0 or 1.
+  // Any other is not known, never "no key yet": it throws, and each caller says the key could not be read.
+  const line = repliesFor(
+    await redisPipeline([
+      ["HGET", saleKey(store, product), reference],
+      ["HEXISTS", waitingKey(store, product), reference],
+    ]),
+    2,
+  );
+  const [key, waiting] = line ?? [];
+  if (!line || (key !== null && typeof key !== "string") || (waiting !== 0 && waiting !== 1)) throw new UnknownReplyError("a sale's license key");
+  if (key === REFUNDED_SALE) return { state: "refunded", waiting: waiting === 1 };
   if (key === PENDING_REFUND_SALE) return { state: "pending" };
   if (typeof key === "string" && key) {
-    const [raw] = await redisPipeline([["HGET", infoKey(store, product), key]]);
-    // No record yet (the moment between the sale's key and its record in settle) is not revoked; a reply of another
-    // shape, or a record no writer writes, is unknown, never shown good or revoked (CX-123 rule 24).
+    const reply = repliesFor(await redisPipeline([["HGET", infoKey(store, product), key]]), 1);
+    const raw = reply?.[0];
+    // A record that does not read is not known, never a good key (this PR); no record yet (the moment between the
+    // sale's key and its record in settle) is not revoked, and a record no writer writes is unknown (main, readInfo).
+    if (!reply || (raw !== null && typeof raw !== "string")) throw new UnknownReplyError("a license key's record");
     if (raw === null) return { state: "issued", key, revoked: false };
-    if (typeof raw !== "string") throw new UnknownReplyError("HGET of a license key's record");
     return { state: "issued", key, revoked: Boolean(readInfo(raw).v) };
   }
   // Still waiting only while the product hands out keys: one switched off gives none.
-  return Number(waiting) === 1 && activeKeys(product) ? { state: "waiting" } : null;
+  return waiting === 1 && activeKeys(product) ? { state: "waiting" } : null;
 }
 
 /**

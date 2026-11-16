@@ -40,6 +40,7 @@ import { readPaid } from "@/lib/paypal-sales";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { type DataStore, giveData, needData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { onAccount } from "@/lib/stripe-account";
@@ -49,8 +50,9 @@ import { type Store, saleHandles } from "@/lib/store";
 import { listingFinder } from "@/lib/catalog";
 import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
-import { readFlows, flowsStartedFor } from "@/lib/flows";
+import { type Flow, readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
+import { lessonsInOrder, readCourse } from "@/lib/course";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
@@ -137,18 +139,30 @@ export function personNoteText(raw: unknown): string {
   return raw.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_PERSON_NOTE);
 }
 
-function parsePersonNotes(raw: unknown): PersonNote[] {
-  const flat = Array.isArray(raw) ? (raw as unknown[]).map(String) : [];
+/**
+ * The notes' hash (one HGETALL) read exactly, as addPersonNote writes it (rule 24; Claude 2 on #3159): one reply,
+ * a list of strings with an even count, each field a note's id and each value its JSON { at, by, text } with words.
+ * An empty list is a hash with nothing in it, so no notes; anything else throws UnknownReplyError, never "no notes",
+ * so the studio never says "No notes yet." about a buyer whose notes it could not read.
+ */
+function parsePersonNotes(replies: unknown): PersonNote[] {
+  const flat = stringList(repliesFor(replies, 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0) throw new UnknownReplyError("a buyer's notes");
   const out: PersonNote[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
+  for (let i = 0; i < flat.length; i += 2) {
     const id = flat[i];
-    if (!NOTE_ID.test(id)) continue;
+    let value: unknown;
     try {
-      const value = JSON.parse(flat[i + 1]) as Record<string, unknown>;
-      const text = personNoteText(value.text);
-      if (!text) continue;
-      out.push({ id, at: Number(value.at) || 0, by: typeof value.by === "string" ? value.by.slice(0, MAX_EMAIL_LENGTH) : "", text });
-    } catch {}
+      value = JSON.parse(flat[i + 1]);
+    } catch {
+      throw new UnknownReplyError("a buyer's notes");
+    }
+    const note = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+    const text = note && typeof note.text === "string" ? personNoteText(note.text) : "";
+    if (!NOTE_ID.test(id) || !note || !text || !Number.isSafeInteger(note.at) || (note.at as number) < 0 || typeof note.by !== "string") {
+      throw new UnknownReplyError("a buyer's notes");
+    }
+    out.push({ id, at: note.at as number, by: note.by.slice(0, MAX_EMAIL_LENGTH), text });
   }
   return out.sort((a, b) => b.at - a.at || a.id.localeCompare(b.id));
 }
@@ -157,10 +171,10 @@ function parsePersonNotes(raw: unknown): PersonNote[] {
 const NOTES_SLOT = "pn";
 const noteBytes = (note: PersonNote) => dataBytes([note.id, JSON.stringify({ at: note.at, by: note.by, text: note.text })], 1);
 
+/** A buyer's notes, newest first; throws UnknownReplyError when they could not be read exactly (parsePersonNotes). */
 export async function readPersonNotes(statsId: string | null, person: string): Promise<PersonNote[]> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["HGETALL", notesKey(statsId, person)]]);
-  return parsePersonNotes(raw);
+  return parsePersonNotes(await redisPipeline([["HGETALL", notesKey(statsId, person)]]));
 }
 
 /**
@@ -175,17 +189,31 @@ export async function addPersonNote(statsId: string, person: string, by: string,
   const json = JSON.stringify({ at: Math.floor(now / 1000), by: normaliseEmail(by), text });
   // Its room in the store's data room first (DataRoomError when it does not fit), its person's place with it.
   await needData(room, [{ slot: NOTES_SLOT, bytes: dataBytes([id, json], 1) + dataBytes([person], 1) }]);
-  await redisPipeline([
-    ["HSET", notesKey(statsId, person), id, json],
-    ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
-    ["SADD", whoKey(statsId), person],
-    ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
-  ]);
+  // Each reply read exactly (rule 24; Codex X5 on #3159): HSET answers 1 for a new field, the two EXPIREs 1, SADD 0 or 1.
+  // Anything else is unknown: the note may or may not be kept, so its room stays taken and the save is not answered
+  // as done.
+  const wrote = repliesFor(
+    await redisPipeline([
+      ["HSET", notesKey(statsId, person), id, json],
+      ["EXPIRE", notesKey(statsId, person), NOTES_SECONDS],
+      ["SADD", whoKey(statsId), person],
+      ["EXPIRE", whoKey(statsId), NOTES_SECONDS],
+    ]),
+    4,
+  );
+  const [set, kept, listed, keptList] = (wrote ?? []).map(countOf);
+  if (!wrote || set !== 1 || kept !== 1 || (listed !== 0 && listed !== 1) || keptList !== 1) throw new UnknownReplyError("saving a buyer's note");
   const notes = await readPersonNotes(statsId, person);
   if (notes.length > MAX_PERSON_NOTES) {
     const dropped = notes.slice(MAX_PERSON_NOTES);
-    await redisPipeline([["HDEL", notesKey(statsId, person), ...dropped.map((n) => n.id)]]);
-    await giveData(room, [{ slot: NOTES_SLOT, bytes: dropped.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    // One HDEL a note, so each one's room goes back only when its own delete answered 1; one that answered 0 was
+    // already gone (its room went with it), and any other reply keeps its room (never given back on a guess).
+    const removed = repliesFor(await redisPipeline(dropped.map((n) => ["HDEL", notesKey(statsId, person), n.id])), dropped.length);
+    const gone = removed ? dropped.filter((_, i) => countOf(removed[i]) === 1) : [];
+    if (gone.length) await giveData(room, [{ slot: NOTES_SLOT, bytes: gone.reduce((sum, n) => sum + noteBytes(n), 0) }]);
+    if (!removed || gone.length + removed.filter((r) => countOf(r) === 0).length !== dropped.length) {
+      console.error("pruning a buyer's oldest notes was not confirmed; their room stays counted", dropped.length);
+    }
     return notes.slice(0, MAX_PERSON_NOTES);
   }
   return notes;
@@ -195,8 +223,8 @@ export async function addPersonNote(statsId: string, person: string, by: string,
 export async function removePersonNote(statsId: string, person: string, id: unknown, room: DataStore): Promise<PersonNote[]> {
   if (typeof id === "string" && NOTE_ID.test(id) && PERSON_KEY.test(person) && isRedisConfigured()) {
     const gone = (await readPersonNotes(statsId, person)).find((n) => n.id === id);
-    const [removed] = await redisPipeline([["HDEL", notesKey(statsId, person), id]]);
-    if (gone && Number(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
+    const [removed] = repliesFor(await redisPipeline([["HDEL", notesKey(statsId, person), id]]), 1) ?? [null];
+    if (gone && countOf(removed) === 1) await giveData(room, [{ slot: NOTES_SLOT, bytes: noteBytes(gone) }]);
   }
   return readPersonNotes(statsId, person);
 }
@@ -204,12 +232,23 @@ export async function removePersonNote(statsId: string, person: string, id: unkn
 /** Every note about every person, for a store that is being deleted. */
 export async function forgetPersonNotes(statsId: string | null): Promise<void> {
   if (!statsId || !isRedisConfigured()) return;
-  const [raw] = await redisPipeline([["SMEMBERS", whoKey(statsId)]]);
-  const people = (Array.isArray(raw) ? (raw as unknown[]).map(String) : []).filter((p) => PERSON_KEY.test(p));
+  // The index read exactly (#4673, CX-123 rule 24): one reply holding a whole list of text. Anything else is
+  // unknown and throws before anything is deleted, so the index that finds the notes is never lost while they stay.
+  const members = stringList(repliesFor(await redisPipeline([["SMEMBERS", whoKey(statsId)]]), 1)?.[0]);
+  if (!members) throw new UnknownReplyError("a store's people with notes");
+  const people = members.filter((p) => PERSON_KEY.test(p));
   for (let i = 0; i < people.length; i += 500) {
-    await redisPipeline([["DEL", ...people.slice(i, i + 500).map((p) => notesKey(statsId, p))]]);
+    const batch = people.slice(i, i + 500);
+    confirmDeleted(await redisPipeline([["DEL", ...batch.map((p) => notesKey(statsId, p))]]), batch.length, "a store's people's notes");
   }
-  await redisPipeline([["DEL", whoKey(statsId)]]);
+  // The index goes last, and only once every batch above was confirmed.
+  confirmDeleted(await redisPipeline([["DEL", whoKey(statsId)]]), 1, "a store's notes index");
+}
+
+/** One DEL's own count, read exactly: a whole number from 0 to the keys it was sent, or UnknownReplyError. */
+function confirmDeleted(replies: unknown, keys: number, what: string): void {
+  const count = countOf(repliesFor(replies, 1)?.[0]);
+  if (count === null || count > keys) throw new UnknownReplyError(what);
 }
 
 // ------------------------------------------------------------------ the page
@@ -254,6 +293,31 @@ export type ProfileMembership = {
 
 export type ProfileCourse = { title: string; done: number; lessons: number; since: number; lastSeen: number };
 
+/**
+ * A part of the page read apart from the payments, which may fail on its own
+ * (rule 24): how far they are in their courses, the calls coming up, the
+ * sequences they were started on, the team's notes about them. A part that could not be read is named, never
+ * shown as "none". Purchases handed over without a Stripe payment and the
+ * amount of a PayPal sale are not named here: an unread one makes the reading
+ * `partial`, which the page already says in the tiles and the orders box (#2908).
+ */
+export type ProfilePart = "courses" | "calls" | "sequences" | "notes";
+const PROFILE_PARTS: ProfilePart[] = ["courses", "calls", "sequences", "notes"];
+const PART_WORDS: Record<ProfilePart, string> = {
+  courses: "how far they are in their courses",
+  calls: "their calls coming up",
+  sequences: "the sequences they were started on",
+  notes: "your team's notes about them",
+};
+
+/** What the page says when some of its parts could not be read; "" when all were. */
+export function profileUnreadWords(parts: readonly ProfilePart[]): string {
+  const named = PROFILE_PARTS.filter((p) => parts.includes(p)).map((p) => PART_WORDS[p]);
+  if (!named.length) return "";
+  const list = named.length === 1 ? named[0] : `${named.slice(0, -1).join("; ")}; and ${named[named.length - 1]}`;
+  return `Some parts of this page could not be loaded just now, so they are missing below: ${list}. Nothing was changed. Open this page again in a moment.`;
+}
+
 export type BuyerProfile = {
   email: string;
   /** The name Stripe or an import has for them; "" when none. */
@@ -290,6 +354,8 @@ export type BuyerProfile = {
   partial: boolean;
   /** Stripe could not be read: the payments are not on the page. */
   stripeError: boolean;
+  /** The other parts that could not be read just now, in the page's order: missing, not empty. */
+  unread: ProfilePart[];
 };
 
 type Row = Record<string, unknown>;
@@ -349,6 +415,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   const charges = new Map<string, Charge>();
   let partial = false;
   let stripeError = false;
+  const unread = new Set<ProfilePart>();
   let name = "";
 
   type Bought = { at: number; source: string; first: string; recorded: boolean };
@@ -606,12 +673,34 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
   // The list, the sequences, the courses, the calls and the notes, side by side.
   const [contactRaw, flows, calls, notes] = await Promise.all([
     store.listId && isRedisConfigured() ? redisPipeline([["HGET", leadsKey(store.listId), email]]).then(([raw]) => raw) : Promise.resolve(null),
-    store.listId ? readFlows(store.listId).catch(() => []) : Promise.resolve([]),
-    callsFor(store, email).catch(() => [] as BookedCall[]),
-    store.statsId ? readPersonNotes(store.statsId, person) : Promise.resolve([]),
+    store.listId
+      ? readFlows(store.listId).catch((error): Flow[] => {
+          console.error("reading a buyer's sequences failed", error);
+          unread.add("sequences");
+          return [];
+        })
+      : Promise.resolve([] as Flow[]),
+    callsFor(store, email).catch((error): BookedCall[] => {
+      console.error("reading a buyer's calls failed", error);
+      unread.add("calls");
+      return [];
+    }),
+    store.statsId
+      ? readPersonNotes(store.statsId, person).catch((error): PersonNote[] => {
+          console.error("reading a buyer's notes failed", error);
+          unread.add("notes");
+          return [];
+        })
+      : Promise.resolve([] as PersonNote[]),
   ]);
   const contact = parseContact(contactRaw);
-  const started = new Set(await flowsStartedFor(flows, email).catch(() => [] as string[]));
+  const started = new Set(
+    await flowsStartedFor(flows, email).catch((error): string[] => {
+      console.error("reading which sequences a buyer was started on failed", error);
+      unread.add("sequences");
+      return [];
+    }),
+  );
 
   const courses: ProfileCourse[] = [];
   const seen = new Set<string>();
@@ -620,11 +709,23 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     seen.add(id);
     const listing = await find(id);
     if (!listing?.course) continue;
-    const [done, dates] = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email)]);
+    // A read that fails (the outline, the lessons marked done, the dates) leaves this course off the page and names
+    // its progress as unread (rule 24): never a figure nobody read, and never the whole buyer page lost with it.
+    const read = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email), readCourse(listing.course.id)]).catch((error) => {
+      console.error("reading a buyer's course progress failed", error);
+      unread.add("courses");
+      return null;
+    });
+    if (!read) continue;
+    const [done, dates, outline] = read;
+    // Counted against the course's lessons now: a mark kept for a lesson the
+    // creator took out is not a lesson done, and the listing's count can be
+    // older than the outline. Without the outline, the listing's count, as before.
+    const current = outline ? lessonsInOrder(outline).map(({ lesson }) => lesson.id) : null;
     courses.push({
       title: listing.title,
-      done: Math.min(done.size, listing.course.lessons),
-      lessons: listing.course.lessons,
+      done: current ? current.filter((id) => done.has(id)).length : Math.min(done.size, listing.course.lessons),
+      lessons: current ? current.length : listing.course.lessons,
       since: dates?.since ?? 0,
       lastSeen: dates?.lastSeen ?? 0,
     });
@@ -654,6 +755,7 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     notes,
     partial,
     stripeError,
+    unread: PROFILE_PARTS.filter((p) => unread.has(p)),
   };
 }
 

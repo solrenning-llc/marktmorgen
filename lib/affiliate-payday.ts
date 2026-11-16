@@ -19,10 +19,10 @@
  * overlap, a store seen twice while it moves between addresses — finds the day
  * taken and does nothing.
  */
-import { isRedisConfigured } from "@/lib/redis";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark } from "@/lib/claim-mark";
-import { UnknownReplyError } from "@/lib/redis-reply";
-import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
+import { NIMBUS_FROM, isSenderConfigured, sendEmailOutcome } from "@/lib/email";
 import { SITE_URL } from "@/lib/site-url";
 import { storesAfter, type Store } from "@/lib/store";
 import { affiliatesOn, readBook } from "@/lib/affiliates";
@@ -33,6 +33,13 @@ import { formatMoney } from "@/lib/money";
 
 /** How long the mark on a month lasts: long enough that next month is a new one. */
 const CLAIM_SECONDS = 40 * 86_400;
+/**
+ * How long a run holds the month's claim while it pays and writes (#4620, part 3). The claim becomes the month's
+ * own (CLAIM_SECONDS) only once the email went, or may have; a run stopped before that (the function's 60 s, a read
+ * that failed) leaves a hold that runs out, and a run on one of the next days (PAYDAY_CATCH_UP_DAYS) does it then.
+ * Nobody is paid twice on it: payWithPayPal re-reads who is already on their way and holds its own lock.
+ */
+const HOLD_SECONDS = 15 * 60;
 /** A ceiling on one run, so a job that is behind still ends. */
 const MAX_STEPS = 10_000;
 
@@ -60,9 +67,42 @@ function monthOf(now: Date): string {
  * counted as failed and nobody is written to or paid on it.
  */
 async function claimMonth(statsId: string, month: string): Promise<boolean> {
-  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, CLAIM_SECONDS);
+  const got = await claimMark(`nl:aff:payday:${statsId}:${month}`, HOLD_SECONDS);
   if (got === "unknown") throw new UnknownReplyError("a store's payday claim");
   return got === "ours";
+}
+
+/**
+ * Makes the month's claim the month's own, once its email went or may have. The EXPIRE is tried twice; when neither
+ * is confirmed, the mark is written again for the month (SET ... EX), so a hold that ran out meanwhile is put back
+ * too. A failure of all three is said: then, and only then, the hold runs out and a later run that month may write
+ * again (Claude 4 on #4667).
+ */
+async function keepMonth(statsId: string, month: string): Promise<void> {
+  const key = `nl:aff:payday:${statsId}:${month}`;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      if (repliesFor(await redisPipeline([["EXPIRE", key, CLAIM_SECONDS]]), 1)?.[0] === 1) return;
+    } catch {
+      // Tried again below.
+    }
+  }
+  try {
+    if (repliesFor(await redisPipeline([["SET", key, "kept", "EX", CLAIM_SECONDS]]), 1)?.[0] === "OK") return;
+  } catch {
+    // Said below.
+  }
+  console.error("a store's payday claim could not be kept for the month");
+}
+
+/**
+ * Sends the payday email and keeps the month's claim unless the email was surely not sent: one that may have gone
+ * ("uncertain") is never written again, and one refused is tried again by a later run once the hold runs out.
+ */
+async function sendAndKeep(store: Store & { statsId: string }, month: string, message: Parameters<typeof sendEmailOutcome>[0]): Promise<boolean> {
+  const outcome = await sendEmailOutcome(message);
+  if (outcome !== "refused") await keepMonth(store.statsId, month);
+  return outcome === "sent";
 }
 
 /** The message itself. Plain text, so every word is what arrives. */
@@ -152,6 +192,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
       ].join("\n"),
     };
   }
+  if (paid.reason === "pending") {
+    return {
+      subject: "Your affiliates' payment may still go out from your PayPal",
+      text: [
+        "Hello,",
+        "",
+        "It is your affiliate payday, and you asked us to pay by ourselves. Nobody was paid just now. But we could not confirm that this payment was cleared from our records, so our daily check may still send it from your PayPal, to the same people for the same amounts.",
+        "",
+        "Until then, they show as on their way on your affiliate page. Do not pay them another way, or they could be paid twice.",
+        studio,
+        "",
+        "— Marktmorgen",
+      ].join("\n"),
+    };
+  }
   const why: Record<string, string> = {
     funds: "your PayPal balance did not cover it. Add money to your PayPal balance",
     refused: "PayPal refused the app you connected. Connect it again, with Payouts switched on",
@@ -177,9 +232,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
   };
 }
 
-/** One store, if today is its payday and anybody is owed. True when sent. */
+/**
+ * How many days after its payday a store is still due, in the same month (#4620): the daily run stops at its
+ * deadline, so a store it did not reach on its payday is kept on the next days instead of waiting a whole month. The
+ * month's claim (claimMonth) still lets only one run send, so nothing goes twice.
+ */
+export const PAYDAY_CATCH_UP_DAYS = 3;
+
+/** Whether a store's payday is today or was at most PAYDAY_CATCH_UP_DAYS days ago in this month. */
+export function paydayDue(payday: number, dayOfMonth: number): boolean {
+  return payday >= 1 && dayOfMonth >= payday && dayOfMonth - payday <= PAYDAY_CATCH_UP_DAYS;
+}
+
+/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent. */
 async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean> {
-  if (!affiliatesOn(store) || store.affiliates.payday !== dayOfMonth) return false;
+  if (!affiliatesOn(store) || !paydayDue(store.affiliates.payday, dayOfMonth)) return false;
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
@@ -196,7 +263,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
   if (book.refundsChecked && (await paysAutomatically(store))) {
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency);
-    return sendEmail({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
   }
   const { subject, text } = paydayEmail({
     storeName: store.name,
@@ -209,7 +276,7 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     refundsChecked: book.refundsChecked,
     leadsCents: book.lines.filter((l) => l.how === "lead" && l.status !== "approved" && l.currency === book.currency).reduce((sum, l) => sum + l.commission, 0),
   });
-  return sendEmail({ meter: { by: "store", store: store, kind: "email" },
+  return sendAndKeep({ ...store, statsId: store.statsId }, month, { meter: { by: "store", store: store, kind: "email" },
     from: NIMBUS_FROM,
     to: store.email,
     subject,
@@ -219,10 +286,10 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
 }
 
 /**
- * Every store, once, for whichever of them pays today. `deadline` is when the
- * run has to stop whatever it has reached; the next run starts again from the
- * beginning, and the month's claim keeps anybody already emailed from being
- * emailed twice.
+ * Every store, once, for whichever of them pays today or paid in the last
+ * PAYDAY_CATCH_UP_DAYS days. `deadline` is when the run has to stop whatever it
+ * has reached; the next run starts again from the beginning, and the month's
+ * claim keeps anybody already emailed from being emailed twice.
  */
 export async function sendPaydayEmails(deadline: number, now = new Date()): Promise<PaydayCounts> {
   const counts: PaydayCounts = { seen: 0, due: 0, sent: 0, failed: 0, complete: false };
@@ -232,10 +299,19 @@ export async function sendPaydayEmails(deadline: number, now = new Date()): Prom
   let cursor = "0";
   for (let step = 0; step < MAX_STEPS; step += 1) {
     if (Date.now() >= deadline) return counts;
-    const { stores, next } = await storesAfter(cursor);
+    // A page of stores that does not read ends the run as not complete (#4620), instead of throwing out of the job:
+    // the stores it would have held are reached on the next days, inside PAYDAY_CATCH_UP_DAYS.
+    let page: Awaited<ReturnType<typeof storesAfter>>;
+    try {
+      page = await storesAfter(cursor);
+    } catch (error) {
+      console.error("reading a page of stores for the affiliate payday failed; the run stops here", error);
+      return counts;
+    }
+    const { stores, next } = page;
     for (const store of stores) {
       counts.seen += 1;
-      if (store.affiliates.payday !== dayOfMonth) continue;
+      if (!paydayDue(store.affiliates.payday, dayOfMonth)) continue;
       counts.due += 1;
       try {
         if (await payday(store, month, dayOfMonth)) counts.sent += 1;

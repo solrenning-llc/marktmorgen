@@ -149,6 +149,22 @@ async function main(): Promise<void> {
   for (let i = 0; i < before.length; i += 2) kept.push(Number(before[i + 1]), before[i]);
   await redis.pipeline([["DEL", listKey], ["ZADD", listKey, ...kept]]);
 
+  // Review of #3571 (Claude 7, MEDIUM): a file whose keeping time is over is never shown, though the sweep's grace
+  // keeps it on the list for a few more days (the privacy policy keeps these files only for the time the creator chose).
+  resetWorld();
+  const expiredId = await sent(`ex${"e".repeat(30)}`, LESSONS[0], NOW - 31 * 86_400);
+  const freshId = await sent(`fr${"f".repeat(30)}`, LESSONS[1], NOW - 60);
+  const everyRow: { id: string }[] = [];
+  let pageAt: unknown = null;
+  for (let pages = 0; pages < 10; pages += 1) {
+    const page = await get(`id=prod1&list=1${pageAt ? `&before=${pageAt}` : ""}`);
+    everyRow.push(...(page.body.rows as { id: string }[]));
+    pageAt = page.body.next;
+    if (!pageAt) break;
+  }
+  is("a file past its keeping time is not listed, its buyer's address and note with it", everyRow.some((row) => row.id === expiredId), false);
+  is("control: a file within its keeping time is listed", everyRow.some((row) => row.id === freshId), true);
+
   part("A reply, once");
   resetWorld();
   const target = ids[5];

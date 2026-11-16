@@ -351,7 +351,13 @@ async function activateOne<S extends Shop>(shop: S, statsId: string, id: string,
     if (entry.tries >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
     // One key a try: a repeat of the same try is answered, not done again; the next try is a new request.
     const live = await activateCode(shop.stripeAccountId, id, `dsched:${id}:${entry.start}:${entry.tries}`);
-    if (!live) return missed(shop, statsId, entry, nowSeconds);
+    // Not confirmed live is not confirmed off: a 5xx, a timeout or a lost reply may follow a switch-on that landed
+    // (Claude 4 on #4522). Tried again while tries remain; the last one switches it off before the failure is final,
+    // as a code box never confirmed on does, which is harmless when the switch-on never landed.
+    if (!live) {
+      if (entry.tries + 1 >= ACTIVATION_TRIES) return offThenFailed(shop, shop.stripeAccountId, statsId, entry, nowSeconds);
+      return missed(shop, statsId, entry, nowSeconds);
+    }
     // Live on Stripe. The checkout's code box goes on first, confirmed by the store it answers with; a box
     // not confirmed on is a missed try like any other (counted, tried again at the next run, which Stripe
     // answers the same way, then kept as failed), so the code is never counted live while buyers cannot type it.

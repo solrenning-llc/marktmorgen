@@ -134,8 +134,12 @@ async function main() {
       is(`try ${i + 1} is not activation`, run.activated, 0);
       clock += RETRY_SECONDS;
     }
-    is("one Stripe call a try, no more", calls.length, ACTIVATION_TRIES);
-    is("a new idempotency key for each try", new Set(calls.map((c) => c.key)).size, ACTIVATION_TRIES);
+    // The last try's unclear answer may follow a switch-on that landed, so it is switched off before the failure is
+    // final (Claude 4 on #4522): one switch-on a try, and one stop, confirmed here, at the last.
+    const switchOns = calls.filter((c) => c.body === "active=true");
+    is("one switch-on a try, no more", switchOns.length, ACTIVATION_TRIES);
+    is("a new idempotency key for each try", new Set(switchOns.map((c) => c.key)).size, ACTIVATION_TRIES);
+    is("and the last try switches it off once before the failure is final", calls.filter((c) => c.body === "active=false").length, 1);
     const failedNow = await sched.readSchedules(STATS);
     is("marked failed after the last try", failedNow.ok && failedNow.schedules[0]?.failed, true);
     is("out of the due list", await redis.pipeline([["ZSCORE", "nl:dsched:due", `${SID}|${STATS}|promo_ck3synthetic`]]), [null]);

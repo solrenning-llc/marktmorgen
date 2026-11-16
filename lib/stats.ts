@@ -1556,7 +1556,8 @@ export const OLD_PAYMENT_LOOKUPS_PER_READING = 10;
 /**
  * Whether a payment paid one of this store's membership or payment plan invoices, by its own invoice payment
  * (GET /v1/invoice_payments?payment[type]=payment_intent&payment[payment_intent]=, the invoice expanded): read exactly
- * (CX-123 rule 24). True only when Stripe lists exactly that payment, paid, on a paid invoice of a subscription this
+ * (CX-123 rule 24). True only when Stripe lists exactly that payment, alone (has_more false: a payment intent can pay
+ * more than one invoice, so one row with more behind it proves nothing; Codex X7 on #4549), paid, on a paid invoice of a subscription this
  * store opened (its checkout's or a later one, its metadata naming one of the store's handles). Anything else,
  * an answer in another shape included, is false: the refund or dispute stays unconfirmed.
  */
@@ -1567,7 +1568,7 @@ export async function paymentOfStoreInvoice(store: Store, paymentIntent: string)
     store.stripeAccountId,
     `/invoice_payments?${new URLSearchParams({ "payment[type]": "payment_intent", "payment[payment_intent]": paymentIntent, limit: "1", "expand[]": "data.invoice" })}`,
   )) as { object?: unknown; data?: unknown; has_more?: unknown } | null;
-  if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length !== 1 || typeof listed.has_more !== "boolean") return false;
+  if (!listed || listed.object !== "list" || !Array.isArray(listed.data) || listed.data.length !== 1 || listed.has_more !== false) return false;
   const row = listed.data[0] as Record<string, unknown> | null;
   if (!row || typeof row !== "object" || row.status !== "paid") return false;
   const payment = row.payment as { type?: unknown; payment_intent?: unknown } | null | undefined;

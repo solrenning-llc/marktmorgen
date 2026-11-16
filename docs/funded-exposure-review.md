@@ -30,7 +30,10 @@ account giving no answer has the same shape (`nl:held:silent:`): STRIPE_SILENT_D
 daily runs, the platform reading the store's own subscription in the same run, never with several
 accounts silent together; our platform key giving no answer is never the creator's and holds with
 no deadline; and before a store closed without its members' renewals stopped is deleted, each
-member with a known subscription is told the membership may keep renewing. Its work is CLOSING_DEADLINE_WORK in
+member with a known subscription is told the membership may keep renewing, in the same letter as its
+refund when one was owed, one letter an address; a member already told of the closing gets one
+follow-up, the one its notice paid for, and any letter past it takes a credit of the closing's
+emails first or the store is held (Claude 1 cloud's review of #3463). Its work is CLOSING_DEADLINE_WORK in
 tests/plan-cost-registry.ts. The deadline is the earliest moment, not a guaranteed
 latest: a store already in the held recheck line waits its turn among the50 rechecks a
 day, and the walk then runs at most every WALK_GAP_MS, so deletion within

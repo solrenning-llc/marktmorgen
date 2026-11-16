@@ -95,6 +95,7 @@ import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/cl
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
+import { normaliseEmail } from "@/lib/auth";
 import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing, shutOf } from "@/lib/closing-plan-guard";
 
 export { CLOSING_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS };
@@ -1357,9 +1358,11 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     // Told for what happened: the balance did not cover it, or the closing's limit of calls did not reach it.
     const tellUnmade = async (): Promise<Closing | null> => {
       for (const [why, r] of [["balance", "short"], ["limit", "over"]] as const) {
-        const left = [...(await paidPeriods(store))].filter(([, row]) => row.r === r && row.f === 1 && !row.m);
+        const periods = [...(await paidPeriods(store))];
+        const left = periods.filter(([, row]) => row.r === r && row.f === 1 && !row.m);
         if (!left.length) continue;
-        const told = await tellRefundShort(store, left.map(([, row]) => ({ email: row.e, amount: unusedOfRow(row, next.day ?? day), cur: row.cur })), endedAt, why);
+        // An address already sent its follow-up (another subscription's letter) takes a credit for this one.
+        const told = await tellRefundShort(store, left.map(([, row]) => ({ email: row.e, amount: unusedOfRow(row, next.day ?? day), cur: row.cur })), endedAt, why, 0, { followed: followedUp(periods.map(([, row]) => row)) });
         if (!told.ok) return { key, state: "held", note: "its members whose refund could not be made are not all told yet", overdue: "notice" };
         for (const [sub, row] of left) await savePaidPeriod(store, sub, { ...row, m: 1 });
         if (told.untold) console.error(`plan-closing: ${told.untold} members whose refund could not be made were not covered by the store's closing emails`);
@@ -1400,9 +1403,16 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
       // again before it is still asked for the refund. A notice that cannot go out, or a closing out of email
       // credit, holds the store: nobody's paid time is deleted untold.
       const owed = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending").map((row) => ({ row, want: stillToGive(row.unused, row.paid.back ?? 0) }));
-      const told = await tellRefundShort(store, owed.map(({ row, want }) => ({ email: row.paid.e, amount: want, cur: row.paid.cur })), endedAt, "lapse", next.day ?? day);
+      // One letter an address, whatever its subscriptions, and, closed also before the renewals were stopped, the
+      // renewals said in that same letter (`n`): a member already told of the closing gets one follow-up, the one its
+      // notice paid for; a letter past it takes a credit (Claude 1 cloud's review of #3463, MEDIUM).
+      const renewalsToo = lapsed && !next.renewals && !next.renewalsTold;
+      const told = await tellRefundShort(store, oneLetterAnAddress(owed.map(({ row, want }) => ({ email: row.paid.e, amount: want, cur: row.paid.cur }))), endedAt, "lapse", next.day ?? day, {
+        followed: followedUp([...(await paidPeriods(store)).values()]),
+        renewals: renewalsToo,
+      });
       if (!told.ok || told.uncredited > 0) return { key, state: "held", note: "its members whose refund may not have been made are not all told yet", overdue: "notice" };
-      for (const { row, want } of owed) await savePaidPeriod(store, row.sub, { ...row.paid, r: "over", f: 1, want, m: 1 });
+      for (const { row, want } of owed) await savePaidPeriod(store, row.sub, { ...row.paid, r: "over", f: 1, want, m: 1, ...(renewalsToo ? { n: 1 as const } : {}) });
     } else {
       next = { ...next, refunds: now };
       await save(next);
@@ -1413,8 +1423,12 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   // store closed. A notice that cannot go out, or a closing out of email credit, holds the store, as the refund
   // notice does; once told, it is written down (`renewalsTold`) and not sent again.
   if (lapsed && !next.renewals && !next.renewalsTold) {
-    const emails = [...new Set([...(await paidPeriods(store)).values()].map((row) => row.e).filter((email): email is string => typeof email === "string" && email.length > 0))];
-    const told = await tellRefundShort(store, emails.map((email) => ({ email, amount: 0, cur: "usd" })), endedAt, "renewals", next.day ?? day);
+    // Not again to an address told in its refund letter (`n`); one already sent its follow-up (`m`: the balance or the
+    // limit letter) takes a credit for this one (Claude 1 cloud's review of #3463, MEDIUM).
+    const rows = [...(await paidPeriods(store)).values()];
+    const inRefundLetter = new Set(rows.filter((row) => row.n === 1 && typeof row.e === "string").map((row) => normaliseEmail(row.e)));
+    const emails = [...new Set(rows.map((row) => row.e).filter((email): email is string => typeof email === "string" && email.length > 0).map((email) => normaliseEmail(email)))].filter((email) => !inRefundLetter.has(email));
+    const told = await tellRefundShort(store, emails.map((email) => ({ email, amount: 0, cur: "usd" })), endedAt, "renewals", next.day ?? day, { followed: followedUp(rows) });
     if (!told.ok || told.uncredited > 0) return { key, state: "held", note: "its members whose renewals were not stopped are not all told yet", overdue: "notice" };
     next = { ...next, renewalsTold: now };
     await save(next);
@@ -1454,6 +1468,26 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   }
   await save({ ...next, removed: now, due: now });
   return { key, state: "removed", note: `closed, ${done.files} files: its records are deleted by the next walk` };
+}
+
+/** The addresses already sent their one follow-up letter of a closing (a paid period marked `m`). */
+function followedUp(rows: PaidPeriod[]): string[] {
+  return rows.filter((row) => row.m === 1 && typeof row.e === "string" && row.e.length > 0).map((row) => normaliseEmail(row.e));
+}
+
+/** The refunds owed, one entry an address: its amounts added up by currency, so a member with two subscriptions gets one letter. */
+function oneLetterAnAddress(owed: { email: string; amount: number; cur: string }[]): { email: string; amount: number; cur: string; also: { amount: number; cur: string }[] }[] {
+  const byAddress = new Map<string, { email: string; sums: Map<string, number> }>();
+  for (const { email, amount, cur } of owed) {
+    const address = normaliseEmail(typeof email === "string" ? email : "");
+    const entry = byAddress.get(address) ?? { email, sums: new Map<string, number>() };
+    entry.sums.set(cur, (entry.sums.get(cur) ?? 0) + amount);
+    byAddress.set(address, entry);
+  }
+  return [...byAddress.values()].map(({ email, sums }) => {
+    const [first, ...rest] = [...sums].map(([cur, amount]) => ({ amount, cur }));
+    return { email, amount: first.amount, cur: first.cur, also: rest };
+  });
 }
 
 /**

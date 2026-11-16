@@ -10,7 +10,6 @@
  * renewals go in one letter, one letter an address, and any letter past a told member's one funded follow-up takes a
  * credit first: none left, nothing is sent and the store is held (as "notice"), never sent unpaid.
  */
-import { createHash } from "node:crypto";
 import { type Hands, closeOne } from "@/lib/plan-closing";
 import { savePaidPeriod } from "@/lib/closing-holds";
 import { creditKey } from "@/lib/closing-credit";
@@ -30,8 +29,6 @@ const W = CLOSING_DAYS - WARN_WEEK_DAYS;
 /** The days after the closing day Stripe is waited for: the time already set, less one walk's room. */
 const SILENT = ERASE_WITHIN_DAYS - ERASE_EVERY_DAYS;
 const LIBRARY = "4242";
-const sha = (value: string) => createHash("sha256").update(value).digest("hex");
-const stateKey = (key: string) => `nl:plan:closing:${sha(key).slice(0, 40)}`;
 
 // ------------------------------------------------------------- stand-ins
 
@@ -140,11 +137,6 @@ async function told(made: Made): Promise<void> {
   for (const at of [made.ended + 60_000, made.ended + M * DAY, made.ended + W * DAY]) await closeOne(made.email, at, hands);
 }
 
-const filesOf = (made: Made) => [...objects.keys()].filter((path) => path.startsWith(`vault/${made.folder}/`)).length;
-const record = async (made: Made): Promise<Record<string, unknown> | null> => {
-  const [raw] = await redis.pipeline([["GET", stateKey(made.email)]]);
-  return typeof raw === "string" ? (JSON.parse(raw) as Record<string, unknown>) : null;
-};
 
 async function quietly<T>(work: () => Promise<T>): Promise<T> {
   const real = console.error;
@@ -189,9 +181,7 @@ function fresh(): void {
   broken.clear();
 }
 
-const renewalNotices = (made: Made) => sent.filter((mail) => mail.to.includes(`${made.handle}-member@example.com`) && /may keep renewing/i.test(mail.subject));
 
-const refundLetters = (made: Made) => sent.filter((mail) => mail.to.includes(`${made.handle}-member@example.com`) && /may not have been made/i.test(mail.subject));
 
 
 const member = (made: Made, n = "") => `${made.handle}-member${n}@example.com`;

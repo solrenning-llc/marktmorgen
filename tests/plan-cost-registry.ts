@@ -1101,7 +1101,11 @@ export const HELD_EXPOSURE = {
  *     silentLast), HSET+EXPIRE of the day's account note and, past the deadline with a streak, four HLEN of the two
  *     days' notes and the same one platform GET of the store's own subscription (shared with a refusal's, once a run);
  *   - a lapse before its members' renewals were stopped: one notice per member with a known subscription, out of the
- *     closing's own email credit (lib/closing-credit.ts), and one SET of its record, once;
+ *     closing's own email credit (lib/closing-credit.ts), and one SET of its record, once; a member owed a refund is
+ *     told both in its refund letter, one letter an address, and a member already told of the closing gets one
+ *     follow-up only, the one its notice paid for: any letter past it takes one credit first, all or nothing, or the
+ *     store is held (Claude 1 cloud's review of #3463, tests/closing-told-follow-ups.test.ts); the refund letter
+ *     reads the paid periods once more (HGETALL) for who was already sent a follow-up;
  *   - a lapse: SET of its record and the monthly count's EVAL, once.
  * The notes are hashed identities (about 80 bytes a field) for ACCOUNT_NOTE_SECONDS. Stripe's endpoint tariff and the
  * number of stores in this state are unknown, never zero: no monthly total is certified here.
@@ -1111,6 +1115,7 @@ export const CLOSING_DEADLINE_WORK = {
   refusalCommandsPerRun: 1 + 2 + 4,
   silenceCommandsPerRun: 1 + 2 + 4,
   renewalNoticeCommandsOnce: 1,
+  lapseLetterReadsOnce: 1,
   answerCommandsPerRun: 2 + 1,
   platformGetsPerRefusedRun: 1,
   fundedActivationsPerRefusedRun: 1,

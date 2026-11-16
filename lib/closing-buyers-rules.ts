@@ -200,6 +200,11 @@ export type PaidPeriod = {
   want?: number;
   /** The member was emailed that their refund could not be made. */
   m?: 1;
+  /**
+   * That same letter also said the membership may keep renewing (a store closed without Stripe before its renewals
+   * were stopped): the renewals letter is not sent to this address again (Claude 1 cloud's review of #3463).
+   */
+  n?: 1;
 };
 
 /**
@@ -389,7 +394,25 @@ export function refundUnmadeLetter(input: { store: string; amount: string; conta
  * (it closed days before), and as a refund that may not have been made (a refund Stripe did not answer about may
  * have been made). `amount` is what was left to give.
  */
-export function refundLapsedLetter(input: { store: string; amount: string; contact: string; closedOn: number }): BuyerLetter {
+export function refundLapsedLetter(input: { store: string; amount: string; contact: string; closedOn: number; renewals?: boolean }): BuyerLetter {
+  // Closed also before the renewals were stopped: both said in this one letter, so a member already told of the
+  // closing gets one follow-up, the one its notice paid for (EMAILS_PER_BUYER_PER_ENDING; Claude 1 cloud on #3463).
+  if (input.renewals) {
+    return {
+      subject: `Your refund from ${input.store} may not have been made, and your membership may keep renewing`,
+      text: [
+        `${input.store} closed on ${dateWords(input.closedOn)}. You had paid for time after that day, and up to ${input.amount}`,
+        "of it was to be given back to you from the store's own Stripe account.",
+        "We could not reach the store's Stripe account, so we could not make this refund or check whether it was made.",
+        "We also could not stop your membership's renewals or check whether they were stopped. Your card may still be charged.",
+        "",
+        `If ${input.store} has not refunded it to you already, or to stop your membership, please contact them directly: ${input.contact}`,
+        "If they do not answer about the renewals, your card issuer can stop the payments.",
+        "",
+        "Marktmorgen does not hold the store's money and cannot make the refund or stop these payments.",
+      ].join("\n"),
+    };
+  }
   return {
     subject: `Your refund from ${input.store} may not have been made`,
     text: [

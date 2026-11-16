@@ -412,17 +412,30 @@ export async function toldOf(store: Store, email: string): Promise<{ toldAt: num
 
 /**
  * The email to members whose refund could not be made on the closing day.
- * Paid for by the follow-up taken when they were told; one who was not told
- * takes it from the store's credit now. True when every one went or was
+ * A member told of the closing had ONE follow-up paid for by its notice
+ * (EMAILS_PER_BUYER_PER_ENDING): its first follow-up takes nothing more. Any
+ * letter past it, to an address in `followed` (already sent a follow-up) or
+ * sent a letter earlier in this same call, takes one credit from the store's
+ * closing like a member never told (Claude 1 cloud's review of #3463: the
+ * lapse and renewals letters went unpaid to told members). For "lapse" and
+ * "renewals", which hold the store until everyone is told, the credit is all
+ * or nothing: one letter not paid for sends nothing, so a held store does not
+ * send its free letters again on every run. True when every one went or was
  * counted as not coverable.
  */
 export async function tellRefundShort(
   store: Store,
-  short: { email: string; amount: number; cur: string }[],
+  short: { email: string; amount: number; cur: string; also?: { amount: number; cur: string }[] }[],
   endedAt: number,
   why: "balance" | "limit" | "lapse" | "renewals" = "balance",
   /** The closing day, for "lapse" and "renewals": the letter says it (DONO-3). */
   closedOn = 0,
+  options: {
+    /** Addresses already sent their one follow-up (a paid period marked `m`): a told member's next letter takes a credit. */
+    followed?: Iterable<string>;
+    /** "lapse" only: the renewals were not stopped either, said in the same letter. */
+    renewals?: boolean;
+  } = {},
 ): Promise<{ sent: number; untold: number; uncredited: number; ok: boolean }> {
   const postal = companyPostal();
   // `uncredited`: of `untold`, those left out because the closing's email credit ran out (not a bad address).
@@ -444,11 +457,14 @@ export async function tellRefundShort(
     if (mark === null) return { ...out, ok: false };
     rows.push({ row, email, told: typeof mark === "number" });
   }
+  /** Addresses whose one funded follow-up is spent: before this call, or by a letter of it. */
+  const spent = new Set([...(options.followed ?? [])].map((email) => normaliseEmail(email)));
+  const allOrNothing = why === "lapse" || why === "renewals";
   const going: BatchMessage[] = [];
   const addresses: string[] = [];
   let taken = 0;
   for (const { row, email, told } of rows) {
-    if (!told) {
+    if (!told || spent.has(email)) {
       if (!(await takeCreditOrGiveBack(folder, 1, taken))) {
         out.untold += 1;
         out.uncredited += 1;
@@ -456,13 +472,21 @@ export async function tellRefundShort(
       }
       taken += 1;
     }
+    spent.add(email);
     addresses.push(email);
-    const input = { store: store.name, amount: formatMoney(row.amount, row.cur), contact: contactOf(store) };
-    const letter = why === "renewals" ? renewalsUnstoppedLetter({ store: input.store, contact: input.contact, closedOn }) : why === "lapse" ? refundLapsedLetter({ ...input, closedOn }) : why === "limit" ? refundUnmadeLetter(input) : refundShortLetter(input);
+    const amount = [{ amount: row.amount, cur: row.cur }, ...(row.also ?? [])].map((part) => formatMoney(part.amount, part.cur)).join(" and ");
+    const input = { store: store.name, amount, contact: contactOf(store) };
+    const letter = why === "renewals" ? renewalsUnstoppedLetter({ store: input.store, contact: input.contact, closedOn }) : why === "lapse" ? refundLapsedLetter({ ...input, closedOn, renewals: options.renewals === true }) : why === "limit" ? refundUnmadeLetter(input) : refundShortLetter(input);
     going.push(message(store, email, letter, postal));
   }
+  if (allOrNothing && out.uncredited > 0) {
+    // Not everyone can be told: nothing goes, the credit taken is given back, and the store is held to try again.
+    await returnCredit(folder, taken);
+    return out;
+  }
+  const kind = why === "renewals" ? "renewals" : why === "lapse" ? (options.renewals ? "lapsedrenewals" : "lapsed") : why === "limit" ? "unmade" : "short";
   for (let i = 0; i < going.length; i += 100) {
-    if (!(await send(going.slice(i, i + 100), batchKey(why === "renewals" ? "renewals" : why === "lapse" ? "lapsed" : why === "limit" ? "unmade" : "short", folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
+    if (!(await send(going.slice(i, i + 100), batchKey(kind, folder, endedAt, addresses.slice(i, i + 100))))) return { ...out, ok: false };
     out.sent += Math.min(100, going.length - i);
   }
   return out;

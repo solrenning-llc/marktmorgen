@@ -1,3 +1,4 @@
+import { runningSubscriptions } from "@/lib/payment-methods";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";
@@ -335,6 +336,15 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
+      // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
+      // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
+      // every product, not only one paid now: a membership edited to free first still charges its members (#4074).
+      // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
+      if (before && guarded.store.stripeAccountId) {
+        const running = await runningSubscriptions(guarded.store, id);
+        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
+        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
       }
       // Its waitlist's hold and drop are paid for before anything goes (WAITLIST_DROP_UNITS, lib/waitlist.ts; #4462).
       const paid = await takeAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS);

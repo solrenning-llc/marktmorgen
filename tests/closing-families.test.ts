@@ -32,6 +32,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:taxobs:v1:": ["lib/checkout-sweep.ts", "TAX_OBSERVATION_KEEP_SECONDS"],
   // A store's search index (a capped part): one record kept ten minutes.
   "nl:search:": ["lib/store-search-index.ts", "SEARCH_INDEX_SECONDS"],
+  // A store's Blob folder listed once a day, its total and the hourly tally (a capped part): each key kept three days.
+  "nl:storage:blob:": ["lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS"],
   // The mark of a passed-over Stripe event (a capped part): set with the same expiry as every event mark.
   "nl:hooks:evt:": ["lib/webhooks.ts", "EVENT_SECONDS"],
   "nl:call:confirmed:": ["lib/calls.ts", "CONFIRMED_SECONDS"],

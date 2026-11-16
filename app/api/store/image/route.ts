@@ -49,7 +49,10 @@ const ACTIONS = new Set(["attach", "remove", "alt", "display"]);
  * browser made for phones (lib/product-image.ts, SMALL_LONG_SIDE). It is
  * held to every check the picture itself is, and has to be narrower than it;
  * one that fails any of them is deleted and left out, and the picture is
- * attached without it — a copy is never worth refusing a picture for.
+ * attached without it — a copy is never worth refusing a picture for. A copy
+ * whose check meets an unknown (a head or a read that fails, a passing outage
+ * of the file store) is left out too, and kept: only what the store proves is
+ * not a copy we keep is deleted.
  */
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "products", 2_000);
@@ -154,8 +157,8 @@ export async function POST(request: NextRequest) {
           if (good) small = { path: smallPath, width: smallWidth, bytes: copy.size };
           else await dropFresh([smallPath]);
         } catch (error) {
-          console.error("checking a picture's smaller copy failed; attached without it", error);
-          await dropFresh([smallPath]);
+          // Unknown, not "not a picture": left out and kept, never deleted (lib/uploaded-image.ts, firstBytes).
+          console.error("checking a picture's smaller copy failed; attached without it, and the copy kept", error);
         }
       }
       // The thumbnail copy (Encanto 5b-2), checked exactly as the smaller copy, within MAX_THUMB_BYTES and narrower
@@ -178,8 +181,8 @@ export async function POST(request: NextRequest) {
           if (good) thumb = { path: thumbPath, width: thumbWidth, bytes: copy.size };
           else await dropFresh([thumbPath]);
         } catch (error) {
-          console.error("checking a picture's thumbnail copy failed; attached without it", error);
-          await dropFresh([thumbPath]);
+          // Unknown, not "not a picture": left out and kept, never deleted, as the smaller copy is.
+          console.error("checking a picture's thumbnail copy failed; attached without it, and the copy kept", error);
         }
       }
       // Checked above: exact, or none.

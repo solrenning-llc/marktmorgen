@@ -18,6 +18,7 @@ import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { UNKNOWN_SALES_GOAL_CENTS, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
+import { guestFiguresOf, sendGuestReports } from "@/lib/report-guests-mail";
 
 /**
  * The weekly email to each creator whose store had visitors (lib/stats-report.ts).
@@ -162,6 +163,13 @@ export async function GET(request: NextRequest) {
           const text = message.text.replace(stopUrl, own).replace("You get this every Monday while your store has visitors.", `You get this because the owner of @${store.handle} added you.`);
           await sendEmail({ meter: { by: "company" }, from: NIMBUS_FROM, to: email, subject: message.subject, text, headers: { "List-Unsubscribe": `<${own}>` } }).catch(() => false);
         }
+      }
+      // The week's chosen figures to the addresses outside the team that said yes (405 [HX1]): each checked again
+      // just before its email and taken from the store's emails first (lib/report-guests-mail.ts).
+      try {
+        await sendGuestReports(store, "week", guestFiguresOf(data, "week", ""));
+      } catch (error) {
+        console.error("weekly: the outside addresses' emails failed", error);
       }
     }
     console.log(`weekly: ${JSON.stringify(out)}`);

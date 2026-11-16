@@ -11,6 +11,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { lastMonthOf, monthClaim, noteSeen, readSeen, releaseMonth, monthlyMessage, readNumbers, weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
+import { guestFiguresOf, sendGuestReports } from "@/lib/report-guests-mail";
 
 /**
  * The month's email to each creator whose store had visitors in it
@@ -123,6 +124,13 @@ export async function GET(request: NextRequest) {
       }).catch(() => false);
       if (ok) out.sent += 1;
       else out.failed += 1;
+      // The month's chosen figures to the addresses outside the team that said yes (405 [HX1]): each checked again
+      // just before its email and taken from the store's emails first (lib/report-guests-mail.ts).
+      try {
+        await sendGuestReports(store, "month", guestFiguresOf(data, "month", month));
+      } catch (error) {
+        console.error("monthly: the outside addresses' emails failed", error);
+      }
     }
     console.log(`monthly: ${JSON.stringify(out)}`);
     return Response.json({ ok: true, ...out }, { headers: { "Cache-Control": "no-store" } });

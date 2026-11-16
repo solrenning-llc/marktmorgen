@@ -215,11 +215,19 @@ function parseRecord(raw: unknown): UpsellRecord | null {
   }
 }
 
-/** The answer to one offer of this order, or null when there is none yet. */
+/**
+ * The answer to one offer of this order, or null when there is none yet (GET null). A reply in any other shape,
+ * or a record that does not parse, is unknown and throws (CX-123 rule 24): an offer waiting on Stripe is never
+ * let go, and a paid one never read as not there, on it.
+ */
 export async function readUpsell(session: string, slot = ""): Promise<UpsellRecord | null> {
   if (!isRedisConfigured() || !SESSION_ID.test(session) || (slot && !SLOT_PATTERN.test(slot))) return null;
-  const [raw] = await redisPipeline([["GET", recordKey(session, slot)]]);
-  return parseRecord(raw);
+  const replies = repliesFor(await redisPipeline([["GET", recordKey(session, slot)]]), 1);
+  if (!replies) throw new UnknownReplyError("an offer's answer");
+  if (replies[0] === null) return null;
+  const record = parseRecord(replies[0]);
+  if (!record || typeof record !== "object" || typeof record.state !== "string") throw new UnknownReplyError("an offer's answer");
+  return record;
 }
 
 /** Every answer this order has, keyed by slot ("" for the first offer). */
@@ -272,6 +280,8 @@ export type TakeResult =
   | { kind: "failed" }
   /** Stripe's answer did not arrive; the thanks page finds out what happened. */
   | { kind: "checking" }
+  /** Stripe answered 429 (too many requests) to the yes: the offer was let go of and can be answered again, under the same idempotency key. */
+  | { kind: "busy" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
   | { kind: "consent" }
@@ -447,6 +457,13 @@ export async function takeUpsell(input: {
   const digital = deliversDigitally(target);
   if (digital && !validConsent(input.consent)) return { kind: "consent" };
 
+  // An order that came through an affiliate's link carries them on to what
+  // is added after it, at the share this product earns today. Read before
+  // anything is written or charged: a share that cannot be read throws
+  // (CX-123 rule 24), and the offer is not charged without it.
+  const via = view.metadata?.via ?? "";
+  const rate = via ? await funnelRate(store, via, target.id) : 0;
+
   // Once, however many times the button is pressed. Taken here only on exactly "OK"; null is an answer already
   // written. Any other reply (none, a number, another word, more than one) does not say the claim is this press's,
   // so it is unknown (CX-123 rule 24): the card is not charged and nothing more is written.
@@ -518,10 +535,6 @@ export async function takeUpsell(input: {
   // The yes to start access at once, its version and its time, on the offer's own payment.
   if (digital && input.consent) body.set(`metadata[${CONSENT_META}]`, consentMetaValue(input.consent, consentKind(target)));
   if (email) body.set("receipt_email", email);
-  // An order that came through an affiliate's link carries them on to what
-  // is added after it, at the share this product earns today.
-  const via = view.metadata?.via ?? "";
-  const rate = via ? await funnelRate(store, via, target.id).catch(() => 0) : 0;
   if (via && rate > 0) {
     body.set("metadata[via]", via);
     body.set("metadata[via_rate]", String(rate));
@@ -568,11 +581,29 @@ export async function takeUpsell(input: {
     return { kind: "failed" };
   } catch (error) {
     // Stripe answered and said no — a declined card, a refused request — so
-    // nothing was charged.
-    if (error instanceof StripeError && error.status < 500) {
+    // nothing was charged. Never a 429 (too many requests: nothing done, and
+    // nothing said of the card), a 409 or an idempotency error (a request
+    // under this key is still being worked on, or was made before): those
+    // say nothing of a charge, and go the way of no answer below.
+    if (
+      error instanceof StripeError &&
+      error.status < 500 &&
+      error.status !== 409 &&
+      error.status !== 429 &&
+      error.code !== "idempotency_error" &&
+      error.code !== "idempotency_key_in_use"
+    ) {
       await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
       return { kind: "failed" };
+    }
+    // Too many requests: not a word about the card, and the yes is not lost to it (outage drill, 13 November 2026).
+    // The offer is let go of so the buyer can answer it again; that yes goes under this same idempotency key, so
+    // whatever Stripe did with this one, it is charged once at most.
+    if (error instanceof StripeError && error.status === 429) {
+      await redisPipeline([["DEL", recordKey(session, slot)], ...(slot ? [["SREM", slotsKey(session), slot]] : [])]);
+      await unwatchPending(store, session, slot);
+      return { kind: "busy" };
     }
     // No answer, or Stripe's own failure: the charge may have gone through.
     // It stays pending and is settled from what Stripe says (settleUpsells),

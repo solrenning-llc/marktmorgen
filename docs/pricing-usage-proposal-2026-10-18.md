@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $119.45 | $1,221.20 | $69 / $690 |
-| Studio | $175.30 | $1,862.00 | $449 / $4,490 |
-| Scale | $273.20 | $2,998.80 | $999 / $9,990 |
+| Store | $119.55 | $1,221.73 | $69 / $690 |
+| Studio | $175.30 | $1,862.45 | $449 / $4,490 |
+| Scale | $273.20 | $2,999.43 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -88,8 +88,8 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **6 + 39** · 40 + 250 · 40 + 250 | **8 + 40** · 80 + 400 · 80 + 400 |
 | Storage: included · #553 · before #553 | **0.5 GB** · 5 GB · 5 GB | **6 GB** · 40 GB · 40 GB | **8 GB** · 80 GB · 80 GB |
 | Video hours watched a month: included · #553 · before #553 | **4** · 4 · 4 | **32** · 32 · 32 | **64** · 64 · 64 |
-| Access emails a month: included · #553 · before #553 | **22** · 150 · 150 | **62** · 400 · 400 | **100** · 1,000 · 1,000 |
-| Store emails a month: included · #553 · before #553 | **11** · 75 · 75 | **47** · 300 · 300 | **81** · 800 · 800 |
+| Access emails a month: included · #553 · before #553 | **21** · 150 · 150 | **62** · 400 · 400 | **100** · 1,000 · 1,000 |
+| Store emails a month: included · #553 · before #553 | **10** · 75 · 75 | **47** · 300 · 300 | **81** · 800 · 800 |
 | Net at full included use, monthly (sizing reading) | 60.24% | 60.33% | 60.40% |
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.03% | 60.01% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.11% | 12.14% |

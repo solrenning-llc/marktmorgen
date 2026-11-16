@@ -231,7 +231,9 @@ export async function visitPath(store: Store, record: PathRecord, now = Date.now
   let changed = false;
   let moneyTriedAt = record.moneyTriedAt;
   const triedRecently = moneyTriedAt !== undefined && now - moneyTriedAt >= 0 && now - moneyTriedAt < PATH_MONEY_SECONDS * 1000;
-  if ((!moneyFresh(money, store, now) && !triedRecently) || !countsFresh(counts, now)) {
+  // Money and counts are one charged reading: after a reading whose refunds were unknown, neither is read nor charged
+  // again before PATH_MONEY_SECONDS, even while the counts stay stale (Codex U on #3443).
+  if ((!moneyFresh(money, store, now) || !countsFresh(counts, now)) && !triedRecently) {
     if (await charge(PATH_READ_UNITS)) {
       const [readMoney, readCounts] = await Promise.all([readPathMoney(store, now).catch(() => null), readPathCounts(store, now)]);
       // A reading whose refunds are unknown (money null, no sale counted as kept) never replaces a kept one, as a reading

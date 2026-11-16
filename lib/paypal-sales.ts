@@ -1172,7 +1172,9 @@ export async function watchPayPal(
     if (takeOff || seenAgain) {
       const left = paid.at + PAID_KEPT_SECONDS - now;
       if (left > 0) {
-        const { blind: _blind, ...seen } = paid;
+        // The record without its blind mark, once PayPal's word reads again.
+        const seen: Paid = { ...paid };
+        delete seen.blind;
         const record: Paid = { ...(seenAgain ? seen : paid), ...(takeOff ? { takenOff: status as TakenOff } : {}) };
         const wrote = repliesFor(await redisPipeline([["SET", paidKey(order), JSON.stringify(record), "XX", "EX", left]]), 1);
         if (!wrote || (wrote[0] !== "OK" && wrote[0] !== null)) {
@@ -1406,7 +1408,7 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
   const rows = read ? listSlots(read[0]) : null;
   if (!rows || rows.length !== wanted.length) return { sales: [], partial: true };
   const sales: Paid[] = [];
-  for (const raw of rows) {
+  for (const [i, raw] of rows.entries()) {
     let paid: Paid | null = null;
     try {
       paid = typeof raw === "string" ? (JSON.parse(raw) as Paid) : null;
@@ -1414,8 +1416,10 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
       paid = null;
     }
     // An order that cannot be read is left out, not guessed at, and the reading says it is partial. One whose record
-    // has gone (null) or belongs to another store is not this store's sale.
-    if (paid && typeof paid === "object" && paid.store === statsId && typeof paid.order === "string") sales.push(paid);
+    // has gone (null) or belongs to another store is not this store's sale. A record of this store that names another
+    // order than the one listed is not that order's sale either (Codex P on #3443): it is left out and the reading is
+    // partial, so another order's capture, amount or refunds are never counted as this one's.
+    if (paid && typeof paid === "object" && paid.store === statsId && paid.order === wanted[i]) sales.push(paid);
     else if (raw !== null && !(paid && typeof paid === "object" && typeof paid.store === "string" && paid.store !== statsId)) partial = true;
   }
   return { sales, partial };

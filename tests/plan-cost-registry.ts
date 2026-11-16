@@ -231,6 +231,24 @@ export const CART_STOCK_COMMANDS_MOST = 71;
 export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**
+ * A limited product's unit counted as sold (lib/stock.ts, STOCK_SELL; Claude 3's performance audit, 13 November 2026, and
+ * Claude 7's MÉDIO on #4472, 14 and 15 November 2026): one script that lets go of the checkout's own field and raises the
+ * product's sold count, billed as the EVAL and its two calls (HDEL, HINCRBY) where the field-per-sale write was one HSET.
+ */
+export const STOCK_SELL_COMMANDS = 3;
+/**
+ * A paid order's stock confirmation at its worst (the thanks page: confirmStock for its product, confirmCartStock for the
+ * rest of a cart of MAX_CART limited products): one HEXISTS a product, and STOCK_SELL only for a product the checkout still
+ * holds, so each order's unit is counted by one STOCK_SELL in its life (from the thanks page, or from a page that finds its
+ * hold lapsed and Stripe says paid; whichever comes second finds no field and sends no script). A thanks page opened
+ * again sends the HEXISTS only, as main's confirmation did. Measured in tests/stock-sell-cost.test.ts, held inside its own
+ * share of ORDER_COMPUTE, which with the cart's stock share and the contact's quarter stays inside one order's compute.
+ */
+export const STOCK_CONFIRM_COMMANDS_MOST = 16;
+export const STOCK_CONFIRM_SHARE_OF_ORDER_COMPUTE = 0.12;
+/** The quarter of ORDER_COMPUTE an order's contact write may take at the most (lib/contacts.ts, tests/contacts-write-cost.test.ts). */
+export const CONTACT_SHARE_OF_ORDER_COMPUTE = 0.25;
+/**
  * The access emails a plan's window holds (lib/store-allowance-rules.ts):
  * since 17 October 2026 counted and refused past the figure, before sending
  * (lib/email.ts, EmailMeter); until then a figure set high that no counter held.

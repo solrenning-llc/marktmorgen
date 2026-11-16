@@ -62,6 +62,9 @@ const EXPECTED_EMPTY: string[] = ["lib/shipment-mail-outbox.ts", "lib/order-conf
 // 761 [STN8]: nothing calls the made-to-order record yet, so the world keeps none.
 EXPECTED_EMPTY.push("lib/made-to-order.ts");
 
+// 610 [WP9] unit 2: the world activates no license key on a device; its copy is held in tests/licence-activations.test.ts.
+EXPECTED_EMPTY.splice(EXPECTED_EMPTY.indexOf("lib/licence-keys.ts") + 1, 0, "lib/licence-activations.ts");
+
 main().catch((error) => {
   console.error(error);
   process.exit(1);

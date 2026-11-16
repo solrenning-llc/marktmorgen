@@ -210,6 +210,75 @@ async function main() {
     run = await sched.activateScheduledCodes(Date.now() + 10_000, start + HOUR, { ...deps, findStore: async () => "none" as const });
     is("a store confirmed gone sends nothing and drops the notice", [told.length, run.notices.dropped, (await redis.pipeline([["ZCARD", TELL]]))[0]], [0, 1, 0]);
 
+    // Codex N1 on #3027 (MEDIUM 1, transcribed by Claude 2 cloud G): the mark and the dequeue were two commands, so a
+    // dequeue that landed beside a mark that did not left the record unsent and out of the line for good.
+    part("A mark whose write is not confirmed keeps the notice in the line");
+    {
+      await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due", TELL, `nl:dsched:lock:${STATS}`]]);
+      told = [];
+      tellAnswers = [true];
+      await sched.scheduleCode(shop, asked("MARK1"), { start, end }, NOW);
+      clock = start;
+      for (let i = 0; i < ACTIVATION_TRIES - 1; i += 1) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+        clock += RETRY_SECONDS;
+      }
+      const pipe = redis.pipeline.bind(redis);
+      let hit = false;
+      redis.pipeline = (async (commands: (string | number)[][]) => {
+        const marking = commands.some((c) => c.some((a) => String(a).includes('"m":1')));
+        if (!hit && marking) {
+          hit = true;
+          // The dequeue lands and the mark does not, its reply out of shape; a single step is answered out of shape, not applied.
+          if (commands.length === 2 && commands[1][0] === "ZREM") {
+            await pipe([commands[1]]);
+            return ["garbled", 1];
+          }
+          return ["garbled"];
+        }
+        return pipe(commands);
+      }) as typeof redis.pipeline;
+      try {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+      } finally {
+        redis.pipeline = pipe;
+      }
+      const record = JSON.parse(String((await redis.pipeline([["HGET", `nl:dsched:${STATS}`, "promo_MARK1"]]))[0]));
+      is("not told on an unconfirmed mark", told.length, 0);
+      is("the record is not marked", record.m, undefined);
+      is("and its notice is still in the line", (await redis.pipeline([["ZSCORE", TELL, member("promo_MARK1")]]))[0] !== null, true);
+      await sched.activateScheduledCodes(Date.now() + 10_000, clock + NOTICE_RETRY_SECONDS, deps);
+      is("the next run tells it, once", told.map((t) => t.code), ["MARK1"]);
+    }
+
+    // Codex N1 on #3027 (MEDIUM 2): a send that outlasted the lock and then failed wrote its snapshot back over a code
+    // the creator had canceled meanwhile, and put it back in the line.
+    part("A slow send that fails after a cancel never brings the code back");
+    {
+      await redis.pipeline([["DEL", `nl:dsched:${STATS}`, "nl:dsched:due", TELL, `nl:dsched:lock:${STATS}`]]);
+      told = [];
+      await sched.scheduleCode(shop, asked("SLOW1"), { start, end }, NOW);
+      clock = start;
+      for (let i = 0; i < ACTIVATION_TRIES - 1; i += 1) {
+        await sched.activateScheduledCodes(Date.now() + 10_000, clock, deps);
+        clock += RETRY_SECONDS;
+      }
+      let canceled: string | null = null;
+      const slow = {
+        ...deps,
+        tell: async () => {
+          // The send outlasts the job's lock; the creator cancels in between; then the send fails.
+          await redis.pipeline([["DEL", `nl:dsched:lock:${STATS}`]]);
+          canceled = await sched.cancelSchedule(shop, "promo_SLOW1");
+          return false;
+        },
+      };
+      await sched.activateScheduledCodes(Date.now() + 10_000, clock, slow);
+      is("the cancel went through", canceled === "done" || canceled === "stopped", true);
+      is("the canceled code is not written back", (await redis.pipeline([["HGET", `nl:dsched:${STATS}`, "promo_SLOW1"]]))[0], null);
+      is("nor put back in the line", await redis.pipeline([["ZCARD", TELL]]), [0]);
+    }
+
     part("The real sender: the store's own email figure, before it goes");
     const lib = readFileSync("lib/discount-schedule-notice.ts", "utf8");
     is("sent through sendEmail, counted against the store's email figure", /meter: \{ by: "store", store(: store)?, kind: "email" \}/.test(lib), true);

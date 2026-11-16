@@ -1575,6 +1575,7 @@
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",
+    "components/paypal-waiting-notice.tsx",
     "components/pdf-preview-toggle.tsx",
     "components/pdf-stamp-toggle.tsx",
     "components/pending-submit.tsx",
@@ -1737,6 +1738,7 @@
     "components/withdrawal-where.tsx",
     "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
+    "components/workflow-versions.tsx",
     "components/yearly-ask-editor.tsx"
   ],
   "apiRouteSources": [

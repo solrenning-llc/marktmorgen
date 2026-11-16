@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Icon, iconFor, type IconName } from "@/components/icons";
 import { RevealOnScroll } from "@/components/home-parts";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { isBillingConfigured } from "@/lib/billing";
 import { PUBLISHED_PLAN_PRICES as PLAN_PRICES, PUBLISHED_PRICE_CENTS as PRICE_CENTS, REFUND_DAYS, TRIAL_DAYS, PUBLISHED_YEAR_PRICE_CENTS as YEAR_PRICE_CENTS } from "@/lib/plan";
 import { isConnectConfigured } from "@/lib/stripe-connect";

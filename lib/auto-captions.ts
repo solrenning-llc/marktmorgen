@@ -721,6 +721,12 @@ export async function autoRefundsOwed(folder: string): Promise<{ id: string; cen
     if (rows[i] === null) return [];
     const pending = parsePending(rows[i]);
     if (!pending) throw new UnknownReplyError("a caption refund owed to a store");
-    return pending.owed && pending.owed.cents !== 0 && readStreamPath(pending.path)?.folder === folder ? [{ id, cents: pending.owed.cents ?? pending.cents, stuck: pending.owed.stuck === true }] : [];
+    if (!pending.owed || pending.owed.cents === 0) return [];
+    // Listed under this folder: a path that does not read, or names another folder, is unknown, never "none owed" (Codex T).
+    if (readStreamPath(pending.path)?.folder !== folder) throw new UnknownReplyError("a caption refund owed to a store");
+    // An amount owed is a whole number of cents above zero; anything else is unknown, never "a refund of $0.00" (Codex g).
+    const cents = pending.owed.cents ?? pending.cents;
+    if (!Number.isSafeInteger(cents) || cents <= 0) throw new UnknownReplyError("a caption refund owed to a store");
+    return [{ id, cents, stuck: pending.owed.stuck === true }];
   });
 }

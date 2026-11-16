@@ -46,7 +46,7 @@ import { dataKey, noteData } from "@/lib/store-data";
 import { DATA_STEP_BYTES } from "@/lib/store-data-rules";
 import { readAllListings } from "@/lib/catalog";
 import { readFlows } from "@/lib/flows";
-import { type Store, storeForEmail, storeRef, storesAfter } from "@/lib/store";
+import { type Store, storeForRefExact, storeRef, storesAfter } from "@/lib/store";
 
 /** Changed to count every store again from the start. */
 export const RECOUNT_VERSION = "2026-10-18";
@@ -284,7 +284,8 @@ async function applySums(deadline: number): Promise<{ applied: number; done: boo
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const ref = flat[i];
       const measured = count(flat[i + 1]);
-      const store: Store | null = await storeForEmail(ref);
+      // Only confirmed absence lets a measured sum go. An unreadable owner GET must keep this sum for the next run.
+      const store: Store | null = await storeForRefExact(ref);
       const key = store ? dataKey(store) : null;
       if (store && key) {
         const room = fields(await read(["HMGET", key, "#", LEGACY_SLOT]), 2);

@@ -138,6 +138,16 @@ async function main(): Promise<void> {
     from: "store@x.test",
   }).then(() => "settled", () => "threw");
   is("a free checkout settles with no payment read", free, "settled");
+  const unreadStart = await startGroup(store, product, "5");
+  if (!unreadStart.ok) throw new Error("unread-total group did not start");
+  const unreadTotal = await settleGroup({
+    store,
+    session: { ...sessionFor(unreadStart.group.id, "pi_unused_unread"), amount_total: undefined, payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a total that does not read, with no payment, is never taken for free", [unreadTotal, Boolean(await openGroup(store, unreadStart.group.id))], ["threw", false]);
 
   part("Its Stripe reads are priced inside the order's compute (Claude 7's cost MEDIUM on #4494)");
   const source = readFileSync("lib/group-buy.ts", "utf8");

@@ -250,9 +250,10 @@ export async function settleGroup(input: {
   // and the answer must be that PaymentIntent, succeeded, with its expanded charge tied to it (Codex X4 and N1 on
   // #4494; fix as Codex X5 proposed). Only a free checkout, with no PaymentIntent, is settled with no read.
   try {
-    const total = session.amount_total;
-    if (typeof total !== "number" || !Number.isSafeInteger(total) || total < 0) throw new UnknownReplyError("a purchase for several's total");
-    if (total > 0 || pi) {
+    // Only a checkout that reads as free (a total of exactly zero) and names no PaymentIntent is settled unread; a total
+    // that does not read is not taken for zero, so its payment is read (its receipt still leaves the amount out).
+    const free = session.amount_total === 0 && !pi;
+    if (!free) {
       const account = store.stripeAccountId;
       if (!PAYMENT_ID.test(pi) || typeof account !== "string" || !account) throw new UnknownReplyError("a purchase for several's payment");
       const payment = await onAccount("GET", account, `/payment_intents/${encodeURIComponent(pi)}?expand[]=latest_charge`);

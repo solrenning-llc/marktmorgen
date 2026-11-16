@@ -21,7 +21,7 @@
  * and so is not in the list of choices the page was given.
  */
 import type { Listing, Product } from "@/lib/store";
-import { bumpPauseWords, bumpState, bumpStates, planPauseWords, planState } from "@/lib/product-extras";
+import { bumpPauseWords, bumpStates, planPauseWords, planState } from "@/lib/product-extras";
 import { funnelHealth, stepPauseWords } from "@/lib/funnel";
 import { listedLengths } from "@/lib/call-lengths";
 
@@ -124,9 +124,9 @@ export function quietedBy(
   for (const product of products) {
     const title = product.title || "A product";
     // A box or an offer that pointed at the product just changed.
-    for (const bump of product.bumps) {
-      if (bump.productId !== changedId) continue;
-      const state = bumpState(all, product, bump);
+    // Read as the checkout reads them, the boxes against each other too (bumpStates).
+    for (const state of bumpStates(all, product)) {
+      if (state.bump.productId !== changedId) continue;
       if ("paused" in state) say(title, bumpPauseWords(state.paused, all.find((p) => p.id === changedId)?.title ?? ""));
     }
     const funnel = product.funnel ? funnelHealth(all, product) : null;

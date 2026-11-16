@@ -396,6 +396,69 @@ await t.test(`a stale m: 1 note never takes back a stop the creator set after ou
   assert.equal(shop.sub().cancel_at_period_end, true, "a stop the creator set is never taken back on a stale note");
 });
 }
+// Codex Y on #3740 (MEDIUM): none was made and the plan has already ended (our stop ran out), but the note's removal is
+// lost. The note must still let the next run read the plan again, so a canceled plan is never told it renews as usual.
+for (const plan of ["ended at Stripe", "still live"] as const) {
+await t.test(`a lost note removal after "none was made" keeps what the plan is for the next run: ${plan} (Codex Y on #3740)`, async () => {
+  await reset();
+  const shop = await paidShop();
+  world.refundsDown = true;
+  await refundAndEndPlan(await shop.store(), NOW);
+  world.refundsDown = false;
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "our stop is noted for the daily job");
+  if (plan === "ended at Stripe") shop.sub().status = "canceled";
+  world.emails = [];
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  const logged = console.error;
+  console.error = () => {};
+  try {
+    await finishPlanRefunds(Date.now() + 10_000, NOW + 601);
+    redis.pipeline = original;
+    assert.notEqual(await shop.note(), null, "the removal was lost, so the note is still there");
+    await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600);
+  } finally {
+    console.error = logged;
+    redis.pipeline = original;
+    delete process.env.RESEND_API_KEY;
+  }
+  assert.equal(await shop.note(), null, "the next run drops the note");
+  const texts = world.emails.map((email) => email.text);
+  assert.equal(texts.length, 1, "one letter, once the note is gone");
+  if (plan === "ended at Stripe") {
+    assert.equal(texts.some((text) => text.includes("renews as usual")), false, "a canceled plan is never told it renews as usual");
+    assert.equal(texts[0].includes("Your plan ended at the end of the period you paid for"), true, "the letter says the plan has ended");
+  } else {
+    assert.equal(texts[0].includes("renews as usual"), true, "a plan that goes on is told so");
+    assert.equal(shop.sub().cancel_at_period_end, false, "our stop was taken back");
+  }
+});
+}
+// The same on the creator's request: the plan ends between our stop and its take-back, and the note's removal is
+// lost. The note keeps m: 1, so the daily job reads the plan again instead of taking it for one that goes on.
+await t.test("a lost note removal after the plan ended on the creator's request keeps the note at m: 1 (Codex Y on #3740)", async () => {
+  await reset();
+  const shop = await paidShop({ at: NOW - 40 * DAY });
+  const store = await shop.store();
+  world.afterSubscriptionGet = async () => {
+    shop.sub().status = "canceled";
+    world.afterSubscriptionGet = null;
+  };
+  redis.pipeline = async (commands) => dropLost(commands) ? [] : original(commands);
+  try {
+    await assert.rejects(() => refundAndEndPlan(store, NOW), "a lost removal answer is not taken for a removal");
+  } finally {
+    redis.pipeline = original;
+    world.afterSubscriptionGet = null;
+  }
+  assert.equal(JSON.parse(String(await shop.note())).m, 1, "the plan ended, so the note never says our stop was taken back");
+  world.emails = [];
+  process.env.RESEND_API_KEY = "re_a_stand_in_key_for_tests_only";
+  const quiet = console.error;
+  console.error = () => {};
+  try { await finishPlanRefunds(Date.now() + 10_000, NOW + 2 * 3_600); } finally { console.error = quiet; delete process.env.RESEND_API_KEY; }
+  assert.equal(world.emails.some((email) => email.text.includes("renews as usual")), false, "a canceled plan is never told it renews as usual");
+});
 // Claude 1 on #3740: while our stop stands (a refund that may still turn up), the creator takes it back and cancels
 // themselves from the studio (lib/billing.ts setCancelAtPeriodEnd). That cancellation is theirs: no run takes it back.
 await t.test("the creator's own resume and cancel, made while our stop stood, is never taken back", async () => {

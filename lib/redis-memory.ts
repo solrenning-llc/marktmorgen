@@ -2421,6 +2421,13 @@ export class MemoryRedis {
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
       }
+      case "ZMSCORE": {
+        const z = this.zset(key);
+        return args.map((member) => {
+          const found = z.find((e) => e.member === member);
+          return found ? String(found.score) : null;
+        });
+      }
       case "ZREMRANGEBYRANK": {
         const z = this.zset(key);
         const [from, to] = [Number(args[0]), Number(args[1])];

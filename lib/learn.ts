@@ -550,12 +550,17 @@ export async function touchStudent(
   const card = !drip ? null : "card" in drip ? drip.card : drip.course.id === courseId ? dripCardOf(drip.course, drip.productId) : null;
   const index = card && room.statsId && room.handle && !indexed ? { statsId: room.statsId, handle: room.handle, card } : null;
   const pairs = index ? duePairs(courseId, field, row.s, index.card, nowSeconds) : [];
+  // Only the pairs not yet in the index take room: a student the walk indexed already has theirs (Claude 5 on #3344).
+  // A student with no row yet was never walked, so all of theirs are new and nothing is read for it.
+  const fresh = index ? (typeof raw === "string" ? await newPairs(index.statsId, pairs) : pairs) : [];
   // Marked once its pairs are written, and kept marked by a visit that writes none (the course start, with no outline).
   if (index || indexed) row.i = 1;
   const json = JSON.stringify(row);
   const changes: DataChange[] = [
     ...(typeof raw !== "string" ? [{ slot: DONE_SLOT(courseId), bytes: dataBytes([field, json, "0000000000"], 1) }] : []),
-    ...(index && pairs.length > 0 ? [...pairRoom(pairs), cardRoom(courseId, index.card)] : []),
+    ...(index && fresh.length > 0 ? pairRoom(fresh) : []),
+    // The card only from the outline (the course page): the course start hands the kept card, already in its room.
+    ...(index && pairs.length > 0 && !(drip && "card" in drip) ? [cardRoom(courseId, index.card)] : []),
   ];
   if (changes.length > 0 && !(await takeData(room, changes)).ok) {
     // A new row and its pairs together or neither; a row already kept is written without its pairs, and without its
@@ -567,11 +572,14 @@ export async function touchStudent(
   }
   const commands: Cmd[] = [["HSET", key, field, json]];
   if (index && pairs.length > 0) {
+    // Every pair written, so an earlier start moves the scores of those already there; only the new ones took room.
     commands.push(
       ["ZADD", dueKey(index.statsId), ...pairs.flatMap(([score, member]) => [score, member])],
       ["SADD", DRIP_STORES, `${index.statsId}|${index.handle}`],
-      ["SET", cardKey(courseId), JSON.stringify(index.card), "NX"],
     );
+    // The course start hands the card it has just read (dripCardFor): written again only from the outline, which the
+    // course page has and whose card may not be kept yet (Claude 5 on #3344, MEDIUM 2: 1 command and its bytes fewer).
+    if (!(drip && "card" in drip)) commands.push(["SET", cardKey(courseId), JSON.stringify(index.card), "NX"]);
   }
   await redisPipeline(commands);
 }
@@ -1098,7 +1106,7 @@ const walkKey = (statsId: string) => `nl:drip:walk:${statsId}`;
 /** A course's card in the store's data room. */
 const CARD_SLOT = (courseId: string) => `dc:${courseId}`;
 /** Students read at a time (HSCAN COUNT, a hint): every one of them is read, page after page, never a first few thousand. */
-const DRIP_PAGE = 200;
+const DRIP_PAGE = 100;
 /** How long a run goes on when its caller gives no deadline; the route gives its own (app/api/cron/courses). */
 const DRIP_RUN_MS = 40_000;
 /**
@@ -1213,6 +1221,24 @@ function pairRoom(pairs: [number, string][]): DataChange[] {
     months.set(month, held);
   }
   return [...months.values()];
+}
+
+/**
+ * The pairs not yet in the store's index, read with one ZMSCORE: only those take room (pairRoom), since a ZADD of a
+ * member already there only moves its score (Claude 5 on #3344, MEDIUM 1). Each answer is null (not there) or a score;
+ * any other reply is unknown, never "not there", which would take the room twice.
+ */
+async function newPairs(statsId: string, pairs: [number, string][]): Promise<[number, string][]> {
+  if (pairs.length === 0) return [];
+  const replies = repliesFor(await redisPipeline([["ZMSCORE", dueKey(statsId), ...pairs.map(([, member]) => member)]]), 1);
+  const scores = replies ? listSlots(replies[0]) : null;
+  if (!scores || scores.length !== pairs.length) throw new UnknownReplyError("which drip pairs are already indexed");
+  return pairs.filter((_, n) => {
+    const score = scores[n];
+    if (score === null) return true;
+    if ((typeof score === "string" && /^-?[0-9]+(\.[0-9]+)?$/.test(score)) || (typeof score === "number" && Number.isFinite(score))) return false;
+    throw new UnknownReplyError("which drip pairs are already indexed");
+  });
 }
 
 /** A course's card in the room, its slot set to the card's bytes. */
@@ -1469,8 +1495,10 @@ async function walkPending(store: Store, statsId: string, pending: string[], run
           pairs.push(...duePairs(courseId, scanned.items[i], row.s, card, run.nowSeconds));
         }
         if (pairs.length > 0) {
-          // The page's pairs take their room first: a full room writes none, and the course waits where it is.
-          if (!(await takeData(store, pairRoom(pairs))).ok) throw new Error("the store's data room cannot take a drip course's pairs");
+          // The page's new pairs take their room first: a full room writes none, and the course waits where it is. A pair
+          // already in the index (a schedule moved, a student indexed by an earlier walk) only has its score moved.
+          const fresh = await newPairs(statsId, pairs);
+          if (fresh.length > 0 && !(await takeData(store, pairRoom(fresh))).ok) throw new Error("the store's data room cannot take a drip course's pairs");
           const added = repliesFor(await redisPipeline([["ZADD", dueKey(statsId), ...pairs.flatMap(([score, m]) => [score, m])]]), 1);
           if (!added || countOf(added[0]) === null) throw new UnknownReplyError("a drip course's pairs written");
           pairsWritten += pairs.length;

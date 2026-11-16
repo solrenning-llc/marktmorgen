@@ -164,6 +164,24 @@ async function main(): Promise<void> {
   calls.head = 0;
   calls.get = 0;
   is("the product's picture named for the link: refused as another record's, and never read", [await result(await linkImage(post("/api/store/link-image", session, linkBody(main)))), calls.head, calls.get], [[400, "in_use"], 0, 0]);
+  // Claude 2 on #2843 (LOW 2): a copy the product already shows whose size its record cannot vouch for (a legacy
+  // bytes 0) is left out, unread, as a failing copy is; the picture itself is not refused for it.
+  part("A product's own copy with a size its record cannot vouch for: left out, unread, the picture still attached");
+  const second = await addProduct(OWNER, "Second guide", "", "19", null);
+  if (!second.ok) throw new Error("setup");
+  const otherId = second.product.id;
+  const ownMain = await upload({ productId: otherId });
+  const ownSmall = await upload({ productId: otherId });
+  const ownBody = { action: "attach", id: otherId, path: ownMain, width: 1200, height: 800, alt: "A second guide", small: { path: ownSmall, width: 800 } };
+  is("attached fresh from the door", await result(await productImage(post("/api/store/image", session, ownBody))), [200, "ok"]);
+  const ownImage = (await readListing((await storeForEmail(OWNER))!, otherId))?.image ?? null;
+  if (!ownImage?.small) throw new Error("setup");
+  await setProductImage(OWNER, otherId, { ...ownImage, small: { ...ownImage.small, bytes: 0 } });
+  calls.head = 0;
+  calls.get = 0;
+  const answered = await result(await productImage(post("/api/store/image", session, ownBody)));
+  const after = (await readListing((await storeForEmail(OWNER))!, otherId))?.image ?? null;
+  is("sent again: the picture attached, the copy left out, and nothing read", [answered, after?.path, after?.small ?? null, calls.head, calls.get], [[200, "ok"], ownMain, null, 0, 0]);
   done();
 }
 

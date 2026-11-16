@@ -546,14 +546,28 @@ async function main(): Promise<void> {
     const worstMonth = (cycle: Cycle) => (["creator", "pro", "scale"] as const).map((tier) => ((netOf(tier, cycle) - worstCost(tier)) * (1 - taxShare)).toFixed(2));
     // Main's model since 124dc5fc3 (#3384, members import holds the month's emails): its extra import commands
     // raised the imports line by $0.009 on Studio and $0.016 on Scale, one cent less kept than this PR first showed.
-    // Merged with #2803 (Costs: every picture upload's Blob operations and reads, under the owner's US$ 66 ceiling; 15 November 2026): its costs move these figures by cents.
-    // Merged again with its base #2803 (15 November 2026): its blob upload costs with this PR's thumbnails, a few cents less kept a month.
-    // Merged again with its base #2801 (15 November 2026): this PR's single studio-blob line in place of the base's line per copy, a few cents more kept a month.
-    // Merged with its base claude5/studio-blob, this PR's buyer-blob and mail-picture lines keep a few cents less a month
-    is("11: Store, Studio and Scale keep 44.48, 312.38 and 699.20 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.48", "312.38", "699.20"]);
+    // With #4015 (a moved call's records kept 730 days, lib/data-families.ts), Scale's monthly worst month keeps one
+    // cent less: 703.26 where 703.27 was, still above zero (MR); Store and Studio are unchanged. Cost is not lowered.
+    // #4542 (C7, 14 November 2026): a person's erasure also reads the store's dropped courses and probes each
+    // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
+    // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
+    // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merged with main of 15 November 2026 (Claude 1 cloud O): main's model with this PR's costs together; computed, not chosen, each still above zero (MR).
+    // Merge of main into #2803 (16 November 2026): main's outbox and this PR's Blob costs together; computed, still above zero (MR).
+    // #2801 (thumbnail copies) merged again with its base #2803 (16 November 2026): the thumbnail's Blob lines with main's
+    // model and #2803's upload costs together; computed, not chosen, each still above zero (MR).
+    // #2843 (one studio-blob line) merged again with its base #2801 (16 November 2026): this PR's single line in place of the
+    // base's line per copy, with main's model and #2803's costs; computed, not chosen, each still above zero (MR).
+    // #2852 (buyer-blob and mail-picture-blob lines) merged again with its base #2843 (16 November 2026): this PR's lines with
+    // the stack's and main's model; computed, not chosen, each still above zero (MR).
+    is("11: Store, Studio and Scale keep 44.49, 312.50 and 699.55 dollars in their worst month on a monthly plan", worstMonth("month"), ["44.49", "312.50", "699.55"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
-    is("11: and 36.42, 257.25 and 575.92 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.42", "257.25", "575.92"]);
+    // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
+    // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
+    is("11: and 36.44, 257.37 and 576.28 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["36.44", "257.37", "576.28"]);
   } finally {
     Date.now = realNow;
   }

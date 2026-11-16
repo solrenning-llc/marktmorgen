@@ -83,7 +83,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
+import { type Store, imageFolder, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -94,7 +94,7 @@ import { buyerPagesCap, forgetTold, tellBuyers, tellRefundShort } from "@/lib/cl
 import { giveBackUnused, unusedRows, unusedSummary } from "@/lib/closing-refunds";
 import { stillToGive, unusedOf, type PaidPeriod } from "@/lib/closing-buyers-rules";
 import { formatMoney } from "@/lib/money";
-import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing } from "@/lib/closing-plan-guard";
+import { CLOSING_CHECKOUT_SECONDS, expirePlanCheckouts, lastPlanMoment, markShut, refusePlanIfClosing, shutOf } from "@/lib/closing-plan-guard";
 
 export { CLOSING_DAYS, RECHECK_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS };
 
@@ -625,7 +625,7 @@ const HANDS: Hands = {
  * Past `until` this stops where it is and says it was not seen through, and
  * the next day's run carries on from what is left in the folders.
  */
-export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY): Promise<{ files: number; clean: boolean }> {
+export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY, closing = false): Promise<{ files: number; clean: boolean }> {
   // Only a record Redis says is not there (nil) has nothing left to remove. One that does not read (a failed request,
   // a record that does not parse, or one under that key for another owner) is unknown (rule 24): nothing is deleted
   // and it is not seen through, so the store is not written down as done and this runs again the next day.
@@ -726,7 +726,12 @@ export async function removeStored(key: string, hands: Pick<Hands, "list" | "rem
   // and its community's pictures (since 18 October 2026), which the
   // community's posts then show without.
   const pictures = store.community ? `community/${communityFolder(store.community.id)}/` : "";
-  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : [])]) {
+  // A store that closes takes its pictures with it (product, link and page pictures, email pictures, its buyers'
+  // review photos: images/<imageFolder>/), as the privacy policy says its files go that day (#closed-stores);
+  // app/api/image serves them to anybody with the address, whether the store is there or not. A store that stays
+  // (a plan ended before October 18, 2026) still shows them, so they are kept.
+  const images = closing ? `images/${await imageFolder(key)}/` : "";
+  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : []), ...(images ? [images] : [])]) {
     try {
       await removeAll(await hands.list(prefix));
       if (prefix === pictures && store.community) await forgetPictures(communityFolder(store.community.id));
@@ -784,10 +789,62 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
   if (was !== null) {
     const [rawFinal] = exactly(await redisPipeline([["GET", stateKey(key)]]), 1, "a store's closing state");
     const kept = readState(rawFinal);
-    const final: State = kept.of === was ? kept : { of: was, renewals: now };
+    // A state missing, for another ending (two overlapping runs: one put the store in this line, the other saw a plan
+    // again and deleted the state) or with no day is never rebuilt as "renewals stopped" or with today as its day
+    // (Claude 7's hunt, MÉDIO money): today would give members back less than they paid for. Its day is the one its
+    // closing day marked on its address (markShut, below and in closingDay) for this same ending: with that mark, the
+    // closing day runs again on it. With none, its day is the earliest one its closing could have had, removalDay of
+    // its ending, so members are given back more, never less (rare: a state and its mark both lost; the extra comes
+    // from the creator's account, never more than what is still to give or what the charge took; ALL-160, the safe
+    // choice that waits on no person). Its buyers not told yet are told first, and its day's steps wait until
+    // BUYER_NOTICE_DAYS after the last was told: nothing is removed or given back without that notice.
+    // Each step of the closing day is safe to run twice: renewals already stopped are skipped, members already
+    // settled are skipped, and a refund still owed is made only after the refunds already on its payment are listed
+    // and what its charge gave back is read (giveBackUnused, lib/closing-refunds.ts), never on Stripe's idempotency
+    // key alone, which lasts 24 hours.
+    let final: State = kept.of === was ? kept : { of: was };
+    if (final.day === undefined) {
+      const mark = await shutOf(store.handle);
+      if (mark && mark.ended === was) {
+        final = { ...final, day: mark.since };
+        await redisPipeline([["SET", stateKey(key), JSON.stringify(final)]]);
+        console.error(`plan-closing: ${key}'s closing day was lost; it was read back from its address mark and its closing day runs again`);
+      } else {
+        console.error(`plan-closing: ${key}'s closing day and its address mark were lost; its earliest day is taken, after its buyers are told`);
+        const save = (next: State) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]);
+        // Nobody is charged by a store that closes, while its buyers are told: stopRenewals skips what has ended.
+        try {
+          const stopped = await stopRenewals(store, until);
+          if (!stopped.done) return { key, state: "held", note: "its closing day was lost, and its members' renewals are not all stopped yet" };
+        } catch (error) {
+          console.error("stopping a closing store's renewals failed", error);
+          return { key, state: "held", note: "its closing day was lost, and Stripe could not be asked to stop its renewals" };
+        }
+        const earliest = removalDay(was);
+        if (tellsBuyers(was) && !final.buyersDone) {
+          // Those told before are written down by address (toldKey) and never written to again.
+          const named = Math.max(earliest, now + BUYER_NOTICE_DAYS * DAY_MS);
+          const cap = buyerNoticeCap(store.tier, paidBefore(store));
+          const told = await tellBuyers(store, was, named, final.buyersAfter ?? "", until, final.buyersPages ?? 0, buyerPagesCap(cap)).catch((error) => {
+            console.error("telling a closing store's buyers failed", error);
+            return null;
+          });
+          if (!told) return { key, state: "held", note: "its closing day was lost, and its buyers could not all be read or told yet" };
+          if (told.blocked === "postal") return { key, state: "held", note: "no company postal address for its buyers' notice" };
+          final = { ...final, buyersFrom: final.buyersFrom ?? now, buyersAfter: told.after, buyersPages: told.pages, untold: (final.untold ?? 0) + told.untold, ...(told.capped ? { buyersCapped: 1 } : {}), ...(told.done ? { buyersDone: now } : {}) };
+          await save(final);
+          if (!told.done) return { key, state: "told", note: "its closing day was lost: its buyers, in part" };
+        }
+        if (final.buyersDone && now < afterBuyersTold(earliest, final.buyersDone)) return { key, state: "waiting", note: "its closing day was lost: its buyers are told, and it closes a notice's length after" };
+        final = { ...final, day: earliest };
+        await save(final);
+      }
+    }
     // A plan paid for it since its day began (a checkout opened before and
     // finished on it) is ended and returned in full (lib/closing-plan-guard.ts).
-    await markShut(store, final.day ?? now, was);
+    // Set above in every case; never today.
+    const finalDay = final.day ?? removalDay(was);
+    await markShut(store, finalDay, was);
     // The durable final index survives a late active snapshot, which clears
     // planEndedAt. Keep the original closing proof for the refund guard.
     const closingStore = store.planEndedAt ? store : { ...store, planEndedAt: new Date(was).toISOString() };
@@ -805,7 +862,7 @@ export async function closeOne(key: string, now = Date.now(), hands: Hands = HAN
       return { key, state: "removed", note: "its records are deleted by the next walk" };
     }
     const folderFinal = await storeFolder(storeRef(store));
-    return closingDay(store, key, final, was, final.day ?? now, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
+    return closingDay(store, key, final, was, finalDay, folderFinal, now, hands, until, (next) => redisPipeline([["SET", stateKey(key), JSON.stringify(next)]]));
   }
   const endedAt = Date.parse(store.planEndedAt);
   if (standingOf(store, now / 1000) !== "ended" || !Number.isFinite(endedAt)) {
@@ -1050,7 +1107,7 @@ async function closingDay(store: Store, key: string, state: State, endedAt: numb
     console.error("deleting what a closing store's files left failed", error);
     return { key, state: "held", note: "what its files left could not be deleted" };
   }
-  const done = await removeStored(key, hands, until);
+  const done = await removeStored(key, hands, until, true);
   if (!done.clean) return { key, state: "held", note: `removed ${done.files}, and something could not be removed` };
   const after = (await hands.measure(folder)) + (store.community && hands.pictures ? await hands.pictures(store.community.id) : 0);
   if (after > keptRoomFor(endedAt)) return { key, state: "held", note: `removed ${done.files} and it still keeps ${bytesWords(after)}` };

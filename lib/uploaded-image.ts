@@ -12,10 +12,15 @@ import { get, head } from "@/lib/blob";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 
-/** The first bytes of a stored picture, to see what it really is. */
+/**
+ * The first bytes of a stored picture, to see what it really is; null only when the file store says it is not there
+ * (404). Any other answer without the file's bytes throws: unknown, never "not a picture", so a passing outage of the
+ * file store never gets a picture deleted (the pattern of lib/picture-check.ts; Claude 2 on #2843).
+ */
 export async function firstBytes(path: string): Promise<Uint8Array | null> {
   const found = await get(path, { access: "private" });
-  if (!found || found.statusCode !== 200 || !found.stream) return null;
+  if (!found) return null;
+  if (found.statusCode !== 200 || !found.stream) throw new Error(`a picture's read answered ${found.statusCode}`);
   const reader = found.stream.getReader();
   const chunks: Uint8Array[] = [];
   let length = 0;

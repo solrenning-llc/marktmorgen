@@ -101,11 +101,29 @@ return n`;
 export type MoveAsk = { ok: true; id: string; fromToken: string; toToken: string } | { ok: false; reason: "email" | "same" | "scope" | "over" | "unknown" };
 
 /**
+ * Takes one of an address's asks for its day, as a request keeps the address
+ * (lib/purchase-move-rules.ts readMoveAddresses): "within" when this one is
+ * inside the three, "over" past them, "unknown" when the count cannot be read.
+ * The ask on a store's page takes it before it reads anything else about the
+ * addresses, so whatever it would answer next is behind the same count
+ * (Codex N4 on #3625).
+ */
+export async function takeMoveDay(from: string, now = Date.now()): Promise<"within" | "over" | "unknown"> {
+  if (!isRedisConfigured()) return "unknown";
+  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, dayKey(from, now), MOVE_MARK_SECONDS]]), 1);
+  const count = counted ? countOf(counted[0]) : null;
+  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
+  return allowed === "within" || allowed === "over" ? allowed : "unknown";
+}
+
+/**
  * A buyer asks to move their purchases from one address to another, for one
  * store (its id) or "all". Counts against the old address's three a day
  * before anything is written; the request and both links end with its day.
+ * `dayTaken` when the caller already took it with takeMoveDay for the same
+ * old address and moment: then it is not taken twice.
  */
-export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number }): Promise<MoveAsk> {
+export async function askPurchaseMove(input: { from: unknown; to: unknown; scope: unknown; now?: number; dayTaken?: boolean }): Promise<MoveAsk> {
   const now = input.now ?? Date.now();
   const made = newMoveRequest({ from: input.from, to: input.to, scope: readMoveScope(input.scope), now: seconds(now) });
   if (typeof made === "string") return { ok: false, reason: made };
@@ -114,11 +132,10 @@ export async function askPurchaseMove(input: { from: unknown; to: unknown; scope
   const json = JSON.stringify(record);
   if (Buffer.byteLength(json, "utf8") > MAX_MOVE_RECORD_BYTES) return { ok: false, reason: "unknown" };
 
-  const day = dayKey(made.from, now);
-  const counted = repliesFor(await redisPipeline([["EVAL", MOVE_DAY_COUNT, 1, day, MOVE_MARK_SECONDS]]), 1);
-  const count = counted ? countOf(counted[0]) : null;
-  const allowed = dailyMoves(count === null || count < 1 ? null : count - 1);
-  if (allowed !== "within") return { ok: false, reason: allowed === "over" ? "over" : "unknown" };
+  if (!input.dayTaken) {
+    const allowed = await takeMoveDay(made.from, now);
+    if (allowed !== "within") return { ok: false, reason: allowed };
+  }
 
   const id = randomBytes(16).toString("hex");
   const fromToken = randomBytes(24).toString("hex");

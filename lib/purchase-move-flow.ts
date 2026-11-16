@@ -49,7 +49,7 @@ import { sendEmail } from "@/lib/email";
 import { suppressedAmong } from "@/lib/suppression";
 import { takePublicRequest } from "@/lib/traffic";
 import { type MoveSide, type MoveState, moveState, readMoveAddresses } from "@/lib/purchase-move-rules";
-import { askPurchaseMove, confirmPurchaseMove, readMoveLink } from "@/lib/purchase-moves";
+import { askPurchaseMove, confirmPurchaseMove, readMoveLink, takeMoveDay } from "@/lib/purchase-moves";
 import { type MoveApplied, applyPurchaseMove } from "@/lib/purchase-move-index";
 import { PURCHASE_MOVE_DELIVERED, purchaseMoveOpen } from "@/lib/purchase-move-open";
 import { type AskState, type ConfirmState, moveWords } from "@/lib/purchase-move-words";
@@ -62,7 +62,7 @@ export const MOVE_ASK_UNITS = 1;
 export const MOVE_LINK_UNITS = 1;
 /** Public requests a Confirm holds before it reads: its own reads, and the move written into the index when it is the second. */
 export const MOVE_CONFIRM_UNITS = 2;
-/** Commands an ask makes besides the hold and its two emails: the purchases link, the deleted people, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT) and the request with its two links (3). */
+/** Commands an ask makes besides the hold and its two emails: the purchases link, the day's count (one script, billed 3: lib/purchase-moves.ts MOVE_DAY_COUNT), the deleted people and the request with its two links (3). */
 export const MOVE_ASK_COMMANDS = 8;
 /** Commands a link's page reads: the link, the request with both confirmations and the claim (4), the deleted people. */
 export const MOVE_LINK_COMMANDS = 6;
@@ -122,13 +122,22 @@ export async function askToMovePurchases(input: { store: Store; token: string; t
   if (!current) return "signed-out";
   const addresses = readMoveAddresses(current, input.to);
   if (addresses === "email" || addresses === "same") return addresses;
+  // The day's count before the deleted people are read (Codex N4 on #3625): past the three, a deleted address is
+  // answered "over" like any other, so asking cannot sort the people who asked to be deleted from the rest.
+  let day: Awaited<ReturnType<typeof takeMoveDay>>;
+  try {
+    day = await takeMoveDay(addresses.from, now);
+  } catch {
+    return "error";
+  }
+  if (day !== "within") return day === "over" ? "over" : "error";
   const deleted = await deletedAmong(store, [addresses.from, addresses.to]);
   if (deleted === "unknown") return "error";
   if (deleted) return "deleted";
 
   let asked: Awaited<ReturnType<typeof askPurchaseMove>>;
   try {
-    asked = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now });
+    asked = await askPurchaseMove({ from: addresses.from, to: addresses.to, scope: store.sid, now, dayTaken: true });
   } catch {
     return "error";
   }

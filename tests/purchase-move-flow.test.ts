@@ -98,6 +98,8 @@ const post = (url: string, fields: Record<string, string>, headers: Record<strin
 
 const linkIn = (text: string) => /\/@moss\/orders\/move\/confirm\?t=([0-9a-f]{48})/.exec(text)?.[1] ?? null;
 const moveKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:"));
+const requestKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:r:") || k.startsWith("nl:pm:t:"));
+const dayKeys = () => redis.keys().filter((k) => k.startsWith("nl:pm:day:"));
 
 async function main(): Promise<void> {
   redis.clear();
@@ -256,12 +258,14 @@ async function main(): Promise<void> {
   {
     const token = await signIn("dee.buyer@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "gone.new@example.com", Math.floor(Date.now() / 1000))]);
-    const [m, q, k] = [mails.length, await used(), moveKeys().length];
+    const [m, q, k, r, d] = [mails.length, await used(), moveKeys().length, requestKeys().length, dayKeys().length];
     is("moving to it is refused", await askToMovePurchases({ store: moss, token, to: "Gone.New@example.com", origin: ORIGIN }), "deleted");
     const gone = await signIn("gone.old@example.com");
     await redis.pipeline([suppressCommand(moss.listId!, "gone.old@example.com", Math.floor(Date.now() / 1000))]);
     is("moving from it is refused", await askToMovePurchases({ store: moss, token: gone, to: "gone.other@example.com", origin: ORIGIN }), "deleted");
-    is("no request, no email, no store email taken", [moveKeys().length - k, mails.length - m, (await used()) - q], [0, 0, 0]);
+    is("no request, no email, no store email taken", [requestKeys().length - r, mails.length - m, (await used()) - q], [0, 0, 0]);
+    // Each ask took one of its old address's day like any other (Codex N4 on #3625): the only key either wrote.
+    is("each took one of its day's asks", [moveKeys().length - k, dayKeys().length - d], [2, 2]);
 
     // Asked first, then deleted before confirming.
     const late = await signIn("late.buyer@example.com");

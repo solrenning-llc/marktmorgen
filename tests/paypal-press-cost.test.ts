@@ -188,6 +188,10 @@ async function main(): Promise<void> {
   is("payday's auto-pay: one a store a month (claimMonth)", PAYPAL_PRESSES_UNTAKEN, 1);
   const payday = readFileSync(join(process.cwd(), "lib/affiliate-payday.ts"), "utf8");
   is("payday claims the month before it pays by itself", payday.indexOf("claimMonth(store.statsId, month)") > 0 && payday.indexOf("claimMonth(store.statsId, month)") < payday.indexOf("await payWithPayPal(store)"), true);
+  // Kept for good before the press, not after the email (Claude 6 on #4488): a refused email or a run stopped mid-press
+  // never lets the next day's run press again (tests/affiliate-payday-catch-up.test.ts holds it by behavior).
+  const kept = payday.indexOf("if (!(await keepMonth(store.statsId, month))) throw");
+  is("payday keeps the month, confirmed, before it pays by itself", kept > payday.indexOf("claimMonth(store.statsId, month)") && kept < payday.indexOf("await payWithPayPal(store)"), true);
   const registry = readFileSync(join(process.cwd(), "tests/plan-cost-registry.ts"), "utf8");
   const worst = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("\n}\n", registry.indexOf("export function nonPayingWorst")));
   is("a store that pays nothing carries its payday's auto-pay too", worst.includes("PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS"), true);

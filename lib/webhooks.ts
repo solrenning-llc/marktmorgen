@@ -24,8 +24,10 @@
  *   payment.failed       a membership's renewal, or a payment plan's payment,
  *                        was tried on the creator's Stripe account and failed
  *                        (378 [TB4] WG (a))
+ *   membership.paused    a membership's payments paused, by the member's pause
+ *                        link or in the Stripe dashboard (378 [TB4] WG (a))
  *
- * The first four about money, and these last three, are read from the creator's own Stripe account,
+ * The first four about money, and these last four, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
  * dashboard is noticed on the next run, within about five minutes. A refund
@@ -111,6 +113,7 @@ export const WEBHOOK_EVENTS = [
   "course.lesson_completed",
   "product.updated",
   "payment.failed",
+  "membership.paused",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -1649,7 +1652,7 @@ const STRIPE_TYPES = [
 ];
 
 /** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
-const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending", "payment.failed"];
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending", "payment.failed", "membership.paused"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Pick<Config, "endpoints">): boolean {
@@ -1983,18 +1986,20 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         changed_at: iso(event.created),
       }, created);
     }
-    if (!says.cancel) return true;
+    const pausing = says.paused && heard.has("membership.paused") ? says.paused : null;
+    const canceling = says.cancel && heard.has("membership.canceled") ? says.cancel : null;
+    // No endpoint hears a pause or a cancellation this update makes: nothing to look up, nothing to wait on.
+    if (!pausing && !canceling) return true;
     const item = ((object.items as { data?: { current_period_end?: unknown }[] } | undefined)?.data ?? [])[0];
     const endsAt = num(object.cancel_at) || num(object.current_period_end) || num(item?.current_period_end);
     const details = (object.cancellation_details ?? {}) as { reason?: unknown };
     let email: string | null = null;
     const customer = str(object.customer);
-    // No endpoint hears cancellations: nothing to look up, nothing to wait on.
-    if (!heard.has("membership.canceled")) return true;
-    // The member's address, from the run's lookups: with none left, or a
-    // call that failed, the cancellation waits for the next run rather than
-    // going out without it (a membership.changed of the same update, already
-    // sent, is not sent twice). A customer Stripe no longer has has none.
+    // The member's address, from the run's lookups, once for both: with none
+    // left, or a call that failed, the pause and the cancellation wait for the
+    // next run rather than going out without it (a membership.changed of the
+    // same update, already sent, is not sent twice). A customer Stripe no
+    // longer has has none.
     if (customer && store.stripeAccountId) {
       if (lookups.left <= 0) {
         saySpent(store, "left");
@@ -2006,13 +2011,28 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       } catch (error) {
         if (!isMissing(error)) {
           const waits = waitsOn(error);
-          console.error(waits === "ours" ? "OUR CODE FAILED reading a canceled member's address (not a Stripe error); it is read again next run" : "reading a canceled member's address failed at Stripe; it is read again next run", store.handle, error);
+          console.error(waits === "ours" ? "OUR CODE FAILED reading a paused or canceled member's address (not a Stripe error); it is read again next run" : "reading a paused or canceled member's address failed at Stripe; it is read again next run", store.handle, error);
           return waits;
         }
         email = null;
       }
     }
-    await emitEvent(store, "membership.canceled", says.cancel, {
+    if (pausing) {
+      // A pause the member's link asked for starts at the end of what was paid for (pause_from); one made in the
+      // Stripe dashboard pauses its payments at once. resumes_at is null when the pause has no end set.
+      await emitEvent(store, "membership.paused", pausing.seed, {
+        subscription: id,
+        product: await product(meta.product),
+        option: meta.option ?? null,
+        behavior: pausing.behavior,
+        pauses_from: iso(Number(meta.pause_from)) ?? iso(event.created),
+        resumes_at: iso(pausing.resumesAt),
+        buyer: { email, customer },
+        paused_at: iso(event.created),
+      }, created);
+    }
+    if (!canceling) return true;
+    await emitEvent(store, "membership.canceled", canceling, {
       subscription: id,
       product: await product(meta.product),
       status: ended ? "ended" : "ending",
@@ -2101,7 +2121,11 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
  * change of price or quantity it is (the seed of its membership.changed),
  * if any, and whether it is a cancellation (with its membership.canceled seed).
  */
-function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from: NonNullable<ReturnType<typeof planOf>>; to: NonNullable<ReturnType<typeof planOf>> } | null; cancel: string | null } {
+function subscriptionEmits(event: StripeEvent): {
+  changed: { seed: string; from: NonNullable<ReturnType<typeof planOf>>; to: NonNullable<ReturnType<typeof planOf>> } | null;
+  cancel: string | null;
+  paused: { seed: string; behavior: string; resumesAt: number } | null;
+} {
   const object = event.data?.object ?? {};
   const previous = event.data?.previous_attributes ?? {};
   const meta = (object.metadata ?? {}) as Record<string, string>;
@@ -2128,7 +2152,23 @@ function subscriptionEmits(event: StripeEvent): { changed: { seed: string; from:
       ? set && stopsBeforeSoldEnd(object as FixedEndSub) && !stopsBeforeSoldEnd({ ...object, ...previous } as FixedEndSub)
       : ending && !wasEnding && set;
   }
-  return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null };
+  // A pause of the membership's payments set by this update, or moved to another end (378 [TB4] complement WG (a)):
+  // said once per end, so the same pause read again is not told twice.
+  let paused = null;
+  if (!ended && "pause_collection" in previous) {
+    const now = pauseCollectionOf(object.pause_collection);
+    const was = pauseCollectionOf(previous.pause_collection);
+    if (now && (!was || was.resumesAt !== now.resumesAt)) paused = { seed: `${id}|paused|${now.resumesAt}`, ...now };
+  }
+  return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null, paused };
+}
+
+/** A subscription's pause_collection as Stripe gives it: what is done with its payments and when it ends (0 for no end); null for none. */
+function pauseCollectionOf(value: unknown): { behavior: string; resumesAt: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const pause = value as { behavior?: unknown; resumes_at?: unknown };
+  const behavior = str(pause.behavior);
+  return behavior ? { behavior, resumesAt: num(pause.resumes_at) } : null;
 }
 
 /**
@@ -2214,7 +2254,11 @@ function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean):
   if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
     const says = subscriptionEmits(event);
     return {
-      parts: [...(says.changed ? [{ type: "membership.changed" as const, seed: says.changed.seed }] : []), ...(says.cancel ? [{ type: "membership.canceled" as const, seed: says.cancel }] : [])],
+      parts: [
+        ...(says.changed ? [{ type: "membership.changed" as const, seed: says.changed.seed }] : []),
+        ...(says.paused ? [{ type: "membership.paused" as const, seed: says.paused.seed }] : []),
+        ...(says.cancel ? [{ type: "membership.canceled" as const, seed: says.cancel }] : []),
+      ],
       about: `subscription ${shown}`,
       known,
     };

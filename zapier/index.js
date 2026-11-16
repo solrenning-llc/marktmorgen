@@ -475,6 +475,23 @@ const EVENTS = [
       failed_at: "2026-11-01T14:05:00.000Z",
     },
   },
+  {
+    key: "membership_paused",
+    event: "membership.paused",
+    noun: "Membership",
+    label: "Membership Paused",
+    description: "Triggers when a membership's payments are paused, by the member or in your Stripe dashboard.",
+    data: {
+      subscription: "sub_a1b2c3",
+      product: { id: "p_3d9e7b", title: "The Supper Club" },
+      option: null,
+      behavior: "void",
+      pauses_from: "2026-12-01T14:05:00.000Z",
+      resumes_at: "2027-02-01T14:05:00.000Z",
+      buyer: { email: "ada@example.com", customer: "cus_a1b2c3" },
+      paused_at: "2026-11-10T09:30:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

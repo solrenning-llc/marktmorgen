@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     expireBetween = true;
     await withinChallengeWrites("synthetic-community");
     is("no count is left without an expiry", keys().filter((k) => redis.run(["TTL", k]) === -1), []);
-    is("and a change is still counted within afterwards", await withinChallengeWrites("synthetic-community"), true);
+    is("and a change is still counted within afterward", await withinChallengeWrites("synthetic-community"), true);
   }
 
   part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");

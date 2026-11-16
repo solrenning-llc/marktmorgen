@@ -45,6 +45,8 @@ const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const addressKey = (email: string) => `nl:auth:rec:${sha(`nimbus-rec:${normaliseEmail(email)}`).slice(0, 40)}`;
 const setKey = (session: string) => `nl:auth:rec:set:${sha(`nimbus-rec-set:${session}`).slice(0, 40)}`;
 const linkKey = (token: string) => `nl:auth:rec:link:${sha(`nimbus-rec-link:${token}`).slice(0, 40)}`;
+const boundKey = (kind: LinkKind, token: string) => `nl:auth:rec:bound:${sha(`nimbus-rec-bound:${kind}:${token}`).slice(0, 40)}`;
+const addressTag = (address: string) => sha(`nimbus-rec-tag:${normaliseEmail(address)}`).slice(0, 40);
 const untilKey = (email: string) => `nl:auth:rec:until:${sha(`nimbus-rec-until:${normaliseEmail(email)}`).slice(0, 40)}`;
 
 /**
@@ -61,6 +63,33 @@ export async function recoveryAddress(email: string): Promise<string> {
   if (raw === null) return "";
   if (typeof raw !== "string" || !EMAIL_PATTERN.test(raw)) throw new UnknownReplyError("a recovery address");
   return raw;
+}
+
+/** The links mailed to a recovery address: a login link (/signin/lost) or a rescue link (lib/two-step.ts sendRescue). */
+export type LinkKind = "lost" | "rescue";
+
+/**
+ * Ties a link mailed to a recovery address to that address, before the link itself is written: a link mailed to
+ * an address the owner then took away or replaced opens nothing (linkStillBound). True only on an exact "OK";
+ * otherwise the caller writes no link and sends nothing (rule 24).
+ */
+export async function bindLink(kind: LinkKind, token: string, address: string, seconds: number): Promise<boolean> {
+  return kept(await redisPipeline([["SET", boundKey(kind, token), addressTag(address), "EX", seconds]]));
+}
+
+/**
+ * Spends the tie of a link already spent: true when the address it was mailed to is still `current`, the account's
+ * recovery address now. A tie for another address, or none while there is no recovery address, is false. No tie at
+ * all is only a link mailed before ties were written (at most 15 minutes after that release), taken as before. A
+ * reply of another shape throws UnknownReplyError: never opened on an unknown (rule 24).
+ */
+export async function linkStillBound(kind: LinkKind, token: string, current: string): Promise<boolean> {
+  const replies = repliesFor(await redisPipeline([["GETDEL", boundKey(kind, token)]]), 1);
+  if (!replies) throw new UnknownReplyError("a recovery link's address");
+  const [tag] = replies;
+  if (tag === null) return true;
+  if (typeof tag !== "string" || !/^[0-9a-f]{40}$/.test(tag)) throw new UnknownReplyError("a recovery link's address");
+  return current !== "" && tag === addressTag(current);
 }
 
 /** A SET answered exactly "OK"; any other answer is not known to have been kept (rule 24). */
@@ -197,6 +226,7 @@ export async function sendLostEmailLink(signIn: string, ip: string, origin: stri
   const address = await recoveryAddress(email);
   if (!address) return;
   const token = randomBytes(32).toString("hex");
+  if (!(await bindLink("lost", token, address, LINK_SECONDS))) throw new UnknownReplyError("a recovery-address login link's address");
   // A login link is only as good as its grant: only a SET answered exactly "OK" is one (CX-123 rule 24). Any other
   // reply sends neither the link nor the notice to the sign-in address; the route still answers "sent", telling nothing.
   const written = repliesFor(await redisPipeline([["SET", linkKey(token), email, "EX", LINK_SECONDS]]), 1);
@@ -235,7 +265,9 @@ export async function spendLostEmailLink(token: string): Promise<string | null> 
     const [removed] = await redisPipeline([["DEL", linkKey(token)]]);
     email = Number(removed) === 1 ? readBack : null;
   }
-  return typeof email === "string" && email ? email : null;
+  if (typeof email !== "string" || !email) return null;
+  // Mailed to an address the owner has since taken away or replaced: it opens nothing.
+  return (await linkStillBound("lost", token, await recoveryAddress(email))) ? email : null;
 }
 
 /** How long, after its lock has run out unanswered, the recovery address goes on logging in with everything open. */

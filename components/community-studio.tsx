@@ -473,7 +473,7 @@ function AboutPage({
         </label>
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <button type="submit" className="btn" disabled={!changed || busy !== null}>Save</button>
-          {config.page.on ? <a href={`/@${handle}/community/about`} className="btn btn-ghost">Open it</a> : null}
+          {config.page.on ? <a href={`/@${handle}/community/about`} className="btn btn-ghost">Open the About page</a> : null}
           {problem("about-page")}
         </div>
       </form>

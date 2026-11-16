@@ -69,6 +69,26 @@ async function main(): Promise<void> {
     is("it took one of the day's pages, once", await dayCount(), 1);
   }
 
+  // Claude 3's MEDIUM on #3313 (6910034581): a name that signs as itself but breaks the contract's own key rule (a
+  // C0 control or DEL, which the URL parser percent-encodes and leadsTo decodes back; or a name over 1,024 characters)
+  // reached parseFilesPage and threw the whole page, again on every retry. It is refused like an unsignable key.
+  for (const [label, name] of [
+    ["DEL", "a\u007fb.pdf"],
+    ["U+0001", "a\u0001b"],
+    ["a name over 1,024 characters", `${"n".repeat(1_100)}.pdf`],
+  ] as const) {
+    part(`a page of 1,000 with ${label} in a name in its middle: the 999 others go out, the page is incomplete for good`);
+    reset();
+    const bad = `${PREFIX}${name}`;
+    blobWorld.pages = [listing([...blobs(0, 500), item(bad, 9_997), ...blobs(500, 499)])];
+    const answer = await call(`?source=blob&store=${STORE}`);
+    is("answered as a page, not a 503", answer.status, 200);
+    is("the 999 others are handed out", answer.page?.entries.length, 999);
+    is("the refused name is nowhere in the answer", answer.page?.entries.some((e) => e.key === bad) ?? true, false);
+    is("never complete: reason unsignable, no cursor", [answer.page?.complete, answer.page?.reason, answer.page?.cursor], [false, "unsignable", null]);
+    is("it took one of the day's pages, once", await dayCount(), 1);
+  }
+
   part("the refused key on the first provider page: the listing goes on, and its end is still never complete");
   reset();
   blobWorld.pages = [listing([item(`${PREFIX}What #1.pdf`, 9_998), ...blobs(0, 999)], "provider-cursor-2"), listing(blobs(999, 10))];

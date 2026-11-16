@@ -304,7 +304,9 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
@@ -2265,6 +2267,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

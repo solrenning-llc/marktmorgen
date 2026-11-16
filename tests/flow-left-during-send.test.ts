@@ -92,6 +92,30 @@ async function main(): Promise<void> {
   is("their run is not written back: nothing of them is left", await readRun(flowId, personOf("erased@example.com")), null);
   const [indexed] = await real([["ZSCORE", `nl:wf:runs:${flowId}`, personOf("erased@example.com")]]);
   is("and they are not in the workflow's list of runs", indexed, null);
+
+  part("Refused by the email service, address by address: failed with the service's words, never also 'left' (Claude 1 on #4307)");
+  // On main since #3489, sendTo answers a fourth list, `refused`, in neither done nor rest. The PR's rule (whoever is
+  // in none of done, rest and uncertain left the list) took them as left too: written twice, the run's status and
+  // note overwritten to "left", and the history saying they left a list they may still be on.
+  await upsertContact(list, "refused@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
+  await enroll(store, "refused@example.com", { joined: false, tag: "welcome" });
+  // Amazon refuses this one address by name (lib/email.ts recipientsOwn: a refusal whose text names the recipient's
+  // address is that address's own), so sendTo answers it in `refused`, not as the batch's refusal.
+  const sesFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname === "/v2/email/outbound-emails" && String(init?.body ?? "").includes("refused@example.com")) {
+      return new Response(JSON.stringify({ message: "Illegal address: refused@example.com" }), { status: 400, headers: { "content-type": "application/json", "x-amzn-errortype": "BadRequestException" } });
+    }
+    return sesFetch(input, init);
+  }) as typeof fetch;
+  await run();
+  globalThis.fetch = sesFetch;
+  const refusedRun = await readRun(flowId, personOf("refused@example.com"));
+  const text = JSON.stringify(refusedRun ?? null);
+  is("their run ends as failed, not left", refusedRun?.run.status, "failed");
+  is("with the email service's words", /did not accept this email|refused this address/.test(text), true);
+  is("and never with the 'no longer on your list' note", text.includes("No longer on your list"), false);
   mail.restore();
   done();
 }

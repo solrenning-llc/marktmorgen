@@ -8,6 +8,8 @@
  *   nl:mv:link:<token>       who a link is for: { s, f }, until LINK_DAYS after the renewal date
  *   nl:mv:due                reminders waiting: "<store id>|<field>", by when each goes
  *   nl:mv:gone:<statsId>:<product>  a membership just removed, for GONE_MARK_SECONDS: no import step writes to it
+ *   nl:mv:pend:<statsId>     memberships being removed whose invitations are not yet confirmed deleted: a person's
+ *                            erasure and the copy of their data read them besides the catalog
  *
  * Nothing here gives anybody anything: an invitation is an offer to keep a
  * membership by paying for it, from the renewal date on. A member who keeps
@@ -19,7 +21,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -48,6 +50,18 @@ const goneMarkKey = (statsId: string, productId: string) => `nl:mv:gone:${statsI
 export const GONE_MARK_SECONDS = 86_400;
 /** The database commands the mark adds to an import step: one MGET inside INVITE_UNLESS_ERASED, whatever the rows. */
 export const INVITE_GONE_READ_COMMANDS = 1;
+/**
+ * The memberships a removal noted before it went (notePendingInvites) whose invitations are not yet confirmed deleted;
+ * dropProductInvites takes each off once it has deleted them all (Claude 3, MEDIUM on #3473). The one deletion runs
+ * after the product is gone, when nothing in the studio can ask for it again, so a deletion that did not finish (a reply
+ * not known, the studio's requests used up) left every invitation under a product no erasure read: noted here first, a
+ * person's erasure and the copy of their data still reach them (withPendingInvites).
+ */
+const pendingKey = (statsId: string) => `nl:mv:pend:${statsId}`;
+/** The most memberships a store notes in pendingKey; past it a removal that would need one more is refused (InvitesPendingFullError). */
+export const PENDING_MAX = 20;
+/** A product's id as pendingKey keeps it (lib/store.ts makes them so; app/api/store/product/route.ts PRODUCT_ID). */
+const PENDING_ID = /^[a-z0-9]{6,40}$/;
 /** The slot invites are counted in, in the store's data room. */
 const INVITES_SLOT = "mv";
 const TOKEN_PATTERN = /^[0-9a-f]{40}$/;
@@ -432,9 +446,12 @@ export async function openMove(
  * here, their links and their reminders (lib/person-erasure.ts). A
  * membership they already kept is the creator's Stripe record, not this.
  */
-export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">, productIds: string[], email: string): Promise<number> {
-  if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
+export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">, current: string[], email: string): Promise<number> {
+  if (!store.statsId || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
+  // The products the catalog holds and those whose removal has not confirmed their invitations gone (pendingKey).
+  const productIds = await withPendingInvites(statsId, current);
+  if (!productIds.length) return 0;
   const fields = productIds.map((p) => inviteField(email, p));
   // Read exactly (unknown is never zero): a reply in another shape, or a kept invite that does not read, may still
   // hold the address and its reminder, so it is never said to be forgotten. It throws, and the erasure reports this
@@ -460,6 +477,62 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   return held.length;
 }
 
+/**
+ * The products asked about and the memberships in pendingKey, each once, in that order: what a person's erasure and the
+ * copy of their data read invitations under. The note is the only way back to a removed membership's invitations, so it
+ * is read exactly (rule 24): any other reply, or a member that is not a product's id, throws UnknownReplyError, and the
+ * erasure says it is not finished instead of a receipt that left them.
+ */
+export async function withPendingInvites(statsId: string, current: string[]): Promise<string[]> {
+  if (!statsId || !isRedisConfigured()) return current;
+  const what = "the memberships whose invitations wait to be deleted";
+  const reply = repliesFor(await redisPipeline([["SMEMBERS", pendingKey(statsId)]]), 1);
+  const pending = stringList(reply?.[0]);
+  if (!pending || !pending.every((id) => PENDING_ID.test(id))) throw new UnknownReplyError(what);
+  return [...new Set([...current, ...pending])];
+}
+
+/** Thrown when pendingKey already holds PENDING_MAX memberships: nothing was noted, and nothing is removed. */
+export class InvitesPendingFullError extends Error {
+  constructor() {
+    super("too many removed memberships still wait for their invitations to be deleted");
+    this.name = "InvitesPendingFullError";
+  }
+}
+
+/**
+ * Notes a membership in pendingKey before it is removed (app/api/store/product/route.ts), in the studio request that
+ * also pays for its invitations' deletion's first page (dropProductInvites, `firstPaid`): taken first, and refused
+ * (InvitesUnpaidError) before anything is read. Already noted, nothing more is written. Every reply is read exactly
+ * (rule 24): unknown throws UnknownReplyError and the product is not removed, so no invitation is left that neither the
+ * catalog nor the note leads to. A full note (PENDING_MAX) throws InvitesPendingFullError, and the product stays.
+ */
+export async function notePendingInvites(store: Pick<Store, "sid" | "statsId">, productId: string, pay: (units: number) => Promise<boolean>): Promise<void> {
+  if (!store.statsId || !store.sid || !isRedisConfigured()) return;
+  if (!PENDING_ID.test(productId)) throw new RangeError("not a product's id");
+  if (!(await pay(1))) throw new InvitesUnpaidError();
+  const key = pendingKey(store.statsId);
+  const what = "the memberships whose invitations wait to be deleted";
+  const counted = repliesFor(await redisPipeline([["SISMEMBER", key, productId], ["SCARD", key]]), 2);
+  const already = counted ? countOf(counted[0]) : null;
+  const size = counted ? countOf(counted[1]) : null;
+  if (already === null || already > 1 || size === null) throw new UnknownReplyError(what);
+  if (already === 1) return;
+  if (size >= PENDING_MAX) throw new InvitesPendingFullError();
+  // Not the room's (a few ids, capped): bounded by PENDING_MAX in tests/store-data-registry.ts.
+  const added = repliesFor(await redisPipeline([["SADD", key, productId]]), 1)?.[0];
+  if (added !== 1 && added !== 0) throw new UnknownReplyError(what);
+}
+
+/**
+ * Takes a membership off pendingKey once every invitation to it is confirmed deleted (dropProductInvites). Not
+ * confirmed, it throws UnknownReplyError: the note staying only costs a person's erasure one more field to read.
+ */
+async function settlePendingInvites(statsId: string, productId: string): Promise<void> {
+  const taken = repliesFor(await redisPipeline([["SREM", pendingKey(statsId), productId]]), 1)?.[0];
+  if (taken !== 1 && taken !== 0) throw new UnknownReplyError("the note of a membership whose invitations were deleted");
+}
+
 /** The invitations one studio request reads and deletes when their membership is removed: a page of the store's invitations. */
 export const INVITES_PER_UNIT = 100;
 
@@ -478,21 +551,31 @@ export class InvitesUnpaidError extends Error {
  * a time (HSCAN), each page paid for first in one studio request (`pay`, false when the studio will not:
  * InvitesUnpaidError, nothing more read). Every reply is read exactly (rule 24): an unknown one throws
  * UnknownReplyError, and what is left is found again by the next try. The first studio request pays for the removal's
- * mark, the count and the first page; a store with no invitations takes that one request and reads one count.
+ * mark, the count and the first page; a store with no invitations takes that one request and reads one count. With
+ * `firstPaid`, that request was already taken by notePendingInvites, which noted the membership before its removal.
+ * Once every invitation to it is deleted, it is taken off that note (settlePendingInvites, in the same first request).
  */
-export async function dropProductInvites(store: Pick<Store, "sid" | "statsId">, productId: string, pay: (units: number) => Promise<boolean>): Promise<number> {
+export async function dropProductInvites(
+  store: Pick<Store, "sid" | "statsId">,
+  productId: string,
+  pay: (units: number) => Promise<boolean>,
+  firstPaid = false,
+): Promise<number> {
   if (!store.statsId || !store.sid || !isRedisConfigured()) return 0;
   const key = invitesKey(store.statsId);
   // The membership is marked removed before its invitations are read, in the first request paid for (the mark, the
   // count and the first page): an import step that read the catalog before the removal then writes nothing to it, and
   // one that wrote before the mark is found below (Claude 7, MEDIUM on #3473). Not confirmed, it throws, and the same
   // removal asked again marks it again.
-  if (!(await pay(1))) throw new InvitesUnpaidError();
+  if (!firstPaid && !(await pay(1))) throw new InvitesUnpaidError();
   const first = repliesFor(await redisPipeline([["SET", goneMarkKey(store.statsId, productId), "1", "EX", GONE_MARK_SECONDS], ["HLEN", key]]), 2);
   if (!first || first[0] !== "OK") throw new UnknownReplyError("a removed membership's mark");
   const size = countOf(first[1]);
   if (size === null) throw new UnknownReplyError("a store's invitations");
-  if (size === 0) return 0;
+  if (size === 0) {
+    await settlePendingInvites(store.statsId, productId);
+    return 0;
+  }
   const suffix = `:${productId}`;
   let dropped = 0;
   let cursor = "0";
@@ -526,5 +609,6 @@ export async function dropProductInvites(store: Pick<Store, "sid" | "statsId">, 
     }
     cursor = page.next;
   } while (cursor !== "0");
+  await settlePendingInvites(store.statsId, productId);
   return dropped;
 }

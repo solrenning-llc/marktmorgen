@@ -78,11 +78,17 @@ export type ErasureSize = {
  * (lib/payment-request-store.ts): 260 before them; and (since 18 October 2026) a person's agreements at their cap, two
  * commands each for twice MAX_PER_PERSON (lib/agreement-store.ts), with every version's key named: 460 before them;
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
- * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it.
+ * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (Claude 3 on #3473) the read of the
+ * memberships whose invitations wait to be deleted (lib/move-members.ts withPendingInvites), one SMEMBERS: 551 before it.
  */
-export const ERASE_FIXED_COMMANDS = 551;
-/** Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read again, and those commands. */
-export const ERASE_FIXED_BYTES = 310_000;
+export const ERASE_FIXED_COMMANDS = 552;
+/**
+ * Bytes every erasure moves whatever the store: keys, small records, a sync log's jobs, the store's own record read
+ * again, and those commands; 310,000 before (Claude 3 on #3473) the memberships whose invitations wait to be deleted
+ * (lib/move-members.ts PENDING_MAX, 20): their ids read once (40 bytes each) and, for each, one more field of the
+ * person's invitations asked (73 bytes) and its record (at most about 600 bytes with a full address), counted at 15,000.
+ */
+export const ERASE_FIXED_BYTES = 325_000;
 /** Per thing counted: [commands, bytes]. */
 export const ERASE_PER: Record<keyof ErasureSize, [number, number]> = {
   products: [16, 4_000],

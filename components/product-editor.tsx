@@ -166,6 +166,8 @@ const MESSAGES: Record<string, string> = {
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
   // A podcast made before 9 November 2026 whose old feeds must still be reachable, and the store's list of those is full.
   podcast_feeds: "This podcast cannot be removed yet: too many removed podcasts in your store still have old buyer feeds to delete. Write to support about it.",
+  // Removed memberships whose members' invitations from an import are not yet deleted, and the store's list of those is full.
+  member_invites: "This product cannot be removed yet: too many removed memberships in your store still have invitations to delete. Write to support about it.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
   shipped: "This is a physical product you ship: sold once, at one price, with nothing else to hand over. Under Shipping, stop shipping it first to change that.",

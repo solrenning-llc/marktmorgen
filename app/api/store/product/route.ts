@@ -50,7 +50,7 @@ import { dropPodcastRecord, readPodcast } from "@/lib/podcast";
 import type { Podcast } from "@/lib/podcast-rules";
 import { GoneFullError, ListenersUnpaidError, dropListeners } from "@/lib/podcast-access";
 import { countStudio } from "@/lib/studio-route";
-import { InvitesUnpaidError, dropProductInvites } from "@/lib/move-members";
+import { InvitesPendingFullError, InvitesUnpaidError, dropProductInvites, notePendingInvites } from "@/lib/move-members";
 import { studioRefusal } from "@/lib/person-tasks";
 import { withLock } from "@/lib/redis-lock";
 import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, readProducts } from "@/lib/catalog";
@@ -366,6 +366,24 @@ export async function POST(request: NextRequest) {
           return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
         }
       }
+      // A product still here is noted first among the memberships whose invitations wait to be deleted (Claude 3, MEDIUM
+      // on #3473), in the studio request that also pays for their deletion's first page below: that one deletion runs
+      // after the product is gone, when the studio can no longer ask for it again, so if it does not finish, a person's
+      // erasure and the copy of their data still reach every invitation through the note. Not noted (refused, a reply
+      // not known, the note full): nothing is removed.
+      if (before) {
+        try {
+          await notePendingInvites(guarded.store, id, pay);
+        } catch (error) {
+          if (error instanceof InvitesUnpaidError) {
+            const refused = studioRefusal(refusal.reason ?? "unknown", refusal.message ?? "");
+            return Response.json(refused.body, { status: refused.status });
+          }
+          if (error instanceof InvitesPendingFullError) return Response.json({ ok: false, error: "member_invites" }, { status: 409 });
+          console.error("could not note a membership's invitations before removing it", error);
+          return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+        }
+      }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       // A podcast's record is read again and deleted under its own lock, held across the product's removal (Codex L,
       // finding 2 on #3473, MEDIUM): the studio's podcast route adds an episode only under that lock after reading the
@@ -436,8 +454,10 @@ export async function POST(request: NextRequest) {
       if (removed.ok) {
         const going = removed.product;
         // Its invitations, now that it is gone (above): not finished (a reply not known, the studio's requests used up),
-        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left.
-        await dropProductInvites(removed.store, id, pay).catch((error: unknown) => {
+        // it is said to the caller (cleanupPending), and the same removal asked again deletes what is left. Until then the
+        // note made before the removal keeps them within a person's erasure and data copy. Its first page is paid for by
+        // the request that made the note.
+        await dropProductInvites(removed.store, id, pay, !!before).catch((error: unknown) => {
           console.error("could not delete the invitations to a removed membership", error);
           cleanupPending = true;
         });

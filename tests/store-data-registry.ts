@@ -97,6 +97,8 @@ import { REFUND_MARK_MAX_BYTES } from "@/lib/affiliate-lead-rules";
 const KB = 1_024;
 /** lib/podcast-access.ts GONE_MAX, held there by the source check of its entry below (that module is not imported here). */
 const GONE_MAX = 50;
+/** lib/move-members.ts PENDING_MAX, held there by the source check of its entry below. */
+const PENDING_MAX = 20;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
 const KEY = 256;
 /** A mark: a key of under 80 characters holding a word, a count or a time. */
@@ -736,6 +738,8 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mv:due@lib/move-members.ts": company("Invites to remind", "One sorted set for every store, each an invite's."),
   // Claude 7, MEDIUM on #3473: a membership's removal marks it for a day, so an import step that read the catalog before it writes nothing to it.
   "nl:mv:gone:@lib/move-members.ts": short("A membership just removed, so no import step writes an invitation to it", "studio", 1),
+  // Claude 3, MEDIUM on #3473: a membership is noted before its removal and taken off once its invitations are deleted.
+  "nl:mv:pend:@lib/move-members.ts": { what: "Memberships removed whose invitations a person's erasure must still reach", parts: [capped(PENDING_MAX * MARK + KEY, "One set a store, at most PENDING_MAX product ids (a removal that would add one more is refused); each taken off once its invitations are deleted.", src("lib/move-members.ts", `PENDING_MAX = ${PENDING_MAX};`))] },
   "nl:mv:link:@lib/move-members.ts": room("An invite's link, until a while after the renewal it is for", "lib/move-members.ts"),
   // ---------------------------------------------------------------- lib/ n–p
   "nl:next:@lib/next-bought.ts": { what: "What buyers bought next, cached", parts: [capped(256 * KB, "One cached view.")] },

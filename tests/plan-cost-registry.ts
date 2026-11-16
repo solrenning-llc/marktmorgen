@@ -1578,7 +1578,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/product/route.ts", names: ["countStudio(guarded.store, null, units)", "dropListeners(guarded.store, id"] },
       { file: "lib/podcast-access.ts", names: ["LISTENERS_PER_UNIT = 100;", "options.pay(1)", "options.pay(Math.ceil(addresses.length / LISTENERS_PER_UNIT))"] },
       // And a removed membership's invitations from an import: a page of the store's invitations per studio request, paid first.
-      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 100;", "if (!(await pay(1))) throw new InvitesUnpaidError();"] },
+      // The first is taken before the removal, where the membership is noted among those whose invitations wait to be deleted
+      // (Claude 3, MEDIUM on #3473): the note's SISMEMBER, SCARD and SADD, then the mark, the count, the first page and the
+      // note's SREM, ten commands at the most in that one request (UNIT_COST.studio's twenty).
+      { file: "lib/move-members.ts", names: ["INVITES_PER_UNIT = 100;", "if (!(await pay(1))) throw new InvitesUnpaidError();", "if (!firstPaid && !(await pay(1))) throw new InvitesUnpaidError();", "PENDING_MAX = 20;"] },
+      { file: "app/api/store/product/route.ts", names: ["await notePendingInvites(guarded.store, id, pay);", "await dropProductInvites(removed.store, id, pay, !!before)"] },
       // A discount code scheduled ahead (511 [CK3]) takes SCHEDULE_UNITS more studio requests before Stripe is asked, one for each try the
       // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },

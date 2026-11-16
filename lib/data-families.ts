@@ -74,7 +74,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:gone:", "nl:metaads:gen", "nl:metaads:pass", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
-  "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:mv:gone:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
+  "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:mv:gone:", "nl:mv:pend:", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
   "nl:order-confirmation:closed:", "nl:order-confirmation:erased:", "nl:order-confirmation:due", "nl:order-confirmation:person:", "nl:order-confirmation:row:",
   "nl:order-confirmation:source:", "nl:order-confirmation:store:",
   "nl:nudge:", "nl:nudge:count:", "nl:nudge:cursor", "nl:orders:folders:", "nl:orders:link:", "nl:orders:n:",
@@ -321,7 +321,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:metaads:conn:": E, "nl:metaads:gone:": Cr(1), "nl:metaads:gen": C, "nl:metaads:pass": C, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
   "nl:mnum:": E,
   "nl:monthly:lock": C, "nl:monthly:seen:": Cr(40), "nl:monthly:sent:": Cr(62),
-  "nl:mv:": E, "nl:mv:due": I, "nl:mv:gone:": X(1), "nl:mv:link:": T("nl:mv:"),
+  "nl:mv:": E, "nl:mv:due": I, "nl:mv:gone:": X(1), "nl:mv:link:": T("nl:mv:"), "nl:mv:pend:": E,
   // ---------------------------------------------------------------- n-p
   "nl:next:": E, "nl:next:lock:": E,
   "nl:nlink:": E, "nl:nlink:opens:": E,

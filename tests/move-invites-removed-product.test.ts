@@ -11,7 +11,7 @@ import { NextRequest } from "next/server";
 import { POST as productRoute } from "@/app/api/store/product/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { dropProductInvites, inviteMembers, readInvite } from "@/lib/move-members";
+import { PENDING_MAX, dropProductInvites, forgetInvitesPerson, inviteMembers, readInvite } from "@/lib/move-members";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { erasePerson, erasureScope } from "@/lib/person-erasure";
 import { COPIERS } from "@/lib/person-copy";
@@ -75,6 +75,8 @@ async function main(): Promise<void> {
   is("[CORRETO] Ada's link to it is gone", (await redis.pipeline([["GET", `nl:mv:link:${adaLink}`]]))[0], null);
   const due = ((await redis.pipeline([["ZRANGEBYSCORE", "nl:mv:due", "-inf", "+inf"]]))[0] as string[]).filter((m) => m.endsWith(`:${club.product.id}`));
   is("[CORRETO] no reminder for it waits", due.length, 0);
+  const pendingKey = `nl:mv:pend:${store.statsId}`;
+  is("[CORRETO] once its invitations are all deleted, it is taken off the note of memberships waiting for that", (await redis.pipeline([["SMEMBERS", pendingKey]]))[0], []);
 
   part("Ben then asks the store to erase him");
   const erased = await erasePerson((await storeForEmail(OWNER))!, BEN, { kind: "person" });
@@ -129,6 +131,29 @@ async function main(): Promise<void> {
   const carlValues = (await redis.pipeline([["HVALS", invitesKey]]))[0] as string[];
   is("[CORRETO] nothing kept names Carl", carlValues.filter((v) => v.includes(CARL)).length, 0);
   is("[CORRETO] Carl's link is gone", (await redis.pipeline([["GET", `nl:mv:link:${carlLink}`]]))[0], null);
+  is("the removed membership stays noted, its deletion not confirmed", (await redis.pipeline([["SMEMBERS", pendingKey]]))[0], [late.product.id]);
+  const again = await productRoute(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers, body: JSON.stringify({ action: "remove", id: late.product.id }) }));
+  is("the same removal asked again answers", again.status < 500, true);
+  is("[CORRETO] and, its invitations' deletion finished, takes it off the note", (await redis.pipeline([["SMEMBERS", pendingKey]]))[0], []);
+
+  part("An unknown read of the note is never taken as no membership waiting (rule 24)");
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (commands[0]?.[0] === "SMEMBERS" && commands[0][1] === pendingKey) return [{ unexpected: true }];
+    return real(commands);
+  }) as typeof redis.pipeline;
+  const unknownForget = await forgetInvitesPerson(store, [], CARL).then(
+    () => "finished",
+    (error: unknown) => (error instanceof UnknownReplyError ? "unknown" : String(error)),
+  );
+  redis.pipeline = real;
+  is("[CORRETO] the erasure's part throws as unknown", unknownForget, "unknown");
+
+  part("A full note keeps the product: nothing is removed whose invitations could be left unreachable");
+  await redis.pipeline([["SADD", pendingKey, ...Array.from({ length: PENDING_MAX }, (_, i) => `zz${String(i).padStart(6, "0")}`)]]);
+  const full = await productRoute(new NextRequest("https://marktmorgen.com/api/store/product", { method: "POST", headers, body: JSON.stringify({ action: "remove", id: other.product.id }) }));
+  is("the removal is refused while the note is full", [full.status, ((await full.json()) as { error?: string }).error], [409, "member_invites"]);
+  is("[CORRETO] the product stays, with its invitation", [(await storeForEmail(OWNER))!.catalog.items.some((item) => item.id === other.product.id), ((await redis.pipeline([["HKEYS", invitesKey]]))[0] as string[]).some((f) => f.endsWith(`:${other.product.id}`))], [true, true]);
+  await redis.pipeline([["DEL", pendingKey]]);
   done();
 }
 

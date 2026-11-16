@@ -299,6 +299,7 @@ export default async function StorePage({ params, searchParams }: Params) {
   const quoted = store.quotes.filter((quote) => index.some((item) => item.id === quote.p && !item.hidden));
   const shown: Record<PagePart, boolean> = {
     products: total > 0,
+    intro: store.intro !== null && !searching,
     quotes: total > 0 && page === 1 && !searching && quoted.length > 0,
     links: links.length > 0,
     tips: tipsOpen(store),
@@ -377,12 +378,7 @@ export default async function StorePage({ params, searchParams }: Params) {
             </div>
             {/* The store's own pages the creator put in the menu (lib/site-page-rules.ts). */}
             <StorePagesNav store={store} />
-            {/* The creator's welcome video, loaded only when played (components/video-embed.tsx). */}
-            {store.intro && !searching ? (
-              <div className="mx-auto mt-6 max-w-md text-left">
-                <VideoEmbed video={store.intro} title={store.name} poster={null} lang={store.language} />
-              </div>
-            ) : null}
+            {/* The welcome video is a part of the page order now, after the products unless the creator moves it (496 [ME1], unit 3). */}
           </div>
         </section>
 
@@ -557,6 +553,12 @@ export default async function StorePage({ params, searchParams }: Params) {
                     </p>
                   )}
                 </>
+              ) : null}
+              {/* The creator's welcome video, loaded only when played (components/video-embed.tsx). */}
+              {part === "intro" && store.intro ? (
+                <div className="mx-auto mt-10 max-w-md text-left">
+                  <VideoEmbed video={store.intro} title={store.name} poster={null} lang={store.language} />
+                </div>
               ) : null}
               {/* "What buyers say": the newest reviews with words, kept on the store's record (lib/store-quotes.ts). */}
               {part === "quotes" ? (

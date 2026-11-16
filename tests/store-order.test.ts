@@ -14,14 +14,15 @@ async function main(): Promise<void> {
 
   part("An order, made whole");
   is("nothing kept is the usual order", parseOrder(undefined), USUAL_ORDER);
-  is("the usual order is the page as it always was", USUAL_ORDER, ["products", "quotes", "links", "tips", "signup", "faq", "contact", "community"]);
+  // The welcome video joined the parts on 16 November 2026, right after the products (496 [ME1], unit 3; tests/store-intro-part.test.ts).
+  is("the usual order is the page as it always was, with the welcome video after the products", USUAL_ORDER, ["products", "intro", "quotes", "links", "tips", "signup", "faq", "contact", "community"]);
   is("each part once, and names that are not parts dropped", parseOrder(["community", "community", "banner", 4, ...USUAL_ORDER]), ["community", ...USUAL_ORDER.filter((p) => p !== "community")]);
-  is("a part missing goes right after the one before it in the usual order", parseOrder(["links", "products", "tips", "signup", "faq", "contact", "community"]), ["links", "products", "quotes", "tips", "signup", "faq", "contact", "community"]);
-  const chosen = ["signup", "links", "tips", "products", "quotes", "faq", "contact", "community"];
+  is("a part missing goes right after the one before it in the usual order", parseOrder(["links", "products", "tips", "signup", "faq", "contact", "community"]), ["links", "products", "intro", "quotes", "tips", "signup", "faq", "contact", "community"]);
+  const chosen = ["signup", "links", "tips", "products", "intro", "quotes", "faq", "contact", "community"];
   is("a whole order is kept as it is", parseOrder(chosen), chosen);
-  is("a part added after an order was chosen goes in after the part it follows in the usual order", parseOrder(["signup", "links", "tips", "products", "faq", "contact", "community"]), chosen);
+  is("a part added after an order was chosen goes in after the part it follows in the usual order", parseOrder(["signup", "links", "tips", "products", "intro", "faq", "contact", "community"]), chosen);
   is("whatever was sent, every part is there", parseOrder(["community", "faq"]).slice().sort(), USUAL_ORDER.slice().sort());
-  is("a store that chose its order before Support my work existed finds it under its links", parseOrder(["links", "products", "quotes", "signup", "faq", "contact", "community"]), ["links", "tips", "products", "quotes", "signup", "faq", "contact", "community"]);
+  is("a store that chose its order before Support my work existed finds it under its links", parseOrder(["links", "products", "intro", "quotes", "signup", "faq", "contact", "community"]), ["links", "tips", "products", "intro", "quotes", "signup", "faq", "contact", "community"]);
   is("the usual order is known as such", [isUsualOrder(USUAL_ORDER), isUsualOrder(parseOrder(chosen))], [true, false]);
 
   part("A search");

@@ -106,7 +106,7 @@ export function storeChecks(store: Store, input: StoreCoachInput): StoreCheck[] 
     },
     {
       id: "intro",
-      label: "A welcome video under your name",
+      label: "A welcome video",
       why: "A minute of you saying who you are and what the store is for: a face makes a stranger trust a store.",
       done: store.intro !== null,
       weight: 1,

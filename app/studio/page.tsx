@@ -1775,6 +1775,7 @@ export default async function StudioPage({
                 order={store.order}
                 on={{
                   products: visibleCount(store) > 0,
+                  intro: store.intro !== null,
                   quotes: store.quotes.length > 0,
                   links: store.links.some((link) => !link.header),
                   tips: tipsOpen(store),

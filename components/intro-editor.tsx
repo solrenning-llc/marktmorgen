@@ -8,7 +8,8 @@ import { toast } from "@/components/toast";
 import { PROVIDER_NAMES, type Video, readVideo, videoAddress } from "@/lib/sales-page";
 
 /**
- * The welcome video under the store's name (lib/store.ts, intro): pasted as
+ * The welcome video on the store page (lib/store.ts, intro), after the products
+ * unless the creator moves it in the page order (lib/store-order.ts): pasted as
  * it is copied from YouTube, Vimeo or Loom, checked as it is typed, and
  * played on the page only when a visitor presses play.
  */
@@ -79,8 +80,12 @@ export function IntroEditor({ intro }: { intro: Video | null }) {
         {wrong
           ? "That is not a YouTube, Vimeo or Loom video address."
           : video
-            ? `A ${PROVIDER_NAMES[video.provider]} video, under your name. It loads only when a visitor presses play.`
-            : "A short hello under your name: who you are and what your store is for. YouTube, Vimeo or Loom."}
+            ? `A ${PROVIDER_NAMES[video.provider]} video. It loads only when a visitor presses play.`
+            : "A short hello: who you are and what your store is for. YouTube, Vimeo or Loom."}
+      </p>
+      {/* Where it shows (496 [ME1], unit 3): after the products, so the first one stays on a phone's first screen; the order below moves it. */}
+      <p className="mt-1 text-sm text-ink-soft">
+        It shows after your products, unless you move it higher in <a href="#order" className="link">the order of your page</a>.
       </p>
       {error ? <p role="alert" className="mt-2 text-sm font-semibold text-danger-text">{error}</p> : null}
       <div className="mt-3 flex flex-wrap gap-2">

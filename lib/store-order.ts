@@ -3,7 +3,7 @@
  * October 2026).
  *
  * Every store page is one column: who the creator is at the top, then what
- * they sell, what buyers said, where else they are, a way to support them, the sign-up box, the
+ * they sell, their welcome video, what buyers said, where else they are, a way to support them, the sign-up box, the
  * questions, the contact form and the way into the community. A creator whose
  * page is mostly links wants the links first; one whose buyers' words sell
  * best wants those above the products; one building a list wants the sign-up
@@ -21,6 +21,10 @@
 
 export const PAGE_PARTS = [
   { id: "products", label: "What you sell", note: "Your products, with the search, the sale banner and the guide that helps a visitor choose." },
+  // Added 16 November 2026 (496 [ME1], unit 3): the welcome video stood under the creator's name, above the
+  // products, and pushed the first one below a phone's first screen. Right after the products now, and the
+  // creator can put it back above them; a store that chose an order before finds it right after its products.
+  { id: "intro", label: "Welcome video", note: "Your hello from YouTube, Vimeo or Loom, loaded only when a visitor presses play. Shown when you have added one." },
   { id: "quotes", label: "What buyers say", note: "The newest reviews with words, once you have some." },
   { id: "links", label: "Your links", note: "The links with no price, and the headings over them." },
   { id: "tips", label: "Support my work", note: "Amounts a fan can give you with nothing bought. Shown when it is switched on." },

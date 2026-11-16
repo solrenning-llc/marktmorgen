@@ -1633,7 +1633,8 @@ try {
   {
     await open(studio, `${LOCAL}/studio`);
     const order = studio.locator("section#order");
-    for (let n = 0; n < 2; n++) await order.getByRole("button", { name: "Move Your links up" }).click();
+    // Three places up: the welcome video stands between the products and the buyers' words since 496 [ME1] unit 3.
+    for (let n = 0; n < 3; n++) await order.getByRole("button", { name: "Move Your links up" }).click();
     is("the list shows the new order before it is saved", (await words(order.locator("li").first())).includes("Your links"), true);
     await order.getByRole("button", { name: "Save the order" }).click();
     await studio.getByText("Saved. Your page shows its parts in this order.").first().waitFor({ timeout: 30_000 });
@@ -1884,16 +1885,17 @@ try {
   }
 
   await keepSmall();
-  part("A welcome video under the store's name");
+  part("A welcome video, after the products unless the creator moves it");
   {
     await open(studio, `${LOCAL}/studio`);
     await studio.locator("#intro-url").fill("not a video");
     is("an address that is no video is said so before saving", await studio.locator("#intro-url").getAttribute("aria-invalid"), "true");
     await studio.locator("#intro-url").fill("https://vimeo.com/123456789");
     await studio.getByRole("button", { name: "Save the video" }).click();
-    await studio.getByText("Welcome video saved. It plays under your store's name.").first().waitFor({ timeout: 15_000 });
+    await studio.getByText("Welcome video settings saved.").first().waitFor({ timeout: 15_000 });
     await open(page, `${LOCAL}/@localshop`);
-    is("under the store's name, loaded only when played", [
+    is("drawn as its own part, right after the products", await page.locator(".st-part").evaluateAll((parts) => parts.slice(0, 2).map((p) => p.getAttribute("data-part"))), ["products", "intro"]);
+    is("loaded only when played", [
       await page.getByRole("button", { name: /Play the video: Harbor Kitchen Local\. It loads from Vimeo\./ }).count(),
       await page.locator('iframe[src*="vimeo"]').count(),
     ], [1, 0]);

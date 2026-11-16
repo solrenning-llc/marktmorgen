@@ -83,6 +83,7 @@ const MESSAGES: Record<string, string> = {
   upcoming: "Cancel it first, so everyone coming is told.",
   telling: "Everyone coming is still being told it was canceled. Delete it once that is done.",
   busy: "This event is being saved from somewhere else right now. Try again in a moment.",
+  making: "Another event is being added to this community right now. Try again in a moment.",
   store_full: "Your store's data room is full. Delete old posts, events or drafts you no longer need.",
   slow: "That is a lot of changes in an hour. Wait a little, then try again.",
   unknown: "That event is not there anymore. Reload the page.",

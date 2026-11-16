@@ -135,6 +135,8 @@ const indexKey = (id: string) => `${base(id)}:evs`;
 const rsvpKey = (id: string, event: string) => `${base(id)}:ev:${event}:r`;
 const countKey = (id: string, event: string) => `${base(id)}:ev:${event}:n`;
 const lockKey = (id: string, event: string) => `${base(id)}:evlock:${event}`;
+/** One per community: the count of its events, the oldest let go and the new one's ZADD are one step, so two events made at once never take the index past MAX_KEPT_EVENTS (Claude 5 on #2957). */
+const keptLockKey = (id: string) => `${base(id)}:evslock`;
 const accessKey = (id: string, event: string, email: string) => `${base(id)}:ev:${event}:ok:${emailKey(email)}`;
 const writesKey = (id: string) => `nl:rl:cm:ev:${id}`;
 export const EVENT_QUEUE = "nl:cm:evq";
@@ -445,7 +447,7 @@ function queueEntries(community: string, handle: string, event: CommunityEvent, 
   return out;
 }
 
-export type CreateResult = { ok: true; event: CommunityEvent } | { ok: false; reason: "full" };
+export type CreateResult = { ok: true; event: CommunityEvent } | { ok: false; reason: "full" | "busy" };
 
 /**
  * The slot an event and everyone coming to it is counted in, in the store's
@@ -467,36 +469,50 @@ function eventBytes(event: CommunityEvent): number {
 export async function createEvent(store: Store, input: EventInput, now = Date.now()): Promise<CreateResult> {
   const id = store.community?.id as string;
   if ((await upcomingCount(id, now)) >= MAX_UPCOMING_EVENTS) return { ok: false, reason: "full" };
-  // Read exactly (rule 24; Claude 5 on #3845): an unreadable count is unknown, so nothing is made, never an event past the cap.
-  const kept = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
-  if (kept === null) throw new UnknownReplyError("the events a community keeps");
-  if (kept >= MAX_KEPT_EVENTS) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, kept - MAX_KEPT_EVENTS + 1]]);
-    const oldest = (Array.isArray(raw) ? (raw as string[]) : []).filter((e) => ITEM_ID.test(e));
-    if (!oldest.length) return { ok: false, reason: "full" };
-    for (const gone of await readEvents(id, oldest)) await forgetEvent(id, gone, store);
+  // The count, the oldest let go and the new event's ZADD under one lock per community (Claude 5 on #2957): two events
+  // made at once each counted before the other's ZADD, so the index went past MAX_KEPT_EVENTS, and then every member's
+  // erasure and copy were refused until the creator made or deleted an event.
+  let made: CommunityEvent | null;
+  try {
+    made = await withLock(keptLockKey(id), 20, 5_000, async (): Promise<CommunityEvent | null> => {
+      // Read exactly (rule 24; Claude 5 on #3845): an unreadable count is unknown, so nothing is made, never an event past the cap.
+      const kept = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+      if (kept === null) throw new UnknownReplyError("the events a community keeps");
+      if (kept >= MAX_KEPT_EVENTS) {
+        const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, kept - MAX_KEPT_EVENTS + 1]]);
+        const oldest = (Array.isArray(raw) ? (raw as string[]) : []).filter((e) => ITEM_ID.test(e));
+        if (!oldest.length) return null;
+        for (const gone of await readEvents(id, oldest)) await forgetEvent(id, gone, store);
+      }
+      const event: CommunityEvent = {
+        id: newItemId(),
+        ...input,
+        link: input.where === "link" ? input.link : "",
+        meet: input.where === "meet" ? input.meet : null,
+        room: newVideoRoom(),
+        replay: null,
+        cancelled: false,
+        post: "",
+        at: Math.floor(now / 1000),
+        moves: 0,
+        v: 1,
+      };
+      const entries = queueEntries(id, store.handle, event, now);
+      // Its room first (DataRoomError when it does not fit): nothing is written without it.
+      await needData(store, [{ slot: EVENT_SLOT(event.id), bytes: eventBytes(event), set: true }]);
+      await redisPipeline([
+        ["SET", eventKey(id, event.id), JSON.stringify(event)],
+        ["ZADD", indexKey(id), event.start, event.id],
+        ...(entries.length ? [["ZADD", EVENT_QUEUE, ...entries]] : []),
+      ]);
+      return event;
+    });
+  } catch (error) {
+    if (error instanceof LockBusyError) return { ok: false, reason: "busy" };
+    throw error;
   }
-  const event: CommunityEvent = {
-    id: newItemId(),
-    ...input,
-    link: input.where === "link" ? input.link : "",
-    meet: input.where === "meet" ? input.meet : null,
-    room: newVideoRoom(),
-    replay: null,
-    cancelled: false,
-    post: "",
-    at: Math.floor(now / 1000),
-    moves: 0,
-    v: 1,
-  };
-  const entries = queueEntries(id, store.handle, event, now);
-  // Its room first (DataRoomError when it does not fit): nothing is written without it.
-  await needData(store, [{ slot: EVENT_SLOT(event.id), bytes: eventBytes(event), set: true }]);
-  await redisPipeline([
-    ["SET", eventKey(id, event.id), JSON.stringify(event)],
-    ["ZADD", indexKey(id), event.start, event.id],
-    ...(entries.length ? [["ZADD", EVENT_QUEUE, ...entries]] : []),
-  ]);
+  if (!made) return { ok: false, reason: "full" };
+  const event = made;
   // Findable from the search box as soon as it exists. Never allowed to stop
   // an event being made.
   await indexEvent(id, event).catch(() => {});

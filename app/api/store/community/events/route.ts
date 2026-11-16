@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
       const refused = await meetRefused(input, null);
       if (refused) return refused;
       const made = await createEvent(store, input);
-      if (!made.ok) return fail("too_many", 409);
+      if (!made.ok) return fail(made.reason === "busy" ? "making" : "too_many", 409);
       let event = made.event;
       const record = await meeting(eventMeeting(store, event));
       if (body.announce === true) {

@@ -369,6 +369,42 @@ async function handedOver(statsId: string, order: string): Promise<void> {
 }
 
 /**
+ * A PayPal sale whose affiliate or partner credit failed after it was handed over (an unknown read of the affiliate,
+ * rule 24, or Redis trouble): kept in the same list as `credit:<order>`, so the sweep credits it again from the paid
+ * record (creditAgain), never by handing the order over or emailing the buyer twice. Its own read is the one the list
+ * already costs a sweep. Best effort, as the hand-over's own retry mark is.
+ */
+const CREDIT_PREFIX = "credit:";
+async function oweCredit(store: Store, order: string, error: unknown): Promise<void> {
+  console.error("crediting a PayPal sale failed; credited again at the next sweep", order, error);
+  if (store.statsId && isRedisConfigured()) await redisPipeline([["ZADD", handOverKey(store.statsId), dueNow(), `${CREDIT_PREFIX}${order}`]]).catch(() => undefined);
+}
+
+/** Credits again a sale kept by oweCredit; true once it is credited or there is nothing left to credit. Throws while unknown. */
+async function creditAgain(store: Store, order: string): Promise<boolean> {
+  const paid = await readPaidExact(order);
+  if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");
+  // Erased, or past its time: nothing left to credit from.
+  if (paid === null) return true;
+  // The person deleted from the store at their own request since paying: credited for the sale paid, with nothing that
+  // names them (no bond), as the hand-over does (Claude 1 cloud, MEDIUM on #3858). An unknown mark throws: the credit
+  // stays owed for the next sweep, never made on a guess (rule 24).
+  const listId = await deletionListId(store);
+  const erased = await erasedSincePaid(listId, paid, true);
+  const product = await readListing(store, paid.product);
+  await creditPayPalSale(store, paid, product?.title ?? "", !erased);
+  // Read once more after the bond, as the hand-over does (Claude 6, MEDIUM on #3858): a deletion that wrote its mark
+  // between the read above and the bond did not see that bond, so it is taken back here. Also when the first read said
+  // erased, so a bond an earlier try wrote before stopping is taken back too. One HGET a try; the forget's reply is
+  // read exactly, and anything but 0 or 1 throws, so the credit stays owed for the next sweep (rule 24).
+  if (paid.via && store.statsId && (erased || (await erasedSincePaid(listId, paid, true)))) {
+    const replies = repliesFor(await redisPipeline([forgetBondCommand(store.statsId, paid.email, paid.via.aff)]), 1);
+    if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back the bond of a person deleted during a PayPal credit's retry");
+  }
+  return true;
+}
+
+/**
  * Gives the buyer what they paid for and emails the receipt. False when the product is gone (Redis answered that
  * its record is not there). Everything it hands over is read first, a bundle's products too; a read that is
  * unknown throws before anything is handed over, and the order is kept for the sweep to hand over, never taken
@@ -454,7 +490,7 @@ async function handOver(store: Store, paid: Paid): Promise<"handed" | "gone" | "
       return null;
     },
   });
-  await creditPayPalSale(store, paid, product.title).catch((error) => console.error("crediting a PayPal sale failed", error));
+  await creditPayPalSale(store, paid, product.title).catch((error) => oweCredit(store, paid.order, error));
   // The person's own deletion completed during this try, after its check (finding 3): what the try wrote of them is
   // taken back, the webhooks are not told, and the order leaves the list. Read once more, after every write that names
   // them (the bond last), so a deletion that writes its mark after this read deletes those writes itself. One HGET a try.
@@ -527,6 +563,15 @@ async function handOverAgain(store: Store, deadline: number): Promise<number> {
   let handed = 0;
   for (const order of orders) {
     if (Date.now() >= deadline) break;
+    if (order.startsWith(CREDIT_PREFIX)) {
+      try {
+        if (await creditAgain(store, order.slice(CREDIT_PREFIX.length))) await redisPipeline([["ZREM", key, order]]);
+      } catch (error) {
+        console.error("crediting a PayPal sale again failed; tried again at the next sweep", store.handle, order, error);
+        await redisPipeline([["ZADD", key, dueNow(), order]]).catch(() => undefined);
+      }
+      continue;
+    }
     try {
       const paid = await readPaidExact(order);
       if (paid === "unknown") throw new UnknownReplyError("a PayPal order's paid record");

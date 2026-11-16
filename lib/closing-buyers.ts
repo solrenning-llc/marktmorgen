@@ -36,7 +36,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { textCountOf } from "@/lib/redis-count";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { type Store, saleHandles, storeFolder, storeRef } from "@/lib/store";
-import { readPayPalSales } from "@/lib/paypal-sales";
+import { paypalOrderKeys } from "@/lib/paypal-sales";
 import { importedBuyers } from "@/lib/imported-purchases";
 import { storeBase } from "@/lib/purchase-email";
 import { formatMoney } from "@/lib/money";
@@ -157,7 +157,72 @@ export function buyerPagesCap(cap: number): number {
   return Math.ceil((2 * cap) / 100) + 5;
 }
 
-const CURSOR = /^(start|\d{1,3}\|[!-~]{0,800})$/;
+const CURSOR = /^(start|pp\|\d{1,7}|\d{1,3}\|[!-~]{0,800})$/;
+
+/**
+ * The most PayPal sales read in one page for a closing's buyers (#4258): one range of at most this many order ids
+ * and one MGET of their records, each up to MAX_PAID_BYTES (lib/paypal-sales.ts), a page counted against the
+ * closing's page cap (buyerPagesCap) and the run's BUYER_PAGES_PER_RUN like a page of Stripe payments.
+ */
+export const PAYPAL_PAGE = 100;
+/** The store's PayPal sales, scored by when each was paid: the same key as lib/paypal-sales.ts's salesKey. */
+const paypalSalesKey = (statsId: string) => `nl:ppsell:sales:${statsId}`;
+/** A PayPal order's paid record: lib/paypal-sales.ts's paidKey, through its exported pair (order key, paid key). */
+const paypalPaidKey = (order: string): string | null => paypalOrderKeys(order)[1] ?? null;
+/** The told list's field for a PayPal sale whose buyer could not be read (counted once, as `#<sub>` is for a member). */
+const unreadField = (order: string) => `#pp:${/^[!-~]{1,64}$/.test(order) ? order : createHash("sha256").update(order).digest("hex").slice(0, 16)}`;
+
+/**
+ * The range of the store's PayPal sales, newest first, from `offset`, at most `n` ids, read exactly (rule 24): null
+ * when the reply is out of shape. Newest first so a sale paid during the closing moves the rest down (read again,
+ * told once by the told list) and the oldest leaving the list moves nothing before it: no sale is skipped.
+ */
+async function paypalIds(statsId: string, offset: number, n: number): Promise<string[] | null> {
+  const ids = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", paypalSalesKey(statsId), "+inf", "0", "LIMIT", String(offset), String(n)]]), 1)?.[0]);
+  return ids && ids.length <= n ? ids : null;
+}
+
+/**
+ * One page of the store's PayPal buyers (#4258): `read`, how many sales the page held; `emails`, the buyers whose
+ * record read as this store's sale of that order; `unread`, the sales whose buyer cannot be known (an id that is not
+ * an order, a record Redis answered as missing, text that is not a record, one written for another store or another
+ * order), to be counted as not told, never dropped. Null when Redis answered out of shape: nothing on the page is
+ * acted on, and it is read again on the next run.
+ */
+async function paypalPage(statsId: string, offset: number): Promise<{ read: number; emails: string[]; unread: string[] } | null> {
+  const ids = await paypalIds(statsId, offset, PAYPAL_PAGE);
+  if (!ids) return null;
+  const unread: string[] = [];
+  const orders: { order: string; key: string }[] = [];
+  for (const order of ids) {
+    const key = paypalPaidKey(order);
+    if (key) orders.push({ order, key });
+    else unread.push(order);
+  }
+  const emails: string[] = [];
+  if (orders.length) {
+    const rows = repliesFor(repliesFor(await redisPipeline([["MGET", ...orders.map((o) => o.key)]]), 1)?.[0], orders.length);
+    if (!rows) return null;
+    for (const [i, { order }] of orders.entries()) {
+      const raw = rows[i];
+      if (raw !== null && typeof raw !== "string") return null;
+      let paid: unknown = null;
+      try {
+        paid = typeof raw === "string" ? JSON.parse(raw) : null;
+      } catch {
+        paid = null;
+      }
+      const sale = paid && typeof paid === "object" && !Array.isArray(paid) ? (paid as { store?: unknown; order?: unknown; email?: unknown }) : null;
+      // Read as tell() reads it (normaliseEmail, EMAIL_PATTERN): an address that is not one is unread, so the sale is
+      // counted as not told (its unreadField mark keeps it once), never dropped before the told list (Codex L's MEDIUM,
+      // Claude 3 cloud S on #4427).
+      const email = sale && sale.store === statsId && sale.order === order && typeof sale.email === "string" ? normaliseEmail(sale.email) : "";
+      if (EMAIL_PATTERN.test(email)) emails.push(email);
+      else unread.push(order);
+    }
+  }
+  return { read: ids.length, emails, unread };
+}
 
 /**
  * One page of Stripe's payment search, only in its exact shape (rule 30, the
@@ -180,12 +245,13 @@ function searchPageOf(reply: unknown): { rows: Record<string, unknown>[]; next: 
 /**
  * Tells the next part of the store's buyers. `after` is where the last run
  * stopped ("" the first time: then the buyers kept here, the members held
- * and those brought over or paid with PayPal, are told first; each address
- * told is written down at once, so a run that stops part-way never writes to
- * anybody twice). Then the payments that name this store in their own
+ * and those brought over, are told first; each address told is written down
+ * at once, so a run that stops part-way never writes to anybody twice). Then
+ * its PayPal sales, PAYPAL_PAGE a page from the cursor `pp|<offset>` (#4258),
+ * a sale whose buyer cannot be read counted as not told. Then the payments that name this store in their own
  * metadata, found by Stripe's search on the creator's account (never the
- * account's whole history), BUYER_PAGES_PER_RUN pages a run and `maxPages`
- * in all; at that cap it is done, and says it was `capped`. `day` is the
+ * account's whole history). BUYER_PAGES_PER_RUN pages a run and `maxPages`
+ * in all, PayPal's and Stripe's together; at that cap it is done, and says it was `capped`. `day` is the
  * closing day the emails name.
  */
 export async function tellBuyers(store: Store, endedAt: number, day: number, after: string, until: number, pagesRead = 0, maxPages = Number.POSITIVE_INFINITY): Promise<Told> {
@@ -237,15 +303,46 @@ export async function tellBuyers(store: Store, endedAt: number, day: number, aft
     for (const sub of held.missing) if (await markUntold(folder, `#${sub}`, 0)) out.untold += 1;
     const kept: string[] = [...members.keys()];
     kept.push(...(await importedBuyers(store.statsId)).keys());
-    kept.push(...(await readPayPalSales(store.statsId, 0, 100_000)).sales.map((sale) => sale.email));
     if (!(await tell(kept))) return out;
+    out.after = "pp|0";
+  }
+  // Pages left in this run, PayPal's and Stripe's together.
+  let budget = BUYER_PAGES_PER_RUN;
+  if (out.after.startsWith("pp|")) {
+    // The PayPal buyers, a page at a time, each page told before the next is read (#4258).
+    const statsId = store.statsId;
+    let offset = Number(out.after.slice(3));
+    while (statsId && isRedisConfigured()) {
+      if (out.pages >= maxPages) {
+        // At the cap: one id past it says whether any sale is left unread (then the round is capped, never silent).
+        const left = await paypalIds(statsId, offset, 1);
+        if (!left) return out;
+        if (left.length) return { ...out, done: true, capped: true };
+        break;
+      }
+      if (budget <= 0 || Date.now() > until) return out;
+      const page = await paypalPage(statsId, offset);
+      if (!page) {
+        console.error("closing-buyers: a page of the store's PayPal sales was not read in its shape; tried again");
+        return out;
+      }
+      if (!page.read) break;
+      out.pages += 1;
+      budget -= 1;
+      // Counted once however many times the page is read (HSETNX of our own mark).
+      for (const order of page.unread) if (await markUntold(folder, unreadField(order), 0)) out.untold += 1;
+      if (!(await tell(page.emails))) return out;
+      offset += page.read;
+      out.after = `pp|${offset}`;
+      if (page.read < PAYPAL_PAGE) break;
+    }
     out.after = "start";
   }
   const account = store.stripeAccountId;
   if (!account) return { ...out, done: true };
   const handles = [...saleHandles(store)];
   let [h, page] = out.after === "start" ? [0, ""] : [Number(out.after.split("|")[0]), out.after.slice(out.after.indexOf("|") + 1)];
-  for (let run = 0; run < BUYER_PAGES_PER_RUN; run += 1) {
+  for (; budget > 0; budget -= 1) {
     if (h >= handles.length) return { ...out, done: true };
     if (out.pages >= maxPages) return { ...out, done: true, capped: true };
     if (Date.now() > until) return out;

@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   };
   let { store, product } = await load(mug.product.id);
   is("not in PayPal, as before", sellsWithPayPal(product), false);
-  await createCheckout(store, product, "https://marktmorgen.com", null, {});
+  await createCheckout(store, product, "https://marktmorgen.com", "", {});
   let sent = checkouts.at(-1)!;
   is("the line is the creator's choose-your-price Price", [sent.get("line_items[0][price]"), sent.get("line_items[0][price_data][unit_amount]"), sent.get("metadata[pwyw]")], ["price_test00000001", null, "yes"]);
   is("with the creator's lowest and suggested prices", [prices.at(-1)?.get("custom_unit_amount[minimum]"), prices.at(-1)?.get("custom_unit_amount[preset]")], ["2000", "2800"]);
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
 
   await setTax(OWNER, { enabled: true, included: false, ids: false, invoices: false } as never);
   ({ store, product } = await load(mug.product.id));
-  await createCheckout(store, product, "https://marktmorgen.com", null, {});
+  await createCheckout(store, product, "https://marktmorgen.com", "", {});
   sent = checkouts.at(-1)!;
   is("tax on: the Price is made for goods, with the store's tax behavior", [prices.length, prices.at(-1)?.get("product_data[tax_code]"), prices.at(-1)?.get("tax_behavior")], [2, "txcd_99999999", "exclusive"]);
   is("and shipping is taxed as shipping", [sent.get("line_items[0][price]"), sent.get("shipping_options[0][shipping_rate_data][tax_code]")], ["price_test00000002", "txcd_92010001"]);
@@ -116,12 +116,12 @@ async function main(): Promise<void> {
   if (!pdf.ok) throw new Error("no product");
   await setProductLink(OWNER, pdf.product.id, "https://example.com/pdf");
   ({ store, product } = await load(pdf.product.id));
-  await createCheckout(store, product, "https://marktmorgen.com", null, { digitalConsent: TEST_CONSENT });
+  await createCheckout(store, product, "https://marktmorgen.com", "", { digitalConsent: TEST_CONSENT });
   is("a product that does not ship is not made for goods", [prices.length, prices.at(-1)?.get("product_data[tax_code]") ?? null], [3, null]);
 
   ({ store, product } = await load(mug.product.id));
   let gift = "sent";
-  await createCheckout(store, product, "https://marktmorgen.com", null, { gift: "g".repeat(16) }).catch(() => (gift = "refused"));
+  await createCheckout(store, product, "https://marktmorgen.com", "", { gift: "g".repeat(16) }).catch(() => (gift = "refused"));
   is("never as a gift", gift, "refused");
 
   done();

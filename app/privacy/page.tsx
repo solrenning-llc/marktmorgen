@@ -304,7 +304,9 @@ export default function PrivacyPage() {
           the creator&apos;s list (sign-ups are not sent to Google). With each
           we send its id, time, amount, currency and products, whether the
           buyer had paid that creator before, the page, the email address
-          hashed with SHA-256, the network address and browser of the request
+          hashed with SHA-256 (a sign-up for something free or a waitlist is
+          sent without it, because the address is not confirmed yet), the
+          network address and browser of the request
           that opened the checkout or sent the sign-up (not with a later
           membership payment), and the platform&apos;s own cookies and ad click
           id from that browser. It goes to that platform on the creator&apos;s
@@ -1596,7 +1598,10 @@ export default function PrivacyPage() {
           and delete the connection, its token and every figure read from
           it. If they remove our app in their Facebook settings, or ask Meta
           for their data to be deleted, Meta tells us and we do the same at
-          once, and tell the store&apos;s owner.
+          once, and tell the store&apos;s owner. We then keep, for one day,
+          a scrambled form of that Meta user ID and the time Meta told us,
+          only so that a connection being finished at that very moment is
+          not kept either.
         </p>
         <p id="comparisons" className="scroll-mt-24">
           <strong className="text-black">Comparisons between stores.</strong>{" "}
@@ -2265,6 +2270,10 @@ export default function PrivacyPage() {
             shown without your name. Delete them in the community first if you
             want them gone, or ask the creator. What a creator copied elsewhere
             (their email platform, their own files) is theirs to delete there.
+            If a creator removed a course before we began keeping a record of
+            removed courses, the records you left in that course (lessons
+            done, quiz answers, work you handed in, a certificate) are not
+            reached when you ask us to delete your data from that store.
           </p>
         </div>
         <p>

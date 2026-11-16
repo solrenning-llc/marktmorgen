@@ -17,6 +17,10 @@
  *   - every write of an import over another writer's goes only over the job it read (review on #3384, second
  *     review, HIGH): a cancel between an upload's read and its write is never undone, what an import held is given
  *     back exactly once, never used after it was given back, and no give-back takes a count below zero;
+ *   - a give-up of an old upload ends it only while it is still receiving: one finished or queued meanwhile is left
+ *     alone, with what it holds (focal review on #3384, L-A);
+ *   - a finish queues an import and puts it on the active set in one step, so a lost round trip never leaves a queued
+ *     import off the set, nor one on the set still receiving (focal review on #3384, L-B);
  *   - a reminder refused by a full month is tried once more when the month opens again, while that is still before
  *     the renewal date, and is never sent twice.
  */
@@ -383,6 +387,95 @@ async function main(): Promise<void> {
   const goneLeft = (await redis.pipeline([["EXISTS", `nl:import:${goneId}`], ["EXISTS", `nl:import:${goneId}:rows`]])) as number[];
   is("an import let go between a batch's read and its write is not written again, and keeps no rows", [gone.ok, goneRows.ok, (goneRows as { reason?: string }).reason, goneLeft], [true, false, "state", [0, 0]]);
 
+  part("A give-up ends an old upload only while it is still receiving (focal review on #3384, L-A)");
+  const onActive = async (id: string) => (await redis.pipeline([["SISMEMBER", "nl:imports:active", id]]))[0];
+  // An upload with no hold, finished between a new start's read of it and its give-up: the give-up's write finds it
+  // changed, reads it again and finds it queued. That import is the creator's, finished: it is left alone.
+  const LA = "r46e-guard-a@example.com";
+  await creatorStore(LA, "r46guarda", { period: paidPeriod() });
+  const laAt = Date.now();
+  const la = await startImport((await storeForEmail(LA))!, LA, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const laId = la.ok ? la.job.id : "";
+  await addRows((await storeForEmail(LA))!, laId, [["2", "guard-a1@example.com", "", "", ""]]);
+  setClock(laAt + 3 * 60 * 60_000);
+  const laNext = await afterRead(laId, async () => finishUpload((await storeForEmail(LA))!, laId), async () =>
+    startImport((await storeForEmail(LA))!, LA, "contacts", { expected: 1, file: "one.csv", agreed: true }),
+  );
+  is(
+    "L-A: an old upload finished meanwhile is not ended: it stays queued and on the active set, and the new start is told the store is busy",
+    [la.ok, laNext.ok, (laNext as { reason?: string }).reason, await readJobState(laId), await onActive(laId)],
+    [true, false, "busy", "queued", 1],
+  );
+  // The same with a members upload holding the month's emails, its job turned queued by another writer meanwhile:
+  // what it holds is not given back while it is queued, and a cancel afterward gives it back once.
+  const LH = "r46e-guard-h@example.com";
+  await creatorStore(LH, "r46guardh", { period: paidPeriod() });
+  const lhAt = Date.now();
+  const lh = await startImport((await storeForEmail(LH))!, LH, "members", { expected: 20, file: "patrons.csv", stopped: true });
+  const lhId = lh.ok ? lh.job.id : "";
+  await addRows((await storeForEmail(LH))!, lhId, memberRows(20, in10, "guardh"));
+  setClock(lhAt + 3 * 60 * 60_000);
+  const queueIt = async () => {
+    const raw = (await redis.pipeline([["GET", `nl:import:${lhId}`]]))[0] as string;
+    await redis.pipeline([["SET", `nl:import:${lhId}`, JSON.stringify({ ...(JSON.parse(raw) as object), state: "queued" }), "EX", 7 * DAY]]);
+  };
+  const lhNext = await afterRead(lhId, queueIt, async () => startImport((await storeForEmail(LH))!, LH, "members", { expected: 1, file: "one.csv", stopped: true }));
+  is(
+    "L-A: a held upload turned queued meanwhile is not ended, its 20 are not given back, and the new start is told the store is busy",
+    [lh.ok, lhNext.ok, (lhNext as { reason?: string }).reason, await readJobState(lhId), await movedNow(LH)],
+    [true, false, "busy", "queued", "20"],
+  );
+  if (lhNext.ok) await cancelImport((await storeForEmail(LH))!, lhNext.job.id);
+  const lhCancel = await cancelImport((await storeForEmail(LH))!, lhId);
+  is("L-A control: the creator's cancel of that queued import still ends it and gives its 20 back once", [lhCancel?.state, await movedNow(LH), await onActive(lhId)], ["canceled", "0", 0]);
+  Date.now = () => fixedStart + (realNow() - realStart);
+
+  part("A finish queues an import and puts it on the active set together, or does neither (focal review on #3384, L-B)");
+  /** Loses, once, the round trip that puts import `id` on the active set: before it runs, or after it ran (its reply lost). */
+  async function loseActive<T>(id: string, when: "before" | "after", fn: () => Promise<T>): Promise<"answered" | "threw"> {
+    const pipeline = redis.pipeline.bind(redis);
+    let armed = true;
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      const hit = armed && commands.some((c) => c.map(String).includes("nl:imports:active") && c.map(String).includes(id));
+      if (!hit) return pipeline(commands);
+      armed = false;
+      if (when === "after") await pipeline(commands);
+      throw new Error("Redis request failed with status 503");
+    }) as typeof redis.pipeline;
+    try {
+      await fn();
+      return "answered";
+    } catch {
+      return "threw";
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  }
+  const LB = "r46e-guard-b@example.com";
+  await creatorStore(LB, "r46guardb", { period: paidPeriod() });
+  const lb = await startImport((await storeForEmail(LB))!, LB, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const lbId = lb.ok ? lb.job.id : "";
+  await addRows((await storeForEmail(LB))!, lbId, [["2", "guard-b1@example.com", "", "", ""]]);
+  const lbLost = await loseActive(lbId, "before", async () => finishUpload((await storeForEmail(LB))!, lbId));
+  is(
+    "L-B: a finish whose round trip is lost before it runs leaves the import receiving and off the active set, never queued outside it",
+    [lb.ok, lbLost, await readJobState(lbId), await onActive(lbId)],
+    [true, "threw", "receiving", 0],
+  );
+  const lbAgain = await finishUpload((await storeForEmail(LB))!, lbId);
+  is("L-B: the page's finish tried again then queues it and puts it on the active set", [lbAgain.ok, await readJobState(lbId), await onActive(lbId)], [true, "queued", 1]);
+  const LB2 = "r46e-guard-b2@example.com";
+  await creatorStore(LB2, "r46guardb2", { period: paidPeriod() });
+  const lb2 = await startImport((await storeForEmail(LB2))!, LB2, "contacts", { expected: 2, file: "list.csv", agreed: true });
+  const lb2Id = lb2.ok ? lb2.job.id : "";
+  await addRows((await storeForEmail(LB2))!, lb2Id, [["2", "guard-b2@example.com", "", "", ""]]);
+  const lb2Lost = await loseActive(lb2Id, "after", async () => finishUpload((await storeForEmail(LB2))!, lb2Id));
+  is(
+    "L-B control: a finish that ran with its reply lost has the import queued and on the active set together",
+    [lb2.ok, lb2Lost, await readJobState(lb2Id), await onActive(lb2Id)],
+    [true, "threw", "queued", 1],
+  );
+
   part("A give-back never takes a count below zero, and reads it exactly");
   const FLOOR = "r46e-floor@example.com";
   const floorStore = await creatorStore(FLOOR, "r46floor", { period: paidPeriod() });
@@ -464,6 +557,54 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:imports:moved:${remindStore.sid}:${nextWindow.id}`, "0"]]);
   const third = await sendMoveReminders(opened + 7_200_000 + 30_000, opened + 7_200_000);
   is("never sent twice: nothing more goes afterward", [third.sent, emails.slice(before).length], [0, 1]);
+  Date.now = realNow;
+
+  part("A reminder due during a temporary sending pause is sent after the pause (Codex G on #4359)");
+  // The store's sending is paused (bounces) when the reminder falls due. The pause ends before the renewal date, so
+  // the reminder waits in line for its end instead of being dropped, and goes once when sending resumes.
+  const dueOf = async (sid: string) => {
+    const line = (await redis.pipeline([["ZRANGEBYSCORE", "nl:mv:due", "-inf", "+inf", "WITHSCORES"]]))[0] as string[];
+    return line.flatMap((member, i) => (i % 2 === 0 && member.startsWith(`${sid}|`) ? [Number(line[i + 1])] : []));
+  };
+  const pauseFor = (sid: string, until: number) =>
+    redis.pipeline([["SET", `nl:mail:paused:${sid}`, JSON.stringify({ reason: "bounces", until, sent: 100, count: 9 })]]);
+  const PAUSED = "r46e-pause@example.com";
+  const p0 = Date.now();
+  const pauseStore = await creatorStore(PAUSED, "r46pause", { period: paidPeriod(p0, { behind: 1, ahead: 29 }) });
+  const pauseRenews = Math.floor(p0 / 1000) + 20 * DAY;
+  const onePaused = await importMembers(PAUSED, memberRows(1, pauseRenews, "paused"));
+  is("one member is invited and emailed", onePaused.job?.counts.mailed, 1);
+  const [pausedDue] = await dueOf(pauseStore.sid);
+  const pauseEnds = pausedDue + DAY;
+  await pauseFor(pauseStore.sid, pauseEnds);
+  const beforePause = emails.length;
+  setClock(pausedDue * 1000 + 60_000);
+  const duringPause = await sendMoveReminders(pausedDue * 1000 + 90_000, pausedDue * 1000 + 60_000);
+  is("during the pause nothing goes", [duringPause.sent, emails.length - beforePause], [0, 0]);
+  is("and the reminder waits in line for the pause's end, not dropped", await dueOf(pauseStore.sid), [pauseEnds]);
+  setClock(pauseEnds * 1000 + 60_000);
+  const afterPause = await sendMoveReminders(pauseEnds * 1000 + 90_000, pauseEnds * 1000 + 60_000);
+  is("once the pause is over the reminder goes, once", [afterPause.sent, emails.slice(beforePause).map(to)], [1, ["paused1@example.com"]]);
+  is("and it is off the line", await dueOf(pauseStore.sid), []);
+  Date.now = realNow;
+
+  part("A pause running past the renewal date lets the reminder go, and one read in an unknown shape keeps it");
+  const PAUSELONG = "r46e-pauselong@example.com";
+  const l0 = Date.now();
+  const longStore = await creatorStore(PAUSELONG, "r46plong", { period: paidPeriod(l0, { behind: 1, ahead: 29 }) });
+  await importMembers(PAUSELONG, memberRows(1, Math.floor(l0 / 1000) + 20 * DAY, "longpause"));
+  const [longDue] = await dueOf(longStore.sid);
+  await redis.pipeline([["SET", `nl:mail:paused:${longStore.sid}`, "not json"]]);
+  const beforeLong = emails.length;
+  setClock(longDue * 1000 + 60_000);
+  const unknownPause = await sendMoveReminders(longDue * 1000 + 90_000, longDue * 1000 + 60_000);
+  is("a pause read in an unknown shape sends nothing", [unknownPause.sent, emails.length - beforeLong], [0, 0]);
+  is("and keeps the reminder in line, an hour on", await dueOf(longStore.sid), [longDue + 60 + 3_600]);
+  await pauseFor(longStore.sid, longDue + 6 * DAY);
+  setClock((longDue + 3_660) * 1000 + 60_000);
+  const longPause = await sendMoveReminders((longDue + 3_660) * 1000 + 90_000, (longDue + 3_660) * 1000 + 60_000);
+  is("a pause that ends after the renewal date sends nothing", [longPause.sent, emails.length - beforeLong], [0, 0]);
+  is("and takes the reminder off the line", await dueOf(longStore.sid), []);
   Date.now = realNow;
   done();
 }

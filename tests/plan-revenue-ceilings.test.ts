@@ -4,6 +4,12 @@ import { BASE_PLAN_REVENUE_CEILINGS, CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, REQUIRED
 import { PUBLISHED_PLAN_PRICES } from "@/lib/plan";
 import { assessCustomerWorstCase, type CustomerWorstCase } from "@/lib/net-margin-rules";
 import { done, is } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
+
+// The review's exposure names its month once (zeroExposureFixture) and the readiness check reads the month at the
+// call; a real month end between the two failed the review. The clock stays inside one UTC day
+// (tests/one-utc-day.ts).
+withinOneUtcDay();
 const funded = (gross: number,key:MarginScenario='creator_month_full'): CustomerWorstCase => fundedCustomerWithAi(gross,Math.floor(gross*.65),12,key);
 const review = (): CommercialMarginReview => ({ companyBase:zeroFixedCompanyFixture, planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot: CURRENT_PRICE_AND_RIGHTS_SNAPSHOT, taxEvidence: "TEST ONLY", costAndLimitEvidence: "TEST ONLY", allocatedFixedCostsVerified:true, fundedExposure:zeroExposureFixture(), prepaidUsageEnforced: true, scenarios: Object.fromEntries(REQUIRED_MARGIN_SCENARIOS.map(key => [key, funded(BASE_PLAN_REVENUE_CEILINGS[key] ?? 10000,key)])) });
 is("all six subscription ceilings are the price list of 18 October 2026", BASE_PLAN_REVENUE_CEILINGS, { creator_month_full: 6900, creator_year_full: 69000, pro_month_full: 44900, pro_year_full: 449000, scale_month_full: 99900, scale_year_full: 999000 });

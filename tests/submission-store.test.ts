@@ -573,10 +573,26 @@ async function main(): Promise<void> {
     const keptSlot = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, kept, EVE) ?? ""]]))[0] ?? 0);
     const sent = await openSubmissionDoor({ ...ask(EVE), lessonId: kept }, w.steps);
     if (!sent.ok) throw new Error("open refused");
-    await closeSubmissionDoor({ ...where(EVE), lessonId: kept, data: SHOP, note: "" }, sent.upload.pathname, ["e"], NOW, w.steps);
+    const closedKept = await closeSubmissionDoor({ ...where(EVE), lessonId: kept, data: SHOP, note: "" }, sent.upload.pathname, ["e"], NOW, w.steps);
+    if (!closedKept.ok) throw new Error("close refused");
     const afterClose = await keptSlot();
     await settleSubmissionSlots(NOW + UPLOAD_SECONDS + 1);
     is("a kept file's place stays counted after the sweep", [afterClose > 0, await keptSlot()], [true, afterClose]);
+
+    // Claude 3 and Claude 5 on #3568 (MEDIUM A): the kept file's place was counted until its keeping time, but the
+    // slot's only turn was the door's end, so nothing set it back once the place lapsed. Its turn is now the kept file's
+    // keeping time: the sweep sets it back then.
+    const keptAt = closedKept.submission.keepUntil;
+    is("before the keeping time ends, the slot still holds the kept file's place", (await settleSubmissionSlots(keptAt - 60), await keptSlot()), afterClose);
+    await settleSubmissionSlots(keptAt + 1);
+    is("once the keeping time has ended, the sweep sets the slot back to what is held: nothing", await keptSlot(), 0);
+
+    // Claude 5 on #3568 (MEDIUM B): the store's list expired a month after its last open, so a backlog the daily sweep
+    // had not reached yet was lost and its slots stayed at their most. The list now never expires by itself: each turn
+    // is counted in its buyer's slot, and goes with the sweep, the store's closing or the buyer's erasure.
+    const left2 = await openSubmissionDoor({ ...ask(EVE, 50 * MiB, NOW), lessonId: "lesson0ttl01" }, w.steps);
+    is("control: an upload opened", left2.ok, true);
+    is("the store's list of turns has no expiry of its own, so a backlog is never lost", (await redis.pipeline([["TTL", `nl:sub:slots:${FOLDER}`]]))[0], -1);
   }
 }
 

@@ -47,7 +47,7 @@ import { noteTestSales } from "@/lib/headline-test";
 import { revokeRefundedGifts } from "@/lib/gifts";
 import { revokeRefundedPreorders } from "@/lib/preorders";
 import { revokeRefundedGroups } from "@/lib/group-buy";
-import { sweepPayPal } from "@/lib/paypal-delivery";
+import { retryPayPalCancelNotices, sweepPayPal } from "@/lib/paypal-delivery";
 import { dropEnrollment } from "@/lib/learn";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
@@ -485,8 +485,9 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
   }
   // Sold through the creator's PayPal (lib/paypal-sales.ts): a payment PayPal
   // held as pending is handed over once it completes, and a full refund takes
-  // the purchase back.
-  if (store.paypalSeller) {
+  // the purchase back. Also after the creator disconnected PayPal, while the
+  // orders it took are still answered (paypalPast, lib/paypal-delivery.ts).
+  if (store.paypalSeller || store.paypalPast) {
     try {
       const paypal = await sweepPayPal(store, deadline);
       counts.confirmed += paypal.cleared;
@@ -737,6 +738,9 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
   const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
   let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
   let skip = Number(savedDone) || 0;
+  // The buyers' notices of canceled PayPal orders the sender refused, tried again once a run, for every store
+  // (lib/paypal-sales.ts, retryCancelNotices): one ZRANGEBYSCORE, and a batch at most.
+  await retryPayPalCancelNotices(deadline).catch((error) => console.error("trying canceled PayPal orders' notices again failed", error));
   // The stores with open payment requests, read once a run.
   const requesting = await storesWithRequests().catch(() => new Set<string>());
   // Redis's SCAN may hand back the same key on more than one page (and a store
@@ -762,7 +766,7 @@ export async function sweepCheckouts(deadline: number, taxPolicyValue: unknown =
       swept.add(id);
       const reviewed = Boolean(store.stripeAccountId) && (await storeHasReviews(store).catch(() => false));
       const asks = Boolean(store.sid) && requesting.has(store.sid);
-      if (worthAsking(store, asks) || reviewed || store.paypalSeller) {
+      if (worthAsking(store, asks) || reviewed || store.paypalSeller || store.paypalPast) {
         counts.stores += 1;
         try {
           await sweepStore(store, counts, deadline, reviewed, asks, taxPass);

@@ -23,6 +23,8 @@ import { openGroup, revokeRefundedGroups, settleGroup, startGroup } from "@/lib/
 import type { Listing, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { readFileSync } from "node:fs";
+import { CART_STOCK_SHARE_OF_ORDER_COMPUTE, GROUP_SETTLE_STRIPE_CALLS, GROUP_SETTLE_STRIPE_WAIT, ORDER_COMPUTE } from "./plan-cost-registry";
 
 process.env.STRIPE_SECRET_KEY = "sk_test_group_refunded_before_settle_only";
 process.env.RESEND_API_KEY = "re_test_group_refunded_before_settle_only";
@@ -136,6 +138,12 @@ async function main(): Promise<void> {
     from: "store@x.test",
   }).then(() => "settled", () => "threw");
   is("a free checkout settles with no payment read", free, "settled");
+
+  part("Its Stripe reads are priced inside the order's compute (Claude 7's cost MEDIUM on #4494)");
+  const source = readFileSync("lib/group-buy.ts", "utf8");
+  const settle = source.slice(source.indexOf("export async function settleGroup("), source.indexOf("\n}\n", source.indexOf("export async function settleGroup(")));
+  is("settleGroup asks Stripe once itself, and givenBack once more at the most", [settle.split("onAccount(").length - 1, settle.split("givenBack(").length - 1, GROUP_SETTLE_STRIPE_CALLS], [1, 1, 2]);
+  is("those waits fit in an order's compute beside the cart's stock share", CART_STOCK_SHARE_OF_ORDER_COMPUTE * ORDER_COMPUTE + GROUP_SETTLE_STRIPE_WAIT <= ORDER_COMPUTE, true);
 
   part("Control: a payment that stands settles as before");
   const kept = "pi_GroupRefKept0001";

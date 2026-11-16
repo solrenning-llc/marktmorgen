@@ -285,6 +285,22 @@ async function main() {
   is("once", await run(first + 31 * DAY), []);
   is("Month 2 on its day", await run(first + 60 * DAY), [subject("Month 2")]);
   is("the student's row keeps its day", (await studentDates(courseId, buyer))?.since, first);
+
+  part("Bought again with an earlier access end than the refunded purchase: the drip stops at the end of the purchase that stands (merge with 24 [E7])");
+  {
+    const endNew = second + 45 * DAY;
+    const endOld = second + 400 * DAY;
+    current = { ...course, accessEndsAt: endNew, accessEndsKept: [] };
+    const stamped = (id: string, created: number, refunded: boolean, end: number) => ({ ...session(id, created, refunded), metadata: { store: store.handle, product: product.id, access_end: String(end) } });
+    await fresh([stamped("cs_test_second", second, false, endNew), stamped("cs_test_first", first, true, endOld)]);
+    await recordEnrollment(store, buyer, product.id, first);
+    // The row as the page left it before the refund: the first purchase's later end.
+    await redis.pipeline([["HSET", `nl:course:${courseId}:students`, emailKey(buyer), JSON.stringify({ e: buyer, s: first, l: first, x: endOld })]]);
+    await noteBoughtAgain(store, [courseId], buyer, second);
+    is("Month 1 goes, inside the new purchase's access", await run(second + 30 * DAY), [subject("Month 1")]);
+    is("Month 2 opens after the new purchase's end: not sent, although the row's old stamp runs later", await run(second + 60 * DAY), []);
+    current = course;
+  }
   done();
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -118,6 +118,11 @@ async function main(): Promise<void> {
     const set = await setProductExtras(OWNER, front, { slot, bump: { productId: target, priceCents: 900, pitch: "" } });
     if (!set.ok) throw new Error(`box not set: ${set.reason}`);
   }
+  // Since main's 10369bd84 a box whose bundle holds what an earlier box offers is paused (one copy is never charged
+  // twice), so the bundle's box is checked on a product of its own, where it is shown.
+  const bundleFront = await make("item-front-bundle");
+  const bundleBox = await setProductExtras(OWNER, bundleFront, { slot: 0, bump: { productId: heldBundle, priceCents: 900, pitch: "" } });
+  if (!bundleBox.ok) throw new Error(`box not set: ${bundleBox.reason}`);
   const other = await make("item-other");
 
   part("Before the report: everything sells");
@@ -146,7 +151,7 @@ async function main(): Promise<void> {
   }
   is("a checked box of the held product is refused", await sale(front, [reported]), "box");
   is("the first box checked the old way is refused too", await sale(front, ["yes"]), "box");
-  is("a checked box of a bundle holding it is refused", await sale(front, [heldBundle]), "box");
+  is("a checked box of a bundle holding it is refused", await sale(bundleFront, [heldBundle]), "box");
   is("a checked box of a product not held goes on", await sale(front, [partC]), null);
   is("no box checked goes on", await sale(front, []), null);
 

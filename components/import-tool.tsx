@@ -1,12 +1,13 @@
 "use client";
 
+import { importBatches } from "@/lib/import-batches";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icons";
 import { toast } from "@/components/toast";
 import { useStudioStore } from "@/components/studio-store-pin";
-import { type ParsedCsv, csvLine, guessColumn, parseCsv, readConsent } from "@/lib/csv";
+import { type ParsedCsv, csvLine, decodeCsvBytes, guessColumn, parseCsv, readConsent } from "@/lib/csv";
 import { CLICKFUNNELS_EXAMPLES, CLICKFUNNELS_HEADERS, CLICKFUNNELS_LAST_NAME, readClickFunnelsStatus } from "@/lib/clickfunnels-csv";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { IMPORTS_PAUSED } from "@/lib/import-limits";
@@ -35,8 +36,6 @@ export type ImportView = {
 
 export type ImportSource = "csv" | "clickfunnels";
 
-/** Rows sent in one request: the server's own limit (lib/imports.ts, BATCH_ROWS). */
-const BATCH = 1_000;
 /** The biggest file read here. */
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -137,6 +136,7 @@ const MESSAGES: Record<string, string> = {
   ...STUDIO_MESSAGES,
   busy: "Another import is running on this store. Wait for it to finish, or cancel it, and start this one after.",
   too_many: "That is more rows than this import takes. Split the file and bring it in parts.",
+  row_too_large: "One row of this file is too large to send. Shorten its longest cells, like a description, and choose the file again.",
   consent: "Check the box to confirm these people agreed to receive your emails. Nobody is added without it.",
   email: "Emailing buyers needs your store's plan to be active. Uncheck the box, or start your plan first.",
   members_email: "Moving members needs your store's plan to be active: each member is emailed their own link.",
@@ -376,7 +376,8 @@ export function ImportTool({
       setError("That file is over 25 MB. Split it and bring it in parts.");
       return;
     }
-    const text = await file.text();
+    // Its bytes as the spreadsheet wrote them: UTF-8, UTF-16 or Excel's Windows-1252, never accents made into "�" (lib/csv.ts).
+    const text = decodeCsvBytes(new Uint8Array(await file.arrayBuffer()));
     const read = parseCsv(text, LIMITS[kind]);
     if (read.header.length === 0 || read.rows.length === 0) {
       setError("That file has no rows under its first line. It needs a first line naming the columns, then one row per entry.");
@@ -461,12 +462,20 @@ export function ImportTool({
     const collected: PreviewRow[] = [];
     let room: number | null = null;
     try {
-      for (let from = 0; from < rows.length; from += BATCH) {
+      // Cut by rows and by weight, so no request is heavier than the server takes (lib/import-batches.ts).
+      const previewBody = (slice: string[][]) => ({ action: "preview", ...options(), rows: slice });
+      const batches = importBatches(rows, previewBody);
+      if (!batches) {
+        setError(MESSAGES.row_too_large);
+        setDry(null);
+        return;
+      }
+      for (const [from, to] of batches) {
         const data = (await (
           await fetch("/api/store/import", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "preview", ...options(), rows: rows.slice(from, from + BATCH) }),
+            body: JSON.stringify(previewBody(rows.slice(from, to))),
           })
         ).json().catch(() => ({ ok: false, error: "server_error" }))) as { ok?: boolean; error?: string; rows?: PreviewRow[]; room?: number | null };
         if (!data.ok || !Array.isArray(data.rows)) {
@@ -476,7 +485,7 @@ export function ImportTool({
         }
         if (room === null && typeof data.room === "number") room = data.room;
         collected.push(...data.rows);
-        setChecking(Math.min(rows.length, from + BATCH));
+        setChecking(to);
       }
       setDry(tally(kind, collected, room, signature));
     } catch {
@@ -527,8 +536,17 @@ export function ImportTool({
       }
       current = begun.import;
       setJob(current);
-      for (let from = 0; from < rows.length; from += BATCH) {
-        const sent = await post({ action: "rows", id: current.id, rows: rows.slice(from, from + BATCH) });
+      const id = current.id;
+      const rowsBody = (slice: string[][]) => ({ action: "rows", id, rows: slice });
+      const batches = importBatches(rows, rowsBody);
+      if (!batches) {
+        setError(MESSAGES.row_too_large);
+        await post({ action: "cancel", id }).catch(() => null);
+        setJob(null);
+        return;
+      }
+      for (const [from, to] of batches) {
+        const sent = await post(rowsBody(rows.slice(from, to)));
         if (!sent.ok || !sent.import) {
           setError(MESSAGES[sent.error ?? ""] ?? MESSAGES.server_error);
           await post({ action: "cancel", id: current.id }).catch(() => null);

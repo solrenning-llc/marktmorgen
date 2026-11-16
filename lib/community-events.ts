@@ -75,6 +75,7 @@ import { dataBytes } from "@/lib/store-data-rules";
 import { communityWords } from "@/lib/buyer-words/community";
 import { eventFileWords } from "@/lib/buyer-words/event-file";
 import { LANGUAGES } from "@/lib/store-language";
+import { IMITATION_FIX, MAX_TEXT, brandImitationOnPage, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
 import {
   EVENT_LENGTHS,
   EVENT_WRITES_PER_HOUR,
@@ -356,6 +357,27 @@ export type InputProblem =
   | "link"
   | "meet"
   | "only";
+
+/** Where an event poses as Marktmorgen itself: its title, its description or its meeting link, with the passage, why and the fix. */
+export type EventImitation = { field: "title" | "about" | "link"; excerpt: string; why: string; fix: string };
+
+/**
+ * The first part of an event the store schedules that poses as Marktmorgen itself (568 [GD2] (c),
+ * lib/brand-imitation-rules.ts), or null. An event is on the community's calendar and its own page for every member,
+ * in the feed when announced and in the reminder emails, so "Marktmorgen Support: verify your account" there, or a
+ * meeting link to an address only made to look like marktmorgen.com, is a phishing message in the store's name. The
+ * link is read only for its address. What a member writes is never read by this.
+ */
+export function eventImitation(input: Pick<EventInput, "title" | "about" | "link">): EventImitation | null {
+  const why = imitationWhy("the event cannot be shown with it");
+  for (const field of ["title", "about"] as const) {
+    const words = typeof input[field] === "string" ? input[field].slice(0, MAX_TEXT) : "";
+    const found = imitationIn(words);
+    if (found) return { field, excerpt: excerptAt(words, found.at, found.length), why, fix: IMITATION_FIX };
+  }
+  const link = input.link ? brandImitationOnPage([], [input.link]) : null;
+  return link ? { field: "link", excerpt: link.excerpt, why, fix: IMITATION_FIX } : null;
+}
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME = /^(\d{2}):(\d{2})$/;

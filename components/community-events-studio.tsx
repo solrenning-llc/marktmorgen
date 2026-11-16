@@ -17,6 +17,7 @@ import {
   MAX_UPCOMING_EVENTS,
 } from "@/lib/community-text";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import { NewTab } from "@/components/new-tab";
 
 /** One event, as the studio shows it: everything but the member-facing page's checks. */
@@ -104,7 +105,19 @@ const LINK_CHECK: LinkCheck = (raw) => (raw.trim() ? ROOM_CHECK(raw) : { problem
  * `notice`, after a move or a cancellation that was made: "waiting" when who is coming could not be read just then
  * (the email goes out once it can), "failed" when the email could not be started at all.
  */
-type Answer = { ok?: boolean; error?: string; moved?: boolean; notice?: "waiting" | "failed" };
+/** Where in an event a "poses as Marktmorgen" refusal was found (568 [GD2] (c)), as the server names it. */
+const EVENT_PARTS: Record<string, string> = { title: "the event's title", about: "the event's description", link: "the meeting link" };
+
+type Answer = { ok?: boolean; error?: string; moved?: boolean; notice?: "waiting" | "failed"; passage?: unknown };
+
+/** What the studio says when the server refused: posing as Marktmorgen with its part and passage, or the fixed words. */
+function refusalText(answer: Answer): string {
+  if (answer.error === "brand_imitation") {
+    const field = answer.passage && typeof answer.passage === "object" ? String((answer.passage as Record<string, unknown>).field) : "";
+    return imitationMessage(answer.passage, EVENT_PARTS[field] ?? "the event", "The event was not saved");
+  }
+  return MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error;
+}
 
 /** What the studio says when the email about a change could not be started. */
 const UNSENT = "but the email to anyone coming could not be started. Tell them in the community.";
@@ -183,7 +196,7 @@ export function CommunityEventsStudio({
     const answer = await send(payload);
     setBusy(null);
     if (!answer.ok) {
-      setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
+      setError({ where, text: refusalText(answer) });
       return false;
     }
     toast(typeof done === "string" ? done : done(answer));

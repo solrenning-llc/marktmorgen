@@ -13,6 +13,7 @@ import {
   createEvent,
   deleteEvent,
   editEvent,
+  eventImitation,
   readEvent,
   readEventInput,
   readReplay,
@@ -61,6 +62,12 @@ export async function POST(request: NextRequest) {
   const action = text(body.action, 20);
   if (!ACTIONS.has(action)) return Response.json({ ok: false, error: "invalid" }, { status: 400 });
   const fail = (error: string, status = 400) => Response.json({ ok: false, error }, { status });
+  // An event that poses as Marktmorgen itself is never put before the members (568 [GD2] (c),
+  // lib/brand-imitation-rules.ts): the part, the passage, why and the fix go back; nothing is written.
+  const posing = (input: EventInput) => {
+    const found = eventImitation(input);
+    return found ? Response.json({ ok: false, error: "brand_imitation", passage: found }, { status: 409 }) : null;
+  };
 
   try {
     const store = await storeForEmail(ref);
@@ -113,6 +120,9 @@ export async function POST(request: NextRequest) {
     if (action === "create") {
       const input = readEventInput(body, config);
       if (typeof input === "string") return fail(input);
+      // Before anything is made: no event, no meeting, no announcement in the feed.
+      const imitation = posing(input);
+      if (imitation) return imitation;
       const refused = await meetRefused(input, null);
       if (refused) return refused;
       const made = await createEvent(store, input);
@@ -142,6 +152,9 @@ export async function POST(request: NextRequest) {
       if (!current) return fail("unknown", 404);
       const input = readEventInput(body, config, Date.now(), current);
       if (typeof input === "string") return fail(input);
+      // The event keeps the words and the place it had.
+      const imitation = posing(input);
+      if (imitation) return imitation;
       // A new time is emailed to everyone coming: not from a session let in without its second step (lib/two-step.ts).
       if ((input.start !== current.start || input.minutes !== current.minutes) && (await lockedFor(request, "events", "move"))) return refusedJson("locked");
       const refused = await meetRefused(input, current);

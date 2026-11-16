@@ -284,6 +284,16 @@ export function copyFolder(file: Pick<ProductFile, "pathname">): string {
 }
 
 /**
+ * Keeps a copy's record only while the store's data room has space for it (lib/store-data.ts): without it the buyer
+ * still gets the copy, and the next download asks the file store for it again (one HEAD) before stamping another.
+ */
+async function keepRecord(store: DataStore, key: string, copy: ProductFile): Promise<void> {
+  if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
+    await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
+  }
+}
+
+/**
  * What a buyer's download hands over for a file the product stamps:
  *
  *   - "kept": the buyer's stamped copy, kept in the store's folder and reused by every later download of the sale;
@@ -403,6 +413,20 @@ export async function stampedDelivery(
       if (epub && (noted === "signed" || noted === "encrypted" || noted === "unreadable")) return ORIGINAL;
       storageNoted = noted === "storage";
     }
+    // The copy's path is made from the sale and the file alone, so with no record (the data room had no space for it,
+    // or it expired) a copy made before may still be there: it is asked about first, one HEAD, and handed over as it
+    // is, instead of reading the whole original again, stamping it and writing it over the same path (#4237, item 3).
+    // Only a copy that is not there, or one that cannot be asked about, is made again: kept in the store when it has
+    // room (writeWithinStorage, below), or stamped on the fly for this download when it has none (#3899).
+    const contentType = epub ? "application/epub+zip" : "application/pdf";
+    const headLast = isVaultPath(file.pathname) ? keyName(file.name) : file.name;
+    const headPath = `${copyFolder(file)}${sha(`${sale.reference}|${file.addedAt}`).slice(0, 24)}/${headLast}`;
+    const found = await headFile(headPath).catch(() => null);
+    if (found && found.size > 0 && found.contentType === contentType) {
+      const kept: ProductFile = { pathname: headPath, name: file.name, bytes: found.size, contentType, addedAt: new Date().toISOString() };
+      await keepRecord(store, key, kept);
+      return { kind: "kept", copy: kept };
+    }
     // A store found without room a moment ago is not listed again on every download: the copy is stamped on the
     // fly, below, outside this block, so nothing that goes wrong there can hand over the original.
     if (!(await roomNotedOut(file))) {
@@ -445,15 +469,13 @@ export async function stampedDelivery(
       contentType: stamped.contentType,
       addedAt: new Date().toISOString(),
     };
-    // Its record is kept only while the store's data room has space for it
-    // (lib/store-data.ts): without it the buyer still gets this copy, and the
-    // next download stamps another.
+    // Its record is kept only while the store's data room has space for it (keepRecord): without it the buyer still
+    // gets this copy, and the next download finds it with one HEAD (#4237). A record that cannot be kept never turns
+    // a copy already kept into one sent unkept.
     try {
-      if (isRedisConfigured() && (await keepFor(store, COPY_RECORD_BYTES, COPY_RECORD_SECONDS))) {
-        await redisPipeline([["SET", key, JSON.stringify(copy), "EX", COPY_RECORD_SECONDS]]);
-      }
+      await keepRecord(store, key, copy);
     } catch (error) {
-      console.error("a stamped copy's record could not be kept; the next download stamps another", error);
+      console.error("a stamped copy's record could not be kept; the next download asks the file store for it", error);
     }
     // The storage has room again: the studio no longer says it ran out for this file.
     if (storageNoted) await redisPipeline([["DEL", problemKey(file.pathname)]]).catch(() => {});

@@ -25,6 +25,9 @@ async function main() {
    if(commands[0]?.[0]==="SMEMBERS")return members as unknown[];
    if(commands[0]?.[0]==="EXISTS")return exists as unknown[];
    if(commands[0]?.[0]==="SREM")return [1];
+   // The new request's own write lock (lib/payment-request-store.ts), taken just before it is counted, and let go.
+   if(commands[0]?.[0]==="SET"&&String(commands[0][1]).startsWith("nl:payreq:w:"))return ["OK"];
+   if(commands[0]?.[0]==="EVAL"&&String(commands[0][1]).startsWith("-- marktmorgen:release:v1"))return [1];
    throw new Error("Synthetic stop before admission writes");
   };
   return createRequest(store,draft);

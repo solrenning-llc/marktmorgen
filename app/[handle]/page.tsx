@@ -21,7 +21,8 @@ import { StoreTipBox } from "@/components/store-tip-box";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
-import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords } from "@/lib/catalog";
+import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
+import { SEARCH_UNAVAILABLE, searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -177,10 +178,12 @@ export default async function StorePage({ params, searchParams }: Params) {
   // is nothing to correct.
   if (asked !== store.handle && !reachedOn) permanentRedirect(`/@${store.handle}`);
 
-  // A store with no plan a visit can be charged to, which has had the visits
-  // such a store has this month, rests until the month turns or its plan is
-  // paid (lib/traffic.ts). Asked only of such a store, before anything else
-  // is read for it; a store that pays is never rested.
+  // A store rests until its window turns once the visits or the requests its
+  // standing covers this window are used, or when they cannot be read
+  // (lib/traffic.ts, isResting): a store with no plan at the visits such a
+  // store has, a store that pays at its plan's. Asked before anything else is
+  // read for it. Only a visit a person's browser sent is counted toward it
+  // (app/api/store/hit).
   if (await isResting(store)) return <StoreResting store={store} />;
   // Switched off after notices about its content (lib/takedown.ts).
   if (store.suspended) return <StoreResting store={store} suspended />;
@@ -218,8 +221,15 @@ export default async function StorePage({ params, searchParams }: Params) {
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
       ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
       : false;
-  const searching = searchAllowed ? wantedSearch : "";
-  const results = searching ? await searchStore(store, searching) : null;
+  // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
+  // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
+  // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
+  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
+  const searchUnavailable = answer === SEARCH_UNAVAILABLE;
+  const results = answer === SEARCH_UNAVAILABLE ? null : answer;
+  const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
+  const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
     const statsId = store.statsId;
@@ -427,12 +437,16 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
-                        <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
+                      {searchRefused ? (
+                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">
-                          <span className="font-semibold">{results.total ? bw.searchFound(results.total, searching) : bw.searchNone(searching)}</span>
+                          <span className="font-semibold">{results.total > results.listings.length
+                              ? bw.searchCut(results.listings.length, results.total, searching)
+                              : results.total
+                                ? bw.searchFound(results.total, searching)
+                                : bw.searchNone(searching)}</span>
                           <a href={pageHref(store.handle, 1, reachedOn !== null)} className="st-footer-link">
                             {bw.searchClear}
                           </a>
@@ -536,8 +550,10 @@ export default async function StorePage({ params, searchParams }: Params) {
                       <p className="st-muted mt-2 text-center text-sm">{w.whoAnswers(store.name)}</p>
                     </>
                   ) : (
-                    <p className="st-note mt-6 text-sm">
-                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody(store.name)}
+                    <p className="st-note mt-6 text-sm" data-no-payments>
+                      <strong>{w.noPaymentsTitle}</strong> {w.noPaymentsBody}
+                      {/* A way to the creator only where there is one: never "write to them" with nowhere to write. */}
+                      {shown.contact ? <> <a href="#contact" className="underline underline-offset-2">{w.noPaymentsWrite(store.name)}</a></> : null}
                     </p>
                   )}
                 </>

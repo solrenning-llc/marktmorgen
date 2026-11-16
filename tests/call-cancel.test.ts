@@ -15,7 +15,7 @@
  *     every language says it with the hours.
  */
 import { readFileSync } from "node:fs";
-import { CANCEL_HOURS, readCancelPromise, readSetup, zonedToUtc, type CallSetup } from "@/lib/call-setup";
+import { CANCEL_HOURS, readCancelPromise, readSetup, type CallSetup } from "@/lib/call-setup";
 import { callCheckoutBody, confirmBooking, creatorCancelLine, type CallListing } from "@/lib/calls";
 import { bookingWords } from "@/lib/buyer-words/booking";
 import { LANGUAGE_CODES } from "@/lib/store-language";
@@ -23,6 +23,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import { readListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const emails: { to: string; text: string }[] = [];
@@ -42,17 +43,6 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 60, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, seats: 1, room: "https://example.com/room", video: false, meet: null };
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * 86_400_000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 async function main(): Promise<void> {
   redis.clear();

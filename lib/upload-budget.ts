@@ -3,9 +3,9 @@ import { isRedisConfigured, redisPipeline } from '@/lib/redis';
 import { costStandingOf } from '@/lib/plan-standing';
 import { type AllowanceWindow, type WindowFields, allowanceWindow } from '@/lib/allowance-window';
 import type { Tier } from '@/lib/plan';
-import { AUTOMATIC_UPLOAD_REVIEW_ID, UPLOAD_BUDGET_RULES, UPLOAD_BUDGET_SCOPES, currentUploadBudgetPolicy, isUploadBudgetConfigured, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey, type UploadBudgetPolicy, type UploadBudgetScope } from '@/lib/upload-budget-policy';
+import { AUTOMATIC_UPLOAD_REVIEW_ID, UPLOAD_BUDGET_RULES, UPLOAD_BUDGET_SCOPES, currentUploadBudgetPolicy, isUploadBudgetConfigured, uploadBackendOpen, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey, type UploadBackend, type UploadBudgetPolicy, type UploadBudgetScope } from '@/lib/upload-budget-policy';
 
-export type UploadBackend = 'r2'|'blob'|'stream';
+export type { UploadBackend };
 export type UploadStore = WindowFields & { statsId: string|null; tier: Tier };
 export function uploadScopeFor(store: UploadStore): UploadBudgetScope {
   // A paid plan whose renewal is unpaid uploads as an ended one (232 [CA1] unit 4).
@@ -161,9 +161,8 @@ async function reserve(statsId: string, scope: UploadBudgetScope, action: 'open'
  * refunds monthly upload capacity. This is not a supplier-dollar ceiling.
  */
 export async function reserveStoreUpload(store: UploadStore, bytes: number, backend: UploadBackend, policy: UploadBudgetPolicy|null=currentUploadBudgetPolicy()): Promise<boolean> {
-  // Direct Blob/Bunny grants do not establish the same revocable, size-bound
-  // session contract. Keep them closed until that provider path is proven.
-  if(backend!=='r2'||!Number.isSafeInteger(bytes)||bytes<=0)return false;
+  // Only the doors uploadBackendOpen names open (lib/upload-budget-policy.ts).
+  if(!uploadBackendOpen(backend)||!Number.isSafeInteger(bytes)||bytes<=0)return false;
   if(store?.period?.funded===true&&!(await reservePaidResourceWindow(store)))return false;
   return !!store?.statsId && reserve(store.statsId,uploadScopeFor(store),'open',bytes,policy,allowanceWindow(store));
 }

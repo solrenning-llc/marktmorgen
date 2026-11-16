@@ -203,6 +203,11 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   // counts the order as failed and reads it again (CX-123 rule 24), never a package with no last day or one session.
   const terms = packageTermsOf(meta);
   if (!terms) throw new Error(`call package ${checkout}: its sessions or days do not read`);
+  // What was paid, in the currency paid, as the buyer's email says it: whole smallest units and three letters, read
+  // before anything is written, never "$0.00" nor the store's currency for one that does not read (CX-123 rule 24).
+  const amount = session.amount_total;
+  const currency = typeof session.currency === "string" && /^[a-z]{3}$/.test(session.currency) ? session.currency : null;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || !currency) throw new Error(`call package ${checkout}: what was paid does not read`);
   const days = terms.days;
   const total = terms.sessions;
   const token = randomBytes(24).toString("hex");
@@ -212,8 +217,6 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   if (fresh === null) return readBought(checkout);
   await orderWrite(store, [["SADD", packagesKey(store.statsId), checkout]]);
   await orderWrite(store, [["SET", tokenKey(token), checkout, ...keep(bought)]]);
-  const amount = typeof session.amount_total === "number" ? session.amount_total : 0;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
   // In the store's language (lib/buyer-words/booking.ts), with the amount and
   // the date written its way, in the currency actually paid.
   const b = bookingWords(store.language);

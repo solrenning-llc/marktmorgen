@@ -23,7 +23,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail }
 import { readListing } from "@/lib/catalog";
 import { readPage } from "@/lib/sales-page-store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
-import { BLOCK_KINDS, MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES, PUBLISH_PAGE_UNITS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
+import { BLOCK_KINDS, MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES, publishPageUnits, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
 import { allowanceUsedExact } from "@/lib/store-allowance";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
@@ -263,11 +263,26 @@ async function main(): Promise<void> {
   const beforePublish = await studioUsed();
   const again = await publish();
   is("published again", [again.status, await stillDraft()], [200, false]);
-  // Each read is one GET of the whole stored record, the page and its second version (Claude 6 on #3693), at most the
-  // reader's own bound, MAX_STORED_PAGE_BYTES: two of them at 50,000 bytes a unit.
-  is("the two page reads are priced at the stored record's bound: 2 × MAX_STORED_PAGE_BYTES at 50,000 bytes a unit", PUBLISH_PAGE_UNITS * 50_000 >= 2 * MAX_STORED_PAGE_BYTES, true);
+  // Each read is one GET of the whole stored record, the page and its second version, and it moves UTF-8 bytes, up to
+  // three a code unit where the record's own bound counts code units (Claude 6 on #3693, twice): so the publish pays by
+  // the record's own byte count (STRLEN) at 50,000 bytes a unit, for its two reads, before it reads.
+  const pageKey = `nl:product:page:${(await storeForEmail(OWNER))!.statsId}:${draft.product.id}`;
+  const bytes = Number((await redis.pipeline([["STRLEN", pageKey]]))[0]);
+  is("the record's bytes are read", bytes > 0, true);
+  is("a publish takes the units of two reads of the record's own bytes, besides the request's own", (await studioUsed()) - beforePublish >= 1 + publishPageUnits(bytes), true);
+  is("two reads of the largest record a reader takes, at three bytes a code unit, are paid in full", publishPageUnits(3 * MAX_STORED_PAGE_BYTES) * 50_000 >= 2 * 3 * MAX_STORED_PAGE_BYTES, true);
   is("which holds a page and a second version at their own bound", MAX_STORED_PAGE_BYTES >= 2 * MAX_PAGE_BYTES, true);
-  is("and a publish with a page takes them, besides the request's own", (await studioUsed()) - beforePublish >= 1 + PUBLISH_PAGE_UNITS, true);
+  // A record grown past what was paid, between the paid read and the lock: nothing is published, the creator is told.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const longer: TextBlock = { ...own, id: "text0009", body: "Notes in the creator's own words. ".repeat(80) };
+  afterPageRead(async () => {
+    await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own, longer] } });
+  });
+  const grown = await publish();
+  redis.pipeline = pipeline;
+  is("a record grown past what was paid publishes nothing and says why", [grown.status, grown.data.error, await stillDraft()], [409, "page_changed", true]);
+  const settled = await publish();
+  is("pressed again, it is paid at its new size and published", [settled.status, await stillDraft()], [200, false]);
   const publishMessage = (rules as Record<string, unknown>).templatePublishMessage as ((left: { field: string; kind: string | null; part: string }, product: string | null) => string) | undefined;
   is("the message says the product, where the part is, and the way on", [
     publishMessage?.({ field: "block", kind: "quotes", part: "⟦Their name⟧" }, "Draft guide"),

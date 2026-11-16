@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { HELD_DAYS, MAX_FIRST, MAX_HELD, MAX_WHY, TOLD_DAYS } from "@/lib/community-approval-rules";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { FILTER_MAX_LINKS, FILTER_MAX_WORDS, FILTER_MAX_WORD_LENGTH } from "@/lib/community-filter";
 
 /** One post or comment waiting for approval, as the studio shows it. */
 export type HeldRow = {
@@ -21,7 +22,12 @@ export type HeldRow = {
   poll: boolean;
   /** For a comment, the post it answers. */
   href: string;
+  /** Why your words to check held it (lib/community-filter.ts holdWords), or "" when a space's approval setting did. */
+  reason: string;
 };
+
+/** The creator's words to check, as the studio shows them; `unreadable` when the saved list could not be read. */
+export type FilterView = { words: string[]; links: boolean; unreadable: boolean };
 
 type Mode = "off" | "first" | "all";
 export type SpaceRule = { id: string; name: string; posts: { mode: Mode; n: number }; comments: { mode: Mode; n: number } };
@@ -39,13 +45,17 @@ const MESSAGES: Record<string, string> = {
   signed_out: "Your session ended. Log in again.",
   invalid: "That could not be read. Nothing was changed.",
   server_error: "Something went wrong on our side. Try again in a moment.",
+  filter: "That list could not be read. Nothing was changed.",
+  filter_long: `Each word or phrase can be up to ${FILTER_MAX_WORD_LENGTH} characters. Shorten the long one, then save.`,
+  filter_many: `The list holds up to ${FILTER_MAX_WORDS} words or phrases. Take some out, then save.`,
+  setup_read_unavailable: "Your community's settings could not be read just now, so nothing was saved. Try again in a moment.",
 };
 
 type Answer = { ok?: boolean; error?: string };
 
-async function send(payload: Record<string, unknown>): Promise<Answer> {
+async function send(payload: Record<string, unknown>, to = "/api/store/community/approval"): Promise<Answer> {
   try {
-    const response = await fetch("/api/store/community/approval", {
+    const response = await fetch(to, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -72,21 +82,24 @@ export function CommunityApprovalStudio({
   rules,
   queue,
   canSettings,
+  filter = null,
 }: {
   /** Each space's rule; null when they could not be read. */
   rules: SpaceRule[] | null;
   /** What waits, oldest first; null when it could not be read. */
   queue: HeldRow[] | null;
   canSettings: boolean;
+  /** The creator's words to check (113 [E2-COMMUNITY-MODERATION]); null draws no form. */
+  filter?: FilterView | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<{ where: string; text: string } | null>(null);
 
-  async function run(where: string, payload: Record<string, unknown>, done: string): Promise<boolean> {
+  async function run(where: string, payload: Record<string, unknown>, done: string, to?: string): Promise<boolean> {
     setBusy(where);
     setError(null);
-    const answer = await send(payload);
+    const answer = await send(payload, to);
     setBusy(null);
     if (!answer.ok) {
       setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
@@ -106,12 +119,13 @@ export function CommunityApprovalStudio({
   return (
     <>
       {canSettings ? <Rules rules={rules} busy={busy} run={run} problem={problem} /> : null}
+      {canSettings && filter ? <Words filter={filter} busy={busy} run={run} problem={problem} /> : null}
       <Waiting queue={queue} busy={busy} run={run} problem={problem} />
     </>
   );
 }
 
-type Runner = (where: string, payload: Record<string, unknown>, done: string) => Promise<boolean>;
+type Runner = (where: string, payload: Record<string, unknown>, done: string, to?: string) => Promise<boolean>;
 type Problem = (where: string) => React.ReactNode;
 
 function Waiting({ queue, busy, run, problem }: { queue: HeldRow[] | null; busy: string | null; run: Runner; problem: Problem }) {
@@ -124,14 +138,14 @@ function Waiting({ queue, busy, run, problem }: { queue: HeldRow[] | null; busy:
         <span className={`tag ${queue?.length ? "tag-brand" : ""}`}>{queue === null ? "Not loaded" : queue.length ? `${queue.length} to approve` : "None to approve"}</span>
       </div>
       <p className="mt-2 text-ink-soft">
-        {`Posts and comments held by a space's approval setting. Only their authors and you can see them. Approve to publish one. If you don't publish one, its author is told, with your note if you write one. After ${HELD_DAYS} days without an answer, it is not published, and its author is told. Up to ${MAX_HELD} can wait at once.`}
+        {`Posts and comments held by a space's approval setting or by your words to check. Only their authors and you can see them. Approve to publish one. If you don't publish one, its author is told, with your note if you write one. After ${HELD_DAYS} days without an answer, it is not published, and its author is told. Up to ${MAX_HELD} can wait at once.`}
       </p>
       {queue === null ? (
         <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
           What is waiting could not be loaded, so nothing is shown as approved or not. Reload this page to check.
         </p>
       ) : queue.length === 0 ? (
-        <p className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">None to approve. When a space holds a post or a comment for you, it shows up here.</p>
+        <p className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink-soft">None to approve. When a space or your words to check hold a post or a comment for you, it shows up here.</p>
       ) : (
         <ul className="mt-4 space-y-3">
           {queue.map((row) => (
@@ -147,6 +161,7 @@ function Waiting({ queue, busy, run, problem }: { queue: HeldRow[] | null; busy:
               {row.picture || row.poll ? (
                 <p className="mt-1 text-sm text-ink-soft">{[row.picture ? "It has a picture." : "", row.poll ? "It is a poll." : ""].filter(Boolean).join(" ")}</p>
               ) : null}
+              {row.reason ? <p className="mt-1 text-sm text-ink-soft">{row.reason}</p> : null}
               {removing === row.id ? (
                 <form
                   className="mt-3"
@@ -206,6 +221,83 @@ function Waiting({ queue, busy, run, problem }: { queue: HeldRow[] | null; busy:
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+/** One word or phrase a line, or several on a line split by commas, as the server reads them. */
+function entriesOf(typed: string): string[] {
+  return typed
+    .split(/[\r\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The creator's words to check (113 [E2-COMMUNITY-MODERATION],
+ * lib/community-filter.ts): a member's post or comment that uses one waits in
+ * the queue below instead of going up, and its author is told it waits for
+ * approval, never which word. Saved with the community's settings.
+ */
+function Words({ filter, busy, run, problem }: { filter: FilterView; busy: string | null; run: Runner; problem: Problem }) {
+  const [typed, setTyped] = useState(filter.words.join("\n"));
+  const [links, setLinks] = useState(filter.links);
+  const entries = entriesOf(typed);
+  const changed = filter.unreadable || JSON.stringify(entries) !== JSON.stringify(filter.words) || links !== filter.links;
+  const where = "words";
+  return (
+    <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-words-title">
+      <h2 id="cm-words-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Words to check</h2>
+      <p className="mt-2 text-ink-soft">
+        When a member&apos;s post or comment uses a word or phrase on this list, it waits for you under Waiting for approval instead of
+        going up. Its author is told it is waiting for your approval, not which word. You and your team are never held.
+      </p>
+      {filter.unreadable ? (
+        <p role="status" className="mt-4 rounded-[var(--r-md)] bg-sand p-4 text-sm text-ink">
+          Your saved list could not be read, so every post and comment from members waits for you. Save the list again to fix it.
+        </p>
+      ) : null}
+      <form
+        className="mt-4 space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (changed) run(where, { action: "filter", words: entries, links }, "Saved.", "/api/store/community/manage");
+        }}
+      >
+        <div>
+          <label htmlFor="cm-words" className="field-label">
+            {`Words and phrases, one on each line (up to ${FILTER_MAX_WORDS}, each up to ${FILTER_MAX_WORD_LENGTH} characters)`}
+          </label>
+          <textarea
+            id="cm-words"
+            className="field mt-1 resize-y"
+            rows={6}
+            maxLength={FILTER_MAX_WORDS * (FILTER_MAX_WORD_LENGTH + 1)}
+            placeholder={"free money\ndm me"}
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            aria-describedby="cm-words-help cm-words-count"
+            spellCheck={false}
+          />
+          <p id="cm-words-help" className="mt-1 text-sm text-ink-soft">
+            Capital letters and accents do not matter, and a word counts only as a whole word: &quot;spam&quot; does not catch &quot;spammer&quot;.
+          </p>
+          <p id="cm-words-count" className="mt-1 text-sm text-ink-soft">
+            {`${entries.length} of ${FILTER_MAX_WORDS} on the list`}
+          </p>
+        </div>
+        <label className="flex min-h-[44px] cursor-pointer items-start gap-3 rounded-[var(--r-sm)] px-2 py-2 hover:bg-paper">
+          <input type="checkbox" className="mt-1 h-5 w-5 shrink-0" checked={links} onChange={(event) => setLinks(event.target.checked)} />
+          <span className="text-sm">
+            <span className="block font-semibold text-ink">{`Also hold a post or comment with more than ${FILTER_MAX_LINKS} links`}</span>
+            <span className="block text-ink-soft">Off, and links are held only when a space&apos;s approval setting holds the post.</span>
+          </span>
+        </label>
+        <button type="submit" className="btn btn-primary" aria-busy={busy === where} disabled={busy !== null || !changed}>
+          Save
+        </button>
+      </form>
+      {problem(where)}
     </section>
   );
 }

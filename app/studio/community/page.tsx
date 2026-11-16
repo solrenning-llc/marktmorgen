@@ -26,6 +26,7 @@ import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
 import { CommunityApprovalStudio, type HeldRow, type SpaceRule } from "@/components/community-approval-studio";
 import { approvalsOf, heldDaysLeft, heldQueue } from "@/lib/community-approval";
+import { holdWords } from "@/lib/community-filter";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
 import { configuredProviders } from "@/lib/meet-providers";
 import { meetView } from "@/lib/meet-connect";
@@ -202,6 +203,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
         picture: Boolean(h.img),
         poll: Boolean(h.poll),
         href: h.kind === "comment" ? `/@${store.handle}/community/post/${h.post}` : "",
+        reason: h.hr ? holdWords(h.hr) : "",
       }));
     })().catch(() => null);
 
@@ -293,7 +295,18 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           canEmail={canAnnounceByEmail(store)}
           canSettings={can(view.role, "settings")}
           isOwner={view.role === "owner"}
-          approval={config ? <CommunityApprovalStudio rules={rules} queue={held} canSettings={can(view.role, "settings")} /> : null}
+          approval={
+            config ? (
+              <CommunityApprovalStudio
+                rules={rules}
+                queue={held}
+                canSettings={can(view.role, "settings")}
+                // The creator's words to check (113 [E2-COMMUNITY-MODERATION]): never set is an empty list; one saved
+                // that does not read is said so, since everything members send waits until it is saved again.
+                filter={{ words: config.filter?.words ?? [], links: config.filter?.links ?? false, unreadable: config.filter === null }}
+              />
+            ) : null
+          }
           rewards={rewards}
           lockedPreview={config ? { unlocks, language: store.language, look: store.look } : null}
           courses={[...course].flatMap((id) => {

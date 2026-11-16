@@ -309,12 +309,12 @@ export default async function StorePage({ params, searchParams }: Params) {
     community: store.community?.on === true,
   };
 
-  // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   // The badge at the foot of the page, and where it leads: the creator's invite code only while the invite programme and
   // sales are both open (lib/badge-link.ts, 14 [D11]); read, never made, and only when the badge is shown. Its read
   // starts here, beside recentSales, so it adds no serial round trip (badgeInviteCode never rejects).
   const showBadge = store.look.badge || !canUse(store, "branding");
   const badgeRead = showBadge ? badgeInviteCode(store.sid) : null;
+  // The store's latest real purchases, where the creator shows them (lib/recent-sales.ts).
   const recent = await recentSales(store);
   const badgeLink = badgeHref(badgeRead ? await badgeRead : null);
 

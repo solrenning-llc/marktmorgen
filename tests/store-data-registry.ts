@@ -813,7 +813,6 @@ export const FAMILIES: Record<string, Family> = {
   "nl:ppsell:o:@lib/paypal-sales.ts": { what: "A PayPal order opened", parts: [per("order", 30, KB, "Its record, thirty days at most.", KIND("paypal")), per("request", 3, 768, "One opened and never paid, three days.", REQ("paypal checkout"))] },
   "nl:ppsell:own:@lib/paypal-sales.ts": short("The paid orders behind one address's product", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:paid:@lib/paypal-sales.ts": short("A PayPal order paid", "order", 400, KB, KIND("paypal")),
-  "nl:ppsell:partref:@lib/paypal-sales.ts": short("Paid orders PayPal refunded in part, by their capture", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:pending:@lib/paypal-sales.ts": short("Orders whose payment PayPal holds, until it completes", "order", 30, MARK, KIND("paypal")),
   "nl:ppsell:refunded:@lib/paypal-sales.ts": short("Orders PayPal refunded", "order", 400, MARK, KIND("paypal")),
   // A PayPal order hands over one product (lib/paypal-sales.ts, sellsWithPayPal): never a call, a recurring one or
@@ -823,6 +822,7 @@ export const FAMILIES: Record<string, Family> = {
   // A field of "paypal:" and a capture id of up to 64 characters, a time of up to 12 digits, ORDER_ENTRY_BYTES and a
   // quarter more, rounded up (lib/order-data.ts): 192 bytes; 256 with the key's own share.
   "nl:ppsell:back:@lib/paypal-sales.ts": { what: "PayPal payments refunded in full, kept for good for the affiliate book's lines (9 November 2026)", parts: [item(256, "One field per refunded PayPal order, written through lib/order-data.ts.", "paypal")] },
+  "nl:ppsell:partback:@lib/paypal-sales.ts": { what: "PayPal payments refunded in part, kept for good for the affiliate book's lines (Claude 4 on #4131)", parts: [item(256, "One field per PayPal order refunded in part, written through lib/order-data.ts.", "paypal")] },
   "nl:ppsell:reversed:@lib/paypal-sales.ts": short("Of those, the orders PayPal took back by another way than a refund (reversed, failed, declined)", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:sales:@lib/paypal-sales.ts": short("Every paid order", "order", 400, MARK, KIND("paypal")),
   "nl:ppsell:watch:@lib/paypal-sales.ts": short("Paid orders inside PayPal's refund window, and past it until the paid record ends those whose capture is in a status not known here", "order", 400, MARK, KIND("paypal")),

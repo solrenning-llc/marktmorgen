@@ -184,8 +184,13 @@ export const BOOK_PAYPAL_REFUNDS = 500;
 export const BOOK_KEPT_REFUND_BYTES = 192;
 /** A PayPal sale's record, read for its refund: the order, the payment, the buyer, what the visit carried. */
 export const PAYPAL_PAID_BYTES = 4_096;
-/** One PayPal sale refunded in part as readBook reads it (lib/paypal-sales.ts, readPayPalPartlyRefunded): a capture id of at most 64 characters and its score, with room. */
-export const PAYPAL_PARTLY_BYTES = 96;
+/**
+ * The book's third question about one PayPal payment (lib/affiliates.ts, readBook): the name it sends to the payments
+ * refunded in part, kept for good (lib/paypal-sales.ts, partlyRefundedKey: "paypal:" and a capture id of up to 64
+ * characters, 79 with framing) and the answer (null, or a time of up to 12 digits, 20 with framing): 99, rounded up.
+ * Counted for every entry, a ceiling of the payments, as BOOK_KEPT_REFUND_BYTES is.
+ */
+export const PAYPAL_PARTLY_BYTES = 112;
 /** Open bookings whose moves readBook reads at the most, a hundred at a command (lib/call-moves-read.ts). */
 export const BOOK_MOVES = 200;
 /** Invoices readBook reads at the most, so products named by them at the most (lib/affiliates.ts, INVOICE_PAGES of a hundred). */
@@ -217,11 +222,11 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
     // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
     // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
     // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
-    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The PayPal sales refunded in part are one
-    // more read of at most BOOK_PAYPAL_REFUNDS of them, counted whenever anything is credited (it is made only when a
-    // PayPal sale is).
-    commands: 8 + 7 + (any ? 2 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + marks,
-    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + (any ? BOOK_PAYPAL_REFUNDS * PAYPAL_PARTLY_BYTES : 0) + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
+    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The PayPal sales refunded in part are a
+    // third question in the same slices and the same round trip (an HMGET of the payments kept for good by payment,
+    // PAYPAL_PARTLY_BYTES an entry; Claude 4 on #4131).
+    commands: 8 + 7 + (any ? 1 + paypal + 3 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + marks,
+    bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * (BOOK_KEPT_REFUND_BYTES + PAYPAL_PARTLY_BYTES) : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,
     // Invoices while it has affiliates; refunds and disputes while it has anything credited.
     stripePages: s.stripe && any ? stripePages : 0,

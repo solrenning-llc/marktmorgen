@@ -75,7 +75,7 @@
  */
 import { windowCount, windowCountOf } from "@/lib/window-count";
 import { rememberAffiliate } from "@/lib/affiliate-hub";
-import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, paypalPaymentId, readPayPalPartlyRefunded, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, type Paid, backKey as paypalBackKey, partlyRefundedKey as paypalPartlyRefundedKey, paypalPaymentId, refundedKey as paypalRefundedKey } from "@/lib/paypal-sales";
 import { MAX_STORE_BYTES, saleHandles, storeForEmailSeen, storeForId, storeRef } from "@/lib/store";
 import { createHash, randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
@@ -3673,7 +3673,11 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         const slices = <T,>(list: T[]) => Array.from({ length: Math.ceil(list.length / BOOK_KEPT_SLICE) }, (_, i) => list.slice(i * BOOK_KEPT_SLICE, (i + 1) * BOOK_KEPT_SLICE));
         const kept = slices(pis).map((names) => ["HMGET", paypalBackKey(statsId), ...names]);
         const marked = slices(orders).map((names) => ["ZMSCORE", paypalRefundedKey(statsId), ...names]);
-        const replies = repliesFor(await redisPipeline([...kept, ...marked]), kept.length + marked.length);
+        // And the third question, in the same slices: the payments refunded in part, kept for good by payment
+        // (lib/paypal-sales.ts, partlyRefundedKey). Asked by name, never listed since the book's oldest line, so neither
+        // an old mark nor a store with many is lost (Claude 4 on #4131).
+        const partly = slices(pis).map((names) => ["HMGET", paypalPartlyRefundedKey(statsId), ...names]);
+        const replies = repliesFor(await redisPipeline([...kept, ...marked, ...partly]), kept.length + marked.length + partly.length);
         const answers = (from: number, commands: (string | number)[][]) => {
           const out: unknown[] = [];
           commands.forEach((command, i) => {
@@ -3685,18 +3689,14 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
         };
         const back = answers(0, kept);
         const seen = answers(kept.length, marked);
+        const part = answers(kept.length + marked.length, partly);
         const answer = (v: unknown) => v === null || typeof v === "string";
-        if (!replies || back.length !== pis.length || seen.length !== orders.length || !back.every(answer) || !seen.every(answer)) refundsChecked = false;
+        if (!replies || back.length !== pis.length || seen.length !== orders.length || part.length !== pis.length || !back.every(answer) || !seen.every(answer) || !part.every(answer)) refundsChecked = false;
         else {
           for (const [i, pi] of pis.entries()) if (back[i] !== null) refundedInFull(pi);
           for (const [i, order] of orders.entries()) if (seen[i] !== null) refundedInFull(paypalOrders.get(order) as string);
+          partlyRefunded = new Set(pis.filter((_, i) => part[i] !== null));
         }
-      }
-      // Read only when a PayPal sale is in the book: a store that never sold with PayPal has none.
-      if (paypalSales.size) {
-        const partly = await readPayPalPartlyRefunded(store.statsId, since);
-        if (partly.partial) refundsChecked = false;
-        partlyRefunded = new Set([...partly.captures].map(paypalPaymentId));
       }
     } catch (error) {
       console.error("reading refunds for the affiliate book failed", error);

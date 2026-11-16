@@ -102,7 +102,7 @@ async function main(): Promise<void> {
 
   const line = book.lines.find((l) => l.aff === AFF && l.ref === `paypal:${sold.order}`);
   is("its line says partly refunded and earns nothing", [line?.status, line?.commission], ["partly refunded", 0]);
-  is("the mark names the capture, kept as long as the sales", [(await redis.pipeline([["ZSCORE", `nl:ppsell:partref:${store.statsId}`, sold.capture]]))[0] !== null, Number((await redis.pipeline([["TTL", `nl:ppsell:partref:${store.statsId}`]]))[0]) > 399 * 86_400], [true, true]);
+  is("the mark names the payment, kept for good as the book's line is", [(await redis.pipeline([["HEXISTS", `nl:ppsell:partback:${store.statsId}`, `paypal:${sold.capture}`]]))[0], (await redis.pipeline([["TTL", `nl:ppsell:partback:${store.statsId}`]]))[0]], [1, -1]);
   is("the order stays watched for a refund in full", (await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${store.statsId}`, sold.order]]))[0] !== null, true);
 
   part("Another sale, still completed, keeps paying in full");
@@ -124,16 +124,21 @@ async function main(): Promise<void> {
   captures.set(unsure.capture, "PARTIALLY_REFUNDED");
   await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, "0", unsure.order]]);
   const pipeline = redis.pipeline.bind(redis);
-  redis.pipeline = (async (commands: (string | number)[][]) =>
-    commands.length === 2 && commands[0][0] === "ZADD" && String(commands[0][1]).startsWith("nl:ppsell:partref:") ? ["OK", 1] : pipeline(commands)) as typeof redis.pipeline;
+  // The kept mark's write (one ORDER_WRITE script naming the key) answered in another shape.
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await pipeline(commands);
+    return commands.map((command, i) => (command[0] === "EVAL" && command.some((arg) => String(arg).startsWith("nl:ppsell:partback:")) ? "garbled" : replies[i]));
+  }) as typeof redis.pipeline;
   await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {}, refunded: async () => {} });
   redis.pipeline = pipeline;
   const lookAgain = Number((await redis.pipeline([["ZSCORE", `nl:ppsell:watch:${store.statsId}`, unsure.order]]))[0]);
   is("looked at again in about an hour", lookAgain >= Math.floor(Date.now() / 1000) + 3000, true);
 
   part("A reading of the marks in another shape is unknown: no payout is made on the book");
-  redis.pipeline = (async (commands: (string | number)[][]) =>
-    commands.length === 1 && commands[0][0] === "ZRANGEBYSCORE" && String(commands[0][1]).startsWith("nl:ppsell:partref:") ? [["not-a-capture!", "1"]] : pipeline(commands)) as typeof redis.pipeline;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const replies = await pipeline(commands);
+    return commands.map((command, i) => (command[0] === "HMGET" && String(command[1]).startsWith("nl:ppsell:partback:") ? ["not", "an", "answer", "per", "name"] : replies[i]));
+  }) as typeof redis.pipeline;
   const blind = await readBook(store);
   redis.pipeline = pipeline;
   is("refunds not checked, so nothing is paid on what is owed", blind.refundsChecked, false);

@@ -149,7 +149,7 @@ function main(): void {
   is("shown in the health section, from the seven days already read", /<ListHealthTable health=\{health\} \/>/.test(section), true);
   is("imported from the component", page.includes('import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";'), true);
   is("a read that failed with no pause confirmed: the health section says so, never hidden as if nothing were there", /confirmedPause === null && health === null \? \([\s\S]{0,600}<ListHealthUnread \/>/.test(page), true);
-  is("one reading of the seven days on the page", count(page, /listHealth\(/g), 1);
+  is("one reading of the seven days on the page, read exactly (lib/list-health-read.ts; #2314)", count(page, /listHealthExact\(/g), 1);
   is("no reading of its own: the page imports nothing from Redis", /@\/lib\/redis/.test(page), false);
   const component = readFileSync("components/list-health-table.tsx", "utf8");
   is("the component reads nothing and runs on the server", /@\/lib\/redis|@\/lib\/mail-health"|"use client"|await /.test(component), false);

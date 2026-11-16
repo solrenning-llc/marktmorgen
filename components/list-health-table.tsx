@@ -9,7 +9,7 @@ import { BOTH_NEEDED, SOFT_BOUNCE_NOTE, TERMS, UNREAD, healthRows, levelWords, p
  * list's email, then the words explained in place.
  *
  * A server component that reads nothing: it is given the seven days the page
- * already read for KB20 (lib/mail-health.ts, listHealth), so the page makes
+ * already read, exactly, for KB20 (lib/list-health-read.ts, listHealthExact), so the page makes
  * no second reading. The level comes from KB20's healthLevels and the shares
  * from its shareWords, so this table and the sentence above it never
  * disagree. Each row says the level that pauses (count and share, both
@@ -74,8 +74,9 @@ export function ListHealthTable({ health }: { health: HealthCounts }) {
 }
 
 /**
- * The health section when the seven days could not be read (lib/mail-health.ts
- * listHealth throws on an incomplete or malformed read, CX-123 rule 24): no
+ * The health section when the seven days could not be read whole
+ * (lib/list-health-read.ts listHealthExact throws on an incomplete or malformed
+ * reply, CX-123 rule 24): no
  * count, no level, no distance from a pause and no "nothing was sent", since
  * none of them is known.
  */

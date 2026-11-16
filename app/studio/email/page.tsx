@@ -25,7 +25,8 @@ import { sellsSomething } from "@/lib/mail-starters";
 import { readFlowStatsStrict } from "@/lib/flow-stats";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { inTrial, monthlyAllowance, usedThisMonth } from "@/lib/mail";
-import { healthId, listHealth, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
+import { healthId, pauseForSending, pauseWords, pausedFor } from "@/lib/mail-health";
+import { listHealthExact } from "@/lib/list-health-read";
 import { HEALTH_NOTE, healthAdvice, healthLevels, healthLine } from "@/lib/mail-health-levels";
 import { ListHealthTable, ListHealthUnread } from "@/components/list-health-table";
 import { PRO_MONTHLY_EMAILS, PRO_ON_SALE, hasPro, SCALE_MONTHLY_EMAILS, TRIAL_DAYS, TRIAL_MONTHLY_EMAILS, publishedPriceWords as priceWords, publishedYearSaving as yearSaving } from "@/lib/plan";
@@ -76,7 +77,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
     // of its addresses bounced or reported it (lib/mail-health.ts).
     pausedFor(healthId(store)),
     // The same seven days the pause reads, said before it comes (599 [KB20], lib/mail-health-levels.ts).
-    listHealth(healthId(store)).catch(() => null),
+    // Read exactly (lib/list-health-read.ts, rule 24; Claude 1 cloud on #2314): a reply not read whole is null, never counts.
+    listHealthExact(healthId(store)).catch(() => null),
     // Whether no pause is confirmed (null), unlike pausedFor, which says null when it could not read: the
     // health section is shown only then, so a failed read never says "no pause coming" during a pause.
     pauseForSending(healthId(store)).catch(() => undefined),
@@ -233,8 +235,8 @@ export default async function StudioEmailPage({ searchParams }: Params) {
               <ListHealthTable health={health} />
             </section>
           ) : confirmedPause === null && health === null ? (
-            // The seven days could not be read (lib/mail-health.ts listHealth refuses an incomplete read, CX-123
-            // rule 24): said as not read, never hidden as if there were nothing, never as counts.
+            // The seven days could not be read whole (lib/list-health-read.ts listHealthExact throws on an incomplete
+            // or malformed reply, CX-123 rule 24): said as not read, never hidden as if there were nothing, never as counts.
             <section aria-labelledby="mail-health-title" className="mt-8 rounded-[var(--r-md)] border border-line bg-white p-5 text-ink" data-mail-health="unread">
               <h2 id="mail-health-title" className="text-lg font-semibold">Email health: not read just now</h2>
               <ListHealthUnread />

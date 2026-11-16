@@ -75,7 +75,7 @@ export default function GrowWithoutSwitchingPage() {
         {PLANS_ON_SALE ? (
           <section aria-labelledby="change-title" className="mt-12 max-w-3xl">
             <h2 id="change-title" className="t-h2">You change your plan yourself</h2>
-            <p className="mt-3">The store&apos;s owner changes the plan from the plan card in the studio, with no call or message to anyone. Moving up keeps your store as it is and opens the larger plan&apos;s allowances.</p>
+            <p className="mt-3">The store&apos;s owner changes the plan from the plan card in the studio, with no call or message to anyone. Moving up keeps your store as it is and opens the allowances of the plan you choose.</p>
           </section>
         ) : null}
 

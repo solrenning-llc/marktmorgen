@@ -36,7 +36,7 @@ import { type Book, addPayoutOnce, payAddress, payoutIdForItem, payoutReference,
 import { type BatchLine, batchTotal, owedLines, payoutNote } from "@/lib/affiliate-payouts";
 import { plainAmount } from "@/lib/money";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { LockBusyError, withLock } from "@/lib/redis-lock";
+import { LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
 import { readPendingPayoutBatches, type PendingPayoutBatch } from "@/lib/pending-payouts";
 import { type Store, storeForId, storeIdGone } from "@/lib/store";
 
@@ -425,15 +425,20 @@ export async function payWithPayPal(store: Store): Promise<PayResult> {
   const link = await readLink(store);
   if (!link) return { ok: false, reason: "not-connected" };
   try {
-    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (): Promise<PayResult> => {
+    return await withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (lock): Promise<PayResult> => {
       const book = await readBook(store);
       // What is owed is not known while refunds could not be read from Stripe.
       if (!book.refundsChecked) return { ok: false, reason: "refunds" };
-      const lines = payableLines(book, await onTheirWay(store));
-      if (!lines.length) return { ok: false, reason: "nothing" };
+      if (!payableLines(book, await onTheirWay(store)).length) return { ok: false, reason: "nothing" };
       const token = await bearer(store);
       if (!token) return { ok: false, reason: "reconnect" };
       const { auth, sender } = token;
+      // The lock may have run out while the book or PayPal's token took their time (#4618): another press or the
+      // payday may have taken it since and sent these people. So who is on their way is read again now, after the
+      // slow calls, and the lock must still be ours right before the batch is written down; otherwise nothing is sent.
+      const lines = payableLines(book, await onTheirWay(store));
+      if (!lines.length) return { ok: false, reason: "nothing" };
+      if (!(await holdLock(lock))) return { ok: false, reason: "busy" };
       const senderBatchId = `nl-${statsId.slice(0, 12)}-${Date.now().toString(36)}`;
       // `p`: the app the money is asked from, so a retry of an unknown answer never comes from another account (#4448).
       const open: OpenBatch = { at: Date.now(), currency: store.currency, lines: lines.map((l) => {
@@ -696,13 +701,24 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   });
 }
 
+/** The store the daily settling last reached; the next run starts after it. */
+const SETTLE_AFTER = "nl:pp:settle:after";
+const SETTLE_AFTER_SECONDS = 7 * 86_400;
+
 /** The daily job: every store with a batch still open. */
 export async function settleAllPayPal(deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [sids] = await redisPipeline([["SMEMBERS", STORES]]);
+  const [sids, after] = await redisPipeline([["SMEMBERS", STORES], ["GET", SETTLE_AFTER]]);
+  // In id order, starting after the store where the last run stopped (#4620): slow stores at the front never take
+  // every day's run from the stores behind them. An unread place starts at the front, as before.
+  const all = (Array.isArray(sids) ? sids : []).filter((sid): sid is string => typeof sid === "string").sort();
+  const from = typeof after === "string" ? all.findIndex((sid) => sid > after) : 0;
+  const start = from < 0 ? 0 : from;
   let done = 0;
-  for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
+  for (const sid of [...all.slice(start), ...all.slice(0, start)]) {
     if (Date.now() >= deadline) break;
+    // Kept before the store is settled, so a run cut short inside it goes on with the next store the next day.
+    await redisPipeline([["SET", SETTLE_AFTER, sid, "EX", SETTLE_AFTER_SECONDS]]).catch((error) => console.error("the PayPal settling's place could not be kept", error));
     let store: Store | null;
     try {
       store = await storeForId(sid);

@@ -714,17 +714,29 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   if (Number(already) === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
-  const [added, length] = await redisPipeline([
-    ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
-    ["HLEN", rsvpKey(id, event.id)],
-  ]);
-  if (Number(added) !== 1) {
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
+      ["HLEN", rsvpKey(id, event.id)],
+    ]),
+    2,
+  );
+  // Read exactly (rule 24): a write that did not read may have written the member down, so the room taken for the
+  // place is kept whole and the request answers unknown, never "already" with the room given back.
+  const added = replies ? countOf(replies[0]) : null;
+  if (added === null || added > 1) throw new UnknownReplyError("an RSVP's HSETNX");
+  if (added === 0) {
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "already";
   }
-  if (event.cap > 0 && Number(length) > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
-    await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+  // A length that did not read is never under the cap: on a capped event the member is taken back out, as on a list
+  // one too long, and the request answers unknown rather than "added" or "full".
+  const length = replies ? countOf(replies[1]) : null;
+  if (event.cap > 0 && (length === null || length > event.cap)) {
+    const removed = countOf(repliesFor(await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]), 1)?.[0]);
+    if (removed === 1) await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+    if (length === null) throw new UnknownReplyError("an RSVP's HLEN");
+    if (removed !== 1) throw new UnknownReplyError("an RSVP's HDEL");
     return "full";
   }
   return "added";
@@ -737,13 +749,17 @@ export async function cancelRsvp(id: string, event: CommunityEvent, member: stri
   return Number(removed) === 1;
 }
 
-/** How many are coming to each event, and whether this member is. */
-export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number; mine: boolean }>> {
-  const out = new Map<string, { going: number; mine: boolean }>();
+/**
+ * How many are coming to each event, and whether this member is. A count that does not read is null (rule 24), shown
+ * as no count at all, never "0 going"; a whole answer that does not read throws UnknownReplyError.
+ */
+export async function rsvpNumbers(id: string, events: CommunityEvent[], member: string | null): Promise<Map<string, { going: number | null; mine: boolean }>> {
+  const out = new Map<string, { going: number | null; mine: boolean }>();
   if (!events.length) return out;
-  const rows = await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]]));
+  const rows = repliesFor(await redisPipeline(events.flatMap((e) => [["HLEN", rsvpKey(id, e.id)], ["HEXISTS", rsvpKey(id, e.id), member ?? "-"]])), events.length * 2);
+  if (!rows) throw new UnknownReplyError("the events' HLEN");
   events.forEach((e, i) => {
-    out.set(e.id, { going: Number(rows[i * 2]) || 0, mine: Number(rows[i * 2 + 1]) === 1 });
+    out.set(e.id, { going: countOf(rows[i * 2]), mine: rows[i * 2 + 1] === 1 });
   });
   return out;
 }

@@ -59,7 +59,8 @@ export function EventCard({
 }: {
   store: Store;
   event: CommunityEvent;
-  going: number;
+  /** How many are coming; null when the count did not read, and then no count is shown (rule 24). */
+  going: number | null;
   mine: boolean;
   /** Kept for the buyers of products this reader does not have. */
   locked: boolean;
@@ -92,7 +93,7 @@ export function EventCard({
           {!event.cancelled ? (
             <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold">
               <span>{eventWhenIn(store, event, now)}</span>
-              <span className="st-muted">{over ? w.rsvpd(going) : placesWords(store, event, going)}</span>
+              {going === null ? null : <span className="st-muted">{over ? w.rsvpd(going) : placesWords(store, event, going)}</span>}
             </p>
           ) : null}
         </div>

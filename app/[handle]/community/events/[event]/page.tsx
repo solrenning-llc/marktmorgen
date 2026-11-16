@@ -80,7 +80,8 @@ export default async function CommunityEventPage({ params, searchParams }: Param
     event.where === "meet" ? eventMeetings(store, [event]).catch(() => null) : null,
   ]);
   const meeting = meetings?.get(event.id) ?? null;
-  const going = numbers.get(event.id)?.going ?? 0;
+  // A count that did not read is null: no count is shown, never "0 going" (rule 24); taking a place still checks the cap.
+  const going = numbers.get(event.id)?.going ?? null;
   const mine = numbers.get(event.id)?.mine ?? false;
   const over = isOver(event, now);
   const door = joinWindow(event, now);
@@ -93,7 +94,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
     viewer.owner && place === "zoom" && meeting && roomKind(way) === "zoom"
       ? `/api/integrations/zoom/host?${new URLSearchParams({ scope: meeting.scope, ...(store.sid ? { store: store.sid } : {}) })}`
       : null;
-  const full = event.cap > 0 && going >= event.cap;
+  const full = event.cap > 0 && going !== null && going >= event.cap;
   const room = way && isVideoRoom(way) ? way : null;
   const doorsOpenAt = clockAt(door.opensAt, event.tz, locale);
   // A store switched off after a report (lib/takedown.ts) offers nothing to buy: the event says its product is no longer offered here.
@@ -127,7 +128,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
               </p>
               <LocalTime ms={event.start} tz={event.tz} locale={locale} template={w.yourTime("{time}")} />
               <p className="st-muted mt-1 text-sm">
-                {`${whereWords} · ${w.hostedBy(store.name)}${event.cancelled ? "" : over ? ` · ${w.rsvpd(going)}` : ` · ${placesWords(store, event, going)}`}`}
+                {`${whereWords} · ${w.hostedBy(store.name)}${event.cancelled || going === null ? "" : over ? ` · ${w.rsvpd(going)}` : ` · ${placesWords(store, event, going)}`}`}
               </p>
             </div>
           </div>
@@ -156,7 +157,7 @@ export default async function CommunityEventPage({ params, searchParams }: Param
           ) : !over ? (
             <div className="mt-6 flex flex-wrap items-center gap-3">
               {viewer.owner ? (
-                <span className="cm-pill cm-pill-still">{w.youHost(going)}</span>
+                <span className="cm-pill cm-pill-still">{going === null ? w.youHostUncounted : w.youHost(going)}</span>
               ) : mine ? (
                 <>
                   <span className="cm-pill cm-pill-on" role="status">{w.youAreGoing}</span>

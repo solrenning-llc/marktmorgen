@@ -198,15 +198,25 @@ export async function addResponse(statsId: string, formId: string, response: For
   const guessed = kept >= KEPT_RESPONSES && typeof oldest === "string" ? dataBytes([oldest], 1) : 0;
   const charged = dataBytes([json], 1) - guessed;
   await needData(room, [{ slot: ANSWERS_SLOT(formId), bytes: charged }]);
-  // Once the keep is sent, a lost or unreadable receipt does not say whether it was kept.
+  // Once the keep is sent, a lost or unreadable receipt does not say whether it was kept. Unknown, the room holds the
+  // most the keep can have added, the whole new response: the oldest read before it may have been deleted meanwhile
+  // (its bytes given back) and the keep then dropped nothing (Codex X3 on #2857). Only an exact receipt settles less.
+  const unconfirmed = async (): Promise<never> => {
+    if (guessed > 0) {
+      await noteData(room, [{ slot: ANSWERS_SLOT(formId), bytes: guessed }]).catch((error: unknown) =>
+        console.error("could not hold a form response's whole room after its keep was not confirmed", error),
+      );
+    }
+    throw new UnconfirmedKeep(what);
+  };
   let list: unknown[] | null;
   try {
     const [gone] = exactReplies(await redisPipeline([["EVAL", KEEP_FORM_RESPONSE, 1, responsesKey(statsId, formId), json, KEPT_RESPONSES]]), 1, what);
     list = plainList(gone);
   } catch {
-    throw new UnconfirmedKeep(what);
+    return unconfirmed();
   }
-  if (!list || list.some(raw => parseResponse(raw) === null)) throw new UnconfirmedKeep(what);
+  if (!list || list.some(raw => parseResponse(raw) === null)) return unconfirmed();
   // Unknown writes retain their reservation; only an exact receipt can release room.
   const dropped = list.reduce<number>((sum, raw) => sum + dataBytes([raw as string], 1), 0);
   const off = dataBytes([json], 1) - dropped - charged;

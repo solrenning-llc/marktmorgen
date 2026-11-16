@@ -303,6 +303,9 @@ export async function POST(request: NextRequest) {
       // A partner the creator brings from outside: they need no account here,
       // only an address that can receive PayPal. Checked against the same cap
       // as any other share, before the email goes out.
+      // A store switched off after notices about its content takes nobody new (lib/affiliates.ts takesNewAffiliates):
+      // said in its own words, before the cap is read or paid for; nothing is sent.
+      if (store.suspended) return fail("suspended");
       // An end date, when the creator chose one (630 [HN6](39)); empty is until revoked.
       const end = readTermEnd(body.ends, Math.floor(Date.now() / 1000));
       if (!end.ok) return fail("share_ends");

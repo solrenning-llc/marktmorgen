@@ -7,6 +7,10 @@ import {AI_MONTHLY} from "@/lib/ai-rules";
 import type {Store} from "@/lib/store";
 import {reset,ordinary,ledger,opened,monetaryCalls} from "./path-wording-provider-world";
 import {calendarPeriod} from "./billing-period-fixture";
+import {withinOneUtcDay} from "./one-utc-day";
+// The checks name the month's job count and spend ledger by the month they read; the code reads its own at each call,
+// so a real month end passing mid-file read the new month's 0. The clock stays inside one UTC day (tests/one-utc-day.ts).
+withinOneUtcDay();
 const source={mission:"title",step:"Write your store's name the way you want people to say it."};
 const text="Write your store's name as you want people to say it.";
 const store={statsId:"pathwording",sid:"a".repeat(32),tier:"pro",createdAt:1,subscriptionActive:true,subscriptionId:"synthetic-subscription",trialEnds:0,planEndedAt:"",period:calendarPeriod(),name:"Private owner name",bio:"private-contact@example.test"} as unknown as Store;

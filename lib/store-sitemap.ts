@@ -79,6 +79,19 @@ export function storeRoot(store: Store): string {
   return store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}` : `${SITE_URL}/@${store.handle}`;
 }
 
+/**
+ * The address a store's page names as its own (its canonical), for its
+ * structured data as for this map: on a live domain the domain's short one,
+ * the front page with its slash (`https://chef.com/`); otherwise under
+ * marktmorgen.com/@handle. `path` starts with "/", or is left out for the
+ * front page.
+ */
+export function storeAddress(store: Store, path = ""): string {
+  const root = storeRoot(store);
+  if (path) return `${root}${path}`;
+  return root === `${SITE_URL}/@${store.handle}` ? root : `${root}/`;
+}
+
 /** Every address of a store a search engine is asked to keep, in the order a visitor meets them. */
 export async function storeSitemap(store: Store, nowSeconds = Math.floor(Date.now() / 1000), postPages = MAX_POST_PAGES): Promise<SitemapEntry[]> {
   if (store.suspended) return [];

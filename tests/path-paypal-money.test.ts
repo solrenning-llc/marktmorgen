@@ -393,6 +393,42 @@ async function main(): Promise<void> {
     is("once PATH_MONEY_SECONDS have passed it is read again, and the readable reading replaces the kept one", [charged, after.record.money?.cents, after.record.money?.at], [2, 4400, day + PATH_MONEY_SECONDS * 1000]);
   }
 
+  part("Codex P's MEDIUM: a listed order whose record names another order is never read as that order's sale");
+  {
+    const { statsId } = await setup();
+    // Order 9 is listed, but its key holds a valid record of this store for order 8 (another order's capture and amount).
+    const other = paid(statsId, 8, 9900, now - 30);
+    redis.run(["SET", `nl:ppsell:paid:${order(9)}`, JSON.stringify(other)]);
+    redis.run(["ZADD", `nl:ppsell:sales:${statsId}`, String(now - 30), order(9)]);
+    const read = await readPayPalSales(statsId, 0, 300);
+    is("the record that is not the listed order's own is left out, and the reading says it is partial", [read.sales.some((p) => p.order === order(8)), read.partial], [false, true]);
+    is("the store's own sales are still read", read.sales.map((p) => p.order).sort(), [order(1), order(2), order(3)]);
+  }
+
+  part("Codex U's MEDIUM: the money's wait also holds when the counts could not be read either");
+  {
+    const { store } = await setup();
+    const answers = readAnswers({ goalCents: 100_000, skills: "baking", subject: "sourdough", minutes: 30, audience: "instagram", timeZone: "America/Sao_Paulo" }, store.currency);
+    if (!answers.ok) throw new Error("answers");
+    const started = await startPath(store, answers.answers, now * 1000);
+    if (!started.ok) throw new Error("path");
+    const kept = await visitPath(store, started.record, now * 1000, async () => true);
+    let charged = 0;
+    const charge = async () => { charged += 1; return true; };
+    const day = now * 1000 + 86_400_000;
+    // The refunds stay unreadable and the links count answers off its shape, so neither the money nor the counts renew.
+    bend = (commands, replies) => {
+      if (commands[0]?.[0] === "HLEN") return ["x"];
+      return bendFirst("nl:ppsell:refunded:", "ZRANGEBYSCORE", () => ["1"])(commands, replies);
+    };
+    const first = await visitPath(store, kept.record, day, charge);
+    const second = await visitPath(store, first.record, day + 60_000, charge);
+    is("the first visit reads and is charged; the next, a minute later, waits with the counts still stale", charged, 1);
+    const after = await visitPath(store, second.record, day + PATH_MONEY_SECONDS * 1000, charge);
+    bend = null;
+    is("once PATH_MONEY_SECONDS have passed, money and counts are tried again", [charged, Boolean(after.record.moneyTriedAt)], [2, true]);
+  }
+
   done();
 }
 

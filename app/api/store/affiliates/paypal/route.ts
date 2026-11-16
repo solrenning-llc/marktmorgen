@@ -17,6 +17,10 @@ import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay,
  *
  * For the owner and Admins ("settings"): it moves the creator's own money.
  */
+// Below the pay lock's 120 s (lib/paypal-payouts.ts payWithPayPal, #4618): a press is stopped before its lock can run
+// out, as the payday cron's 60 s already is.
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 4_000);
   if (!guarded.ok) return guarded.response;

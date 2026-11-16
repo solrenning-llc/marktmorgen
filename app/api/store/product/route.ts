@@ -1,6 +1,5 @@
 import { dropPublicShow } from "@/lib/podcast-public-show";
 import { withLock } from "@/lib/redis-lock";
-import { applyCourseTaskDrops, readCourseTaskDrops } from "@/lib/assignment";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";

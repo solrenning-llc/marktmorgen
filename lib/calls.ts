@@ -60,6 +60,7 @@ import { PAST_CALL_DAYS } from "@/lib/store-data-rules";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isHouseStore } from "@/lib/house-store";
 import { HOLD_SECONDS, checkoutClosesAt, onAccount } from "@/lib/stripe-account";
+import { expiredFor } from "@/lib/stripe-session-reply";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { askForCallReminder, recoveryOn, refusedRecovery, withoutCallReminder } from "@/lib/recovery-setting";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant-pay";
@@ -652,7 +653,8 @@ export async function releaseOwnHold(store: Store, session: string, { openedHere
 async function expireCheckout(account: string, session: string): Promise<boolean> {
   try {
     const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    return closed.status === "expired";
+    // Only Stripe's word that THIS checkout expired counts (rule 24): another session's "expired" frees nothing.
+    return expiredFor(closed, session);
   } catch (error) {
     console.error("Call checkout could not be closed at Stripe:", error instanceof Error ? error.message : error);
     return false;
@@ -958,7 +960,8 @@ export async function withCallLock<T>(store: Store | null, work: (keep: () => Pr
 async function closeUnheld(account: string, session: string): Promise<boolean> {
   try {
     const closed = await onAccount("POST", account, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    return closed.status === "expired";
+    // Only Stripe's word that THIS checkout expired counts (rule 24): another session's "expired" frees nothing.
+    return expiredFor(closed, session);
   } catch (error) {
     console.error("closing a call checkout whose lock was lost failed", error);
     return false;

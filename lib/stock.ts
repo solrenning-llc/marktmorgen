@@ -12,6 +12,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { HOLD_SECONDS, StripeError, onAccount, watchCheckoutOpening } from "@/lib/stripe-account";
+import { expiredFor, ownSessionReply } from "@/lib/stripe-session-reply";
 import { isSettled } from "@/lib/instant-pay";
 import { limitedStock } from "@/lib/product-extras";
 import { type Held, LockBusyError, releaseLock, takeLock } from "@/lib/redis-lock";
@@ -150,11 +151,17 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
     }
     checks += 1;
     try {
-      const found = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
-      if (isSettled(found)) {
+      const answered = await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}`, undefined, undefined, undefined, CHECK_MS);
+      // Only an answer about this checkout counts (rule 24): another session's, or one with no id, is unknown, so the
+      // unit stays held and is neither let go nor marked sold on it.
+      const found = ownSessionReply(answered, session);
+      if (!found) {
+        used += 1;
+        unknown += 1;
+      } else if (isSettled(found)) {
         writes.push(["HSET", stockKey(store.statsId, product.id), session, JSON.stringify({ until: 0, paid: true })]);
         used += 1;
-      } else if (found.status === "expired") {
+      } else if (expiredFor(found, session)) {
         writes.push(["HDEL", stockKey(store.statsId, product.id), session]);
       } else {
         // An unknown or completed-but-unsettled response is not proof that
@@ -268,7 +275,8 @@ export async function releaseStockHold(store: Store, product: Listing, session: 
       `/checkout/sessions/${encodeURIComponent(session)}/expire`,
       new URLSearchParams(),
     );
-    if (closed.status !== "expired") return false;
+    // Only Stripe's word that THIS checkout expired lets the unit go (rule 24): another session's "expired" is not it.
+    if (!expiredFor(closed, session)) return false;
   } catch {
     return false;
   }
@@ -492,7 +500,7 @@ export async function withCartStockHolds<T extends { id: string }>(
   if (store.stripeAccountId) {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(value.id)}/expire`, new URLSearchParams()).catch(() => null);
     // One command a product, both fields at once, so the failure path stays inside CART_STOCK_COMMANDS_MOST (tests/cart-stock.test.ts).
-    if (closed?.status === "expired") await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
+    if (expiredFor(closed, value.id)) await redisPipeline(keys.map((key) => ["HDEL", key, value.id, pending])).catch(() => {});
   }
   return { ok: false, reason: "busy" };
 }
@@ -532,7 +540,7 @@ export async function releaseCartStockHolds(store: Store, products: Listing[], s
   if (holding.length === 0) return false;
   try {
     const closed = await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(session)}/expire`, new URLSearchParams());
-    if (closed.status !== "expired") return false;
+    if (!expiredFor(closed, session)) return false;
   } catch {
     return false;
   }

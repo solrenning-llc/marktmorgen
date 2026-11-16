@@ -34,10 +34,10 @@ test("an expired hold is released only after an explicit expired checkout respon
       assert.equal(await stockLeft(creator, product, 2), 0);
       assert.equal(deletes, 0);
     }
-    response = { status: "complete", payment_status: "paid" };
+    response = { id: "cs_test_synthetic", status: "complete", payment_status: "paid" };
     assert.equal(await stockLeft(creator, product, 2), 0);
     assert.equal(deletes, 0);
-    response = { status: "expired", payment_status: "unpaid" };
+    response = { id: "cs_test_synthetic", status: "expired", payment_status: "unpaid" };
     assert.equal(await stockLeft(creator, product, 2), 1);
     assert.equal(deletes, 1);
     assert.equal(reads, 8);

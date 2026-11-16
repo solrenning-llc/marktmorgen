@@ -92,7 +92,7 @@ async function main(): Promise<void> {
   const calls = readFileSync("lib/calls.ts", "utf8");
   is("no status compared with \"expired\" directly in lib/stock.ts", /\.status\s*[!=]==\s*"expired"/.test(stock), false);
   is("nor in lib/calls.ts", /\.status\s*[!=]==\s*"expired"/.test(calls), false);
-  is("lib/stock.ts's three expiry POSTs and lib/calls.ts's two read the reply with expiredFor", [(stock.match(/expiredFor\(/g) ?? []).length, (calls.match(/expiredFor\(/g) ?? []).length], [3, 2]);
+  is("lib/stock.ts's three expiry POSTs and its count's read, and lib/calls.ts's two, read the reply with expiredFor", [(stock.match(/expiredFor\(/g) ?? []).length, (calls.match(/expiredFor\(/g) ?? []).length], [4, 2]);
 
   part("Control: the session's own expired still hands the hold back");
   answer = "own";

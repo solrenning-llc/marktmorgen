@@ -119,7 +119,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     const id = `cs_test_team${String(sessions).padStart(12, "0")}`;
     return answer({ id, url: `https://checkout.stripe.com/c/pay/${id}` });
   }
-  if (method === "POST" && /^\/checkout\/sessions\/[^/]+\/expire$/.test(path)) return answer({ status: "expired" });
+  // As Stripe answers: the session it closed, by its id (only its own "expired" frees a time, lib/stripe-session-reply.ts).
+  if (method === "POST" && /^\/checkout\/sessions\/[^/]+\/expire$/.test(path)) return answer({ id: path.split("/")[3], status: "expired" });
   return answer({ object: "list", data: [], has_more: false });
 }) as typeof fetch;
 

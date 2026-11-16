@@ -61,7 +61,7 @@
 import { onAccount } from "@/lib/stripe-account";
 import { ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, listSlots, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
 import { CLOSING, type Closing, closingFamilyOf } from "@/lib/data-families";
 import { DEL_BATCH, FOLLOW_BATCH, RENEWALS_AT_ONCE } from "@/lib/plan-closing-rules";
 import { idsIn } from "@/lib/data-recount";
@@ -864,8 +864,12 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
   if (!isRedisConfigured()) return report;
   // A move back a walk that Redis did not confirm (moveBack): this run is never said to be done.
   let unsure = false;
-  const [rawState] = await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]);
-  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = Array.isArray(rawState) ? rawState.map((v) => (typeof v === "string" ? v : "")) : ["", "", "", ""];
+  // Read exactly (CX-123 rule 24): four slots, each text or nil (a field never written). Anything else is unknown and
+  // throws before anything is written, never "idle at the start": that would begin the walk again from the first key
+  // and write over the cursor of a walk under way, so the keys at the end would never be reached.
+  const stateRow = listSlots(repliesFor(await redisPipeline([["HMGET", WALK_KEY, "cursor", "started", "phase", "unfinished"]]), 1)?.[0]);
+  if (!stateRow || stateRow.length !== 4 || stateRow.some((v) => v !== null && typeof v !== "string")) throw new UnknownReplyError("the closed stores' walk state");
+  const [cursorRaw, startedRaw, phaseRaw, unfinishedRaw] = stateRow.map((v) => (v === null ? "" : (v as string)));
   let phase = phaseRaw || "idle";
   let cursor = cursorRaw || "0";
 
@@ -878,7 +882,9 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
       await redisPipeline([["HSET", WALK_KEY, "unfinished", left + unreadable]]);
       report.unfinished = left + unreadable;
     }
-    const started = Number(startedRaw) || 0;
+    // Never started is "" (nil); anything but a whole number of milliseconds is unknown, never "long ago".
+    if (startedRaw !== "" && !/^(0|[1-9]\d*)$/.test(startedRaw)) throw new UnknownReplyError("when the closed stores' last walk started");
+    const started = startedRaw === "" ? 0 : Number(startedRaw);
     if (now - started < WALK_GAP_MS) return { ...report, done: true };
     const [due] = await redisPipeline([["ZRANGEBYSCORE", DUE_KEY, "-inf", now, "LIMIT", 0, BATCH_MAX]]);
     const refs = Array.isArray(due) ? (due as unknown[]).map(String) : [];

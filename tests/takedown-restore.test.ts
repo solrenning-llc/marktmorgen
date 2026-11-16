@@ -18,7 +18,8 @@ import { NextRequest } from "next/server";
 import { GET as servePicture } from "@/app/api/image/[folder]/[file]/route";
 import { POST as act } from "@/app/api/takedown/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addStoreLink, claimHandle, closeStoreRecord, createStore, deleteStore, dropHeldLink, ensureStatsId, imageFolder, setLinkImage, storeForEmail, storeRef } from "@/lib/store";
+import { queueDeleted } from "@/lib/closed-store-data";
+import { addStoreLink, claimHandle, closeStoreRecord, createStore, deleteStore as deleteWith, dropHeldLink, ensureStatsId, imageFolder, setLinkImage, storeForEmail, storeRef } from "@/lib/store";
 import { readReport } from "@/lib/takedown-rules";
 import { type Report, actOnHeld, fileReport, noticeSentAt, openReport, settleHeld, takeDown } from "@/lib/takedown";
 import { createHash } from "node:crypto";
@@ -28,6 +29,8 @@ import { MAX_STORE_LINKS, showingLinks } from "@/lib/store-link";
 import { faults, hooks, kept } from "./picture-takedown-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+// Merged with main of 16 November 2026: main's deleteStore takes the closing walk's queue, as tests/store-deletion.test.ts passes it.
+const deleteStore = (ref: string) => deleteWith(ref, queueDeleted);
 
 type Sent = { to: string[] | string; subject: string; text: string };
 const sent: Sent[] = [];

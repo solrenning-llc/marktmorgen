@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $95.90 | $940.60 | $69 / $690 |
-| Studio | $151.85 | $1,580.98 | $449 / $4,490 |
-| Scale | $249.95 | $2,717.95 | $999 / $9,990 |
+| Store | $95.90 | $940.90 | $69 / $690 |
+| Studio | $151.85 | $1,581.55 | $449 / $4,490 |
+| Scale | $249.95 | $2,718.55 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -44,7 +44,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $99 / $990 | 4.7% | 60.18% | 60.13% | $59.58 | 0.66 |
 | $129 / $1,290 **(recommended)** | 88.2% | 60.20% | 60.06% | $77.66 | 0.51 |
 | $149 / $1,490 | 100.0% | 60.53% | 60.41% | $90.20 | 0.44 |
-| $169 / $1,690 | 100.0% | 60.91% | 60.80% | $102.94 | 0.38 |
+| $169 / $1,690 | 100.0% | 60.91% | 60.79% | $102.94 | 0.38 |
 | $199 / $1,990 | 100.0% | 61.33% | 61.23% | $122.05 | 0.32 |
 
 ### Studio
@@ -55,7 +55,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $129 / $1,290 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | 8.9% | 60.30% | 60.03% | $120.00 | 2.24 |
-| $249 / $2,490 **(recommended)** | 23.7% | 60.31% | 60.02% | $150.19 | 1.79 |
+| $249 / $2,490 **(recommended)** | 23.7% | 60.31% | 60.02% | $150.18 | 1.79 |
 | $299 / $2,990 | 37.5% | 60.35% | 60.05% | $180.47 | 1.49 |
 | $449 / $4,490 | 80.0% | 60.38% | 60.05% | $271.15 | 0.99 |
 
@@ -67,7 +67,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $249 / $2,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $299 / $2,990 | 0.6% | 60.38% | 60.02% | $180.55 | 3.33 |
 | $349 / $3,490 | 7.5% | 60.39% | 60.02% | $210.77 | 2.85 |
-| $399 / $3,990 **(recommended)** | 14.0% | 60.40% | 60.03% | $241.00 | 2.50 |
+| $399 / $3,990 **(recommended)** | 14.0% | 60.40% | 60.03% | $241.00 | 2.49 |
 | $499 / $4,990 | 27.5% | 60.41% | 60.03% | $301.48 | 1.99 |
 | $999 / $9,990 | 92.5% | 60.42% | 60.02% | $603.63 | 1.00 |
 
@@ -93,8 +93,8 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, monthly (sizing reading) | 60.20% | 60.31% | 60.40% |
 | Net at full included use, yearly (sizing reading) | 60.06% | 60.02% | 60.03% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.07% | 12.10% | 12.14% |
-| Net a customer, a month, at full included use | $77.66 | $150.19 | $241.00 |
-| The same at #553's price | $39.25 | $268.64 | $601.30 |
+| Net a customer, a month, at full included use | $77.66 | $150.18 | $241.00 |
+| The same at #553's price | $39.25 | $268.64 | $601.29 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

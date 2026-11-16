@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$159 / $1,590** | every #553 figure, none cut | 60.74% / 60.61% | 12.26% | 122 | $69 / $690 |
+| Store | **$159 / $1,590** | every #553 figure, none cut | 60.74% / 60.61% | 12.26% | 123 | $69 / $690 |
 | Studio | **$739 / $7,390** | every #553 figure, none cut | 61.34% / 61.10% | 12.50% | 15 | $449 / $4,490 |
 | Scale | **$1,539 / $15,390** | every #553 figure, none cut | 61.41% / 61.13% | 12.53% | 7 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $159 | 12.0% | 11.5% / 1.0% / 5.8% / 12.0% | 122 |
+| Store | $159 | 12.0% | 11.5% / 1.0% / 5.8% / 12.0% | 123 |
 | Studio | $739 | 27.3% | 27.0% / 1.7% / 14.1% / 27.3% | 15 |
 | Scale | $1,539 | 29.5% | 29.5% / 1.8% / 15.3% / 29.4% | 7 |
 
@@ -199,7 +199,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 | Store | store-email | 7 | $139 | 1.00× | 1.00× |
 | Store | transactional-email | 15 | $139 | 1.00× | 1.00× |
 | Store | visits | 340 | $119 | 1.08× | 1.17× |
-| Studio | ai | 4 | $449 | 1.08× | 1.18× |
+| Studio | ai | 4 | $459 | 1.07× | 1.15× |
 | Studio | video | 3 | $519 | 1.01× | 1.02× |
 | Studio | storage | 4 GB | $499 | 1.03× | 1.06× |
 | Studio | orders | 45 | $509 | 1.02× | 1.04× |

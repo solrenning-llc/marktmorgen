@@ -76,6 +76,8 @@ is("and the lesson's own address, titles and course are handed over", /\{lastPer
 const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
 // Access known not to be open, never while it could not be checked (lib/course-door.ts, forgetsOnDevice).
 is("the course page forgets it whenever it opens with access known not to be open", /const forgetPerson = forgetsOnDevice\(access\) && access\.learner \? deviceLastKey\(access\.learner\.email\) : null;/.test(coursePage) && /\{forgetPerson \? <ForgetLastLesson courseId=\{course\.id\} person=\{forgetPerson\} \/> : null\}/.test(coursePage), true);
+// And never on a check of the course's end date that could not be made (24 [E7], "unchecked"): forgetsOnDevice says so.
+is("never on a check of the course's end date that could not be made (24 [E7])", /access\.state !== "unchecked"/.test(readFileSync("lib/course-door.ts", "utf8")), true);
 
 part("The library: nothing drawn before the browser is read");
 is("server markup is empty, so nothing shows that is not there", renderToStaticMarkup(createElement(LibraryContinue, { person: ADA, open: ["ada-studio"] })), "");

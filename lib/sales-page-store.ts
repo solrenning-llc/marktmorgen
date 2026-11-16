@@ -201,6 +201,20 @@ export async function readPage(statsId: string | null, productId: string): Promi
   return pageOf(replies[0]);
 }
 
+/**
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
+ */
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
   if (raw === null) return { ...EMPTY_PAGE, blocks: [] };
@@ -352,8 +366,11 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
+  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
   for (const entry of list) {
     if (typeof entry !== "string") continue;

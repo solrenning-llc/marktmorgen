@@ -3,6 +3,7 @@ import { StoreFullError } from "@/lib/store-full";
 import { guardStoreWrite } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
+import { lockRead } from "@/lib/two-step-unknown";
 import { ensureStatsId } from "@/lib/store";
 import { type Deal, DEAL_ID, FIRST_PIPELINE_ID, newCrmId, pipelineLimit, readFollowUp, parseDeal, parseFields, parseStages } from "@/lib/crm-rules";
 import { type AccessMap, PIPELINE_ACCESS_REFUSAL, accessOf, pipelineOfStage, visiblePipelines } from "@/lib/pipeline-access-rules";
@@ -62,7 +63,8 @@ export async function POST(request: NextRequest) {
       if (fields.length !== Math.min(sent.length, 10) || sent.length > 10) return refuse("fields");
       // A field left out takes its answers off every person: a session let in without its
       // second step keeps every field (lib/two-step.ts), checked against the fields as written.
-      const keepAll = await lockedFor(request, "orders", "fields-remove");
+      const keepAll = await lockRead(lockedFor(request, "orders", "fields-remove"));
+      if (keepAll instanceof Response) return keepAll;
       return Response.json({ ok: true, fields: await writeFields(statsId, fields, keepAll) });
     }
     if (body.action === "value") {

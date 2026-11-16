@@ -4,12 +4,13 @@ import { type NextRequest, after } from "next/server";
 import { OrdersPausedError } from "@/lib/order-admission";
 import { linkOrigin, originFrom } from "@/lib/request-origin";
 import { normaliseHandle, storeForHandle } from "@/lib/store";
-import { readListings, readProduct } from "@/lib/catalog";
+import { readAsking, readListings, readProduct } from "@/lib/catalog";
 import { canSell, canSellProduct } from "@/lib/store-checkout";
 import { cartPrice, createCartCheckout } from "@/lib/cart-checkout";
 import { codeCookieName, readLinkCode } from "@/lib/code-link";
 import { MAX_CART, cartable, dealOff, readCartIds } from "@/lib/cart-rules";
 import { bestBundleSwap } from "@/lib/cart-bundle";
+import { heldByABundle } from "@/lib/bundle-rules";
 import { cartPicks } from "@/lib/store-collections";
 import { readSoldCounts } from "@/lib/sold-count";
 import { cartWords } from "@/lib/buyer-words/cart";
@@ -68,7 +69,14 @@ export async function GET(request: NextRequest) {
   const [listings, coming] = await Promise.all([ids.length ? readListings(store, ids) : Promise.resolve([]), soonState(store).catch(() => null)]);
   // A limited product with none left cannot be paid for: said on its line (lib/stock.ts). A count that cannot be read is
   // not a unit either, but is not said to be sold out: it is not available in a cart right now (undefined).
-  const left = new Map(await Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)));
+  // Which lines ask questions at checkout: those are bought from their own page, which asks them, and the cart
+  // checkout below refuses them (#4350), so they are not payable here. A reading that cannot be had is never
+  // "asks nothing" (rule 24): no line is payable right now.
+  const [stocks, asking] = await Promise.all([
+    Promise.all(listings.filter((p) => p.stock !== null).map(async (p) => [p.id, await stockLeft(store, p).catch(() => undefined)] as const)),
+    readAsking(store, listings.filter((p) => cartable(p)).map((p) => p.id)).catch(() => null),
+  ]);
+  const left = new Map(stocks);
   const selling = canSell(store);
   const sw = shippingWords(store.language);
   const items = ids.flatMap((id) => {
@@ -80,8 +88,13 @@ export async function GET(request: NextRequest) {
     const ships = shipped ? [shipped.cents > 0 ? sw.cost(formatMoney(shipped.cents, store.currency, locale)) : sw.free, shipped.note].filter(Boolean).join(" · ") : null;
     const soldOut = left.get(id) === 0;
     const unknown = left.has(id) && left.get(id) === undefined;
-    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
+    return [{ id, title: product.title, href: `/@${store.handle}/p/${productSegment(product)}`, cents, price: formatMoney(cents, store.currency, locale), ok: selling && cartable(product) && asking !== null && !asking.has(id) && coming !== null && !coming.soon.has(id) && !soldOut && !unknown, ships, soldOut }];
   });
+  // A product a bundle in the same cart already hands over is not payable on its own line: the bundle brings it (lib/bundle-rules.ts, heldByABundle).
+  // Only a bundle that can be paid for itself brings anything: one sold out or coming soon holds nothing back.
+  const payableIds = new Set(items.filter((item) => item.ok).map((item) => item.id));
+  const inABundle = new Set(heldByABundle(listings.filter((p) => !p.bundle || payableIds.has(p.id))).map((p) => p.id));
+  for (const item of items) if (inABundle.has(item.id)) item.ok = false;
   // What ships, as the checkout will ask Stripe for it (lib/cart-shipping.ts), from what can be paid for.
   const shippable = items.filter((item) => item.ok).flatMap((item) => listings.filter((p) => p.id === item.id));
   const sending = cartShipping(shippable.map(cartItemOf), country);
@@ -141,7 +154,8 @@ export async function GET(request: NextRequest) {
     return listing ? [{ id: item.id, title: item.title, pairs: listing.pairs ?? [] }] : [];
   });
   // With the coming-soon reading unknown nothing is offered either: a suggestion or a bundle could be a product not out yet.
-  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale).catch(() => []) : [];
+  // The suggestions read what is left of a limited one only within the reads the cart's own lines left (MAX_CART in all).
+  const suggest = coming ? await suggestions(store, inCart, ids, coming.soon, country, locale, MAX_CART - left.size).catch(() => []) : [];
   const bundle = coming ? bundleSwap(store, payable, ids, coming.soon, country, locale) : null;
   return Response.json(
     {
@@ -212,6 +226,7 @@ async function suggestions(
   soon: Set<string>,
   country: string,
   locale: string,
+  stockReads: number,
 ): Promise<Suggestion[]> {
   if (inCart.length === 0 || ids.length >= MAX_CART || !canSell(store)) return [];
   const words = cartWords(store.language);
@@ -235,10 +250,19 @@ async function suggestions(
   if (wanted.length === 0) return [];
   const listed = await readListings(store, wanted.map((want) => want.id));
   const out: Suggestion[] = [];
+  let reads = stockReads;
   for (const want of wanted) {
     const product = listed.find((p) => p.id === want.id);
     if (!product || !cartable(product) || !canSellProduct(store, product)) continue;
     if (product.keys && (await outOfKeys(store, product).catch(() => true))) continue;
+    // A limited one with none left, or whose count cannot be read, is not offered: its line would only say "Sold out" (lib/stock.ts).
+    // Past the reads the cart's own lines left, a limited one is passed over unread, so the open cart reads at most MAX_CART counts.
+    if (product.stock !== null) {
+      if (reads <= 0) continue;
+      reads -= 1;
+      const left = await stockLeft(store, product).catch(() => undefined);
+      if (left !== null && !(typeof left === "number" && left > 0)) continue;
+    }
     out.push({
       id: want.id,
       title: product.title,
@@ -302,6 +326,8 @@ export async function POST(request: NextRequest) {
   if (!coming) return away(`/@${store.handle}?cart=error#cart`);
   const fit = products.length === ids.length && products.every((p) => cartable(p) && p.fields.length === 0 && !coming.soon.has(p.id));
   if (!fit) return away(`/@${store.handle}?cart=changed#cart`);
+  // A product a bundle in the same cart already hands over would be charged twice for one copy: back to the cart, nothing charged.
+  if (heldByABundle(products).length > 0) return away(`/@${store.handle}?cart=changed#cart`);
   // Read in part: a product outside what was read may be coming soon, so it is unknown and never sent to Stripe;
   // back to the cart to try again, nothing charged.
   if (products.some((p) => !knownNotSoon(coming, p.id))) return away(`/@${store.handle}?cart=error#cart`);

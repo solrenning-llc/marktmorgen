@@ -331,7 +331,7 @@ test("lesson pages supply the store's video allowance", () => {
   // The actual admission behavior, including failed reads and exact exhaustion,
   // is exercised in video-admission.test.ts. Keep this route wiring check.
   const page = readFileSync(join(process.cwd(), "app/[handle]/course/[product]/[lesson]/page.tsx"), "utf8");
-  assert.match(page, /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store\)/, "the lesson page must supply the store's allowance and its window");
+  assert.match(page, /lessonVideo\(lesson\.video, videoLimitFor\(store\), windowId\(store\), store, \{ free: access\.state !== "open" \}\)/, "the lesson page must supply the store's allowance and its window");
 });
 
 test("a store that pays nothing can cost next to nothing", () => {

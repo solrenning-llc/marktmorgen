@@ -357,6 +357,45 @@ async function main(): Promise<void> {
     is("the next run refunds and ends it", [refundBodies.length, subscriptions.sub_P62.status], [1, "canceled"]);
   }
 
+  part("A stored decision with no exact subscription id acts on nothing (Codex X4 follow-up; Codex g, Claude 7 on #4168)");
+  {
+    for (const corrupt of ["act:", "act:not_a_sub"]) {
+      reset();
+      const id = warn(65, plan(65));
+      await redis.pipeline([["HSET", SEEN_KEY, id, corrupt]]);
+      const counts = await run();
+      is(`${corrupt}: no refund or subscription deletion is attempted`, [posts().length, deletes().length], [0, 0]);
+      is(`${corrupt}: the corrupt decision stays visible and the run fails closed`, [await redis.pipeline([["HGET", SEEN_KEY, id]]), counts.failed, counts.complete], [[corrupt], 1, false]);
+      is(`${corrupt}: the real subscription is still active`, subscriptions.sub_P65.status, "active");
+    }
+  }
+
+  part("A decided refund held by the run's budget is never closed as final by a later run that could not read the list (Claude 7 on #4168, MEDIUM)");
+  {
+    reset();
+    for (let n = 300; n < 300 + MAX_REFUNDS + 1; n += 1) warn(n, plan(n));
+    const first = await run();
+    is("run 1: MAX_REFUNDS refunded, one held", [first.refunded, first.complete], [MAX_REFUNDS, false]);
+    listBroken = true;
+    const second = await run();
+    is("run 2: the list is unreadable, so nothing is ended or closed", [second.complete, second.ended, subscriptions.sub_P325.status], [false, 0, "active"]);
+    listBroken = false;
+    const third = await run();
+    const unrefunded = Object.values(charges).filter((charge) => charge.amount_refunded < charge.amount).map((charge) => charge.id);
+    is("run 3: every flagged payment is refunded", [unrefunded, third.refunded], [[], 1]);
+    is("and every subscription ended", Object.values(subscriptions).filter((sub) => sub.status !== "canceled").length, 0);
+  }
+
+  part("A decided warning past MAX_PAGES is not closed as final while its refund may be owed (Claude 7 on #4168, MEDIUM)");
+  {
+    reset();
+    const id = warn(400, plan(400), 6_900, { ageDays: 100 });
+    await redis.pipeline([["HSET", SEEN_KEY, id, "act:sub_P400"]]);
+    for (let n = 1_000; n < 1_000 + 100 * MAX_PAGES; n += 1) warn(n, null);
+    const counts = await run();
+    is("not final, nothing refunded or ended for it", [await redis.pipeline([["HGET", SEEN_KEY, id]]), charges.ch_C400.amount_refunded, subscriptions.sub_P400.status, counts.complete], [["act:sub_P400"], 0, "active", false]);
+  }
+
   part("Finished fields older than the window are dropped; a decision still to end is kept (review of #4168, second round, LOW)");
   {
     reset();

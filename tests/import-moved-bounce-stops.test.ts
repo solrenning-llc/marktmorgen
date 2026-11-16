@@ -126,7 +126,7 @@ async function main(): Promise<void> {
     };
     let threw = false;
     try {
-      await heardFromSender({ kind: "complained", permanent: false, to: LATE, store: store.sid, list: "", move: store.statsId });
+      await heardFromSender({ kind: "complained", permanent: false, to: LATE, store: store.sid, list: "", move: store.statsId ?? "" });
     } catch {
       threw = true;
     } finally {

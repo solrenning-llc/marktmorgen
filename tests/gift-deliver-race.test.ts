@@ -18,7 +18,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductLink, setStripeAccoun
 import { readListing } from "@/lib/catalog";
 import { deliverGift, revokeRefundedGifts, startGift } from "@/lib/gifts";
 import { importedFor } from "@/lib/imported-purchases";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 
 const NOW = Math.floor(Date.now() / 1000);
@@ -96,6 +96,8 @@ test("a confirmation that waited for the giving mark does not give a gift refund
       refunded = true;
       assert.equal(await quiet(() => revokeRefundedGifts(store, Date.now() + 60_000, async () => {})), 1);
       assert.equal(await holds(), false, "the refund pass took the purchase back");
+      // The first run keeps its mark once the gift is given (#2872 review M1); it runs out before the second claims.
+      advance(301_000);
     }
     return real(commands);
   }) as typeof redis.pipeline;
@@ -109,9 +111,10 @@ test("a confirmation that waited for the giving mark does not give a gift refund
   assert.ok(keptGift(giftId).revoked, "the gift stays revoked");
 });
 
-test("control: one confirmation gives the gift, and a second one says it is already given", async () => {
+test("control: one confirmation gives the gift, and a second one beside its kept mark throws, never already", async () => {
   const { store, product, giftId } = await setUp();
   assert.equal(await quiet(() => deliver(store, product, giftId)), "given");
-  assert.equal(await quiet(() => deliver(store, product, giftId)), "already");
+  // Claude 6 on #2872: the run holding the mark may have died before its emails, so "already" is never said beside it.
+  await assert.rejects(quiet(() => deliver(store, product, giftId)), /another run is giving this gift/);
   assert.equal(await holds(), true);
 });

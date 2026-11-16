@@ -45,6 +45,7 @@ import { cleanText, cleanLine } from "@/lib/community-text";
 import { productSegment } from "@/lib/product-slug";
 import { noteForErasure } from "@/lib/erasure-index";
 import { blankInLists } from "@/lib/erasure-lists";
+import { waitlistPromptsLeft } from "@/lib/waitlist-note";
 
 const soonKey = (sid: string) => `nl:wl:${sid}:soon`;
 const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
@@ -281,7 +282,7 @@ function entriesOf(raw: unknown): [string, WaitEntry][] {
   return pairs.map(([k, v]) => [k, parseEntry(v)] as [string, WaitEntry | null]).filter((p): p is [string, WaitEntry] => p[1] !== null);
 }
 
-export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" };
+export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" | "outline_left" };
 
 /**
  * Puts the product on sale and starts the one email to everyone who
@@ -302,6 +303,8 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const total = confirmed.length;
   // A postal address is the law's for an email that offers something for sale (CAN-SPAM).
   if (total > 0 && !address) return { ok: false, reason: "address" };
+  // The email goes to everyone confirmed, once: never with a part of the note's ready example left (lib/waitlist-note.ts).
+  if (total > 0 && waitlistPromptsLeft(note).length) return { ok: false, reason: "outline_left" };
   const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now() };
   await redisPipeline([
     ["SREM", soonKey(sid), product.id],

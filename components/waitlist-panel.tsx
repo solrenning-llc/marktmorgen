@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_LAUNCH_ADDRESS, MAX_LAUNCH_NOTE } from "@/lib/waitlist-rules";
 import type { WaitlistView } from "@/lib/waitlist";
+import { WAITLIST_NOTE, WAITLIST_NOTE_LEFT, waitlistPromptsLeft } from "@/lib/waitlist-note";
 import type { PreorderView } from "@/lib/preorders";
 import { MAX_PREORDER_DAYS, PREORDER_PROBLEMS, type PreorderProblem, addDays, todayOf } from "@/lib/preorder-rules";
 
@@ -18,6 +19,8 @@ const MESSAGES: Record<string, string> = {
   soon: "Mark it coming soon first: pre-orders are taken instead of a buy button.",
   day: `Choose a day from tomorrow to ${MAX_PREORDER_DAYS} days ahead.`,
   agree: "Check the box that says you refund every pre-order in full if it does not come out: buyers are told so.",
+  // A part of the note's example still in [brackets] (lib/waitlist-note.ts): the email goes to everyone at once.
+  outline_left: WAITLIST_NOTE_LEFT,
 };
 
 async function postPreorder(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string; view?: PreorderView }> {
@@ -88,6 +91,7 @@ export function WaitlistPanel({
   // Saved, but the numbers could not be read after it (the route's `viewsUnread`).
   const [saved, setSaved] = useState(false);
   const [note, setNote] = useState("");
+  const noteField = useRef<HTMLTextAreaElement>(null);
   // "Change" on a row of the review before the sale: back to that field, the review closed (487 [IT4], pattern 8).
   function changeAnswer(id: string) {
     setConfirming(false);
@@ -232,9 +236,10 @@ export function WaitlistPanel({
           </p>
           {view.confirmed ? (
             <>
-              <label className="block">
-                <span className="field-label">A note in the email (optional)</span>
+              <div>
+                <label htmlFor={`waitlist-${productId}-note`} className="field-label">A note in the email (optional)</label>
                 <textarea
+                  ref={noteField}
                   id={`waitlist-${productId}-note`}
                   className="field mt-1"
                   rows={3}
@@ -243,7 +248,37 @@ export function WaitlistPanel({
                   onChange={(e) => { setNote(e.target.value); setConfirming(false); }}
                   placeholder="Thank you for waiting. Reply to this email if you have any questions."
                 />
-              </label>
+                <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-waitlist-example="">
+                  <p id={`waitlist-${productId}-example-help`} className="text-sm text-ink-soft">
+                    Not sure what to write? Start from an example: it sets out what people who waited look for, and each part in [brackets] is yours to replace with your own words, including the brackets. The email already has the link and the price. It can&apos;t go out until you replace every part.
+                  </p>
+                  {note.trim() ? (
+                    <p className="mt-2 text-sm text-ink-soft">The example goes only into an empty note. Clear the note to use it.</p>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm mt-2"
+                      aria-describedby={`waitlist-${productId}-example-help`}
+                      onClick={() => {
+                        // Only into an empty note: nothing typed is replaced.
+                        if (note.trim()) return;
+                        setNote(WAITLIST_NOTE);
+                        setConfirming(false);
+                        // The button gives way to a sentence: the focus moves to the note, the first part to replace selected.
+                        requestAnimationFrame(() => {
+                          const field = noteField.current;
+                          if (!field) return;
+                          field.focus();
+                          const start = WAITLIST_NOTE.indexOf("[");
+                          field.setSelectionRange(start, WAITLIST_NOTE.indexOf("]", start) + 1);
+                        });
+                      }}
+                    >
+                      Start the note from an example
+                    </button>
+                  )}
+                </div>
+              </div>
               <label className="block">
                 <span className="field-label">Postal address at the bottom of the email</span>
                 <input
@@ -295,7 +330,14 @@ export function WaitlistPanel({
             // An email about something for sale needs the postal address: without one, the second press is not offered.
             disabled={busy || (pre.waiting > 0 && !hasContent) || (confirming && view.confirmed > 0 && !address.trim())}
             onClick={async () => {
+              // Before the review: an email that goes to everyone at once is never offered with a part of the example left.
+              if (view.confirmed && waitlistPromptsLeft(note).length) {
+                setConfirming(false);
+                setError(MESSAGES.outline_left);
+                return;
+              }
               if (!confirming) {
+                setError(null);
                 setConfirming(true);
                 // The review opens with the focus on its heading, so it is read once, in order.
                 requestAnimationFrame(() => document.getElementById(`waitlist-${productId}-review-title`)?.focus());

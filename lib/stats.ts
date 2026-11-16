@@ -2019,14 +2019,22 @@ export async function readSales(store: Store, now = Date.now()): Promise<SalesSt
         console.error("reading invoice payments failed", error);
         return null;
       });
-      for (const [invoice, intents] of paid?.byInvoice ?? []) {
-        if (!storeInvoices.has(invoice)) continue;
-        const sale = checkoutInvoices.get(invoice);
-        for (const intent of intents) {
-          if (!intent) continue;
-          if (sale) byPayment.set(intent, sale);
-          else renewalPayments.add(intent);
+      // A payment is confirmed here only when the answer was read whole and every invoice it lists that payment paying
+      // is the store's (Claude 5 on #4549): one that also paid another invoice does not say which one a refund gives
+      // back (Codex X7), and a cut answer may hold its other invoices among those not read. Anything else is left to
+      // the one-by-one lookup below, which refuses it the same way.
+      const invoicesOf = new Map<string, Set<string>>();
+      if (paid && !paid.partial) {
+        for (const [invoice, intents] of paid.byInvoice) {
+          for (const intent of intents) if (intent) invoicesOf.set(intent, (invoicesOf.get(intent) ?? new Set<string>()).add(invoice));
         }
+      }
+      for (const [intent, paidInvoices] of invoicesOf) {
+        if (![...paidInvoices].every((invoice) => storeInvoices.has(invoice))) continue;
+        const [only] = paidInvoices;
+        const sale = paidInvoices.size === 1 ? checkoutInvoices.get(only) : undefined;
+        if (sale) byPayment.set(intent, sale);
+        else renewalPayments.add(intent);
       }
     }
     // A payment still unconfirmed (a membership payment older than the invoices read above) is looked up by its own

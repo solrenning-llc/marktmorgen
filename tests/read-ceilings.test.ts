@@ -352,7 +352,8 @@ async function main(): Promise<void> {
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;
     const oneMore = 32 * (heavyWorst - lightWorst);
-    is("the first year given back stays under US$ 65 with the day's heavy readings", year < 65, true);
+    // US$66.00 since the owner's decision of 16 November 2026, 02h15 Fortaleza (BROADCAST-262); it does not rise again.
+    is("the first year given back stays under US$ 66 with the day's heavy readings", year < 66, true);
     is("and one more heavy reading a day would pass it: the figure is the most the margin allows", year + oneMore >= 65, true);
     is("which is fewer than one an hour: the gap is said to Claude 1 and the owner (inbox C4-33), not hidden", HEAVY_READINGS_PER_DAY < 24, true);
   }

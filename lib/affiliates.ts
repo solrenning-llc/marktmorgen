@@ -3411,7 +3411,7 @@ async function paypalDone(statsId: string, order: string): Promise<void> {
  * it, credited once at the share of the sale, or nobody's; read but sold at a share not known now, or past the
  * deadline, the creator is told with the same retries. Off the list once decided.
  */
-async function settlePayPalPending(store: Store, paid: Paid, title: string, now: number, send: PendingSend): Promise<void> {
+async function settlePayPalPending(store: Store, paid: Paid, title: string, now: number, send: PendingSend, remember = true): Promise<void> {
   const statsId = store.statsId as string;
   const raw = paid.meta?.[VIA_PENDING_META];
   const ref = `paypal:${paid.order}`;
@@ -3437,7 +3437,8 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
   if (outcome.kind === "credit" && rate > 0) {
     const sale = { ref, pi: paypalPaymentId(paid.capture), at: paid.at, product: paid.product, title: title.slice(0, 200), base: paid.cents, total: paid.cents, currency: readCurrencyCode(paid.currency) };
     await writeReferral(store, { ...sale, aff: outcome.affiliate.id, rate, self: await isSelf(store, outcome.affiliate.id, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });
-    await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
+    // Not for a person deleted at their own request (creditPayPalSale's `remember`, lib/paypal-delivery.ts).
+    if (remember) await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
   await writePendingMark(statsId, ref, outcome.kind === "credit" && rate > 0 ? `credited:${outcome.affiliate.id}` : "none");
   await paypalDone(statsId, paid.order);
@@ -3603,7 +3604,7 @@ export async function creditPayPalSale(store: Store, paid: Paid, title: string, 
   await notePartners(store, { ...sale, buyer: paid.email }).catch(keep);
   // A pending link and a link read at checkout never go together (pending needs no `via`), so settling the pending
   // one here, before the affiliate's referral below, changes nothing for a sale whose link was read.
-  if (pending) await settlePayPalPending(store, paid, title, now, send).catch(keep);
+  if (pending) await settlePayPalPending(store, paid, title, now, send, remember).catch(keep);
   if (first) throw first;
   if (paid.via && affiliatesOn(store) && paid.via.rate > 0) {
     await writeReferral(store, { ...sale, aff: paid.via.aff, rate: paid.via.rate, self: await isSelf(store, paid.via.aff, paid.email), promotion: affiliatePromotionFrom(paid.meta) ?? undefined, how: "click" });

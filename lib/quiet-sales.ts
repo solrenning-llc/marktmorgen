@@ -99,6 +99,7 @@ export async function checkQuiet(store: Store, now = Date.now()): Promise<QuietO
   if (!isRedisConfigured() || !isSenderConfigured() || !store.stripeAccountId) return "skipped";
   const standing = standingOf(store);
   if (standing !== "paid" && standing !== "trial") return "skipped";
+  if (store.alertEmailsOff === null) console.error(`quiet-sales: the alert email choice of ${store.handle} cannot be read; optional alert emails are held until the owner saves it again`);
   if (!wantsAlertEmail(store.alertEmailsOff, "quiet-sales")) return "skipped";
   if (await weeklyOff(store.handle)) return "skipped";
   const day = new Date(now).toISOString().slice(0, 10);

@@ -223,6 +223,8 @@ export async function checkAlerts(store: Store, now = Date.now()): Promise<Alert
   });
   if (!alerts.length) return { said: 0, skipped: false };
 
+  // A damaged choice holds every optional email (keptOff -> null); it is said here so it is seen (Claude 7's LEVE on #3013).
+  if (store.alertEmailsOff === null) console.error(`store-alerts: the alert email choice of ${store.handle} cannot be read; optional alert emails are held until the owner saves it again`);
   // The stop link is read only when some alert is one the creator wants by email (alertEmailsOff).
   const emailing = isSenderConfigured() && alerts.some((alert) => wantsAlertEmail(store.alertEmailsOff, alert.kind)) && !(await weeklyOff(store.handle));
   const chat = store.chatSales ? await chatAddress(store.statsId).catch(() => null) : null;

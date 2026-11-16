@@ -604,8 +604,9 @@ export type Store = {
    * The optional alert emails its owner switched off (lib/notify-prefs-rules.ts, queue item 601 [KB22] U6): none
    * until changed, so every alert is emailed as before. Kept here so each alert job follows the last saved choice
    * with the store it already holds, never a second reading. Account, payment, plan and legal emails never read it.
+   * null: the kept value is present but not a list (keptOff), so optional alert emails are held, and each alert job
+   * says so in the log, until the owner saves again.
    */
-  /** null: the kept list is not a list (keptOff), so optional alert emails are held until the owner saves again. */
   alertEmailsOff: OptionalEvent[] | null;
   /**
    * The creator's own websites that may open the store's checkout card and

@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { standingOf } from "@/lib/plan-standing";
-import { weeklyOff } from "@/lib/stats-report";
+import { weeklyOffState } from "@/lib/stats-report";
 import { StudioHeader } from "@/components/studio-header";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { NotifyPrefsPanel } from "@/components/notify-prefs-panel";
@@ -27,7 +27,7 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  *
  * What would make a choice here do nothing today is said at the top, never
  * hidden behind a box that looks on: the weekly email's stop link (which
- * stops all of these, read through lib/stats-report.ts weeklyOff) and a store
+ * stops all of these, read through lib/stats-report.ts weeklyOffState) and a store
  * that does not take payments yet. Redis: one SISMEMBER for the stop link;
  * when it cannot be read, the page says so instead of drawing it as off.
  */
@@ -41,9 +41,10 @@ export default async function StudioNotificationsPage({ searchParams }: Params) 
   const { view: access } = found;
   const store = access.store;
   if (access.role !== "owner") redirect(studioPath(store, "team=forbidden"));
-  // Unknown (the read failed) is its own state, never "not stopped": the panel
-  // then says it could not check and still offers the restart (SREM is idempotent).
-  const stopped: boolean | null = await weeklyOff(store.handle).catch(() => null);
+  // Unknown (the read failed, or its reply was unreadable) is its own state, never "not stopped" and never "stopped
+  // for sure" (Claude 7's LEVE on #3013): the panel then says it could not check and still offers the restart
+  // (SREM is idempotent). weeklyOff would read an unreadable reply as stopped, which is right for a job, not for a page.
+  const stopped: boolean | null = await weeklyOffState(store.handle).catch(() => null);
   const standing = standingOf(store);
   const takesPayments = Boolean(store.stripeAccountId) && (standing === "paid" || standing === "trial");
 

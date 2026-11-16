@@ -19,7 +19,9 @@
  * guess between sending against an "off" and losing an alert. No job can
  * run without the store record, so none decides without the choice. A list
  * in the record that names an event this code no longer has keeps the rest
- * (keptOff); one that is not a list at all reads as nothing switched off.
+ * (keptOff); a present value that is not a list at all (a stored null
+ * included) reads as unknown, and every optional email is held until the
+ * owner saves the choice again (Codex X2's reviews of #3013).
  *
  * Always on, shown as such with the reason: what keeps the account safe, what
  * says buyers cannot pay or the plan cannot be paid, what comes before a

@@ -225,7 +225,7 @@ async function main(): Promise<void> {
   const page = readFileSync("app/studio/notifications/page.tsx", "utf8");
   const panel = readFileSync("components/notify-prefs-panel.tsx", "utf8");
   is("the page is the owner's, and shows the store's own choice", page.includes('if (access.role !== "owner") redirect(') && page.includes("store.alertEmailsOff"), true);
-  is("it says when the stop link holds, with a way to undo it", page.includes("weeklyOff(store.handle)") && panel.includes("Start these emails again"), true);
+  is("it says when the stop link holds, with a way to undo it", page.includes("weeklyOffState(store.handle)") && panel.includes("Start these emails again"), true);
   is("it says when the store does not take payments yet", page.includes("These alerts start once your store takes payments"), true);
   is("a breadcrumb says where the owner is", page.includes('aria-label="Breadcrumb"') && page.includes('aria-current="page"'), true);
   is("nothing is disabled while saving, so focus stays", !panel.includes("disabled=") && panel.includes("aria-busy={busy}"), true);

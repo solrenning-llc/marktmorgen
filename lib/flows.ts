@@ -1468,7 +1468,9 @@ export async function sendDueSteps(
       // unsubscribed, bounced, removed) is in none of its lists: nothing went to them, and their run ends as left, so
       // no attempt stays open for good (Claude 2 (nuvem D) bug hunt).
       // Each is written only where their run still exists: one erased meanwhile leaves nothing behind (Claude 7 on #4307).
-      const accounted = new Set([...result.done, ...result.rest, ...uncertain]);
+      // Refused address by address (sendTo's fourth list, #3489) is accounted for: settled failed above, never also
+      // "left" (Claude 1 on #4307).
+      const accounted = new Set([...result.done, ...result.rest, ...uncertain, ...(result.refused ?? []).map((r) => r.email)]);
       const gone = going.filter((email) => !accounted.has(email));
       if (gone.length) counts.dropped += gone.length;
       if (waiting) {

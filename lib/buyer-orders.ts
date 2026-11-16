@@ -22,6 +22,7 @@
  * Like cancelling a membership, this works whatever state the creator's own
  * Marktmorgen subscription is in: somebody paid for that file, and they get it.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { currentMeta } from "@/lib/tier-rules";
 import { packageState, readBought } from "@/lib/call-packages";
 import { giftFrom } from "@/lib/gifts";
@@ -36,7 +37,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
-import { readStripePage } from "@/lib/stripe-list";
+import { StripeListUnreadable, readStripePage } from "@/lib/stripe-list";
 import { isSettled } from "@/lib/instant-pay";
 import type { ProductFile } from "@/lib/product-file";
 import { isLiveSub, soldAMembership } from "@/lib/membership-access";
@@ -582,7 +583,19 @@ function waitsForCheck(store: Store, session: Row): boolean {
   return saleHandles(store).has(meta.store ?? "") && isSettled(session) && meta.kind !== "call" && !meta.gift && !meta.group;
 }
 
-/** The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first. */
+/**
+ * Pages of a hundred checkouts read under one spelling of the address (Stripe's most a page) before the list is no
+ * longer known. Past the first, which is one of ORDERS_STRIPE_LISTS, each page is a call taken from the ceiling
+ * (ORDERS_STRIPE_CALLS) before it is made.
+ */
+const CHECKOUT_PAGES_MOST = 10;
+
+/**
+ * The address's checkouts on the creator's Stripe account under both spellings of it, each once, newest first: every
+ * page Stripe has, each read in its exact shape (readStripePage). A list that goes on past what may be read, a page
+ * that is not one, or more pages after a last row that cannot be read throws StripeListUnreadable: the page says the
+ * purchases could not be read, never that the older ones were not bought (rule 24).
+ */
 async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Promise<Row[]> {
   const account = store.stripeAccountId;
   if (!account) return [];
@@ -590,16 +603,22 @@ async function checkoutsOf(store: Store, email: string, meter?: OrdersMeter): Pr
   const variants = [...new Set([email.trim(), normaliseEmail(email)])];
   const checkouts = new Map<string, Row>();
   for (const variant of variants) {
-    const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
-    query.append("expand[]", "data.subscription");
-    // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
-    query.append("expand[]", "data.subscription.latest_invoice");
-    query.append("expand[]", "data.payment_intent.latest_charge");
-    meter?.alive();
-    const listed: unknown = await onAccount("GET", account, `/checkout/sessions?${query}`);
-    for (const session of rows(listed)) {
-      const id = typeof session.id === "string" ? session.id : "";
-      if (!checkouts.has(id)) checkouts.set(id, session);
+    let after = "";
+    for (let page = 0; ; page += 1) {
+      if (page >= CHECKOUT_PAGES_MOST || (page > 0 && meter && !meter.stripe(1))) throw new StripeListUnreadable("more checkouts than are read");
+      const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
+      if (after) query.set("starting_after", after);
+      query.append("expand[]", "data.subscription");
+      // Whether a past-due membership is still being retried is on its latest invoice (lib/membership-access.ts).
+      query.append("expand[]", "data.subscription.latest_invoice");
+      query.append("expand[]", "data.payment_intent.latest_charge");
+      meter?.alive();
+      const read = readStripePage(await onAccount("GET", account, `/checkout/sessions?${query}`));
+      // A row with no id it can read is left out, as it always was: nothing can be handed over under it.
+      for (const session of read.rows) if (!checkouts.has(session.id)) checkouts.set(session.id, session);
+      if (!read.hasMore) break;
+      if (!read.lastId) throw new StripeListUnreadable("more checkouts and no readable last one");
+      after = read.lastId;
     }
   }
   const createdAt = (row: Row) => (typeof row.created === "number" ? row.created : 0);
@@ -1022,27 +1041,13 @@ export async function purchasesFor(store: Store, email: string, meter?: OrdersMe
   return kept.slice(0, MAX_LISTED);
 }
 
-/** A whole number from one up after INCR, or null when the reply is not exactly that. */
-function incremented(reply: unknown): number | null {
-  const count = countOf(reply);
-  return count !== null && count >= 1 ? count : null;
-}
-
 /**
  * Whether one more request fits in the hour: true or false on a count read in
  * its exact shape, null when the answer is missing, cut short or of another
  * shape, which is never taken as room (CX-123 rule 24).
  */
 async function within(key: string, limit: number): Promise<boolean | null> {
-  const both = repliesFor(
-    await redisPipeline([
-      ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-      ["INCR", key],
-    ]),
-    2,
-  );
-  if (!both || (both[0] !== "OK" && both[0] !== null)) return null;
-  const count = incremented(both[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count === null ? null : count <= limit;
 }
 

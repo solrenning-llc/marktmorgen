@@ -10,7 +10,7 @@
  *
  * <store> is the store's statsId, which stays through a change of handle.
  */
-import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { withinStore } from "@/lib/metered-limits";
 import { createHash } from "node:crypto";
 import { WAIT_TOKEN, newWaitlistToken as newToken, waitlistTokenKey as tokenKey, parseStoreWaitlistGrant, type StoreWaitlistGrant as TokenGrant } from "@/lib/waitlist-tokens";
@@ -24,12 +24,14 @@ import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
 import {
   CONFIRM_SECONDS,
   LAUNCH_BATCH,
+  LAUNCH_HOLD_SECONDS,
   type LaunchJob,
   MAX_LAUNCH_ADDRESS,
   MAX_LAUNCH_NOTE,
@@ -50,6 +52,19 @@ const listKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}`;
 const jobKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:job`;
 const sendKey = (sid: string, pid: string) => `nl:wl:${sid}:${pid}:send`;
 const JOBS = "nl:wl:jobs";
+/**
+ * How long a launch's record and its send list are kept from their last
+ * write: the same for both, renewed together (launch, every batch, every held
+ * run), so the list never lapses while its record lives, and as long as the
+ * hold (LAUNCH_HOLD_SECONDS), so a held launch's record lives until its stop.
+ */
+const JOB_SECONDS = LAUNCH_HOLD_SECONDS;
+/**
+ * The hold's last week: a renewal read in another shape here stops the launch
+ * at once (holdLaunch), while its record still certainly lives, rather than
+ * leave it to lapse with nobody told.
+ */
+const HOLD_LAST_STRETCH = 7 * 86_400;
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -110,6 +125,8 @@ export async function joinWaitlist(input: {
   origin: string;
 }): Promise<JoinResult> {
   const { store, product, consent, ip, origin } = input;
+  // Switched off after notices about its content (lib/takedown.ts): no address is taken, as on its list.
+  if (store.suspended) return "closed";
   const raw = input.email.trim();
   if (!raw || raw.length > MAX_EMAIL_LENGTH || !EMAIL_PATTERN.test(raw)) return "email";
   if (!store.statsId || !isRedisConfigured()) return "error";
@@ -119,12 +136,21 @@ export async function joinWaitlist(input: {
   if (!(await withinStore("waitlist-ip", `${sid}:${ip}`, 10, 3_600, store))) return "limited";
   if (!(await withinLimit("waitlist-address", sha(email), 5, 3_600))) return "limited";
 
-  const [existing, size] = await redisPipeline([
+  // Both read exactly (rule 24): a length in another shape is never room on the list, and a place
+  // in another shape is never "not on it", which would write a confirmed place over as a new one.
+  const read = repliesFor(await redisPipeline([
     ["HGET", listKey(sid, product.id), email],
     ["HLEN", listKey(sid, product.id)],
-  ]);
+  ]), 2);
+  const existing = read?.[0];
+  const size = countOf(read?.[1]);
+  if (!read || size === null || (existing !== null && typeof existing !== "string")) return "error";
   const before = parseEntry(existing);
-  if (!before && Number(size) >= MAX_WAITLIST) return "full";
+  // Only a place that is not there (null) is "not on the list". A place kept as text that does not read is unknown
+  // (#4792): written over as a new one, it would lose a confirmed place and its leave token, take data room again and
+  // send a new confirmation. It is left as it is, and nothing is sent.
+  if (existing !== null && !before) return "error";
+  if (!before && size >= MAX_WAITLIST) return "full";
 
   const leave = before?.t ?? newToken();
   const asked = Boolean(before?.c) || consent;
@@ -173,20 +199,57 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
   return parseStoreWaitlistGrant(raw);
 }
 
+/**
+ * Writes a confirmed waitlist entry back only while its confirmation link and the entry itself still exist, in one
+ * step (#4268): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2] the entry. Answers 1 written, 0
+ * not. Billed as one EVAL and the calls inside it, at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the same
+ * check in one step.
+ */
+const WAIT_CONFIRM = [
+  "-- marktmorgen:waitlist-confirm:v1",
+  'if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HEXISTS", KEYS[2], ARGV[1]) == 0 then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  "return 1",
+].join("\n");
+
+/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HEXISTS and HSET (tests/waitlist-confirm-cost.test.ts). */
+export const WAIT_CONFIRM_CALLS = 3;
+
+/**
+ * Public requests of the store's a press takes before it writes anything (#4404): the page the button is on pays one,
+ * and a press that writes the entry back (WAIT_CONFIRM) or signs the address up to the list does more than that one
+ * pays for (the link and the store read again, the script and its calls, the sign-up's first round), so it takes one
+ * more first, or writes nothing. Held in tests/waitlist-confirm-cost.test.ts and named in tests/plan-cost-registry.ts.
+ */
+export const WAIT_CONFIRM_UNITS = 1;
+
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
+  // Switched off after notices about its content: the spot does not count and joins no list (lib/store-join.ts listOpen).
+  if (store?.suspended) return { ok: false };
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
   const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
   const entry = parseEntry(raw);
   if (!entry) return { ok: false };
+  // Paid before it spends: a press that writes takes WAIT_CONFIRM_UNITS of the store's public requests, or is refused.
+  const joins = Boolean(entry.c && store.listId);
+  // Refused for want of a request: the link still works, so the page says to press it again later, never "expired".
+  if ((!entry.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false, reason: "busy" };
+  // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
+  // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
+  // the list again and lifts the erasure print.
   if (!entry.ok) {
-    await redisPipeline([["HSET", listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, JSON.stringify({ ...entry, ok: now() })]]);
+    if (written !== 1) return { ok: false };
   }
-  if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
-      console.error("could not add a waitlist address to a list", error),
-    );
+  if (joins && store.listId) {
+    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
+      console.error("could not add a waitlist address to a list", error);
+      // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.
+      return error instanceof UnknownReplyError ? ({ gone: true } as const) : null;
+    });
+    if (added?.gone) return { ok: false };
   }
   return { ok: true, productId: grant.p };
 }
@@ -204,7 +267,8 @@ export async function leaveWaitlist(token: string): Promise<boolean> {
 
 // ------------------------------------------------------------------ the studio
 
-export type WaitlistView = { soon: boolean; confirmed: number; waiting: number; launch: LaunchJob | null };
+/** `switchedOff`: the store is switched off after notices, so a launch still owed is paused (runLaunches). */
+export type WaitlistView = { soon: boolean; confirmed: number; waiting: number; launch: LaunchJob | null; switchedOff: boolean };
 
 export async function waitlistViews(store: Store, productIds: string[]): Promise<Record<string, WaitlistView>> {
   const out: Record<string, WaitlistView> = {};
@@ -221,6 +285,7 @@ export async function waitlistViews(store: Store, productIds: string[]): Promise
       confirmed: entries.filter(([, e]) => e.ok > 0).length,
       waiting: entries.filter(([, e]) => e.ok === 0).length,
       launch,
+      switchedOff: Boolean(store.suspended),
     };
   });
   return out;
@@ -236,13 +301,15 @@ function entriesOf(raw: unknown): [string, WaitEntry][] {
   return pairs.map(([k, v]) => [k, parseEntry(v)] as [string, WaitEntry | null]).filter((p): p is [string, WaitEntry] => p[1] !== null);
 }
 
-export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" };
+export type LaunchResult = { ok: true; total: number } | { ok: false; reason: "address" | "busy" | "switched_off" };
 
 /**
  * Puts the product on sale and starts the one email to everyone who
- * confirmed. The five-minute job sends it (runLaunches).
+ * confirmed. The five-minute job sends it (runLaunches). Refused, with
+ * nothing written, while the store is switched off after notices.
  */
 export async function launch(store: Store, product: Listing, input: { note: unknown; address: unknown }): Promise<LaunchResult> {
+  if (store.suspended) return { ok: false, reason: "switched_off" };
   const address = cleanLine(input.address, MAX_LAUNCH_ADDRESS);
   const note = cleanText(input.note, MAX_LAUNCH_NOTE);
   if (!store.statsId) return { ok: false, reason: "busy" };
@@ -257,13 +324,13 @@ export async function launch(store: Store, product: Listing, input: { note: unkn
   const total = confirmed.length;
   // A postal address is the law's for an email that offers something for sale (CAN-SPAM).
   if (total > 0 && !address) return { ok: false, reason: "address" };
-  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now() };
+  const job: LaunchJob = { handle: store.handle, note, address, total, cursor: 0, sent: 0, started: now(), finished: total ? 0 : now(), stopped: 0 };
   await redisPipeline([
     ["SREM", soonKey(sid), product.id],
-    ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", 120 * 86_400],
+    ["SET", jobKey(sid, product.id), JSON.stringify(job), "EX", JOB_SECONDS],
     ["DEL", sendKey(sid, product.id)],
     ...(total
-      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), 30 * 86_400], ["SADD", JOBS, `${sid}|${product.id}`]]
+      ? [["RPUSH", sendKey(sid, product.id), ...confirmed], ["EXPIRE", sendKey(sid, product.id), JOB_SECONDS], ["SADD", JOBS, `${sid}|${product.id}`]]
       : [["DEL", listKey(sid, product.id)]]),
   ]);
   return { ok: true, total };
@@ -348,6 +415,15 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       continue;
     }
     const { store, product } = target;
+    // Switched off after notices about its content (lib/takedown.ts): the
+    // launch waits where it is, nothing reserved or sent, and goes on once
+    // the store is back on. Each held run keeps its record and send list
+    // alive; held LAUNCH_HOLD_SECONDS from its start, it stops (holdLaunch).
+    // One already handled in full only has its finish written below.
+    if (store.suspended && job.cursor < job.total) {
+      await holdLaunch(sid, pid, member, job);
+      continue;
+    }
     const said = speech(store);
     const g = givingWords(store.language);
     const words = launchBody(
@@ -361,7 +437,15 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
       store.language,
     );
     const sender = { ...store, mail: { fromName: store.mail?.fromName || store.name, address: job.address } };
+    let batches = 0;
     while (job.cursor < job.total && Date.now() <= deadline) {
+      // Read again before every batch after the first, so a switch-off during
+      // the run stops the rest (one store read a batch). Anything but this
+      // store, read and on, waits for the next run, which reads it in full.
+      if (batches++ > 0) {
+        const again = await load(job.handle).catch(() => null);
+        if (!again || again.statsId !== sid || again.suspended) break;
+      }
       const [slice] = await redisPipeline([["LRANGE", sendKey(sid, pid), job.cursor, job.cursor + LAUNCH_BATCH - 1]]);
       const emails = Array.isArray(slice) ? (slice as string[]) : [];
       if (!emails.length) break;
@@ -416,7 +500,11 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
         sent += chunk.length;
       }
       job.cursor += emails.length;
-      await redisPipeline([["SET", jobKey(sid, pid), JSON.stringify(job), "EX", 120 * 86_400]]);
+      // The send list is renewed with the record, so it never lapses while the record lives.
+      await redisPipeline([
+        ["SET", jobKey(sid, pid), JSON.stringify(job), "EX", JOB_SECONDS],
+        ["EXPIRE", sendKey(sid, pid), JOB_SECONDS],
+      ]);
     }
     if (job.cursor >= job.total) {
       job.finished = now();
@@ -434,15 +522,73 @@ export async function runLaunches(load: (handle: string) => Promise<Store | null
 }
 
 /**
+ * A launch owed while its store is switched off. Before LAUNCH_HOLD_SECONDS
+ * from its start, one EXPIRE pair renews its send list and its record, so it
+ * still goes out once the store is back on; a reply not in its shape is logged
+ * and the launch held as it is, tried again next run (rule 24), except in the
+ * hold's last week (HOLD_LAST_STRETCH), where it stops at once: every write of
+ * the record is at or after its start and keeps it JOB_SECONDS, so it still
+ * lives then, and the stop is seen instead of a silent lapse. Past it, or
+ * once its send list is confirmed gone (EXPIRE 0), the launch stops: its record
+ * says so (`stopped`), kept as a finished launch is, the addresses already
+ * handled leave the waitlist, and whoever was not emailed stays on it, so the
+ * creator can start the launch again. The handled addresses are read exactly
+ * (LRANGE of the cursor's length); another shape holds it for the next run.
+ */
+async function holdLaunch(sid: string, pid: string, member: string, job: LaunchJob): Promise<void> {
+  if (now() - job.started < LAUNCH_HOLD_SECONDS) {
+    const renewed = repliesFor(
+      await redisPipeline([
+        ["EXPIRE", sendKey(sid, pid), JOB_SECONDS],
+        ["EXPIRE", jobKey(sid, pid), JOB_SECONDS],
+      ]),
+      2,
+    );
+    if (!renewed || !renewed.every((r) => r === 0 || r === 1)) {
+      if (now() - job.started < LAUNCH_HOLD_SECONDS - HOLD_LAST_STRETCH) {
+        console.error("holding a waitlist launch: its keys were renewed in an unknown shape, so it waits", new UnknownReplyError("a held launch's renewal"));
+        return;
+      }
+      console.error("holding a waitlist launch: its keys were renewed in an unknown shape in the hold's last week, so it stops now", new UnknownReplyError("a held launch's renewal"));
+    } else if (renewed[1] === 0 || renewed[0] === 1) {
+      // The record lapsed between the reads: the next run's exact nil ends it.
+      // The send list still there, or none owed: held as it is.
+      return;
+    }
+  }
+  const handled = job.cursor > 0 ? stringList(repliesFor(await redisPipeline([["LRANGE", sendKey(sid, pid), 0, job.cursor - 1]]), 1)?.[0]) : [];
+  // An exact list of the cursor's length, or an exact empty one when the list is gone; anything else waits.
+  if (!handled || (handled.length !== job.cursor && handled.length !== 0)) {
+    console.error("stopping a waitlist launch: who it emailed was read in an unknown shape, so it waits", new UnknownReplyError("a stopped launch's handled addresses"));
+    return;
+  }
+  const at = now();
+  await redisPipeline([
+    ["SET", jobKey(sid, pid), JSON.stringify({ ...job, finished: at, stopped: at }), "EX", 90 * 86_400],
+    ...(handled.length ? [["HDEL", listKey(sid, pid), ...handled]] : []),
+    ["DEL", sendKey(sid, pid)],
+    ["SREM", JOBS, member],
+  ]);
+}
+
+/**
  * Takes one address off every waitlist of the store, out of any launch email
  * still going out, and deletes its confirm and leave links (lib/person-erasure.ts).
  */
 export async function forgetWaitlistPerson(sid: string | null, productIds: string[], email: string): Promise<number> {
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
-  const replies = productIds.length ? await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])) : [];
+  let removed = 0;
+  if (productIds.length) {
+    // One reply per product, each the integer 0 or 1. Anything else is unknown (rule 24, #4383): an entry holding the
+    // address may still be there to be copied into a launch, so the erasure is never reported complete; its retry
+    // deletes what is left.
+    const replies = repliesFor(await redisPipeline(productIds.map((p) => ["HDEL", listKey(sid, p), address])), productIds.length);
+    if (!replies || replies.some((n) => n !== 0 && n !== 1)) throw new UnknownReplyError("a person's waitlist deletions");
+    removed = replies.reduce<number>((sum, n) => sum + (n as number), 0);
+  }
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0) + blanked;
+  return removed + blanked;
 }
 
 /**

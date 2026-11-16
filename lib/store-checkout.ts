@@ -18,7 +18,8 @@ import { currentMeta } from "@/lib/tier-rules";
 import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
 import { fairCoupon, memberCoupon } from "@/lib/fair-coupon";
-import { isMemberPercent } from "@/lib/member-price-rules";
+import { isMemberPercent, memberKeepsFloor } from "@/lib/member-price-rules";
+import { currencyRule } from "@/lib/money";
 import { introCoupon } from "@/lib/intro-coupon";
 import { activeIntro } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
@@ -521,7 +522,12 @@ export async function createCheckout(
   // (a product no rule may cover), nor a gift, places for others or a
   // pre-order, which hand nothing to the member (lib/bundle-rules.ts).
   const memberAlone = added.length === 0 && !extras.gift && !extras.group && !extras.preorder;
-  const memberOffNow = !extras.coupon && !plan && !membership && memberAlone && saleable(product) && extras.member && isMemberPercent(extras.member.percent) ? extras.member.percent : 0;
+  // Never below the currency's smallest charge, as a sale and a fair price (DISC-S-1): memberClaim already
+  // refuses such a claim; this holds the floor for any other caller too.
+  const memberOffNow =
+    !extras.coupon && !plan && !membership && memberAlone && saleable(product) && extras.member && isMemberPercent(extras.member.percent) && memberKeepsFloor(product, extras.member.percent, currencyRule(store.currency).minCharge)
+      ? extras.member.percent
+      : 0;
   // A membership's introductory price (lib/intro-price.ts), unless a
   // come-back offer replaces it: one discount at a time, as everywhere here.
   const intro = membership && !extras.coupon ? activeIntro(product, store.tiers) : null;

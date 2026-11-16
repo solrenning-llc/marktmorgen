@@ -54,6 +54,7 @@ import { NEXT_OFFER_CHOICES, NEXT_OFFER_PRODUCTS, NEXT_OFFER_REQUEST_UNITS } fro
 import { DISCOUNT_NAMES, discountKindOf } from "@/lib/discount-impact";
 import { addProduct, claimHandle, ensureStatsId, setMemberPrices, setProductLink, setStripeAccount, setSubscription, setStoreSale, storeForEmail } from "@/lib/store";
 import { readProduct } from "@/lib/catalog";
+import { currencyRule } from "@/lib/money";
 import { createCheckout } from "@/lib/store-checkout";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
@@ -172,10 +173,10 @@ async function main(): Promise<void> {
   ], [0, 0, 0, 0]);
   is("the products each rule names", [memberRulesFor(setting, candidate()).map((r) => r.id), memberRulesFor(setting, candidate({ id: "p2" })).map((r) => r.id)], [["club", "buyers"], ["club"]]);
   is("what would qualify for this product", qualifyingFor(setting, candidate()), ["club", "guide"]);
-  is("nothing held: nothing off", memberOffFrom(setting, candidate(), new Set()), 0);
-  is("holding one: its rule's percentage", memberOffFrom(setting, candidate(), new Set(["club"])), 20);
-  is("holding both: the larger, never the sum", memberOffFrom(setting, candidate(), new Set(["club", "guide"])), 30);
-  is("switched off: nothing", memberOffFrom({ ...setting, on: false }, candidate(), new Set(["club", "guide"])), 0);
+  is("nothing held: nothing off", memberOffFrom(setting, candidate(), new Set(), 50), 0);
+  is("holding one: its rule's percentage", memberOffFrom(setting, candidate(), new Set(["club"]), 50), 20);
+  is("holding both: the larger, never the sum", memberOffFrom(setting, candidate(), new Set(["club", "guide"]), 50), 30);
+  is("switched off: nothing", memberOffFrom({ ...setting, on: false }, candidate(), new Set(["club", "guide"]), 50), 0);
   is("the coupon on the creator's account", memberCouponId(20), "mm_member_20");
 
   part("Who is a member, from Stripe's rows");
@@ -371,6 +372,41 @@ async function main(): Promise<void> {
   is("the route refuses a claim on anything but the member's own purchase alone, before a gift or a group is written down", alone > 0 && alone < route.indexOf("startGift(") && alone < route.indexOf("startGroup("), true);
   is("the route passes only what memberClaim proved", route.includes("member = { percent: claim.member, email: claim.email };"), true);
   is("a member price never opens the closed single-file category", charge_.includes('!(body.has("discounts[0][coupon]") && !body.has("metadata[member]"))'), true);
+
+  part("Never below the currency's smallest charge, as a sale or a fair price (DISC-S-1, #4550)");
+  // A $1.00 product under a 90% member rule would be 10 cents, below the 50 Stripe charges in US dollars: the page
+  // would promise a price the till cannot take. Like saleOff and fairOff, a rule that takes it below minCharge does not
+  // apply; a smaller rule the member also meets, that keeps the floor, does.
+  await setStoreSale(OWNER, { name: "", percent: 0, starts: 0, ends: 0, all: true, products: [], coupon: "" });
+  const pin = await addProduct(OWNER, "Enamel Pin", "", "1", null);
+  if (!pin.ok) throw new Error("no pin");
+  await setProductLink(OWNER, pin.product.id, "https://example.com/pin");
+  await setMemberPrices(OWNER, {
+    on: true,
+    rules: [
+      { id: "deep", percent: 90, by: [club.product.id], all: true, products: [] },
+      { id: "pins", percent: 40, by: [club.product.id], all: false, products: [pin.product.id] },
+    ],
+  });
+  const pinNow = async () => (await readProduct(await current(), pin.product.id))!;
+  const floor = currencyRule((await current()).currency).minCharge;
+  is("US dollars charge at least 50 cents", floor, 50);
+  is("RED: DISC-S-1: the 90% rule is not taken on the $1.00 pin; the 40% one is ($0.60)", memberOffFrom((await current()).memberPrices, await pinNow(), new Set([club.product.id]), floor), 40);
+  is("the planner keeps its 90% ($2.70)", memberOffFrom((await current()).memberPrices, await plannerNow(), new Set([club.product.id]), floor), 90);
+  sessionsByEmail = { [MEMBER]: [joined(club.product.id, "active")] };
+  is("RED: DISC-S-1: the page's check says 40% for the pin, what the till can take", await memberPriceFor(await current(), await pinNow(), proved), { state: "member", percent: 40, email: MEMBER });
+  is("and 90% for the planner", await memberPriceFor(await current(), await plannerNow(), proved), { state: "member", percent: 90, email: MEMBER });
+  is("RED: DISC-S-1: a claim of 90% on the pin is refused before Stripe", await memberClaim(await current(), await pinNow(), 90, proved), { ok: false });
+  const openPin = async (more: Parameters<typeof createCheckout>[4] = {}) => {
+    checkouts.length = 0;
+    const s = await current();
+    await createCheckout(s, await pinNow(), "https://marktmorgen.com", "", { ...more, digitalConsent: TEST_CONSENT });
+    return checkouts[0];
+  };
+  sent = await openPin({ member: { percent: 90, email: MEMBER } });
+  is("RED: DISC-S-1: a 90% member price handed to the checkout is never sent for the pin, so Stripe charges $1.00, not 10 cents", [sent.get("discounts[0][coupon]"), sent.get("metadata[member]")], [null, null]);
+  sent = await openPin({ member: { percent: 40, email: MEMBER } });
+  is("the 40% one is: $0.60", [sent.get("discounts[0][coupon]"), sent.get("metadata[member]")], ["mm_member_40", "40"]);
 
   part("What it reads, held to an existing line");
   is("counted as the next product after a purchase is, from the plan's public requests", MEMBER_PRICE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);

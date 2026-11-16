@@ -232,7 +232,7 @@ async function main(): Promise<void> {
   part("Card notices: a card page whose setting is unsure is read again on the next run (merge of main's \"unsure\")");
   reset();
   {
-    const account = "acct_1TestCardUnsure1";
+    const account = "acct_1TestCardUnsur";
     const product = await makeStore("cards-unsure@example.com", "cardunsure", account, true);
     active.set(account, running("cardunsure", product, 600, [10]));
     const sub = "sub_cardunsureRun0010";

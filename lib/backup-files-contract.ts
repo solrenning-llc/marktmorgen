@@ -18,7 +18,10 @@
  * (the provider has another page), "cutoff" (the route's time ran out),
  * "page_bytes" (the 1 MB cap), each with a cursor to go on from; or
  * "over_bound" (the store holds more than its pages can list, so its listing
- * can never complete, and no cursor). An incomplete page never holds a
+ * can never complete, and no cursor); or "unsignable" (the listing reached its
+ * end, but at least one of its keys could not be signed as itself, so it was
+ * left out: never complete, no cursor, and the Worker alarms and applies no
+ * orphan end, as for over_bound; Claude 5's MEDIUM on #3313). An incomplete page never holds a
  * deletion: deletion records come on their own page (kind "deletions"), from
  * the records the site keeps, never from what a listing misses.
  *
@@ -61,7 +64,7 @@ export const BACKUP_FILES_OBJECTS_PER_MONTH = 10_000;
 /** How long a signed read URL lasts: 15 minutes (R2 allows 1 s to 7 days, Blob at most 7 days). */
 export const BACKUP_FILES_URL_SECONDS = 900;
 
-export const BACKUP_FILES_REASONS = ["done", "more", "cutoff", "page_bytes", "over_bound"] as const;
+export const BACKUP_FILES_REASONS = ["done", "more", "cutoff", "page_bytes", "over_bound", "unsignable"] as const;
 export type BackupFilesReason = (typeof BACKUP_FILES_REASONS)[number];
 export const BACKUP_DELETION_REASONS = ["creator_deleted", "store_closed", "privacy_request"] as const;
 export type BackupDeletionReason = (typeof BACKUP_DELETION_REASONS)[number];
@@ -160,7 +163,7 @@ function pageEnd(value: Record<string, unknown>, reasons: readonly string[]): { 
   if (typeof reason !== "string" || !reasons.includes(reason)) fail("reason is not one the contract knows");
   if (cursor !== null && (typeof cursor !== "string" || !CURSOR_PATTERN.test(cursor))) fail("cursor is neither null nor base64url");
   if (complete !== (reason === "done")) fail("complete is true exactly when the reason is done");
-  if (reason === "done" || reason === "over_bound") {
+  if (reason === "done" || reason === "over_bound" || reason === "unsignable") {
     if (cursor !== null) fail(`a ${reason as string} page carries no cursor`);
   } else if (cursor === null) fail("an incomplete page needs a cursor to go on from");
   return { cursor: cursor as string | null, complete: complete as boolean, reason: reason as string };

@@ -62,6 +62,8 @@
  *     the last entry signed, losing none;
  *   - at most BACKUP_FILES_PAGES_PER_STORE provider pages a listing: a store
  *     with more objects is answered "over_bound", never complete (item 8);
+ *   - a key that cannot be signed as itself is left out alone and its listing
+ *     ends "unsignable", never complete (Claude 5's MEDIUM on #3313);
  *   - at most the review's maxPagesPerDay pages a UTC day for each source,
  *     counted before the provider is asked (one INCR and one EXPIRE NX, lib/window-count.ts, read
  *     in their exact shape, rule 24): past it 429, unreadable 503.
@@ -214,11 +216,12 @@ export function admitFilesReview(raw: unknown): BackupFilesRouteReview | null {
 
 // -------------------------------------------------------------------- cursor
 
-type CursorState = { page: number; provider: string | null; after: string | null };
+/** `refused`: a key of this listing, on an earlier page or call, could not be signed and was left out (Claude 5's MEDIUM on #3313). */
+type CursorState = { page: number; provider: string | null; after: string | null; refused?: true };
 
 /** Where the next page starts: the provider page (its index and its own cursor) and the last key signed in it, if any. */
 export function encodeFilesCursor(source: BackupFilesSource, store: string, state: CursorState): string {
-  return Buffer.from(JSON.stringify({ v: 1, s: source, st: store, p: state.page, c: state.provider, a: state.after }), "utf8").toString("base64url");
+  return Buffer.from(JSON.stringify({ v: 1, s: source, st: store, p: state.page, c: state.provider, a: state.after, ...(state.refused ? { r: 1 } : {}) }), "utf8").toString("base64url");
 }
 
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -233,13 +236,14 @@ export function decodeFilesCursor(text: string, source: BackupFilesSource, store
     return null;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const { v, s, st, p, c, a, ...rest } = value as Record<string, unknown>;
+  const { v, s, st, p, c, a, r, ...rest } = value as Record<string, unknown>;
   if (Object.keys(rest).length || v !== 1 || s !== source || st !== store) return null;
+  if (r !== undefined && r !== 1) return null;
   if (typeof p !== "number" || !Number.isSafeInteger(p) || p < 0 || p >= BACKUP_FILES_PAGES_PER_STORE) return null;
   const text1 = (x: unknown, most: number) => x === null || (typeof x === "string" && x.length > 0 && x.length <= most && !CONTROL.test(x));
   if (!text1(c, 2048) || !text1(a, 1024)) return null;
   if (p > 0 && c === null) return null;
-  return { page: p, provider: c as string | null, after: a as string | null };
+  return { page: p, provider: c as string | null, after: a as string | null, ...(r === 1 ? { refused: true as const } : {}) };
 }
 
 // ------------------------------------------------------------- day's ceiling
@@ -272,6 +276,14 @@ class SourceError extends Error {
 const fail = (message: string): never => {
   throw new SourceError(message);
 };
+
+/** A key whose signed address would not lead to it (leadsTo): that one object is left out of the page, never the page. */
+class UnsignableKey extends SourceError {
+  constructor() {
+    super("a signed URL whose address is not the key's");
+    this.name = "BackupFilesUnsignableKey";
+  }
+}
 
 /** One page of Vercel Blob under `prefix`, read in its exact shape; throws on anything else. */
 async function listBlob(prefix: string, cursor: string | null): Promise<Listed> {
@@ -326,7 +338,8 @@ function blobSigner(now: () => number): Signer {
     // with "?", "#" or an encoded part gives an address whose request path is not the signed one. As R2's signer
     // checks (lib/backup-files-r2.ts), the address must decode back to exactly this key, with no fragment, or the page
     // is not answered, never handed out as signed (Claude 7's LEVE on #3313).
-    if (!leadsTo(url as string, key)) fail("a signed URL whose address is not the key's");
+    // That one key is left out, and its listing is never called complete (backupFilesPage, Claude 5's MEDIUM on #3313).
+    if (!leadsTo(url as string, key)) throw new UnsignableKey();
     return { url: url as string, expiresAt: held.validUntil };
   };
 }
@@ -388,17 +401,30 @@ export async function backupFilesPage(
   }
   const entries: BackupFilesEntry[] = [];
   let bytes = PAGE_HEAD_BYTES;
+  // A key that cannot be signed as itself ("%" or "#" kept in a Blob name: Claude 5's MEDIUM on #3313) is left out,
+  // never handed out, and never takes the other entries down with it; the listing carries it in its cursor, so its
+  // end is "unsignable", never complete, and the Worker alarms and applies no orphan end.
+  let refused = state.refused === true;
+  const carry = (next: CursorState): CursorState => (refused ? { ...next, refused: true } : next);
   for (const object of objects) {
-    const resume = { page: state.page, provider: state.provider, after: entries.length ? entries[entries.length - 1].key : state.after };
+    const resume = carry({ page: state.page, provider: state.provider, after: entries.length ? entries[entries.length - 1].key : state.after });
     if (now() >= options.stopAt) return answer(entries, "cutoff", resume);
-    const signed = await source.sign(object.key);
+    let signed: { url: string; expiresAt: number };
+    try {
+      signed = await source.sign(object.key);
+    } catch (error) {
+      if (!(error instanceof UnsignableKey)) throw error;
+      if (!refused) console.error("backup files: a key could not be signed as itself and is left out", input.source);
+      refused = true;
+      continue;
+    }
     const entry: BackupFilesEntry = { source: input.source, key: object.key, etag: object.etag, size: object.size, url: signed.url, expiresAt: signed.expiresAt };
     const weight = Buffer.byteLength(JSON.stringify(entry), "utf8") + 1;
     if (bytes + weight > BACKUP_FILES_PAGE_BYTES) return answer(entries, "page_bytes", resume);
     bytes += weight;
     entries.push(entry);
   }
-  if (listed.next === null) return answer(entries, "done", null);
+  if (listed.next === null) return answer(entries, refused ? "unsignable" : "done", null);
   if (state.page + 1 >= BACKUP_FILES_PAGES_PER_STORE) return answer(entries, "over_bound", null);
-  return answer(entries, "more", { page: state.page + 1, provider: listed.next, after: null });
+  return answer(entries, "more", carry({ page: state.page + 1, provider: listed.next, after: null }));
 }

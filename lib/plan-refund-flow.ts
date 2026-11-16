@@ -523,13 +523,15 @@ export async function refundAndEndPlan(store: Store, nowSeconds = Math.floor(Dat
     // our stop is taken back at once and the note goes.
     const notMade = async (reason: Exclude<PlanRefundFlow, { ok: true }>["reason"], maybe: boolean): Promise<PlanRefundFlow> => {
       if (!maybe) {
-        if (note.m === 1 && (await takeBackStop(id)) !== null) {
+        const back = note.m === 1 ? await takeBackStop(id) : null;
+        if (back === "live") {
           // Said before the note goes: if its removal is lost, a later run must not take back a stop the creator
-          // set themselves since (comment 6807195181 on #3585).
+          // set themselves since (comment 6807195181 on #3585). Not when the plan has ended: the note keeps m: 1, so
+          // the daily job, after a lost removal, reads the plan again and never says it renews (Codex Y on #3740).
           note = { ...note, m: 0 };
           await writeNote(store.sid, note);
         }
-        if (note.m === 0) {
+        if (note.m === 0 || back === "ended") {
           await dropNote(store.sid);
           return { ok: false, reason, stopLeft: false };
         }
@@ -716,9 +718,11 @@ export async function finishPlanRefunds(deadline: number, nowSeconds = Math.floo
         counts.left += 1;
         continue;
       }
-      if (note.m === 1) {
+      if (note.m === 1 && back === "live") {
         // Our stop is gone: the note says so before it is dropped, so a lost removal never lets a later run take back
-        // a stop the creator set themselves since (comment 6807195181 on #3585).
+        // a stop the creator set themselves since (comment 6807195181 on #3585). Not when the plan has ended: the note
+        // keeps m: 1, so a run after a lost removal reads the plan again and says it ended, never that it renews
+        // (Codex Y on #3740). An ended plan has no stop left for a later run to take back.
         await writeNote(sid, { ...note, m: 0 });
       }
       await dropNote(sid);

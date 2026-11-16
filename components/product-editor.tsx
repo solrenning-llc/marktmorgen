@@ -3,6 +3,8 @@
 import { optionPriceReview, optionRemovalWords, priceReview as reviewPrice, type PriceField } from "@/lib/price-review";
 import { isBundle } from "@/lib/bundle-rules";
 import { PRODUCT_OUTLINE, PRODUCT_OUTLINE_LEFT, productOutlineMessage } from "@/lib/product-outline";
+import { templatePublishMessage } from "@/lib/template-text-rules";
+import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { PackageEditor } from "@/components/package-editor";
 import { PodcastToggle } from "@/components/podcast-toggle";
 import { WaitlistPanel } from "@/components/waitlist-panel";
@@ -137,6 +139,12 @@ const MESSAGES: Record<string, string> = {
   outline_left: PRODUCT_OUTLINE_LEFT,
   ...STUDIO_MESSAGES,
   title: "Give it a name before saving.",
+  // A sales page published with a part still to write, marked ⟦…⟧ or in a campaign's [brackets] (Revisor 2 on #3593).
+  placeholder: "This product's sales page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Open it under Sales pages, replace each one with your own words, then publish it. Nothing was published.",
+  // A sales page added to a draft while it was being published (review of #3693): nothing was published.
+  page_changed: "This product's sales page changed while it was being published, so nothing was published. Publish it again.",
+  // A sales page whose size could not be read when publishing (Claude 6 on #3693): not "gone", only not checked.
+  page_unread: "Your sales page could not be checked just now. Nothing was published. Try again in a minute.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
@@ -163,6 +171,8 @@ const MESSAGES: Record<string, string> = {
   unknown: "That is no longer on your store.",
   // The file named is an episode's audio of this product's podcast (app/api/store/file/attach).
   in_use: "That file is already used on this product. Choose the file from your device again.",
+  memberships: "Members or payment plans are still being charged for this on Stripe. Cancel them in your Stripe dashboard first, then remove it, so nobody keeps paying for something removed.",
+  stripe: "We could not check with Stripe whether anyone is still being charged for this. Nothing was removed. Try again in a moment.",
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
@@ -294,8 +304,20 @@ async function send(
       const said = data as { left?: unknown; product?: unknown };
       return wrong(productOutlineMessage(payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save", typeof said.left === "string" ? said.left : null, typeof said.product === "string" ? said.product : null));
     }
+    if (data.error === "placeholder") {
+      // A part left to write on the draft's sales page (754 [STN1]), said with where it is.
+      const said = data as { field?: unknown; kind?: unknown; part?: unknown; product?: unknown };
+      const field = said.field === "block" || said.field === "search" || said.field === "test" ? said.field : null;
+      const kind = field === "block" && (said.kind === "booking" || BLOCK_KINDS.some((k) => k.kind === said.kind)) ? (said.kind as BlockKind) : null;
+      if (field && typeof said.part === "string" && said.part && (field !== "block" || kind)) {
+        return wrong(templatePublishMessage({ field, kind, part: said.part }, typeof said.product === "string" ? said.product : null));
+      }
+      return wrong(MESSAGES.placeholder);
+    }
     // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
     if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
+    // The studio's own words when its requests are used up (lib/studio-route.ts), as the server says them.
+    if (data.error === "studio_used" && typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) return wrong((data as { message: string }).message);
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {
@@ -514,7 +536,7 @@ function ProductForm({
         {offerOutline && !loadingAbout ? (
           <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
             <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
-              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace, brackets and all, with your own words. This product can&apos;t go on your store until you replace every one.
             </p>
             {draft.about.trim() ? (
               <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>

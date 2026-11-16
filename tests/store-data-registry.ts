@@ -337,6 +337,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:remind:failed:@lib/billing-reminders.ts": company("A failed invoice told", "The company's emails to creators about their own plan."),
   "nl:billing:sync:after@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
   "nl:billing:sync:cursor@lib/billing-sync.ts": company("Where the billing sync stopped", "One key, the company's job."),
+  "nl:billing:period-read:@lib/billing-sync.ts": lock("A paying store's one Stripe read of its unknown period, at most one a minute (60 s, made only if absent)"),
   "nl:plan-refund:@lib/plan-refund-flow.ts": company("One store's plan refund lock while its refund is made and its plan ended (305 [SY1])", "One short key a store, the company's money job: a random token, expiring by itself FLOW_LOCK_SECONDS (505) after it was taken, released at once when done (lib/plan-refund-flow.ts)."),
   "nl:plan-refund:ending@lib/plan-refund-flow.ts": company("Plan refunds not finished yet (305 [SY1])", "One hash, one small field a store with a refund in progress (a subscription id, two times, a flag and up to MAX_PARTS (6) charge ids with their amounts; no person's data), removed when the plan is ended or the refund is found not made, by the request itself or the daily job; one whose refund cannot be read is kept, with its stop, until it reads, and said in the log after GIVE_UP_DAYS (7) (lib/plan-refund-flow.ts)."),
   "nl:plan-refund:next@lib/plan-refund-flow.ts": company("The daily job's place among plan refunds not finished yet (305 [SY1])", "One short key for every store, the company's job: the id of the store whose refund note the daily job looked at last, so the next run starts after it and every note has its turn; written once a run, gone by itself NEXT_SECONDS (30 days) after the last run that looked at a note; no person's data (lib/plan-refund-flow.ts)."),
@@ -380,7 +381,14 @@ export const FAMILIES: Record<string, Family> = {
   "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   // C4-33 (4): a product update's searches for its buyers, from a count of their own.
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
-  "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
+  "nl:meet:rf:@lib/call-meetings.ts": {
+    what: "Refunds read for meetings: those handled (and a call's refund held for later, marked as one), where the read stands and its pass, and the day's alert of a call's refund pending more than seven days",
+    parts: [
+      per("order", 61, MARK, "Refunds already handled, and a call's refund held for later (one mark each), sixty-one days after the last one read."),
+      per("order", 1, KEY, "One alert mark a charge of a call's refund pending more than seven days, a day (the owner's decision 18)."),
+      capped(400, "Where a pass over the refunds for meetings stands: one a store, under 400 bytes, seven days after it last moved (A3)."),
+    ],
+  },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
@@ -713,6 +721,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:meet:user:@lib/meet-connect.ts": company("The stores a Zoom user connected", "Per Zoom user, for Zoom's uninstall notice."),
   "nl:meet:lock:@lib/meet-links.ts": short("A meeting being made", "integration", 1, 128),
   "nl:meet:stores@lib/meet-links.ts": company("Stores with meetings to tidy", "One sorted set for every store."),
+  // Pre-review of claude5/call-refund-stores-cursor: the meetings' refund job's rotation, the list's members again.
+  "nl:meet:refund-turns@lib/call-meetings.ts": company("When each store with meetings to come last had its refunds read", "One sorted set for every store: one member a member of nl:meet:stores (the same <callsId>|<handle>, under 100 bytes) with a time each, kept in step with it every run, so a store that leaves the list leaves it within a run; it doubles the list's members, priced as the job's (MEET_REFUND_TURN_COMMANDS in tests/plan-cost-registry.ts)."),
+  "nl:meet:refund-turns:said@lib/call-meetings.ts": company("A turn of the meetings' refund job that waited more than a day was said today", "One key for every store, a day."),
   "nl:meet:q@lib/meet-records.ts": company("Meeting records due", "One sorted set for every store: each a booked call's or an event's."),
   "nl:meet:r:@lib/meet-records.ts": short("A meeting's record: a booked call's (a group call's time keeps its guests), until 60 days after it", "call", 430, 1536),
   "nl:health:@lib/member-health.ts": { what: "Members' scores, cached", parts: [capped(512 * KB, "One cached view.")] },
@@ -943,6 +954,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:mail:segs:@lib/segments.ts": { what: "Saved groups", parts: [capped(MAX_SEGMENTS * 2 * KB, "MAX_SEGMENTS.", src("lib/segments-rules.ts", "MAX_SEGMENTS"))] },
   "nl:stats:@lib/segments.ts": { what: "Buyers' ledger, cached an hour", parts: [capped(ALL_TIME_PAGES * 100 * 4 * 512, "One row per buyer, at most one for each of ALL_TIME_PAGES pages of checkouts, offers after paying, PayPal sales and renewals (270 [GR1], unit 2).", src("lib/stats.ts", "ALL_TIME_PAGES"))] },
   "nl:ses:did:@lib/ses.ts": company("A send already handed to Amazon", "The company's, minutes."),
+  "nl:ses:maybe:@lib/ses.ts": company("A send Amazon may have taken, its answer lost", "The company's, minutes."),
   "nl:ses:h:@lib/ses.ts": company("Amazon's sends an hour", "The company's."),
   "nl:ses:state@lib/ses.ts": company("Amazon's state", "One key, the company's."),
   "nl:share:applied@lib/share-settle.ts": company("Shares applied, by store", "One hash for every store: a field a store."),

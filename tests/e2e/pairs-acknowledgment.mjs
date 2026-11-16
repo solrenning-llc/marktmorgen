@@ -1,5 +1,5 @@
+import {waitForReactHandler} from "./react-hydration.mjs";
 import {waitForReactChangeHandler} from "./react-hydration.mjs";
-
 /** Every creator-pick save/removal is intercepted, with no buyer or public data writes. */
 export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
  const cases=[
@@ -38,8 +38,11 @@ export async function checkPairsAcknowledgment({browser,LOCAL,fixture,is}){
      window.__pairsSelectionEvents.push({type,trusted:event.isTrusted,value:select?.value,selectedIndex:select?.selectedIndex,buttonDisabled:root.querySelector("button")?.disabled});
     },true);
    });
-   // The selects are server-rendered and enabled: a choice made before React attaches
-   // onChange is reset to "" on hydration, and "Save picks" never enables (WebKit, CI).
+   // Only once React has taken the editor over (onclick set on its button): a pick made while a slow or busy browser is
+   // still drawing the panel can be lost, which left the button disabled for good.
+   const saveButton=section.getByRole("button",{name:"Save picks",exact:true});
+   await waitForReactHandler(page,saveButton,"onClick");
+   // And the select's own onChange (#4044): a choice made before React attaches it is reset to "" on hydration.
    await waitForReactChangeHandler(page,first);
    await first.selectOption(target);
    console.log("PAIRS_INITIAL_SELECTION",JSON.stringify(await section.evaluate((root,target)=>({

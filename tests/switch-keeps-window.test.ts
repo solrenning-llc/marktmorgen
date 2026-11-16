@@ -570,7 +570,9 @@ async function main(): Promise<void> {
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.04, 258.68 and 579.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.90"]);
+    // Merge of main into #2287 (16 November 2026, Claude 3 cloud R): main's model and this PR together, yearly
+    // 37.04, 258.68, 579.90 -> 37.04, 258.67, 579.89; figures as the model computes them, still above zero (MR); no cost lowered.
+    is("11: and 37.04, 258.67 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.89"]);
   } finally {
     Date.now = realNow;
   }

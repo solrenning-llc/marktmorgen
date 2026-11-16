@@ -633,18 +633,32 @@ def main():
         return client.command("EVAL", script, 10, *keys, op, expected, json.dumps(row), at,
                               131_072, json.dumps(p), owner)
 
-    def stats():
+    def stats(text):
         out = {}
-        for line in redis.command("INFO", "COMMANDSTATS").splitlines():
+        for line in text.splitlines():
             m = re.match(r"cmdstat_([^:]+):calls=(\d+),", line)
             if m and m[1] != "info":
                 out[m[1]] = int(m[2])
         return out
 
+    # INFO COMMANDSTATS counts every client's commands. CI's Redis service runs its
+    # health check (`redis-cli ping`, .github/workflows/product-checks.yml) every 5 s,
+    # and a PING that landed between two separate INFOs was counted as ours:
+    # (28, 27) in form-opportunity-redis jobs 132730822538 and 132876842218.
+    # MULTI/EXEC runs both INFOs and the one measured command as one transaction,
+    # so no other client's command can come in between. A second client sends a
+    # PING during every measured step, the health check made deterministic: it
+    # must never be counted.
+    health_check = LocalRedis()
+
     def measured(fn, ceiling):
-        before = stats()
-        result = fn()
-        after = stats()
+        assert redis.command("MULTI") == "OK"
+        assert redis.command("INFO", "COMMANDSTATS") == "QUEUED"
+        assert health_check.command("PING") == "PONG"
+        assert fn() == "QUEUED", "a measured step issues exactly one command"
+        assert redis.command("INFO", "COMMANDSTATS") == "QUEUED"
+        before, result, after = redis.command("EXEC")
+        before, after = stats(before), stats(after)
         count = sum(n - before.get(cmd, 0) for cmd, n in after.items())
         assert count <= ceiling, (count, ceiling, result)
         return result, count
@@ -803,6 +817,7 @@ def main():
     finally:
         if made:
             redis.command("DEL", *sorted(made))
+        health_check.close()
         redis.close()
 
 

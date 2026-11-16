@@ -65,6 +65,7 @@ import { KEPT_DAYS, ALL_TIME_PAGES, DAY_FIELDS_MAX, LIFE_WRITE_MAX } from "@/lib
 import { NUMBERS_KEPT_BYTES } from "@/lib/api-read-rules";
 import { MAX_AFFILIATES } from "@/lib/affiliate-setting";
 import { MAX_SPEND_ENTRIES } from "@/lib/ad-spend-rules";
+import { OUTBOX_MAX_KEPT, OUTBOX_RECORD_MAX_BYTES } from "@/lib/webhook-outbox";
 import { MAX_LINKS } from "@/lib/short-link-rules";
 import { MAX_SCHEDULED_CODES } from "@/lib/discount-schedule-rules";
 import { MAX_NOTES, MAX_NOTE_LENGTH as MAX_STATS_NOTE } from "@/lib/stats-notes";
@@ -1104,7 +1105,7 @@ export const FAMILIES: Record<string, Family> = {
   ] },
   "nl:hooks:log:@lib/webhooks.ts": { what: "The store's last deliveries", parts: [capped(HOOK_LOG * 64, "The newest LOG_SIZE.", src("lib/webhooks.ts", "LOG_SIZE"))] },
   "nl:hooks:pos@lib/webhooks.ts": company("Where the webhook job stopped", "One key, the company's job."),
-  "nl:hookout:@lib/webhook-outbox.ts": short("A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", "request", 7, 4_096),
+  "nl:hookout:@lib/webhook-outbox.ts": { what: "A webhook event noticed once that could not be queued then, kept to be tried again (#4284, #4275): at most one a free copy or a sign-up confirmed, only when its queueing failed, a week at most", parts: [capped(OUTBOX_MAX_KEPT * (OUTBOX_RECORD_MAX_BYTES + 2 * KEY), "The whole outbox, which one store may fill: OUTBOX_MAX_KEPT records of OUTBOX_RECORD_MAX_BYTES for the site, counted in OUTBOX_ADMIT, each with its key and its member in the due line.", src("lib/webhook-outbox.ts", "OUTBOX_MAX_KEPT", "OUTBOX_RECORD_MAX_BYTES", "OUTBOX_ADMIT"))] },
   "nl:hookout:due@lib/webhook-outbox.ts": company("Kept webhook events due to be tried again", "One sorted set, each member an event kept by lib/webhook-outbox.ts, gone when it is queued, dropped or its week is over; never more than OUTBOX_MAX_KEPT members, counted in the write that adds one."),
   "nl:hooks:q@lib/webhooks.ts": company("Deliveries waiting for a try", "One sorted set, members gone within a week: each a webhook's."),
   "nl:hooks:stores@lib/webhooks.ts": company("Stores with any endpoint", "One set for every store."),

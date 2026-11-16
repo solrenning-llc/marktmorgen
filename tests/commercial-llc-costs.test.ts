@@ -1,8 +1,12 @@
-import {test} from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import {commercialMarginReady,CURRENT_COMMERCIAL_TERMS,CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,REQUIRED_MARGIN_SCENARIOS,BASE_PLAN_REVENUE_CEILINGS,type CommercialMarginReview} from "@/lib/commercial-margin";
 import {CURRENT_LLC_FIXED_COST_CEILINGS as lines,LLC_FIXED_COST_ALLOCATION,LLC_FIXED_COST_IDS} from "./llc-retention-approved-policy";
 import {planPaymentDisputeFixture,zeroExposureFixture,fundedCustomerWithAi} from "./margin-test-fixtures";
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 const review=(fixed=100):CommercialMarginReview=>({
  companyBase:{monthlyFixedCostsCeilingCents:fixed,monthlyFixedTaxesCeilingCents:0,allFixedCostsBounded:true,allFixedTaxesReviewed:true,fixedCostsEvidence:"TEST ONLY: complete full LLC ceilings",fixedTaxEvidence:"TEST ONLY: explicit hypothetical taxes",reviewedPayingCustomers:100},
  planPaymentDisputes:planPaymentDisputeFixture(),priceAndRightsSnapshot:CURRENT_PRICE_AND_RIGHTS_SNAPSHOT,taxEvidence:"TEST ONLY",costAndLimitEvidence:"TEST ONLY",

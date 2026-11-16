@@ -11,6 +11,7 @@
  *     when the answer is given;
  *   - the studio's numbers carry it for each window, with the store's window.
  */
+import { mock } from "node:test";
 import { ATTRIBUTION_DAYS, attributionTable, parseAttributionDays } from "@/lib/attribution-rules";
 import { CHANNEL_COOKIE_SECONDS, channelCookieName, channelOfRequest, nextChannelCookie, readChannelCookie } from "@/lib/visit-channel";
 import { recordHeard } from "@/lib/heard";
@@ -19,6 +20,10 @@ import { claimHandle, ensureStatsId, setAttributionDays, setStripeAccount, store
 import { numbersContext } from "@/lib/numbers-ask";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+// The sales below are dated from NOW, taken once at load, while the week is read again from the clock: a run crossing
+// 00:00 UTC (any day) lost what the buyers said (the podcast answer and Instagram's said column). Only Date is stopped,
+// for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 process.env.NIMBUS_DATA_KEY = "a-local-key-for-tests-only-0123456789abcdef";
 process.env.STRIPE_SECRET_KEY = "sk_test_attribution_stand_in";

@@ -169,6 +169,7 @@ check("a complete rule is read with every part as typed", () => {
       id: "rule42abc",
       post: "17890012345",
       keywords: ["Guide", "free"],
+      match: "exact",
       repeat: "12h",
       mode: "test",
       testers: ["my_test_account"],
@@ -280,7 +281,7 @@ check("noteTested leaves the rule passed in as it was", () => {
 // The decision for one comment.
 const NOW = 2_000_000_000;
 function decide(over: Partial<Parameters<typeof decideReply>[0]> = {}) {
-  return decideReply({ rule: rule(), comment: "guide please!", personId: "my_test_account", ownAccountId: "chef_account", lastSentAtSeconds: null, nowSeconds: NOW, live: AUTODM_LIVE, ...over });
+  return decideReply({ rule: rule(), comment: "Guide!", personId: "my_test_account", ownAccountId: "chef_account", lastSentAtSeconds: null, nowSeconds: NOW, live: AUTODM_LIVE, ...over });
 }
 check("a test account's matching comment in test mode gets the reply, with the keyword it matched", () => {
   equal(decide(), { send: true, keyword: "guide" });
@@ -369,7 +370,7 @@ check("the link never names the person, the post or the keyword", () => {
 
 // The studio's test box and the words.
 check("the test box says which keyword matched and who would get the reply in each mode", () => {
-  equal(tryComment(rule(), "GUIDES!!"), { matched: "guide", words: 'This comment matches "guide". In test mode, only your test accounts get the reply.' });
+  equal(tryComment(rule({ match: "close" }), "GUIDES!!"), { matched: "guide", words: 'This comment matches "guide". In test mode, only your test accounts get the reply.' });
   equal(tryComment(rule({ mode: "off" }), "guide"), { matched: "guide", words: 'This comment matches "guide". This rule is off, so nobody gets the reply.' });
   const live = { ...noteTested(rule()), mode: "live" as const };
   equal(tryComment(live, "guide").words, AUTODM_LIVE ? 'This comment matches "guide". Everyone who comments it gets the reply.' : 'This comment matches "guide". AutoDM can\'t send replies yet, so nobody gets the reply.');
@@ -386,7 +387,7 @@ check("the test box says plainly when nothing matches", () => {
   equal(tryComment(rule(), "love this"), { matched: null, words: "This comment doesn't match any keyword, so no reply is sent." });
 });
 check("the test box shows the keyword as the creator typed it", () => {
-  equal(tryComment(rule({ keywords: ["Free Guide"] }), "free guides").matched, "Free Guide");
+  equal(tryComment(rule({ keywords: ["Free Guide"], match: "close" }), "free guides").matched, "Free Guide");
 });
 check("every problem has one plain US English sentence, numbered from 1 for people", () => {
   const sentences = [

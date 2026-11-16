@@ -4,7 +4,12 @@
  * keeps anything. These are the decisions an automatic reply to a comment
  * needs before any channel is involved:
  *
- *   - which keyword a comment matches. Matching forgives case, accents, a
+ *   - which keyword a comment matches. A new rule is exact (759 [STN6]):
+ *     the comment must be the keyword alone, with case, accents,
+ *     punctuation, emoji and styled letters set aside, so "Guide!" gets the
+ *     reply and "I already have the guide" does not. The creator may choose
+ *     "close" instead, the match below, which finds the keyword inside a
+ *     sentence. Close matching forgives case, accents, a
  *     simple English plural and a small typo ("Guides!!", "gude", "café" for
  *     "cafe"), but never matches inside a longer word ("guide" is not in
  *     "guidebook", "art" is not in "party") and never forgives a digit
@@ -27,8 +32,9 @@
  *   - who may get it: a new rule starts in test mode, where only the
  *     creator's own listed test accounts get the reply, and nobody gets
  *     anything while AUTODM_LIVE is false;
- *   - what is counted per post: replies sent, clicks on the link in them and
- *     sales from those clicks, as three numbers and nothing about anyone. A
+ *   - what is counted per post: comments that held a keyword, replies sent,
+ *     clicks on the link in them and sales from those clicks, as four numbers
+ *     and nothing about anyone. A
  *     link in a reply carries only the rule's id (dmLinkTag), never who
  *     clicked it.
  *
@@ -183,25 +189,55 @@ function capped(comment: string): string {
 }
 
 /**
- * Whether a comment holds the keyword: a keyword of N words matches N words
- * in a row of the comment, each the same once compared, the same plural, or
- * within the typo allowance. Only whole words match, and only the first
- * COMMENT_MAX_CHARS characters of the comment are read.
+ * How a post's keywords are matched, chosen by the creator (759 [STN6]):
+ * "exact", the comment is the keyword alone once compared; or "close", the
+ * keyword anywhere in the comment, forgiving a plural and a small typo.
  */
-export function matchesKeyword(comment: string, keyword: string): boolean {
+export const MATCH_CHOICES = ["exact", "close"] as const;
+export type MatchId = (typeof MATCH_CHOICES)[number];
+/**
+ * A new rule is exact, so a word dropped into a sentence ("I already have the
+ * guide") does not send the reply by accident.
+ */
+export const DEFAULT_MATCH: MatchId = "exact";
+
+/** One of MATCH_CHOICES, exactly as written, or null. */
+export function readMatch(input: unknown): MatchId | null {
+  return MATCH_CHOICES.find((choice) => choice === input) ?? null;
+}
+
+/** Exact: the comment's words are the keyword's words, the same once compared, and nothing else. */
+function tokensEqual(tokens: string[], words: string[]): boolean {
+  return words.length > 0 && tokens.length === words.length && words.every((word, k) => tokens[k] === word);
+}
+
+function tokensFit(tokens: string[], words: string[], match: MatchId): boolean {
+  return match === "close" ? tokensMatch(tokens, words) : tokensEqual(tokens, words);
+}
+
+/**
+ * Whether a comment holds the keyword. Exact (the default): the comment is
+ * the keyword alone, word for word once compared. Close: a keyword of N words
+ * matches N words in a row of the comment, each the same once compared, the
+ * same plural, or within the typo allowance. Only whole words match, and only
+ * the first COMMENT_MAX_CHARS characters of the comment are read.
+ */
+export function matchesKeyword(comment: string, keyword: string, match: MatchId = DEFAULT_MATCH): boolean {
   if (typeof comment !== "string" || typeof keyword !== "string") return false;
-  return tokensMatch(tokensOf(capped(comment)), tokensOf(keyword));
+  return tokensFit(tokensOf(capped(comment)), tokensOf(keyword), readMatch(match) ?? DEFAULT_MATCH);
 }
 
 /**
  * The first of the post's keywords, in the creator's order, that the comment
- * matches, as the creator typed it; null when none does.
+ * matches, as the creator typed it; null when none does. A choice that is
+ * not one of MATCH_CHOICES is read as exact, never as close.
  */
-export function matchingKeyword(comment: string, keywords: readonly string[]): string | null {
+export function matchingKeyword(comment: string, keywords: readonly string[], match: MatchId = DEFAULT_MATCH): string | null {
   if (typeof comment !== "string") return null;
   const tokens = tokensOf(capped(comment));
+  const how = readMatch(match) ?? DEFAULT_MATCH;
   for (const keyword of keywords) {
-    if (typeof keyword === "string" && tokensMatch(tokens, tokensOf(keyword))) return keyword;
+    if (typeof keyword === "string" && tokensFit(tokens, tokensOf(keyword), how)) return keyword;
   }
   return null;
 }
@@ -340,12 +376,15 @@ export function mayReachPerson(input: {
   return testers.ok && typeof input.personId === "string" && testers.testers.includes(input.personId);
 }
 
-/** One post's counts, with nothing about anyone: replies sent, clicks on their link, sales from those clicks. */
-export type AutoDmCounts = { sent: number; clicked: number; sold: number };
+/**
+ * One post's counts, with nothing about anyone: comments that held a keyword, replies sent, clicks on their link,
+ * sales from those clicks.
+ */
+export type AutoDmCounts = { commented: number; sent: number; clicked: number; sold: number };
 
 /** A post's counts before anything happened. */
 export function emptyCounts(): AutoDmCounts {
-  return { sent: 0, clicked: 0, sold: 0 };
+  return { commented: 0, sent: 0, clicked: 0, sold: 0 };
 }
 
 /** The counts with one more of `kind`, as a new object; the one passed in is left as it was. */
@@ -361,11 +400,12 @@ function grouped(n: number): string {
   return String(whole(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
-/** The counts in one line of plain US English: "Sent 1,234 · 30 clicks · 1 sale". */
+/** The counts in one line of plain US English: "1,300 comments · Sent 1,234 · 30 clicks · 1 sale". */
 export function countsLine(counts: AutoDmCounts): string {
+  const comments = whole(counts.commented);
   const clicks = whole(counts.clicked);
   const sales = whole(counts.sold);
-  return `Sent ${grouped(counts.sent)} · ${grouped(clicks)} ${clicks === 1 ? "click" : "clicks"} · ${grouped(sales)} ${sales === 1 ? "sale" : "sales"}`;
+  return `${grouped(comments)} ${comments === 1 ? "comment" : "comments"} · Sent ${grouped(counts.sent)} · ${grouped(clicks)} ${clicks === 1 ? "click" : "clicks"} · ${grouped(sales)} ${sales === 1 ? "sale" : "sales"}`;
 }
 
 const RULE_ID = /^[a-z0-9]{6,24}$/;

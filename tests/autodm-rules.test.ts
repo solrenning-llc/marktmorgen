@@ -42,6 +42,11 @@ import {
 } from "@/lib/autodm-rules";
 import { done, is, part } from "./check";
 
+// The matching below is the "close" choice: a keyword inside a sentence, forgiving a plural and a small typo. Since
+// 759 [STN6] a new rule is exact instead; tests/autodm-exact-match.test.ts holds that default.
+const matchesClose = (comment: string, keyword: string) => matchesKeyword(comment, keyword, "close");
+const matchingClose = (comment: string, keywords: readonly string[]) => matchingKeyword(comment, keywords, "close");
+
 part("Nothing is live");
 is("AUTODM_LIVE is false", AUTODM_LIVE, false);
 is("a new rule starts in test mode, every 12 hours", [DEFAULT_MODE, DEFAULT_REPEAT], ["test", "12h"]);
@@ -51,30 +56,30 @@ is("case, accents and punctuation", normalizeForMatch("  Café — GUIDE!!  "), 
 is("runs of symbols become one space", normalizeForMatch("free,,,   guide...now"), "free guide now");
 is("emoji and punctuation only become nothing", normalizeForMatch("🔥🔥 !!! ✨"), "");
 is("compatibility forms (ligature, full-width)", normalizeForMatch("ﬁle ＧＵＩＤＥ"), "file guide");
-is("styled capitals people paste into comments match", matchesKeyword("𝐆𝐔𝐈𝐃𝐄 please", "guide"), true);
-is("bold-italic styled words match too", matchesKeyword("send the 𝑭𝑹𝑬𝑬 𝑮𝑼𝑰𝑫𝑬", "free guide"), true);
-is("a Japanese voicing mark keeps words apart (ガイド is not カイト)", matchesKeyword("カイト", "ガイド"), false);
-is("ガイド still matches itself", matchesKeyword("ガイド", "ガイド"), true);
-is("a Hindi vowel sign is kept (कि is not क)", matchesKeyword("क", "कि"), false);
+is("styled capitals people paste into comments match", matchesClose("𝐆𝐔𝐈𝐃𝐄 please", "guide"), true);
+is("bold-italic styled words match too", matchesClose("send the 𝑭𝑹𝑬𝑬 𝑮𝑼𝑰𝑫𝑬", "free guide"), true);
+is("a Japanese voicing mark keeps words apart (ガイド is not カイト)", matchesClose("カイト", "ガイド"), false);
+is("ガイド still matches itself", matchesClose("ガイド", "ガイド"), true);
+is("a Hindi vowel sign is kept (कि is not क)", matchesClose("क", "कि"), false);
 is("a Hindi word stays one word", normalizeForMatch("किताब"), "किताब");
 is("a Korean syllable stays one letter", Array.from(normalizeForMatch("가이드")).length, 3);
 is("Turkish dotted capital I folds to i", normalizeForMatch("İ"), "i");
 is("digits are kept", normalizeForMatch("Code-10"), "code 10");
 
 part("Case and accents");
-is("GUIDE matches guide", matchesKeyword("Send me the GUIDE please", "guide"), true);
-is("café matches cafe, both ways", [matchesKeyword("love this café", "cafe"), matchesKeyword("love this cafe", "Café")], [true, true]);
-is("crème brûlée matches creme brulee", matchesKeyword("Crème Brûlée recipe?", "creme brulee"), true);
+is("GUIDE matches guide", matchesClose("Send me the GUIDE please", "guide"), true);
+is("café matches cafe, both ways", [matchesClose("love this café", "cafe"), matchesClose("love this cafe", "Café")], [true, true]);
+is("crème brûlée matches creme brulee", matchesClose("Crème Brûlée recipe?", "creme brulee"), true);
 
 part("Plurals");
-is("guide / guides, both ways", [matchesKeyword("guides", "guide"), matchesKeyword("guide", "guides")], [true, true]);
-is("box / boxes", [matchesKeyword("boxes", "box"), matchesKeyword("box", "boxes")], [true, true]);
-is("story / stories", [matchesKeyword("stories", "story"), matchesKeyword("story", "stories")], [true, true]);
-is("class / classes", [matchesKeyword("classes", "class"), matchesKeyword("class", "classes")], [true, true]);
-is("wish / wishes, church / churches", [matchesKeyword("wishes", "wish"), matchesKeyword("churches", "church")], [true, true]);
-is("case / cases", [matchesKeyword("cases", "case"), matchesKeyword("case", "cases")], [true, true]);
+is("guide / guides, both ways", [matchesClose("guides", "guide"), matchesClose("guide", "guides")], [true, true]);
+is("box / boxes", [matchesClose("boxes", "box"), matchesClose("box", "boxes")], [true, true]);
+is("story / stories", [matchesClose("stories", "story"), matchesClose("story", "stories")], [true, true]);
+is("class / classes", [matchesClose("classes", "class"), matchesClose("class", "classes")], [true, true]);
+is("wish / wishes, church / churches", [matchesClose("wishes", "wish"), matchesClose("churches", "church")], [true, true]);
+is("case / cases", [matchesClose("cases", "case"), matchesClose("case", "cases")], [true, true]);
 is("glass is not stripped to glas", pluralForms("glass"), ["glass"]);
-is("glass / glasses", [matchesKeyword("glasses", "glass"), matchesKeyword("glass", "glasses")], [true, true]);
+is("glass / glasses", [matchesClose("glasses", "glass"), matchesClose("glass", "glasses")], [true, true]);
 is("a 3-letter word keeps its s", pluralForms("bus"), ["bus"]);
 is("plural forms of stories, boxes, guides", [pluralForms("stories"), pluralForms("boxes"), pluralForms("guides")], [
   ["stories", "story", "storie"],
@@ -84,56 +89,56 @@ is("plural forms of stories, boxes, guides", [pluralForms("stories"), pluralForm
 
 part("Typos");
 is("5 letters: one swapped, missing, extra or wrong letter", [
-  matchesKeyword("giude", "guide"),
-  matchesKeyword("gude", "guide"),
-  matchesKeyword("guidee", "guide"),
-  matchesKeyword("guido", "guide"),
+  matchesClose("giude", "guide"),
+  matchesClose("gude", "guide"),
+  matchesClose("guidee", "guide"),
+  matchesClose("guido", "guide"),
 ], [true, true, true, true]);
-is("5 letters: two typos do not match", matchesKeyword("gidue", "guide"), false);
-is("8 letters: one typo matches, two do not", [matchesKeyword("templtae", "template"), matchesKeyword("tmpltae", "template")], [true, false]);
+is("5 letters: two typos do not match", matchesClose("gidue", "guide"), false);
+is("8 letters: one typo matches, two do not", [matchesClose("templtae", "template"), matchesClose("tmpltae", "template")], [true, false]);
 is("9+ letters: two typos match, three do not", [
-  matchesKeyword("checklsit", "checklist"),
-  matchesKeyword("chcklsit", "checklist"),
-  matchesKeyword("chklsit", "checklist"),
+  matchesClose("checklsit", "checklist"),
+  matchesClose("chcklsit", "checklist"),
+  matchesClose("chklsit", "checklist"),
 ], [true, true, false]);
-is("4 letters or fewer: no typo at all (link / lynk)", [matchesKeyword("lynk", "link"), matchesKeyword("lnik", "link")], [false, false]);
-is("the keyword's word decides the allowance", [matchesKeyword("guid", "guide"), matchesKeyword("linkk", "link")], [true, false]);
+is("4 letters or fewer: no typo at all (link / lynk)", [matchesClose("lynk", "link"), matchesClose("lnik", "link")], [false, false]);
+is("the keyword's word decides the allowance", [matchesClose("guid", "guide"), matchesClose("linkk", "link")], [true, false]);
 is("distance stops early above its bound", typoDistance("abcdefghij", "zyxwvutsrq", 2), 3);
 is("distance counts a swap once", typoDistance("abcd", "abdc", 2), 1);
 is("distance with a large length gap returns at once", typoDistance("a", "abcdefgh", 1), 2);
 
 part("Digits");
-is("code10 does not match code11", matchesKeyword("code10", "code11"), false);
-is("code10 matches CODE10", matchesKeyword("CODE10 please", "code10"), true);
-is("a long word with a digit allows no typo", matchesKeyword("promocode2026", "promocode2025"), false);
-is("2026 does not match 2025", matchesKeyword("plan 2026", "2025"), false);
+is("code10 does not match code11", matchesClose("code10", "code11"), false);
+is("code10 matches CODE10", matchesClose("CODE10 please", "code10"), true);
+is("a long word with a digit allows no typo", matchesClose("promocode2026", "promocode2025"), false);
+is("2026 does not match 2025", matchesClose("plan 2026", "2025"), false);
 
 part("Whole words only");
-is("guide is not in guidebook", matchesKeyword("my guidebook", "guide"), false);
-is("art is not in party", matchesKeyword("party time", "art"), false);
-is("guidebook does not match guide", matchesKeyword("guide", "guidebook"), false);
-is("a word inside punctuation still counts", matchesKeyword("(guide)", "guide"), true);
+is("guide is not in guidebook", matchesClose("my guidebook", "guide"), false);
+is("art is not in party", matchesClose("party time", "art"), false);
+is("guidebook does not match guide", matchesClose("guide", "guidebook"), false);
+is("a word inside punctuation still counts", matchesClose("(guide)", "guide"), true);
 
 part("Several words");
-is("free guide matches 'free, guide!'", matchesKeyword("free, guide!", "free guide"), true);
-is("and 'I want the FREE-GUIDES'", matchesKeyword("I want the FREE-GUIDES", "free guide"), true);
-is("not when the words are apart", matchesKeyword("free stuff and a guide", "free guide"), false);
-is("not in the other order", matchesKeyword("guide free", "free guide"), false);
-is("not when the comment is shorter", matchesKeyword("free", "free guide"), false);
-is("no typo in a 4-letter word of the keyword", matchesKeyword("send the freee guide", "free guide"), false);
-is("a typo in a 5+ letter word of the keyword", matchesKeyword("send the mini cheklist", "mini checklist"), true);
-is("first keyword in the creator's order", matchingKeyword("I want the recipes and the guide", ["guide", "recipe"]), "guide");
-is("returned as the creator typed it", matchingKeyword("recipe please", ["Guide", "Recipes!"]), "Recipes!");
-is("no keyword matches", matchingKeyword("nice photo", ["guide", "recipe"]), null);
-is("an empty comment matches nothing", [matchesKeyword("", "guide"), matchesKeyword("🔥", "guide")], [false, false]);
-is("an emoji-only keyword matches nothing", matchesKeyword("🔥", "🔥"), false);
+is("free guide matches 'free, guide!'", matchesClose("free, guide!", "free guide"), true);
+is("and 'I want the FREE-GUIDES'", matchesClose("I want the FREE-GUIDES", "free guide"), true);
+is("not when the words are apart", matchesClose("free stuff and a guide", "free guide"), false);
+is("not in the other order", matchesClose("guide free", "free guide"), false);
+is("not when the comment is shorter", matchesClose("free", "free guide"), false);
+is("no typo in a 4-letter word of the keyword", matchesClose("send the freee guide", "free guide"), false);
+is("a typo in a 5+ letter word of the keyword", matchesClose("send the mini cheklist", "mini checklist"), true);
+is("first keyword in the creator's order", matchingClose("I want the recipes and the guide", ["guide", "recipe"]), "guide");
+is("returned as the creator typed it", matchingClose("recipe please", ["Guide", "Recipes!"]), "Recipes!");
+is("no keyword matches", matchingClose("nice photo", ["guide", "recipe"]), null);
+is("an empty comment matches nothing", [matchesClose("", "guide"), matchesClose("🔥", "guide")], [false, false]);
+is("an emoji-only keyword matches nothing", matchesClose("🔥", "🔥"), false);
 
 part("Comment length cap");
 const padding = "x ".repeat(COMMENT_MAX_CHARS / 2);
-is("a keyword past the cap is not read", matchesKeyword(`${padding}guide`, "guide"), false);
-is("a keyword just inside the cap is read", matchesKeyword(`${"x ".repeat(COMMENT_MAX_CHARS / 2 - 3)}guide`, "guide"), true);
-is("the cap counts characters, not code units", matchesKeyword(`${"😀".repeat(COMMENT_MAX_CHARS - 6)} guide`, "guide"), true);
-is("a huge comment returns", matchesKeyword("a ".repeat(1_000_000), "guide"), false);
+is("a keyword past the cap is not read", matchesClose(`${padding}guide`, "guide"), false);
+is("a keyword just inside the cap is read", matchesClose(`${"x ".repeat(COMMENT_MAX_CHARS / 2 - 3)}guide`, "guide"), true);
+is("the cap counts characters, not code units", matchesClose(`${"😀".repeat(COMMENT_MAX_CHARS - 6)} guide`, "guide"), true);
+is("a huge comment returns", matchesClose("a ".repeat(1_000_000), "guide"), false);
 
 part("A post's keywords");
 is("kept as typed, trimmed", readKeywords(["  Free Guide ", "Recipe"]), { ok: true, keywords: ["Free Guide", "Recipe"] });
@@ -213,20 +218,20 @@ is("64 characters are allowed", readTesters(["x".repeat(64)]).ok, true);
 is("the same id twice", readTesters(["me", "you", "me"]), { ok: false, problem: "duplicate", index: 2, other: 0 });
 
 part("Counts per post");
-is("empty counts", emptyCounts(), { sent: 0, clicked: 0, sold: 0 });
-const before = { sent: 4, clicked: 1, sold: 0 };
+is("empty counts", emptyCounts(), { commented: 0, sent: 0, clicked: 0, sold: 0 });
+const before = { commented: 5, sent: 4, clicked: 1, sold: 0 };
 const after = addCount(before, "sold");
-is("addCount returns a new object", [after, after === before], [{ sent: 4, clicked: 1, sold: 1 }, false]);
-is("and leaves the old one as it was", before, { sent: 4, clicked: 1, sold: 0 });
+is("addCount returns a new object", [after, after === before], [{ commented: 5, sent: 4, clicked: 1, sold: 1 }, false]);
+is("and leaves the old one as it was", before, { commented: 5, sent: 4, clicked: 1, sold: 0 });
 is("each kind", [addCount(emptyCounts(), "sent"), addCount(emptyCounts(), "clicked")], [
-  { sent: 1, clicked: 0, sold: 0 },
-  { sent: 0, clicked: 1, sold: 0 },
+  { commented: 0, sent: 1, clicked: 0, sold: 0 },
+  { commented: 0, sent: 0, clicked: 1, sold: 0 },
 ]);
-is("a typical line", countsLine({ sent: 120, clicked: 30, sold: 4 }), "Sent 120 · 30 clicks · 4 sales");
-is("singular", countsLine({ sent: 1, clicked: 1, sold: 1 }), "Sent 1 · 1 click · 1 sale");
-is("zero is plural", countsLine(emptyCounts()), "Sent 0 · 0 clicks · 0 sales");
-is("grouping", countsLine({ sent: 1_234_567, clicked: 1_234, sold: 999 }), "Sent 1,234,567 · 1,234 clicks · 999 sales");
-is("a broken number shows as 0", countsLine({ sent: Number.NaN, clicked: -3, sold: 2.7 }), "Sent 0 · 0 clicks · 2 sales");
+is("a typical line", countsLine({ commented: 150, sent: 120, clicked: 30, sold: 4 }), "150 comments · Sent 120 · 30 clicks · 4 sales");
+is("singular", countsLine({ commented: 1, sent: 1, clicked: 1, sold: 1 }), "1 comment · Sent 1 · 1 click · 1 sale");
+is("zero is plural", countsLine(emptyCounts()), "0 comments · Sent 0 · 0 clicks · 0 sales");
+is("grouping", countsLine({ commented: 2_345_678, sent: 1_234_567, clicked: 1_234, sold: 999 }), "2,345,678 comments · Sent 1,234,567 · 1,234 clicks · 999 sales");
+is("a broken number shows as 0", countsLine({ commented: -1, sent: Number.NaN, clicked: -3, sold: 2.7 }), "0 comments · Sent 0 · 0 clicks · 2 sales");
 
 part("Link tag");
 is("a valid rule id", dmLinkTag("abc123"), { name: "mm_dm", value: "abc123" });

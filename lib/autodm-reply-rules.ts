@@ -17,8 +17,9 @@
  *     named with its field, in the order the studio shows the fields;
  *   - test before live: a rule may be saved live only once a test reply went
  *     out to one of the creator's test accounts for exactly this rule
- *     (ruleFingerprint, noteTested). Changing the keywords, the reply, the
- *     product, the post or the repeat interval asks for a new test; changing
+ *     (ruleFingerprint, noteTested). Changing the keywords, how they match
+ *     (exact or close, 759 [STN6]), the reply, the product, the post or the
+ *     repeat interval asks for a new test; changing
  *     only the test accounts or the mode does not;
  *   - the decision for one comment (decideReply), in a fixed order so the
  *     cheapest refusal comes first and the channel unit only has to carry it
@@ -44,6 +45,7 @@
  */
 import {
   AUTODM_LIVE,
+  DEFAULT_MATCH,
   DEFAULT_MODE,
   DEFAULT_REPEAT,
   KEYWORD_MAX_CHARS,
@@ -55,10 +57,12 @@ import {
   mayReachPerson,
   mayReplyAgain,
   readKeywords,
+  readMatch,
   readRepeat,
   readTesters,
   type AutoDmMode,
   type KeywordProblem,
+  type MatchId,
   type RepeatId,
 } from "@/lib/autodm-rules";
 import { productSegment } from "@/lib/product-slug";
@@ -148,6 +152,8 @@ export type AutoDmRule = {
   id: string;
   post: string;
   keywords: string[];
+  /** Exact (the comment is the keyword alone) or close (the keyword inside a sentence); 759 [STN6]. */
+  match: MatchId;
   repeat: RepeatId;
   mode: AutoDmMode;
   testers: string[];
@@ -157,11 +163,11 @@ export type AutoDmRule = {
 };
 
 /** The parts of a rule, in the order the studio shows them and problems are named. */
-export type RuleField = "id" | "post" | "keywords" | "repeat" | "mode" | "testers" | "reply" | "product";
+export type RuleField = "id" | "post" | "keywords" | "match" | "repeat" | "mode" | "testers" | "reply" | "product";
 
 /** The first thing wrong with a rule. `index` and `other` count from 0, as unit 1's readers do. */
 export type RuleProblem =
-  | { ok: false; field: "id" | "post" | "repeat" | "product"; problem: "bad" }
+  | { ok: false; field: "id" | "post" | "match" | "repeat" | "product"; problem: "bad" }
   | { ok: false; field: "mode"; problem: "bad" | "untested" }
   | { ok: false; field: "keywords"; problem: KeywordProblem; index: number; other?: number }
   | { ok: false; field: "testers"; problem: "not_list" | "too_many" | "bad_id" | "duplicate"; index: number; other?: number }
@@ -174,13 +180,13 @@ const MODES: readonly AutoDmMode[] = ["off", "test", "live"];
 
 /**
  * What a rule's test covers: the post, the keywords in order and as typed,
- * the repeat interval, the reply and the product. Each part is written with
+ * how they match, the repeat interval, the reply and the product. Each part is written with
  * its length, so text moved from one part to another never gives the same
  * fingerprint. The test accounts and the mode are left out: they decide who
  * gets the reply, not what it is.
  */
-export function ruleFingerprint(rule: Pick<AutoDmRule, "post" | "keywords" | "repeat" | "reply" | "product">): string {
-  return JSON.stringify([rule.post, rule.keywords, rule.repeat, rule.reply, rule.product]);
+export function ruleFingerprint(rule: Pick<AutoDmRule, "post" | "keywords" | "match" | "repeat" | "reply" | "product">): string {
+  return JSON.stringify([rule.post, rule.keywords, rule.match, rule.repeat, rule.reply, rule.product]);
 }
 
 /** The rule marked as tested as it is now, as a new object; the one passed in is left as it was. */
@@ -190,8 +196,9 @@ export function noteTested(rule: AutoDmRule): AutoDmRule {
 
 /**
  * Checks a post's whole rule, as the studio or the API sends it, against the
- * ids of the products the store sells now. A repeat interval, mode or list of
- * test accounts left out takes its default (12 hours, test mode, none); one
+ * ids of the products the store sells now. A match, repeat interval, mode or
+ * list of test accounts left out takes its default (exact, 12 hours, test
+ * mode, none); one
  * sent but not one of the choices is refused, never replaced.
  *
  * `kept` is the test mark the server kept for this post's rule (noteTested,
@@ -209,6 +216,8 @@ export function readAutoDmRule(input: unknown, products: readonly { id: string }
   if (!POST_ID.test(post)) return { ok: false, field: "post", problem: "bad" };
   const keywords = readKeywords(value.keywords);
   if (!keywords.ok) return { ok: false, field: "keywords", problem: keywords.problem, index: keywords.index, ...(keywords.other === undefined ? {} : { other: keywords.other }) };
+  const match = "match" in value ? readMatch(value.match) : DEFAULT_MATCH;
+  if (!match) return { ok: false, field: "match", problem: "bad" };
   const repeat = "repeat" in value ? readRepeat(value.repeat) : DEFAULT_REPEAT;
   if (!repeat) return { ok: false, field: "repeat", problem: "bad" };
   const mode = "mode" in value ? MODES.find((m) => m === value.mode) ?? null : DEFAULT_MODE;
@@ -220,7 +229,7 @@ export function readAutoDmRule(input: unknown, products: readonly { id: string }
   const product = typeof value.product === "string" ? value.product : "";
   if (!product || !products.some((p) => p.id === product)) return { ok: false, field: "product", problem: "bad" };
   const tested = typeof kept === "string" && kept ? kept : null;
-  const rule: AutoDmRule = { id, post, keywords: keywords.keywords, repeat, mode, testers: testers.testers, reply: reply.text, product, tested };
+  const rule: AutoDmRule = { id, post, keywords: keywords.keywords, match, repeat, mode, testers: testers.testers, reply: reply.text, product, tested };
   if (mode === "live" && tested !== ruleFingerprint(rule)) return { ok: false, field: "mode", problem: "untested" };
   return { ok: true, rule };
 }
@@ -262,7 +271,7 @@ export function decideReply(input: {
   if (typeof input.personId !== "string" || !input.personId.trim() || !mayReachPerson({ mode: rule.mode, live: input.live === true && AUTODM_LIVE, personId: input.personId, testerIds: rule.testers })) {
     return { send: false, why: "not_reached" };
   }
-  const keyword = matchingKeyword(input.comment, rule.keywords);
+  const keyword = matchingKeyword(input.comment, rule.keywords, rule.match);
   if (keyword === null) return { send: false, why: "no_match" };
   if (!mayReplyAgain(input.lastSentAtSeconds, input.nowSeconds, rule.repeat)) return { send: false, why: "too_soon" };
   return { send: true, keyword };
@@ -309,7 +318,7 @@ const quote = (keyword: string) => `"${keyword}"`;
  * interval is not looked at.
  */
 export function tryComment(rule: AutoDmRule, comment: string, live = AUTODM_LIVE): { matched: string | null; words: string } {
-  const matched = matchingKeyword(comment, rule.keywords);
+  const matched = matchingKeyword(comment, rule.keywords, rule.match);
   if (matched === null) return { matched, words: "This comment doesn't match any keyword, so no reply is sent." };
   const who =
     rule.mode === "off"
@@ -340,6 +349,8 @@ export function ruleProblemWords(problem: RuleProblem): string {
       return "Something went wrong saving this rule. Please try again.";
     case "post":
       return "Choose the post this rule answers.";
+    case "match":
+      return "Choose whether a comment must be the keyword alone or may only contain it.";
     case "repeat":
       return "Choose how often one person can get this reply.";
     case "mode":

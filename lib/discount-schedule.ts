@@ -139,6 +139,42 @@ async function counted(commands: (string | number)[][]): Promise<boolean> {
   }
 }
 
+/**
+ * One step of a failed code's email (tellOne): the record written over only while it is still exactly the one read,
+ * and, in the same step, its member taken off the line (ZREM) or put back on it (ZADD). Answers 1 when written, 0 when
+ * the record is gone or changed and nothing was written (Codex N1 on #3027: a mark beside a dequeue that did not land
+ * lost the email for good, and a write-back after a cancel brought the code back). Modelled by lib/redis-memory.ts.
+ * KEYS[1] the schedules, KEYS[2] the line; ARGV: the code's id, the record read, the record to write, "ZREM" or
+ * "ZADD", the member, and for ZADD its score.
+ */
+export const TELL_STEP = `-- marktmorgen:dsched-tell-step:v1
+local held = redis.call('HGET', KEYS[1], ARGV[1])
+if held ~= ARGV[2] then return 0 end
+redis.call('HSET', KEYS[1], ARGV[1], ARGV[3])
+if ARGV[4] == 'ZREM' then redis.call('ZREM', KEYS[2], ARGV[5]) else redis.call('ZADD', KEYS[2], ARGV[6], ARGV[5]) end
+return 1`;
+
+/**
+ * Runs TELL_STEP: "written", "changed" (nothing written: the record is gone or another), or "unknown" when the
+ * answer is lost or in another shape; then the record is read back, and only one equal to `next` is "written".
+ */
+async function tellStep(statsId: string, id: string, read: string, next: string, line: ["ZREM"] | ["ZADD", number], member: string): Promise<"written" | "changed" | "unknown"> {
+  try {
+    const replies = repliesFor(await redisPipeline([["EVAL", TELL_STEP, 2, scheduleKey(statsId), TELL_KEY, id, read, next, line[0], member, ...(line[0] === "ZADD" ? [line[1]] : [])]]), 1);
+    if (replies && replies[0] === 1) return "written";
+    if (replies && replies[0] === 0) return "changed";
+  } catch {
+    // Read back below.
+  }
+  try {
+    const back = repliesFor(await redisPipeline([["HGET", scheduleKey(statsId), id]]), 1);
+    // Only the record this step writes proves it landed; the line moved with it in the same step.
+    return back && back[0] === next ? "written" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export type Scheduled =
   | { ok: true; code: DiscountCode }
   /** "live": Stripe made the code live at once and did not confirm it off; it is kept as failed for the studio to show. */
@@ -414,11 +450,11 @@ async function tellOne<S extends Shop>(shop: S, statsId: string, id: string, now
       return "dropped";
     }
     const notices = entry.notices + 1;
-    const settled = await counted([
-      ["HSET", scheduleKey(statsId), id, writeRecord({ ...entry, notices, mailed: true })],
-      ["ZREM", TELL_KEY, member],
-    ]);
-    if (!settled) return "unknown";
+    // Marked and taken off the line in one step, only over the record read (TELL_STEP): never one without the other.
+    const marked = writeRecord({ ...entry, notices, mailed: true });
+    const settled = await tellStep(statsId, id, raw, marked, ["ZREM"], member);
+    if (settled === "changed") return "dropped";
+    if (settled !== "written") return "unknown";
     let sent = false;
     try {
       sent = await tell(shop, shown(entry), nowSeconds);
@@ -429,11 +465,10 @@ async function tellOne<S extends Shop>(shop: S, statsId: string, id: string, now
     if (sent === true) return "told";
     // The last try: it stays settled, and is never tried again.
     if (notices >= NOTICE_TRIES) return "untold";
-    // Not sent: unmarked, and tried again later. If this write is not confirmed it stays settled: never sent twice.
-    await counted([
-      ["HSET", scheduleKey(statsId), id, writeRecord({ ...entry, notices, mailed: false })],
-      ["ZADD", TELL_KEY, nowSeconds + NOTICE_RETRY_SECONDS, member],
-    ]);
+    // Not sent: unmarked, and tried again later, only over the record marked above (TELL_STEP): a send that outlasted
+    // the lock while the creator canceled or changed the code writes nothing and requeues nothing. If this write is not
+    // confirmed it stays settled: never sent twice.
+    await tellStep(statsId, id, marked, writeRecord({ ...entry, notices, mailed: false }), ["ZADD", nowSeconds + NOTICE_RETRY_SECONDS], member);
     return "untold";
   });
   return result === "busy" ? "unknown" : result;

@@ -131,7 +131,8 @@ export default async function AffiliatesPage({ params, searchParams }: Params) {
           const owners = await codeOwners(store).catch(() => new Map<string, string>());
           const mine = [...owners].filter(([, id]) => id === affiliate.id).map(([promo]) => promo);
           if (!mine.length) return [];
-          const listed = await listCodes(store.stripeAccountId as string).catch(() => ({ state: "error" as const }));
+          // The live codes alone, so one behind newer switched-off codes is still found.
+          const listed = await listCodes(store.stripeAccountId as string, { active: true }).catch(() => ({ state: "error" as const }));
           if (listed.state !== "ok") return [];
           return listed.codes
             .filter((code) => code.active && code.off !== null && mine.includes(code.id))

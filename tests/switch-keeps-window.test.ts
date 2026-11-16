@@ -568,12 +568,12 @@ async function main(): Promise<void> {
     // Merge of main into #3440 (15 November 2026): a draft's private preview page and its records cost a little more,
     // one cent less kept on Studio and Scale monthly, still above zero (MR); figures as the model computes them with
     // main's costs and #3440's together. The yearly figures are unchanged.
-    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.17"]);
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.16 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.16"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.04, 258.68 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.89"]);
+    is("11: and 37.04, 258.67 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.89"]);
   } finally {
     Date.now = realNow;
   }

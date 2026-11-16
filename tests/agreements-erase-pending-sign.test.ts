@@ -25,6 +25,9 @@ import { ERASERS, erasureScope } from "@/lib/person-erasure";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 globalThis.fetch = (async () => new Response("{}", { status: 500 })) as typeof fetch;
 const original = redis.pipeline.bind(redis);

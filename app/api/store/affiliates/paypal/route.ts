@@ -3,8 +3,8 @@ import type { NextRequest } from "next/server";
 import { storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { clientAddress } from "@/lib/request-guard";
-import { affiliatesOn } from "@/lib/affiliates";
-import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
+import { affiliatesOn, bookSizes } from "@/lib/affiliates";
+import { connectPayPal, disconnectPayPal, payWithPayPal, paypalPressUnits, readPayPal, setAutoPay, settlePayPal } from "@/lib/paypal-payouts";
 
 /**
  * The creator's own PayPal, for paying affiliates (lib/paypal-payouts.ts):
@@ -17,6 +17,10 @@ import { connectPayPal, disconnectPayPal, payWithPayPal, readPayPal, setAutoPay,
  *
  * For the owner and Admins ("settings"): it moves the creator's own money.
  */
+// Below the pay lock's 120 s (lib/paypal-payouts.ts payWithPayPal, #4618): a press is stopped before its lock can run
+// out, as the payday cron's 60 s already is.
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const guarded = await guardStoreWrite(request, "settings", 4_000);
   if (!guarded.ok) return guarded.response;
@@ -42,7 +46,11 @@ export async function POST(request: NextRequest) {
     }
     if (op === "pay") {
       if (!affiliatesOn(store)) return fail("off");
-      const refused = await withinServiceWhy("paypal-pay", store.handle, 6, 3600, store);
+      // A press reads the whole book and costs more than a call: it takes the figure's units for it at the program's
+      // size, counted first, before anything is read or sent (paypalPressUnits). Not counted: never taken as small.
+      const sizes = await bookSizes(store);
+      if (!sizes) return fail("error", 502);
+      const refused = await withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes));
       if (refused) return serviceRefusedJson(refused, "slow");
       const result = await payWithPayPal(store);
       return result.ok ? Response.json(result) : fail(result.reason, result.reason === "error" || result.reason === "unknown" || result.reason === "pending" ? 502 : 409);

@@ -232,6 +232,18 @@ export const CART_STOCK_COMMANDS_MOST = 71;
 export const CART_STOCK_SHARE_OF_ORDER_COMPUTE = 0.5;
 export const CART_STOCK_STRIPE_WAIT_MS = 5 * 2_000;
 /**
+ * Every look the five-minute job takes at one offer after paying still waiting on Stripe (lib/upsell.ts,
+ * settlePendingOffers), from its first minute to the day it is let go: a payment the bank asked the buyer to confirm,
+ * one whose answer was lost on the way back, or one still processing. At most OFFER_WATCH_LOOKS_MOST looks an offer,
+ * each at most OFFER_WATCH_LOOK_COMMANDS_MOST database commands (its record read twice, its next look written, the
+ * store's record and the run's share of reading the list), and Stripe reads of the creator's account, which bill no API
+ * call. Measured in tests/upsell-settle-late.test.ts and held to a declared share of ORDER_COMPUTE, an offer being its
+ * own order (line orders); what is left of ORDER_COMPUTE is more than the offer's own answer takes, measured there too.
+ */
+export const OFFER_WATCH_LOOKS_MOST = 11;
+export const OFFER_WATCH_LOOK_COMMANDS_MOST = 7;
+export const OFFER_WATCH_SHARE_OF_ORDER_COMPUTE = 0.6;
+/**
  * The access emails a plan's window holds (lib/store-allowance-rules.ts):
  * since 17 October 2026 counted and refused past the figure, before sending
  * (lib/email.ts, EmailMeter); until then a figure set high that no counter held.
@@ -1267,6 +1279,10 @@ export const COST_LINES: CostLine[] = [
       // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
+      // An offer still waiting on Stripe is looked at by the five-minute job less often the longer it waits (WATCH_AFTER_MS),
+      // and a bank payment still processing past its second day once a day until its seventh: OFFER_WATCH_LOOKS_MOST x
+      // OFFER_WATCH_LOOK_COMMANDS_MOST commands at most, inside OFFER_WATCH_SHARE_OF_ORDER_COMPUTE.
+      { file: "lib/upsell.ts", names: ["settlePendingOffers", "WATCH_AFTER_MS", "nextLook", "PROCESSING_WATCH_MS = 7 * 24", "PROCESSING_RECHECK_MS = 24 * 60"] },
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],
@@ -1480,6 +1496,10 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
+      // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
+      // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
+      // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
+      { file: "lib/licence-activations.ts", names: ["ACTIVATION_COMMANDS", "ACTIVATION_REQUEST_UNITS", "MAX_ACTIVATION_RECORD_BYTES", "needData(store"] },
       // A community search and its access checks, and the one walk of its archive, paid before they read (4 November 2026).
       { file: "lib/community-read-rules.ts", names: ["SEARCH_UNITS", "SEARCH_ROOM_UNITS", "SEARCH_UNITS_PER_CONVERSATION", "SEARCH_UNITS_PER_CHECK", "WALK_COMMANDS_PER_UNIT", "WALK_BYTES_PER_UNIT"] },
       { file: "app/[handle]/community/search/page.tsx", names: ["searchUnits({ room: config.chat.on, conversations })", "checkUnits(checks)", "{ shared: true }"] },

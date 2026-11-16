@@ -27,7 +27,7 @@ import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { noteUnitsLeft, lowStockOf, restoreUnitsSeen, wouldCrossLow } from "@/lib/low-stock";
 import { alertCreator } from "@/lib/phone-alerts";
 import { SITE_URL } from "@/lib/site-url";
-import { weeklyOff, weeklyToken } from "@/lib/stats-report";
+import { weeklyOffState, weeklyToken } from "@/lib/stats-report";
 import type { Store } from "@/lib/store";
 import { redisPipeline } from "@/lib/redis";
 import { countOf, repliesFor } from "@/lib/redis-reply";
@@ -100,10 +100,24 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
     console.error("a low-stock notification failed", error);
     return 0;
   });
-  // Emails the creator stopped are their own choice: then the crossing is said by the phone alone, or not at all.
+  // Emails the creator stopped are their own choice: then the crossing is said by the phone alone, or not at all. Whether
+  // they are stopped is read exactly (rule 24): an answer that is not known, or a read that fails, is not their choice,
+  // so with no phone told nothing is spent and the next check says it (Claude 5 on #3725, MEDIUM 1).
+  let stopped: boolean | null = false;
+  if (isSenderConfigured()) {
+    stopped = await weeklyOffState(store.handle).catch((error: unknown) => {
+      console.error("low-stock: whether the creator stopped the emails could not be read", error);
+      return null;
+    });
+  }
+  if (stopped === null && pushed < 1) {
+    // No email was tried, so the store's place for the day goes back too.
+    await giveBack(store, product.id, left as number, before, key, value, day, true);
+    return "unknown";
+  }
   let emailTried = false;
   let emailed = false;
-  if (isSenderConfigured() && !(await weeklyOff(store.handle))) {
+  if (isSenderConfigured() && stopped === false) {
     emailTried = true;
     const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(weeklyToken(store.handle))}`;
     emailed = await sendEmail({
@@ -122,16 +136,32 @@ export async function tellLowStock(store: Store, product: { id: string; title: s
       headers: { "List-Unsubscribe": `<${stopUrl}>` },
     }).catch(() => false);
   }
-  // Nothing reached the creator (the store's emails used up, or the send failed, and no phone told): nothing is spent,
-  // so the next check says it (Revisor 1 and Claude 3 on #3725). The day's mark, the count seen and the store's place go back.
+  // Nothing reached the creator (the store's emails used up, or the send failed, and no phone told): the crossing is not
+  // spent, so the next check says it (Revisor 1 and Claude 3 on #3725). The day's mark and the count seen go back; the
+  // store's place for the day does not, since a send was tried: a send that keeps failing is tried at most
+  // LOW_STOCK_ALERTS_A_STORE_DAY times a day for the store, each one a call to the provider (Claude 5 on #3725, MEDIUM 2).
   if (pushed < 1 && emailTried && !emailed) {
-    await releaseMark(key, value).catch(() => {});
-    await restoreUnitsSeen(store, product.id, left as number, before).catch(() => {});
-    await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
+    await giveBack(store, product.id, left as number, before, key, value, day, false);
     return "unknown";
   }
   // Nobody was told (no phone answered, and the creator stopped the emails or sending is off): the crossing stays
   // spent, the creator's own choice, but it is never said as told (cloud J's LOW on #3725).
   if (pushed < 1 && !emailed) return "no";
   return "told";
+}
+
+/** Puts back what a crossing that reached nobody took: the day's mark, the count seen and, when asked, the store's place. */
+async function giveBack(
+  store: Store,
+  productId: string,
+  left: number,
+  before: Parameters<typeof restoreUnitsSeen>[3],
+  key: string,
+  value: string,
+  day: string,
+  place: boolean,
+): Promise<void> {
+  await releaseMark(key, value).catch(() => {});
+  await restoreUnitsSeen(store, productId, left, before).catch(() => {});
+  if (place && store.statsId) await redisPipeline([["DECR", storeDayKey(store.statsId, day)]]).catch(() => {});
 }

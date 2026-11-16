@@ -1556,6 +1556,11 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/funnel-explain/route.ts", names: ["countStudio(store, null, FUNNEL_EXPLAIN_READ_UNITS)", "readFunnelChecks"] },
       // Marktmorgen Path reading its store's money and counts again takes PATH_READ_UNITS studio requests first, at most once every PATH_MONEY_SECONDS (18 October 2026).
       { file: "lib/path.ts", names: ["PATH_READ_UNITS", "countStudio(store, null, units)"] },
+      // A reading of the affiliate book not counted ahead (the studio's page, its spreadsheet, the payout file, the PayPal press, payday,
+      // the PayPal settling) takes KEPT_INVOICES_STUDIO_UNITS studio requests before it reads and writes back the kept invoices,
+      // priced in tests/affiliate-kept-invoices-counted.test.ts; refused, it reads none and nothing is paid (Claude 7's MEDIUM on #3378).
+      { file: "lib/api-read-rules.ts", names: ["KEPT_INVOICES_STUDIO_UNITS"] },
+      { file: "lib/affiliates.ts", names: ["takeAllowance(store, \"studio\", KEPT_INVOICES_STUDIO_UNITS)", "keptPaid"] },
       // The invoices of a store's own plan take one billing request of the day (the essential counter) before Stripe is asked, none without a plan subscription (601 [KB22] U5).
       { file: "lib/plan-invoices.ts", names: ["PLAN_INVOICES_PER_DAY", "PLAN_INVOICES_SHOWN", "takeEssentialBelow(store, PLAN_INVOICES_PER_DAY)", "await take()"] },
       { file: "lib/studio-route.ts", names: ["takeEssential", "takeEssentialBelow", 'essentialTakeBelow("studio-essential", store.sid || store.handle, Math.min(below, ESSENTIAL_PER_DAY), 86_400)'] },

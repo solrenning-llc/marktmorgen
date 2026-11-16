@@ -496,7 +496,8 @@ export async function affiliatesTool(store: Store, charge: Charge) {
   if (!affiliatesOn(store)) return { program: null, note: "The affiliate program is off." };
   const refused = await chargeBook(store, charge);
   if (refused) return refused;
-  const book = await readBook(store);
+  // Counted ahead, the kept invoices with it (chargeBook, bookWork).
+  const book = await readBook(store, undefined, { keptPaid: true });
   return {
     currency: book.currency,
     program: { percent: store.affiliates.percent, days: store.affiliates.days, rule: store.affiliates.rule, memberships_months: store.affiliates.recurring, bonuses: store.affiliates.bonuses },

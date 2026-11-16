@@ -347,7 +347,8 @@ export function invoicesSettled(book: Pick<Book, "invoicesChecked" | "unlinkedIn
 export async function affiliates(store: Store, charge: Charge): Promise<{ data: Record<string, unknown>[]; currency: string; refunds_checked: boolean; invoices_checked: boolean; unlinked_invoices: number } | Response> {
   const refused = await chargeBook(store, charge);
   if (refused) return refused;
-  const book = await readBook(store);
+  // Counted ahead, the kept invoices with it (chargeBook, bookWork).
+  const book = await readBook(store, undefined, { keptPaid: true });
   return {
     currency: book.currency,
     // When Stripe could not be asked about refunds, the amounts may be high.

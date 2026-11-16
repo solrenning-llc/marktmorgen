@@ -106,7 +106,8 @@ import {
 } from "@/lib/affiliate-setting";
 import { type Card, productIds, readCardsFor } from "@/lib/catalog";
 import type { HeldOne, HeldWhy } from "@/lib/affiliate-bulk-words";
-import { type BookSizes, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
+import { type BookSizes, KEPT_INVOICES_STUDIO_UNITS, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
+import { takeAllowance } from "@/lib/store-allowance";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
@@ -3582,7 +3583,7 @@ async function markRefunds(account: string, marks: { key: string; field: string;
  * product (its title is ""), and nothing is read for the names: for a reader
  * that prints no product, as the payout file (lib/affiliate-payouts.ts).
  */
-export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean } = {}): Promise<Book> {
+export async function readBook(store: Store, only?: string, limits: { deadline?: number; titles?: boolean; keptPaid?: boolean } = {}): Promise<Book> {
   if (!store.statsId || !isRedisConfigured()) return { rows: [], lines: [], payouts: [], refundsChecked: true, invoicesChecked: true, unlinkedInvoices: 0, currency: store.currency, elsewhere: 0 };
   const statsId = store.statsId;
   // Each hash read exactly: a reply that does not read throws, and nothing is shown as owed or paid on it.
@@ -3668,6 +3669,13 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
   let recurringLines: Referral[] = [];
   if (store.stripeAccountId && everyone.length) {
     try {
+      // The invoices kept between readings are read and written back whole (BOOK_INVOICES_KEPT_BYTES each way). A
+      // reading counted ahead says so (keptPaid: the API and MCP readers, bookWork; the affiliate's own page,
+      // affiliatePageCost); any other takes KEPT_INVOICES_STUDIO_UNITS of the store's studio requests first, and one
+      // that cannot reads no invoice: the book is then not checked, so nothing is paid from it (Claude 7's MEDIUM on #3378).
+      if (!limits.keptPaid && !(await takeAllowance(store, "studio", KEPT_INVOICES_STUDIO_UNITS)).ok) {
+        throw new Error("the kept invoices' studio requests could not be taken");
+      }
       const read = await recurringReferrals(store, everyone, Math.min(...everyone.map((a) => Math.floor(a.appliedAt / 1000))) - 86_400, limits.deadline, limits.titles !== false);
       recurringLines = read.lines.filter((r) => mine(r.aff));
       invoicesChecked = read.complete;

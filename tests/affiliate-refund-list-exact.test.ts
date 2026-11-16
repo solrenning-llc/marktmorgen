@@ -106,6 +106,16 @@ function unreadable(row: (over?: Record<string, unknown>) => Record<string, unkn
   ];
 }
 
+/**
+ * A reading not counted ahead takes the kept invoices' studio requests first (KEPT_INVOICES_STUDIO_UNITS, Claude 7's
+ * MEDIUM on #3378); this test reads the book dozens of times, past a store's figure, so each case starts with the
+ * figure given back. Otherwise a case would pass on a refused count rather than on the page it is about.
+ */
+async function roomy(): Promise<void> {
+  const counts = redis.keys().filter((k) => k.startsWith("nl:allow:"));
+  if (counts.length) await redis.pipeline([["DEL", ...counts]]);
+}
+
 async function main(): Promise<void> {
   process.env.STRIPE_SECRET_KEY = "sk_test_refund_list_only";
   process.env.RESEND_API_KEY = "re_test_only";
@@ -139,6 +149,7 @@ async function main(): Promise<void> {
     part(`A page of ${list} that cannot be read: no PayPal batch this round`);
     for (const [what, body] of unreadable(row)) {
       set(body);
+      await roomy();
       const before = created.length;
       const read = await readBook(store);
       const tried = await payWithPayPal(store);
@@ -152,12 +163,15 @@ async function main(): Promise<void> {
   part("A page of paid invoices that cannot be read: not 'no membership payments'");
   for (const [what, body] of unreadable((over = {}) => ({ id: "in_1", object: "invoice", status: "paid", amount_paid: 3000, ...over })).slice(0, 8)) {
     invoicesBody = body;
+    await roomy();
     is(`invoices, ${what}: not checked`, (await readBook(store)).invoicesChecked, false);
   }
   invoicesBody = EMPTY;
+  await roomy();
   is("invoices, an empty list read whole: checked", (await readBook(store)).invoicesChecked, true);
 
   part("Last: everything read whole, the commission is paid once");
+  await roomy();
   const lastBefore = created.length;
   paid = await payWithPayPal(store);
   is("sent, for the sale that was neither refunded nor charged back", paid.ok ? [paid.people, paid.cents, created.length - lastBefore] : paid.reason, [1, 3000, 1]);

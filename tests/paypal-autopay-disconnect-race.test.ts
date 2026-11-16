@@ -49,6 +49,30 @@ async function main() {
   }
   is("the app stays removed", await read(), null);
   is("the switch says it is not connected", said, false);
+
+  // Codex X8 on #4345 (ALTO, money; RETIDO in #4821, 6923303295): SET XX proves only that some record is there, not
+  // that it is the one read. An app replaced between the read and the write was overwritten by the old one's record,
+  // with automatic payouts on, and the daily run paid affiliates from the app the creator had removed.
+  part("An app replaced between the switch's read and its write is not overwritten");
+  const appB = JSON.stringify({ client: "AppClientSyntheticB2", secret: "sealed-synthetic-b", at: 2, auto: false });
+  await redis.pipeline([["SET", key, link]]);
+  let swap = true;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    const answer = await pipeline(commands);
+    if (swap && commands.length === 1 && commands[0][0] === "GET" && commands[0][1] === key) {
+      swap = false;
+      await pipeline([["SET", key, appB]]);
+    }
+    return answer;
+  }) as typeof redis.pipeline;
+  let saidB: boolean;
+  try {
+    saidB = await setAutoPay(store, true);
+  } finally {
+    redis.pipeline = pipeline;
+  }
+  is("the new app's record stays exactly as it was written", await read(), appB);
+  is("the switch says it did not switch: changed meanwhile, try again", saidB, false);
   done();
 }
 

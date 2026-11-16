@@ -32,6 +32,8 @@ export class FakeBucket {
   deleteFault: (key: string) => boolean = () => false;
   partFault: (partNumber: number) => unknown = () => undefined;
   getFault: (key: string) => unknown = () => undefined;
+  /** A createMultipartUpload that throws (Claude 5's HIGH on #3340). */
+  createFault: (key: string) => boolean = () => false;
   private ids = 0;
 
   async get(key: string): Promise<unknown> {
@@ -62,6 +64,7 @@ export class FakeBucket {
 
   async createMultipartUpload(key: string, options?: { customMetadata?: Record<string, string> }): Promise<unknown> {
     this.log.push(`mpu-create ${key}`);
+    if (this.createFault(key)) throw new Error("TEST: the bucket refused to start the upload");
     const uploadId = `upload-${++this.ids}`;
     this.uploads.set(uploadId, { key, parts: new Map(), customMetadata: options?.customMetadata, done: false });
     return this.resumeMultipartUpload(key, uploadId);

@@ -90,6 +90,8 @@ export type BackupDeletionPage = {
   reason: "done" | "more" | "cutoff";
 };
 
+/** Stand-in until the fix: no bound. */
+export const BACKUP_FILES_ROOM_MOST = Number.MAX_SAFE_INTEGER;
 export type BackupStoreRoom = { store: string; roomBytes: number };
 export type BackupStoresPage = {
   version: 1;

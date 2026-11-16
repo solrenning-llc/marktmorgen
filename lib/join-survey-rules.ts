@@ -123,11 +123,14 @@ const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/
 /** Invisible format characters (zero-width and the like), which could split an address so no pattern sees it. */
 const FORMAT = /\p{Cf}/gu;
 /**
- * A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits in any script (\p{Nd}, as cleanReviewText reads them; Claude 6 on #3652) with spaces, dots, hyphens or brackets.
+ * A phone number, at the width lib/inbox-rules.ts forAi reads one (nine characters or more, so a seven-digit local
+ * number is not one here, unlike cleanReviewText): its digits in any script (\p{Nd}, as cleanReviewText reads them;
+ * Claude 6 on #3652), and the separators a phone is typed or pasted with, ASCII or wide, every dash and hyphen (\p{Pd}),
+ * the minus sign, the Japanese IME's long mark, dots, slashes and brackets (Claude 5 on #3652).
  * Wide on purpose (Claude 1 on #3652, LEVE): a long date or figure ("2026-11-11", "1 000 000") goes too, losing a few
  * words a member typed rather than ever keeping a way to reach them.
  */
-const PHONE = /\+?\(?\p{Nd}[\p{Nd}\s().-]{7,}\p{Nd}/gu;
+const PHONE = /[+＋]?[(（]?\p{Nd}[\p{Nd}\s\p{Pd}−ー().\/（）．／]{7,}\p{Nd}/gu;
 /**
  * A social handle: "@" and a name (an address is taken out above), also glued to punctuation such as "ig:@name" or
  * "(@name)" (Claude 3 nuvem M on #3652); never after a letter, a digit, "@" or "." ("5@ each" stays).

@@ -72,13 +72,14 @@ async function main() {
   fresh([session("cs_test_once", first, false)]);
   await recordEnrollment(store, buyer, product.id, first + 7);
   is("the course opens from the day written down", (await paidCourses(store, buyer)).get(product.id), first + 7);
-  is("the cached answer keeps the same bytes", await cached(), `{"p":{"prod_again01":${first}},"x":[],"r":[]}`);
+  // Main's cache (24 [E7], #3445) always writes `a` and `e`; the bytes are main's, unchanged by this PR.
+  is("the cached answer keeps the same bytes", await cached(), `{"p":{"prod_again01":${first}},"x":[],"r":[],"a":[],"e":{}}`);
 
   part("Refunded in full and not bought again (unchanged)");
   fresh([session("cs_test_gone", first, true)]);
   await recordEnrollment(store, buyer, product.id, first);
   is("the course stays closed", (await paidCourses(store, buyer)).has(product.id), false);
-  is("the cached answer keeps the same bytes", await cached(), `{"p":{},"x":[],"r":["prod_again01"]}`);
+  is("the cached answer keeps the same bytes", await cached(), `{"p":{},"x":[],"r":["prod_again01"],"a":[],"e":{}}`);
 
   part("Bought twice, neither refunded (unchanged)");
   fresh([session("cs_test_later", second, false), session("cs_test_earlier", first, false)]);

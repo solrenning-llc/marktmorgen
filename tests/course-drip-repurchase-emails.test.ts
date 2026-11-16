@@ -119,7 +119,8 @@ async function main() {
   await redis.pipeline([["DEL", redis.keys().find((k) => k.startsWith("nl:learn:paid:")) ?? "none"]]);
   const start = (await paidCourses(store, buyer)).get(product.id);
   is("the page opens the course from the purchase that stands", start, again);
-  await touchStudent(courseId, buyer, start ?? 0, store as unknown as DataStore, course);
+  // The merge with 24 [E7] put the stamp fifth (none shown here), the course that stands sixth.
+  await touchStudent(courseId, buyer, start ?? 0, store as unknown as DataStore, undefined, course);
   is("and the student's row takes that day", (await studentDates(courseId, buyer))?.since, again);
   is("Month 1 is announced again when it opens again, 30 days after buying again", await run(again + 30 * DAY), [subject("Month 1")]);
   is("once", await run(again + 31 * DAY), []);

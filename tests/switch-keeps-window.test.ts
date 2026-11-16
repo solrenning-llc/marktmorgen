@@ -575,7 +575,9 @@ async function main(): Promise<void> {
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // #3369's drip-start-read line in a month of a yearly plan, recomputed at the same merge: 37.03, 258.62 and 579.77.
     // Still above zero (MR). Cost is not lowered.
-    is("11: and 37.02, 258.60 and 579.69 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.02", "258.60", "579.69"]);
+    // Merge of main into #3369 (16 November 2026, Claude 6 cloud): main's model (with #3445's course access end) and this
+    // PR's drip-start line together cost Scale's yearly month one cent more: 579.68 where 579.69 was; still above zero (MR).
+    is("11: and 37.02, 258.60 and 579.68 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.02", "258.60", "579.68"]);
   } finally {
     Date.now = realNow;
   }

@@ -80,6 +80,7 @@ import {
   intervalName,
   membershipPrice,
 } from "@/lib/product-recurring";
+import { EVERY_CHOICES, EVERY_PROBLEM_WORDS, everyName, everyWords, parseEvery } from "@/lib/recurring-every-rules";
 import { MAX_INTRO_COUNT, activeIntro, introLineEnglish } from "@/lib/intro-price";
 import { activeYearly } from "@/lib/yearly-price";
 import { MAX_ABOUT_LENGTH, aboutBlocks } from "@/lib/product-about";
@@ -149,6 +150,12 @@ const MESSAGES: Record<string, string> = {
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,
   payments: `Type ${MIN_MEMBER_PAYMENTS} to ${MAX_MEMBER_PAYMENTS} payments, or leave it empty for a membership that runs until it is canceled.`,
+  // Charged every N (609 [WP8]): each refusal says what to do, from the rules the route applies (lib/recurring-every-rules.ts).
+  every: EVERY_PROBLEM_WORDS.every,
+  every_intro: EVERY_PROBLEM_WORDS.intro,
+  every_yearly: EVERY_PROBLEM_WORDS.yearly,
+  every_tiers: EVERY_PROBLEM_WORDS.tiers,
+  every_payments: EVERY_PROBLEM_WORDS.payments,
   store_full: "Your store has reached the most it can hold. Remove something, or shorten a long list of choices, to make room.",
   intro_membership: "An introductory price is for a membership. Pick how often it charges first.",
   intro_trial: "A membership starts with one offer: a free trial or an introductory price. Empty one of them.",
@@ -174,6 +181,8 @@ const MESSAGES: Record<string, string> = {
   removed_full: `Your store has removed ${MAX_PRODUCTS.toLocaleString("en-US")} products, the most we keep track of so buyers can still get a copy of their data or have it deleted. Unpublish this one instead: it comes off your store and stays here as a draft.`,
   // The file named is an episode's audio of this product's podcast (app/api/store/file/attach).
   in_use: "That file is already used on this product. Choose the file from your device again.",
+  memberships: "Members or payment plans are still being charged for this on Stripe. Cancel them in your Stripe dashboard first, then remove it, so nobody keeps paying for something removed.",
+  stripe: "We could not check with Stripe whether anyone is still being charged for this. Nothing was removed. Try again in a moment.",
   preorders: "Buyers have pre-ordered this and are waiting for it. Put it on sale, which hands it to them, or refund their pre-orders in your Stripe dashboard first.",
   call: "This is a paid call, so it has one price, charged once, and delivers a time rather than a file. Stop selling it as a call first to change that.",
   course: "This is a course: it cannot be free, and it delivers its lessons rather than a file or a link of its own. Its lessons are changed from its own page.",
@@ -202,6 +211,8 @@ type Draft = {
   price: string;
   /** "" means a single sale. Anything else is how often it charges. */
   every: "" | Interval;
+  /** How many of those one charge covers, as chosen: "1", or "2", "3", "6" for every few (609 [WP8]). */
+  everyCount: string;
   /** Days free before a membership's first payment. "" is none. */
   trial: string;
   /** Payments before a membership ends by itself. "" is until cancelled. */
@@ -225,6 +236,7 @@ const EMPTY: Draft = {
   summary: "",
   price: "",
   every: "",
+  everyCount: "1",
   trial: "",
   payments: "",
   introPrice: "",
@@ -242,6 +254,7 @@ function payloadOf(draft: Draft): Record<string, unknown> {
     summary: draft.summary,
     price: draft.price,
     every: draft.every,
+    everyCount: draft.every ? parseEvery(draft.every, Number(draft.everyCount)) : 1,
     trial: draft.every ? draft.trial.trim() : "",
     payments: draft.every ? draft.payments.trim() : "",
     // Always sent from here, so taking it off, or the membership away, clears it.
@@ -537,7 +550,7 @@ function ProductForm({
         {offerOutline && !loadingAbout ? (
           <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-product-outline="">
             <p id={`product-outline-help-${id}`} className="text-sm text-ink-soft">
-              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace with your own words, including the brackets. This product can&apos;t go on your store until you replace every one.
+              Not sure what to write? Start from an outline: it sets out what buyers look for, and each part in [brackets] is yours to replace, brackets and all, with your own words. This product can&apos;t go on your store until you replace every one.
             </p>
             {draft.about.trim() ? (
               <p className="mt-2 text-sm text-ink-soft">The outline goes only into an empty description. Clear the description to use it.</p>
@@ -708,6 +721,8 @@ function ProductForm({
             setDraft({
               ...draft,
               every: event.target.value as "" | Interval,
+              // A count the new interval does not offer goes back to one (609 [WP8]).
+              everyCount: event.target.value && EVERY_CHOICES[event.target.value as Interval].includes(Number(draft.everyCount)) ? draft.everyCount : "1",
               // A membership charges a set amount, so nobody chooses it.
               pwyw: event.target.value ? false : draft.pwyw,
             })
@@ -723,11 +738,35 @@ function ProductForm({
         </select>
         <p className="mt-1 text-sm text-ink-soft">
           {draft.every
-            ? `A membership. The member is charged once ${everyLabel(
-                draft.every,
-              )} on your own Stripe account until it is canceled. Members can cancel it themselves from your store's membership page, linked in their confirmation email and under the membership on your page, and you can cancel it in your Stripe dashboard. A file or course delivered here closes when the membership ends; access to a link that leads somewhere else is yours to take back.`
+            ? `A membership. The member is charged once ${everyWords(draft.every, Number(draft.everyCount))} on your own Stripe account until it is canceled. Members can cancel it themselves from your store's membership page, linked in their confirmation email and under the membership on your page, and you can cancel it in your Stripe dashboard. A file or course delivered here closes when the membership ends; access to a link that leads somewhere else is yours to take back.`
             : "Most things are sold once. Pick a schedule to make this a membership instead."}
         </p>
+        {draft.every && EVERY_CHOICES[draft.every].length > 1 ? (
+          /* Every 2 weeks, or every 2, 3 or 6 months (609 [WP8]): only the counts Stripe and the rules allow, each named in full. */
+          <div className="mt-4">
+            <label htmlFor={`product-every-count-${id}`} className="field-label">
+              Charge it every
+            </label>
+            <select
+              id={`product-every-count-${id}`}
+              name="everyCount"
+              value={String(parseEvery(draft.every, Number(draft.everyCount)))}
+              onChange={(event) => setDraft({ ...draft, everyCount: event.target.value })}
+              aria-describedby={`product-every-count-help-${id}`}
+              className="field mt-2"
+            >
+              {EVERY_CHOICES[draft.every].map((n) => (
+                <option key={n} value={String(n)}>
+                  {everyName(draft.every as Interval, n)}
+                </option>
+              ))}
+            </select>
+            <p id={`product-every-count-help-${id}`} className="mt-1 text-sm text-ink-soft">
+              Your store&apos;s pages, the checkout and the purchase emails say exactly this. Charging every few weeks or months does not go with an
+              introductory price, a yearly price, a set number of payments or plans members switch between.
+            </p>
+          </div>
+        ) : null}
         {draft.every ? (
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div>
@@ -845,7 +884,7 @@ function ProductForm({
                 </p>
               </div>
             ) : null}
-            {/^\d+$/.test(draft.trial.trim()) || /^\d+$/.test(draft.payments.trim()) || draft.introPrice.trim() ? (
+            {/^\d+$/.test(draft.trial.trim()) || /^\d+$/.test(draft.payments.trim()) || draft.introPrice.trim() || Number(draft.everyCount) > 1 ? (
               <p className="rounded-xl bg-sand px-3 py-2 text-sm text-ink sm:col-span-2">
                 {(() => {
                   const typed = readMoney(draft.price, currency);
@@ -855,6 +894,7 @@ function ProductForm({
                       interval: draft.every,
                       trialDays: Number(draft.trial.trim()) || 0,
                       payments: Number(draft.payments.trim()) || 0,
+                      every: parseEvery(draft.every, Number(draft.everyCount)),
                     },
                     price,
                   );
@@ -1721,7 +1761,7 @@ function badges(product: Product): string[] {
   if (product.call) out.push("Call");
   if (product.course) out.push("Course");
   if (product.recurring) {
-    out.push("Membership");
+    out.push((product.recurring.every ?? 1) > 1 ? `Membership, ${everyWords(product.recurring.interval, product.recurring.every ?? 1)}` : "Membership");
     if (product.recurring.trialDays) out.push(`${product.recurring.trialDays}-day trial`);
     if (product.recurring.payments) out.push(`${product.recurring.payments} ${intervalAdjective(product.recurring.interval)} payments`);
     if (product.intro) out.push(product.intro.count > 1 ? `Introductory price, ${product.intro.count} months` : "Introductory price");
@@ -2102,6 +2142,7 @@ export function ProductEditor({
       summary: product.summary,
       price: moneyField(product.priceCents, currency),
       every: product.recurring ? product.recurring.interval : "",
+      everyCount: String(product.recurring?.every ?? 1),
       trial: product.recurring?.trialDays ? String(product.recurring.trialDays) : "",
       payments: product.recurring?.payments ? String(product.recurring.payments) : "",
       introPrice: product.intro ? moneyField(product.intro.cents, currency) : "",
@@ -2262,6 +2303,8 @@ export function ProductEditor({
                   options: product.options.length,
                   priceCents: product.priceCents,
                   interval: product.recurring?.interval ?? null,
+                  // How often it charges now (609 [WP8]), so a change to every 3 months is reviewed (Claude 4 on #3536).
+                  every: product.recurring ? parseEvery(product.recurring.interval, product.recurring.every) : 1,
                   suggestedCents: product.pwyw?.suggestedCents ?? null,
                   // "Now" is what the checkout offers, never only what is stored (lib/store-checkout.ts).
                   intro: activeIntro(product, tiers),
@@ -2309,7 +2352,7 @@ export function ProductEditor({
                 draft={draft}
                 setDraft={(next) => {
                   setDraft(next);
-                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments) setPriceReview(null);
+                  if (next.price !== draft.price || next.every !== draft.every || next.pwyw !== draft.pwyw || next.suggested !== draft.suggested || next.introPrice !== draft.introPrice || next.introCount !== draft.introCount || next.yearlyPrice !== draft.yearlyPrice || next.trial !== draft.trial || next.payments !== draft.payments || next.everyCount !== draft.everyCount) setPriceReview(null);
                 }}
                 busy={busy}
                 error={error}
@@ -2388,7 +2431,7 @@ export function ProductEditor({
                         {isFree(product)
                           ? "Free"
                           : product.recurring
-                            ? `${formatMoney(product.priceCents, currency)} ${everyLabel(product.recurring.interval)}`
+                            ? `${formatMoney(product.priceCents, currency)} ${everyWords(product.recurring.interval, product.recurring.every ?? 1)}`
                             : product.pwyw
                               ? `${formatMoney(product.priceCents, currency)}+`
                               : formatMoney(product.priceCents, currency)}

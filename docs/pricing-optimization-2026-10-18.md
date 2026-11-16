@@ -10,7 +10,7 @@
 
 | Plan | Monthly / yearly price | Included limits | Net at full use, monthly / yearly | Net under the most-tax reading (the gate) | Customers needed per $100 a month of fixed cost | Today (#553) |
 | --- | --- | --- | --- | --- | --- | --- |
-| Store | **$179 / $1,790** | every #553 figure, none cut | 60.59% / 60.40% | 12.21% | 166 | $69 / $690 |
+| Store | **$179 / $1,790** | every #553 figure, none cut | 60.59% / 60.40% | 12.21% | 167 | $69 / $690 |
 | Studio | **$749 / $7,490** | every #553 figure, none cut | 61.26% / 61.00% | 12.47% | 16 | $449 / $4,490 |
 | Scale | **$1,569 / $15,690** | every #553 figure, none cut | 61.40% / 61.12% | 12.53% | 7 | $999 / $9,990 |
 
@@ -169,7 +169,7 @@ Solver: scipy.optimize.milp (HiGHS), scipy 1.x.
 
 | Plan | Price | Worst regret | Regret at ε −0.5 / −1 / −1.5 / −2 | Customers needed per $100 a month of fixed cost |
 | --- | --- | --- | --- | --- |
-| Store | $179 | 5.7% | 5.7% / 0.5% / 2.5% / 5.3% | 166 |
+| Store | $179 | 5.7% | 5.7% / 0.5% / 2.5% / 5.3% | 167 |
 | Studio | $749 | 26.5% | 26.5% / 1.7% / 13.1% / 25.6% | 16 |
 | Scale | $1,569 | 28.8% | 28.8% / 1.7% / 15.0% / 28.8% | 7 |
 

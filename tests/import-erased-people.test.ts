@@ -424,7 +424,7 @@ async function main(): Promise<void> {
     /** Answers the checked writes' script in `reply` (or throws) without running it; every other command as it is. */
     const scriptAnswers = (name: string, reply: unknown) => {
       redis.pipeline = async (commands: (string | number)[][]) => {
-        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(`-- marktmorgen:${name}:v1\n`))) {
+        if (commands.some((c) => c[0] === "EVAL" && String(c[1]).startsWith(`-- marktmorgen:${name}:v`))) {
           if (reply === "throw") throw new Error("synthetic script failure");
           return commands.map(() => reply);
         }

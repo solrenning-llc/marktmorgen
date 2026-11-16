@@ -1083,13 +1083,22 @@ export async function paypalCounts(statsId: string | null): Promise<{ sales: num
 /**
  * The store's PayPal sales paid since `since` (seconds), newest first, at most
  * `limit`: one range and one read of the orders. Nothing is asked of PayPal.
+ * `now` (seconds) tells a record that expired by design from one not read.
  */
-export async function readPayPalSales(statsId: string | null, since: number, limit: number): Promise<{ sales: Paid[]; partial: boolean }> {
+export async function readPayPalSales(statsId: string | null, since: number, limit: number, now = Math.floor(Date.now() / 1000)): Promise<{ sales: Paid[]; partial: boolean }> {
   if (!statsId || !isRedisConfigured()) return { sales: [], partial: false };
   // Read exactly, as the refunds beside it are (readPayPalRefundsWithCoverage; rule 24): the list as a list of text no
-  // longer than asked, else unknown and thrown, never "no PayPal sales".
-  const orders = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
-  if (!orders || orders.length > limit + 1) throw new UnknownReplyError("the PayPal sales");
+  // longer than asked, each member with its time, else unknown and thrown, never "no PayPal sales".
+  const flat = stringList(repliesFor(await redisPipeline([["ZREVRANGEBYSCORE", salesKey(statsId), "+inf", String(Math.max(0, since)), "WITHSCORES", "LIMIT", "0", String(limit + 1)]]), 1)?.[0]);
+  if (!flat || flat.length % 2 !== 0 || flat.length > 2 * (limit + 1)) throw new UnknownReplyError("the PayPal sales");
+  const orders: string[] = [];
+  const paidAt = new Map<string, number>();
+  for (let i = 0; i < flat.length; i += 2) {
+    const time = /^\d{1,15}$/.test(flat[i + 1]) ? Number(flat[i + 1]) : NaN;
+    if (!Number.isSafeInteger(time)) throw new UnknownReplyError("the PayPal sales");
+    orders.push(flat[i]);
+    paidAt.set(flat[i], time);
+  }
   const listed = orders.slice(0, limit);
   // An order that is not an order id, a record Redis answered as missing or one written for another store is a sale
   // this reading could not count: the reading is partial, never whole without it.
@@ -1104,7 +1113,10 @@ export async function readPayPalSales(statsId: string | null, since: number, lim
   list.forEach((order, i) => {
     const raw = rows[i];
     if (raw === null) {
-      missing = true;
+      // Its record is written with the member, at its time, and kept PAID_KEPT_SECONDS: past that it expired by design
+      // and the member is only waiting for the next sale's trim (Codex L and Codex V on #4001), outside what is kept.
+      // Missing inside that window, it is a sale this reading could not count.
+      if ((paidAt.get(order) ?? now) + PAID_KEPT_SECONDS > now) missing = true;
       return;
     }
     if (typeof raw !== "string") throw new UnknownReplyError(what);

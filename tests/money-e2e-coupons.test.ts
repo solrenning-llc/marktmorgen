@@ -100,6 +100,17 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const q = url.searchParams;
   const body = new URLSearchParams(typeof init?.body === "string" ? init.body : String(init?.body ?? ""));
   if (path === "/promotion_codes" && method === "GET") return promotionCodes(q);
+  // One code read by its id (lib/discount.ts findCode, which the member discount uses on main): answered from the
+  // same synthetic codes the list serves, with Stripe's own 404 resource_missing for a code that is not there.
+  const promotion = /^\/promotion_codes\/([^/]+)$/.exec(path);
+  if (promotion && method === "GET") {
+    const listed = promotionCodes(new URLSearchParams());
+    if (listed.status !== 200) return listed;
+    const rows = ((await listed.json()) as Json).data;
+    if (!Array.isArray(rows)) return stripeError(500, "An unknown error occurred.");
+    const found = (rows as Json[]).find((c) => c.id === decodeURIComponent(promotion[1]));
+    return found ? answer(found) : stripeError(404, "No such promotion_code", "resource_missing");
+  }
   if (path === "/promotion_codes" && method === "POST") {
     promotionBodies.push(body);
     return answer({ id: "promo_1Made0001", object: "promotion_code", code: body.get("code"), active: body.get("active") !== "false", times_redeemed: 0, max_redemptions: body.has("max_redemptions") ? Number(body.get("max_redemptions")) : null, expires_at: null, restrictions: { first_time_transaction: false, minimum_amount: null, minimum_amount_currency: null }, promotion: { type: "coupon", coupon: body.get("promotion[coupon]") } });

@@ -156,7 +156,9 @@ async function main(): Promise<void> {
   };
   const settle = () => settleGroup({ store, session, product, base: BASE, from: FROM });
   is("settled", await settle(), "settled");
-  is("twice is once", await settle(), "already");
+  // Twice is once: the second run finds the first run's kept mark and throws, never "already" for a receipt it did not
+  // send (Claude 6 on #2872); the caller's "sent" mark answers every run after the first.
+  is("twice is once", await settle().then(() => "returned", () => "threw"), "threw");
   const receipt = emails.find((e) => e.to[0] === "buyer@example.com");
   is("the receipt: how many, what was paid, the link", Boolean(receipt?.text.includes("for 2 people") && receipt.text.includes("$98") && receipt.text.includes(`${BASE}/group/${id}`)), true);
   is("one email so far", emails.length, 1);

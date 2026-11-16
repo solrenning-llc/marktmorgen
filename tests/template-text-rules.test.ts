@@ -283,6 +283,50 @@ async function main(): Promise<void> {
   is("a record grown past what was paid publishes nothing and says why", [grown.status, grown.data.error, await stillDraft()], [409, "page_changed", true]);
   const settled = await publish();
   is("pressed again, it is paid at its new size and published", [settled.status, await stillDraft()], [200, false]);
+  // Claude 6 on #3693 (LOW 1): a page over one unit's worth pays more than one unit, by its UTF-8 bytes, not a fixed one.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const wide = [5, 6, 7, 8].map((n): TextBlock => ({ ...own, id: `text001${n}`, body: "日本語のノート。".repeat(375) }));
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own, ...wide] } });
+  const wideBytes = Number((await redis.pipeline([["STRLEN", pageKey]]))[0]);
+  const beforeWide = await studioUsed();
+  const wideOut = await publish();
+  is("a page of more than one unit's bytes is published", [wideOut.status, await stillDraft(), publishPageUnits(wideBytes) > 1], [200, false, true]);
+  is("and pays the units of its own bytes, more than one", (await studioUsed()) - beforeWide >= 1 + publishPageUnits(wideBytes), true);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  // Claude 6 on #3693 (MEDIUM, rule 24): a size that does not read says so, never that the product is gone.
+  const sizeAnswer = async (answer: (command: readonly unknown[]) => unknown) => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "STRLEN")) return commands.map((command) => answer(command));
+      return pipeline(commands);
+    };
+    try {
+      return await publish();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  };
+  const thrown = await (async () => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "STRLEN")) throw new Error("synthetic outage");
+      return pipeline(commands);
+    };
+    try {
+      return await publish();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  })();
+  const odd = await sizeAnswer(() => "many");
+  is("a page size that does not read publishes nothing and says it could not be checked", [thrown.status, thrown.data.error, odd.status, odd.data.error, await stillDraft()], [503, "page_unread", 503, "page_unread", true]);
+  let sizes = 0;
+  const lockOdd = await sizeAnswer(() => (++sizes === 1 ? 0 : "many"));
+  const lockOddDraft = await stillDraft();
+  is("as one that does not read again under the lock (its first read was 0 bytes, so nothing more was paid)", [lockOdd.status, lockOdd.data.error, lockOddDraft], [503, "page_unread", true]);
+  const editorSource = readFileSync("components/product-editor.tsx", "utf8");
+  is("the editor tells the creator to try again, not that the product is gone", /page_unread: "[^"]*could not be checked[^"]*Nothing was published[^"]*"/.test(editorSource), true);
+  const afterOutage = await publish();
+  is("once the size reads, it is published", [afterOutage.status, await stillDraft()], [200, false]);
   const publishMessage = (rules as Record<string, unknown>).templatePublishMessage as ((left: { field: string; kind: string | null; part: string }, product: string | null) => string) | undefined;
   is("the message says the product, where the part is, and the way on", [
     publishMessage?.({ field: "block", kind: "quotes", part: "⟦Their name⟧" }, "Draft guide"),

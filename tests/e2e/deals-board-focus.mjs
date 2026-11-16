@@ -97,7 +97,8 @@ try {
   const errors = [];
   const page = await boardPage(context, errors);
   const mount = async (w) => {
-    await page.evaluate((w) => window.harness.mount(w), w);
+    const epoch = await page.evaluate((w) => window.harness.mount(w), w);
+    await page.waitForFunction((epoch) => window.harness.mountedEpoch === epoch, epoch);
     await page.locator("#deals-title").waitFor();
   };
   const active = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName);

@@ -19,6 +19,8 @@ import { type LanguageCode, parseLanguage } from "@/lib/store-language";
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 /** French takes the singular for 0 and 1. */
 const pluralFr = (n: number, one: string, many: string) => (n < 2 ? one : many);
+/** "A, B and C" in a language's own "and": the things a deleted review takes with it (deleteReviewWhat). */
+const andList = (parts: string[], and: string) => (parts.length < 2 ? parts.join("") : `${parts.slice(0, -1).join(", ")} ${and} ${parts[parts.length - 1]}`);
 /** A non-breaking space, before the signs French spaces from the word before them. */
 const S = " ";
 
@@ -86,6 +88,8 @@ const en = {
   freeNotConsented: (store: string) =>
     `You did not check the box to hear from ${store}, so your address reaches them marked as having asked for this one thing, and nothing more.`,
   freeIgnore: "If you did not ask for this, ignore this email. Nothing happens unless the link is used.",
+  /** The way to write to the creator, when the store page's contact form is open (lib/store-contact.ts): replies to the free copy's email do not reach them (755 [STN2]). */
+  freeContact: (store: string, link: string) => `To write to ${store}, use the contact form on their page: ${link}`,
   freeSentBy: (store: string) =>
     `Sent by Marktmorgen on behalf of ${store}. Marktmorgen uses your address for nothing else, and replies to this email do not reach ${store}.`,
 
@@ -128,7 +132,7 @@ const en = {
   notOnListBody: "It was removed already, or the waitlist has done its job and its addresses are gone.",
   almostThere: "Almost there",
   waitSentBody: (title: string, store: string) =>
-    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen and usually arrives within a minute; if it is not there, look in spam.`,
+    `We emailed you a button to confirm your spot on the waitlist for ${title || "it"}. It comes from ${store} via Marktmorgen. If it is not there, look in spam.`,
   waitSentNote: "Your spot counts once you press it, so a mistyped address is never told anything.",
   onTheList: "You are on the list",
   tellWhenOut: (title: string) => `We will tell you when ${title || "it"} is out`,
@@ -178,6 +182,10 @@ const en = {
     unavailable: {
       title: "We could not send that just now",
       body: "No place was taken or lost. Try again in a moment.",
+    },
+    opening: {
+      title: "We could not finish opening your place",
+      body: "Open the link again in a moment. If it was already yours, nothing changes.",
     },
     expired: {
       title: "That link has expired",
@@ -285,6 +293,10 @@ const en = {
     error: "Something went wrong on our side. Nothing was changed. Try again in a moment.",
     photo: "That photo could not be added. Try another one, as a JPEG or straight from your camera.",
     photoPaused: "Your review was saved, but the new photo was not added: this store is not taking new photos right now.",
+    photoLimit: "Your review was saved, but the new photo was not added: a review can take 3 new photos in all, and yours has had 3.",
+    photoFailed: "Your review was saved, but the new photo was not added because of a problem on our side. That try still counts as 1 of the 3 new photos a review can take.",
+    confirmDelete: "There is no review of yours here to delete.",
+    kept: "Your review was not deleted. Nothing was changed.",
   } as Record<string, string>,
   yourRating: (title: string) => `Your rating for ${title}`,
   whatYouThink: "What you think (optional)",
@@ -293,9 +305,18 @@ const en = {
   nameToShow: "Name to show (optional)",
   updateReview: "Update my review",
   postReview: "Post my review",
+  /** A review of theirs that could not be read: never a blank form that would post over it. */
+  reviewUnread: (title: string) => `Your review of ${title} could not be loaded just now. Refresh this page in a moment to see or change it.`,
   reviewPublic: (store: string) =>
     `Your review is public on ${store}'s page, marked as a verified purchase. Your email address is never shown. ${store} can reply and can hide it, but cannot change it.`,
   deleteReview: "Delete my review",
+  /** The question the first press of "Delete my review" opens (WCAG 3.3.4, 3.3.6): nothing is deleted until its yes. */
+  deleteReviewAsk: (title: string) => `Delete your review of ${title}?`,
+  /** Exactly what goes: the rating with its stars, the words when there are any, the photo when there is one. */
+  deleteReviewWhat: (stars: number, hasWords: boolean, hasPhoto: boolean, store: string) =>
+    `This deletes ${andList([`your ${stars}-star rating`, ...(hasWords ? ["your words"] : []), ...(hasPhoto ? ["your photo"] : [])], "and")} from ${store}'s page. It cannot be brought back.`,
+  deleteReviewYes: "Yes, delete my review",
+  deleteReviewKeep: "Keep my review",
   reviewPhoto: "Add a photo (optional)",
   reviewPhotoHint: "A photo of what you made with it, or of it in use. It shows with your review.",
   reviewPhotoRemove: "Remove my photo",
@@ -432,6 +453,7 @@ const es: GivingWords = {
   freeNotConsented: (store) =>
     `No marcaste la casilla para recibir noticias de ${store}, así que tu dirección le llega indicando que pediste solo esto, y nada más.`,
   freeIgnore: "Si no lo pediste, ignora este email. No pasa nada a menos que se use el enlace.",
+  freeContact: (store, link) => `Para escribir a ${store}, usa el formulario de contacto de su página: ${link}`,
   freeSentBy: (store) =>
     `Enviado por Marktmorgen en nombre de ${store}. Marktmorgen no usa tu dirección para nada más, y las respuestas a este email no llegan a ${store}.`,
 
@@ -473,7 +495,7 @@ const es: GivingWords = {
   notOnListBody: "Ya se quitó, o la lista de espera ya cumplió su función y sus direcciones se han borrado.",
   almostThere: "Ya casi está",
   waitSentBody: (title, store) =>
-    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen y suele tardar menos de un minuto; si no está, mira en spam.`,
+    `Te hemos enviado por email un botón para confirmar tu plaza en la lista de espera${title ? ` de ${title}` : ""}. Llega de ${store} a través de Marktmorgen. Si no está, mira en spam.`,
   waitSentNote: "Tu plaza cuenta cuando lo pulsas, así que a una dirección mal escrita nunca se le avisa de nada.",
   onTheList: "Estás en la lista",
   tellWhenOut: (title) => (title ? `Te avisaremos cuando salga ${title}` : "Te avisaremos cuando salga"),
@@ -519,6 +541,10 @@ const es: GivingWords = {
     unavailable: {
       title: "No hemos podido enviarlo ahora mismo",
       body: "No se ha ocupado ni perdido ninguna plaza. Vuelve a intentarlo en un momento.",
+    },
+    opening: {
+      title: "No hemos podido terminar de abrir tu plaza",
+      body: "Vuelve a abrir el enlace en un momento. Si ya era tuya, no cambia nada.",
     },
     expired: {
       title: "Ese enlace ha caducado",
@@ -619,6 +645,10 @@ const es: GivingWords = {
     error: "Algo ha fallado por nuestra parte. No se ha cambiado nada. Vuelve a intentarlo en un momento.",
     photo: "No se pudo añadir esa foto. Prueba con otra, en JPEG o directamente de tu cámara.",
     photoPaused: "Su reseña se guardó, pero la foto nueva no se añadió: esta tienda no acepta fotos nuevas en este momento.",
+    photoLimit: "Su reseña se guardó, pero la foto nueva no se añadió: una reseña puede recibir 3 fotos nuevas en total, y la suya ya ha recibido 3.",
+    photoFailed: "Su reseña se guardó, pero la foto nueva no se añadió por un problema de nuestra parte. Ese intento cuenta igualmente como 1 de las 3 fotos nuevas que puede recibir una reseña.",
+    confirmDelete: "Aquí no hay ninguna reseña tuya que eliminar.",
+    kept: "Tu reseña no se ha eliminado. No se ha cambiado nada.",
   },
   yourRating: (title) => `Tu valoración de ${title}`,
   whatYouThink: "Qué te parece (opcional)",
@@ -626,9 +656,15 @@ const es: GivingWords = {
   nameToShow: "Nombre que se mostrará (opcional)",
   updateReview: "Actualizar mi reseña",
   postReview: "Publicar mi reseña",
+  reviewUnread: (title) => `No pudimos cargar tu reseña de ${title} en este momento. Actualiza esta página en un momento para verla o cambiarla.`,
   reviewPublic: (store) =>
     `Tu reseña es pública en la página de ${store}, marcada como compra verificada. Tu dirección de email nunca se muestra. ${store} puede responder y ocultarla, pero no puede cambiarla.`,
   deleteReview: "Eliminar mi reseña",
+  deleteReviewAsk: (title) => `¿Eliminar tu reseña de ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Esto elimina ${andList([`tu valoración de ${stars} ${plural(stars, "estrella", "estrellas")}`, ...(hasWords ? ["tus palabras"] : []), ...(hasPhoto ? ["tu foto"] : [])], "y")} de la página de ${store}. No se puede recuperar.`,
+  deleteReviewYes: "Sí, eliminar mi reseña",
+  deleteReviewKeep: "Conservar mi reseña",
   reviewPhoto: "Añade una foto (opcional)",
   reviewPhotoHint: "Una foto de lo que hiciste con él o de cómo lo usas. Se muestra con tu reseña.",
   reviewPhotoRemove: "Quitar mi foto",
@@ -756,6 +792,7 @@ const fr: GivingWords = {
   freeNotConsented: (store) =>
     `Vous n'avez pas coché la case pour recevoir des nouvelles de ${store}, votre adresse lui parvient donc avec la mention que vous avez demandé uniquement ceci, et rien de plus.`,
   freeIgnore: "Si vous ne l'avez pas demandé, ignorez cet e-mail. Rien ne se passe tant que le lien n'est pas utilisé.",
+  freeContact: (store, link) => `Pour écrire à ${store}, utilisez le formulaire de contact de sa page : ${link}`,
   freeSentBy: (store) =>
     `Envoyé par Marktmorgen pour le compte de ${store}. Marktmorgen n'utilise votre adresse pour rien d'autre, et les réponses à cet e-mail ne parviennent pas à ${store}.`,
 
@@ -796,7 +833,7 @@ const fr: GivingWords = {
   notOnListBody: "Elle a déjà été retirée, ou la liste d'attente a rempli son rôle et ses adresses ont été supprimées.",
   almostThere: "Presque terminé",
   waitSentBody: (title, store) =>
-    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen et arrive généralement en moins d'une minute${S}; s'il n'y est pas, regardez dans les spams.`,
+    `Nous vous avons envoyé par e-mail un bouton pour confirmer votre place sur la liste d'attente${title ? ` de ${title}` : ""}. Il vient de ${store} via Marktmorgen. S'il n'y est pas, regardez dans les spams.`,
   waitSentNote: "Votre place compte dès que vous appuyez dessus, une adresse mal saisie ne reçoit donc jamais rien.",
   onTheList: "Vous êtes sur la liste",
   tellWhenOut: (title) => `Nous vous préviendrons à la sortie${title ? ` de ${title}` : ""}`,
@@ -842,6 +879,10 @@ const fr: GivingWords = {
     unavailable: {
       title: "Nous n'avons pas pu l'envoyer pour le moment",
       body: "Aucune place n'a été prise ni perdue. Réessayez dans un instant.",
+    },
+    opening: {
+      title: "Nous n'avons pas pu finir d'ouvrir votre place",
+      body: "Rouvrez le lien dans un instant. Si elle était déjà à vous, rien ne change.",
     },
     expired: {
       title: "Ce lien a expiré",
@@ -939,6 +980,10 @@ const fr: GivingWords = {
     error: "Un problème est survenu de notre côté. Rien n'a été modifié. Réessayez dans un instant.",
     photo: "Impossible d'ajouter cette photo. Essayez-en une autre, en JPEG ou prise directement avec votre appareil.",
     photoPaused: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée : cette boutique n'accepte pas de nouvelles photos pour le moment.",
+    photoLimit: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée : un avis peut recevoir 3 nouvelles photos au total, et le vôtre en a déjà reçu 3.",
+    photoFailed: "Votre avis a été enregistré, mais la nouvelle photo n'a pas été ajoutée à cause d'un problème de notre côté. Cet essai compte quand même comme 1 des 3 nouvelles photos qu'un avis peut recevoir.",
+    confirmDelete: "Vous n'avez ici aucun avis à supprimer.",
+    kept: "Votre avis n'a pas été supprimé. Rien n'a été modifié.",
   },
   yourRating: (title) => `Votre note pour ${title}`,
   whatYouThink: "Votre avis (facultatif)",
@@ -946,9 +991,15 @@ const fr: GivingWords = {
   nameToShow: "Nom affiché (facultatif)",
   updateReview: "Mettre à jour mon avis",
   postReview: "Publier mon avis",
+  reviewUnread: (title) => `Votre avis sur ${title} n'a pas pu être chargé pour l'instant. Actualisez cette page dans un instant pour le voir ou le modifier.`,
   reviewPublic: (store) =>
     `Votre avis est public sur la page de ${store}, marqué comme achat vérifié. Votre adresse e-mail n'est jamais affichée. ${store} peut y répondre et le masquer, mais pas le modifier.`,
   deleteReview: "Supprimer mon avis",
+  deleteReviewAsk: (title) => `Supprimer votre avis sur ${title}${S}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Cela retire ${andList([`votre note de ${stars}${S}${pluralFr(stars, "étoile", "étoiles")}`, ...(hasWords ? ["votre texte"] : []), ...(hasPhoto ? ["votre photo"] : [])], "et")} de la page de ${store}. Cette suppression est définitive.`,
+  deleteReviewYes: "Oui, supprimer mon avis",
+  deleteReviewKeep: "Garder mon avis",
   reviewPhoto: "Ajoutez une photo (facultatif)",
   reviewPhotoHint: "Une photo de ce que vous avez réalisé avec, ou de son utilisation. Elle s'affiche avec votre avis.",
   reviewPhotoRemove: "Retirer ma photo",
@@ -1076,6 +1127,7 @@ const de: GivingWords = {
   freeNotConsented: (store) =>
     `Sie haben das Kästchen für Nachrichten von ${store} nicht angekreuzt, daher erhält ${store} Ihre Adresse mit dem Vermerk, dass Sie nur dies angefordert haben, und nichts weiter.`,
   freeIgnore: "Wenn Sie das nicht angefordert haben, ignorieren Sie diese E-Mail. Es passiert nichts, solange der Link nicht benutzt wird.",
+  freeContact: (store, link) => `Um ${store} zu schreiben, nutzen Sie das Kontaktformular auf der Seite: ${link}`,
   freeSentBy: (store) =>
     `Gesendet von Marktmorgen im Auftrag von ${store}. Marktmorgen verwendet Ihre Adresse für nichts anderes, und Antworten auf diese E-Mail erreichen ${store} nicht.`,
 
@@ -1117,7 +1169,7 @@ const de: GivingWords = {
   notOnListBody: "Sie wurde bereits entfernt, oder die Warteliste hat ihren Zweck erfüllt und ihre Adressen sind gelöscht.",
   almostThere: "Fast geschafft",
   waitSentBody: (title, store) =>
-    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen und ist meist innerhalb einer Minute da; falls nicht, sehen Sie im Spam-Ordner nach.`,
+    `Wir haben Ihnen per E-Mail eine Schaltfläche geschickt, mit der Sie Ihren Platz auf der Warteliste${title ? ` für ${title}` : ""} bestätigen. Sie kommt von ${store} über Marktmorgen. Falls sie nicht da ist, sehen Sie im Spam-Ordner nach.`,
   waitSentNote: "Ihr Platz zählt erst, wenn Sie darauf drücken, damit eine vertippte Adresse nie benachrichtigt wird.",
   onTheList: "Sie stehen auf der Liste",
   tellWhenOut: (title) => `Wir sagen Ihnen Bescheid, wenn ${title || "es"} erscheint`,
@@ -1163,6 +1215,10 @@ const de: GivingWords = {
     unavailable: {
       title: "Wir konnten das gerade nicht senden",
       body: "Es wurde kein Platz vergeben oder verloren. Versuchen Sie es gleich noch einmal.",
+    },
+    opening: {
+      title: "Wir konnten Ihren Platz nicht fertig öffnen",
+      body: "Öffnen Sie den Link gleich noch einmal. Wenn der Platz schon Ihrer war, ändert sich nichts.",
     },
     expired: {
       title: "Dieser Link ist abgelaufen",
@@ -1259,6 +1315,10 @@ const de: GivingWords = {
     error: "Bei uns ist etwas schiefgelaufen. Es wurde nichts geändert. Versuchen Sie es gleich noch einmal.",
     photo: "Dieses Foto konnte nicht hinzugefügt werden. Versuche ein anderes, als JPEG oder direkt aus der Kamera.",
     photoPaused: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde nicht hinzugefügt: Dieser Shop nimmt im Moment keine neuen Fotos an.",
+    photoLimit: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde nicht hinzugefügt: Eine Bewertung kann insgesamt 3 neue Fotos erhalten, und Ihre hat bereits 3 erhalten.",
+    photoFailed: "Ihre Bewertung wurde gespeichert, aber das neue Foto wurde wegen eines Problems bei uns nicht hinzugefügt. Dieser Versuch zählt trotzdem als 1 der 3 neuen Fotos, die eine Bewertung erhalten kann.",
+    confirmDelete: "Hier gibt es keine Bewertung von Ihnen, die gelöscht werden kann.",
+    kept: "Ihre Bewertung wurde nicht gelöscht. Es wurde nichts geändert.",
   },
   yourRating: (title) => `Ihre Sterne für ${title}`,
   whatYouThink: "Ihre Meinung (optional)",
@@ -1266,9 +1326,15 @@ const de: GivingWords = {
   nameToShow: "Angezeigter Name (optional)",
   updateReview: "Meine Bewertung aktualisieren",
   postReview: "Meine Bewertung veröffentlichen",
+  reviewUnread: (title) => `Ihre Bewertung von ${title} konnte gerade nicht geladen werden. Laden Sie diese Seite gleich neu, um sie zu sehen oder zu ändern.`,
   reviewPublic: (store) =>
     `Ihre Bewertung ist auf der Seite von ${store} öffentlich sichtbar und als verifizierter Kauf gekennzeichnet. Ihre E-Mail-Adresse wird nie angezeigt. ${store} kann antworten und sie ausblenden, aber nicht ändern.`,
   deleteReview: "Meine Bewertung löschen",
+  deleteReviewAsk: (title) => `Ihre Bewertung von ${title} löschen?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Damit löschen Sie ${andList([`Ihre Bewertung mit ${stars} ${plural(stars, "Stern", "Sternen")}`, ...(hasWords ? ["Ihren Text"] : []), ...(hasPhoto ? ["Ihr Foto"] : [])], "und")} von der Seite von ${store}. Das lässt sich nicht rückgängig machen.`,
+  deleteReviewYes: "Ja, meine Bewertung löschen",
+  deleteReviewKeep: "Meine Bewertung behalten",
   reviewPhoto: "Füge ein Foto hinzu (optional)",
   reviewPhotoHint: "Ein Foto von dem, was du damit gemacht hast, oder davon im Einsatz. Es erscheint mit deiner Bewertung.",
   reviewPhotoRemove: "Mein Foto entfernen",
@@ -1396,6 +1462,7 @@ const it: GivingWords = {
   freeNotConsented: (store) =>
     `Non hai spuntato la casella per ricevere notizie da ${store}, quindi il tuo indirizzo gli arriva con l'indicazione che hai chiesto solo questo, e nient'altro.`,
   freeIgnore: "Se non l'hai chiesto tu, ignora questa email. Non succede nulla finché il link non viene usato.",
+  freeContact: (store, link) => `Per scrivere a ${store}, usa il modulo di contatto della sua pagina: ${link}`,
   freeSentBy: (store) =>
     `Inviata da Marktmorgen per conto di ${store}. Marktmorgen non usa il tuo indirizzo per nient'altro, e le risposte a questa email non arrivano a ${store}.`,
 
@@ -1437,7 +1504,7 @@ const it: GivingWords = {
   notOnListBody: "È già stato rimosso, oppure la lista d'attesa ha fatto il suo lavoro e i suoi indirizzi sono stati cancellati.",
   almostThere: "Ci sei quasi",
   waitSentBody: (title, store) =>
-    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen, di solito entro un minuto; se non la trovi, guarda nello spam.`,
+    `Ti abbiamo inviato via email un pulsante per confermare il tuo posto nella lista d'attesa${title ? ` per ${title}` : ""}. Arriva da ${store} tramite Marktmorgen. Se non la trovi, guarda nello spam.`,
   waitSentNote: "Il tuo posto conta solo quando lo premi, così un indirizzo scritto male non riceve mai niente.",
   onTheList: "Sei nella lista",
   tellWhenOut: (title) => (title ? `Ti avviseremo quando uscirà ${title}` : "Ti avviseremo quando uscirà"),
@@ -1483,6 +1550,10 @@ const it: GivingWords = {
     unavailable: {
       title: "Non siamo riusciti a inviarlo in questo momento",
       body: "Nessun posto è stato preso o perso. Riprova tra un momento.",
+    },
+    opening: {
+      title: "Non siamo riusciti a finire di aprire il tuo posto",
+      body: "Riapri il link tra un momento. Se era già tuo, non cambia nulla.",
     },
     expired: {
       title: "Quel link è scaduto",
@@ -1583,6 +1654,10 @@ const it: GivingWords = {
     error: "Qualcosa è andato storto da parte nostra. Non è stato modificato nulla. Riprova tra un momento.",
     photo: "Non è stato possibile aggiungere quella foto. Provane un'altra, in JPEG o scattata dalla fotocamera.",
     photoPaused: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta: questo negozio al momento non accetta nuove foto.",
+    photoLimit: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta: una recensione può ricevere 3 nuove foto in tutto, e la Sua ne ha già ricevute 3.",
+    photoFailed: "La Sua recensione è stata salvata, ma la nuova foto non è stata aggiunta per un problema da parte nostra. Questo tentativo conta comunque come 1 delle 3 nuove foto che una recensione può ricevere.",
+    confirmDelete: "Qui non c'è nessuna tua recensione da eliminare.",
+    kept: "La tua recensione non è stata eliminata. Non è stato modificato nulla.",
   },
   yourRating: (title) => `Il tuo voto per ${title}`,
   whatYouThink: "Cosa ne pensi (facoltativo)",
@@ -1590,9 +1665,15 @@ const it: GivingWords = {
   nameToShow: "Nome da mostrare (facoltativo)",
   updateReview: "Aggiorna la mia recensione",
   postReview: "Pubblica la mia recensione",
+  reviewUnread: (title) => `Al momento non è stato possibile caricare la tua recensione di ${title}. Aggiorna questa pagina tra un momento per vederla o modificarla.`,
   reviewPublic: (store) =>
     `La tua recensione è pubblica sulla pagina di ${store}, segnata come acquisto verificato. Il tuo indirizzo email non viene mai mostrato. ${store} può rispondere e nasconderla, ma non può modificarla.`,
   deleteReview: "Elimina la mia recensione",
+  deleteReviewAsk: (title) => `Eliminare la tua recensione di ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Così elimini ${andList([`il tuo voto di ${stars} ${plural(stars, "stella", "stelle")}`, ...(hasWords ? ["il tuo testo"] : []), ...(hasPhoto ? ["la tua foto"] : [])], "e")} dalla pagina di ${store}. Non si può recuperare.`,
+  deleteReviewYes: "Sì, elimina la mia recensione",
+  deleteReviewKeep: "Mantieni la mia recensione",
   reviewPhoto: "Aggiungi una foto (facoltativo)",
   reviewPhotoHint: "Una foto di ciò che hai realizzato o di come lo usi. Appare con la tua recensione.",
   reviewPhotoRemove: "Rimuovi la mia foto",
@@ -1719,6 +1800,7 @@ const nl: GivingWords = {
   freeNotConsented: (store) =>
     `Je hebt het vakje om van ${store} te horen niet aangevinkt, dus je adres komt bij hen terecht met de vermelding dat je alleen hierom hebt gevraagd, en verder niets.`,
   freeIgnore: "Heb je hier niet om gevraagd, negeer deze e-mail dan. Er gebeurt niets zolang de link niet wordt gebruikt.",
+  freeContact: (store, link) => `Wil je ${store} schrijven? Gebruik het contactformulier op de pagina: ${link}`,
   freeSentBy: (store) =>
     `Verstuurd door Marktmorgen namens ${store}. Marktmorgen gebruikt je adres nergens anders voor, en antwoorden op deze e-mail komen niet aan bij ${store}.`,
 
@@ -1759,7 +1841,7 @@ const nl: GivingWords = {
   notOnListBody: "Het is al verwijderd, of de wachtlijst heeft haar werk gedaan en de adressen zijn gewist.",
   almostThere: "Bijna klaar",
   waitSentBody: (title, store) =>
-    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen en is er meestal binnen een minuut; staat hij er niet, kijk dan in je spam.`,
+    `We hebben je een knop gemaild om je plek op de wachtlijst${title ? ` voor ${title}` : ""} te bevestigen. De e-mail komt van ${store} via Marktmorgen. Staat hij er niet, kijk dan in je spam.`,
   waitSentNote: "Je plek telt pas als je erop drukt, dus een verkeerd getypt adres krijgt nooit iets te horen.",
   onTheList: "Je staat op de lijst",
   tellWhenOut: (title) => `We laten het je weten als ${title || "het"} uit is`,
@@ -1805,6 +1887,10 @@ const nl: GivingWords = {
     unavailable: {
       title: "We konden dat nu niet versturen",
       body: "Er is geen plek ingenomen of verloren gegaan. Probeer het zo opnieuw.",
+    },
+    opening: {
+      title: "We konden je plek niet helemaal openen",
+      body: "Open de link zo opnieuw. Was de plek al van jou, dan verandert er niets.",
     },
     expired: {
       title: "Die link is verlopen",
@@ -1900,6 +1986,10 @@ const nl: GivingWords = {
     error: "Er ging iets mis aan onze kant. Er is niets gewijzigd. Probeer het zo opnieuw.",
     photo: "Die foto kon niet worden toegevoegd. Probeer een andere, als JPEG of rechtstreeks van je camera.",
     photoPaused: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd: deze winkel neemt op dit moment geen nieuwe foto's aan.",
+    photoLimit: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd: een review kan in totaal 3 nieuwe foto's krijgen, en de uwe heeft er al 3 gehad.",
+    photoFailed: "Uw review is opgeslagen, maar de nieuwe foto is niet toegevoegd door een probleem aan onze kant. Deze poging telt toch als 1 van de 3 nieuwe foto's die een review kan krijgen.",
+    confirmDelete: "Er staat hier geen beoordeling van je om te verwijderen.",
+    kept: "Je beoordeling is niet verwijderd. Er is niets gewijzigd.",
   },
   yourRating: (title) => `Je score voor ${title}`,
   whatYouThink: "Wat je ervan vindt (optioneel)",
@@ -1907,9 +1997,15 @@ const nl: GivingWords = {
   nameToShow: "Naam die wordt getoond (optioneel)",
   updateReview: "Mijn beoordeling bijwerken",
   postReview: "Mijn beoordeling plaatsen",
+  reviewUnread: (title) => `Je beoordeling van ${title} kon nu niet worden geladen. Vernieuw deze pagina zo meteen om hem te zien of te wijzigen.`,
   reviewPublic: (store) =>
     `Je beoordeling is openbaar op de pagina van ${store}, gemarkeerd als geverifieerde aankoop. Je e-mailadres wordt nooit getoond. ${store} kan erop reageren en haar verbergen, maar niet wijzigen.`,
   deleteReview: "Mijn beoordeling verwijderen",
+  deleteReviewAsk: (title) => `Je beoordeling van ${title} verwijderen?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Hiermee verwijder je ${andList([`je score van ${stars} ${plural(stars, "ster", "sterren")}`, ...(hasWords ? ["je tekst"] : []), ...(hasPhoto ? ["je foto"] : [])], "en")} van de pagina van ${store}. Dit kan niet ongedaan worden gemaakt.`,
+  deleteReviewYes: "Ja, mijn beoordeling verwijderen",
+  deleteReviewKeep: "Mijn beoordeling houden",
   reviewPhoto: "Voeg een foto toe (optioneel)",
   reviewPhotoHint: "Een foto van wat je ermee maakte, of ervan in gebruik. Hij verschijnt bij je beoordeling.",
   reviewPhotoRemove: "Mijn foto verwijderen",
@@ -2037,6 +2133,7 @@ const pt: GivingWords = {
   freeNotConsented: (store) =>
     `Não assinalou a caixa para receber notícias de ${store}, por isso o seu endereço chega-lhe com a indicação de que pediu apenas isto, e mais nada.`,
   freeIgnore: "Se não pediu isto, ignore este email. Nada acontece a menos que a ligação seja utilizada.",
+  freeContact: (store, link) => `Para escrever a ${store}, use o formulário de contacto da página: ${link}`,
   freeSentBy: (store) =>
     `Enviado pela Marktmorgen em nome de ${store}. A Marktmorgen não utiliza o seu endereço para mais nada, e as respostas a este email não chegam a ${store}.`,
 
@@ -2078,7 +2175,7 @@ const pt: GivingWords = {
   notOnListBody: "Já foi removido, ou a lista de espera já cumpriu a sua função e os endereços foram apagados.",
   almostThere: "Está quase",
   waitSentBody: (title, store) =>
-    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen e costuma demorar menos de um minuto; se não estiver lá, veja na pasta de spam.`,
+    `Enviámos-lhe por email um botão para confirmar o seu lugar na lista de espera${title ? ` de ${title}` : ""}. Chega de ${store} através da Marktmorgen. Se não estiver lá, veja na pasta de spam.`,
   waitSentNote: "O seu lugar só conta quando carregar nele, por isso um endereço mal escrito nunca recebe nada.",
   onTheList: "Está na lista",
   tellWhenOut: (title) => (title ? `Receberá um aviso quando ${title} sair` : "Receberá um aviso quando sair"),
@@ -2124,6 +2221,10 @@ const pt: GivingWords = {
     unavailable: {
       title: "Não foi possível enviá-la neste momento",
       body: "Nenhum lugar foi ocupado nem perdido. Tente novamente daqui a pouco.",
+    },
+    opening: {
+      title: "Não foi possível terminar de abrir o seu lugar",
+      body: "Abra a ligação novamente daqui a pouco. Se o lugar já era seu, nada muda.",
     },
     expired: {
       title: "Essa ligação expirou",
@@ -2224,6 +2325,10 @@ const pt: GivingWords = {
     error: "Algo correu mal do nosso lado. Nada foi alterado. Tente novamente daqui a pouco.",
     photo: "Não foi possível adicionar essa fotografia. Experimente outra, em JPEG ou tirada diretamente com a câmara.",
     photoPaused: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada: esta loja não está a aceitar novas fotografias neste momento.",
+    photoLimit: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada: uma avaliação pode receber 3 novas fotografias no total, e a sua já recebeu 3.",
+    photoFailed: "A sua avaliação foi guardada, mas a nova fotografia não foi adicionada devido a um problema do nosso lado. Esta tentativa conta na mesma como 1 das 3 novas fotografias que uma avaliação pode receber.",
+    confirmDelete: "Não tem aqui nenhuma avaliação para eliminar.",
+    kept: "A sua avaliação não foi eliminada. Nada foi alterado.",
   },
   yourRating: (title) => `A sua classificação de ${title}`,
   whatYouThink: "O que achou (opcional)",
@@ -2231,9 +2336,15 @@ const pt: GivingWords = {
   nameToShow: "Nome a mostrar (opcional)",
   updateReview: "Atualizar a minha avaliação",
   postReview: "Publicar a minha avaliação",
+  reviewUnread: (title) => `Não foi possível carregar a sua avaliação de ${title} neste momento. Atualize esta página daqui a pouco para a ver ou alterar.`,
   reviewPublic: (store) =>
     `A sua avaliação é pública na página de ${store}, marcada como compra verificada. O seu endereço de email nunca é mostrado. ${store} pode responder e ocultá-la, mas não a pode alterar.`,
   deleteReview: "Eliminar a minha avaliação",
+  deleteReviewAsk: (title) => `Eliminar a sua avaliação de ${title}?`,
+  deleteReviewWhat: (stars, hasWords, hasPhoto, store) =>
+    `Isto elimina ${andList([`a sua classificação de ${stars} ${plural(stars, "estrela", "estrelas")}`, ...(hasWords ? ["o seu texto"] : []), ...(hasPhoto ? ["a sua fotografia"] : [])], "e")} da página de ${store}. Não é possível recuperá-la depois.`,
+  deleteReviewYes: "Sim, eliminar a minha avaliação",
+  deleteReviewKeep: "Manter a minha avaliação",
   reviewPhoto: "Adicione uma fotografia (opcional)",
   reviewPhotoHint: "Uma fotografia do que fez com ele, ou de como o usa. Aparece com a sua avaliação.",
   reviewPhotoRemove: "Remover a minha fotografia",

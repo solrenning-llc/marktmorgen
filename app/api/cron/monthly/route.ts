@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { visitedFolders } from "@/lib/traffic";
 import { monthKey } from "@/lib/delivery";
@@ -8,7 +9,7 @@ import { storeOf } from "@/lib/usage-billing";
 import { standingOf } from "@/lib/plan-standing";
 import { SITE_URL } from "@/lib/site-url";
 import { claimMonth, lastMonthOf, releaseMonth, monthlyMessage, readNumbers, weeklyOff, weeklyToken } from "@/lib/stats-report";
-import { goalForMonth, readSalesGoal } from "@/lib/sales-goal";
+import { UNKNOWN_SALES_GOAL_CENTS, goalForMonth, readSalesGoal, withGoalAvailability } from "@/lib/sales-goal";
 import { chatAddress, forChat, postToChat } from "@/lib/chat-summary";
 
 /**
@@ -33,8 +34,13 @@ export async function GET(request: NextRequest) {
   if (!isRedisConfigured() || !isSenderConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:monthly:lock", "1", "NX", "EX", 120]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an
+  // unknown answer runs nothing this time, and the lock is let go at the end only while it still holds this run's
+  // own value, so a run never deletes another run's lock.
+  const lock = claimValue();
+  const got = await claimMark("nl:monthly:lock", 120, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
 
   const started = Date.now();
   const out = { looked: 0, sent: 0, posted: 0, quiet: 0, stopped: 0, unpaid: 0, failed: 0 };
@@ -52,7 +58,12 @@ export async function GET(request: NextRequest) {
         continue;
       }
       const emailOff = await weeklyOff(store.handle);
-      const chat = await chatAddress(store.statsId).catch(() => null);
+      // An address that could not be read is not "no channel" (rule 24): nothing is claimed, so a later run sends the email and the post together.
+      const chat = await chatAddress(store.statsId).catch(() => undefined);
+      if (chat === undefined) {
+        out.failed += 1;
+        continue;
+      }
       if (emailOff && !chat) {
         out.stopped += 1;
         continue;
@@ -69,9 +80,9 @@ export async function GET(request: NextRequest) {
       const token = weeklyToken(store.handle);
       const stopUrl = `${SITE_URL}/api/store/weekly?h=${encodeURIComponent(store.handle)}&t=${encodeURIComponent(token)}`;
       // Only a goal set by the month being reported is measured: one set on the 1st is for the month ahead.
-      const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: 0, since: "" }));
+      const kept = await readSalesGoal(store.statsId, store.currency).catch(() => ({ cents: UNKNOWN_SALES_GOAL_CENTS, since: "" }));
       const goal = goalForMonth(kept, month);
-      const message = data && token ? monthlyMessage(store, data, month, stopUrl, goal) : null;
+      const message = withGoalAvailability(token ? monthlyMessage(store, data, month, stopUrl, goal) : null, goal);
       if (!message) {
         out.quiet += 1;
         continue;
@@ -94,6 +105,6 @@ export async function GET(request: NextRequest) {
     console.error("monthly emails failed", error);
     return Response.json({ ok: false, error: "failed", ...out }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:monthly:lock"]]).catch(() => undefined);
+    await releaseMark("nl:monthly:lock", lock);
   }
 }

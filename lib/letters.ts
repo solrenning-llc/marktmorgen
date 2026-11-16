@@ -151,11 +151,23 @@ export async function publishLetter(store: Store, broadcast: Broadcast, now = Da
   }
 }
 
-/** Takes a published email off the store: its copy is deleted. */
+/**
+ * Takes a published email off the store: its copy is deleted, then its entry
+ * leaves the list. True once Redis confirms both (a count of 0 or 1 each, so
+ * one already off is off); false when it cannot be asked. Any other reply
+ * throws UnknownReplyError (CX-123 rule 24): the copy is what the email's own
+ * address reads, so a DEL that is not confirmed is not "taken off", and the
+ * entry stays on the list until then, so the studio still offers the next try.
+ */
 export async function unpublishLetter(store: Pick<Store, "sid">, id: string): Promise<boolean> {
   if (!LETTER_ID.test(id) || !isRedisConfigured() || !store.sid) return false;
-  const [, removed] = await redisPipeline([["DEL", recordKey(id)], ["ZREM", listKey(store.sid), id]]);
-  return Number(removed) === 1;
+  const deleted = repliesFor(await redisPipeline([["DEL", recordKey(id)]]), 1);
+  const copies = deleted ? countOf(deleted[0]) : null;
+  if (copies === null || copies > 1) throw new UnknownReplyError("taking an email's copy off the store");
+  const removed = repliesFor(await redisPipeline([["ZREM", listKey(store.sid), id]]), 1);
+  const entries = removed ? countOf(removed[0]) : null;
+  if (entries === null || entries > 1) throw new UnknownReplyError("taking an email off the store's list");
+  return true;
 }
 
 /** One of this store's published emails, or null. */
@@ -171,28 +183,38 @@ export async function readLetter(store: Pick<Store, "sid">, id: string): Promise
   }
 }
 
-/** The store's published emails, newest first; [] when there are none or they cannot be read. */
-export async function listLetters(store: Pick<Store, "sid">): Promise<Letter[]> {
+/**
+ * The store's published emails, newest first: [] only when Redis answered an empty list, null when they could not be
+ * read (a cut, nil or off-shape reply, a record that does not read as written, or a read that threw; rule 24, Codex G
+ * on #3143), so the page never says "none" on a guess. A record that is gone (nil) is skipped.
+ */
+export async function listLetters(store: Pick<Store, "sid">): Promise<Letter[] | null> {
   if (!isRedisConfigured() || !store.sid) return [];
   try {
-    const [ids] = await redisPipeline([["ZREVRANGE", listKey(store.sid), 0, MAX_PUBLISHED_LETTERS - 1]]);
-    const list = Array.isArray(ids) ? ids.map(String).filter((id) => LETTER_ID.test(id)) : [];
+    const range = repliesFor(await redisPipeline([["ZREVRANGE", listKey(store.sid), 0, MAX_PUBLISHED_LETTERS - 1]]), 1)?.[0];
+    // Every id is one this code wrote; any other is an unknown answer, never "none".
+    if (!Array.isArray(range) || !range.every((id) => typeof id === "string" && LETTER_ID.test(id))) return null;
+    const list = range as string[];
     if (!list.length) return [];
-    const [raws] = await redisPipeline([["MGET", ...list.map(recordKey)]]);
-    const values = Array.isArray(raws) ? raws : [];
+    const raws = repliesFor(await redisPipeline([["MGET", ...list.map(recordKey)]]), 1)?.[0];
+    if (!Array.isArray(raws) || raws.length !== list.length) return null;
     const out: Letter[] = [];
-    list.forEach((_, i) => {
+    for (const raw of raws) {
+      if (raw === null) continue;
+      if (typeof raw !== "string") return null;
+      let letter: Letter | null;
       try {
-        const letter = typeof values[i] === "string" ? parseLetter(JSON.parse(values[i] as string)) : null;
-        if (letter && letter.sid === store.sid) out.push(letter);
+        letter = parseLetter(JSON.parse(raw));
       } catch {
-        // A copy that cannot be read is not shown.
+        return null;
       }
-    });
+      if (!letter) return null;
+      if (letter.sid === store.sid) out.push(letter);
+    }
     return out;
   } catch (error) {
     console.error("reading published emails failed", error);
-    return [];
+    return null;
   }
 }
 

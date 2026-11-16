@@ -19,8 +19,8 @@
  * product complies with anything. Pure and browser-safe.
  */
 import { type PhysicalLegal } from "./physical-legal-record";
-import { gpsrClosedCountries, safetyGaps } from "./physical-legal";
-import { type ShipCandidate, type Shipping, activeShipping } from "./shipping";
+import { gpsrCloses, gpsrClosedCountries, safetyGaps } from "./physical-legal";
+import { SHIP_COUNTRIES, type ShipCandidate, type Shipping, activeShipping } from "./shipping";
 
 export type SafetyCandidate = ShipCandidate & {
   shipping?: Shipping | null;
@@ -45,17 +45,33 @@ function filled(product: SafetyCandidate): boolean {
 }
 
 /**
+ * Whether these are every country Stripe ships to except the ones closed
+ * while safety fields are not filled: said in a few words, not as a list of
+ * some two hundred codes (review of #3029, finding 2).
+ */
+export function everywhereButGpsr(countries: readonly string[]): boolean {
+  const open = SHIP_COUNTRIES.filter((code) => !gpsrCloses(code));
+  return countries.length === open.length && open.every((code) => countries.includes(code));
+}
+
+/** The shipping a product offers now; `exceptGpsr` when it is everywhere Stripe ships to but the closed EU/EEA. */
+export type ShippingNow = Shipping & { exceptGpsr?: true };
+
+/**
  * The shipping a product offers now, or null when it is not shipped. Never
  * null for a shipped product (that would read as digital): when every country
- * is closed, the countries are empty and nothing can be paid for.
+ * is closed, the countries are empty and nothing can be paid for. A region
+ * that loses countries becomes "custom", so nothing reads its countries back
+ * from the region and reopens them.
  */
-export function shippingNow(product: SafetyCandidate): Shipping | null {
+export function shippingNow(product: SafetyCandidate): ShippingNow | null {
   const shipping = activeShipping(product);
   if (!shipping) return null;
   // Not filled: gpsrClosedCountries with nothing filled closes every EU/EEA country it ships to.
   const closed = filled(product) ? [] : gpsrClosedCountries(shipping.countries, null, false);
   if (closed.length === 0) return shipping;
-  return { ...shipping, region: "custom", countries: shipping.countries.filter((code) => !closed.includes(code)) };
+  const countries = shipping.countries.filter((code) => !closed.includes(code));
+  return { ...shipping, region: "custom", countries, ...(everywhereButGpsr(countries) ? { exceptGpsr: true as const } : {}) };
 }
 
 /** A shipped product with no country it can be sent to now: not sold until its safety fields are filled. */

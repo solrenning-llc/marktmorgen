@@ -133,7 +133,7 @@ async function main(): Promise<void> {
     invoice("in_Elsewhere001", NOW - 5 * DAY, 3000, { ...terms, store: "another" }),
     invoice("in_Nobody000001", NOW - 5 * DAY, 3000, { product: club.product.id }),
   ];
-  refunds = [{ status: "succeeded", payment_intent: "pi_in_Month0000002", amount: 1000 }];
+  refunds = [{ id: "re_Month0000002", object: "refund", status: "succeeded", payment_intent: "pi_in_Month0000002", amount: 1000, currency: "usd" }];
   let book = await readBook(store);
   is("renewals retain the original subscription promotion", book.lines.find(line => line.ref === "in_Month0000002")?.promotion, {source:"instagram",campaign:"launch",content:"story-a"});
   const lines = (aff: string) => book.lines.filter((l) => l.aff === aff && l.how !== "bonus").map((l) => [l.ref, l.commission, l.status]);
@@ -161,7 +161,7 @@ async function main(): Promise<void> {
   const bonus = book.lines.find((l) => l.how === "bonus");
   is("two sales that earn in this month: the bonus once, dated at the second", [bonus?.commission, bonus?.at, bonus?.aff], [5000, secondSale, SARA]);
   is("not counted as a sale", book.rows.find((r) => r.affiliate.id === SARA)?.sales, 2);
-  refunds = [{ status: "succeeded", payment_intent: "pi_in_Bonus0000002", amount: 2000 }];
+  refunds = [{ id: "re_Bonus0000002", object: "refund", status: "succeeded", payment_intent: "pi_in_Bonus0000002", amount: 2000, currency: "usd" }];
   book = await readBook(store);
   is("a refund that takes the month under the goal takes it back", book.lines.some((l) => l.how === "bonus"), false);
   refunds = [];

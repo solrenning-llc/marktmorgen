@@ -22,9 +22,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { addOption, addProduct, claimHandle, ensureStatsId, setProductFields, setProductImage, setProductLegal, setProductShipping, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
 import { catalogRecord, listingOf, parseCatalog, parseProduct, readListing, readProduct, readProductLegal } from "@/lib/catalog";
-import { parseShipping } from "@/lib/shipping";
-import { GPSR_AREA, unitWords } from "@/lib/physical-legal";
-import { LEGAL_RECORD_MAX_BYTES, type PhysicalLegal } from "@/lib/physical-legal-record";
+import { activeShipping, parseShipping, SHIP_COUNTRIES, shipsToWords } from "@/lib/shipping";
+import { GPSR_AREA, gpsrCloses, safetyGaps, unitWords } from "@/lib/physical-legal";
+import { deliveryWords } from "@/lib/answers";
+import { SHIPPING_WORDS } from "@/lib/buyer-words/shipping";
+import { LEGAL_RECORD_MAX_BYTES, type PhysicalLegal, safetySummary } from "@/lib/physical-legal-record";
 import { shippingNow, shipsNowhere } from "@/lib/physical-legal-ship";
 import { cartItemOf, cartShipping } from "@/lib/cart-shipping";
 import { canSellProduct, createCheckout } from "@/lib/store-checkout";
@@ -81,6 +83,27 @@ async function main(): Promise<void> {
   const worldNow = shippingNow(world)!;
   is("a region that loses countries is said as the countries left", [worldNow.region, worldNow.countries.some((code) => GPSR_AREA.includes(code)), worldNow.countries.length > 0], ["custom", false, true]);
   is("an unreadable legal record reads as not filled", shippingNow(parseProduct({ ...RAW, legal: { safety: "full" }, image: IMAGE })!)?.countries, ["US"]);
+
+  // Independent review of #3029 at aaba5bd4f, findings 1 and 2 (their proof, kept here).
+  part("EU and EEA territory with its own two letters; a world product said in a few words");
+  // Åland (TFEU art. 355(4)) and the French outermost regions (arts. 349 and 355(1); OJ C 202, 7.6.2016).
+  const TERRITORIES = ["AX", "GF", "GP", "MF", "MQ", "RE", "YT"];
+  is("Åland and the French outermost regions are in the Union: closed on a world product not filled", TERRITORIES.filter((code) => worldNow.countries.includes(code)), []);
+  is("shipped to Réunion, Guadeloupe and the US, not filled: only the US", shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "custom", countries: ["RE", "GP", "US"], note: "" } })!)?.countries, ["US"]);
+  is("Svalbard and Jan Mayen share one code, and Jan Mayen is in the EEA: closed while not filled", worldNow.countries.includes("SJ"), false);
+  const worldFilled = shippingNow(parseProduct({ ...RAW, shipping: { cents: 600, region: "world", note: "" }, legal: FULL, image: IMAGE })!)!;
+  is("filled: every one of them opens again, and the region is kept", [[...TERRITORIES, "SJ"].every((code) => worldFilled.countries.includes(code)), worldFilled.region], [true, "world"]);
+  is("a manufacturer in Réunion is in the Union: no responsible person asked for", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "RE" }, responsible: null }, true), []);
+  is("a responsible person in Martinique is in the Union", safetyGaps({ ...SAFETY, responsible: { ...SAFETY.responsible, country: "MQ" } }, true), []);
+  is("a manufacturer on Svalbard, outside the EEA, still needs one", safetyGaps({ ...SAFETY, manufacturer: { ...SAFETY.manufacturer, country: "SJ" }, responsible: null }, true).includes("responsible"), true);
+  const worldWords = deliveryWords(listingOf(world));
+  is("the delivery fact of a world product not filled stays short", [worldWords.length < 400, worldWords.includes("AD, AE")], [true, false]);
+  is("it names the region and what is left out", worldWords.includes("to: everywhere Stripe can ship to, except for now the European Union, Iceland, Liechtenstein and Norway."), true);
+  is("the buy box says it in a few words", shipsToWords(worldNow, "en-US", SHIPPING_WORDS.en), "most countries, except for now the European Union, Iceland, Liechtenstein and Norway");
+  for (const code of LANGUAGE_CODES) is(`${code}: said, not listed`, shipsToWords(worldNow, code, SHIPPING_WORDS[code]).length < 160, true);
+  is("a custom list stays a list", shipsToWords(shippingNow(bare)!, "en-US", SHIPPING_WORDS.en), "United States");
+  const cartRoute = readFileSync("app/api/store/cart/route.ts", "utf8");
+  is("the cart says it the same way", /everywhereButGpsr\(sending\.countries\)/.test(cartRoute), true);
 
   part("The listing carries a computed mark, never the record");
   const listing = listingOf(filled);
@@ -227,7 +250,65 @@ async function main(): Promise<void> {
 
   part("The studio says why");
   const editor = readFileSync("components/physical-legal-editor.tsx", "utf8");
-  is("the summary of what keeps it from the EU/EEA", editor.includes("gapSummary(safetyGaps("), true);
+  const legalRecord = readFileSync("lib/physical-legal-record.ts", "utf8");
+  is("the summary of what keeps it from the EU/EEA", editor.includes("safetySummary(product.shipping.countries, ") && legalRecord.includes("gapSummary(safetyGaps(info, hasPicture))"), true);
+
+  // The checkout closes the EU/EEA (shippingNow above), so the studio must say so (VR 2): the creator is told
+  // that buyers there can't buy, only when the closing holds for that product, from the same rule.
+  const SOME_CANT = "Until these details are complete, buyers in the EU and EEA can't buy this product.";
+  // Changed assertion, noted (Codex U's LEVE on lib/physical-legal-record.ts:158, 9 Nov 2026): the old sentence said
+  // "because it only ships to the EU and EEA", which is false for Svalbard and Jan Mayen (SJ), closed with the area but
+  // not inside it. The new one gives the reason that holds for every closed place.
+  const NO_ONE = "Until these details are complete, no one can buy this product, because every place it ships to needs them.";
+  const PARTLY_CANT = "Until these details are complete, buyers in Svalbard and Jan Mayen can't buy this product.";
+  const BOTH_CANT = "Until these details are complete, buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy this product.";
+  const filledSafety = {
+    manufacturer: { name: "Harbor Print Co.", postal: "1 Dock Rd", electronic: "https://harbor.example/contact", country: "DE" },
+    responsible: null,
+    productType: "Cookbook",
+    identifier: "",
+    warnings: "",
+    noWarnings: true,
+  };
+  const shipped = (shipping: unknown, safety: typeof filledSafety | null, image: boolean) => ({
+    ...parseProduct({ id: "s1", title: "Book", priceCents: 3500, shipping })!,
+    legal: safety ? { safety, prop65: "", quantities: [] } : null,
+    ...(image ? { image: "https://example.com/book.png" } : {}),
+  });
+  const said = (product: ReturnType<typeof shipped>) => safetySummary(product.shipping!.countries, product.legal?.safety ?? null, Boolean(product.image));
+  const studioWorld = shipped({ cents: 600, region: "world", note: "" }, null, false);
+  is("fields not filled, shipped worldwide: the checkout leaves out Germany", shippingNow(studioWorld)!.countries.includes("DE"), false);
+  // Changed assertion, noted (Codex U's LEVE, sibling): "worldwide" includes SJ, which the checkout closes too, so the
+  // studio names both closed places, not the EU and EEA alone.
+  is("and the studio says buyers in the EU and EEA and in Svalbard and Jan Mayen can't buy it", said(studioWorld).endsWith(` ${BOTH_CANT}`), true);
+  is("after the list of what is needed", said(studioWorld).startsWith("Needed before selling to buyers in the EU/EEA: "), true);
+  const studioEuOnly = shipped({ cents: 600, region: "eu", note: "" }, null, true);
+  is("shipped only to the EU/EEA: not sold at all", shipsNowhere(studioEuOnly), true);
+  is("and the studio says no one can buy it", said(studioEuOnly).endsWith(` ${NO_ONE}`), true);
+  const svalbard = shipped({ cents: 600, region: "custom", countries: ["SJ"], note: "" }, null, true);
+  is("Svalbard and Jan Mayen only: closed by the checkout, so the studio says so too", [shipsNowhere(svalbard), said(svalbard).endsWith(` ${NO_ONE}`)], [true, true]);
+  // Codex U's LEVE: no closing sentence may call a place outside GPSR_AREA "the EU and EEA", and the named partly-in
+  // places must be exactly the codes closed outside the area, so a new one cannot be closed under the wrong name.
+  is("the only code closed outside the area is SJ, the one the sentences name", SHIP_COUNTRIES.filter((code) => gpsrCloses(code) && !GPSR_AREA.includes(code)), ["SJ"]);
+  is("Svalbard and Jan Mayen only: never told it ships only to the EU and EEA", said(svalbard).includes("EU and EEA."), false);
+  const svalbardAndUs = shipped({ cents: 600, region: "custom", countries: ["SJ", "US"], note: "" }, null, true);
+  is("Svalbard and Jan Mayen with the US: the US stays open and the studio names the place closed", [shippingNow(svalbardAndUs)!.countries, said(svalbardAndUs).endsWith(` ${PARTLY_CANT}`)], [["US"], true]);
+  const svalbardGermanyUs = shipped({ cents: 600, region: "custom", countries: ["DE", "SJ", "US"], note: "" }, null, true);
+  is("Germany, Svalbard and Jan Mayen and the US: both closed places are named", [shippingNow(svalbardGermanyUs)!.countries, said(svalbardGermanyUs).endsWith(` ${BOTH_CANT}`)], [["US"], true]);
+  const germanyUs = shipped({ cents: 600, region: "custom", countries: ["DE", "US"], note: "" }, null, true);
+  is("Germany with the US: only the EU and EEA are named", said(germanyUs).endsWith(` ${SOME_CANT}`), true);
+  for (const [name, product] of [
+    ["filled, shipped worldwide", shipped({ cents: 600, region: "world", note: "" }, filledSafety, true)],
+    ["filled but no picture", shipped({ cents: 600, region: "world", note: "" }, filledSafety, false)],
+    ["not filled, shipped to the US only", shipped({ cents: 600, region: "us", note: "" }, null, false)],
+    ["not filled, shipped worldwide", studioWorld],
+    ["not filled, EU/EEA only", studioEuOnly],
+  ] as const) {
+    const closes = shippingNow(product)!.countries.length < activeShipping(product)!.countries.length;
+    // Changed assertion, noted (after the RED commit): either closing sentence counts, "no one can buy" included.
+    is(`${name}: the studio says buyers can't buy exactly when the checkout closes a country`, [SOME_CANT, PARTLY_CANT, BOTH_CANT, NO_ONE].some((words) => said(product).endsWith(` ${words}`)), closes);
+  }
+  is("the form shows the closing in the studio's notice style, from the same rule", /safetyClosed\(product\.shipping\.countries, /.test(editor) && /notice notice-warn/.test(editor), true);
 
   done();
 }

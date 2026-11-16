@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
 import { SHIP_COUNTRIES } from "@/lib/shipping";
-import { GPSR_AREA, MAX_ELECTRONIC, MAX_IDENTIFIER, MAX_NAME, MAX_POSTAL, MAX_PROP65, MAX_TYPE, MAX_WARNINGS, QUANTITY_UNITS, type QuantityUnit, readSafetyInfo, safetyGaps } from "@/lib/physical-legal";
-import { type LegalFieldProblem, type PhysicalLegal, LEGAL_LABELS, checkLegalWrite, confirmsLegal, gapSummary, legalProblemMessage } from "@/lib/physical-legal-record";
+import { GPSR_AREA, MAX_ELECTRONIC, MAX_IDENTIFIER, MAX_NAME, MAX_POSTAL, MAX_PROP65, MAX_TYPE, MAX_WARNINGS, QUANTITY_UNITS, type QuantityUnit, readSafetyInfo } from "@/lib/physical-legal";
+import { type LegalFieldProblem, type PhysicalLegal, LEGAL_LABELS, checkLegalWrite, confirmsLegal, legalProblemMessage, safetyClosed, safetySummary } from "@/lib/physical-legal-record";
 
 const NOT_CONFIRMED = "Saving was not confirmed. Reload the page to check what was saved before trying again.";
 
@@ -87,7 +87,9 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
 
   const id = `legal-${product.id}`;
   const countries = countryList();
-  const savedSummary = gapSummary(safetyGaps(saved?.safety ?? null, hasPicture));
+  const savedSummary = safetySummary(product.shipping.countries, saved?.safety ?? null, hasPicture);
+  // While the checkout leaves the EU/EEA out (lib/physical-legal-ship.ts), the summary is a warning notice, not plain text.
+  const savedClosed = safetyClosed(product.shipping.countries, saved?.safety ?? null, hasPicture);
   const repNeeded = maker.country !== "" && !GPSR_AREA.includes(maker.country);
   const showRep = repNeeded || rep.name !== "" || rep.postal !== "" || rep.electronic !== "" || rep.country !== "";
   const link = "min-h-11 text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep";
@@ -163,9 +165,9 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
   if (!open) {
     return (
       <div className="mt-3 text-sm text-ink-soft">
-        <p>
+        <p className={savedClosed ? "notice notice-warn" : undefined}>
           <span className="font-semibold text-ink">Legal information for shipping: </span>
-          {savedSummary || "the EU/EEA product safety fields are filled."}
+          {savedSummary}
           {" "}
           <button type="button" className={link} onClick={() => setOpen(true)}>Edit legal information</button>
         </p>
@@ -222,7 +224,8 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
   );
 
   // Read leniently for the live summary: a value that would be refused counts as not filled.
-  const liveSummary = gapSummary(safetyGaps(readSafetyInfo(draft().safety), hasPicture));
+  const liveSummary = safetySummary(product.shipping.countries, readSafetyInfo(draft().safety), hasPicture);
+  const liveClosed = safetyClosed(product.shipping.countries, readSafetyInfo(draft().safety), hasPicture);
 
   return (
     <form
@@ -240,8 +243,8 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
         <p className="mt-1 text-xs text-ink-soft">
           Fill in what your manufacturer or supplier gave you. You can save part of it now and the rest later. These are information fields: they do not tell you whether a law applies to your product.
         </p>
-        <p id={`${id}-gaps`} className="mt-2 text-sm font-semibold text-ink" aria-live="polite">
-          {liveSummary || "The EU/EEA product safety fields are filled."}
+        <p id={`${id}-gaps`} className={liveClosed ? "notice notice-warn mt-2 text-sm font-semibold" : "mt-2 text-sm font-semibold text-ink"} aria-live="polite">
+          {liveSummary}
         </p>
         {problems.length ? (
           <div className="notice notice-error mt-3" role="alert">
@@ -256,7 +259,7 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
 
         <fieldset className="mt-4">
           <legend className="text-sm font-bold text-ink">Product safety and manufacturer</legend>
-          <p className="mt-1 text-xs text-ink-soft">Asked for by the EU General Product Safety Regulation before a product is sold online to buyers in the EU, Iceland, Liechtenstein and Norway. Until it is complete, this product is not shipped there.</p>
+          <p className="mt-1 text-xs text-ink-soft">Asked for by the EU General Product Safety Regulation before a product is sold online to buyers in the EU, Iceland, Liechtenstein and Norway.</p>
           {contactFields("manufacturer", maker, setMaker)}
           {showRep ? (
             <fieldset className="mt-4">
@@ -314,8 +317,8 @@ export function PhysicalLegalEditor({ product }: { product: Product }) {
 
         {error ? <p className="notice notice-error mt-3" role="alert">{error}</p> : null}
         <div className="mt-4 flex flex-wrap gap-3">
-          <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm min-h-11">{busy ? "Saving…" : "Save legal information"}</button>
-          <button type="button" className="btn btn-ghost btn-sm min-h-11" onClick={() => { setOpen(false); setError(null); setProblems([]); }}>Cancel</button>
+          <button type="submit" aria-busy={busy} disabled={busy} className="btn btn-primary btn-sm inline-flex min-h-11 items-center justify-center">{busy ? "Saving…" : "Save legal information"}</button>
+          <button type="button" className="btn btn-ghost btn-sm inline-flex min-h-11 items-center justify-center" onClick={() => { setOpen(false); setError(null); setProblems([]); }}>Cancel</button>
         </div>
       </fieldset>
     </form>

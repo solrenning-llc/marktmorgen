@@ -31,6 +31,7 @@ import { speech } from "@/lib/buyer-words";
 import { type BookingWords, bookingNotice, bookingWords } from "@/lib/buyer-words/booking";
 import { NewTab } from "@/components/new-tab";
 import { listedReturn, listedSite } from "@/lib/embed-sites";
+import { WhoAnswers } from "@/components/who-answers";
 
 type Params = {
   params: Promise<{ handle: string; product: string }>;
@@ -86,7 +87,12 @@ export default async function BookPage({ params, searchParams }: Params) {
   // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
   if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
   const pkgState = pkg ? await packageState(pkg.bought) : null;
-  const open = canSellProduct(store, product) && !(await isSoon(store, product.id).catch(() => false));
+  // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
+  // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
+  const soon = await isSoon(store, product.id).catch(() => null);
+  const sellable = canSellProduct(store, product);
+  const open = sellable && soon === false;
+  const unread = sellable && soon === null;
   // On a team that lets buyers choose (lib/team-scheduling-rules.ts): who they picked, by position; none is "Any available".
   const withKey = typeof query.with === "string" && /^[0-5]$/.test(query.with) ? query.with : "";
   // One of a call's lengths, each with its price (lib/call-lengths.ts): asked for by its link; the times are read at it,
@@ -186,7 +192,7 @@ export default async function BookPage({ params, searchParams }: Params) {
               </div>
             ) : null}
 
-            {!open ? (
+            {!open && !unread ? (
               <div className="st-note mt-6">
                 <p className="font-bold" style={{ color: "var(--st-text)" }}>{b.notices.unavailable.title}</p>
                 <p className="mt-1 text-sm">{b.closedBody(store.name)}</p>
@@ -265,6 +271,8 @@ export default async function BookPage({ params, searchParams }: Params) {
         </div>
 
         <p className="st-muted mt-6 text-center text-sm">{w.paidBy(w.takenBy(true, false), store.name)}</p>
+        {/* Only while the calendar is open: a closed one sells nothing here (WhoAnswers also leaves out test mode and the demo store). */}
+        {open ? <WhoAnswers store={store} /> : null}
     </Shell>
   );
 }
@@ -310,7 +318,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
       className={`st-page st-theme-${store.look.theme} relative min-h-screen overflow-hidden`}
       style={lookStyle(store.look) as React.CSSProperties}
     >
-      <main id="content" className="relative mx-auto max-w-xl px-4 py-12 sm:py-16">
+      <main id="content" className="st-measure relative mx-auto max-w-xl px-4 py-12 sm:py-16">
         <div className="flex items-center justify-center gap-3">
           {store.photoId ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -324,7 +332,7 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
         </div>
         {children}
         <div className="mt-6 text-center">
-          <Link href={`/@${store.handle}`} className="st-footer-link text-sm font-semibold">
+          <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
           <StoreTracking store={store} presence />

@@ -14,9 +14,13 @@ import type { ChannelDays } from "@/lib/stats";
 
 /** Ten million in the store's currency: no month's goal a creator types is over it. */
 export const MAX_GOAL_CENTS = 1_000_000_000;
+/** A private sentinel: zero is confirmed no goal; this value means the saved goal was unreadable. */
+export const UNKNOWN_SALES_GOAL_CENTS = -1;
+export const GOAL_UNAVAILABLE_LINE = "Your saved goal could not be checked. Goal progress is unavailable. Try again later.";
 
 /** A goal as typed: a whole number of cents above zero, at most MAX_GOAL_CENTS; 0 to have none. */
 export function readGoal(raw: unknown): number | null {
+  if (typeof raw !== "number" && (typeof raw !== "string" || !/^\d+$/.test(raw.trim()))) return null;
   const cents = Number(raw);
   if (!Number.isInteger(cents) || cents < 0 || cents > MAX_GOAL_CENTS) return null;
   return cents;
@@ -62,7 +66,7 @@ export type GoalProgress = {
 
 /** The month `today` is in, against a goal. Null with no goal. */
 export function goalProgress(goal: number, byDay: Record<string, number>, today: string): GoalProgress | null {
-  if (!goal || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
+  if (!Number.isSafeInteger(goal) || goal <= 0 || goal > MAX_GOAL_CENTS || !/^\d{4}-\d{2}-\d{2}$/.test(today)) return null;
   const month = today.slice(0, 7);
   const days = daysIn(month);
   const day = Number(today.slice(8, 10));

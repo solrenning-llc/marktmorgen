@@ -22,6 +22,7 @@ import { SHIP_REGIONS } from "@/lib/shipping";
 import { shippingNow } from "@/lib/physical-legal-ship";
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
 import { formatMoney } from "@/lib/money";
@@ -91,7 +92,12 @@ export function deliveryWords(product: Listing, currency = "usd"): string {
   const shipping = shippingNow(product);
   if (shipping && shipping.countries.length === 0) return "It is a physical product the creator ships themselves; it is not shipped anywhere right now, so it cannot be bought yet.";
   if (shipping) {
-    const where = shipping.region === "custom" ? shipping.countries.join(", ") : SHIP_REGIONS[shipping.region].label;
+    // Everywhere but the closed EU/EEA: said in a few words, so this first-tier fact never fills an input cap with ~200 codes.
+    const where = shipping.exceptGpsr
+      ? "everywhere Stripe can ship to, except for now the European Union, Iceland, Liechtenstein and Norway"
+      : shipping.region === "custom"
+        ? shipping.countries.join(", ")
+        : SHIP_REGIONS[shipping.region].label;
     return `It is a physical product the creator ships themselves, to: ${where}. Shipping is ${shipping.cents > 0 ? `${formatMoney(shipping.cents, currency)} per order` : "free"}, added on the payment page.${shipping.note ? ` ${shipping.note}.` : ""} The buyer gives the address on the payment page and gets an email when it ships.`;
   }
   if (product.file || product.options.some((o) => o.file)) return "It is a download: after paying, the buyer downloads the file from the page they land on, and the link comes by email too.";
@@ -456,18 +462,35 @@ export const STORE_PAGE = "@store";
 
 export type Missed = { productId: string; question: string; at: number };
 
-/** The newest questions this store's pages did not answer, for the studio. */
+/** One kept row, as keepAnswer and answerQuestion write it, or null when it is not one. Pure. */
+function missedRow(row: string): { p: string; q: string; at: number } | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(row);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { p, q, at } = value as { p?: unknown; q?: unknown; at?: unknown };
+  return typeof p === "string" && typeof q === "string" && typeof at === "number" && Number.isFinite(at) ? { p, q, at } : null;
+}
+
+/**
+ * The newest questions this store's pages did not answer, for the studio. A
+ * list that is not there is none; a reply in any other shape, or a row that
+ * is not one of ours, throws UnknownReplyError (rule 24), never read as "no
+ * questions". A question too short for today's rules is left out, as before.
+ */
 export async function missedQuestions(store: Store, limit = 20): Promise<Missed[]> {
   if (!store.statsId || !isRedisConfigured()) return [];
-  const [rows] = await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]);
-  if (!Array.isArray(rows)) return [];
+  const rows = stringList(repliesFor(await redisPipeline([["LRANGE", missedKey(store.statsId), 0, Math.max(0, limit - 1)]]), 1)?.[0]);
+  if (!rows) throw new UnknownReplyError("the questions a store's pages could not answer");
   const out: Missed[] = [];
   for (const row of rows) {
-    try {
-      const value = JSON.parse(String(row)) as { p?: unknown; q?: unknown; at?: unknown };
-      const question = readQuestion(value.q);
-      if (typeof value.p === "string" && question) out.push({ productId: value.p, question, at: typeof value.at === "number" ? value.at : 0 });
-    } catch {}
+    const value = missedRow(row);
+    if (!value) throw new UnknownReplyError("a question a store's page could not answer");
+    const question = readQuestion(value.q);
+    if (question) out.push({ productId: value.p, question, at: value.at });
   }
   return out;
 }

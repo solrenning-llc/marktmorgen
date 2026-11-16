@@ -27,6 +27,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { seal, unseal } from "@/lib/secret-box";
 import { REDIRECT_URIS, googleAccount, refreshTokens } from "@/lib/meet-providers";
 import { configuredDemoStudioAdmin } from "@/lib/house-store";
@@ -54,6 +55,12 @@ const env = (name: string) => process.env[name]?.trim() ?? "";
 export const searchConsoleConfigured = () => Boolean(env("GOOGLE_OAUTH_CLIENT_ID") && env("GOOGLE_OAUTH_CLIENT_SECRET"));
 export const isSearchConsoleState = (state: string) => STATE.test(state);
 
+/** A single SET kept only on its exact "OK" (CX-123 rule 24); any other reply is unknown and throws. */
+async function kept(command: (string | number)[], what: string): Promise<void> {
+  const replies = repliesFor(await redisPipeline([command]), 1);
+  if (!replies || replies[0] !== "OK") throw new UnknownReplyError(what);
+}
+
 export type SearchRow = { query: string; clicks: number; impressions: number; position: number };
 export type StoreSearches = { from: string; to: string; rows: SearchRow[] };
 
@@ -73,7 +80,7 @@ export async function searchConsoleStatus(): Promise<{ connected: boolean; accou
 export async function beginSearchConsole(email: string): Promise<string | null> {
   if (!isOperator(email) || !searchConsoleConfigured() || !isRedisConfigured()) return null;
   const state = `gsc.${randomBytes(24).toString("base64url")}`;
-  await redisPipeline([["SET", stateKey(state), JSON.stringify({ email: email.toLowerCase() }), "EX", 600]]);
+  await kept(["SET", stateKey(state), JSON.stringify({ email: email.toLowerCase() }), "EX", 600], "keeping the consent page's state");
   const query = new URLSearchParams({
     client_id: env("GOOGLE_OAUTH_CLIENT_ID"),
     redirect_uri: REDIRECT_URIS.google,
@@ -125,16 +132,22 @@ export async function finishSearchConsole(state: string, code: string, email: st
     if (!scope.split(/\s+/).includes(SEARCH_CONSOLE_SCOPE)) return "scope";
     if (!refresh || refresh.length > 4000) return "error";
     const account = googleAccount(json.id_token)?.email ?? "";
-    await redisPipeline([["SET", CONN, JSON.stringify({ refresh: seal(refresh, CONTEXT), account, at: Date.now() })]]);
+    await kept(["SET", CONN, JSON.stringify({ refresh: seal(refresh, CONTEXT), account, at: Date.now() })], "keeping the Search Console connection");
     return "connected";
   } catch {
     return "error";
   }
 }
 
-/** Takes the connection away. */
+/**
+ * Takes the connection away. Done only on DEL's count (0: it was not there);
+ * any other reply throws, so nobody is told it is disconnected while the
+ * sealed token may still be kept and read (CX-123 rule 24).
+ */
 export async function disconnectSearchConsole(): Promise<void> {
-  if (isRedisConfigured()) await redisPipeline([["DEL", CONN]]);
+  if (!isRedisConfigured()) return;
+  const replies = repliesFor(await redisPipeline([["DEL", CONN]]), 1);
+  if (!replies || countOf(replies[0]) === null) throw new UnknownReplyError("taking the Search Console connection away");
 }
 
 /** The page filter for one store: its own address and everything under it, nothing else. */

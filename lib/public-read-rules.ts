@@ -114,3 +114,13 @@ export type SitemapSize = {
 export function sitemapUnits(size: SitemapSize): number {
   return Math.min(MAX_UNITS, SITEMAP_BASE_UNITS + whole(size.listings / PUBLIC_LISTINGS_PER_UNIT + size.carried / SITEMAP_LINES_PER_UNIT + size.postPages / SITEMAP_POST_PAGES_PER_UNIT));
 }
+
+/**
+ * What a store's card in the buyer's library takes of that store's buyer
+ * requests before it reads what waits on them there (app/library,
+ * lib/buyer-waiting.ts waitingFor; Codex J on #1969): the person's two sets
+ * and their records (four commands, at most MAX_PER_PERSON records of each
+ * kind) and the text of each agreement listed (WAITING_SHOWN). Held against
+ * that read at its largest in tests/plan-cost-registry.test.ts (libraryWaitingRead).
+ */
+export const LIBRARY_WAITING_UNITS = 4;

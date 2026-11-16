@@ -5,13 +5,14 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { readListings, readProduct } from "@/lib/catalog";
 import { MIN_BUNDLE_ITEMS, deliverableItems } from "@/lib/bundle-rules";
 import { clientAddress, fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
-import { isSoon } from "@/lib/waitlist";
+import { isComingSoon } from "@/lib/preorders";
 import { countHit } from "@/lib/visit";
 import { openOrder, paypalReady } from "@/lib/paypal-sales";
 import { cameFrom } from "@/lib/came-from";
 import { channelOfRequest } from "@/lib/visit-channel";
 import { affiliateCookieName, attributionFor } from "@/lib/affiliates";
 import { viaCookieName } from "@/lib/affiliate-setting";
+import { readCountry } from "@/lib/fair-price";
 
 /**
  * Starts a purchase paid with PayPal, into the creator's own PayPal account
@@ -47,7 +48,9 @@ export async function POST(request: NextRequest) {
   if (!product) return away(`/@${store.handle}`);
   if (!(await withinLimit("checkout", `${clientAddress(request)}|${store.handle}`, 20, 600))) return away(`/@${store.handle}?status=slow`);
   if (!paypalReady(store, product)) return away(`/@${store.handle}/p/${product.id}`);
-  if (await isSoon(store, product.id).catch(() => false)) return away(`/@${store.handle}/p/${product.id}#waitlist`);
+  const comingSoon = await isComingSoon(store, product.id).catch(() => null);
+  if (comingSoon === null) return away(`/@${store.handle}?status=error`);
+  if (comingSoon) return away(`/@${store.handle}/p/${product.id}#waitlist`);
   if (product.bundle && deliverableItems(product, await readListings(store, product.bundle)).length < MIN_BUNDLE_ITEMS) {
     return away(`/@${store.handle}`);
   }
@@ -66,7 +69,10 @@ export async function POST(request: NextRequest) {
       return { ...(page.source ? { utm_source: page.source } : {}), ...(page.medium ? { utm_medium: page.medium } : {}), ...(page.campaign ? { utm_campaign: page.campaign } : {}) };
     })(),
   };
-  const opened = await openOrder(store, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
+  // Where the buyer's connection is, for the fair price the page showed them: from the edge, as the Stripe
+  // checkout reads it (app/api/store/checkout/route.ts), never from the form.
+  const visitor = { ...store, visitorCountry: readCountry(request.headers.get("x-vercel-ip-country")) };
+  const opened = await openOrder(visitor, product, linkOrigin(request, store), { meta, via: via && via.rate > 0 ? { aff: via.aff, rate: via.rate } : null, digitalConsent });
   if (!opened.ok && opened.reason === "consent") return away(`/@${store.handle}/p/${product.id}?consent=needed#buy`);
   if (!opened.ok) return away(opened.reason === "paused" ? `/@${store.handle}?status=paused` : `/@${store.handle}/p/${product.id}?paypal=error`);
   after(() => countHit(request, store, { kind: "checkout", id: product.id }));

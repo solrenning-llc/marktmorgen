@@ -18,6 +18,8 @@ export type NextOfferWords = {
   see: string;
   dismiss: string;
   dismissed: string;
+  /** When "No thanks" was not kept: the offer stays and can be dismissed again. */
+  dismissFailed: string;
   /** In the email, under the suggestion: why this address is shown one. */
   emailConsent: (store: string) => string;
 };
@@ -29,6 +31,7 @@ const en: NextOfferWords = {
   see: "See it",
   dismiss: "No thanks",
   dismissed: "Okay. It won't be suggested again for this order.",
+  dismissFailed: "That did not go through, so it may be suggested again. Try again in a moment.",
   emailConsent: (store) => `You see this because you agreed to hear from ${store}.`,
 };
 
@@ -39,6 +42,7 @@ const es: NextOfferWords = {
   see: "Verlo",
   dismiss: "No, gracias",
   dismissed: "De acuerdo. No se volverá a sugerir para este pedido.",
+  dismissFailed: "No se pudo guardar, así que puede volver a sugerirse. Inténtalo de nuevo en un momento.",
   emailConsent: (store) => `Ves esto porque aceptaste recibir noticias de ${store}.`,
 };
 
@@ -49,6 +53,7 @@ const fr: NextOfferWords = {
   see: "Voir",
   dismiss: "Non merci",
   dismissed: "D’accord. Il ne sera plus proposé pour cette commande.",
+  dismissFailed: "Cela n’a pas été enregistré, il pourrait donc être proposé à nouveau. Réessayez dans un instant.",
   emailConsent: (store) => `Vous voyez ceci parce que vous avez accepté d’avoir des nouvelles de ${store}.`,
 };
 
@@ -59,6 +64,7 @@ const de: NextOfferWords = {
   see: "Ansehen",
   dismiss: "Nein, danke",
   dismissed: "In Ordnung. Für diese Bestellung wird es nicht mehr vorgeschlagen.",
+  dismissFailed: "Das wurde nicht gespeichert, daher kann es wieder vorgeschlagen werden. Versuch es gleich noch einmal.",
   emailConsent: (store) => `Du siehst das, weil du zugestimmt hast, von ${store} zu hören.`,
 };
 
@@ -69,6 +75,7 @@ const it: NextOfferWords = {
   see: "Vedi",
   dismiss: "No, grazie",
   dismissed: "D’accordo. Non sarà più suggerito per questo ordine.",
+  dismissFailed: "Non è stato salvato, quindi potrebbe essere suggerito di nuovo. Riprova tra un momento.",
   emailConsent: (store) => `Vedi questo perché hai accettato di ricevere notizie da ${store}.`,
 };
 
@@ -79,6 +86,7 @@ const nl: NextOfferWords = {
   see: "Bekijken",
   dismiss: "Nee, bedankt",
   dismissed: "Oké. Het wordt voor deze bestelling niet meer voorgesteld.",
+  dismissFailed: "Dat is niet opgeslagen, dus het kan opnieuw worden voorgesteld. Probeer het zo meteen opnieuw.",
   emailConsent: (store) => `Je ziet dit omdat je hebt ingestemd om berichten van ${store} te krijgen.`,
 };
 
@@ -89,6 +97,7 @@ const pt: NextOfferWords = {
   see: "Ver",
   dismiss: "Não, obrigado",
   dismissed: "Certo. Não será sugerido de novo para este pedido.",
+  dismissFailed: "Não foi possível salvar, então ele pode ser sugerido de novo. Tente de novo daqui a pouco.",
   emailConsent: (store) => `Você vê isto porque aceitou receber novidades de ${store}.`,
 };
 

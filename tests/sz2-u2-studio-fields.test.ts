@@ -146,9 +146,9 @@ async function main(): Promise<void> {
   is("the studio action has its agent row", Object.hasOwn(AGENT_COVERAGE, "POST store/physical-legal"), true);
 
   part("The studio block");
-  is("the summary of what is missing", [gapSummary([]), gapSummary(["manufacturer-name", "picture", "warnings"])], ["", "Not shipped to the EU/EEA until these are filled: the manufacturer's name, a picture of the product and the warnings, or a check that it has none."]);
+  is("the summary of what is missing", [gapSummary([]), gapSummary(["manufacturer-name", "picture", "warnings"])], ["", "Needed before selling to buyers in the EU/EEA: the manufacturer's name, a picture of the product and the warnings, or a check that it has none."]);
   const form = readFileSync("components/physical-legal-editor.tsx", "utf8");
-  for (const words of ["Product safety and manufacturer", "Net quantity", "California Proposition 65 warning (optional)", "LEGAL_LABELS", "EU responsible person", "aria-invalid", "aria-describedby", "role=\"alert\"", "min-h-11", "/api/store/physical-legal", "confirmsLegal", "checkLegalWrite", "gapSummary"]) {
+  for (const words of ["Product safety and manufacturer", "Net quantity", "California Proposition 65 warning (optional)", "LEGAL_LABELS", "EU responsible person", "aria-invalid", "aria-describedby", "role=\"alert\"", "min-h-11", "/api/store/physical-legal", "confirmsLegal", "checkLegalWrite", "safetySummary"]) {
     is(`the form has: ${words}`, form.includes(words), true);
   }
   is("its labels, shared with the errors", [LEGAL_LABELS["manufacturer.name"], LEGAL_LABELS.noWarnings, LEGAL_LABELS.productType], ["Manufacturer name", "This product has no warnings", "Product type or model"]);

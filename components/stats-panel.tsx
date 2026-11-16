@@ -8,7 +8,7 @@ import { dashboardPaidComplete, dashboardProducts } from "@/lib/dashboard-covera
 import { ledgerPaymentsComplete } from "@/lib/payment-ledger-coverage";
 import { paidFiguresComplete } from "@/lib/paid-coverage";
 import { formatMoney } from "@/lib/money";
-import { SOURCE_NAMES, channelName } from "@/lib/channel-names";
+import { channelName, sourceName } from "@/lib/channel-names";
 import type { StatsNote } from "@/lib/stats-notes";
 import { type AdSpend, paybackOf, spendBy } from "@/lib/ad-spend-rules";
 import { channelCashflows, cashflowStatus } from "@/lib/channel-cashflow";
@@ -21,6 +21,7 @@ import { PaymentMixPanel } from "@/components/payment-mix";
 import { DailyCashflowPanel } from "@/components/daily-cashflow";
 import { RefundActivityPanel } from "@/components/refund-activity";
 import { KeptByCurrency } from "@/components/kept-by-currency";
+import { TaxCollected } from "@/components/tax-collected";
 import { WeeklyCohortsPanel } from "@/components/weekly-cohorts";
 import { RevenueQuality, BuyerChannelsPanel } from "@/components/revenue-quality";
 import { READ_MIN_VISITORS, READ_SAMPLE } from "@/lib/page-read-sample";
@@ -203,7 +204,7 @@ function Breakdown({
           return (
             <li key={row.name} className="text-sm">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate font-semibold text-ink">{label ? label(row.name) : named ? SOURCE_NAMES[row.name] ?? row.name : row.name}</span>
+                <span className="min-w-0 truncate font-semibold text-ink">{label ? label(row.name) : named ? sourceName(row.name) ?? row.name : row.name}</span>
                 <span className="shrink-0 tabular-nums text-ink-soft">{`${count(row.visits)} · ${share}%`}</span>
               </div>
               <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-paper ring-1 ring-line" aria-hidden="true">
@@ -360,7 +361,7 @@ export function RightNow({ currency, initialBox, timeZone, now }: { currency: st
         <ul className="mt-2 space-y-1 text-sm">
           {live.sources.map((s) => (
             <li key={s.source} className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate text-ink">{`From ${s.source === "direct" ? "a direct visit or an app that hides it" : SOURCE_NAMES[s.source] ?? s.source}`}</span>
+              <span className="min-w-0 truncate text-ink">{`From ${s.source === "direct" ? "a direct visit or an app that hides it" : sourceName(s.source) ?? s.source}`}</span>
               <span className="shrink-0 tabular-nums text-ink-soft">{count(s.visitors)}</span>
             </li>
           ))}
@@ -1140,6 +1141,7 @@ export function StatsPanel({
       {range !== "all" ? <PaymentComparisonPanel data={data} range={range} /> : null}
       {range !== "all" ? <DailyCashflowPanel data={data} range={range} spends={spends} /> : null}
       {range !== "all" ? <KeptByCurrency data={data} range={range} /> : null}
+      {data.sales !== "none" && range !== "all" ? <TaxCollected data={data} range={range} /> : null}
       {range !== "all" ? <RefundActivityPanel data={data} range={range} /> : null}
       {salesHere && range !== "all" && days.length > 0 && data.buyerChannels ? (
         <BuyerChannelsPanel window={data.buyerChannels[range]} currency={data.currency} historyPartial={data.buyerChannels.historyPartial} period={{ from: days[0].date, to: days[days.length - 1].date }} />

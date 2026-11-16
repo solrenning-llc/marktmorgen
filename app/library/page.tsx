@@ -1,14 +1,25 @@
 import type { Metadata } from "next";
+import { StudioEmptyState } from "@/components/empty-state";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { SiteNav } from "@/components/site-nav";
 import { SiteFooter } from "@/components/site-footer";
 import { Icon } from "@/components/icons";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store } from "@/lib/store";
+import { storeForIdExactly } from "@/lib/store-exact";
 import { photoUrl } from "@/lib/photo-limits";
 import { storeBase } from "@/lib/purchase-email";
 import { canRecover, ordersLinkFor } from "@/lib/buyer-orders";
 import { libraryOwner, storesBoughtFrom } from "@/lib/buyer-library";
+import { LibraryContinue } from "@/components/library-continue";
+import { deviceLastKey } from "@/lib/lesson-position";
+import { WAITING_LATER, waitingFor, waitingLine } from "@/lib/buyer-waiting";
+import { LIBRARY_WAITING_UNITS } from "@/lib/public-read-rules";
+import { takePublicRequest } from "@/lib/traffic";
+import { requestsOpen } from "@/lib/payment-requests";
+
+/** How many stores of a library are read at the same time. */
+const LIBRARY_STORES_AT_ONCE = 6;
 
 export const metadata: Metadata = {
   title: "Your library — Marktmorgen",
@@ -34,18 +45,60 @@ export default async function LibraryPage({ searchParams }: Params) {
   const query = await searchParams;
   const token = typeof query.token === "string" ? query.token.slice(0, 80) : "";
   const status = typeof query.status === "string" ? STATUS[query.status] : undefined;
-  const email = token ? await libraryOwner(token) : null;
+  // A link whose address could not be read is said so, never "expired" (CX-123 rule 24; Claude 5 on #2910).
+  const owner = token ? await libraryOwner(token).then((email) => ({ email }), () => null) : { email: null };
+  const email = owner?.email ?? null;
+  // The last lesson this address opened in this browser, read there only (650 [WG10], unit 2).
+  const continuePerson = email ? deviceLastKey(email) : null;
 
   // Each store's own list, opened by a link made for this address now (lib/buyer-orders.ts).
-  const shelves: { store: Store; open: string | null }[] = [];
+  const shelves: { store: Store; open: string | null; waiting: string }[] = [];
+  // What could not be read just now is said, never left out as if nothing were there (CX-123 rule 24): the list of
+  // stores itself, or each store whose record did not answer or answered out of shape, read exactly (lib/store-exact.ts;
+  // Codex J on #2910). A store confirmed gone is left out, as before.
+  let listUnread = false;
+  let storesUnread = 0;
   if (email) {
-    const stores = (await Promise.all((await storesBoughtFrom(email)).map((sid) => storeForId(sid).catch(() => null)))).filter((s): s is Store => s !== null);
-    for (const store of stores) {
+    const sids = await storesBoughtFrom(email).catch(() => null);
+    if (!sids) listUnread = true;
+    const read = await Promise.all(
+      (sids ?? []).map((sid) =>
+        storeForIdExactly(sid).then(
+          (store) => (store === "unknown" ? null : { store: store === "none" ? null : store }),
+          () => null,
+        ),
+      ),
+    );
+    storesUnread = read.filter((r) => r === null).length;
+    const stores = read.flatMap((r) => (r?.store ? [r.store] : []));
+    // What waits on them at one store (lib/buyer-waiting.ts), shown only where its orders page opens to act on it, and read
+    // only once that store's buyer requests paid for the read (LIBRARY_WAITING_UNITS; Codex J on #1969). Without them nothing
+    // is read, and the card says it could not check, never that something waits. Payment requests are read only where they
+    // take payment.
+    const shelf = async (store: Store) => {
       const base = storeBase(store);
-      shelves.push({ store, open: canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null });
+      const open = canRecover(store) ? await ordersLinkFor(store, email, base).catch(() => null) : null;
+      let waiting = "";
+      if (open) {
+        const paid = await takePublicRequest(store, "buyer", undefined, LIBRARY_WAITING_UNITS).catch(() => false);
+        const found = paid ? await waitingFor(store, email, undefined, requestsOpen(store)).catch(() => null) : null;
+        waiting = !paid ? WAITING_LATER : waitingLine(found ?? { requestsTotal: 0, agreementsTotal: 0, unread: true });
+      }
+      return { store, open, waiting };
+    };
+    // A few stores at a time, each paying before it reads, so a library of many stores is not read one round trip after
+    // another (Claude 5 on #1969, AX274 performance).
+    for (let at = 0; at < stores.length; at += LIBRARY_STORES_AT_ONCE) {
+      shelves.push(...(await Promise.all(stores.slice(at, at + LIBRARY_STORES_AT_ONCE).map(shelf))));
     }
     shelves.sort((a, b) => a.store.name.localeCompare(b.store.name, "en"));
   }
+  // Whether the list of stores or a store this address bought from could not be read: then the library cannot tell which
+  // stores are open, and the "Continue" card shows nothing rather than a lesson from a store it may not show (rule 24;
+  // Claude 6 on #3060).
+  const unread = listUnread || storesUnread > 0;
+  // The handles of the stores the library shows, the only ones whose last lesson the card may offer.
+  const openHandles = unread ? null : shelves.map(({ store }) => store.handle);
 
   return (
     <div className="flex min-h-screen flex-col bg-paper text-ink">
@@ -69,9 +122,17 @@ export default async function LibraryPage({ searchParams }: Params) {
               <p className="mt-2 text-sm text-ink-soft">
                 What you bought from a store is here while that store is open on Marktmorgen. A store whose creator closes it takes what was bought from it along, so download the files you want to keep. <Link href="/terms#closing" className="underline underline-offset-4">How a store closes</Link>.
               </p>
+              {continuePerson ? <LibraryContinue person={continuePerson} open={openHandles} /> : null}
+              {listUnread || storesUnread ? (
+                <p role="status" className="notice notice-error mt-6">
+                  {listUnread
+                    ? "The stores you bought from could not be read just now. Reload this page in a moment."
+                    : `${storesUnread} ${storesUnread === 1 ? "store" : "stores"} could not be read just now. Reload this page in a moment to see ${storesUnread === 1 ? "it" : "them"}.`}
+                </p>
+              ) : null}
               {shelves.length ? (
                 <ul className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {shelves.map(({ store, open }) => (
+                  {shelves.map(({ store, open, waiting }) => (
                     <li key={store.sid} className="card flex min-w-0 flex-col p-5" data-library-store={store.handle}>
                       <div className="flex items-center gap-3">
                         {store.photoId ? (
@@ -84,6 +145,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                         )}
                         <p className="min-w-0 truncate text-lg font-semibold">{store.name}</p>
                       </div>
+                      {waiting ? <p className="mt-4 text-sm font-semibold text-ink">{waiting}</p> : null}
                       {!open ? (
                         <p role="status" className="mt-4 text-sm text-ink-soft">
                           Your purchases could not be opened just now. Try again in a moment, or visit the store for help.
@@ -103,13 +165,17 @@ export default async function LibraryPage({ searchParams }: Params) {
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="mt-6 text-ink">Nothing is listed for this address any more.</p>
+              ) : listUnread || storesUnread ? null : (
+                <StudioEmptyState level={2} className="mt-6" title="No purchases listed" body="Nothing is listed for this address anymore. If you bought with another email address, ask for a link with that one." action={{ href: "/library", label: "Use another email address" }} />
               )}
             </>
           ) : (
             <div className="max-w-xl">
-              {token ? (
+              {!owner ? (
+                <p className="notice notice-error mb-6" role="alert">
+                  That link could not be read just now. Reload this page in a moment.
+                </p>
+              ) : token ? (
                 <p className="notice notice-error mb-6" role="alert">
                   That link has expired or was already replaced. Ask for a new one below.
                 </p>

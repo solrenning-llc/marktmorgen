@@ -7,7 +7,7 @@
  */
 import { type Course, type CourseModule, type Lesson, findLesson, isOpen, readCourse } from "@/lib/course";
 import { courseAccess, emailKey } from "@/lib/learn";
-import { heldBack, passedQuizzes } from "@/lib/quiz";
+import { heldBack, passedForGate } from "@/lib/quiz";
 import { readCourseListing } from "@/lib/catalog";
 import { readTaskFor } from "@/lib/assignment";
 import type { Task } from "@/lib/assignment-rules";
@@ -30,7 +30,7 @@ export async function studentOnTask(handle: unknown, productId: unknown, lessonI
   if (access.state !== "open" || !isOpen(course, found.unit, access.start)) return { ok: false, reason: "closed" };
   if (access.learner.owner) return { ok: false, reason: "owner" };
   const who = emailKey(access.learner.email);
-  if (heldBack(course, await passedQuizzes(course.id, who)).has(found.lesson.id)) return { ok: false, reason: "held" };
+  if (heldBack(course, await passedForGate(course.id, who)).has(found.lesson.id)) return { ok: false, reason: "held" };
   const task = await readTaskFor(course.id, found.lesson.id);
   if (!task) return { ok: false, reason: "unknown" };
   return { ok: true, store, product, course, lesson: found.lesson, unit: found.unit, task, who, email: access.learner.email };

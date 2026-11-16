@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
@@ -26,6 +26,10 @@ const toRow = (field: CheckoutField): Row => ({
 });
 
 const BLANK: Row = { label: "", type: "text", optional: false, options: "" };
+
+const subscribeReady = () => () => {};
+const clientReady = () => true;
+const serverReady = () => false;
 
 function problemText(reason: string, at: number | undefined): string {
   const which = at === undefined ? "" : `Question ${at + 1}: `;
@@ -53,6 +57,7 @@ function problemText(reason: string, at: number | undefined): string {
 /** The questions a product asks on Stripe's checkout, in the studio. */
 export function CheckoutFieldsEditor({ product }: { product: Product }) {
   const router = useRouter();
+  const ready = useSyncExternalStore(subscribeReady, clientReady, serverReady);
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>(() => product.fields.map(toRow));
   const [busy, setBusy] = useState(false);
@@ -72,7 +77,7 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
         body: JSON.stringify({ id: product.id, fields: next }),
       });
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string; at?: number };
-      if (data.ok) {
+      if (response.ok && data.ok === true) {
         setOpen(false);
         toast(confirmation);
         router.refresh();
@@ -101,24 +106,30 @@ export function CheckoutFieldsEditor({ product }: { product: Product }) {
             <button
               type="button"
               className={link}
+              aria-disabled={ready ? undefined : true}
+              disabled={!ready}
               onClick={() => {
+                if (!ready) return;
                 setRows(product.fields.map(toRow));
                 setOpen(true);
               }}
             >
-              Change
+              {ready ? "Change" : "Change — Loading…"}
             </button>
           </p>
         ) : (
           <button
             type="button"
             className={`block ${link}`}
+            aria-disabled={ready ? undefined : true}
+            disabled={!ready}
             onClick={() => {
+              if (!ready) return;
               setRows([{ ...BLANK }]);
               setOpen(true);
             }}
           >
-            Ask the buyer something at checkout
+            {ready ? "Ask the buyer something at checkout" : "Ask the buyer something at checkout — Loading…"}
           </button>
         )}
       </div>

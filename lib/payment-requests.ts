@@ -37,9 +37,11 @@ import { sendEmail } from "@/lib/email";
 import { fromStore, storeBase } from "@/lib/purchase-email";
 import { speechFor } from "@/lib/buyer-words";
 import { requestWords } from "@/lib/buyer-words/requests";
-import { type Store, saleHandles, storeForId } from "@/lib/store";
+import { type Store, saleHandles, storeForId, storeIdGone } from "@/lib/store";
 import { type OutsideMethod, type PaymentRequest, statusOf, nextReminderAt, canSendAgain } from "@/lib/payment-request-rules";
-import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, requestOf } from "@/lib/payment-request-store";
+import { changeRequest, delayReminder, dropReminder, dueReminders, holdForCheckout, letGo, markPaid, reminderRequestOf, requestOf, requestRecordKey } from "@/lib/payment-request-store";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { countOf, repliesFor } from "@/lib/redis-reply";
 
 /** A reminder that could not go is tried again a day later, never sooner. */
 const RETRY_MS = 86_400_000;
@@ -128,10 +130,26 @@ export async function remindNow(store: Store, id: string, now = Date.now()): Pro
 }
 
 /**
+ * Whether a reminder's store or request is confirmed gone (CX-123 rule 24): the store's id key or the request's
+ * record answered EXISTS with exactly 0. Any other answer, a cut-short reply or a failed read is unknown: false.
+ */
+async function reminderGone(sid: string, id: string): Promise<boolean> {
+  try {
+    if (await storeIdGone(sid)) return true;
+    if (!isRedisConfigured()) return false;
+    const reply = repliesFor(await redisPipeline([["EXISTS", requestRecordKey(id)]]), 1);
+    return reply !== null && countOf(reply[0]) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * The daily job's part: every reminder now due is sent, once, to a request
  * still open, of a store that can still take its payment. Bounded by the
- * deadline and a batch at a time; a reminder that cannot go is dropped and
- * the next one, if any, waits its day.
+ * deadline and a batch at a time; a reminder whose store or request is
+ * confirmed gone is dropped, one that could not be read just now is put off a
+ * day, and the next one, if any, waits its day.
  */
 export async function sendDueReminders(deadline: number, now = Date.now()): Promise<{ sent: number; skipped: number }> {
   const counts = { sent: 0, skipped: 0 };
@@ -140,10 +158,29 @@ export async function sendDueReminders(deadline: number, now = Date.now()): Prom
     if (!due.length) break;
     for (const { sid, id } of due) {
       if (Date.now() >= deadline) return counts;
-      const store = await storeForId(sid).catch(() => null);
-      const request = store ? await requestOf(store, id).catch(() => null) : null;
+      // Rule 24: a read that fails (a Redis timeout) is an unknown answer, never
+      // "gone". The reminder stays on the list, moved later so this run does not
+      // loop on it, and is tried again; only a confirmed null drops it. The request's record is read exactly
+      // (reminderRequestOf): one in an unknown shape is put off the same way, never dropped for good.
+      let store: Store | null;
+      let request: PaymentRequest | null;
+      try {
+        store = await storeForId(sid);
+        request = store ? await reminderRequestOf(store, id) : null;
+      } catch (error) {
+        console.error(`payment request reminder ${sid}|${id}: store or request could not be read; tried again later`, error);
+        await delayReminder(sid, id, now + RETRY_MS);
+        counts.skipped += 1;
+        continue;
+      }
       if (!store || !request) {
-        await dropReminder(sid, id);
+        // A null read is not "gone" by itself: an off-shape reply (not a string, cut short, not a request) also
+        // reads as null. Only an exact EXISTS of 0 on the store's id key or the request's record drops it.
+        if (await reminderGone(sid, id)) await dropReminder(sid, id);
+        else {
+          console.error(`payment request reminder ${sid}|${id}: store or request read as missing but not confirmed gone; tried again later`);
+          await delayReminder(sid, id, now + RETRY_MS);
+        }
         counts.skipped += 1;
         continue;
       }
@@ -184,7 +221,8 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
   if (!requestsOpen(store) || !store.stripeAccountId) return { ok: false, reason: "closed" };
   const request = await requestOf(store, id);
   if (!request || statusOf(request, now) !== "open") return { ok: false, reason: "gone" };
-  if (!(await holdForCheckout(request.id))) return { ok: false, reason: "busy" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
   try {
     // The checkout opened before, while Stripe keeps it open: the same page again.
     if (SESSION_ID.test(request.session) && now - request.sessionAt < REUSE_SECONDS * 1000) {
@@ -213,7 +251,7 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
     if (error instanceof OrdersPausedError) return { ok: false, reason: error.reason === "paused" ? "paused" : "error" };
     return { ok: false, reason: "error", error };
   } finally {
-    await letGo(request.id);
+    await letGo(held);
   }
 }
 
@@ -369,7 +407,8 @@ export async function markPaidOutside(
 ): Promise<{ ok: true; request: PaymentRequest } | { ok: false; reason: OutsideRefusal }> {
   const request = await requestOf(store, id);
   if (!request || request.state !== "open") return { ok: false, reason: "gone" };
-  if (!(await holdForCheckout(request.id))) return { ok: false, reason: "busy" };
+  const held = await holdForCheckout(request.id);
+  if (!held) return { ok: false, reason: "busy" };
   try {
     if (SESSION_ID.test(request.session) && now - request.sessionAt < CHECKOUT_LIFE_MS) {
       if (!store.stripeAccountId) return { ok: false, reason: "error" };
@@ -404,6 +443,6 @@ export async function markPaidOutside(
     console.error("marking a payment request paid outside Stripe failed", error);
     return { ok: false, reason: "error" };
   } finally {
-    await letGo(request.id);
+    await letGo(held);
   }
 }

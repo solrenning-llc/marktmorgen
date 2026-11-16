@@ -8,7 +8,7 @@
  * What fails here:
  *   - the pixel summary marked off before the page is ready (a <details> opens
  *     without script, so "off" was untrue), or its fields not held until then;
- *   - any color of a button animated in forced colors;
+ *   - any color of a button, or of a round icon button (.icon-btn), animated in forced colors;
  *   - the off button's forced look (GrayText, dashed) lost.
  */
 import { readFileSync } from "node:fs";
@@ -32,7 +32,7 @@ part("Forced colors: no button color is animated");
   const blocks = [...css.matchAll(/@media \(forced-colors: active\) \{([\s\S]*?)\n\}/g)].map((m) => m[1]);
   const offBlock = blocks.find((b) => b.includes('.btn[aria-disabled="true"]'));
   is("the off button's forced look is kept", !!offBlock && /color: GrayText;\s*border-style: dashed;\s*border-color: GrayText;/.test(offBlock), true);
-  is("and in the same place, a button's transition is none", !!offBlock && /\n  \.btn \{\s*transition: none;\s*\}/.test(offBlock), true);
+  is("and in the same place, a button's transition is none, a round icon button's too (#2904 review)", !!offBlock && /\n  \.btn,\s*\.icon-btn \{\s*transition: none;\s*\}/.test(offBlock), true);
   const at = css.indexOf("@media (forced-colors: active) {\n  /* The system's colour for an unavailable control");
   is("after the base .btn rule, so it wins", at > css.indexOf("\n.btn {\n"), true);
 }

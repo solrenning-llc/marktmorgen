@@ -80,9 +80,14 @@ not ship to the EU/EEA countries (those countries are taken out of the
 checkout's shipping countries, with the reason in the studio), and the rest of
 its countries keep selling. Area used: EU 27 plus Iceland, Liechtenstein and
 Norway (GPSR is marked "text with EEA relevance"; whether it is already in the
-EEA Agreement was not read, so the stricter inclusion is used). Northern
-Ireland ships under `GB` and cannot be told apart by country code: not covered;
-"Depende do dono".
+EEA Agreement was not read, so the stricter inclusion is used). The parts of
+the Union that Stripe names with their own code are in the area too: Åland
+(`AX`, TFEU art. 355(4)) and the French outermost regions (`GF`, `GP`, `MF`,
+`MQ`, `RE`, `YT`; arts. 349 and 355(1), OJ C 202, 7.6.2016). `SJ` (Svalbard,
+outside the EEA, and Jan Mayen, inside it) is closed while a gap remains but
+does not count as inside the area for a manufacturer (review of #3029).
+Northern Ireland ships under `GB` and cannot be told apart by country code:
+not covered; "Depende do dono".
 
 ### California: Proposition 65 (27 CCR §§ 25600.2, 25602(b), 25603)
 
@@ -174,8 +179,11 @@ type Prop65 = string;                                      // "" is none
 
 Limits: each text field has a maximum length (`MAX_*` in the module), control
 characters and overlong values read as empty (never silently cut),
-a clock that goes back adds the new step one second after the last (no
-applied price is lost), the price history holds at most `MAX_PRICE_STEPS`
+a step is never stamped later than the latest time seen (a change in the
+same second keeps that second, after the earlier step in order; a clock that
+goes back stamps the new step at the last step's second; no applied price is
+lost or moved into the future), a history with any unreadable step reads as
+"unreadable" as a whole (never a filtered subset taken as complete), the price history holds at most `MAX_PRICE_STEPS`
 steps; when a creator changes prices more often than that within the kept period,
 adjacent old steps are merged into one at the **lower** price, so the prior
 price can only come out lower (a smaller announced reduction), never higher.
@@ -193,9 +201,14 @@ on a page view beyond the product record already read.
 - `gpsrClosedCountries(countries, info, hasPicture)`: the shipping countries in
   the EU/EEA that the product cannot ship to while gaps remain.
 - `checkProp65(text)`: `null` when acceptable or empty; otherwise the problem.
+  The site counts only when named on its own (`www.P65Warnings.ca.gov`,
+  optionally with `https://` and a path), not as part of a longer hostname.
 - `unitPrice(priceCents, quantity)`: the price per base unit, rounded half up
   to the smallest currency unit, from exact integer arithmetic.
-- `recordPrice(history, cents, now)` and `priorLowestPrice(history, start)`.
+- `recordPrice(history, cents, now)` and `priorLowestPrice(history, start)`;
+  the latter returns `"unreadable"` when any step of the history cannot be
+  read, and a price replaced within the sale's own starting second counts as
+  before it (it can only lower the prior price).
 
 ## Accessibility (AX274)
 
@@ -253,7 +266,10 @@ rest of the studio. This unit has no interface: 0 → 0 steps and decisions.
    draws it before the buy button, words in `lib/buyer-words/product-safety.ts`
    (7 languages). The unit price is shown for each price sold, from the price
    charged now (store sale or fair price), above the block. The studio's
-   summary (unit 2) already says "Not shipped to the EU/EEA until …".
+   summary (`safetySummary`, unit 2) lists what is needed and, from the same
+   rule (`safetyClosed`), says in a warning notice: "Until these details are
+   complete, buyers in the EU and EEA can't buy this product." (or, for a
+   product shipped only there, that no one can buy it).
 3. Confirmation email: the GPSR fields and the Prop 65 text.
 4. Price history written when a price or a sale changes; the EU/EEA prior
    price on the store sale (`lib/store-sale.ts`) and the percentage from it.

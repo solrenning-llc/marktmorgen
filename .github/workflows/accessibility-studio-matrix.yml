@@ -7,12 +7,18 @@ on:
   pull_request:
   push:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 permissions:
   contents: read
   actions: read
 concurrency:
   group: studio-accessibility-${{ github.ref }}-${{ github.event_name }}
-  cancel-in-progress: true
+  # A merge group's ref is its own (gh-readonly-queue/main/pr-N-…), so with the event in
+  # the group a merge group never shares one with a pull request run or another merge group.
+  # The active merge-group run is never canceled by this group; a newer delivery of the same
+  # merge group may replace one still pending, and that replacement is the same check.
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   documentation-scope:
     name: Documentation scope (accessibility-studio-matrix)
@@ -71,6 +77,8 @@ jobs:
         run: node -e "if (require('playwright-core/package.json').version !== '1.56.1') process.exit(1)"
       - name: Deals board focus, confirmed removal, Move only on its button, errors tied to fields and one status region (synthetic, no server)
         run: node tests/e2e/deals-board-focus.mjs
+      - name: Page editor arrows keep focus at an edge, moves and removals said, no icon button animated in forced colors (synthetic, no server)
+        run: node tests/e2e/page-editor-actions.mjs
       - run: node scripts/ci-build.mjs
       - name: Authenticated studio and page editor at five widths with AAA and access modes
         run: node tests/e2e/accessibility-studio-matrix.mjs

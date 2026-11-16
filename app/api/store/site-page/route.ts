@@ -5,11 +5,11 @@ import { guardStoreWrite, text } from "@/lib/store-request";
 import { refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { MAX_BLOCKS, emptyBlock, oversized, pageProblem, parsePage, picturePaths, type PageBlock } from "@/lib/sales-page";
-import { claimNewPictures, dropPage, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
+import { claimNewPictures, dropPage, picturesOfFailedDrop, readPage, releasePictures, writePage } from "@/lib/sales-page-store";
 import { del } from "@/lib/blob";
 import { ownsImagePath } from "@/lib/product-image";
 import { isStoredPicture } from "@/lib/picture-check";
-import { hasPlaceholder } from "@/lib/mail-body";
+import { templateLeft } from "@/lib/template-text";
 import { MAX_SITE_PAGES, SITE_KINDS, SITE_PAGE_ID, SITE_STARTERS, type SitePage, outFrom, siteKey, siteTitle, slugFrom, slugProblem } from "@/lib/site-page-rules";
 
 /** Thirty full blocks as JSON, with room to spare; a page is held to MAX_PAGE_BYTES. */
@@ -89,7 +89,7 @@ export async function POST(request: NextRequest) {
       if (!found) return refuse("unknown", 404);
       const saved = await setSitePages(ref, pages.filter((page) => page.id !== found.id));
       if (!saved.ok) return refuse(saved.reason);
-      const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(() => [] as string[]);
+      const gone = await dropPage(saved.store.statsId, siteKey(found.id), saved.store).catch(picturesOfFailedDrop);
       if (gone.length) await del(gone).catch((error: unknown) => console.error("could not delete a removed page's pictures", error));
       return Response.json({ ok: true, pages: saved.store.sitePages });
     }
@@ -106,9 +106,11 @@ export async function POST(request: NextRequest) {
       if (problem) return refuse(problem);
       if (page.blocks.some((block) => !SITE_KINDS.includes(block.kind))) return refuse("kind");
       if (oversized(page)) return refuse("too_big");
-      // A part left ⟦like this⟧ for the creator to write (lib/funnel-ai-rules.ts) is a
-      // direction, never words shown to visitors: kept while hidden, refused once shown or scheduled.
-      if (outFrom(page) !== -1 && hasPlaceholder(JSON.stringify(page.blocks))) return refuse("placeholder");
+      // A part left ⟦like this⟧ for the creator to write (lib/funnel-ai-rules.ts), or a campaign's own part in
+      // [brackets] (lib/funnel-starters.ts), is a direction, never words shown to visitors: kept while hidden,
+      // refused once shown or scheduled, saying the block and the part (754 [STN1], unit 1).
+      const left = outFrom(page) !== -1 ? templateLeft(page) : null;
+      if (left) return Response.json({ ok: false, error: "placeholder", ...left }, { status: 400 });
       if (!store.statsId) {
         // A store written before it had one is given its id with the list.
         const marked = await setSitePages(ref, pages);
@@ -118,7 +120,15 @@ export async function POST(request: NextRequest) {
       const statsId = store.statsId;
       const key = siteKey(found.id);
       // Pictures: each new one a picture in this store's own folder, shown on no other page.
-      const before = picturePaths(await readPage(statsId, key));
+      // A page whose read is not known is never taken for an empty one: nothing is claimed, released or written from it.
+      let held;
+      try {
+        held = await readPage(statsId, key);
+      } catch (error) {
+        console.error("reading a store page before saving it failed", error);
+        return refuse("page_unread", 503);
+      }
+      const before = picturePaths(held);
       const shown = picturePaths(page);
       // A picture taken off the page is deleted for good: not from a session let in without its second step (lib/two-step.ts).
       if (before.some((path) => !shown.includes(path)) && (await lockedFor(request, "page", "replace"))) return refusedJson("locked");

@@ -4,7 +4,8 @@ import { preorderDeps } from "@/lib/purchase-email";
 import { readListing } from "@/lib/catalog";
 import type { NextRequest } from "next/server";
 import { cronAllowed } from "@/lib/request-guard";
-import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isRedisConfigured } from "@/lib/redis";
+import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { isSenderConfigured, sendQueuedShipmentMail } from "@/lib/email";
 import { runShipmentMail } from "@/lib/shipment-mail-outbox";
 import { runOrderConfirmationMail } from "@/lib/order-confirmation-outbox";
@@ -102,8 +103,12 @@ async function run(request: NextRequest, started: number): Promise<Response> {
   if (!isRedisConfigured()) {
     return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
   }
-  const [got] = await redisPipeline([["SET", "nl:mail:lock", "1", "NX", "EX", 90]]);
-  if (got === null) return Response.json({ ok: true, busy: true });
+  // One run at a time, on an exact claim (lib/claim-mark.ts, CX-123 rule 24): held by another run is busy; an unknown
+  // answer runs nothing this time, and the lock is let go at the end only while it still holds this run's own value.
+  const lock = claimValue();
+  const got = await claimMark("nl:mail:lock", 90, lock);
+  if (got === "taken") return Response.json({ ok: true, busy: true });
+  if (got !== "ours") return Response.json({ ok: false, error: "lock_unknown" }, { status: 503 });
   const webhooksBy = started + 50_000;
   const meetingsCutoff = started + 55_000;
   try {
@@ -234,7 +239,7 @@ async function run(request: NextRequest, started: number): Promise<Response> {
     console.error("the email job failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });
   } finally {
-    await redisPipeline([["DEL", "nl:mail:lock"]]).catch(() => {});
+    await releaseMark("nl:mail:lock", lock);
   }
 }
 

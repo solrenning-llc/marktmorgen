@@ -37,16 +37,13 @@ const TOKEN_OPEN = { open: "audit 9: issueSignedToken (/signed-token) priced now
 export const BLOB_SITES: Record<string, Record<string, Paid>> = {
   // Studio pictures: the door, its checks and its attach (#2803 picture-uploads, #2801 picture-thumbnails).
   "app/api/store/image/upload/route.ts": { head: { line: "picture-uploads" }, issueSignedToken: TOKEN_OPEN, handleUploadPresigned: SIGNS_LOCALLY },
-  "app/api/store/image/route.ts": { head: { line: "picture-uploads" }, del: DELETE_IS_FREE },
+  // Main (#4291 era) hands a replaced picture to deleteOrSweep (lib/file-drop.ts); the route itself calls no del since.
+  "app/api/store/image/route.ts": { head: { line: "picture-uploads" } },
   "lib/uploaded-image.ts": { head: { line: "picture-uploads" }, get: { line: "picture-uploads" } },
   "lib/picture-door.ts": { head: { line: "picture-uploads" }, del: DELETE_IS_FREE },
   "components/product-image-editor.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
   "components/link-picture.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
   "components/page-editor.tsx": { uploadPresigned: STUDIO_PICTURE_PUT },
-  "app/api/store/link-image/route.ts": { del: DELETE_IS_FREE },
-  "app/api/store/links/route.ts": { del: DELETE_IS_FREE },
-  "app/api/store/page/route.ts": { del: DELETE_IS_FREE },
-  "app/api/store/site-page/route.ts": { del: DELETE_IS_FREE },
   // A page's pictures checked on every save (tests/page-picture-check-cost.test.ts on claude5/page-picture-check-cost).
   "lib/picture-check.ts": { head: { open: "audit 1: a page save checks its new pictures again on every save" }, get: { open: "audit 1: a page save checks its new pictures again on every save" } },
 

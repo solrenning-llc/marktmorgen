@@ -65,18 +65,18 @@ const CARD_SENT_SECONDS = 400 * 86_400;
 /** Where the card reading of a store stopped, so the next day goes on from there. */
 const cardCursorKey = (account: string) => `nl:dun:cards:${account}`;
 /** Pages of 100 running memberships read for cards per store per run. */
-const CARD_PAGES = 5;
+export const CARD_PAGES = 5;
 /** Cards looked up one by one, for memberships paid with the customer's card rather than their own. */
-const CARD_LOOKUPS = 20;
+export const CARD_LOOKUPS = 20;
 const SENT_SECONDS = 90 * 86_400;
 /**
  * At most this many failed renewals written about per store per run (Claude 3 on #2714): each is a claim, a card
  * kept at Stripe and an email. Every page is read to decide, but no more than this is written in one run, as when
  * only the first page was read; the rest wait for the next run.
  */
-const PER_STORE = 100;
+export const PER_STORE = 100;
 /** Pages of past-due memberships read in one run, PER_STORE each: read to decide, not a larger number written. */
-const FAILED_PAGES = 5;
+export const FAILED_PAGES = 5;
 
 const INVOICE_PATTERN = /^in_[A-Za-z0-9]{6,64}$/;
 const SUB_PATTERN = /^sub_[A-Za-z0-9]{6,64}$/;

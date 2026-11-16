@@ -83,6 +83,7 @@ import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
+import { CARD_LOOKUPS as DUNNING_CARD_LOOKUPS, CARD_PAGES as DUNNING_CARD_PAGES, FAILED_PAGES as DUNNING_FAILED_PAGES, PER_STORE as DUNNING_PER_STORE } from "@/lib/payment-recovery";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
@@ -1044,6 +1045,46 @@ export const TEAM_COMMANDS_PER_VIEW = 2;
 /** Windows of a counter that a 31-day month can touch. */
 export const DAY_WINDOWS = 32;
 
+/**
+ * The daily dunning job (lib/payment-recovery.ts, recoverFailedPayments, run by app/api/cron/plans once a day,
+ * vercel.json "0 9 * * *"), for one store that sells memberships, at its worst every run of a 31-day month
+ * (DUNNING_RUNS_PER_MONTH; tests/dunning-cost.test.ts holds the schedule and every call site counted here):
+ *   - finding the store: its share of the walk, the SCAN of a page, its record's GET and the cursor's SET;
+ *   - failed renewals (remindFailed): DUNNING_FAILED_PAGES pages of past-due memberships read (a Stripe list page each),
+ *     their products' titles (one GET of a listing each, READ_LISTING_BYTES at the most, one per membership read), and
+ *     for each membership read the three marks (GET, EXISTS, EXISTS); for each of DUNNING_PER_STORE written, its claim
+ *     (SET NX, and the GET of a claim answered out of shape), the POST that makes the paying card the default (a Stripe
+ *     call waited on STRIPE_WAIT_SECONDS), the month's count (HINCRBY, EXPIRE) and the claim let go when the email
+ *     does not go (EVAL, billed with its TYPE, PTTL, GET and DEL);
+ *   - cards about to stop working (noticeCards, when the creator leaves it on): the cursor's GET and SET,
+ *     DUNNING_CARD_PAGES pages of running memberships, DUNNING_CARD_LOOKUPS cards looked up, the titles again, and for
+ *     each membership read that is due a notice: the open card page's GET, a finished page settled
+ *     (lib/card-update.ts, finishCardUpdate: its checkout session, the membership read, the card set and the failed
+ *     payment paid, four Stripe calls, and the page read again and swapped for done, DUNNING_FINISH commands), the claim, the card link's SET, the count and the claim let go.
+ * The emails themselves are the store's own figure (line store-email, EMAIL_SITES). Stripe bills no API call; each is
+ * paid as the function's memory while it waits. The job's whole run is also bounded by its deadline, a company cost,
+ * so this per-store figure is a ceiling on the store's share of it, never a sum that could be smaller than the work.
+ */
+export const DUNNING_RUNS_PER_MONTH = 31;
+const DUNNING_READ = DUNNING_FAILED_PAGES * DUNNING_PER_STORE;
+const DUNNING_CARD_READ = DUNNING_CARD_PAGES * 100;
+const DUNNING_CLAIM = 2;
+const DUNNING_COUNT = 2;
+/** A claim let go (lib/redis-lock.ts, STRICT_RELEASE_LOCK): its EVAL, billed with TYPE, PTTL, GET and DEL. */
+const DUNNING_LET_GO = 5;
+/** A finished card page settled: the open page read again (GET) and swapped for done (EVAL, billed with its GET and SET). */
+const DUNNING_FINISH = 4;
+export const DUNNING_STORE_COMMANDS = 3
+  + DUNNING_READ * 3 + DUNNING_READ + DUNNING_PER_STORE * (DUNNING_CLAIM + DUNNING_COUNT + DUNNING_LET_GO)
+  + 2 + DUNNING_CARD_READ + DUNNING_CARD_READ * (1 + DUNNING_FINISH + DUNNING_CLAIM + 1 + DUNNING_COUNT + DUNNING_LET_GO);
+export const DUNNING_STORE_BYTES = MAX_STORE_BYTES + (DUNNING_READ + DUNNING_CARD_READ) * READ_LISTING_BYTES;
+export const DUNNING_STRIPE_PAGES = DUNNING_FAILED_PAGES + DUNNING_CARD_PAGES;
+export const DUNNING_STRIPE_CALLS = DUNNING_PER_STORE + DUNNING_CARD_LOOKUPS + DUNNING_CARD_READ * 4;
+/** One store's dunning in one run, in dollars, and in its worst month. */
+export const DUNNING_STORE_RUN = DUNNING_STORE_COMMANDS * COMMAND + DUNNING_STORE_BYTES * DB_BYTE
+  + DUNNING_STRIPE_PAGES * STRIPE_LIST_PAGE + DUNNING_STRIPE_CALLS * STRIPE_WAIT_SECONDS * MEMORY_SECOND;
+export const DUNNING_STORE_MONTH = DUNNING_RUNS_PER_MONTH * DUNNING_STORE_RUN;
+
 /** CX-61: two bounded provider reads, independent of released-name history.
  * Vercel's official regional table read 2026-11-04 has a highest memory rate
  * of $0.0183/GB-hour. Use it for this row while deployment region is unknown.
@@ -1589,6 +1630,18 @@ export const COST_LINES: CostLine[] = [
       { file: "app/api/store/audience/route.ts", names: ["holdListDownload(store)", "held.read", "held.send", "held.settle"] },
     ],
     basis: "A list file or the buyers audience, which walks the whole list, takes from the figure the units of its commands and of every byte it reads and sends (lib/list-download.ts): each read held before it is made at the most it can answer with (a page of the list at the whole list as counted, the store's fields' values for the page's people at their longest), counted at what it moved, and the file held before it is sent; a read the figure has not the units for is never made, and what was held and not used is given back. Its fields' values are read for the people in the file only, never the whole of a field's values. Once a plan has ended it takes ENDED_LIST_DOWNLOADS of its own instead, priced in the line closure. Every studio request of the window at the studio shape; a page drawn takes STUDIO_PAGE_UNITS of them, more than a heavy read costs (held below). Past the figure the studio shows one page, drawn at most PAUSED_PER_DAY times a day; changing or canceling the plan, deleting the store and downloading its sales take a small daily figure instead. What a page reads of the store's numbers past that is the store's own readings (line store-readings), never more of these.",
+  },
+  {
+    id: "dunning",
+    feature: "The daily job that tells members of a failed renewal and of a card about to stop working (lib/payment-recovery.ts), for one store that sells memberships",
+    monthlyUsd: () => DUNNING_STORE_MONTH,
+    sources: [
+      { file: "lib/payment-recovery.ts", names: ["PER_STORE", "FAILED_PAGES", "CARD_PAGES", "CARD_LOOKUPS", "async function remindFailed", "async function noticeCards", "export async function recoverFailedPayments"] },
+      { file: "app/api/cron/plans/route.ts", names: ["recoverFailedPayments(deadline)"] },
+      { file: "lib/card-update.ts", names: ["export async function finishCardUpdate", "export async function cardLink"] },
+      { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },
+    ],
+    basis: `Every run of a 31-day month at its caps, the same on every plan (the caps do not change with the plan): ${DUNNING_STORE_COMMANDS.toLocaleString("en-US")} commands, ${(DUNNING_STORE_BYTES / 1e6).toFixed(1)} MB through the database, ${DUNNING_STRIPE_PAGES} Stripe list pages and ${DUNNING_STRIPE_CALLS.toLocaleString("en-US")} more Stripe calls waited on, a run (DUNNING_STORE_RUN; tests/dunning-cost.test.ts holds every call site). Its emails are the store's own figure (line store-email). A store that sells no memberships costs nothing here, but the line is priced on every plan, as the worst store is.`,
   },
   {
     id: "store-readings",

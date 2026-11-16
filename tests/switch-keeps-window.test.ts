@@ -554,12 +554,15 @@ async function main(): Promise<void> {
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
     // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.18 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.18"]);
+    // The dunning job's line (16 November 2026, tests/plan-cost-registry.ts DUNNING_STORE_MONTH, $1.47 a store at its
+    // caps, the same on every plan): it had no line before, so its cost was in no worst month. Still above zero (MR).
+    is("11: Store, Studio and Scale keep 43.86, 312.56 and 701.93 dollars in their worst month on a monthly plan", worstMonth("month"), ["43.86", "312.56", "701.93"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.04, 258.68 and 579.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.90"]);
+    // The dunning job's line, as above: 35.80, 257.43 and 578.66 where 37.04, 258.68 and 579.90 were.
+    is("11: and 35.80, 257.43 and 578.66 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["35.80", "257.43", "578.66"]);
   } finally {
     Date.now = realNow;
   }

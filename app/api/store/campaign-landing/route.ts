@@ -7,6 +7,7 @@ import { studioRefusal } from "@/lib/person-tasks";
 import { readListing } from "@/lib/catalog";
 import { PageGrown, keptPageBytes, readPageWithin } from "@/lib/sales-page-store";
 import { UnknownReplyError } from "@/lib/redis-reply";
+import { isRedisConfigured } from "@/lib/redis";
 import { StoreFullError } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { countStudio, jsonAccess } from "@/lib/studio-route";
@@ -30,6 +31,17 @@ import { saleClock } from "@/lib/store-sale";
 const NO_STORE = { "Cache-Control": "private, no-store" };
 const MAX_BODY_BYTES = 8_000;
 
+/**
+ * The product's kept page size, read exactly before its reading is counted (keptPageBytes): 0 with no store record or
+ * no Redis, where no page is kept; a size that does not read is UnknownReplyError (503), never 0 (rule 24).
+ */
+async function measuredPage(statsId: string | null, productId: string): Promise<number> {
+  if (!statsId || !isRedisConfigured()) return 0;
+  const bytes = await keptPageBytes(statsId, productId);
+  if (bytes === null) throw new UnknownReplyError("a page's size");
+  return bytes;
+}
+
 export async function GET(request: NextRequest) {
   const access = await jsonAccess(request, "products");
   if (access instanceof Response) return access;
@@ -40,7 +52,7 @@ export async function GET(request: NextRequest) {
     const product = await readListing(store, id);
     if (!product) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     // The page is measured first and its reading counted, past the request's own unit (Claude 5 on #1950).
-    const bytes = await keptPageBytes(store.statsId, product.id);
+    const bytes = await measuredPage(store.statsId, product.id);
     const counted = pageReadUnits(bytes) > 0 ? await countStudio(store, null, pageReadUnits(bytes)) : ({ ok: true } as const);
     if (!counted.ok) {
       const refused = studioRefusal(counted.reason, counted.message);
@@ -77,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
     // The check reads the product's reviews, counted first at their heaviest (AD_CONTEXT_UNITS), and the save reads
     // its page, measured and counted first too (pageReadUnits; Claude 5 on #1950).
-    const bytes = await keptPageBytes(store.statsId, product.id);
+    const bytes = await measuredPage(store.statsId, product.id);
     const counted = await countStudio(store, null, AD_CONTEXT_UNITS + pageReadUnits(bytes));
     if (!counted.ok) {
       const refused = studioRefusal(counted.reason, counted.message);

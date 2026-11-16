@@ -32,7 +32,7 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
@@ -161,14 +161,17 @@ export async function readPage(statsId: string | null, productId: string): Promi
 }
 
 /**
- * How many bytes a product's page takes as kept, read exactly (STRLEN): 0 when there is none. Any other answer is
- * UnknownReplyError, never 0. What a route counts before it reads the page (Claude 5 on #1950).
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
  */
-export async function keptPageBytes(statsId: string | null, productId: string): Promise<number> {
-  if (!statsId || !isRedisConfigured()) return 0;
-  const bytes = countOf(repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1)?.[0]);
-  if (bytes === null) throw new UnknownReplyError("a page's size");
-  return bytes;
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
 }
 
 /** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
@@ -347,8 +350,11 @@ export async function readVersionsExact(statsId: string, productId: string): Pro
 
 export async function readVersions(statsId: string | null, productId: string): Promise<PageVersion[]> {
   if (!statsId || !isRedisConfigured()) return [];
-  const [list] = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
-  if (!Array.isArray(list)) return [];
+  const reply: unknown = await redisPipeline([["LRANGE", versionsKey(statsId, productId), 0, MAX_VERSIONS - 1]]);
+  // An answer that is not one list is unknown, never "no earlier versions" (CX-123 rule 24; audit of the API routes,
+  // 11 Nov 2026): app/api/store/page-versions then refuses, and the editor says they could not be read just now.
+  if (!Array.isArray(reply) || reply.length !== 1 || !Array.isArray(reply[0])) throw new Error("the page's versions could not be read");
+  const list: unknown[] = reply[0];
   const out: PageVersion[] = [];
   for (const entry of list) {
     if (typeof entry !== "string") continue;

@@ -74,12 +74,13 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  */
 // Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
 // the most, added to their own (review of #3568).
-// Opening also writes the slot's turn on the store's list (three commands) and pays for the sweep's turn on it
-// (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6).
+// Opening also writes the slot's turn on the store's list (two commands) and pays for the sweep's turn on it
+// (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6); closing moves that turn to the kept file's keeping time
+// (two commands, the same one sweep).
 export const SUBMISSION_STEP_COMMANDS = {
-  open: 14 + 3 + 10,
+  open: 14 + 2 + 10,
   sign: 1,
-  done: 20,
+  done: 20 + 2,
   abort: 11,
   /** The buyer's list (unit 5): their index, then a record and, for one not kept, its open upload, for each of their entries. */
   mine: 1 + 2 * MAX_SUBMISSIONS_PER_PERSON,
@@ -148,14 +149,15 @@ export function buyerSlotFor(folder: string, courseId: string, lessonId: string,
  * of the latest door opened on it (ZADD GT), so the daily sweep
  * (settleSubmissionSlots) sets the slot back to what is still held once every
  * door on it has had its day, and an upload opened and left never keeps the
- * slot at its most for good. Kept SUBMISSION_SLOTS_KEEP_SECONDS after the last
- * open; deleted with the store, and its buyer's members with the buyer.
+ * slot at its most for good; a file kept moves its turn to its keeping time,
+ * so its place is given back then. The list has no expiry of its own (review
+ * of #3568, Claude 5's MEDIUM B: a backlog the daily sweep has not reached is
+ * never lost): each turn is counted in its buyer's slot, and goes with the
+ * sweep, the store's closing or the buyer's erasure.
  */
 const slotsKey = (folder: string) => `nl:sub:slots:${part(folder)}`;
 /** The stores with a slot on their list, member "data|folder", scored at the soonest turn on it (ZADD LT). */
 const SLOTS_DUE_KEY = "nl:sub:slotdue";
-/** How long a store's list of slots is kept after its last open: a door's day and a month for the sweep to reach it. */
-export const SUBMISSION_SLOTS_KEEP_SECONDS = UPLOAD_SECONDS + 30 * DAY;
 /** The most slots one run of the sweep sets back, across every store. */
 export const SUBMISSION_SLOT_SWEEP_PER_RUN = 300;
 /** The most stores one run of the sweep reads the list of. */
@@ -256,12 +258,11 @@ async function noteSlotTurn(data: DataStore, folder: string, member: string, tur
   const replies = repliesFor(
     await redisPipeline([
       ["ZADD", slotsKey(folder), "GT", turn, member],
-      ["EXPIRE", slotsKey(folder), SUBMISSION_SLOTS_KEEP_SECONDS],
       ["ZADD", SLOTS_DUE_KEY, "LT", turn, store],
     ]),
-    3,
+    2,
   );
-  if (!replies || countOf(replies[0]) === null || replies[1] !== 1 || countOf(replies[2]) === null) throw new UnknownReplyError("a buyer slot's turn on the sweep's list");
+  if (!replies || countOf(replies[0]) === null || countOf(replies[1]) === null) throw new UnknownReplyError("a buyer slot's turn on the sweep's list");
 }
 
 /**
@@ -784,6 +785,11 @@ export async function closeSubmissionDoor(
       if (room.reason === "full") return { ok: false, reason: "full" };
       throw new UnknownReplyError("the store's data room");
     }
+    // The kept file's place is counted in the buyer's slot until its keeping time: the slot's turn moves there, so the
+    // sweep sets the slot back once the place lapses (review of #3568, MEDIUM A of Claude 3 and Claude 5). Not known
+    // to be written, nothing is kept.
+    const slot = buyerSlotFor(door.folder, door.courseId, door.lessonId, door.who);
+    if (slot) await noteSlotTurn(where.data, door.folder, `${slot}|${door.courseId}|${door.lessonId}|${door.who}`, keepUntil);
   } catch (error) {
     // No record was sent: the file is kept in the vault but nothing says whose it is, so it goes.
     await drop();

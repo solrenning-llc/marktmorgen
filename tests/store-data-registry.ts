@@ -379,7 +379,14 @@ export const FAMILIES: Record<string, Family> = {
   "nl:reading:day:@lib/store-readings.ts": { what: "A store's readings of the day, and of them the heavy ones", parts: [capped(4 * KEY, "Two counts a store a UTC day, kept two days.")] },
   // C4-33 (4): a product update's searches for its buyers, from a count of their own.
   "nl:cal:tok:@lib/calendar-sync.ts": { what: "The store's calendar file's token", parts: [capped(KEY, "One a store.")] },
-  "nl:meet:rf:@lib/call-meetings.ts": short("Refunds already handled for meetings, kept sixty-one days after the last one read", "order", 61, MARK),
+  "nl:meet:rf:@lib/call-meetings.ts": {
+    what: "Refunds read for meetings: those handled (and a call's refund held for later, marked as one), where the read stands and its pass, and the day's alert of a call's refund pending more than seven days",
+    parts: [
+      per("order", 61, MARK, "Refunds already handled, and a call's refund held for later (one mark each), sixty-one days after the last one read."),
+      per("order", 1, KEY, "One alert mark a charge of a call's refund pending more than seven days, a day (the owner's decision 18)."),
+      capped(400, "Where a pass over the refunds for meetings stands: one a store, under 400 bytes, seven days after it last moved (A3)."),
+    ],
+  },
   "nl:pkg:@lib/call-packages.ts": { what: "A call package bought", parts: [item(KB, "Its record, a year after its last call: counted as for good.", "call")] },
   "nl:pkg:t:@lib/call-packages.ts": { what: "A call package's token", parts: [item(KEY, "One per package, kept with it.", "call")] },
   "nl:pkg:s:@lib/call-packages.ts": { what: "The packages a store sold, so a closed store finds them (18 October 2026)", parts: [item(160, "A checkout's id in the store's set, one per package.", "call")] },
@@ -712,6 +719,9 @@ export const FAMILIES: Record<string, Family> = {
   "nl:meet:user:@lib/meet-connect.ts": company("The stores a Zoom user connected", "Per Zoom user, for Zoom's uninstall notice."),
   "nl:meet:lock:@lib/meet-links.ts": short("A meeting being made", "integration", 1, 128),
   "nl:meet:stores@lib/meet-links.ts": company("Stores with meetings to tidy", "One sorted set for every store."),
+  // Pre-review of claude5/call-refund-stores-cursor: the meetings' refund job's rotation, the list's members again.
+  "nl:meet:refund-turns@lib/call-meetings.ts": company("When each store with meetings to come last had its refunds read", "One sorted set for every store: one member a member of nl:meet:stores (the same <callsId>|<handle>, under 100 bytes) with a time each, kept in step with it every run, so a store that leaves the list leaves it within a run; it doubles the list's members, priced as the job's (MEET_REFUND_TURN_COMMANDS in tests/plan-cost-registry.ts)."),
+  "nl:meet:refund-turns:said@lib/call-meetings.ts": company("A turn of the meetings' refund job that waited more than a day was said today", "One key for every store, a day."),
   "nl:meet:q@lib/meet-records.ts": company("Meeting records due", "One sorted set for every store: each a booked call's or an event's."),
   "nl:meet:r:@lib/meet-records.ts": short("A meeting's record: a booked call's (a group call's time keeps its guests), until 60 days after it", "call", 430, 1536),
   "nl:health:@lib/member-health.ts": { what: "Members' scores, cached", parts: [capped(512 * KB, "One cached view.")] },
@@ -1024,7 +1034,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:none@lib/submission-notice.ts": company("A key that is never written", "Read in place of a list a store does not have."),
   "nl:sub:told:@lib/submission-notice.ts": short("A buyer's reply email claimed once, so a creator's reply to their file is never emailed twice (750 [CD1] unit 6; SUBMISSION_TOLD_SECONDS, two days)", "own", 2, MARK),
   "nl:sub:slotdue@lib/submission-store.ts": company("The stores with a buyer slot whose turn on the daily sweep has come (review of #3568, Claude 6)", "One sorted set for every store, one member a store (its data room's id and its files' folder) while its list of slots holds a turn, written again from that list or taken off by the sweep (SUBMISSION_SLOT_STORE_NEXT); each turn is an open's, which a buyer action and SUBMISSION_STEP_COMMANDS pay for."),
-  "nl:sub:slots:@lib/submission-store.ts": room("A store's list of the buyer slots an upload was opened on, each turn at its latest door's end, for the daily sweep to set the slot back once every door on it has had its day (review of #3568, Claude 6): each turn counted with every place in the buyer's one room slot (sbl:), the list kept SUBMISSION_SLOTS_KEEP_SECONDS after its last open", "lib/submission-store.ts"),
+  "nl:sub:slots:@lib/submission-store.ts": room("A store's list of the buyer slots an upload was opened on, each turn at its latest door's end or kept file's keeping time, for the daily sweep to set the slot back once every place on it has lapsed (review of #3568, Claude 6): each turn counted with every place in the buyer's one room slot (sbl:); no expiry of its own, so a backlog is never lost, and each turn goes with the sweep, the store's closing or the buyer's erasure", "lib/submission-store.ts"),
   "nl:sub:rec:@lib/submission-store.ts": room("A buyer's file sent for review, its record kept to the creator's keeping time and a week, counted in the room until it expires", "lib/submission-store.ts"),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },

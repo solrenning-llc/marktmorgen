@@ -24,7 +24,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:",
-  "nl:pod:t:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
+  "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
@@ -50,12 +50,12 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
-  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
+  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
-  "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
+  "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
   "nl:free:in:", "nl:free:n:", "nl:free:uses:", "nl:fshare:", "nl:fshare:n:", "nl:fshares:", "nl:fuse:",
   "nl:fuse:m:", "nl:gift:", "nl:gift:pi:", "nl:goal:", "nl:grp:", "nl:grp:pi:", "nl:grp:take:",
@@ -243,6 +243,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cm:": E, "nl:cm:evmail:": X(30), "nl:cm:evmailq": I, "nl:cm:evq": I, "nl:cm:link:": X(1),
   "nl:cm:mail:": X(30), "nl:cm:mailq": I, "nl:cm:rl:": E, "nl:cm:unsub:": T("nl:cm:"),
   "nl:confirm:": X(40),
+  // A checkout whose admitted room was given back, once (lib/purchase-email.ts), an hour past its held hours.
+  "nl:confirm-room:": X(2),
   "nl:contract-reserve:v1": C,
   // A store copy's progress, named by the receiving store (lib/store-copy.ts), seven days; its one-step lock, a minute.
   "nl:copy:": er(7), "nl:copy:lock:": X(1),
@@ -262,7 +264,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
   "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
-  "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
+  "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:fly:": X(1), "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
   "nl:esync:seen:": X(30), "nl:esync:tags:": E,
   "nl:exposure:v1:": C, "nl:exposure:v1:YYYY-MM": C,
   "nl:fair:c:": E,
@@ -370,7 +372,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
-  "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
+  "nl:ppsell:back:": E, "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the
   // order, written once and gone within thirty days; the company's line of its notices the sender refused, each member
   // gone once sent, once its store is gone or another store now (retryPayPalCancelNotices), or within thirty days.

@@ -46,6 +46,15 @@ function inject(match: (c: Command) => boolean, reply: unknown) {
  * the one bent, at its own place in that pipeline.
  */
 function injectZoomStores(reply: unknown[]) {
+  // The same pipeline shape as a Meta user's deletion (SET of the gone mark, then SMEMBERS of the stores).
+  injectMetaStores(reply);
+}
+/**
+ * Changed with #3322's merge (rule 23): a Meta user's deletion now marks them gone in the same pipeline as, and before,
+ * the read of their stores (lib/meta-ads.ts forgetMetaUser), so the mark is answered "OK" and the store list's reply is
+ * the one bent, at its own place in that pipeline.
+ */
+function injectMetaStores(reply: unknown[]) {
   let used = false;
   redis.pipeline = (async (commands: Command[]) => {
     sent.push(...commands);
@@ -95,7 +104,7 @@ for (const [label, reply] of UNKNOWN_LISTS) {
   test(`Meta: a user's store list answered with ${label} is not "no store"; the callback gives no confirmation`, async () => {
     redis.clear();
     seedMeta("10150000000000001", "mstats1");
-    inject((c) => c[0] === "SMEMBERS", reply);
+    injectMetaStores(reply as unknown[]);
     try {
       await assert.rejects(() => forgetMetaUser("10150000000000001"));
       assert.equal(sent.some((c) => c[0] === "DEL" || c[0] === "SREM"), false, "nothing deleted");
@@ -143,7 +152,7 @@ test("Meta callback: an unknown store list answers 503 with no confirmation code
   seedMeta("10150000000000004", "mstats4");
   const payload = Buffer.from(JSON.stringify({ algorithm: "HMAC-SHA256", user_id: "10150000000000004", issued_at: 1 })).toString("base64url");
   const signed = `${createHmac("sha256", SECRET).update(payload).digest("base64url")}.${payload}`;
-  inject((c) => c[0] === "SMEMBERS", [null]);
+  injectMetaStores([null]);
   let status = 0, body = "";
   try {
     const response = await metaDeauthorize(new NextRequest("https://marktmorgen.com/api/integrations/meta/deauthorize", { method: "POST", body: new URLSearchParams({ signed_request: signed }), headers: { "x-forwarded-for": "198.51.100.7" } }));

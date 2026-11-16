@@ -492,6 +492,23 @@ const EVENTS = [
       paused_at: "2026-11-10T09:30:00.000Z",
     },
   },
+  {
+    key: "membership_resumed",
+    event: "membership.resumed",
+    noun: "Membership",
+    label: "Membership Resumed",
+    description: "Triggers when a membership's pause ends: taken off by the member or in your Stripe dashboard, or reaching its end.",
+    data: {
+      subscription: "sub_a1b2c3",
+      product: { id: "p_3d9e7b", title: "The Supper Club" },
+      option: null,
+      how: "early",
+      pause_started: true,
+      paused_until: "2027-02-01T14:05:00.000Z",
+      buyer: { email: "ada@example.com", customer: "cus_a1b2c3" },
+      resumed_at: "2027-01-05T10:00:00.000Z",
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

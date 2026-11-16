@@ -1551,7 +1551,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
       },
       {
         kind: "features",
-        title: "Nineteen events, and how they arrive",
+        title: "Twenty events, and how they arrive",
         items: [
           { icon: "receipt", title: "sale.completed and refund.issued", body: "A paid checkout of any product, each one-click offer taken after it, and a refund, even one made in your Stripe dashboard." },
           { icon: "repeat", title: "membership.started and membership.canceled", body: "A membership bought, and a membership set to end or ended." },
@@ -1569,6 +1569,7 @@ const BASE_FEATURE_PAGES: TopicPage[] = [
           { icon: "check", title: "course.lesson_completed", body: "A student finished a lesson of one of your courses, by marking it done, passing its quiz or handing in work that was approved: their email, the course, the lesson and how far they are, once for each lesson." },
           { icon: "card", title: "payment.failed", body: "A membership's renewal, or a payment of a payment plan, was tried on your Stripe account and did not go through: the membership, the product, the amount, which try it was and when Stripe tries again, and the member's email. Each failed try is sent once." },
           { icon: "clock", title: "membership.paused", body: "A membership's payments were paused, by the member from their pause link or by you in your Stripe dashboard: the membership, the product, when the pause starts and ends, and the member's email. Told again if the pause is moved to another end." },
+          { icon: "play", title: "membership.resumed", body: "A membership's pause ended: taken off early by the member or by you in your Stripe dashboard, or on the day it was set to end. Whether it ended early, whether the pause had started, and the member's email." },
           { icon: "lock", title: "Signed", body: "Every message carries a Marktmorgen-Signature header: an HMAC-SHA256 of its time and body under that address's secret." },
           { icon: "refresh", title: "Tried again", body: "When an address does not answer, the message is tried six more times over about forty hours, then marked failed." },
           { icon: "list", title: "A log you can read", body: "Your studio keeps the last 50 deliveries, each for up to seven days, with what the address answered." },

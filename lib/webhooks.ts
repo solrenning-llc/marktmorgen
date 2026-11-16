@@ -26,8 +26,10 @@
  *                        (378 [TB4] WG (a))
  *   membership.paused    a membership's payments paused, by the member's pause
  *                        link or in the Stripe dashboard (378 [TB4] WG (a))
+ *   membership.resumed   a membership's pause taken off, by the member, in the
+ *                        Stripe dashboard or at its end (378 [TB4] WG (a))
  *
- * The first four about money, and these last four, are read from the creator's own Stripe account,
+ * The first four about money, and these last five, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
  * walked from where the last run stopped, so a refund made in the Stripe
  * dashboard is noticed on the next run, within about five minutes. A refund
@@ -114,6 +116,7 @@ export const WEBHOOK_EVENTS = [
   "product.updated",
   "payment.failed",
   "membership.paused",
+  "membership.resumed",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
@@ -1652,7 +1655,7 @@ const STRIPE_TYPES = [
 ];
 
 /** Our events read from the creator's Stripe account, so a store listening for any of them has its account watched. */
-const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending", "payment.failed", "membership.paused"];
+const FROM_STRIPE: readonly WebhookEvent[] = ["sale.completed", "membership.started", "membership.canceled", "refund.issued", "membership.changed", "dispute.opened", "membership.trial_ending", "payment.failed", "membership.paused", "membership.resumed"];
 
 /** Which of the Stripe-read events an endpoint of this store listens for. */
 function wantsStripe(config: Pick<Config, "endpoints">): boolean {
@@ -1987,9 +1990,10 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       }, created);
     }
     const pausing = says.paused && heard.has("membership.paused") ? says.paused : null;
+    const resuming = says.resumed && heard.has("membership.resumed") ? says.resumed : null;
     const canceling = says.cancel && heard.has("membership.canceled") ? says.cancel : null;
-    // No endpoint hears a pause or a cancellation this update makes: nothing to look up, nothing to wait on.
-    if (!pausing && !canceling) return true;
+    // No endpoint hears a pause, a resume or a cancellation this update makes: nothing to look up, nothing to wait on.
+    if (!pausing && !resuming && !canceling) return true;
     const item = ((object.items as { data?: { current_period_end?: unknown }[] } | undefined)?.data ?? [])[0];
     const endsAt = num(object.cancel_at) || num(object.current_period_end) || num(item?.current_period_end);
     const details = (object.cancellation_details ?? {}) as { reason?: unknown };
@@ -2011,7 +2015,7 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
       } catch (error) {
         if (!isMissing(error)) {
           const waits = waitsOn(error);
-          console.error(waits === "ours" ? "OUR CODE FAILED reading a paused or canceled member's address (not a Stripe error); it is read again next run" : "reading a paused or canceled member's address failed at Stripe; it is read again next run", store.handle, error);
+          console.error(waits === "ours" ? "OUR CODE FAILED reading a paused, resumed or canceled member's address (not a Stripe error); it is read again next run" : "reading a paused, resumed or canceled member's address failed at Stripe; it is read again next run", store.handle, error);
           return waits;
         }
         email = null;
@@ -2029,6 +2033,20 @@ async function fromStripe(store: Store, event: StripeEvent, lookups: Lookups, he
         resumes_at: iso(pausing.resumesAt),
         buyer: { email, customer },
         paused_at: iso(event.created),
+      }, created);
+    }
+    if (resuming) {
+      // "on_schedule" when Stripe ended the pause on the day it was set to end; "early" when it was taken off before.
+      // pause_started is false for a pause the member took off before the end of what they had paid for.
+      await emitEvent(store, "membership.resumed", resuming.seed, {
+        subscription: id,
+        product: await product(meta.product),
+        option: meta.option ?? null,
+        how: resuming.how,
+        pause_started: resuming.started,
+        paused_until: iso(resuming.until),
+        buyer: { email, customer },
+        resumed_at: iso(event.created),
       }, created);
     }
     if (!canceling) return true;
@@ -2125,6 +2143,7 @@ function subscriptionEmits(event: StripeEvent): {
   changed: { seed: string; from: NonNullable<ReturnType<typeof planOf>>; to: NonNullable<ReturnType<typeof planOf>> } | null;
   cancel: string | null;
   paused: { seed: string; behavior: string; resumesAt: number } | null;
+  resumed: { seed: string; how: "early" | "on_schedule"; started: boolean; until: number } | null;
 } {
   const object = event.data?.object ?? {};
   const previous = event.data?.previous_attributes ?? {};
@@ -2154,13 +2173,23 @@ function subscriptionEmits(event: StripeEvent): {
   }
   // A pause of the membership's payments set by this update, or moved to another end (378 [TB4] complement WG (a)):
   // said once per end, so the same pause read again is not told twice.
+  // A pause taken off by this update, once: on its day by Stripe, or early. A pause the member's link set starts at
+  // pause_from (the end of what was paid for), which the resume clears, so it is read as it was before the update;
+  // a pause with none (one made in the dashboard) paused its payments at once.
   let paused = null;
+  let resumed = null;
   if (!ended && "pause_collection" in previous) {
     const now = pauseCollectionOf(object.pause_collection);
     const was = pauseCollectionOf(previous.pause_collection);
     if (now && (!was || was.resumesAt !== now.resumesAt)) paused = { seed: `${id}|paused|${now.resumesAt}`, ...now };
+    if (!now && was) {
+      const at = num(event.created);
+      const previousMeta = (previous.metadata ?? {}) as Record<string, unknown>;
+      const from = Number(typeof previousMeta.pause_from === "string" ? previousMeta.pause_from : meta.pause_from) || 0;
+      resumed = { seed: `${id}|resumed|${at}`, how: was.resumesAt > 0 && at >= was.resumesAt ? "on_schedule" as const : "early" as const, started: !from || from <= at, until: was.resumesAt };
+    }
   }
-  return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null, paused };
+  return { changed, cancel: cancels ? `${id}|${num(object.canceled_at) || num(object.cancel_at) || num(event.created)}` : null, paused, resumed };
 }
 
 /** A subscription's pause_collection as Stripe gives it: what is done with its payments and when it ends (0 for no end); null for none. */
@@ -2257,6 +2286,7 @@ function waitedAs(event: StripeEvent, handles: Set<string>, confirmed: boolean):
       parts: [
         ...(says.changed ? [{ type: "membership.changed" as const, seed: says.changed.seed }] : []),
         ...(says.paused ? [{ type: "membership.paused" as const, seed: says.paused.seed }] : []),
+        ...(says.resumed ? [{ type: "membership.resumed" as const, seed: says.resumed.seed }] : []),
         ...(says.cancel ? [{ type: "membership.canceled" as const, seed: says.cancel }] : []),
       ],
       about: `subscription ${shown}`,

@@ -32,6 +32,7 @@ const EVENTS: { key: WebhookEvent; label: string; hint: string }[] = [
   { key: "product.updated", label: "Product updated", hint: "A product on your store was saved" },
   { key: "payment.failed", label: "Payment failed", hint: "A membership's renewal or a payment plan's payment failed, on your Stripe account" },
   { key: "membership.paused", label: "Membership paused", hint: "A member paused their membership, or you paused it in Stripe" },
+  { key: "membership.resumed", label: "Membership resumed", hint: "A membership's pause ended, early or on its last day" },
 ];
 const ALL = EVENTS.map((e) => e.key);
 

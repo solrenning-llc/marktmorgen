@@ -37,6 +37,7 @@ not already.
   - Product Updated (`product.updated`)
   - Payment Failed (`payment.failed`)
   - Membership Paused (`membership.paused`)
+  - Membership Resumed (`membership.resumed`)
 
   Every event the webhooks send (`WEBHOOK_EVENTS` in `lib/webhooks.ts`) has
   its trigger, and each example has exactly the fields its webhook sends

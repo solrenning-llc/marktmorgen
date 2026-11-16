@@ -20,3 +20,14 @@ export type ChatRefusal =
   | "out"
   | "resting"
   | "unknown";
+
+/**
+ * A text with every lone half of a surrogate pair made U+FFFD, as
+ * lib/webhooks.ts cleanText does: JSON escapes a lone half in 6 bytes and
+ * any other UTF-16 unit in at most 3, so what a look at the room sends
+ * (lib/chat-pace.ts, LOOK_MOST_BYTES) is bounded by the units it carries.
+ * Whole pairs and every other letter are kept as they are.
+ */
+export function wholeUnits(text: string): string {
+  return text.replace(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g, "�");
+}

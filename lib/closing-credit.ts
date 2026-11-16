@@ -13,10 +13,17 @@ import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 
 export const creditKey = (folder: string) => `nl:closing:credit:${folder}`;
 
-/** Sets the closing's emails, for one ending. */
+/**
+ * Sets the closing's emails, for one ending. Throws UnknownReplyError unless
+ * SET answers exactly "OK" (CX-123 rule 24): closeOne (lib/plan-closing.ts)
+ * then writes no holdFrom, so the credit is set again the next day, never
+ * taken as set when it may not be there (every buyer's email would be
+ * refused, and no buyer told).
+ */
 export async function startClosingCredit(folder: string, emails: number): Promise<void> {
   if (!isRedisConfigured() || !folder) return;
-  await redisPipeline([["SET", creditKey(folder), Math.max(0, Math.floor(emails))]]);
+  const replies = repliesFor(await redisPipeline([["SET", creditKey(folder), Math.max(0, Math.floor(emails))]]), 1);
+  if (replies?.[0] !== "OK") throw new UnknownReplyError("a closing's email credit");
 }
 
 /**

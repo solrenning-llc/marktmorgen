@@ -12,6 +12,7 @@
  * that cannot be made, and nothing is taken and the use is refused.
  */
 import { createHash } from "node:crypto";
+import { types } from "node:util";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { LONGEST_WINDOW_DAYS, WINDOW_ID, type WindowFields, allowanceWindow, keepSecondsFor, opensAgainWords, resetWords, windowAt } from "@/lib/allowance-window";
 import { poolPlace } from "@/lib/free-pool";
@@ -21,7 +22,9 @@ import { planAboveSold } from "@/lib/larger-plan";
 import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import type { Store } from "@/lib/store";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
+import { windowCountBy } from "@/lib/window-count";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
@@ -52,6 +55,12 @@ export function serviceAllowanceWords(store: AllowanceStore, code: string, now =
   return usedWords("integration", allowanceFor(store, "integration", now / 1000), resetWords(store, now, NON_PAYING_ALLOWANCES.ended.integration === 0), standingOf(store, now / 1000), PLANS_ON_SALE, planAboveSold(store.tier ?? "creator"));
 }
 
+/** Whether what a caller passed is a store as lib/store.ts reads it, so its billing month can be read and written back. */
+function isWholeStore(store: AllowanceStore): store is Store {
+  const s = store as Partial<Store>;
+  return typeof s.email === "string" && typeof s.handle === "string" && typeof s.sid === "string" && typeof s.subscriptionId === "string" && !!s.subscriptionId;
+}
+
 /**
  * Takes `n` of a kind from the store's window, or refuses with the sentence to
  * show. `asked`: a confirmation to an address a visitor typed, which may take
@@ -59,7 +68,11 @@ export function serviceAllowanceWords(store: AllowanceStore, code: string, now =
  * is for (lib/store-allowance-rules.ts, ASKED_SHARE_BPS). It is counted in the
  * same figure, by the same two commands.
  */
-export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
+export async function takeAllowance(given: AllowanceStore, kind: AllowanceKind, n = 1, now = Date.now(), asked = false): Promise<Taken> {
+  // A whole store that pays but whose billing month the record lacks (a trial just turned into its first paid month)
+  // has it read from Stripe first, once per store at a time (lib/billing-sync.ts, refreshPeriodOnce); still unknown,
+  // refused below. Imported when needed: billing-sync reaches this module through the email it sends.
+  const store: AllowanceStore = allowanceWindow(given, now) || !isWholeStore(given) ? given : await (await import("@/lib/billing-sync")).refreshPeriodOnce(given, now);
   const whole = allowanceFor(store, kind, now / 1000);
   const limit = asked ? askedCeiling(whole) : whole;
   const refuse = (reason: "used" | "unknown" | "pool", message: string): Taken => ({ ok: false, reason, limit, message });
@@ -83,8 +96,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   try {
     const k = key(kind, id, window.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(window, now), n),
     ]);
     // A committed increment with a lost or malformed reply remains consumed.
     // Never coerce unknown evidence, inspect getters, retry or read it back.
@@ -116,8 +128,7 @@ export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind,
   try {
     const k = key(kind, id, window.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(window, now), n),
     ]);
     return acknowledgedAllowanceCount(reply, n) !== null;
   } catch {
@@ -185,8 +196,7 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
   try {
     const k = key(kind, id, target.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(target, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(target, now), n),
     ]);
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return unknown;
@@ -214,24 +224,45 @@ export async function giveAllowanceIn(store: AllowanceStore, kind: AllowanceKind
   const k = key(kind, id, window);
   try {
     // Only a counter that is there: one gone (expired, erased) is not made again below zero, with no expiry.
-    const [left] = await redisPipeline([["DECRBY", k, n]]);
-    const after = Number(left);
-    if (Number.isSafeInteger(after) && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
+    const reply = ownAllowanceReplies(await redisPipeline([["DECRBY", k, n]]), 1);
+    const after = reply?.[0];
+    // Redis integer commands answer numbers. A missing counter can fall no lower than -n.
+    if (typeof after === "number" && Number.isSafeInteger(after) && after >= -n && after < 0) await redisPipeline([["INCRBY", k, -after], ["EXPIRE", k, (LONGEST_WINDOW_DAYS + 1) * 86_400]]);
   } catch {
     // Best effort: counted higher, never lower.
   }
 }
 
-/** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
+/** Local exact reader while the shared repliesFor correction is independently reviewed. */
+function ownAllowanceReplies(reply: unknown, count: number): unknown[] | null {
+  try {
+    if (types.isProxy(reply) || !Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
+    const length = Object.getOwnPropertyDescriptor(reply, "length");
+    if (!length || !Object.hasOwn(length, "value") || length.value !== count || Object.getOwnPropertyNames(reply).length !== count + 1) return null;
+    const values: unknown[] = [];
+    for (let i = 0; i < count; i++) {
+      const slot = Object.getOwnPropertyDescriptor(reply, String(i));
+      if (!slot || !Object.hasOwn(slot, "value")) return null;
+      values.push(slot.value);
+    }
+    return values;
+  } catch { return null; }
+}
+
+
+/**
+ * Fixed-size own-data reply from the INCRBY + EXPIRE NX pipeline (lib/window-count.ts, windowCountBy): the INCRBY's own
+ * whole count of at least `n`, then the EXPIRE's 0 or 1. Anything else is unknown.
+ */
 function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
  try {
   if (!Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");
   if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
   if (Object.getOwnPropertyNames(reply).length !== 3) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0"), count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK") ||
-      !count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < n) return null;
+  const count = Object.getOwnPropertyDescriptor(reply, "0"), expire = Object.getOwnPropertyDescriptor(reply, "1");
+  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < n ||
+      !expire || !Object.hasOwn(expire, "value") || (expire.value !== 0 && expire.value !== 1)) return null;
   return count.value;
  } catch { return null; }
 }
@@ -248,10 +279,11 @@ export async function allowancesUsedStrict(store: AllowanceStore, kinds: readonl
   if (!window || !id || !isRedisConfigured() || !kinds.length) return null;
   try {
     const reply: unknown = await redisPipeline(kinds.map((kind) => ["GET", key(kind, id, window.id)]));
-    if (!Array.isArray(reply) || reply.length !== kinds.length) return null;
+    const values = ownAllowanceReplies(reply, kinds.length);
+    if (!values) return null;
     const out: { kind: AllowanceKind; used: number; figure: number }[] = [];
     for (const [i, kind] of kinds.entries()) {
-      const raw: unknown = reply[i];
+      const raw: unknown = values[i];
       // Only what INCRBY writes is a count: a confirmed none (null), its decimal text with no sign, space, point,
       // exponent, base prefix or leading zero, or the same whole number. Number() would read "", " ", "0x0", "0.0"
       // and "0e4" as 0, an unknown count taken for nothing used (Codex Z on #3169).
@@ -281,9 +313,8 @@ export async function allowanceUsedExact(store: AllowanceStore, kind: AllowanceK
 }
 
 /**
- * The same count with an unread one taken as 0. Kept only for the studio's main page (app/studio/page.tsx, held by
- * another agent's unit; its "0 of N used" when the count is unread is still to be changed there) and for tests that
- * measure what a call took. Never use it for a decision or a new screen: read allowanceUsedExact.
+ * The same count with an unread one taken as 0. Kept only for tests that measure what a call took; the studio's
+ * main page reads allowanceUsedExact (tests/studio-unread-counts.test.ts). Never use it for a decision or a screen.
  */
 export async function allowanceUsed(store: AllowanceStore, kind: AllowanceKind, now = Date.now()): Promise<number> {
   return (await allowanceUsedExact(store, kind, now)) ?? 0;

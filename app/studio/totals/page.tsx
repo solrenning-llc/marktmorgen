@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { countStudio, studioPath, studioView } from "@/lib/studio-route";
 import { STUDIO_PAGE_UNITS } from "@/lib/studio-allowance-rules";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { can } from "@/lib/team-roles";
 import { ReadingsUsed, keptMembers, keptNumbers, readingsBackAt } from "@/lib/store-readings";
@@ -84,7 +85,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
       <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: studioPath(store), label: "Back to the studio", short: "Studio" }} />
       <StudioStorePin sid={store.sid}>
         <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-          <p className="eyebrow">Numbers</p>
+          <StudioTrail store={store} here="Numbers" />
           <h1 className="t-h2 mt-3">All your stores</h1>
           {!several ? (
             <p className="mt-3 max-w-2xl text-ink-soft">
@@ -106,7 +107,7 @@ export default async function StudioTotalsPage({ searchParams }: Params) {
                   Some sales could not be read in full, so the sales and money below may be lower than they are. Each store&apos;s studio home says when its numbers were last read and when they are read again.
                 </p>
               ) : null}
-              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8">
+              <section aria-labelledby="sums-title" className="card mt-6 overflow-x-auto p-6 sm:p-8" tabIndex={0}>
                 <h2 id="sums-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Visits and sales</h2>
                 <table className="mt-4 w-full text-sm">
                   <caption className="sr-only">Visitors, checkouts started, sales and money from sales, for all your stores added up</caption>

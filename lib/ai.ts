@@ -4,7 +4,7 @@ import { allowanceWindow, windowId } from "@/lib/allowance-window";
 import { BUYER_LENSES, type BuyerLens, PREDICTS } from "@/lib/page-coach";
 import { reservePaidResourceWindow } from '@/lib/contract-resource-window';
 import { reserveFundedExposure } from '@/lib/exposure-budget';
-import { consumeAiCallBudget, hasAiCallBudget, withAiCallBudget } from '@/lib/ai-call-budget';
+import { consumeAiCallBudget, hasAiCallBudget, noteAiDispatch, withAiCallBudget, type AiCallReport } from '@/lib/ai-call-budget';
 import { AI_ENTITLEMENT_RULES } from '@/lib/ai-entitlement-rules';
 /**
  * The writing help in the studio (lib/ai-rules.ts), on the server: asking the
@@ -239,6 +239,8 @@ export async function askModel(
   if (!window) return null;
   if (store.period?.funded===true && !(await reservePaidResourceWindow(store))) return null;
   if (!(await reserveAiSpend(store.statsId, scope, named, undefined, hold, window))) return null;
+  // From here the provider may bill: the writing job that asked keeps its count (counted).
+  if (!noteAiDispatch(store.statsId)) return null;
   const response = await timed(timeoutMs, (signal) =>
     fetch(API, {
       method: "POST",
@@ -308,14 +310,29 @@ export const MAX_DESCRIBED_BYTES = 3_500_000;
  * carries (lib/sales-page.ts, Picture.alt), in the store's language. Only
  * what can be seen: no guess at a brand, a person's name or a result, and
  * any words in the picture only as written. One of the month's jobs.
+ *
+ * `bytes` may be the picture itself or how to read it (6 November 2026): a
+ * picture read from the file store is read only once the job is taken, so a
+ * store with no allowance left (Creator's is 0) never spends a paid read on a
+ * request that is refused. A picture that cannot be read then, or is empty or
+ * too large, gives the job back, since nothing was asked of the model: the
+ * same release `counted` makes for a job over the allowance.
  */
 export async function describePicture(
   store: Store,
-  input: { bytes: Uint8Array; mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
+  input: { bytes: Uint8Array | (() => Promise<Uint8Array | null>); mediaType: "image/webp" | "image/jpeg"; productTitle: string; language: string },
   now = Date.now(),
-): Promise<AiResult<string>> {
-  if (input.bytes.length === 0 || input.bytes.length > MAX_DESCRIBED_BYTES) return { ok: false, reason: "notes" };
-  return counted(store, now, async () => {
+): Promise<AiResult<string> | { ok: false; reason: "invalid" }> {
+  const fits = (bytes: Uint8Array) => bytes.length > 0 && bytes.length <= MAX_DESCRIBED_BYTES;
+  if (typeof input.bytes !== "function" && !fits(input.bytes)) return { ok: false, reason: "notes" };
+  const read = input.bytes;
+  const unread: { reason: "invalid" | "notes" | null } = { reason: null };
+  const done = await counted(store, now, async () => {
+    const bytes = typeof read === "function" ? await read().catch(() => null) : read;
+    if (!bytes || !fits(bytes)) {
+      unread.reason = bytes ? "notes" : "invalid";
+      return null;
+    }
     const system = [
       "You describe a picture on a creator's sales page for someone who cannot see it.",
       `Write in ${input.language}. One plain sentence of at most twenty words. Begin with what is shown, not with 'An image of' or 'A picture of'.`,
@@ -323,13 +340,17 @@ export async function describePicture(
       "Return only the sentence.",
     ].join("\n\n");
     const content = [
-      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(input.bytes).toString("base64") } },
+      { type: "image", source: { type: "base64", media_type: input.mediaType, data: Buffer.from(bytes).toString("base64") } },
       { type: "text", text: `The product this picture is on the page of: ${input.productTitle}` },
     ];
     const answer = await askModel(store, system, content, 200, model());
     const sentence = answer ? line(answer.replace(/^["“]|["”]$/g, ""), 150) : "";
     return sentence || null;
   });
+  // The job is given back by counted itself, once: no call reached the provider (the merge of main into #2975:
+  // giving it back here as well took it back twice).
+  if (unread.reason === null) return done;
+  return { ok: false, reason: unread.reason };
 }
 
 /** The JSON object in an answer, whatever the model put around it. */
@@ -384,14 +405,24 @@ export async function counted<T>(store: Store, now: number, run: () => Promise<T
     return { ok: false, reason: "used" };
   }
   let value: T | null = null;
+  const calls: AiCallReport = { owned: false, dispatched: 0 };
   try {
-    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run);
+    value = await withAiCallBudget(store.statsId, jobs * AI_ENTITLEMENT_RULES.writingCallsPerJob, run, calls);
   } catch (error) {
     console.error("a writing job failed", error);
   }
-  // Provider work may cost money even when the response is unusable.
-  // Only a refused reservation is returned; a started attempt stays counted.
-  if (value === null) return { ok: false, reason: "failed" };
+  // Provider work may cost money even when the response is unusable: a
+  // started attempt stays counted. A job whose own budget saw no call reach
+  // the provider (its dollar reservation refused, or it stopped before one)
+  // is given back, once: its reply is read in its exact shape, and one that
+  // cannot be confirmed is logged, never retried (R32 finding 1).
+  if (value === null) {
+    if (calls.owned && calls.dispatched === 0) {
+      const back = repliesFor(await redisPipeline([["DECRBY", key, jobs]]).catch(() => null), 1);
+      if (!back || countOf(back[0]) === null) console.error("a writing job with no provider call could not be confirmed given back");
+    }
+    return { ok: false, reason: "failed" };
+  }
   return { ok: true, value, left: Math.max(0, allowance - count) };
 }
 
@@ -648,6 +679,8 @@ export async function writeStoreSetup(store: Store, input: { about: string; sell
   if (!about && !link) return { ok: false, reason: "notes" };
   return counted(store, now, async () => {
     // The page is read inside this job, so each read is one of the month's writing jobs, counted first.
+    // The read is work of its own: noted like a provider call, so the job keeps its count without one.
+    if (link && !noteAiDispatch(store.statsId ?? "")) return null;
     const source = link ? await readSourcePage(link, sourceHooks) : null;
     const page = source?.ok ? source : null;
     if (!about && !page) return null;
@@ -1290,18 +1323,37 @@ async function readPdfFacts(store: Store, pdf: Uint8Array): Promise<string | nul
 
 export async function writePage(
   store: Store,
-  input: { title: string; price: string; kind: ProductKind | "free"; summary: string; about: string; notes: string; pdf?: Uint8Array | null },
+  input: {
+    title: string;
+    price: string;
+    kind: ProductKind | "free";
+    summary: string;
+    about: string;
+    notes: string;
+    pdf?: Uint8Array | null | (() => Promise<Uint8Array | null>);
+  },
   now = Date.now(),
-): Promise<AiResult<PageDraft>> {
+): Promise<AiResult<PageDraft> | { ok: false; reason: "file" }> {
   const notes = block(input.notes, MAX_AI_NOTES);
   const about = block(input.about, MAX_ABOUT_LENGTH);
   const summary = line(input.summary, MAX_SUMMARY_LENGTH);
-  const pdf = input.pdf && input.pdf.length > 0 ? input.pdf : null;
+  const given = input.pdf;
+  const pdf = typeof given === "function" ? given : given && given.length > 0 ? given : null;
   // Something has to be said about the product, by the creator or by its own file.
   if (!notes && !about && !summary && !pdf) return { ok: false, reason: "notes" };
-  return counted(store, now, async () => {
+  const jobs = pdf ? 1 + READ_PDF_JOBS : 1;
+  // The file may be given as how to read it (6 November 2026): it is read only once the jobs are taken, so a store
+  // with no allowance left (Creator's is 0) never spends a paid file-store read on a request that is refused. A file
+  // that cannot be read then gives every job back (counted does it, once), since nothing was asked of the model.
+  const unread = { file: false };
+  const done = await counted(store, now, async () => {
+    const pages = typeof pdf === "function" ? await pdf().catch(() => null) : pdf;
+    if (pdf && (!pages || pages.length === 0)) {
+      unread.file = true;
+      return null;
+    }
     // What the product's own first pages hold, when the creator asked for them to be read.
-    const fileFacts = pdf ? await readPdfFacts(store, pdf) : null;
+    const fileFacts = pages ? await readPdfFacts(store, pages) : null;
     if (pdf && !fileFacts && !notes && !about && !summary) return null;
     const free = input.kind === "free";
     const system = [
@@ -1364,7 +1416,10 @@ export async function writePage(
       seoDescription: line(json.seoDescription, 160),
     };
     return draft.headline && draft.benefits.length ? draft : null;
-  }, pdf ? 1 + READ_PDF_JOBS : 1);
+  }, jobs);
+  // Every job is given back by counted itself, once: nothing was asked of the model (the merge of main into #2975).
+  if (!unread.file) return done;
+  return { ok: false, reason: "file" };
 }
 
 /**

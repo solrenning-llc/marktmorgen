@@ -131,6 +131,13 @@ export async function createCartCheckout(
   const country = extras.country ?? "";
   const body = new URLSearchParams({
     mode: "payment",
+    // Stripe's paying label on its submit button ("Buy"), so the button that
+    // places the order says it obliges payment (Directive 2011/83/EU art. 8(2);
+    // EU consumer audit 2026-11-06, row 11). Read 6 November 2026 at
+    // https://docs.stripe.com/api/checkout/sessions/create (API 2026-10-28):
+    // `pay` "Submit button includes a 'Buy' label"; allowed only in payment or
+    // subscription mode and not with ui_mode elements (this session is hosted).
+    submit_type: "pay",
     locale: LANGUAGES[store.language].stripe,
     "metadata[store]": store.handle,
     "metadata[product]": products[0].id,
@@ -208,6 +215,11 @@ export async function createCartCheckout(
     if (extras.cameFrom.medium) body.set("metadata[utm_medium]", extras.cameFrom.medium);
     if (extras.cameFrom.campaign) body.set("metadata[utm_campaign]", extras.cameFrom.campaign);
   }
+  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts), and before
+  // the creator's Stripe account is read for a code (below): a cart the store cannot take reads nothing (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
   // One discount at a time, as everywhere here: a code box only when nothing was taken off already.
   const box = !discounted && store.hasDiscounts;
   // A code from a link goes on by itself, as on one product's checkout
@@ -244,10 +256,6 @@ export async function createCartCheckout(
     keepConsentOn(body, extras.digitalConsent, "digital", 1);
     body.set(`payment_intent_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, "digital"));
   }
-  // A cart is one order, admitted before Stripe's page opens (lib/order-admission.ts).
-  const admitted = await admitOrders(store, 1, Date.now(), itemsHandedOver(products));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   for (;;) {
     try {

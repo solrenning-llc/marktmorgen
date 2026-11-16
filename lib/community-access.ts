@@ -176,6 +176,7 @@ export async function paidForAny(store: Store, email: string, ids: Set<string>):
   for (const variant of variants) {
     const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: "100" });
     query.append("expand[]", "data.subscription");
+    query.append("expand[]", "data.subscription.latest_invoice");
     query.append("expand[]", "data.payment_intent.latest_charge");
     const listed = listOf(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, STRIPE_VERSION), isSessionRow);
     if (!listed.complete) complete = false;
@@ -357,7 +358,57 @@ export async function maySeeSpace(
   const ids = gate.needs;
   const id = store.community?.id;
   if (!id) return false;
-  return holdsAnyOf(store, ids, viewer.email, `nl:cm:${id}:sp:ok:${space.id}:${emailKey(viewer.email)}`, String(config.v));
+  return holdsAnyOf(store, ids, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v));
+}
+
+const spaceOkKey = (community: string, space: string, email: string) => `nl:cm:${community}:sp:ok:${space}:${emailKey(email)}`;
+
+/**
+ * One space's answer for one viewer, said as it is: let in, not let in, or
+ * not known just now (Stripe or the kept answer could not be read). The same
+ * rule and the same kept answer as maySeeSpace, asked strictly, so a failed
+ * request is never a no. The member's own community page uses it (review of
+ * #3007, M1): a member whose access could not be checked is never let in on a
+ * guess, and never shown the space locked with an offer to buy what they may
+ * already own; the page says it could not check.
+ */
+export type SpaceAnswer = "in" | "out" | "unknown";
+
+export async function spaceAnswer(
+  store: Store,
+  config: CommunityConfig,
+  space: { id: string; only: string[] },
+  viewer: { owner: boolean; email: string },
+): Promise<SpaceAnswer> {
+  if (viewer.owner) return "in";
+  const gate = spaceGate(space, config.access);
+  if (gate.open) return "in";
+  const id = store.community?.id;
+  if (!id || !isRedisConfigured()) return "out";
+  try {
+    return (await holdsProductsOrThrow(store, gate.needs, viewer.email, spaceOkKey(id, space.id, viewer.email), String(config.v))) ? "in" : "out";
+  } catch (error) {
+    console.error("checking a community space's access failed", error);
+    return "unknown";
+  }
+}
+
+/**
+ * The spaces one viewer may see, in the creator's order, as visibleSpaces,
+ * and the kept spaces whose answer could not be read just now (`unchecked`):
+ * shut, as a no is, but never said to be kept for other buyers.
+ */
+export async function answeredSpaces(
+  store: Store,
+  config: CommunityConfig,
+  viewer: { owner: boolean; email: string },
+): Promise<{ spaces: Space[]; unchecked: Set<string> }> {
+  if (viewer.owner) return { spaces: config.spaces, unchecked: new Set() };
+  const gated = config.spaces.filter((s) => s.only.length);
+  const answers = await Promise.all(gated.map((s) => spaceAnswer(store, config, s, viewer)));
+  const mine = new Set(gated.filter((_, i) => answers[i] === "in").map((s) => s.id));
+  const unchecked = new Set(gated.filter((_, i) => answers[i] === "unknown").map((s) => s.id));
+  return { spaces: config.spaces.filter((s) => !s.only.length || mine.has(s.id)), unchecked };
 }
 
 /**
@@ -585,5 +636,10 @@ export async function forgetAccessPerson(id: string, email: string, spaceIds: st
     ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
     ["HDEL", `nl:cm:${id}:wel`, key],
   ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  // DEL's and HDEL's own counts only (CX-123 rule 24): any other answer throws, so the erasure is never reported done on it.
+  const exact = repliesFor(replies, 2);
+  const removed = countOf(exact?.[0]);
+  const welcomed = countOf(exact?.[1]);
+  if (removed === null || welcomed === null) throw new UnknownReplyError("the community access answers forgotten");
+  return removed + welcomed;
 }

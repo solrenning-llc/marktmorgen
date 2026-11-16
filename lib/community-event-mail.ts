@@ -59,7 +59,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { type BatchMessage, isSenderConfigured, sendBatch } from "@/lib/email";
-import { BATCH_SIZE, CHECKED_BATCH_SIZE, bodyHtml, render } from "@/lib/mail";
+import { BATCH_SIZE, CHECKED_BATCH_SIZE, SENDER_RETRY_NOTE, bodyHtml, render } from "@/lib/mail";
 import { storeSender } from "@/lib/calls";
 import { SITE_URL } from "@/lib/site-url";
 import { type Store, handleLeadsToStore, storeHandleKey } from "@/lib/store";
@@ -755,8 +755,9 @@ export async function advanceEventJob(
         const outcome = await sendBatch(messages, `cmev:${id}:${job.done}:${keys.length}`, { by: "store", store, kind: "email" });
         if (outcome !== "sent") {
           const failures = job.failures + 1;
-          if (outcome === "refused" || failures >= 5) return await finish("failed", "The email service would not take it. Nothing more was sent.");
-          job = { ...job, failures, note: "Paused for a moment: the email service asked us to slow down." };
+          // Only a refusal ends it: a provider that is down keeps the notice waiting, never abandoned (outage drill).
+          if (outcome === "refused") return await finish("failed", "The email service would not take it. Nothing more was sent.");
+          job = { ...job, failures, note: SENDER_RETRY_NOTE };
           break;
         }
       }

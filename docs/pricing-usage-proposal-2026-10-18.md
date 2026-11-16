@@ -20,8 +20,8 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
 | Store | $119.15 | $1,216.85 | $69 / $690 |
-| Studio | $176.28 | $1,873.88 | $449 / $4,490 |
-| Scale | $277.15 | $3,047.90 | $999 / $9,990 |
+| Studio | $176.28 | $1,873.95 | $449 / $4,490 |
+| Scale | $277.15 | $3,048.50 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -56,7 +56,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $149 / $1,490 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $199 / $1,990 | 0.0% | 60.34% | 60.04% | $120.08 | 2.23 |
 | $249 / $2,490 **(recommended)** | 15.0% | 60.36% | 60.05% | $150.31 | 1.78 |
-| $299 / $2,990 | 30.0% | 60.36% | 60.03% | $180.49 | 1.48 |
+| $299 / $2,990 | 30.0% | 60.36% | 60.03% | $180.48 | 1.48 |
 | $449 / $4,490 | 72.5% | 60.37% | 60.02% | $271.08 | 0.99 |
 
 ### Scale
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.05% | 60.01% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.12% | 12.15% |
 | Net a customer, a month, at full included use | $77.72 | $150.31 | $301.46 |
-| The same at #553's price | $38.40 | $267.74 | $600.28 |
+| The same at #553's price | $38.40 | $267.74 | $600.27 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

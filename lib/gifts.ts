@@ -558,8 +558,15 @@ export async function revokeRefundedGifts(
       if (row.status !== "succeeded" || typeof id !== "string" || typeof pi !== "string" || !REFUND_ID.test(id) || !PAYMENT_ID.test(pi)) return false;
       fields.push(id, pi);
     }
-    const counted = countOf(repliesFor(await redisPipeline([["HLEN", retryKey(sid)]]), 1)?.[0]);
-    if (counted === null || counted + rows.length > REFUND_RETRY_CAP) {
+    // Only rows not on the list yet count against its cap (Claude 5 on #3302): a page read again puts back rows already
+    // there, which HLEN holds. Each already there is read in its exact shape (its payment), a new one as nil.
+    const ids = fields.filter((_, i) => i % 2 === 0);
+    const read = repliesFor(await redisPipeline([["HLEN", retryKey(sid)], ["HMGET", retryKey(sid), ...ids]]), 2);
+    const counted = countOf(read?.[0]);
+    const there = read?.[1];
+    const known = Array.isArray(there) && there.length === ids.length && there.every((v) => v === null || (typeof v === "string" && PAYMENT_ID.test(v)));
+    const fresh = known ? (there as unknown[]).filter((v) => v === null).length : null;
+    if (counted === null || fresh === null || counted + fresh > REFUND_RETRY_CAP) {
       console.error("reading refunds for gifts: the list to try again is full or unknown; the anchor waits at the rows");
       return false;
     }

@@ -232,7 +232,8 @@ async function stuck(job: Job, base: number): Promise<void> {
   };
   redis.pipeline = async (commands) => {
     const replies = await original.call(redis, commands);
-    return commands.length === 1 && commands[0][0] === "HLEN" && commands[0][1] === job.retry ? [100] : replies;
+    // The list read as full: its HLEN (sent with the HMGET of the page's ids since Claude 5's MEDIUM on #3302) says 100.
+    return commands[0]?.[0] === "HLEN" && commands[0][1] === job.retry ? [100, ...replies.slice(1)] : replies;
   };
   try {
     is(`${job.name}: the list full: the refund behind is taken back in the same run`, await job.run(refusingAgain), 1);

@@ -623,6 +623,11 @@ export async function conversationsOf(id: string, who: string): Promise<{ reques
 
 /** How many conversations and requests one member is in: what deleting them goes through (lib/community-erasure.ts). */
 export async function dmCount(id: string, who: string): Promise<number> {
-  const [mine, asked] = await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]);
-  return (Number(mine) || 0) + (Number(asked) || 0);
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const replies = repliesFor(await redisPipeline([["ZCARD", inboxKey(id, who)], ["ZCARD", askedKey(id, who)]]), 2);
+  const mine = replies ? replyCount(replies[0]) : null;
+  const asked = replies ? replyCount(replies[1]) : null;
+  if (mine === null || asked === null) throw new UnknownReplyError("the count of a person's community conversations");
+  return mine + asked;
 }

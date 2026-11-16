@@ -84,7 +84,10 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   const { handle, id } = await params;
   const query = await searchParams;
   const found = await load(handle, id, typeof query.product === "string" ? query.product : undefined);
-  if (!found || found.resting) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
+  // A resting store's tab says so, as the resting page's does (../../resting/page.tsx),
+  // in its language from the record the load already read.
+  if (found?.resting) return { title: `${speech(found.store).w.restingTitle} — Marktmorgen`, robots: { index: false, follow: false } };
+  if (!found) return { title: coursesWords(await languageOf(handle)).metaCertNotFound, robots: { index: false, follow: false } };
   const { certificate } = found;
   const w = coursesWords(found.store.language);
   // Withdrawn because its course's payment was given back: no name in the tab or in a link's preview either (DONO-18).
@@ -206,7 +209,8 @@ export default async function CertificatePage({ params, searchParams }: Params) 
                 <span>{"✓"}</span>
               </div>
               <div className="cert-proof">
-                <p>{sample ? w.sampleId : w.certId(certificate.id)}</p>
+                {/* Until when, on the sheet that is printed too, as on the PDF (639 [GL7](32)): an expired one never prints as standing. */}
+                <p>{sample ? w.sampleId : certificate.validUntil ? `${w.certId(certificate.id)} · ${w.validUntil(said.date(certificate.validUntil * 1000))}` : w.certId(certificate.id)}</p>
                 <p>{sample ? w.sampleCheck : w.checkAt(shortUrl)}</p>
               </div>
             </div>

@@ -27,6 +27,7 @@ import { addProduct, claimHandle, ensureStatsId, setProductCourse, setStripeAcco
 import { purchaseRefunded, refundedInFull } from "@/lib/refunds";
 import { paidCourses, recordEnrollment, setBlocked } from "@/lib/learn";
 import { holdsProducts, paidForAny } from "@/lib/community-access";
+import { soldAMembership } from "@/lib/membership-access";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 
@@ -42,7 +43,6 @@ const intents: Record<string, Record<string, unknown>[]> = {};
 const invoices: Record<string, Record<string, unknown>> = {};
 const invoicePayments: Record<string, Record<string, unknown>[]> = {};
 const paymentIntents: Record<string, Record<string, unknown>> = {};
-const refundRows: Record<string, Record<string, unknown>[]> = {};
 let stripeDown = false;
 globalThis.fetch = (async (input: string | URL | Request) => {
   const url = new URL(String(input));
@@ -54,8 +54,6 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   const invoice = /^\/invoices\/(in_[A-Za-z0-9]+)$/.exec(path);
   if (invoice) return answer(invoices[invoice[1]] ?? {});
   if (path === "/invoice_payments") return answer({ object: "list", data: invoicePayments[url.searchParams.get("invoice") ?? ""] ?? [], has_more: false });
-  // A payment's refunds, in Stripe's shape (its charge an id): what lib/learn.ts reads to confirm a refund succeeded.
-  if (path === "/refunds") return answer({ object: "list", data: refundRows[url.searchParams.get("payment_intent") ?? ""] ?? [], has_more: false });
   const pi = /^\/payment_intents\/(pi_[A-Za-z0-9]+)$/.exec(path);
   if (pi) return answer(paymentIntents[pi[1]] ?? {});
   return answer({ object: "list", data: [], has_more: false });
@@ -117,16 +115,10 @@ async function main(): Promise<void> {
 
   part("A course bought once");
   sessions["ana@example.com"] = [paid("cs_test_ana000000001", once)];
-  await recordEnrollment(store, "ana@example.com", once, NOW - 86_400, "stripe");
+  await recordEnrollment(store, "ana@example.com", once, NOW - 86_400);
   is("opens", await open("ana@example.com"), [once]);
-  // Rule 23, a fixture only (owner decision 18, C1-20261109-1054-C5-54; #3376): a course written down is taken
-  // away only once its refund succeeded, so Ben's refund is listed as succeeded, in Stripe's shape (a PaymentIntent
-  // id of Stripe's length, its refund row with its charge as an id). The assertion is unchanged.
-  refundRows.pi_ben000000001 = [
-    { id: "re_ben000000001", object: "refund", status: "succeeded", amount: 4900, created: NOW - 3_600, payment_intent: "pi_ben000000001", charge: "ch_ben000000001" },
-  ];
-  sessions["ben@example.com"] = [paid("cs_test_ben000000001", once, { payment_intent: { id: "pi_ben000000001", latest_charge: charge(4900, 4900) } })];
-  await recordEnrollment(store, "ben@example.com", once, NOW - 86_400, "stripe");
+  sessions["ben@example.com"] = [paid("cs_test_ben000000001", once, { payment_intent: { id: "pi_ben01", latest_charge: charge(4900, 4900) } })];
+  await recordEnrollment(store, "ben@example.com", once, NOW - 86_400);
   is("refunded in full: shut, though the thanks page wrote it down", await open("ben@example.com"), []);
   sessions["cy@example.com"] = [paid("cs_test_cy0000000001", once, { payment_intent: { id: "pi_cy01", latest_charge: charge(4900, 2000) } })];
   is("refunded in part: still open", await open("cy@example.com"), [once]);
@@ -152,6 +144,21 @@ async function main(): Promise<void> {
     sessions[email] = [member(`cs_test_${email.slice(0, 2)}00000000001`, club, status, email === "m3@example.com" ? NOW + 86_400 : null)];
     is(`${status}: ${opens ? "open" : "shut"}`, await open(email), opens ? [club] : []);
   }
+
+  part("A course once sold as a membership, now sold once");
+  // The creator turned the membership into a one-off sale (editProduct takes recurring: null): what was sold as a
+  // membership is still judged by its membership, never reopened to a member who left because of the product's new kind.
+  const archive = await make("Bookkeeping Archive", "99", null, "c".repeat(32));
+  const later = (await storeForEmail(OWNER))!;
+  const openLater = async (email: string) => [...(await paidCourses(later, email)).keys()].sort();
+  sessions["kim@example.com"] = [member("cs_test_kim000000001", archive, "canceled")];
+  await recordEnrollment(later, "kim@example.com", archive, NOW - 86_400);
+  is("a member who left stays shut, though the thanks page wrote it down", await openLater("kim@example.com"), []);
+  sessions["lou@example.com"] = [member("cs_test_lou000000001", archive, "active")];
+  is("a member still paying stays open", await openLater("lou@example.com"), [archive]);
+  is("the checkout is still read as a membership", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "subscription", metadata: { store: "school", product: archive } }), true);
+  is("and a payment plan is not one", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "subscription", metadata: { kind: "plan" } }), false);
+  is("nor a one-off sale", soldAMembership({ recurring: null } as Parameters<typeof soldAMembership>[0], { mode: "payment", metadata: {} }), false);
 
   part("A community");
   const ids = new Set([once, club]);

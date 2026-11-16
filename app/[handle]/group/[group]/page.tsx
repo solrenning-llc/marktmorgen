@@ -105,7 +105,7 @@ export default async function GroupPage({ params, searchParams }: Params) {
       token,
       recordStart: async (email, productId, start) => {
         const course = productId === product.id ? product : await readListing(store, productId);
-        if (course?.course) await recordEnrollment(store, email, productId, start, "group");
+        if (course?.course) await recordEnrollment(store, email, productId, start);
       },
     }).then(
       (value) => ({ value }),

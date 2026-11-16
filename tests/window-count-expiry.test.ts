@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   for (const [name, count] of [
     ["withinLimit", () => withinLimit("synthetic", "203.0.113.7", 3, 60)],
     ["essentialLimitState", () => essentialLimitState("synthetic-essential", "203.0.113.7", 3, 60).then((s) => s === "within")],
-    ["withinMonth", () => withinMonth("synthetic-month", "203.0.113.7", 3, "2026-11")],
+    ["withinMonth", () => withinMonth("synthetic-month", "203.0.113.7", 3, "2026-11", 32 * 86_400)],
   ] as const) {
     part(`${name}: the key expires between the two commands`);
     redis.clear();

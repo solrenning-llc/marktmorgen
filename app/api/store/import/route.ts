@@ -1,4 +1,4 @@
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
     if (!job) return Response.json({ ok: false, error: "unknown" }, { status: 404 });
     if (request.nextUrl.searchParams.get("report") === "1") {
       if (!(await withinLimit("import-report", store.sid, 60, 600))) return new Response("Too many downloads for now. Try again in a few minutes.", { status: 429 });
-      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store)))) return new Response("Your store has downloaded all the import reports its figure allows for now.", { status: 429 });
+      if (!(await withinMonth("import-report-month", store.sid, importAllowanceFor(store).reports, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return new Response("Your store has downloaded all the import reports its figure allows for now.", { status: 429 });
       const csv = await reportCsv(job);
       const day = new Date(job.at).toISOString().slice(0, 10);
       return new Response(csv, {
@@ -140,7 +140,7 @@ export async function POST(request: NextRequest) {
       // Twenty imports a day is far more than moving a store takes.
       if (!(await withinLimit("import-start", store.sid || guarded.ref, 20, 86_400))) return refuse("slow", 429);
       const starts = importAllowanceFor(store).starts;
-      if (!(await withinMonth("import-start-month", store.sid || guarded.ref, starts, windowId(store)))) return refuse("starts_month", 429, { limit: starts });
+      if (!(await withinMonth("import-start-month", store.sid || guarded.ref, starts, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("starts_month", 429, { limit: starts });
       const started = await startImport(store, email, kind, startInput(body));
       if (!started.ok) return refuse(started.reason, started.reason === "busy" ? 409 : 400, { limit: started.limit, opens: started.opens });
       return Response.json({ ok: true, import: view(started.job) });
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       const buyers = kind === "purchases";
       const allowance = importAllowanceFor(store);
       if (!(await withinLimit("import-preview", who, 400, 600))) return refuse("slow", 429);
-      if (!(await withinMonth(buyers ? "import-preview-buyers-month" : "import-preview-month", who, buyers ? allowance.buyerChecks : allowance.checks, windowId(store)))) {
+      if (!(await withinMonth(buyers ? "import-preview-buyers-month" : "import-preview-month", who, buyers ? allowance.buyerChecks : allowance.checks, windowId(store), windowKeySeconds(store, 32 * 86_400)))) {
         return refuse("checks_month", 429, { limit: buyers ? allowance.buyerChecks : allowance.checks });
       }
       const rows = readBatch(kind, body.rows);
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
       // by the time the page shows it; past the month's steps the five-minute job does it.
       // Queued and left while the plan's costs are paused: no step is spent on it (unit 4b2).
       if (costPauseCode(store)) return Response.json({ ok: true, import: view(done.job) });
-      if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store)))) return Response.json({ ok: true, import: view(done.job) });
+      if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return Response.json({ ok: true, import: view(done.job) });
       const after = await runImport(id, Date.now() + STEP_MS);
       return Response.json({ ok: true, import: view(after ?? done.job) });
     }
@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
       const job = await jobOf(store, id);
       if (!job) return refuse("unknown", 404);
       // Past the month's steps the page stops pushing; the five-minute job finishes every import.
-      if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store)))) return Response.json({ ok: true, import: view(job) });
+      if (!(await withinMonth("import-step-month", store.sid || guarded.ref, importAllowanceFor(store).steps, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return Response.json({ ok: true, import: view(job) });
       const after = await runImport(id, Date.now() + STEP_MS);
       return Response.json({ ok: true, import: view(after ?? job) });
     }

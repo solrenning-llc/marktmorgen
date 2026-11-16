@@ -1,4 +1,4 @@
-import { windowId } from "@/lib/allowance-window";
+import { windowId, windowKeySeconds } from "@/lib/allowance-window";
 import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { withinLimit, withinMonth } from "@/lib/request-guard";
@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       // Sixty pages in ten minutes is several whole funnels, read and read again. Reading a page
       // touches no store record: the allowance bounds the work, not a bill.
       if (!(await withinLimit("import-cf-page", who, 60, 600))) return refuse("slow", 429);
-      if (!(await withinMonth("import-cf-page-month", who, allowance.pageReads, windowId(store)))) return refuse("month", 429, { limit: allowance.pageReads });
+      if (!(await withinMonth("import-cf-page-month", who, allowance.pageReads, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.pageReads });
       const html = typeof body.html === "string" ? body.html : "";
       if (!html.trim()) return refuse("empty");
       if (html.length > MAX_TRIMMED_PAGE_CHARS) return refuse("too_big", 413);
@@ -65,11 +65,11 @@ export async function POST(request: NextRequest) {
       // allowances of their own, checked before any work (docs/clickfunnels-import.md).
       if (action === "plan") {
         if (!(await withinLimit("import-cf-plan", who, 120, 600))) return refuse("slow", 429);
-        if (!(await withinMonth("import-cf-plan-month", who, allowance.funnelChecks, windowId(store)))) return refuse("month", 429, { limit: allowance.funnelChecks });
+        if (!(await withinMonth("import-cf-plan-month", who, allowance.funnelChecks, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.funnelChecks });
       }
       if (action === "save") {
         if (!(await withinLimit("import-cf-save", who, 10, 86_400))) return refuse("slow", 429);
-        if (!(await withinMonth("import-cf-save-month", who, allowance.funnelSaves, windowId(store)))) return refuse("month", 429, { limit: allowance.funnelSaves });
+        if (!(await withinMonth("import-cf-save-month", who, allowance.funnelSaves, windowId(store), windowKeySeconds(store, 32 * 86_400)))) return refuse("month", 429, { limit: allowance.funnelSaves });
       }
       const input = { name: body.name, pages: body.pages };
       if (action === "plan") return Response.json({ ok: true, plan: await planFunnelImport(store, input) }, { headers: NO_STORE });

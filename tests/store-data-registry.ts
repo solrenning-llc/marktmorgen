@@ -876,7 +876,7 @@ export const FAMILIES: Record<string, Family> = {
   "nl:auth:rec:set:@lib/recovery-address.ts": company("A recovery address being set", "An account's, minutes."),
   "nl:auth:rec:until:@lib/recovery-address.ts": company("Until when a recovery holds", "An account's."),
   "nl:rl:@lib/request-guard.ts": short("Per connection, person or store counts, by their scope", "request", 1),
-  "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope", "day", 62, 128),
+  "nl:rlm:@lib/request-guard.ts": short("Monthly counts by their scope, kept at least as long as their window (windowKeySeconds)", "day", 63, 128),
   "nl:rev:ask:due@lib/review-ask.ts": company("Review asks due", "One sorted set for every store: each an order's, gone when asked."),
   "nl:rev:link:@lib/review-proof.ts": short("A review link, sixty days", "monthly", 60, LINK_BYTES, MAIL("review ask")),
   "nl:rev:refunds:seen:@lib/review-proof.ts": { what: "Refunds already handled for reviews", parts: [capped(64 * KB, "Sixty-one days after the last one read.")] },

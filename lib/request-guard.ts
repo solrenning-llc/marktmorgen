@@ -308,19 +308,28 @@ function counterReply(reply: unknown): number | null {
  * exactly one of these. `window` is the store's window by its name
  * (lib/allowance-window.ts, windowId): its billing month when it pays us,
  * the calendar month otherwise, so one payment buys one month of each. No
- * window known, nothing let through. Kept 32 days, longer than any window.
+ * window known, nothing let through. Kept `keepSeconds`, which every caller takes from the
+ * store's window (lib/allowance-window.ts, windowKeySeconds(store, 32 * 86_400)): at least 32
+ * days, and never less than the window, so a window stretched to its period's end never outlives
+ * its count (Claude 6's second MEDIUM on #4561, rule 30). A keep under MONTH_KEEP_SECONDS lets
+ * nothing through.
  * Fails open like withinLimit when Redis cannot be asked: the work it guards
  * cannot run either.
  */
-export async function withinMonth(scope: string, who: string, limit: number, window: string | null): Promise<boolean> {
+/** The least a month counter may be kept (withinMonth). */
+const MONTH_KEEP_SECONDS = 32 * 86_400;
+
+export async function withinMonth(scope: string, who: string, limit: number, window: string | null, keepSeconds: number): Promise<boolean> {
   if (!window || !/^\d{4}-(0[1-9]|1[0-2])(-(0[1-9]|[12]\d|3[01]))?$/.test(window)) return false;
   if (!isRedisConfigured()) return true;
   if (!Number.isSafeInteger(limit) || limit <= 0) return false;
+  // Never kept less than a month: a keep that is not one would let the window's count lapse inside it.
+  if (!Number.isSafeInteger(keepSeconds) || keepSeconds < MONTH_KEEP_SECONDS) return false;
   let reply: unknown;
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline(windowCount(key, 32 * 86_400));
+    reply = await redisPipeline(windowCount(key, keepSeconds));
   } catch {
     return true;
   }

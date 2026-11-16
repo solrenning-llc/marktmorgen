@@ -189,6 +189,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/membership-manage.ts": { how: "passing", days: 1, what: "A link to manage your membership that was emailed to you works for an hour" },
   "lib/request-guard.ts": { how: "passing", days: 32, what: "How often your address asked for things, counted by one-way codes, for at most 32 days" },
   "lib/erasure-request.ts": { how: "passing", days: 1, what: "A link you asked for to delete your data works for an hour" },
+  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "If you asked to move your purchases to another email address, the request, with both addresses and when each confirmed it, is deleted a day after you asked; how often an address asked that day is counted by a one-way code, for two days" },
   "lib/store-assistant.ts": { how: "passing", days: 1, what: "What you asked the store's assistant, under a random code only your browser holds and with no name or address, deleted a day after your last message; it cannot be found by your address" },
   "lib/next-offer.ts": { how: "passing", days: 3, what: "The product the store's assistant suggested after an order, under the order's reference with no name or address, deleted three days later" },
   "lib/community.ts": { how: "within", in: "lib/community-erasure.ts", what: "Your community posts, comments, likes and reports are in your community part" },

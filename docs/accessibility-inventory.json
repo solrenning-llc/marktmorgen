@@ -1726,6 +1726,7 @@
     "components/withdrawal-where.tsx",
     "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
+    "components/workflow-versions.tsx",
     "components/yearly-ask-editor.tsx"
   ],
   "apiRouteSources": [

@@ -174,6 +174,51 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
+        if (key.startsWith("-- marktmorgen:flows-write-if:v2\n") && args[0] === "1" && args.length === 5) {
+          const [, list, had, expected, json] = args;
+          const now = this.run(["GET", list]);
+          if (had === "0" ? now !== null && now !== undefined : typeof now !== "string" || createHash("sha1").update(now, "utf8").digest("hex") !== expected) return 0;
+          this.run(["SET", list, json]);
+          return 1;
+        }
+        // lib/flow-versions.ts FLOW_HISTORY_SIZE: the workflows' length and the kept versions' total and longest, nothing read out.
+        if (key.startsWith("-- marktmorgen:flow-history-size:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, flows, list, most] = args;
+          // Read as Redis does, without making an empty list where there is none (this stand-in's LRANGE would).
+          const held = this.data.get(list);
+          if (held !== undefined && !Array.isArray(held)) throw new Error("WRONGTYPE");
+          const items = ((held ?? []) as string[]).slice(0, Number(most));
+          const lengths = items.map((item) => Buffer.byteLength(item, "utf8"));
+          return [this.run(["STRLEN", flows]), lengths.reduce((sum, n) => sum + n, 0), lengths.reduce((most, n) => Math.max(most, n), 0)];
+        }
+        // lib/flow-versions.ts KEEP_FLOW_VERSION: a version pushed only onto the list it was counted from.
+        // lib/flow-versions.ts DROP_FLOW_VERSIONS: the list deleted, with how many versions it held and their length.
+        if (key.startsWith("-- marktmorgen:flow-version-drop:v2\n") && args[0] === "2" && args.length === 4) {
+          const [, list, index, flowId] = args;
+          const items = (this.run(["LRANGE", list, "0", "-1"]) ?? []) as string[];
+          const length = items.reduce((sum, item) => sum + Buffer.byteLength(item, "utf8"), 0);
+          return [this.run(["DEL", list]), items.length, length, this.run(["SREM", index, flowId])];
+        }
+        if (key.startsWith("-- marktmorgen:flow-version-keep:v3\n") && args[0] === "3" && args.length === 10) {
+          const [, list, flows, index, length, head, entry, most, id, flowId] = args;
+          const saved = this.run(["GET", flows]);
+          let listed: unknown = null;
+          try {
+            listed = typeof saved === "string" ? JSON.parse(saved) : null;
+          } catch {
+            listed = null;
+          }
+          // Only a workflow's own top-level id, as cjson.decode and ipairs read the saved array.
+          if (!Array.isArray(listed) || !listed.some((flow) => typeof flow === "object" && flow !== null && (flow as { id?: unknown }).id === id)) return 2;
+          const n = Math.min(Number(this.run(["LLEN", list]) ?? 0), Number(most));
+          if (n !== Number(length)) return 0;
+          if (n > 0 && this.run(["LINDEX", list, "0"]) !== head) return 0;
+          this.run(["LPUSH", list, entry]);
+          this.run(["LTRIM", list, "0", String(Number(most) - 1)]);
+          this.run(["SADD", index, flowId]);
+          return 1;
+        }
         // lib/webhook-outbox.ts OUTBOX_ADMIT: an event kept in the outbox only while its line has room, record and place together.
         if (key.startsWith("-- marktmorgen:hookout-admit:v1\n") && args[0] === "2" && args.length === 8) {
           const [, record, line, id, value, seconds, due, ceiling] = args;
@@ -330,6 +375,18 @@ export class MemoryRedis {
         if (key.startsWith("-- marktmorgen:group-place-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, hold, token] = args;
           return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
+        }
+        // lib/group-buy.ts PLACE_DROP: a place's mark taken off only while it is still exactly the text its open wrote.
+        if (key.startsWith("-- marktmorgen:group-place-drop:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, text] = args;
+          return this.run(["HGET", members, field]) === text ? this.run(["HDEL", members, field]) : 0;
+        }
+        // lib/group-buy.ts PLACE_CLAIM: a place's mark claimed for an open only while it is still the text read.
+        if (key.startsWith("-- marktmorgen:group-place-claim:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, members, field, read, claimed] = args;
+          if (this.run(["HGET", members, field]) !== read) return 0;
+          this.run(["HSET", members, field, claimed]);
+          return 1;
         }
         // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
         if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
@@ -2549,6 +2606,14 @@ export class MemoryRedis {
       case "ZSCORE": {
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
+      }
+      case "ZMSCORE": {
+        // Redis 6.2: one answer per member asked, its score as text or null, in the order asked.
+        const z = this.zset(key);
+        return args.map((member) => {
+          const found = z.find((e) => e.member === member);
+          return found ? String(found.score) : null;
+        });
       }
       case "ZREMRANGEBYRANK": {
         const z = this.zset(key);

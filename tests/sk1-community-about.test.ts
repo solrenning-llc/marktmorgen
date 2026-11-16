@@ -42,7 +42,7 @@ import {
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { takePublicRequest } from "@/lib/traffic";
 import { requestLimitFor } from "@/lib/traffic-rules";
-import { TAKE_COMMANDS, request, walkRead } from "./plan-cost-registry";
+import { SITEMAP_SETTINGS_BYTES, TAKE_COMMANDS, request, walkRead } from "./plan-cost-registry";
 import { laterPageCost } from "./traffic-cost";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
@@ -210,6 +210,24 @@ async function main(): Promise<void> {
   is("off", [(await call({ action: "about-page", on: false, counts: true })).ok, (await readConfig(id))!.page], [true, { on: false, counts: false }]);
   is("on, without counts", [(await call({ action: "about-page", on: true, counts: false })).ok, (await readConfig(id))!.page], [true, { on: true, counts: false }]);
   is("the studio offers it", readFileSync("components/community-studio.tsx", "utf8").includes('action: "about-page"'), true);
+
+  // Claude 7's review of #3016 (6889907689, MEDIUM), reopened by Claude 6 (6907359960), Codex X5 (6907743661) and Codex
+  // L (6907745085): aboutPage read the community's settings (a GET of up to SITEMAP_SETTINGS_BYTES) before the visit was
+  // counted, so a hit on a page that is off, or on a resting store, read them uncounted, and robots.txt allows the
+  // address on every store.
+  part("8. Counted before the settings are read: a resting store reads none, on or off");
+  // The store's requests are used up since part 4.
+  const cfg = `GET nl:cm:${id}:cfg`;
+  for (const on of [false, true]) {
+    await saveConfig(id, { ...(await readConfig(id))!, page: { on, counts: false } });
+    sent = [];
+    const resting = await aboutPage(store);
+    is(`the page ${on ? "on" : "off"}, the store resting: resting, and the settings not read`, [resting.state, names().includes(cfg)], ["resting", false]);
+  }
+  is("the visit is counted (isResting) before the settings are read", lib.indexOf("isResting(store") > 0 && lib.indexOf("isResting(store") < lib.indexOf("readConfig(id)"), true);
+  const settingsRead = request("heavy", 1, SITEMAP_SETTINGS_BYTES) + walkRead(0, SITEMAP_SETTINGS_BYTES);
+  is("the settings read after the count fits in the one counted request, at a later page's price", settingsRead <= laterPageCost(), true);
+  console.log(`About page settings read: $${settingsRead.toFixed(6)} at most, inside one counted request at $${laterPageCost().toFixed(6)}`);
   done();
 }
 main();

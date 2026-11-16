@@ -43,7 +43,7 @@
  *                                 before it keeps nothing (finishMeta)
  *   nl:metaads:stores             the stores connected, for the daily read
  */
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
@@ -233,16 +233,22 @@ async function call(method: "GET" | "DELETE", path: string, params: Record<strin
 
 const wholeAccount = (a: unknown): a is MetaAccount => Boolean(a && typeof (a as MetaAccount).id === "string" && typeof (a as MetaAccount).currency === "string");
 
+/** A field this code writes as text or a number, when it is there at all: missing reads as its default, as before. */
+const absentOr = (value: unknown, type: "string" | "number") => value === undefined || (type === "number" ? typeof value === "number" && Number.isFinite(value) : typeof value === type);
+
 /**
- * A kept connection, or null. With `whole`, every ad account in it must be in the shape this code writes, so what the
- * studio is shown is never a list with one left out, nor "choose an account" for one that could not be read.
+ * A kept connection, or null. With `whole`, every ad account in it, and the chosen account, why it broke and when it
+ * runs out, must be in the shape this code writes, so what the studio is shown is never a list with one left out, nor
+ * "choose an account" for one that could not be read, and a read or a choice never drops the chosen account or takes
+ * a connection as healthy because a field could not be read (CX-123 rule 24).
  */
 function parseConnection(raw: unknown, whole = false): Connection | null {
   if (typeof raw !== "string" || !raw) return null;
   try {
     const v = JSON.parse(raw) as Partial<Connection>;
-    if (typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
+    if (!v || typeof v !== "object" || typeof v.user !== "string" || typeof v.token !== "string" || !Array.isArray(v.accounts)) return null;
     if (whole && !v.accounts.every(wholeAccount)) return null;
+    if (whole && !(absentOr(v.account, "string") && absentOr(v.broken, "string") && absentOr(v.expires, "number") && absentOr(v.connectedAt, "number"))) return null;
     return {
       user: v.user,
       token: v.token,
@@ -261,6 +267,9 @@ function parseConnection(raw: unknown, whole = false): Connection | null {
 }
 
 const keptCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+
+/** No read kept yet: no day, so the studio shows no amount. */
+const NOT_READ: MetaRead = { day: "", at: 0, problem: "", after: 0, lines: 0, cents: 0, campaigns: 0 };
 
 /**
  * The last read, only in the shape this code writes (CX-123 rule 24; Claude 6 on #3069): every field present, the day
@@ -289,16 +298,18 @@ function parseRead(raw: unknown): MetaRead | null {
   }
 }
 
-async function readConnection(statsId: string): Promise<Connection | null> {
-  return (await readConnectionAsSeen(statsId))?.c ?? null;
-}
-
-/** A connection with the exact text it was read as, the text a write made only while it is there is held to. */
-async function readConnectionAsSeen(statsId: string): Promise<{ c: Connection; seen: string } | null> {
-  if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["GET", connKey(statsId)]]);
-  const c = parseConnection(raw);
-  return c && typeof raw === "string" ? { c, seen: raw } : null;
+/**
+ * A connection read exactly (exactConnection: null only when confirmed absent, an unknown reply or a record out of
+ * shape throws) with the exact text it was read as, the text a write made only while it is there is held to
+ * (writeIfConnected).
+ */
+async function exactConnectionAsSeen(statsId: string, whole = false): Promise<{ c: Connection; seen: string } | null> {
+  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
+  if (!read) throw new UnknownReplyError("a Meta connection");
+  if (read[0] === null) return null;
+  const c = parseConnection(read[0], whole);
+  if (!c || typeof read[0] !== "string") throw new UnknownReplyError("a Meta connection");
+  return { c, seen: read[0] };
 }
 
 /**
@@ -564,17 +575,25 @@ export async function finishMeta(input: {
   return { ok: true, view, account: view.account };
 }
 
-/** Chooses which of the connected person's ad accounts is read. */
+/**
+ * Chooses which of the connected person's ad accounts is read. Read exactly (CX-123 rule 24): false only when the
+ * store is confirmed not connected or the id is not one of its accounts; an unknown reply, a record with an account
+ * out of shape (rewriting it would drop that account) or a write not answered in its shape throws, so the Meta route
+ * answers 503, never "not one of your accounts" nor "chosen" unseen.
+ */
 export async function chooseAccount(statsId: string, id: unknown): Promise<boolean> {
-  const read = await readConnectionAsSeen(statsId);
+  if (!isRedisConfigured() || typeof id !== "string") return false;
+  const read = await exactConnectionAsSeen(statsId, true);
   if (!read) return false;
   const { c, seen } = read;
-  if (typeof id !== "string" || !c.accounts.some((a) => a.id === id)) return false;
+  if (!c.accounts.some((a) => a.id === id)) return false;
   if (c.account === id) return true;
-  // Only onto the connection read: one forgotten in between is not written back with the account chosen.
+  // Only onto the connection read: one forgotten in between is not written back with the account chosen. A reply in
+  // another shape throws (writeIfConnected), never "chosen" unseen.
   if (!(await writeIfConnected(statsId, seen, connKey(statsId), JSON.stringify({ ...c, account: id }), 0, [readKey(statsId), linesKey(statsId)]))) return false;
-  // Due now: the daily pass's mark no longer holds (readMetaDue).
-  await redisPipeline([["INCR", GEN_KEY]]);
+  // Due now: the daily pass's mark no longer holds (readMetaDue). Its reply confirmed too (CX-123 rule 24).
+  const bumped = repliesFor(await redisPipeline([["INCR", GEN_KEY]]), 1);
+  if (!bumped || countOf(bumped[0]) === null) throw new UnknownReplyError("a Meta ad account chosen");
   return true;
 }
 
@@ -659,14 +678,13 @@ function confirmDeleted(replies: unknown, commands: number, what: string): void 
   if (!answered || answered.some((reply) => countOf(reply) === null)) throw new UnknownReplyError(what);
 }
 
-/** One store's connection read exactly (CX-123 rule 24): null only when it is confirmed absent; an unknown reply throws. */
-async function exactConnection(statsId: string): Promise<Connection | null> {
-  const read = repliesFor(await redisPipeline([["GET", connKey(statsId)]]), 1);
-  if (!read) throw new UnknownReplyError("a Meta connection");
-  if (read[0] === null) return null;
-  const c = parseConnection(read[0]);
-  if (!c) throw new UnknownReplyError("a Meta connection");
-  return c;
+/**
+ * One store's connection read exactly (CX-123 rule 24): null only when it is confirmed absent; an unknown reply throws.
+ * With `whole`, a record with any account or field out of shape throws too (parseConnection); disconnecting and
+ * forgetting read without it, so a damaged account list never stops a connection being ended.
+ */
+async function exactConnection(statsId: string, whole = false): Promise<Connection | null> {
+  return (await exactConnectionAsSeen(statsId, whole))?.c ?? null;
 }
 
 /**
@@ -678,8 +696,8 @@ async function exactConnection(statsId: string): Promise<Connection | null> {
  * (app/api/integrations/meta/deauthorize) and Meta asks again; nothing the
  * user connected is left without a way to find it.
  *
- * One pass walks at most META_FORGET_PASS stores. With more, the stores of
- * this pass leave the index and the pass is not answered as done, so the next
+ * One pass walks at most META_FORGET_PASS stores, from a random place in id
+ * order, wrapping around. With more, the stores of this pass leave the index and the pass is not answered as done, so the next
  * callback walks the rest; the index goes only once every store was walked
  * (Codex H2 on #2869). A pass that stops throws MetaIncompleteForget with the
  * stores it already forgot, so their owners are still told (Claude 5 on #2869).
@@ -691,7 +709,12 @@ async function exactConnection(statsId: string): Promise<Connection | null> {
  * refused. A mark that is not confirmed written is unknown (UnknownReplyError),
  * never a deletion said to be done.
  */
-export async function forgetMetaUser(user: string, cutoff = Number.POSITIVE_INFINITY): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
+export async function forgetMetaUser(
+  user: string,
+  cutoff = Number.POSITIVE_INFINITY,
+  /** Where in the user's stores, in id order, this pass starts; a random place by default (Claude 7 on #4647). */
+  start?: number,
+): Promise<{ statsId: string; owner: { email: string; handle: string } }[]> {
   if (!isRedisConfigured() || !user) return [];
   // A store this user connected after the notice (cutoff, ms) is theirs again: kept, and kept in the index.
   const kept: string[] = [];
@@ -700,7 +723,13 @@ export async function forgetMetaUser(user: string, cutoff = Number.POSITIVE_INFI
   const stores = stringList(read[1]);
   if (!stores) throw new UnknownReplyError("the stores a Meta user connected");
   const forgot: { statsId: string; owner: { email: string; handle: string } }[] = [];
-  const pass = stores.slice(0, META_FORGET_PASS);
+  // A store kept (connected after the notice) stays in the index, so a pass that always took the same first
+  // META_FORGET_PASS stores could meet only kept ones and never reach an older store behind them: the deletion would
+  // never finish. Each pass starts at a random place in id order and wraps around, so every store left is reached by
+  // some pass (Claude 7 on #4647). With no more than one pass's worth, the start does not matter: every store is walked.
+  const ordered = [...stores].sort();
+  const from = ordered.length > META_FORGET_PASS ? (start ?? randomInt(ordered.length)) % ordered.length : 0;
+  const pass = [...ordered.slice(from), ...ordered.slice(0, from)].slice(0, META_FORGET_PASS);
   try {
     for (const statsId of pass) {
       const c = await exactConnection(statsId);
@@ -748,10 +777,16 @@ export type ReadResult = "read" | "none" | "currency" | "busy" | "error" | "brok
 /** Hook for telling the owner once that the connection broke. */
 export type MetaBrokenHook = (owner: { email: string; handle: string }) => Promise<void>;
 
+/**
+ * Marks that very connection broken and tells the owner once. Read exactly (CX-123 rule 24): only a confirmed nil, a
+ * newer connection or one already marked is left as it is; an unknown reply, or a mark not answered "OK", throws
+ * before the owner is told, so a connection is never said broken without the mark kept, nor left healthy by guess.
+ */
 async function markBroken(statsId: string, c: Connection, why: string, onBroken?: MetaBrokenHook): Promise<void> {
-  const read = await readConnectionAsSeen(statsId);
+  const read = await exactConnectionAsSeen(statsId, true);
   if (!read || read.c.connectedAt !== c.connectedAt || read.c.broken) return;
-  // Only onto the connection read: one forgotten in between is not written back, and its owner is not told.
+  // Only onto the connection read: one forgotten in between is not written back, and its owner is not told. A reply in
+  // another shape throws (writeIfConnected) before the owner is told.
   if (!(await writeIfConnected(statsId, read.seen, connKey(statsId), JSON.stringify({ ...read.c, broken: why }), 0))) return;
   await onBroken?.(read.c.owner).catch(() => {});
 }
@@ -763,12 +798,15 @@ async function markBroken(statsId: string, c: Connection, why: string, onBroken?
  */
 export async function readMetaSpend(statsId: string, storeCurrency: string, now = Date.now(), onBroken?: MetaBrokenHook): Promise<ReadResult> {
   if (!isMetaConfigured() || !isRedisConfigured()) return "none";
-  const found = await readConnectionAsSeen(statsId);
+  // Read exactly (CX-123 rule 24): "none" only for a confirmed nil or no account chosen yet. An unknown reply, a record
+  // out of shape, or a chosen account not among the kept ones throws before Meta is asked, never "not connected", a
+  // chosen account dropped, or a connection taken as healthy because why it broke could not be read.
+  const found = await exactConnectionAsSeen(statsId, true);
   if (!found || found.c.broken || !found.c.account) return found?.c.broken ? "broken" : "none";
   // Everything this read writes is held to the connection exactly as read here (writeIfConnected).
   const { c, seen } = found;
   const account = c.accounts.find((a) => a.id === c.account);
-  if (!account) return "none";
+  if (!account) throw new UnknownReplyError("a Meta connection's chosen ad account");
   // Resolve the connection's own current store, including calls made by the
   // daily job or account picker, before a read lock or any provider request.
   const store = await storeForId(c.sid);
@@ -788,10 +826,16 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
   }
   const window = readWindow(now);
   const note = async (read: Partial<MetaRead>) => {
-    // Written only while that very connection is still there, in one step with that check.
-    const [rawBefore] = await redisPipeline([["GET", readKey(statsId)]]);
-    const before = parseRead(rawBefore);
-    const next: MetaRead = { day: before?.day ?? "", at: before?.at ?? 0, problem: "", after: 0, lines: before?.lines ?? 0, cents: before?.cents ?? 0, campaigns: before?.campaigns ?? 0, ...read };
+    // The last read: a reply in another shape is unknown. A kept record that does not parse is replaced, as it always
+    // was: what it held is only the figures of an earlier read, and keeping it would stop every later note.
+    const beforeReply = repliesFor(await redisPipeline([["GET", readKey(statsId)]]), 1);
+    if (!beforeReply) throw new UnknownReplyError("Meta's last read");
+    // Only a whole earlier read's figures are carried over (Claude 6 on #3070): one whose figures do not read is replaced
+    // by "not read yet" (no day, so the studio shows no amount), never kept under its day with an amount never read.
+    const before = parseRead(beforeReply[0]) ?? NOT_READ;
+    const next: MetaRead = { ...before, problem: "", after: 0, ...read };
+    // Written only while that very connection is still there, in one step with that check; a reply in another shape
+    // throws (writeIfConnected), never taken as noted.
     return writeIfConnected(statsId, seen, readKey(statsId), JSON.stringify(next), KEEP_SECONDS);
   };
   try {
@@ -846,7 +890,8 @@ export async function readMetaSpend(statsId: string, storeCurrency: string, now 
     const kept = !keptReply ? null : keptReply[0] === null ? [] : parseLines(keptReply[0]);
     if (!kept) throw new UnknownReplyError("the Meta ad spend lines kept");
     const merged = mergeLines(kept, fresh, window.from, window.to);
-    // Kept only while that very connection is still there, in one step with that check.
+    // Kept only while that very connection is still there, in one step with that check. An unknown reply is an error
+    // tried again (writeIfConnected throws), never "none" (rule 24).
     if (!(await writeIfConnected(statsId, seen, linesKey(statsId), JSON.stringify(merged), KEEP_SECONDS))) return "none";
     await note({
       day: window.to,
@@ -944,7 +989,8 @@ export async function readMetaDue(
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;
     }
-    const c = replies ? parseConnection(replies[0]) : null;
+    // In the shape readMetaSpend reads (whole), so a record it would refuse is skipped here, not tried every run.
+    const c = replies ? parseConnection(replies[0], true) : null;
     if (!replies || !c) {
       counts.skipped += 1;
       whole = false;
@@ -962,7 +1008,11 @@ export async function readMetaDue(
       whole = false;
       continue;
     }
-    const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken);
+    // One store's connection that cannot be read just now is skipped this time (rule 24), never the whole pass.
+    const result = await readMetaSpend(statsId, store.currency, Date.now(), onBroken).catch((error: unknown) => {
+      if (error instanceof UnknownReplyError) return "skipped" as const;
+      throw error;
+    });
     if (result === "read") counts.read += 1;
     else counts.skipped += 1;
     // Paused (lib/integration-pause.ts): tried again the next day. Anything else asked of this pass is looked at

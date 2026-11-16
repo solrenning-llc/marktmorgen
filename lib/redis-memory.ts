@@ -189,6 +189,28 @@ export class MemoryRedis {
           this.run(["SET", recordKey, record]);
           return 1;
         }
+        // lib/removed-courses.ts PRUNE_REMOVED_COURSES: each named entry, still the entry read, leaves the list only when
+        // the data room holds none of its people's slots and none of its students, certificates or handed-in work is there, and
+        // takes its course's own key (lessons and modules) with it.
+        if (key.startsWith("-- marktmorgen:removed-course-prune:v3\n")) {
+          const count = Number(args[0]);
+          const keys = args.slice(1, 1 + count);
+          const argv = args.slice(1 + count);
+          let left = 0;
+          for (let i = 0; i < argv.length; i += 2) {
+            const id = argv[i];
+            const k = 2 + 4 * (i / 2);
+            let held = this.run(["HGET", keys[0], id]) !== argv[i + 1];
+            for (const prefix of ["cd", "ct", "cc", "ca", "lc"]) if (!held && this.run(["HEXISTS", keys[1], `${prefix}:${id}`]) === 1) held = true;
+            if (!held && (this.run(["EXISTS", keys[k]]) === 1 || this.run(["EXISTS", keys[k + 1]]) === 1 || this.run(["EXISTS", keys[k + 2]]) === 1)) held = true;
+            if (!held) {
+              this.run(["HDEL", keys[0], id]);
+              this.run(["DEL", keys[k + 3]]);
+              left += 1;
+            }
+          }
+          return left;
+        }
         if (key.startsWith("-- marktmorgen:form-find:v1\n") && args[0] === "1" && args.length === 4) {
           const [, listKey, id, kept] = args;
           this.live(listKey);

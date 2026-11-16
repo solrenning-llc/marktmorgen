@@ -8,7 +8,8 @@
  * changed meanwhile stands as it is now. Synthetic data only; the moment is
  * made by writing the row just before the import's write runs.
  */
-import { importContacts, leadsKey, listCounts, parseContact, upsertContact } from "@/lib/contacts";
+import { importContactRows, importContacts, leadsKey, listCounts, parseContact, upsertContact } from "@/lib/contacts";
+import { suppressCommand } from "@/lib/suppression";
 import { claimHandle, ensureListId, ensureStatsId, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -58,6 +59,24 @@ async function main(): Promise<void> {
   part("Without anything in between, the paste adds as before");
   const plain = await importContacts(listId, ["third@example.com"], store);
   is("added", [plain.added, (await listCounts(listId)).agreed], [1, 2]);
+
+  // Codex V on #3925 (6891381661, MÉDIO 2): an answer about who was deleted that is not whole was read as "nobody", so
+  // an address deleted from the store, its row gone, was pasted back in as agreed.
+  part("An unknown answer about deleted people is never nobody deleted");
+  await real([suppressCommand(listId, "gone@example.com", Math.floor(Date.now() / 1000))]);
+  redis.pipeline = (async (batch: Command[]) => {
+    const out = await real(batch);
+    return batch.map((c, i) => (c[0] === "HMGET" && String(c[1]).startsWith("nl:erased:") ? "not-an-array" : out[i]));
+  }) as typeof redis.pipeline;
+  const pasted = await importContacts(listId, ["gone@example.com"], store).then(() => "answered", (e: Error) => e.name);
+  is("thrown as unknown", pasted, "UnknownReplyError");
+  is("the deleted address is not written back", (await real([["HGET", leadsKey(listId), "gone@example.com"]]))[0], null);
+  is("and nobody more is counted as agreeing", (await listCounts(listId)).agreed, 2);
+  // A file's rows read the same two answers the same way (importContactRows).
+  const filed = await importContactRows(listId, [{ email: "gone@example.com", name: "", tags: [], consent: "agreed" }], store).then(() => "answered", (e: Error) => e.name);
+  is("a file's row: thrown as unknown too", filed, "UnknownReplyError");
+  redis.pipeline = real as typeof redis.pipeline;
+  is("and the deleted address is still not on the list", (await real([["HGET", leadsKey(listId), "gone@example.com"]]))[0], null);
   done();
 }
 

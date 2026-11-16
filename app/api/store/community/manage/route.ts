@@ -26,6 +26,7 @@ import { parseDmSetting } from "@/lib/community-dm";
 import { parseChatSetting } from "@/lib/community-chat";
 import { forgetTicket } from "@/lib/community-access";
 import { dropCommunityImage } from "@/lib/community-files";
+import { IMITATION_FIX, MAX_TEXT, excerptAt, imitationIn, imitationWhy } from "@/lib/brand-imitation-rules";
 import {
   MAX_COMMUNITY_ABOUT,
   MAX_COMMUNITY_NAME,
@@ -59,6 +60,25 @@ const ACTIONS = new Set([
 
 /** What keeps order, as opposed to what sets the community up. */
 const MODERATION = new Set(["member", "dismiss", "report-hide", "report-delete"]);
+
+/**
+ * The first of the community's own words set here that poses as Marktmorgen itself (568 [GD2] (c),
+ * lib/brand-imitation-rules.ts), answered as a refusal with the part, the passage, why and the fix; null when none
+ * does. Every member reads these words in the store's name on marktmorgen.com, so "Marktmorgen Support: verify your
+ * account" among them is a phishing message under our name. Only the creator's own words are set here; nothing is
+ * saved when it answers, and the words are not changed. `outcome` says what does not happen with them.
+ */
+function posingPart(outcome: string, parts: readonly (readonly [string, string])[]): Response | null {
+  for (const [field, words] of parts) {
+    const text = words.slice(0, MAX_TEXT);
+    const found = imitationIn(text);
+    if (found) {
+      const passage = { field, excerpt: excerptAt(text, found.at, found.length), why: imitationWhy(outcome), fix: IMITATION_FIX };
+      return Response.json({ ok: false, error: "brand_imitation", passage }, { status: 409 });
+    }
+  }
+  return null;
+}
 
 /**
  * Everything the studio changes about the creator's community.
@@ -136,7 +156,11 @@ export async function POST(request: NextRequest) {
     if (action === "settings") {
       const name = cleanLine(body.name, MAX_COMMUNITY_NAME);
       if (!name) return fail("name");
-      return save({ ...config, name, about: cleanText(body.about, MAX_COMMUNITY_ABOUT) });
+      const about = cleanText(body.about, MAX_COMMUNITY_ABOUT);
+      // Heads every page of the community, in the store's name: never posing as Marktmorgen (568 [GD2] (c)).
+      const posing = posingPart("members cannot be shown it", [["name", name], ["about", about]]);
+      if (posing) return posing;
+      return save({ ...config, name, about });
     }
 
     // Who may write to whom. Off is off: with `on` false the page is gone and
@@ -173,6 +197,9 @@ export async function POST(request: NextRequest) {
       const name = cleanLine(body.name, MAX_SPACE_NAME);
       if (!name) return fail("space_name");
       const about = cleanLine(body.about, MAX_SPACE_ABOUT);
+      // Over every post in the space: never posing as Marktmorgen (568 [GD2] (c)). No space is added or changed.
+      const posing = posingPart("members cannot be shown it", [["space_name", name], ["space_about", about]]);
+      if (posing) return posing;
       const creatorOnly = body.creatorOnly === true;
       // Kept for the buyers of some of the community's own products. Anything
       // that does not open the community is dropped rather than saved, so the

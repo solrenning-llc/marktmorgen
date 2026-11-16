@@ -47,6 +47,27 @@ export const IMITATION_WHY =
 export const IMITATION_FIX =
   "Write as yourself, in your own name, and link only to your own pages or to marktmorgen.com itself. Marktmorgen never asks anyone for a password.";
 
+/**
+ * The same reason for what is not a product (568 [GD2] (c)): a store's own page, a funnel's page, an email to the
+ * list. `outcome` says what does not happen with it ("the page cannot be shown with it").
+ */
+export function imitationWhy(outcome: string): string {
+  return IMITATION_WHY.replace(/so the product cannot be published with it\.$/, `so ${outcome}.`);
+}
+
+/**
+ * The studio's sentence for such a refusal, in the shape of the other refusals (fastMoneyMessage in
+ * lib/terms-check-rules.ts): what did not happen, where, the passage, why, the fix, and that nothing was changed.
+ */
+export function imitationMessage(passage: unknown, where: string, lead: string): string {
+  const p = passage && typeof passage === "object" ? (passage as Record<string, unknown>) : {};
+  const words = typeof p.excerpt === "string" ? p.excerpt.trim().replace(/[.,;:!?]+$/, "") : "";
+  const quoted = words ? `: “${words}”` : "";
+  const why = typeof p.why === "string" && p.why ? p.why : IMITATION_WHY;
+  const fix = typeof p.fix === "string" && p.fix ? p.fix : IMITATION_FIX;
+  return `${lead}. In ${where}${quoted}. ${why} ${fix} Nothing you wrote was changed.`;
+}
+
 /** The name, as people write it: "Marktmorgen", "Markt Morgen", "Markt-Morgen", "MARKTMORGEN". */
 const BRAND_ALL = /\bmarkt[\s-]?morgen\b/gi;
 
@@ -90,7 +111,8 @@ export function lookalikeHost(rawHost: string): boolean {
   return plainLetters(host).replace(/\./g, "").includes("marktmorgen");
 }
 
-function excerptAt(text: string, index: number, length: number): string {
+/** The passage around a find, as a refusal shows it: up to AROUND characters on each side, spaces folded. */
+export function excerptAt(text: string, index: number, length: number): string {
   const start = Math.max(0, index - AROUND);
   const end = Math.min(text.length, index + length + AROUND);
   return `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ").trim()}${end < text.length ? "…" : ""}`;

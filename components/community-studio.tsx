@@ -25,6 +25,7 @@ import {
   MAX_WELCOME,
 } from "@/lib/community-text";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
+import { imitationMessage } from "@/lib/brand-imitation-rules";
 import { MAX_SLOW } from "@/lib/community-chat-rules";
 import { LEVELS, MAX_LEVEL, type Reward, levelOf } from "@/lib/community-levels";
 import { startersAddedWords, startersToAdd } from "@/lib/community-starter";
@@ -81,7 +82,26 @@ const MESSAGES: Record<string, string> = {
   report_read_unavailable: "This report could not be checked just now, so nothing was changed and it is still in the list. Try again in a moment.",
 };
 
-type Answer = { ok?: boolean; error?: string; config?: CommunityConfig };
+/** Where among the community's own words a "poses as Marktmorgen" refusal was found (568 [GD2] (c)), as the server names it. */
+const COMMUNITY_PARTS: Record<string, string> = {
+  name: "the community's name",
+  about: "the community's description",
+  space_name: "the space's name",
+  space_about: "the space's description",
+  question: "one of your questions",
+  welcome: "the welcome message",
+};
+
+type Answer = { ok?: boolean; error?: string; config?: CommunityConfig; passage?: unknown };
+
+/** What the studio says when the server refused: posing as Marktmorgen with its part and passage, or the fixed words. */
+function refusalText(answer: Answer): string {
+  if (answer.error === "brand_imitation") {
+    const field = answer.passage && typeof answer.passage === "object" ? String((answer.passage as Record<string, unknown>).field) : "";
+    return imitationMessage(answer.passage, COMMUNITY_PARTS[field] ?? "your community's words", "Nothing was saved");
+  }
+  return MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error;
+}
 
 async function send(payload: Record<string, unknown>, route = "/api/store/community/manage"): Promise<Answer> {
   try {
@@ -160,7 +180,7 @@ export function CommunityStudio({
     const answer = await send(payload, route);
     setBusy(null);
     if (!answer.ok) {
-      setError({ where, text: MESSAGES[answer.error ?? ""] ?? MESSAGES.server_error });
+      setError({ where, text: refusalText(answer) });
       return answer;
     }
     // A step of several says nothing on its own; the last one says what was done (lib/community-starter.ts).

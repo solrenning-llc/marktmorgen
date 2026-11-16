@@ -62,9 +62,11 @@ async function run(request: NextRequest, started: number) {
       console.error("could not send the drip emails", error);
       return null;
     });
+    // Not swept (the list could not be read, or a reply was in an unknown shape): said in the log and the answer,
+    // never "0 swept", as the pictures below (#4279); the uploads stay on the list and the next run sweeps them.
     const stale = await sweepTaskUploads(deleteFile).catch((error: unknown) => {
       console.error("could not sweep unused assignment uploads", error);
-      return [] as string[];
+      return null;
     });
     // Not swept (the list could not be read exactly): said in the log and the answer, never "0 swept"; the next run sweeps.
     const pictures = await sweepCommunityUploads().catch((error: unknown) => {
@@ -72,7 +74,14 @@ async function run(request: NextRequest, started: number) {
       return null;
     });
     return Response.json(
-      { ok: true, ...(counts ?? { sent: null, dripsFailed: true }), unusedUploads: stale.length, unusedPictures: pictures, ...(pictures === null ? { picturesFailed: true } : {}) },
+      {
+        ok: true,
+        ...(counts ?? { sent: null, dripsFailed: true }),
+        unusedUploads: stale === null ? null : stale.length,
+        ...(stale === null ? { uploadsFailed: true } : {}),
+        unusedPictures: pictures,
+        ...(pictures === null ? { picturesFailed: true } : {}),
+      },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

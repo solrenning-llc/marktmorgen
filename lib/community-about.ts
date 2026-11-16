@@ -223,20 +223,26 @@ export async function aboutCounts(
       for (const raw of records as (string | null)[]) {
         // Deleted while it was read: it no longer counts.
         if (raw === null) continue;
-        let post: { at?: unknown; hid?: unknown };
+        let post: unknown;
         try {
-          post = JSON.parse(raw) as { at?: unknown; hid?: unknown };
+          post = JSON.parse(raw);
         } catch {
           unknown = true;
           break;
         }
-        // A time that is not whole seconds from 1970 up to now is not a post's time: unknown, not a recent post.
-        if (typeof post.at !== "number" || !Number.isSafeInteger(post.at) || post.at < 0 || post.at > at) {
+        // A record that is not an object (null, a number, a list) is not a post: unknown, never a throw.
+        if (typeof post !== "object" || post === null || Array.isArray(post)) {
           unknown = true;
           break;
         }
-        if (post.at < since) allRecent = false;
-        else if (post.hid !== true) n += 1;
+        // A time that is not whole seconds from 1970 up to now is not a post's time: unknown, not a recent post.
+        const { at: when, hid } = post as { at?: unknown; hid?: unknown };
+        if (typeof when !== "number" || !Number.isSafeInteger(when) || when < 0 || when > at) {
+          unknown = true;
+          break;
+        }
+        if (when < since) allRecent = false;
+        else if (hid !== true) n += 1;
       }
       // The newest ABOUT_POSTS_READ all recent, and maybe more before them: "at least".
       if (!unknown) read = { n, more: allRecent && ids.length === ABOUT_POSTS_READ };

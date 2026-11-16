@@ -922,7 +922,11 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
   const what = "a member's RSVPs forgotten";
   const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
   if (!listed) throw new UnknownReplyError(what);
-  const events = listed.slice(0, MAX_KEPT_EVENTS);
+  // Past MAX_KEPT_EVENTS (two events made at once, each counting before its ZADD), a cut would leave out the newest
+  // events with the member's answers still kept (Claude 5 on #2957); eventCount pays for MAX_KEPT_EVENTS at most, so
+  // the deletion is never reported done on it.
+  if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
+  const events = listed;
   if (!events.length) return 0;
   const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
   if (!replies) throw new UnknownReplyError(what);
@@ -939,7 +943,10 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
   const what = "a member's RSVPs";
   const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
   if (!listed) throw new UnknownReplyError(what);
-  const events = listed.slice(0, MAX_KEPT_EVENTS);
+  // Past MAX_KEPT_EVENTS, a cut would leave the newest events out of the copy (Claude 5 on #2957): it says it could
+  // not be read instead.
+  if (listed.length > MAX_KEPT_EVENTS) throw new UnknownReplyError(what);
+  const events = listed;
   if (!events.length) return [];
   const replies = repliesFor(await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who])), events.length);
   if (!replies) throw new UnknownReplyError(what);

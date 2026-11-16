@@ -248,7 +248,7 @@ export function ReviewRow({ review }: { review: StudioReview }) {
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <a href={review.photo} target="_blank" rel="noopener">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={review.photo} alt="The buyer's photo" className="h-24 w-24 rounded-xl object-cover ring-1 ring-line" loading="lazy" />
+            <img src={review.photo} alt="The buyer's photo" width={96} height={96} className="h-24 w-24 rounded-xl object-cover ring-1 ring-line" loading="lazy" />
           <NewTab /></a>
           <button
             type="button"

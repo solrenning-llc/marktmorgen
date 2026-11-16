@@ -232,7 +232,7 @@ export function HeroView({ block, ctx, pill, rating }: { block: HeroBlock; ctx: 
       </div>
       {video ? (
         <div className="sp-hero-media">
-          <VideoEmbed video={video} title={block.headline || ctx.productTitle} poster={ctx.picture ? { src: ctx.picture.src, alt: ctx.picture.alt } : null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
+          <VideoEmbed video={video} title={block.headline || ctx.productTitle} poster={ctx.picture ? { src: ctx.picture.src, alt: ctx.picture.alt, width: ctx.picture.width, height: ctx.picture.height } : null} inert={ctx.preview} lang={ctx.lang ?? DEFAULT_LANGUAGE} />
         </div>
       ) : picture ? (
         <div className="sp-hero-media">

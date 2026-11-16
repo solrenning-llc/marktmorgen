@@ -114,7 +114,7 @@ export function MailPictureButton({
           {pictures.map((picture, i) => (
             <li key={`${picture.url}-${i}`} className="w-20">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={picture.url.replace(SITE_URL, "")} alt={picture.alt || "A picture with no description"} className="h-20 w-20 rounded-lg bg-paper object-cover ring-1 ring-line" />
+              <img src={picture.url.replace(SITE_URL, "")} alt={picture.alt || "A picture with no description"} width={80} height={80} className="h-20 w-20 rounded-lg bg-paper object-cover ring-1 ring-line" />
               <span className="mt-1 block truncate text-xs text-ink-soft">{picture.alt || "No description"}</span>
             </li>
           ))}

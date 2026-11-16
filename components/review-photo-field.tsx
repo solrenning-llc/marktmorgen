@@ -69,7 +69,7 @@ export function ReviewPhotoField({
       {shown ? (
         <div className="mt-3 flex items-center gap-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={shown} alt={words.yours} className="h-20 w-20 rounded-xl object-cover" />
+          <img src={shown} alt={words.yours} width={80} height={80} className="h-20 w-20 rounded-xl object-cover" />
           <button
             type="button"
             onClick={() => {

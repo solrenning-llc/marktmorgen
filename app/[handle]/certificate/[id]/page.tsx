@@ -177,7 +177,7 @@ export default async function CertificatePage({ params, searchParams }: Params) 
             <div className="cert-head">
               {store.photoId ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={photoUrl(store.photoId)} alt="" className="cert-avatar" />
+                <img src={photoUrl(store.photoId)} alt="" width={52} height={52} className="cert-avatar" />
               ) : (
                 <span aria-hidden="true" className="cert-avatar cert-avatar-initial">
                   {store.name.slice(0, 1).toUpperCase()}

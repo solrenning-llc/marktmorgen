@@ -23,8 +23,11 @@ export function VideoEmbed({
 }: {
   video: Video;
   title: string;
-  /** A picture of the store's own to show before play; none draws the colours. */
-  poster: { src: string; alt: string } | null;
+  /**
+   * A picture of the store's own to show before play; none draws the colours. Its width and height go on the
+   * element so the box is kept from the first paint (281 [SF1]; the CSS still draws it at the frame's 16:9).
+   */
+  poster: { src: string; alt: string; width: number; height: number } | null;
   /** In the studio's preview: drawn, never played. */
   inert?: boolean;
   /** The page's language, for the button and the frame's name (lib/buyer-words/blocks.ts). */
@@ -53,7 +56,7 @@ export function VideoEmbed({
     <div className="sp-video">
       {poster ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={poster.src} alt="" className="sp-video-poster" />
+        <img src={poster.src} alt="" width={poster.width} height={poster.height} className="sp-video-poster" />
       ) : (
         <span aria-hidden="true" className="sp-video-poster sp-video-colours" />
       )}

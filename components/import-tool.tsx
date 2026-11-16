@@ -686,7 +686,7 @@ export function ImportTool({
                 </div>
               </fieldset>
 
-              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line">
+              <div className="overflow-x-auto rounded-2xl bg-white ring-1 ring-line" tabIndex={0} role="region" aria-label="The first rows, as a table">
                 <table className="w-full min-w-[28rem] text-left text-sm">
                   <caption className="px-4 pt-3 text-left text-xs font-bold text-ink-soft">The first rows, as they will be read</caption>
                   <thead>
@@ -967,7 +967,7 @@ function DryRunReport({ kind, dry }: { kind: ImportKind; dry: DryRun }) {
         ))}
       </dl>
       {notable.length ? (
-        <div className="mt-3 overflow-x-auto">
+        <div className="mt-3 overflow-x-auto" tabIndex={0} role="region" aria-label="Rows worth a look, as a table">
           <table className="w-full min-w-[28rem] text-left text-sm">
             <caption className="text-left text-xs font-bold text-ink-soft">
               {notable.length > 50 ? `The first 50 of ${notable.length.toLocaleString("en-US")} rows worth a look` : "Rows worth a look"}

@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $118.58 | $1,210.90 | $69 / $690 |
-| Studio | $176.28 | $1,874.80 | $449 / $4,490 |
-| Scale | $275.23 | $3,021.70 | $999 / $9,990 |
+| Store | $118.58 | $1,211.45 | $69 / $690 |
+| Studio | $176.35 | $1,875.28 | $449 / $4,490 |
+| Scale | $275.23 | $3,021.88 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -42,7 +42,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $79 / $790 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
-| $129 / $1,290 **(recommended)** | 17.5% | 60.24% | 60.05% | $77.72 | 0.49 |
+| $129 / $1,290 **(recommended)** | 17.4% | 60.24% | 60.05% | $77.72 | 0.49 |
 | $149 / $1,490 | 70.0% | 60.27% | 60.06% | $89.81 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.41% | 60.20% | $102.10 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.91% | 60.73% | $121.22 | 0.32 |
@@ -82,7 +82,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Price, monthly / yearly | **$129 / $1,290** | **$249 / $2,490** | **$499 / $4,990** |
 | Today (#553) | $69 / $690 | $449 / $4,490 | $999 / $9,990 |
 | Before #553 | $29 / $300 | $99 / $948 | $249 / $2,388 |
-| Visits a month: included · #553 · before #553 | **590** · 3,400 · 3,000 | **1,400** · 10,000 · 10,000 | **9,100** · 40,000 · 40,000 |
+| Visits a month: included · #553 · before #553 | **580** · 3,400 · 3,000 | **1,400** · 10,000 · 10,000 | **9,100** · 40,000 · 40,000 |
 | Orders a month: included · #553 · before #553 | **34** · 200 · 200 | **67** · 450 · 450 | **340** · 1,500 · 1,500 |
 | List emails a month: included · #553 · before #553 | **0** · 0 · 0 | **1,000** · 7,000 · 5,000 | **2,200** · 10,000 · 8,000 |
 | AI writing jobs + answers a month: included · #553 · before #553 | **0 + 0** · 0 + 0 · 0 + 0 | **5 + 37** · 40 + 250 · 40 + 250 | **18 + 91** · 80 + 400 · 80 + 400 |

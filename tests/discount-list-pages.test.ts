@@ -85,7 +85,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (method === "POST" && path.startsWith("/subscriptions/")) {
     writes.push(`discount ${path.split("/")[2]} ${form.get("discounts[0][promotion_code]")}`);
-    return json({ id: path.split("/")[2] });
+    // Stripe answers an applied code with the discount on the membership (#4543, DISC-C-3 reads it).
+    return json({ id: path.split("/")[2], object: "subscription", discounts: ["di_pages000001"] });
   }
   return json({ error: { message: "no stand-in" } }, 404);
 }) as typeof fetch;

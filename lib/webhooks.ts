@@ -81,6 +81,7 @@ import { suppressedAmongCommand, wholeErasedReply } from "@/lib/suppression";
 import { type Store, storeForHandle, saleHandles } from "@/lib/store";
 import { allowanceUsedWords, allowancesUsedStrict, takeAllowance } from "@/lib/store-allowance";
 import { WEBHOOK_ADD_PAUSED_WORDS, WEBHOOK_PAUSED_COUNTED, WEBHOOK_PAUSED_NOT_SENT_WORDS, WEBHOOK_TEST_PAUSED_WORDS, integrationPauseWord } from "@/lib/integration-pause";
+import { namesAddress } from "@/lib/address-match";
 import { reservePaidResourceWindow } from "@/lib/contract-resource-window";
 import { readListing } from "@/lib/catalog";
 import { keyStates } from "@/lib/api-keys";
@@ -164,6 +165,8 @@ const ANCHOR_SECONDS = 30 * 86400;
 
 const EVENT_SECONDS = 30 * 86400;
 const DELIVERY_SECONDS = 7 * 86400;
+/** How long a delivery is kept, as the store is told (lib/person-data.ts): read by tests/person-copy-families.test.ts. */
+export const WEBHOOK_DELIVERY_KEEP_SECONDS = DELIVERY_SECONDS;
 
 /**
  * A delivery not tried again because its endpoint no longer hears that kind of event. Its first try may have taken
@@ -426,9 +429,18 @@ function parseDelivery(raw: unknown): Delivery | null {
   }
 }
 
+/**
+ * A store's webhook settings: null only when there are none (GET null). A reply in any other shape, or settings
+ * that do not parse, are unknown and throw (CX-123 rule 24): never read as a store with no endpoints, which would
+ * leave an event unsent or let the store go from the Stripe watch.
+ */
 async function readConfig(statsId: string): Promise<Config | null> {
-  const [raw] = await redisPipeline([["GET", cfgKey(statsId)]]);
-  return parseConfig(raw);
+  const replies = repliesFor(await redisPipeline([["GET", cfgKey(statsId)]]), 1);
+  if (!replies) throw new UnknownReplyError("a store's webhook settings");
+  if (replies[0] === null) return null;
+  const config = parseConfig(replies[0]);
+  if (!config) throw new UnknownReplyError("a store's webhook settings");
+  return config;
 }
 
 /** How many times a change is tried again from a fresh read when another one landed first. */
@@ -684,7 +696,10 @@ async function namesErased(store: Pick<Store, "listId">, body: string, type: str
 async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store: Store | null | "taken", now = Date.now()): Promise<Delivery> {
   const next = { ...delivery, attempts: delivery.attempts + 1, lastAt: now };
   if (!endpoint) {
-    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed." };
+    // Its endpoint removed, or the whole store's webhooks forgotten (its config deleted): the message is not kept
+    // past it. A delivery the log no longer names (older than LOG_SIZE) is not deleted by forgetStoreWebhooks, and
+    // this write would otherwise keep the buyers' data in it for DELIVERY_SECONDS more. Nothing can send it again.
+    return { ...next, state: "failed", next: 0, lastStatus: 0, lastError: "The endpoint was removed.", body: "", givenUp: true };
   }
   // An endpoint that no longer hears this kind of event is not sent it on a scheduled try either, as by hand
   // (resendDelivery, "not_heard"): its message (a buyer's name and email) never goes on to an address the creator
@@ -805,8 +820,12 @@ async function attempt(delivery: Delivery, endpoint: Endpoint | undefined, store
  * writes down how it went, putting it back on the queue for its next try.
  */
 async function runClaimed(statsId: string, id: string, now = Date.now()): Promise<Delivery | null> {
-  const [raw] = await redisPipeline([["GET", deliveryKey(id)]]);
-  const delivery = parseDelivery(raw);
+  const replies = repliesFor(await redisPipeline([["GET", deliveryKey(id)]]), 1);
+  // Gone (GET null) is taken off the queue; a reply in any other shape, or a record that does not parse, is unknown
+  // (CX-123 rule 24) and throws: it stays queued, and comes back when its lease ends.
+  if (!replies) throw new UnknownReplyError("a webhook delivery");
+  const delivery = replies[0] === null ? null : parseDelivery(replies[0]);
+  if (replies[0] !== null && !delivery) throw new UnknownReplyError("a webhook delivery");
   if (!delivery || delivery.state === "delivered" || delivery.state === "failed") {
     await redisPipeline([["ZREM", QUEUE_KEY, `${statsId}|${id}`]]);
     return delivery;
@@ -1209,6 +1228,51 @@ export async function recentMessages(store: Store, type: WebhookEvent, limit = 3
   const ids = Array.isArray(rawLog) ? (rawLog as unknown[]).map(String).filter((id) => DELIVERY_ID_PATTERN.test(id)) : [];
   // Not paid for by the size: every delivery read whole, as before (a failed one kept before DELIVERY_MAX_BYTES may be larger).
   return (await recentMessagesOf(store, type, ids, ids.map(() => Number.MAX_SAFE_INTEGER), recentLimit(limit))).messages;
+}
+
+/** One delivery of the store's webhooks that carried an address, for the person's copy. */
+export type DeliveryTrace = { event: string; made: string; state: Delivery["state"]; sent: unknown };
+
+/**
+ * The deliveries this store's webhooks made that carry one address, for the person's copy (lib/person-copy.ts, GDPR
+ * art. 15; C7 data-copy hunt): each is kept DELIVERY_SECONDS as the endpoint received it (lib/person-data.ts). Only
+ * reads; each read in its exact shape (CX-123 rule 24): an unknown answer throws UnknownReplyError, so the copy fails
+ * rather than leave them out. What cannot be reached is said in `unread`: a delivery kept in a shape that cannot be
+ * read, and deliveries past the end of the store's log (its last LOG_SIZE), still kept for up to the week but not on it.
+ */
+export async function deliveriesAbout(store: Store, email: string, now = Date.now()): Promise<{ records: DeliveryTrace[]; unread: string[] }> {
+  const address = email.trim().toLowerCase();
+  const records: DeliveryTrace[] = [];
+  const unread: string[] = [];
+  if (!store.statsId || !address || !isRedisConfigured()) return { records, unread };
+  const ids = stringList(repliesFor(await redisPipeline([["LRANGE", logKey(store.statsId), 0, LOG_SIZE - 1]]), 1)?.[0]);
+  if (ids === null) throw new UnknownReplyError("the store's webhook deliveries");
+  const list = ids.filter((id) => DELIVERY_ID_PATTERN.test(id));
+  if (!list.length) return { records, unread };
+  const raws = repliesFor(await redisPipeline(list.map((id) => ["GET", deliveryKey(id)])), list.length);
+  if (!raws || raws.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError("one of the store's webhook deliveries");
+  let oldest = Infinity;
+  for (const raw of raws) {
+    // Gone by itself after the week: nothing is kept.
+    if (raw === null) continue;
+    const delivery = parseDelivery(raw);
+    if (!delivery) {
+      unread.push("A delivery of the store's webhooks could not be read.");
+      continue;
+    }
+    oldest = Math.min(oldest, Number(delivery.createdAt) || 0);
+    // The body's addresses compared whole: never a delivery about a longer address that only contains theirs (Codex G).
+    if (!namesAddress(delivery.body, address)) continue;
+    let sent: unknown = delivery.body;
+    try {
+      sent = JSON.parse(delivery.body);
+    } catch {
+      // Kept as the text the endpoint received.
+    }
+    records.push({ event: delivery.type, made: new Date(Number(delivery.createdAt) || 0).toISOString(), state: delivery.state, sent });
+  }
+  if (ids.length >= LOG_SIZE && oldest > now - DELIVERY_SECONDS * 1000) unread.push(`Deliveries of the store's webhooks older than its last ${LOG_SIZE} are kept up to ${DELIVERY_SECONDS / 86_400} days and could not be read for this copy.`);
+  return { records, unread };
 }
 
 /** Whether a word is one of the events an endpoint can hear. */
@@ -2413,7 +2477,14 @@ export async function watchStripe(deadline: number, now = Date.now()): Promise<{
   for (let n = 0; n < ids.length && Date.now() < deadline; n += 1) {
     const statsId = ids[(start + n) % ids.length];
     await redisPipeline([["SET", POSITION_KEY, statsId]]);
-    const config = await readConfig(statsId);
+    let config: Config | null;
+    try {
+      config = await readConfig(statsId);
+    } catch (error) {
+      // Unknown (CX-123 rule 24): the store stays watched, and is read again next run.
+      console.error("reading a store's webhook settings failed", statsId, error);
+      continue;
+    }
     if (!config || !config.endpoints.length) {
       await redisPipeline([["SREM", STORES_KEY, statsId]]);
       continue;

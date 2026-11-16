@@ -89,6 +89,25 @@ export function priorRefund(list: unknown, intent: string, invoice: string, curr
   return null;
 }
 
+/**
+ * How many refunds under this invoice Stripe's whole list confirms failed or canceled (Codex X8, #4480). Read only
+ * after priorRefund found none that stands, so every row already reads. A confirmed failure gave nothing back, and
+ * the next attempt goes under a key of its own: under the same key Stripe would replay the failed (or earlier
+ * pending) answer instead of trying again. An unknown outcome is never counted, so its retry keeps the same key.
+ */
+export function failedRefunds(list: unknown, intent: string, invoice: string, currency: string): number {
+  const field = (value: unknown, key: string): unknown =>
+    value && typeof value === "object" && !Array.isArray(value) ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined;
+  const rows = field(list, "data");
+  if (!Array.isArray(rows)) return 0;
+  let failed = 0;
+  for (const row of rows) {
+    if (field(field(row, "metadata"), "closing_refund") !== invoice) continue;
+    if (refundState(row, intent, field(row, "amount") as number, currency) === "failed") failed += 1;
+  }
+  return failed;
+}
+
 export function refundState(refund: unknown, intent: string, amount: number, currency: string): "done" | "pending" | "failed" | "unknown" {
   if (!refund || typeof refund !== "object" || Array.isArray(refund)) return "unknown";
   const own = (key: string): unknown => Object.getOwnPropertyDescriptor(refund, key)?.value;
@@ -401,6 +420,8 @@ export async function giveBackUnused(
           else out.done.push({ sub: row.sub, amount: prior.amount, cur: row.paid.cur });
           continue;
         }
+        // Confirmed failures under this invoice move the key on (#4480); with none it is the key used before.
+        const failures = failedRefunds(made, intent, row.paid.inv, row.paid.cur);
         const refunded = charge.amount_refunded as number;
         const give = Math.min(stillToGive(row.unused, refunded), Math.max(0, (row.paid.tot ?? row.paid.amt) - refunded));
         if (give <= 0) {
@@ -422,7 +443,7 @@ export async function giveBackUnused(
             "/refunds",
             new URLSearchParams({ payment_intent: intent, amount: String(give), reason: "requested_by_customer", "metadata[closing_refund]": row.paid.inv, "metadata[store_closing]": "unused_time" }),
             undefined,
-            `closing-refund:${row.paid.inv}`,
+            failures === 0 ? `closing-refund:${row.paid.inv}` : `closing-refund:${row.paid.inv}:${failures}`,
           );
         } catch (error) {
           if (error instanceof StripeError && error.code === "balance_insufficient") {
@@ -445,7 +466,8 @@ export async function giveBackUnused(
         // this payment, for this amount, in one of Stripe's own states counts. Succeeded is done; pending or
         // requires_action is made and waiting; failed or canceled gave nothing back and the member stays to be
         // reconciled; any other answer is unknown, never "done", and is tried again under the same idempotency key, so
-        // Stripe answers with the same refund instead of making a second one.
+        // Stripe answers with the same refund instead of making a second one. Only a failure the list confirms on a
+        // later pass moves the key on (#4480).
         const state = refundState(refund, intent, give, row.paid.cur);
         if (state === "unknown") throw new Error("a closing refund's answer was not one this payment's refund gives");
         if (state === "failed") {

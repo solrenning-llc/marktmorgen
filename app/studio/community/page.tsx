@@ -3,8 +3,10 @@ import { type Reward, pointsOf, readRewards } from "@/lib/community-points";
 import { idsOfKind, readCards } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { unlocksOf } from "@/lib/community-locked";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { SITE_URL } from "@/lib/site-url";
@@ -251,6 +253,13 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             : formatMoney(p.priceCents, store.currency),
   }));
 
+  // "View as a member" draws a space shown Visible and locked as a member sees it (542 [CM1]): its way in worked out
+  // by the real page's own unlocksOf, its reads paid in studio requests first; refused or failed, each says it is not known.
+  const unlocks =
+    config && can(view.role, "settings")
+      ? await unlocksOf(store, config, (units) => countStudio(store, null, units).then((counted) => counted.ok, () => false))
+      : null;
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader
@@ -263,7 +272,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Community</p>
+        <StudioTrail store={store} here="Community" />
         <h1 className="t-h2 mt-3">A place for your buyers</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Posts, comments and likes in spaces you set up, live events members RSVP to and join from the page, a
@@ -286,6 +295,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           isOwner={view.role === "owner"}
           approval={config ? <CommunityApprovalStudio rules={rules} queue={held} canSettings={can(view.role, "settings")} /> : null}
           rewards={rewards}
+          lockedPreview={config ? { unlocks, language: store.language, look: store.look } : null}
           courses={[...course].flatMap((id) => {
             const card = cards.get(id);
             return card ? [{ id, title: card.title }] : [];

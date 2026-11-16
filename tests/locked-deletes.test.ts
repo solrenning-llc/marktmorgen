@@ -77,6 +77,7 @@ import { POST as rcommunity_manage } from "@/app/api/store/community/manage/rout
 import { POST as rcommunity_approval } from "@/app/api/store/community/approval/route";
 import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
+import { POST as rcompanies } from "@/app/api/store/companies/route";
 import { POST as rfile_attach } from "@/app/api/store/file/attach/route";
 import { POST as rcreator_card } from "@/app/api/store/creator-card/route";
 import { POST as rforms } from "@/app/api/store/forms/route";
@@ -133,6 +134,7 @@ const ROUTES: Record<string, Handler> = {
   "community/manage": rcommunity_manage as Handler,
   "community/approval": rcommunity_approval as Handler,
   "course": rcourse as Handler,
+  "companies": rcompanies as Handler,
   "crm": rcrm as Handler,
   "file/attach": rfile_attach as Handler,
   "creator-card": rcreator_card as Handler,
@@ -368,9 +370,11 @@ async function main(): Promise<void> {
     ["person", { action: "unnote", person: "x", id: "x" }],
     ["person-tasks", { action: "remove", person: "x", id: "x" }],
     ["crm", { action: "undeal", id: "x" }],
+    ["companies", { action: "remove", id: "x" }],
     ["crm", { action: "unpipeline", id: "x", moveTo: "x" }],
     ["notes", { action: "remove", id: "x" }],
     ["spend", { action: "remove", id: "x" }],
+    ["spend", { action: "remove-unreadable" }],
     ["outreach", { action: "drop", id: "x" }],
     ["mail", { action: "segment-remove", id: "x" }],
     ["mail", { action: "draft-remove", id: "x" }],
@@ -429,6 +433,8 @@ async function main(): Promise<void> {
     "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
+    "call": ["act:products:remove"],
+    "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
     "community": ["lockedFor"],
@@ -442,7 +448,9 @@ async function main(): Promise<void> {
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "course/task/upload": ["not:a student's own door for a file to hand in: it takes back only the listing it made itself when the door is not opened"],
     "creator-card": ["act:page:remove"],
+    "companies": ["act:orders:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
     "discord": ["need:settings"],
     "discount": ["need:settings"],
@@ -487,7 +495,7 @@ async function main(): Promise<void> {
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(|\bwriteTeam\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);
@@ -561,11 +569,12 @@ async function main(): Promise<void> {
       edit: "open:edits", enable: "open:adds", "lesson-add": "open:adds", "lesson-edit": "open:edits", "lesson-move": "open:edits",
       "lesson-remove": "act:products", media: "lockedFor", "media-remove": "act:products", "module-add": "open:adds", "module-edit": "open:edits",
       "module-move": "open:edits", "module-remove": "act:products", outline: "open:adds", quiz: "act:products:quiz-remove",
-      retries: "open:gives a student their quiz tries back", review: "open:edits", start: "open:edits", task: "act:products:task-remove",
+      retries: "open:gives a student their quiz tries back", review: "open:edits", shelf: "open:edits", start: "open:edits", task: "act:products:task-remove",
       template: "open:adds", withdraw: "act:products",
     },
     "course/comment": { delete: "lockedFor", hide: "open:reversible", show: "open:reversible" },
     "creator-card": { remove: "act:page", save: "open:edits" },
+    "companies": { add: "open:adds", edit: "open:edits", link: "open:edits", remove: "act:orders", restore: "open:adds", unlink: "open:edits" },
     "crm": {
       deal: "open:edits", fields: "lockedFor", pipeline: "open:edits", stages: "open:edits", undeal: "act:orders", value: "open:edits",
       unpipeline: "act:orders",
@@ -584,7 +593,7 @@ async function main(): Promise<void> {
     "join/confirm": "not:a person confirming their own sign-up to the list",
     "keys": { clear: "act:products", off: "open:reversible", revoke: "open:reversible", setup: "open:edits", upload: "open:adds" },
     "link-image": { attach: "lockedFor", remove: "act:page" },
-    "links": { add: "open:adds", edit: "lockedFor", remove: "act:page" },
+    "links": { add: "open:adds", archive: "open:reversible", edit: "lockedFor", remove: "act:page", unarchive: "open:reversible" },
     "mail": {
       broadcast: "need:send", cancel: "need:send", copy: "open:adds", count: "open:reads", "draft-remove": "act:draft", "draft-save": "open:edits",
       flow: "need:send", "flow-activate": "need:send", "flow-forget": "need:send", "flow-import": "need:send", "flow-remove": "need:send",
@@ -608,8 +617,8 @@ async function main(): Promise<void> {
     "reviews": { ask: "need:settings", hide: "open:reversible", photo: "act:reviews", reply: "open:adds", seen: "open:edits" },
     "saved-blocks": { apply: "open:adds", remove: "act:page", save: "open:adds", update: "open:edits" },
     "short-links": { add: "open:adds", remove: "act:page", target: "open:edits" },
-    "site-page": { add: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
-    "spend": { add: "open:adds", remove: "act:stats" },
+    "site-page": { add: "open:adds", copy: "open:adds", export: "open:reads", import: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
+    "spend": { add: "open:adds", remove: "act:stats", "remove-unreadable": "act:stats:remove" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },

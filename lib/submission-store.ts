@@ -32,8 +32,8 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { type DataStore, dataKey, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
@@ -74,8 +74,10 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  */
 // Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
 // the most, added to their own (review of #3568).
+// Opening also writes the slot's turn on the store's list (three commands) and pays for the sweep's turn on it
+// (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6).
 export const SUBMISSION_STEP_COMMANDS = {
-  open: 14,
+  open: 14 + 3 + 10,
   sign: 1,
   done: 20,
   abort: 11,
@@ -139,6 +141,33 @@ export function buyerSlotFor(folder: string, courseId: string, lessonId: string,
   if (!key) return null;
   return `sbl:${createHmac("sha256", key).update([part(folder), part(courseId), part(lessonId), part(who)].join("|")).digest("hex").slice(0, 32)}`;
 }
+
+/**
+ * The buyer slots an upload was opened on, one list per store (review of
+ * #3568, Claude 6): each member "slot|course|lesson|buyer", scored at the end
+ * of the latest door opened on it (ZADD GT), so the daily sweep
+ * (settleSubmissionSlots) sets the slot back to what is still held once every
+ * door on it has had its day, and an upload opened and left never keeps the
+ * slot at its most for good. Kept SUBMISSION_SLOTS_KEEP_SECONDS after the last
+ * open; deleted with the store, and its buyer's members with the buyer.
+ */
+const slotsKey = (folder: string) => `nl:sub:slots:${part(folder)}`;
+/** The stores with a slot on their list, member "data|folder", scored at the soonest turn on it (ZADD LT). */
+const SLOTS_DUE_KEY = "nl:sub:slotdue";
+/** How long a store's list of slots is kept after its last open: a door's day and a month for the sweep to reach it. */
+export const SUBMISSION_SLOTS_KEEP_SECONDS = UPLOAD_SECONDS + 30 * DAY;
+/** The most slots one run of the sweep sets back, across every store. */
+export const SUBMISSION_SLOT_SWEEP_PER_RUN = 300;
+/** The most stores one run of the sweep reads the list of. */
+export const SUBMISSION_SLOT_STORES_PER_RUN = 100;
+/**
+ * The commands the sweep sends for one slot, the store's and the run's reads with it: the run's read of the stores,
+ * the store's read of its list and its turn written again, the member taken (one EVAL), and the slot set back
+ * (settleBuyerRoom: two reads, the slot set, and set again at its most when a place was taken meanwhile). Each open
+ * pays for this inside its own commands (SUBMISSION_STEP_COMMANDS.open).
+ */
+export const SUBMISSION_SLOT_SWEEP_COMMANDS = 1 + 2 + 1 + 6;
+const DATA_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
 export const submissionOwnerId = (id: string) => `sub_${id}`;
@@ -212,15 +241,119 @@ export async function liveCount(folder: string, courseId: string, lessonId: stri
   return count;
 }
 
+/** The store's data room's own id (lib/store-data.ts dataKey), which the sweep sets a slot back in. */
+function dataIdOf(data: DataStore): string {
+  // The room's key is its family and the id, the id with no colon in it; read back through dataKey to be sure.
+  const key = dataKey(data);
+  const id = key?.split(":").pop() ?? "";
+  if (!DATA_ID.test(id) || dataKey({ sid: id }) !== key) throw new UnknownReplyError("the store's data room (no id to set a slot back in)");
+  return id;
+}
+
+/** Writes a slot's turn at `turn` (the later of the one there and this), and the store's own turn on the sweep's list. */
+async function noteSlotTurn(data: DataStore, folder: string, member: string, turn: number): Promise<void> {
+  const store = `${dataIdOf(data)}|${part(folder)}`;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZADD", slotsKey(folder), "GT", turn, member],
+      ["EXPIRE", slotsKey(folder), SUBMISSION_SLOTS_KEEP_SECONDS],
+      ["ZADD", SLOTS_DUE_KEY, "LT", turn, store],
+    ]),
+    3,
+  );
+  if (!replies || countOf(replies[0]) === null || replies[1] !== 1 || countOf(replies[2]) === null) throw new UnknownReplyError("a buyer slot's turn on the sweep's list");
+}
+
+/**
+ * Takes a slot's turn off the store's list only while it is still at the score
+ * read, so an upload opened since (a later score) keeps its turn: 1 taken, 0 not.
+ */
+export const SUBMISSION_SLOT_TAKE = `-- marktmorgen:submission-slot-take:v1
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if score and tonumber(score) == tonumber(ARGV[2]) then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return 1
+end
+return 0`;
+
+/**
+ * The store's turn on the sweep's list, written again from its list: taken off
+ * when the list is empty, otherwise set to the soonest turn on it. Answers 1.
+ */
+export const SUBMISSION_SLOT_STORE_NEXT = `-- marktmorgen:submission-slot-store-next:v1
+local first = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+if #first == 0 then
+  redis.call('ZREM', KEYS[2], ARGV[1])
+else
+  redis.call('ZADD', KEYS[2], first[2], ARGV[1])
+end
+return 1`;
+
+/**
+ * The daily sweep's part for buyer slots (review of #3568, Claude 6): for
+ * each slot every door of which has had its day, the slot set back to what
+ * is still held (settleBuyerRoom, which reads again and puts it back at its
+ * most when a place was taken meanwhile), then its turn taken off the store's
+ * list only while no newer upload moved it. Bounded per run; a list that
+ * does not read is unknown and throws, never "nothing to do".
+ */
+export async function settleSubmissionSlots(nowSeconds: number): Promise<{ settled: number }> {
+  const stores = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", SLOTS_DUE_KEY, "-inf", nowSeconds, "LIMIT", 0, SUBMISSION_SLOT_STORES_PER_RUN]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores with a buyer slot due");
+  let left = SUBMISSION_SLOT_SWEEP_PER_RUN;
+  let settled = 0;
+  for (const store of stores) {
+    if (left <= 0) break;
+    const [dataId, folder, ...rest] = store.split("|");
+    if (rest.length > 0 || !DATA_ID.test(dataId ?? "") || !PART.test(folder ?? "")) {
+      console.error("a store on the buyer slots' sweep list does not read; left for a person to look at");
+      continue;
+    }
+    const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", slotsKey(folder), "-inf", nowSeconds, "WITHSCORES", "LIMIT", 0, left]]), 1)?.[0]);
+    if (!due || due.length % 2 !== 0) throw new UnknownReplyError("a store's buyer slots due");
+    // Only the room's key is needed: setting a slot back is taken whatever the room is (giveData, noteData), so the
+    // plan's fields are never read for a limit here.
+    const data: DataStore = { sid: dataId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" };
+    for (let i = 0; i < due.length; i += 2) {
+      left -= 1;
+      const member = due[i];
+      const [slot, courseId, lessonId, who, ...extra] = member.split("|");
+      if (extra.length > 0 || !/^sbl:[0-9a-f]{32}$/.test(slot ?? "") || ![courseId, lessonId, who].every((value) => PART.test(value ?? ""))) {
+        console.error("a buyer slot's turn does not read; left for a person to look at");
+        continue;
+      }
+      // Set back first, then the turn taken: a slot whose places do not read keeps its turn for the next run, and an
+      // upload opened meanwhile moved the turn (so it stays) and set the slot at its most after this.
+      if (buyerSlotFor(folder, courseId, lessonId, who) !== slot) {
+        console.error("a buyer slot's turn does not match its buyer; left for a person to look at");
+        continue;
+      }
+      if (!(await settleBuyerRoom(data, { folder, courseId, lessonId, who }, nowSeconds))) continue;
+      const taken = countOf(repliesFor(await redisPipeline([["EVAL", SUBMISSION_SLOT_TAKE, 1, slotsKey(folder), member, due[i + 1]]]), 1)?.[0]);
+      if (taken === null) throw new UnknownReplyError("a buyer slot's turn taken");
+      if (taken === 1) settled += 1;
+    }
+    const next = repliesFor(await redisPipeline([["EVAL", SUBMISSION_SLOT_STORE_NEXT, 2, slotsKey(folder), SLOTS_DUE_KEY, store]]), 1);
+    if (next?.[0] !== 1) throw new UnknownReplyError("a store's turn on the buyer slots' sweep");
+  }
+  return { settled };
+}
+
 type Place = { folder: string; courseId: string; lessonId: string; who: string; id: string };
 
 /** Where a buyer's places on one lesson are counted: their set, and their room slot. */
 type Spot = Omit<Place, "id">;
-/** What one place weighs in the room: its member in the lesson's set, its entry in the store's (with a path at its longest), and its line on the course's list to review. */
+/**
+ * The slot's turn on the store's list (slotsKey) at its longest (review of #3568, Claude 6), counted with every place
+ * so the room never holds less than what is kept for it.
+ */
+const SLOT_TURN_BYTES = dataBytes([`nl:sub:slots:${"f".repeat(64)}`, `sbl:${"0".repeat(32)}|${"c".repeat(64)}|${"l".repeat(64)}|${"b".repeat(64)}`], 1);
+/** What one place weighs in the room: its member in the lesson's set, its entry in the store's (with a path at its longest), its line on the course's list to review, and its slot's turn. */
 const placeBytes = (at: Spot) =>
   dataBytes([liveKey(at.folder, at.courseId, at.lessonId, at.who), "0".repeat(32)], 1) +
   dataBytes([whoKey(at.folder, at.who), entryOf(at.courseId, at.lessonId, "0".repeat(32), "v".repeat(MAX_PATH_CHARS))], 1) +
-  dataBytes([listKey(at.folder, at.courseId), listMember(at.lessonId, "0".repeat(32))], 1);
+  dataBytes([listKey(at.folder, at.courseId), listMember(at.lessonId, "0".repeat(32))], 1) +
+  SLOT_TURN_BYTES;
 /** What one open upload weighs in the room: its door, at the largest a door is ever written. */
 const doorBytes = (at: Spot) => dataBytes([doorKey(at.folder, "0".repeat(32))], 1) + MAX_DOOR_BYTES;
 /** The most one buyer's places and open uploads on one lesson ever weigh: every place an open upload. */
@@ -247,16 +380,17 @@ async function heldNow(at: Spot, nowSeconds: number): Promise<{ places: number; 
  * another open puts the slot back at its most, so an open is never left
  * uncounted.
  */
-async function settleBuyerRoom(data: DataStore, at: Spot, nowSeconds: number): Promise<void> {
+async function settleBuyerRoom(data: DataStore, at: Spot, nowSeconds: number): Promise<boolean> {
   const before = await heldNow(at, nowSeconds);
-  if (!before) return;
+  if (!before) return false;
   const slot = buyerSlotFor(at.folder, at.courseId, at.lessonId, at.who);
-  if (!slot) return;
+  if (!slot) return false;
   const most = buyerMost(at);
   const bytes = Math.min(most, before.places * placeBytes(at) + before.doors * doorBytes(at));
   await giveData(data, [{ slot, bytes, set: true }], nowSeconds * 1000);
   const after = await heldNow(at, nowSeconds);
   if (!after || after.places > before.places || after.doors > before.doors) await noteData(data, [{ slot, bytes: most, set: true }], nowSeconds * 1000);
+  return true;
 }
 
 /**
@@ -409,6 +543,14 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   if (!slot) throw new UnknownReplyError("the store's data room (no key to name a buyer's slot)");
   // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
   if (!(await takePlace(place, until, ask.nowSeconds))) return { ok: false, reason: "busy" };
+  // The slot's turn on the store's list before the room is set to its most, so a slot at its most always has a sweep
+  // to set it back once this door's day is over (review of #3568, Claude 6). Not known to be written: nothing opens.
+  try {
+    await noteSlotTurn(ask.data, place.folder, `${slot}|${place.courseId}|${place.lessonId}|${place.who}`, until);
+  } catch (error) {
+    await givePlace(place).catch(() => undefined);
+    throw error;
+  }
   // Then the room, before the door is written: the buyer's one slot on the lesson set to the most their places,
   // entries (with a path at its longest) and open uploads can weigh (each door at MAX_DOOR_BYTES, which a door never
   // passes). Set, never added to, so another try takes nothing more; given back to what is still held whenever an
@@ -504,6 +646,33 @@ async function ownDoor(pathname: string, folder: string, courseId: string, lesso
 
 export type DoorWhere = { store: UploadStore; folder: string; courseId: string; lessonId: string; who: string };
 
+/**
+ * A door that a close or an abort took off (GETDEL) is put back after a refused vault step only while the buyer still
+ * holds its place: their index entry with this file's path and the lesson's live entry, checked in the same step as
+ * the SET NX (Codex N1 on #3570, fix from Codex U and X4). An erasure that ran while the vault was asked removed both,
+ * so nothing that names the buyer comes back. 0: not put back (erased, or the place is gone); 1: put back; 2: a door
+ * was already there. Anything else is not known and throws (rule 24).
+ */
+const SUBMISSION_DOOR_PUT_BACK = [
+  "-- marktmorgen:submission-door-put-back:v1",
+  'if not redis.call("ZSCORE", KEYS[2], ARGV[1]) then return 0 end',
+  'if not redis.call("ZSCORE", KEYS[3], ARGV[2]) then return 0 end',
+  'if redis.call("SET", KEYS[1], ARGV[3], "EX", ARGV[4], "NX") then return 1 end',
+  "return 2",
+].join("\n");
+
+async function putBackSubmissionDoor(door: Door, pathname: string, nowSeconds: number): Promise<void> {
+  // Nothing was kept: the door comes back for the rest of its day, so the buyer can close or give it up again.
+  const left = door.at + UPLOAD_SECONDS - nowSeconds;
+  if (left <= 0) return;
+  const back = repliesFor(await redisPipeline([[
+    "EVAL", SUBMISSION_DOOR_PUT_BACK, 3,
+    doorKey(door.folder, door.id), whoKey(door.folder, door.who), liveKey(door.folder, door.courseId, door.lessonId, door.who),
+    entryOf(door.courseId, door.lessonId, door.id, pathname), door.id, JSON.stringify(door), left,
+  ]]), 1);
+  if (!back || (back[0] !== 0 && back[0] !== 1 && back[0] !== 2)) throw new UnknownReplyError("a submission upload put back");
+}
+
 /** Addresses for pieces of the buyer's own open upload; null when it is not theirs or not open. */
 export async function signSubmissionDoor(
   where: DoorWhere,
@@ -553,13 +722,6 @@ export async function closeSubmissionDoor(
   // deleted when that time ends. A record written later sets the same entry again; an upload never completed costs
   // the sweep one delete.
   const keepUntil = submissionKeepUntil(nowSeconds, Math.min(door.keepDays, MAX_SUBMISSION_KEEP_DAYS));
-  const putBack = async () => {
-    // Nothing was kept: the door is put back for the rest of its day, so the buyer can close it again.
-    const left = door.at + UPLOAD_SECONDS - nowSeconds;
-    if (left <= 0) return;
-    const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
-    if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
-  };
   const taken = repliesFor(
     await redisPipeline([
       ["GETDEL", doorKey(door.folder, door.id)],
@@ -571,12 +733,12 @@ export async function closeSubmissionDoor(
   if (taken[0] === null) return { ok: false, reason: "unknown" };
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to close");
   if (countOf(taken[1]) === null) {
-    await putBack();
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     throw new UnknownReplyError("a submission file put on the sweep's list");
   }
   const closed = await steps.closeReservedVault(pathname, etags);
   if (!closed.ok) {
-    await putBack();
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     return { ok: false, reason: closed.reason };
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
@@ -693,12 +855,8 @@ export async function abortSubmissionDoor(
   if (taken[0] === null) return "unknown";
   if (typeof taken[0] !== "string" || !taken[0].includes(`"id":"${door.id}"`)) throw new UnknownReplyError("a submission upload taken to give up");
   if (!(await steps.abortReservedVault(pathname))) {
-    // Not given up at the vault: the door is put back for the rest of its day, so the buyer can try again.
-    const left = door.at + UPLOAD_SECONDS - nowSeconds;
-    if (left > 0) {
-      const back = repliesFor(await redisPipeline([["SET", doorKey(door.folder, door.id), JSON.stringify(door), "EX", left, "NX"]]), 1);
-      if (!back || (back[0] !== "OK" && back[0] !== null)) throw new UnknownReplyError("a submission upload put back");
-    }
+    // Not given up at the vault: the door is put back for the rest of its day, only while the buyer still holds it.
+    await putBackSubmissionDoor(door, pathname, nowSeconds);
     return "unavailable";
   }
   const place: Place = { folder: door.folder, courseId: door.courseId, lessonId: door.lessonId, who: door.who, id: door.id };
@@ -842,8 +1000,22 @@ export async function forgetSubmissionsPerson(
     if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission deleted");
     if (replies[0] === 1) gone += 1;
   }
-  const keys = [whoKey(folder, who), ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); })];
-  const replies = repliesFor(await redisPipeline(keys.map((key) => ["DEL", key])), keys.length);
+  // Every entry's door is deleted again after the index and places (Claude 6 on #3570): a refused close or abort that
+  // put a door back while this erasure ran (both its checks still passing) is undone here, and one after the index is
+  // gone finds no entry and puts nothing back.
+  const keys = [
+    whoKey(folder, who),
+    ...[...lessons].map((at) => { const [courseId, lessonId] = at.split("|"); return liveKey(folder, courseId, lessonId, who); }),
+    ...entries.map((entry) => doorKey(folder, entry.id)),
+  ];
+  // And their slots' turns on the store's list (review of #3568, Claude 6): each names the buyer, taken off with them.
+  const turns = [...lessons].flatMap((at) => {
+    const [courseId, lessonId] = at.split("|");
+    const slot = buyerSlotFor(folder, courseId, lessonId, who);
+    return slot ? [`${slot}|${courseId}|${lessonId}|${who}`] : [];
+  });
+  const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...(turns.length > 0 ? [["ZREM", slotsKey(folder), ...turns]] : [])];
+  const replies = repliesFor(await redisPipeline(commands), commands.length);
   if (!replies || replies.some((reply) => countOf(reply) === null)) throw new UnknownReplyError("a buyer's submission places deleted");
   // And their room slots (buyerSlotFor), emptied in one step so the store's room keeps nothing of them; a step not
   // known to be done leaves the erasure unfinished, to be pressed again.
@@ -1008,7 +1180,9 @@ export async function reviewList(folder: string, courseId: string, nowSeconds: n
       rows.push({ lessonId, id, submission: "unread" });
       continue;
     }
-    if (submission === null) gone.push(member);
+    // Gone, or its keeping time over (review of #3571, Claude 7): never shown, though the sweep's grace keeps the record
+    // a few days more, so a buyer's address and note are not shown past the time the creator chose; taken off the list.
+    if (submission === null || submission.keepUntil <= nowSeconds) gone.push(member);
     else rows.push({ lessonId, id, submission });
   }
   if (gone.length) await redisPipeline([["ZREM", key, ...gone]]).catch(() => undefined);

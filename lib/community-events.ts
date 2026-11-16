@@ -467,9 +467,11 @@ function eventBytes(event: CommunityEvent): number {
 export async function createEvent(store: Store, input: EventInput, now = Date.now()): Promise<CreateResult> {
   const id = store.community?.id as string;
   if ((await upcomingCount(id, now)) >= MAX_UPCOMING_EVENTS) return { ok: false, reason: "full" };
-  const [kept] = await redisPipeline([["ZCARD", indexKey(id)]]);
-  if (Number(kept) >= MAX_KEPT_EVENTS) {
-    const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, Number(kept) - MAX_KEPT_EVENTS + 1]]);
+  // Read exactly (rule 24; Claude 5 on #3845): an unreadable count is unknown, so nothing is made, never an event past the cap.
+  const kept = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(id)]]), 1)?.[0]);
+  if (kept === null) throw new UnknownReplyError("the events a community keeps");
+  if (kept >= MAX_KEPT_EVENTS) {
+    const [raw] = await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", now - LONGEST_MS, "LIMIT", 0, kept - MAX_KEPT_EVENTS + 1]]);
     const oldest = (Array.isArray(raw) ? (raw as string[]) : []).filter((e) => ITEM_ID.test(e));
     if (!oldest.length) return { ok: false, reason: "full" };
     for (const gone of await readEvents(id, oldest)) await forgetEvent(id, gone, store);
@@ -918,9 +920,11 @@ export async function forgetRsvpsPerson(id: string, who: string, email: string):
   if (!isRedisConfigured()) return 0;
   // Read exactly (rule 24): an index or deletes answered cut short or in another shape throw, so the erasure is tried
   // again, never "no event to take them off" or a count of 0 standing for "erased".
-  const listed = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf"]]), 1)?.[0]);
-  if (!listed) throw new UnknownReplyError("a community's events");
-  const events = listed.slice(0, MAX_KEPT_EVENTS);
+  // At most one more than the cap is read (a bounded read): more than MAX_KEPT_EVENTS events means some would be left
+  // with their answers, so the erasure is not finished and throws, never "done" with an answer kept (Claude 5 on #3845).
+  const events = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", indexKey(id), "-inf", "+inf", "LIMIT", 0, MAX_KEPT_EVENTS + 1]]), 1)?.[0]);
+  if (!events) throw new UnknownReplyError("a community's events");
+  if (events.length > MAX_KEPT_EVENTS) throw new UnknownReplyError("a community's events, more than it may keep");
   if (!events.length) return 0;
   const replies = repliesFor(await redisPipeline([...events.map((e) => ["HDEL", rsvpKey(id, e), who]), ["DEL", ...events.map((e) => accessKey(id, e, email))]]), events.length + 1);
   const counts = replies?.map(countOf);

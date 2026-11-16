@@ -31,6 +31,7 @@ import { dropPause, onBreak } from "@/lib/plan-pause";
 import { KEEP_NOTHING_FROM } from "@/lib/plan-closing-rules";
 import { type MoveResult, type Store, claimHandle, ensureStatsId, ensureStoreId, moveAccount, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { store as redis } from "./redis-stub";
+import { closingStateKey } from "./closed-for-erasure";
 import { done, is, part } from "./check";
 
 const ownerKey = (email: string) => "nl:store:owner:" + createHash("sha256").update("nimbus-store:" + email).digest("hex").slice(0, 40);
@@ -66,10 +67,17 @@ let pauseUnread = false;
 const realPipeline = redis.pipeline;
 redis.pipeline = async (commands: (string | number)[][]) => {
   if (recordReadFails && commands.some((c) => c[0] === "GET" && c[1] === recordReadFails)) throw new Error("Redis request failed with status 503");
-  if (onBatchWrite && commands.length === 1 && commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) {
+  // Under the walk's lock (#3156, fencedBy) the walk's entry is written inside the fenced step, beside the record's
+  // closing: the window is the same, before that step.
+  const fencedEntry = commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:closing-fenced:v1")
+    && commands[0].slice(3).some((word) => word === BATCH_KEY);
+  if (onBatchWrite && commands.length === 1 && ((commands[0][0] === "HSET" && commands[0][1] === BATCH_KEY) || fencedEntry)) {
     const hook = onBatchWrite;
     onBatchWrite = null;
-    await hook(String(commands[0][2]));
+    // The entry's field is the store's ref: the third word of a plain HSET, or, in the fenced step, the first word
+    // after HSET's place and count.
+    const words = commands[0].map(String);
+    await hook(fencedEntry ? words[words.indexOf("HSET", 3) + 3] : words[2]);
   }
   if (pauseUnread && commands.some((c) => c[1] === PAUSE_DUE)) return commands.map(() => ({ unexpected: true }));
   if (linesUnread && commands.length && commands.every((c) => c[0] === "ZSCORE") && commands.some((c) => c[1] === FINAL_INDEX)) return [{}];
@@ -102,6 +110,9 @@ async function endedStore(email: string, handle: string) {
 /** Its closing day has run (lib/plan-closing.ts closingDay): in the final line and in line for the walk. */
 async function pastItsDay(email: string, endedAt: number, at: number) {
   redis.run(["ZADD", FINAL_INDEX, endedAt, email]);
+  // And the closing job's record of that ending, which says what it kept was removed: the walk erases only a store
+  // really due (#3156, dueForErasure), as tests/closed-for-erasure.ts writes it.
+  redis.run(["SET", closingStateKey(email), JSON.stringify({ of: endedAt, renewals: at, refunds: at, removed: at, due: at })]);
   await markDue(email, at);
 }
 
@@ -160,11 +171,13 @@ async function main(): Promise<void> {
   await pastItsDay(E, Date.parse(e.planEndedAt), TE - 1000);
   let inWindow: MoveResult | string = "not reached";
   onBatchWrite = async (ref) => {
-    if (ref === E) inWindow = await moveAccount(E, E2);
+    // Under the walk's lock (#3156, takeDue) the store's record cannot change at all: the move asks for the store's
+    // lock and is refused as busy, before anything of it is read or written. Only that refusal is accepted here.
+    if (ref === E) inWindow = await moveAccount(E, E2).catch((error: unknown) => (error instanceof Error && error.message === "store_busy" ? "refused: store busy" : Promise.reject(error)));
   };
   const walkedE = await walk(TE);
   onBatchWrite = null;
-  is("the move in the window is refused", outcome(inWindow), refused);
+  is("the move in the window is refused: the walk holds the store's lock", outcome(inWindow), "refused: store busy");
   is("the walk takes the store, and finishes", [walkedE.stores, walkedE.done], [1, true]);
   is("its record is gone, at both addresses; its id names nothing; its address is held back", traces(E, E2, e.sid, e.handle), { atOld: false, atNew: false, id: null, handle: "released" });
 

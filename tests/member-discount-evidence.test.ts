@@ -18,6 +18,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (url.pathname === "/v1/customers") return reply(customers);
   if (url.pathname === "/v1/subscriptions") return reply(subscriptions);
   if (url.pathname === "/v1/promotion_codes") return reply(page([{ id: promo, code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } }]));
+  // The one code applyMemberDiscount asks for by its id (lib/discount.ts findCode).
+  if (url.pathname === `/v1/promotion_codes/${promo}` && (init?.method ?? "GET") === "GET") return reply({ id: promo, object: "promotion_code", code: "THANKS", active: true, promotion: { type: "coupon", coupon: { id: "co_1", percent_off: 20, duration: "once" } } });
   if (url.pathname === `/v1/subscriptions/${id}` && init?.method === "POST") { posts += 1; return reply(postReply); }
   throw Error("Unexpected Stripe operation");
 }) as typeof fetch;

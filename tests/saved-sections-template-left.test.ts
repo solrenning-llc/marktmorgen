@@ -3,24 +3,24 @@
  * that use it (app/api/store/saved-blocks/route.ts, "apply") never takes a
  * part a template left to write, ⟦like this⟧ or a campaign's [bracket]
  * part, onto a page visitors see: a store's own page that is shown or
- * scheduled, or the page of a product on the store. The whole request is
- * refused with the part and the pages, before the month's count is taken
- * and before any page is read or written; hidden pages and drafts' pages
- * still take it. The list of pages an update offers says why such a page
- * cannot be updated, so it is not checked to begin with.
+ * scheduled, or the page of a product on the store. As "apply" does
+ * for every rule a page's own save applies (saveProblem,
+ * tests/saved-section-apply-checks.test.ts), such a page is passed over with
+ * the part in its reason and left exactly as it was; hidden pages and
+ * drafts' pages in the same request still take it. The list of pages an
+ * update offers says why such a page cannot be updated, so it is not checked
+ * to begin with.
  *
  * What fails here: a shown page, a scheduled page or a published product's
- * page updated with a section holding a part; a refusal that writes a page
- * or takes the month's count; a hidden page refused; the list offering a
- * shown page with nothing said.
+ * page updated with a section holding a part; a passed-over page said
+ * without the part; a hidden page or a draft's page refused; the list
+ * offering a shown page with nothing said.
  */
 import { NextRequest } from "next/server";
 import { emptyBlock, type PageBlock } from "@/lib/sales-page";
 import { blocksForPage } from "@/lib/saved-blocks";
 import { siteKey } from "@/lib/site-page-rules";
 import { readPage } from "@/lib/sales-page-store";
-import { storeMonthKey } from "@/lib/funnel-share-store";
-import { monthOfUse } from "@/lib/funnel-share-rules";
 import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { POST } from "@/app/api/store/saved-blocks/route";
@@ -69,8 +69,6 @@ async function main() {
   const store = (await storeForEmail(OWNER))!;
   const statsId = store.statsId!;
   const question = async (key: string) => ((await readPage(statsId, key)).blocks.find((b) => b.kind === "faq") as { items: { q: string }[] } | undefined)?.items[0]?.q;
-  const countKey = storeMonthKey(statsId, "apply", monthOfUse(store)!);
-  const count = async () => (await redis.pipeline([["GET", countKey]]))[0];
 
   part("The section changed on a hidden page, with a part still to write");
   const changed = await send({ action: "update", id, blocks: [faq(LEFT)], except: siteKey(edited) });
@@ -79,13 +77,15 @@ async function main() {
   is("the hidden page and the draft's page can", [why.get(siteKey(kept)), why.get(draft.product.id)], ["", ""]);
 
   part("Updating the pages that use it");
-  for (const [name, pages] of [["a shown page", [siteKey(shown)]], ["a scheduled page", [siteKey(later)]], ["a published product's page", [published.product.id]], ["a shown page among hidden ones", [siteKey(kept), siteKey(shown)]]] as const) {
-    const refused = await send({ action: "apply", id, pages });
-    is(`${name}: refused, with the part and the pages`, [refused.status, refused.data.error, refused.data.part, refused.data.pages], [409, "placeholder", LEFT, pages.filter((key) => key !== siteKey(kept))]);
+  for (const [name, pages] of [["a shown page", [siteKey(shown)]], ["a scheduled page", [siteKey(later)]], ["a published product's page", [published.product.id]]] as const) {
+    const applied = await send({ action: "apply", id, pages });
+    const skipped = (applied.data.skipped ?? []) as { key: string; why: string }[];
+    is(`${name}: passed over, with the part in its reason`, [applied.status, applied.data.done, skipped.map((s) => s.key), skipped.every((s) => s.why.includes(LEFT))], [200, [], pages, true]);
   }
-  is("nothing was written, and the month's count was not taken", [await question(siteKey(shown)), await question(siteKey(later)), await question(siteKey(kept)), await question(published.product.id), await count()], ["Is it for me?", "Is it for me?", "Is it for me?", "Is it for me?", null]);
-  const hiddenOnes = await send({ action: "apply", id, pages: [siteKey(kept), draft.product.id] });
-  is("a hidden page and a draft's page take it", [hiddenOnes.status, hiddenOnes.data.done, await question(siteKey(kept)), await question(draft.product.id)], [200, [siteKey(kept), draft.product.id], LEFT, LEFT]);
+  is("none of them was written", [await question(siteKey(shown)), await question(siteKey(later)), await question(published.product.id)], ["Is it for me?", "Is it for me?", "Is it for me?"]);
+  const mixed = await send({ action: "apply", id, pages: [siteKey(kept), siteKey(shown), draft.product.id] });
+  const passed = ((mixed.data.skipped ?? []) as { key: string; why: string }[]).map((s) => s.key);
+  is("among hidden ones: the hidden page and the draft's page take it, the shown one is passed over", [mixed.status, mixed.data.done, passed, await question(siteKey(kept)), await question(draft.product.id), await question(siteKey(shown))], [200, [siteKey(kept), draft.product.id], [siteKey(shown)], LEFT, LEFT, "Is it for me?"]);
 
   part("Once the part is written");
   await send({ action: "update", id, blocks: [faq("Who is it for?")], except: siteKey(edited) });

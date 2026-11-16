@@ -19,10 +19,12 @@ import * as rules from "@/lib/template-text-rules";
 import { MAX_PART_SHOWN, bracketPartsIn, partIn, templateLeftMessage, templateTextIn } from "@/lib/template-text-rules";
 import { STARTER_PROMPTS, templateLeft } from "@/lib/template-text";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { addProduct, claimHandle, ensureStatsId, storeForEmail } from "@/lib/store";
+import { addProduct, claimHandle, ensureStatsId, setProductLink, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
+import { readPage } from "@/lib/sales-page-store";
 import { FUNNEL_STARTERS } from "@/lib/funnel-starters";
-import { BLOCK_KINDS, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
+import { BLOCK_KINDS, MAX_PAGE_BYTES, MAX_STORED_PAGE_BYTES, publishPageUnits, type BlockKind, type PageBlock, type Picture, type QuotesBlock, type TextBlock, type Video } from "@/lib/sales-page";
+import { allowanceUsedExact } from "@/lib/store-allowance";
 import { POST as savePage } from "@/app/api/store/page/route";
 import { POST as sitePage } from "@/app/api/store/site-page/route";
 import { POST as productRoute } from "@/app/api/store/product/route";
@@ -209,9 +211,122 @@ async function main(): Promise<void> {
   await post(savePage, "page", { id: draft.product.id, page: { blocks: [why], seoTitle: "Bread", seoDescription: STARTER_PART } });
   const inSearch = await publish();
   is("and a campaign's part in the search line", [inSearch.status, inSearch.data.field, inSearch.data.block, inSearch.data.part], [409, "search", null, STARTER_PART]);
+
+  part("Publishing and saving at once (Codex P on #3693)");
+  // A draft is published only once it hands something over (754 [STN1]): this one gets a link,
+  // so what these races test is the page's part, not that rule.
+  const linked = await setProductLink(OWNER, draft.product.id, "https://example.com/draft-guide");
+  is("the draft hands over a link, so only its page can hold it back", linked.ok, true);
+  // Runs `then` once, right after the next read of this draft's page answers, before its caller goes on.
+  const pageGet = `nl:product:page:${(await storeForEmail(OWNER))!.statsId}:${draft.product.id}`;
+  const pipeline = redis.pipeline;
+  const afterPageRead = (then: () => Promise<unknown>) => {
+    let pending: (() => Promise<unknown>) | null = then;
+    redis.pipeline = async (commands) => {
+      const out = await pipeline(commands);
+      if (pending && commands.some((command) => command[0] === "GET" && command[1] === pageGet)) {
+        const run = pending;
+        pending = null;
+        await run();
+      }
+      return out;
+    };
+  };
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  let raced: { status: number; data: Record<string, unknown> } | null = null;
+  afterPageRead(async () => {
+    raced = await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked] } });
+  });
+  const published = await publish();
+  redis.pipeline = pipeline;
+  is("a part saved while the draft is being published: the draft's save goes through, the publication is refused and it stays a draft", [(raced as { status: number } | null)?.status, published.status, published.data.error, published.data.block, await stillDraft()], [200, 409, "placeholder", "text0002", true]);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  let racedPublish: { status: number; data: Record<string, unknown> } | null = null;
+  afterPageRead(async () => {
+    racedPublish = await publish();
+  });
+  const saving = await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, marked] } });
+  redis.pipeline = pipeline;
+  const keptPage = await readPage((await storeForEmail(OWNER))!.statsId, draft.product.id);
+  is("published while a part is being saved: the publication goes through, the save is refused and the page keeps no part", [(racedPublish as { status: number } | null)?.status, await stillDraft(), saving.status, saving.data.error, templateLeft(keptPage)], [200, false, 400, "placeholder", null]);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+
   await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
   const clean = await publish();
   is("once written in the creator's own words, it is published", [clean.status, clean.data.ok, await stillDraft()], [200, true, false]);
+  // Claude 7 on #3693 (MÉDIO, cost): a publish reads the sales page twice, the check and again under the store lock,
+  // each up to MAX_PAGE_BYTES, so it takes the studio units those reads move before it reads (50,000 bytes a unit,
+  // UNIT_COST.studio in tests/plan-cost-registry.ts), not only the request's one.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const studioUsed = async () => Number(await allowanceUsedExact((await storeForEmail(OWNER))!, "studio"));
+  const beforePublish = await studioUsed();
+  const again = await publish();
+  is("published again", [again.status, await stillDraft()], [200, false]);
+  // Each read is one GET of the whole stored record, the page and its second version, and it moves UTF-8 bytes, up to
+  // three a code unit where the record's own bound counts code units (Claude 6 on #3693, twice): so the publish pays by
+  // the record's own byte count (STRLEN) at 50,000 bytes a unit, for its two reads, before it reads.
+  const pageKey = `nl:product:page:${(await storeForEmail(OWNER))!.statsId}:${draft.product.id}`;
+  const bytes = Number((await redis.pipeline([["STRLEN", pageKey]]))[0]);
+  is("the record's bytes are read", bytes > 0, true);
+  is("a publish takes the units of two reads of the record's own bytes, besides the request's own", (await studioUsed()) - beforePublish >= 1 + publishPageUnits(bytes), true);
+  is("two reads of the largest record a reader takes, at three bytes a code unit, are paid in full", publishPageUnits(3 * MAX_STORED_PAGE_BYTES) * 50_000 >= 2 * 3 * MAX_STORED_PAGE_BYTES, true);
+  is("which holds a page and a second version at their own bound", MAX_STORED_PAGE_BYTES >= 2 * MAX_PAGE_BYTES, true);
+  // A record grown past what was paid, between the paid read and the lock: nothing is published, the creator is told.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const longer: TextBlock = { ...own, id: "text0009", body: "Notes in the creator's own words. ".repeat(80) };
+  afterPageRead(async () => {
+    await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own, longer] } });
+  });
+  const grown = await publish();
+  redis.pipeline = pipeline;
+  is("a record grown past what was paid publishes nothing and says why", [grown.status, grown.data.error, await stillDraft()], [409, "page_changed", true]);
+  const settled = await publish();
+  is("pressed again, it is paid at its new size and published", [settled.status, await stillDraft()], [200, false]);
+  // Claude 6 on #3693 (LOW 1): a page over one unit's worth pays more than one unit, by its UTF-8 bytes, not a fixed one.
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  const wide = [5, 6, 7, 8].map((n): TextBlock => ({ ...own, id: `text001${n}`, body: "日本語のノート。".repeat(375) }));
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own, ...wide] } });
+  const wideBytes = Number((await redis.pipeline([["STRLEN", pageKey]]))[0]);
+  const beforeWide = await studioUsed();
+  const wideOut = await publish();
+  is("a page of more than one unit's bytes is published", [wideOut.status, await stillDraft(), publishPageUnits(wideBytes) > 1], [200, false, true]);
+  is("and pays the units of its own bytes, more than one", (await studioUsed()) - beforeWide >= 1 + publishPageUnits(wideBytes), true);
+  await post(productRoute, "product", { action: "visibility", id: draft.product.id, hidden: true });
+  await post(savePage, "page", { id: draft.product.id, page: { blocks: [why, own] } });
+  // Claude 6 on #3693 (MEDIUM, rule 24): a size that does not read says so, never that the product is gone.
+  const sizeAnswer = async (answer: (command: readonly unknown[]) => unknown) => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "STRLEN")) return commands.map((command) => answer(command));
+      return pipeline(commands);
+    };
+    try {
+      return await publish();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  };
+  const thrown = await (async () => {
+    redis.pipeline = async (commands) => {
+      if (commands.some((command) => command[0] === "STRLEN")) throw new Error("synthetic outage");
+      return pipeline(commands);
+    };
+    try {
+      return await publish();
+    } finally {
+      redis.pipeline = pipeline;
+    }
+  })();
+  const odd = await sizeAnswer(() => "many");
+  is("a page size that does not read publishes nothing and says it could not be checked", [thrown.status, thrown.data.error, odd.status, odd.data.error, await stillDraft()], [503, "page_unread", 503, "page_unread", true]);
+  let sizes = 0;
+  const lockOdd = await sizeAnswer(() => (++sizes === 1 ? 0 : "many"));
+  const lockOddDraft = await stillDraft();
+  is("as one that does not read again under the lock (its first read was 0 bytes, so nothing more was paid)", [lockOdd.status, lockOdd.data.error, lockOddDraft], [503, "page_unread", true]);
+  const editorSource = readFileSync("components/product-editor.tsx", "utf8");
+  is("the editor tells the creator to try again, not that the product is gone", /page_unread: "[^"]*could not be checked[^"]*Nothing was published[^"]*"/.test(editorSource), true);
+  const afterOutage = await publish();
+  is("once the size reads, it is published", [afterOutage.status, await stillDraft()], [200, false]);
   const publishMessage = (rules as Record<string, unknown>).templatePublishMessage as ((left: { field: string; kind: string | null; part: string }, product: string | null) => string) | undefined;
   is("the message says the product, where the part is, and the way on", [
     publishMessage?.({ field: "block", kind: "quotes", part: "⟦Their name⟧" }, "Draft guide"),

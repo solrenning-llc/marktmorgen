@@ -27,6 +27,7 @@
  *
  * Nothing here needs Node's own modules, so the proxy can use it as it is.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 
 type HeaderSource = { headers: Headers };
@@ -153,11 +154,8 @@ export async function essentialLimitState(scope: string, who: string, limit: num
       !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return "unknown";
   let reply: unknown;
   try {
-    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    const key = await limitKey(scope, who);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     return "unknown";
   }
@@ -171,15 +169,30 @@ export async function essentialLimitState(scope: string, who: string, limit: num
   return count <= limit ? "within" : "exceeded";
 }
 
+/**
+ * Gives back one count taken by essentialLimitState when the work it admitted did not happen (lib/stock.ts
+ * giveBackHold). Best effort: a failed give-back leaves the count as taken, the safe way to be wrong. A window that
+ * ended in between starts again at -1 with its own expiry, never a key that outlives it.
+ */
+export async function giveBackLimit(scope: string, who: string, windowSeconds: number): Promise<void> {
+  if (!isRedisConfigured() || !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return;
+  try {
+    const key = await limitKey(scope, who);
+    await redisPipeline([
+      ["SET", key, "0", "EX", windowSeconds, "NX"],
+      ["DECR", key],
+    ]);
+  } catch {
+    // Kept as taken.
+  }
+}
+
 export async function withinLimit(scope: string, who: string, limit: number, windowSeconds: number): Promise<boolean> {
   if (!isRedisConfigured()) return true;
   let reply: unknown;
   try {
-    const key = `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", windowSeconds, "NX"],
-      ["INCR", key],
-    ]);
+    const key = await limitKey(scope, who);
+    reply = await redisPipeline(windowCount(key, windowSeconds));
   } catch {
     // Redis could not be asked: open, so a buyer is never kept from paying by a counter out of reach.
     return true;
@@ -189,7 +202,7 @@ export async function withinLimit(scope: string, who: string, limit: number, win
   return countWithin(reply, limit);
 }
 
-/** Whether a returned SET NX + INCR reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
+/** Whether a returned windowCount reply holds a count within `limit`; no for any other shape or a reply that throws when read. */
 function countWithin(reply: unknown, limit: number): boolean {
   try {
     const count = counterReply(reply);
@@ -200,20 +213,91 @@ function countWithin(reply: unknown, limit: number): boolean {
 }
 
 /**
- * The count of a SET NX + INCR pipeline, only in its exact shape: two
- * replies, the SET's "OK" or null, and the INCR's own whole number of at
- * least 1; null for anything else. Read by the replies' own data fields,
- * as withinEssentialLimit does, so a getter cannot answer for them.
+ * An IPv6 address as the connection it belongs to (#4628): its first four groups, a /64, the least one customer is
+ * handed, as visitorAddress in lib/traffic-rules.ts counts it. Not a /48: a mobile carrier hands thousands of
+ * unrelated subscribers a /64 each out of one /48, so a /48 would let one of them use up a site-wide limit (sign-in,
+ * erasure requests) for all the others (Claude 7 on #4637). An IPv4 address written the new way ("::ffff:203.0.113.9")
+ * is that IPv4 address. Anything that is not a whole IPv6 address is answered as it is.
+ */
+export function limitAddress(part: string): string {
+  // "[2001:db8::1]:443" and "fe80::1%eth0" are the address they hold: brackets, a port and a zone are not part of it.
+  const address = part.trim().toLowerCase().replace(/^\[([^\]]+)\](?::\d+)?$/, "$1").replace(/%[\w.-]+$/, "");
+  if (!address.includes(":")) return part;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(address);
+  if (mapped) return mapped[1];
+  // The same IPv4 address in hexadecimal ("::ffff:cb00:7109" is 203.0.113.9), never one bucket for every such address.
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(address);
+  if (hex) {
+    const [high, low] = [parseInt(hex[1], 16), parseInt(hex[2], 16)];
+    return [high >> 8, high & 255, low >> 8, low & 255].join(".");
+  }
+  if ((address.match(/::/g) ?? []).length > 1) return part;
+  const [head, tail = ""] = address.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail ? tail.split(":") : [];
+  const missing = 8 - front.length - back.length;
+  const groups = address.includes("::") ? (missing > 0 ? [...front, ...Array<string>(missing).fill("0"), ...back] : []) : front;
+  if (groups.length !== 8 || groups.some((group) => !/^[0-9a-f]{1,4}$/.test(group))) return part;
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
+/**
+ * The counter of a limit. Every part of `who` (an address and a store, usually, joined by "|") that is an IPv6
+ * address is counted as its /64 (#4628): one IPv6 customer holds at least a /64, so counting the exact address let
+ * every request of theirs come from a new address and find a new allowance. An IPv4 address counts by itself. A
+ * caller keeps the address in a part of its own ("|"): joined to something else with ":", it would be read whole
+ * (tests/limit-groups-ipv6.test.ts holds every caller to that). Hashed, and one place, so every reader of a counter
+ * (withinLimit, essentialLimitState and the rest) reads the same one.
+ */
+async function limitKey(scope: string, who: string): Promise<string> {
+  const counted = who.split("|").map(limitAddress).join("|");
+  return `nl:rl:${scope}:${(await sha256Hex(`nimbus-${scope}:${counted}`)).slice(0, 32)}`;
+}
+
+/**
+ * KEYS[1] the counter; ARGV[1] the ceiling; ARGV[2] its window in seconds. Opens the window as
+ * essentialLimitState does, then takes one only while fewer than the ceiling were taken: -1 when
+ * not (nothing taken), the new count when taken.
+ */
+export const ESSENTIAL_BELOW = `-- marktmorgen:essential-below:v1
+redis.call("SET", KEYS[1], "0", "EX", ARGV[2], "NX")
+local n = tonumber(redis.call("GET", KEYS[1]))
+if n == nil then return -2 end
+if n >= tonumber(ARGV[1]) then return -1 end
+return redis.call("INCR", KEYS[1])`;
+
+/**
+ * One more on the very counter essentialLimitState keeps (same scope, key and
+ * window), but only while fewer than `below` were taken in its window, in one
+ * script: a lesser use (the plan's invoices, lib/plan-invoices.ts) can never
+ * take the last `limit - below` an essential action keeps, whatever order
+ * they come in. A refusal takes nothing. "unknown" as essentialLimitState
+ * says it: Redis not configured or not answering, a reply in another shape,
+ * or a ceiling or window that is not a positive whole number.
+ */
+export async function essentialTakeBelow(scope: string, who: string, below: number, windowSeconds: number): Promise<LimitState> {
+  if (!isRedisConfigured() || !Number.isSafeInteger(below) || below <= 0 ||
+      !Number.isSafeInteger(windowSeconds) || windowSeconds <= 0) return "unknown";
+  let reply: unknown;
+  try {
+    reply = await redisPipeline([["EVAL", ESSENTIAL_BELOW, 1, await limitKey(scope, who), below, windowSeconds]]);
+  } catch {
+    return "unknown";
+  }
+  if (!Array.isArray(reply) || reply.length !== 1) return "unknown";
+  const slot = Object.getOwnPropertyDescriptor(reply, "0");
+  const value = slot && Object.hasOwn(slot, "value") ? slot.value : undefined;
+  if (value === -1) return "exceeded";
+  return Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= below ? "within" : "unknown";
+}
+
+/**
+ * The count of a windowCount pipeline (the window-count module), only in its exact shape: two replies, the INCR's own
+ * whole number of at least 1 and the EXPIRE's 0 or 1; null for anything else. Read by the replies' own data fields,
+ * so a getter cannot answer for them.
  */
 function counterReply(reply: unknown): number | null {
-  if (!Array.isArray(reply)) return null;
-  const length = Object.getOwnPropertyDescriptor(reply, "length");
-  if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0");
-  const count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK")) return null;
-  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < 1) return null;
-  return count.value as number;
+  return windowCountOf(reply);
 }
 
 /**
@@ -236,10 +320,7 @@ export async function withinMonth(scope: string, who: string, limit: number, win
   try {
     const month = window;
     const key = `nl:rlm:${scope}:${(await sha256Hex(`nimbus-${scope}:${who}`)).slice(0, 32)}:${month}`;
-    reply = await redisPipeline([
-      ["SET", key, "0", "EX", 32 * 86_400, "NX"],
-      ["INCR", key],
-    ]);
+    reply = await redisPipeline(windowCount(key, 32 * 86_400));
   } catch {
     return true;
   }

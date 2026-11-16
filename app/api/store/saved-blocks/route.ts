@@ -2,11 +2,14 @@ import type { NextRequest } from "next/server";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { jsonAccess } from "@/lib/studio-route";
 import { can } from "@/lib/team-roles";
-import { idsOfKind, readCards } from "@/lib/catalog";
-import { templateLeft } from "@/lib/template-text";
-import { SAVED_BLOCK_ID } from "@/lib/sales-page";
+import { readCards, readListing } from "@/lib/catalog";
+import { SAVED_BLOCK_ID, type SalesPage, oversized, pageProblem } from "@/lib/sales-page";
 import { readPage, writePage } from "@/lib/sales-page-store";
-import { SITE_KINDS, isSiteKey } from "@/lib/site-page-rules";
+import { SITE_KINDS, isSiteKey, outFrom } from "@/lib/site-page-rules";
+import { fastMoneyMessage, fastMoneyOnPage } from "@/lib/terms-check-rules";
+import { pageWords } from "@/lib/page-translate";
+import { templateLeft } from "@/lib/template-text";
+import { templateLeftMessage } from "@/lib/template-text-rules";
 import { BLOCK_KINDS, type BlockKind } from "@/lib/sales-page";
 import { type SavedSection, SECTION_WHY, newSectionId, readSectionInput, updateProblem, withSection } from "@/lib/saved-blocks";
 import { dropSection, readSection, readSections, sectionUses, writeSection } from "@/lib/saved-block-store";
@@ -38,17 +41,26 @@ const kindsFor = (key: string): readonly BlockKind[] => (isSiteKey(key) ? SITE_K
 const mayChange = (role: Parameters<typeof can>[0], key: string) => can(role, isSiteKey(key) ? "page" : "products");
 
 /**
- * Whether visitors see the page under this key, or will by themselves: a store's own page shown or scheduled (its
- * `from` on the store's list, written with its blocks), or the page of a product on the store. Read from the store
- * alone, so it is known before any page is read or the month's count is taken.
+ * Why a page cannot take a section's latest version, by the same rules its own save applies (app/api/store/page/route.ts
+ * for a product's page, app/api/store/site-page/route.ts for a store page), or null when it can. "apply" is a save of
+ * each page, so a page the editor would refuse is passed over with the reason, never written (tests/saved-section-apply-checks.test.ts).
  */
-function goesOut(store: Store, key: string): boolean {
-  if (isSiteKey(key)) return (store.sitePages.find((p) => `site-${p.id}` === key)?.from ?? -1) !== -1;
-  return store.catalog.items.some((item) => item.id === key) && !idsOfKind(store, "hidden").includes(key);
+async function saveProblem(store: Store, key: string, page: SalesPage): Promise<string | null> {
+  if (oversized(page)) return "This page would be too long with it. Shorten the section or this page.";
+  if (pageProblem({ blocks: page.blocks, variant: null }, page)) return "This page would not save with it. Open the page and save it there to see why.";
+  const site = isSiteKey(key);
+  if (!site && page.blocks.some((block) => block.kind === "booking")) return "This page would not save with it. Open the page and save it there to see why.";
+  // What visitors see: a store page shown or scheduled, a product's page while the product is published.
+  const out = site ? outFrom(page) !== -1 : (await readListing(store, key))?.hidden !== true;
+  if (!out) return null;
+  if (!site) {
+    const refused = fastMoneyOnPage(pageWords(page));
+    if (refused) return fastMoneyMessage(refused, "save");
+  }
+  const left = templateLeft(page);
+  if (left) return templateLeftMessage(left, left.kind ? (BLOCK_KINDS.find((k) => k.kind === left.kind)?.label ?? null) : null, site ? "site" : "product");
+  return null;
 }
-
-/** Why a section holding a part left to write cannot go on a page visitors see (754 [STN1], a sibling of #3593). */
-const shownWhy = (part: string) => `Visitors see this page, and the section still has a part for you to write: “${part}”. Replace it with your own words first.`;
 
 /** A page's key as this store has it, with its title, or null. */
 function pageOf(store: Store, key: string, titles: Map<string, string>): { key: string; title: string; site: boolean } | null {
@@ -68,15 +80,16 @@ async function usesOf(store: Store, section: SavedSection, except = ""): Promise
   const keys = (await sectionUses(statsId, section.id)).filter((key) => key !== except).slice(0, MAX_APPLY_PAGES * 2);
   const titles = new Map([...(await readCards(store)).values()].map((card) => [card.id, card.title]));
   const out: { key: string; title: string; site: boolean; why: string }[] = [];
-  const left = templateLeft({ blocks: section.blocks });
   for (const key of keys) {
     const page = pageOf(store, key, titles);
     if (!page) continue;
     const held = await heldPage(statsId, key);
     const problem = updateProblem(held, section.id);
     if (problem === "gone") continue;
-    const fits = problem === null && withSection(held, section, kindsFor(key)) !== null;
-    out.push({ ...page, why: problem ? SECTION_WHY[problem] : left && goesOut(store, key) ? shownWhy(left.part) : fits ? "" : "The section no longer fits on this page." });
+    const next = problem === null ? withSection(held, section, kindsFor(key)) : null;
+    // Said before the creator picks the page, with the reason "apply" would pass it over for.
+    const refused = next ? await saveProblem(store, key, next) : null;
+    out.push({ ...page, why: problem ? SECTION_WHY[problem] : !next ? "The section no longer fits on this page." : (refused ?? "") });
   }
   return out;
 }
@@ -153,11 +166,6 @@ export async function POST(request: NextRequest) {
       const listed = new Set(await sectionUses(statsId, id));
       if (asked.some((key) => !listed.has(key))) return refuse("pages");
       if (asked.some((key) => !mayChange(role, key))) return refuse("forbidden", 403);
-      // A part a template left to write never goes onto a page visitors see (754 [STN1], a sibling of #3593): the
-      // whole request is refused, saying the part and those pages, before the month's count and before any read or write.
-      const left = templateLeft({ blocks: section.blocks });
-      const shown = left ? asked.filter((key) => goesOut(store, key)) : [];
-      if (left && shown.length) return refuse("placeholder", 409, { ...left, pages: shown });
       const month = monthOfUse(store);
       if (!month) return refuse("unavailable", 503);
       // The month's count is taken first, as before, so a request past the figure reads no page at all (Codex Z on
@@ -183,6 +191,11 @@ export async function POST(request: NextRequest) {
         const next = problem ? null : withSection(held, section, kindsFor(key));
         if (!next) {
           skipped.push({ key, why: problem ? SECTION_WHY[problem] : "The section no longer fits on this page." });
+          continue;
+        }
+        const refused = await saveProblem(store, key, next);
+        if (refused) {
+          skipped.push({ key, why: refused });
           continue;
         }
         planned.push({ key, next });

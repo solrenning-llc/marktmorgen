@@ -1,10 +1,11 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { uploadReason, uploadSoldFile } from "@/lib/sold-file-upload";
 import { toast } from "@/components/toast";
 import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { MAX_FILE_BYTES, maxFileLabel, readableSize } from "@/lib/product-file";
+import { EPISODE_OUTLINE, EPISODE_OUTLINE_LEFT, episodePromptsLeft } from "@/lib/episode-outline";
 import { EPISODE_ACCEPT, EPISODE_TYPES, type Episode, MAX_EPISODES, MAX_EPISODE_NOTES, MAX_EPISODE_TITLE, type Podcast } from "@/lib/podcast-rules";
 
 const MESSAGES: Record<string, string> = {
@@ -18,6 +19,8 @@ const MESSAGES: Record<string, string> = {
   unknown: "That episode is no longer there. Reload the page.",
   // The same audio is another episode's already, or the product's own file (app/api/store/podcast).
   in_use: "That audio file is already used on this product. Choose the file from your device again.",
+  // A part of the notes' outline still in [brackets] (lib/episode-outline.ts): an episode goes out at once.
+  outline_left: EPISODE_OUTLINE_LEFT,
 };
 
 type Answer = { ok: boolean; error?: string; podcast?: Podcast };
@@ -45,6 +48,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
   const [percent, setPercent] = useState<number | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const id = useId().replace(/[^A-Za-z0-9_-]/g, "");
+  const notesField = useRef<HTMLTextAreaElement>(null);
 
   async function run(payload: Record<string, unknown>, done: string): Promise<boolean> {
     setError(null);
@@ -63,6 +68,8 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
     if (!(EPISODE_TYPES as readonly string[]).includes(file.type)) return setError(MESSAGES.type);
     if (file.size > MAX_FILE_BYTES) return setError(MESSAGES.too_big);
     if (!title.trim()) return setError(MESSAGES.title);
+    // Before the upload: a refusal after it would have spent the store's upload room on audio that never goes out.
+    if (episodePromptsLeft(title, notes).length) return setError(MESSAGES.outline_left);
     setPercent(0);
     setError(null);
     try {
@@ -94,10 +101,39 @@ export function PodcastEditor({ productId, folder, initial }: { productId: strin
             <span className="field-label">Title</span>
             <input className="field mt-1" maxLength={MAX_EPISODE_TITLE} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Episode 1: Your first starter" />
           </label>
-          <label className="block">
-            <span className="field-label">Notes (optional)</span>
-            <textarea className="field mt-1" rows={3} maxLength={MAX_EPISODE_NOTES} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What it covers, and anything the listener needs." />
-          </label>
+          <div>
+            <label htmlFor={`episode-notes-${id}`} className="field-label">Notes (optional)</label>
+            <textarea ref={notesField} id={`episode-notes-${id}`} className="field mt-1" rows={3} maxLength={MAX_EPISODE_NOTES} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What it covers, and anything the listener needs." />
+            <div className="mt-2 rounded-[var(--r-sm)] border border-line bg-white p-3" data-episode-outline="">
+              <p id={`episode-outline-help-${id}`} className="text-sm text-ink-soft">
+                Not sure what to write? Start from an outline: it sets out what listeners look for, and each part in [brackets] is yours to replace with your own words, including the brackets. The episode can&apos;t go out until you replace every one.
+              </p>
+              {notes.trim() ? (
+                <p className="mt-2 text-sm text-ink-soft">The outline goes only into empty notes. Clear the notes to use it.</p>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm mt-2"
+                  aria-describedby={`episode-outline-help-${id}`}
+                  onClick={() => {
+                    // Only into empty notes: nothing typed is replaced.
+                    if (notes.trim()) return;
+                    setNotes(EPISODE_OUTLINE);
+                    // The button gives way to a sentence: the focus moves to the notes, the first part to replace selected.
+                    requestAnimationFrame(() => {
+                      const field = notesField.current;
+                      if (!field) return;
+                      field.focus();
+                      const start = EPISODE_OUTLINE.indexOf("[");
+                      field.setSelectionRange(start, EPISODE_OUTLINE.indexOf("]", start) + 1);
+                    });
+                  }}
+                >
+                  Start the notes from an outline
+                </button>
+              )}
+            </div>
+          </div>
           <label className="block">
             <span className="field-label">The audio</span>
             <input className="field mt-1" type="file" accept={EPISODE_ACCEPT} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

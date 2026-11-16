@@ -12,6 +12,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { newItemId } from "@/lib/course";
 import { cleanLine, cleanText } from "@/lib/community-text";
+import { episodePromptsLeft } from "@/lib/episode-outline";
 import {
   EPISODE_TYPES,
   type Episode,
@@ -90,7 +91,7 @@ export type PodcastEdit =
   | { op: "edit"; id: string; title: unknown; notes: unknown }
   | { op: "remove"; id: string };
 
-export type PodcastResult = { ok: true; podcast: Podcast; removed: Episode | null } | { ok: false; reason: "too_many" | "type" | "unknown" | "title" };
+export type PodcastResult = { ok: true; podcast: Podcast; removed: Episode | null } | { ok: false; reason: "too_many" | "type" | "unknown" | "title" | "outline_left" };
 
 /** One change from the studio. Pure: the caller writes, and deletes the audio of a removed episode. */
 export function editPodcast(podcast: Podcast, edit: PodcastEdit): PodcastResult {
@@ -99,6 +100,8 @@ export function editPodcast(podcast: Podcast, edit: PodcastEdit): PodcastResult 
     if (!(EPISODE_TYPES as readonly string[]).includes(edit.contentType)) return { ok: false, reason: "type" };
     const title = cleanLine(edit.title, MAX_EPISODE_TITLE);
     if (!title) return { ok: false, reason: "title" };
+    // An episode goes out at once: never with a prompt of the notes' outline still in it (lib/episode-outline.ts).
+    if (episodePromptsLeft(edit.title, edit.notes).length) return { ok: false, reason: "outline_left" };
     const episode: Episode = {
       id: newItemId(),
       title,
@@ -117,6 +120,7 @@ export function editPodcast(podcast: Podcast, edit: PodcastEdit): PodcastResult 
   }
   const title = cleanLine(edit.title, MAX_EPISODE_TITLE);
   if (!title) return { ok: false, reason: "title" };
+  if (episodePromptsLeft(edit.title, edit.notes).length) return { ok: false, reason: "outline_left" };
   const next = { ...found, title, notes: cleanText(edit.notes, MAX_EPISODE_NOTES) };
   return { ok: true, podcast: { ...podcast, episodes: podcast.episodes.map((e) => (e.id === edit.id ? next : e)) }, removed: null };
 }

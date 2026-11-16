@@ -193,6 +193,25 @@ async function main(): Promise<void> {
   is("the first store's connection is gone and out of the index", kept(one.statsId), [0, 0]);
   is("the second store's connection is still indexed", kept(two.statsId), [1, 1]);
 
+  part("Claude 7's MEDIUM 1 on #3333: a flow begun before the removal is forgotten by a notice with the removal's time");
+  await reset();
+  // The flow begins a minute ago; the person removes the app in Zoom two seconds ago; the keep lands a second ago,
+  // before any mark, so it is kept; then Zoom's notice arrives with that removal time. The connection was kept on our
+  // clock after the removal, but its flow began before it: it is not a new grant, and nothing of it may stay.
+  const removedAt = realNow() - 2_000;
+  const begunBefore = await consent(one.statsId, realNow() - 60_000);
+  is("connected first (set-up: the keep landed before any mark)", begunBefore.ok, true);
+  forgotNow = await forgetUser("zoom", USER, removedAt).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
+  is("forgotten by the notice, the owner to be told", Array.isArray(forgotNow) ? forgotNow.map((f: { statsId: string }) => f.statsId) : forgotNow, [one.statsId]);
+  is("no connection and no index entry are left", kept(one.statsId), [0, 0]);
+  await reset();
+  // Control: a flow begun well after the removal (a new grant) stays, as main's redelivery rule keeps it.
+  const begunAfter = await consent(one.statsId, realNow() - 1_000);
+  is("a flow begun after the removal connects (set-up)", begunAfter.ok, true);
+  forgotNow = await forgetUser("zoom", USER, realNow() - 60_000).catch((error: unknown) => `threw ${error instanceof Error ? error.name : error}`);
+  is("a notice for a removal a minute before that flow began forgets nothing", forgotNow, []);
+  is("and the new grant stays, indexed", kept(one.statsId), [1, 1]);
+
   part("A consent flow older than any consent can be keeps nothing");
   await reset();
   const stale = await consent(one.statsId, realNow() - 21 * 60_000);

@@ -26,10 +26,19 @@ const PENDING = "nl:plans:pending";
 const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
 
-/** Written down when a plan's checkout opens, so it is settled either way. */
+/**
+ * Written down when a plan's checkout opens, so it is settled either way.
+ *
+ * It returns only once the write is confirmed: the checkout is handed to the buyer on that promise, and a plan the
+ * job cannot find is charged past its last payment. So an account or session id the job could not follow, no Redis,
+ * or a SADD reply other than exactly 0 or 1 (unknown, short or of another shape) throws, never passes as written
+ * (Codex X4 on #4493).
+ */
 export async function rememberPlan(account: string, session: string): Promise<void> {
-  if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  if (!ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) throw new Error("A plan's checkout cannot be written down: not a Stripe account and checkout session");
+  const replies = await redisPipeline([["SADD", PENDING, `${account}|${session}|${Math.floor(Date.now() / 1000)}`]]);
+  const added = Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined;
+  if (added !== 0 && added !== 1) throw new Error("Redis did not confirm the plan's checkout was written down");
 }
 
 /**

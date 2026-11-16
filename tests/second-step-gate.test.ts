@@ -31,7 +31,7 @@ import { POST as moveRoute } from "@/app/api/auth/move/route";
 import { accountStores, claimHandle, createStore, ensureStoreId, storeForEmail } from "@/lib/store";
 import { POST as recoveryRoute } from "@/app/api/auth/recovery-address/route";
 import { endMoving, isMoving, markBrokenMove, markMoving, readBrokenMove, sendMoveLink } from "@/lib/auth";
-import { clearBrokenMoveByHand, describeMove } from "@/lib/move-repair";
+import { clearBrokenMoveByHand, describeMove, repairMove } from "@/lib/move-repair";
 import { existsSync } from "node:fs";
 import { removalWhen } from "@/lib/removal-time";
 import { store as redis } from "./redis-stub";
@@ -1313,6 +1313,44 @@ async function main(): Promise<void> {
   is("the session itself is still there (its logout did not happen)", await emailForSession(lockedZeda), ZEDA);
   is("cancelReset reports the locked sessions as kept", cancelled, "kept-locked");
   is("the session whose logout was not confirmed stays locked", (await lockedUntil(lockedZeda)) > 0, true);
+
+  part("A broken move's repair whose logout of the away address is unknown keeps the record (issue 4366)");
+  const REA = "rep-away@example.com";
+  const REB = "rep-home@example.com";
+  await claimHandle(REB, "rep-home", "Rep Home", "");
+  const reaSession = await openSession(REA);
+  await markBrokenMove(REA, REB);
+  const reaSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${REA}`).slice(0, 40)}`;
+  const beforeRepair = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === reaSet ? [42] : beforeRepair(commands)) as typeof redis.pipeline;
+  const reaRepaired = await repairMove(REA);
+  redis.pipeline = beforeRepair;
+  is("control: the old session on the away address is still open", await emailForSession(reaSession), REA);
+  is("the repair does not report success while the away address was not logged out", reaRepaired, false);
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(REA)) !== null, await isMoving(REA), await isMoving(REB)], [true, true, true]);
+  is("a later try whose logout is confirmed repairs it", [await repairMove(REA), await emailForSession(reaSession), await readBrokenMove(REA), await isMoving(REA), await isMoving(REB)], [true, null, null, false, false]);
+
+  part("Clearing a broken move by hand whose logout of one address is unknown keeps the record");
+  const HCA = "hand-a@example.com";
+  const HCB = "hand-b@example.com";
+  const hcaSession = await openSession(HCA);
+  const hcbSession = await openSession(HCB);
+  await markBrokenMove(HCA, HCB);
+  const hcbSet = `nl:auth:sessions:${hex(`nimbus-auth-sessions:${HCB}`).slice(0, 40)}`;
+  const beforeHand = redis.pipeline.bind(redis);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0]?.[0] === "SMEMBERS" && commands[0]?.[1] === hcbSet ? [42] : beforeHand(commands)) as typeof redis.pipeline;
+  const hcCleared = await clearBrokenMoveByHand(HCA, HCA);
+  redis.pipeline = beforeHand;
+  is("control: the old session on the address whose logout was unknown is still open", await emailForSession(hcbSession), HCB);
+  is("it does not report cleared while an address was not logged out", hcCleared, "logout");
+  is("the broken-move record (the lock on both addresses) is kept", [(await readBrokenMove(HCA)) !== null, await isMoving(HCA), await isMoving(HCB)], [true, true, true]);
+  is(
+    "a later try whose logouts are confirmed clears it",
+    [await clearBrokenMoveByHand(HCA, HCA), await emailForSession(hcaSession), await emailForSession(hcbSession), await readBrokenMove(HCA), await isMoving(HCA), await isMoving(HCB)],
+    ["cleared", null, null, null, false, false],
+  );
 
   clock.restore();
   done();

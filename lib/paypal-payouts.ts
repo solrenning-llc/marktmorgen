@@ -611,7 +611,14 @@ export async function settlePayPal(store: Store): Promise<Settled> {
       // Paid to the receiver it was sent to (#4657): a line that kept the receiver's print is booked only when the
       // receiver PayPal answers has that same print. Another receiver, none, or no key to print with keeps it on
       // its way. A line from before prints were kept is read as it always was.
-      if (status === PAID && got?.item && line.r && !sameReceiver(got.receiver, line.r)) {
+      // The same for an item that did not pay (Claude 5 on #4682, MÉDIO): another receiver's item proves neither the
+      // payment nor its failure, so it never releases the line to be owed and paid again. A batch PayPal DENIED or
+      // CANCELED as a whole speaks for every line, whatever its items say, and still releases them.
+      const itemLevel = batchStatus !== "DENIED" && batchStatus !== "CANCELED";
+      if (itemLevel && got && line.r && ((status === PAID && got.item) || NOT_PAID.has(status)) && !sameReceiver(got.receiver, line.r)) {
+        // Said where the operator reads it (Claude 5's LEVE): the line stays on its way, and the affiliate is left out
+        // of the next payouts, until a read names the receiver it was sent to.
+        console.error("a PayPal payout item names another receiver than the one its line was sent to; the line stays on its way", batch, line.a, status);
         still.push(line);
         continue;
       }

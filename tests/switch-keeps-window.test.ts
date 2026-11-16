@@ -566,6 +566,8 @@ async function main(): Promise<void> {
     // Merge of main into #3545 (15 November 2026): the catalog's product records read in shared MGETs and its listing
     // reads priced as such (lib/catalog.ts, lib/read-ceilings.ts) cost fewer store commands, so each plan keeps more;
     // figures as the model computes them with main's costs and #3545's reads together.
+    // Merge of main into #3545 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 46.84, 315.54, 704.91;
+    // figures as the model computes them; still above zero (MR). The merge lowers no cost: the gain is this PR's shared MGET reads.
     // Merge of #3545 into #3079 (15 November 2026): #3079 sizes each shared MGET so one reply stays within 1 MiB at the
     // written ceiling (lib/redis-mget.ts, smaller lots) and reads a booking's two meeting records a GET each, so the
     // catalog and calendar lines cost more store commands: 0.76 dollars less kept on each plan's month, still above
@@ -575,6 +577,8 @@ async function main(): Promise<void> {
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #3545 (16 November 2026): main's costs and this PR's change together, yearly month 37.04, 258.68, 579.90 -> 38.78, 260.41, 581.64;
+    // figures as the model computes them; still above zero (MR). The merge lowers no cost: the gain is this PR's shared MGET reads.
     // Merge of #3545 into #3079 (15 November 2026): the same byte-sized reads cost a yearly month 0.76 to 0.77 dollars more.
     is("11: and 38.01, 259.65 and 580.87 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["38.01", "259.65", "580.87"]);
   } finally {

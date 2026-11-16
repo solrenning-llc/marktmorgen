@@ -17,12 +17,22 @@
 import { withinEssentialLimit, withinLimit } from "@/lib/request-guard";
 import type { Store } from "@/lib/store";
 import { takeAllowance } from "@/lib/store-allowance";
-import { takePublicRequest } from "@/lib/traffic";
+import { type RequestTake, takePublicRequest, takePublicRequestWhy } from "@/lib/traffic";
 
 /** An unknown short-window count throws UnknownReplyError (withinLimit), never said as a spent window; callers read it with `.catch(unknownLimit)`. */
 export async function withinStore(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" = "public"): Promise<boolean> {
   if (!(await withinLimit(scope, who, limit, windowSeconds))) return false;
   return takePublicRequest(store, side);
+}
+
+/**
+ * withinStore, said three ways (lib/traffic.ts, RequestTake): "over" for the short window or the store's figure,
+ * "unknown" when the store's count could not be made, so a page says "not checked just now", never "too many". Both
+ * refuse (outage drill, 13 November 2026).
+ */
+export async function withinStoreWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store, side: "public" | "buyer" = "public"): Promise<RequestTake> {
+  if (!(await withinLimit(scope, who, limit, windowSeconds))) return "over";
+  return takePublicRequestWhy(store, side);
 }
 
 /**

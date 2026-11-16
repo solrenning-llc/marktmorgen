@@ -2337,6 +2337,7 @@ Proveniência AB: passou a fazer parte do Bloco de abertura, posição (h), por 
 94. **[D2-BUYER-TRUST] Cartão de confiança factual para o comprador**
    - Pedido: P4, atualização70946172-40e4-4720-9329-d64271855eb4;19/10/2026, hora original não fornecida.
    - Estado (Claude 2, 1/11/2026): **em andamento**, unidade 0 (desenho) num PR: docs/buyer-trust-card.md (fato a fato: política de reembolso sem campo estruturado, só texto; entregas sem registro de entrega, só pedidos do Stripe; tempo de resposta não registrado; idade da loja em createdAt; ativação do Stripe por readAccount, nunca "identidade verificada"; unidades 1–5, com o tempo de resposta em Depende do dono). Arquivo reservado: docs/buyer-trust-card.md.
+   - Estado (Claude 1, 12/11/2026 12h02 Fortaleza): unidade 0 (desenho, docs/buyer-trust-card.md) incorporada; **unidade 2 testada num PR** do ramo `claude/modest-faraday-f25rzq`: cartão "About this store" na página da loja com "On Marktmorgen since <mês ano>", lido do `createdAt` do registro, nunca digitado, desligado por padrão (StoreLook.since, caixa no editor de aparência), sem leitura nova por visita; não diz "open", "selling" nem "verified" (revisão independente de 12/11/2026: a loja pode ter ficado em repouso; as vendas continuam fechadas). Unidades 1, 3 e 4 continuam a fazer; 5 em Depende do dono.
    - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 10/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
    - Escopo e prova: Sistema calcula política de reembolso, entregas recentes bem-sucedidas, tempo médio de resposta, idade da loja e identidade verificada pelo Stripe, somente quando comprováveis. Nada preenchido manualmente pelo criador como se fosse verificação; privacidade, períodos, amostra/indisponibilidade e custo de leitura precisam de definição.
@@ -2766,6 +2767,7 @@ Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem 
    - Custo e margem: Calcular postagem/renovação/token/filas/franquia e teto antes de fornecedor; nenhuma solicitação de aprovação.
 
 41. **[G3] Documentar Google Business Profile e preparar resposta a avaliações, desligada até aprovação.**
+   - Assumido pelo Claude 3 (TODOS-112), 11/11/2026 16h20 Fortaleza: estudo em docs/google-business-profile-study-2026-11-11.md (fontes oficiais lidas no dia; aprovação depende de perfil verificado da empresa há 60+ dias e de preço oficial, que não está publicado; recomendação em "Depende do dono"). Estado: testado num PR (documento); nenhum código, conta ou pedido de acesso.
    - Pedido: P2 G3; datas/horas e grau de certeza em Proveniência.
    - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 63/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
@@ -22400,7 +22402,7 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 16. Ligação com o Google Postmaster Tools e o Microsoft SNDS do domínio do criador, depois de 356 [ES2] (estende lib/mail-health.ts).
 17. Página pública mensal com a entregabilidade real da plataforma (entregues, devoluções, reclamações), só com números medidos e acima de mínimos (estende lib/platform-proof.ts; complemento de 570 [DR1]).
 18. Assinatura de e-mail por pessoa da equipe nas respostas da caixa de entrada (estende lib/inbox.ts e lib/mail-from.ts).
-19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts).
+19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts). Estado (Claude 3, 03/11/2026): unidades 1 e 2 (versões guardadas a cada mudança, até 10, com restauração que também pode ser desfeita, e a lista no estúdio de e-mail) no PR #1927 (ramo claude3/gl7-flow-versions), testado num PR e ainda não incorporado (atualizado em 13/11/2026 pelo LEVE 4 da revisão de Claude 1 cloud).
 20. Mais dados estruturados (Course, Event, ProfilePage e PodcastSeries), conferidos na documentação oficial do schema.org e do Google (estende lib/page-structured-data.ts).
 21. Biblioteca maior de ícones e ilustrações de licença livre, com texto alternativo (estende lib/sales-page-icons.ts).
 22. Cartão de visita digital do criador com "Save contact" (vCard) e formulário de troca de contato com consentimento (estende lib/site-pages.ts e lib/forms.ts).

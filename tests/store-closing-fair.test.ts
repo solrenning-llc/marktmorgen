@@ -450,7 +450,12 @@ async function main() {
     const healthy = redis.pipeline;
     let dropped = 0;
     redis.pipeline = (async (commands: (string | number)[][]) => {
-      if (!dropped && commands.length === 1 && commands[0][0] === "SET" && String(commands[0][1]).startsWith("nl:plan:closing:") && /"day":/.test(String(commands[0][2])) && !/"renewals":/.test(String(commands[0][2]))) {
+      // closeOne writes its state with EVAL CLOSING_STATE_SAVE (lib/plan-closing.ts, stateSaver):
+      // ["EVAL", script, 1, key, mode, seen, text]. The day's own record is the save whose text has the day and no renewals.
+      const c = commands[0] ?? [];
+      const isSave = c[0] === "EVAL" && String(c[1]).startsWith("-- marktmorgen:closing-state-save:v1") && String(c[3]).startsWith("nl:plan:closing:");
+      const body = String(isSave ? c[6] : "");
+      if (!dropped && commands.length === 1 && isSave && /"day":/.test(body) && !/"renewals":/.test(body)) {
         dropped += 1;
         throw new Error("stand-in Redis down for the closing day's own record");
       }

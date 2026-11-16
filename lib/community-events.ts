@@ -55,7 +55,7 @@
  * oldest one that is over makes room for a new one. Every limit is in
  * lib/community-text.ts, where the studio reads it too.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { emailKey } from "@/lib/learn";
@@ -422,10 +422,11 @@ export type CreateResult = { ok: true; event: CommunityEvent } | { ok: false; re
  * The slot an event and everyone coming to it is counted in, in the store's
  * data room (lib/store-data.ts): its record, its place in the calendar, its
  * three reminders in the queue, the words it is found by, and each place
- * taken (RSVP_BYTES).
+ * taken (RSVP_BYTES: 96 until a place's value carried its attempt mark, 17 bytes more, ":" and 16 hex; Codex V on
+ * #2992).
  */
 const EVENT_SLOT = (event: string) => `cm:e:${event}`;
-export const RSVP_BYTES = 96;
+export const RSVP_BYTES = 113;
 function eventBytes(event: CommunityEvent): number {
   return dataBytes([JSON.stringify(event)], 5) + indexBytes([event.title, event.about]);
 }
@@ -679,6 +680,22 @@ export type RsvpResult = "added" | "already" | "full" | "closed";
  * itself, so a request that dies halfway cannot leave a count that says
  * "full" when it is not.
  */
+/**
+ * A place's value is "seconds:attempt": when it was taken, and a random mark of the request that wrote it. A place
+ * taken back (an unknown answer, a list over the cap) is deleted only while it still holds that request's own mark,
+ * so a concurrent request's place for the same member is never deleted (Codex V on #2992). One EVAL, as the HDEL was.
+ */
+export const RELEASE_RSVP = `-- marktmorgen:event-rsvp-release:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then return redis.call('HDEL', KEYS[1], ARGV[1]) end
+return 0`;
+async function releaseOwnRsvp(list: string, member: string, mark: string): Promise<void> {
+  await redisPipeline([["EVAL", RELEASE_RSVP, 1, list, member, mark]]);
+}
+/** When a place was taken, from its value: plain seconds (before the attempt mark) or "seconds:attempt". */
+export function rsvpSeconds(value: unknown): number {
+  return Number(String(value ?? "").split(":", 1)[0]) || 0;
+}
+
 export async function rsvp(id: string, event: CommunityEvent, member: string, room: DataStore, now = Date.now()): Promise<RsvpResult> {
   if (event.cancelled || isOver(event, now)) return "closed";
   // Each answer read exactly (sweep app5, finding 2; CX-123 rules 24 and 30): an unknown one fails (the page says the
@@ -688,9 +705,10 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
   if (already === 1) return "already";
   // A place takes room first (DataRoomError when it does not fit), and gives it back when it is not kept.
   await needData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
+  const mark = `${Math.floor(now / 1000)}:${randomBytes(8).toString("hex")}`;
   const replies = repliesFor(
     await redisPipeline([
-      ["HSETNX", rsvpKey(id, event.id), member, String(Math.floor(now / 1000))],
+      ["HSETNX", rsvpKey(id, event.id), member, mark],
       ["HLEN", rsvpKey(id, event.id)],
     ]),
     2,
@@ -702,13 +720,14 @@ export async function rsvp(id: string, event: CommunityEvent, member: string, ro
     return "already";
   }
   if (added !== 1 || length === null) {
-    // Whether the place was written, or how many now hold one, is unknown: it is given back, never kept over the cap.
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    // Whether the place was written, or how many now hold one, is unknown: it is given back, never kept over the cap,
+    // and only if it is this request's own (another request's place for the same member is kept).
+    await releaseOwnRsvp(rsvpKey(id, event.id), member, mark);
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     throw new UnknownReplyError("a place taken at an event");
   }
   if (event.cap > 0 && length > event.cap) {
-    await redisPipeline([["HDEL", rsvpKey(id, event.id), member]]);
+    await releaseOwnRsvp(rsvpKey(id, event.id), member, mark);
     await giveData(room, [{ slot: EVENT_SLOT(event.id), bytes: RSVP_BYTES }], now);
     return "full";
   }
@@ -771,7 +790,7 @@ export async function rsvpList(id: string, eventId: string, limit = 100_000): Pr
     // A hash answers field and value: an odd page is not one.
     if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("an event's HSCAN");
     const flat = read.items;
-    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], Number(flat[i + 1]) || 0);
+    for (let i = 0; i + 1 < flat.length; i += 2) seen.set(flat[i], rsvpSeconds(flat[i + 1]));
     cursor = read.next;
     if (cursor === "0" || seen.size >= limit) break;
   }
@@ -926,7 +945,7 @@ export async function rsvpsOf(id: string, who: string): Promise<{ event: string;
   const events = (Array.isArray(raw) ? raw : []).map(String).slice(0, MAX_KEPT_EVENTS);
   if (!events.length) return [];
   const replies = await redisPipeline(events.map((e) => ["HGET", rsvpKey(id, e), who]));
-  return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: Number(replies[i]) || 0 }]));
+  return events.flatMap((event, i) => (replies[i] === null || replies[i] === undefined ? [] : [{ event, at: rsvpSeconds(replies[i]) }]));
 }
 
 /** How many live events the community keeps: what deleting a member goes through (lib/community-erasure.ts), and what the walk of its archive reads (lib/community-walk.ts). */

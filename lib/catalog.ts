@@ -724,11 +724,13 @@ function parseJson(raw: unknown): unknown {
 function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
   if (ids === undefined) return productIds(store);
   const known = new Set(productIds(store));
-  const out: string[] = [];
+  // Each id once, in the order asked: a Set, so asking for every product stays linear (772 [SA4] unit 4 measured the
+  // list scan this replaced at 17 s for 100,000 products, tests/catalog-whole-read-load.test.ts).
+  const out = new Set<string>();
   for (const id of ids) {
-    if (typeof id === "string" && known.has(id) && !out.includes(id)) out.push(id);
+    if (typeof id === "string" && known.has(id)) out.add(id);
   }
-  return out;
+  return [...out];
 }
 
 /**

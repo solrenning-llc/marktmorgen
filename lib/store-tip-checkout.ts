@@ -10,8 +10,11 @@
  * what a list of sales needs to say what it was: the store, `kind: "tip"`, a
  * title, and the message the visitor left on Stripe's page.
  */
+import { createHash } from "node:crypto";
 import type { Store } from "@/lib/store";
-import { saleHandles } from "@/lib/store";
+import { saleHandles, storeRef } from "@/lib/store";
+import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { canSell } from "@/lib/store-checkout";
 import { StripeError, onAccount } from "@/lib/stripe-account";
 import { LANGUAGES } from "@/lib/store-language";
@@ -26,6 +29,37 @@ export const TIP_TITLE = "Support";
 
 const SESSION_ID_PATTERN = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
 const DISPLAY_NAME = "branding_settings[display_name]";
+
+/**
+ * How long the page a supporter comes back to may ask Stripe about a gift's
+ * checkout this store opened (R20 finding 3): a Stripe checkout lives a day
+ * at most and its page sends the supporter back at once, so two days covers
+ * it, and a return after that says, as for any id, that nothing was confirmed.
+ */
+export const TIP_MARK_SECONDS = 2 * 86_400;
+
+/**
+ * The mark one gift's checkout leaves: named by a hash of the store's key and
+ * the session id, so it is short, names neither, and another store's mark is
+ * never this one's.
+ */
+function tipMarkKey(store: Store, sessionId: string): string {
+  return `nl:tip:co:${createHash("sha256").update(`${storeRef(store)}|${sessionId}`).digest("hex")}`;
+}
+
+/**
+ * Whether this store's own tip checkout opened this session, read exactly
+ * (CX-123 rule 24): the one reply is the "1" written, true; a confirmed
+ * absence (null), false; any other shape throws UnknownReplyError, which the
+ * caller takes as not recorded, so an unknown never reaches Stripe.
+ */
+async function openedHere(store: Store, sessionId: string): Promise<boolean> {
+  if (!isRedisConfigured()) return false;
+  const reply = repliesFor(await redisPipeline([["GET", tipMarkKey(store, sessionId)]]), 1);
+  if (reply && reply[0] === "1") return true;
+  if (reply && reply[0] === null) return false;
+  throw new UnknownReplyError("a gift's checkout mark");
+}
 
 /** Whether this store's page shows the box and can take what is given: switched on, and a till that works. */
 export function tipsOpen(store: Store): boolean {
@@ -93,6 +127,14 @@ export async function createTipCheckout(
   if (typeof session.url !== "string" || !session.url || typeof session.id !== "string") {
     throw new Error("Stripe did not return a checkout URL");
   }
+  // Recorded before the visitor is sent, so the page they come back to asks
+  // Stripe about this session and no other (readTip). A mark Redis does not
+  // confirm is a checkout not handed out: the visitor is told it failed and
+  // may try again, and the unpaid session expires on Stripe's side.
+  const marked = SESSION_ID_PATTERN.test(session.id) && isRedisConfigured()
+    ? repliesFor(await redisPipeline([["SET", tipMarkKey(store, session.id), "1", "EX", TIP_MARK_SECONDS]]), 1)
+    : null;
+  if (!marked || marked[0] !== "OK") throw new Error("The gift's checkout could not be recorded");
   return { url: session.url, id: session.id };
 }
 
@@ -103,9 +145,20 @@ export type TipOutcome = { state: "paid"; amount: number; currency: string } | {
  * took, only for a finished checkout of this store's that was a gift. Anything
  * else — an id that is not one, another store's, a product's, unpaid — is
  * "waiting", which says nothing was confirmed and promises nothing.
+ *
+ * Stripe is asked only about a session this store's tip checkout recorded
+ * (createTipCheckout), so a made-up id in the address costs no call on the
+ * creator's account (R20 finding 3); a mark that is missing, expired or not
+ * read exactly is "waiting" too.
  */
 export async function readTip(store: Store, sessionId: string): Promise<TipOutcome> {
   if (!store.stripeAccountId || !SESSION_ID_PATTERN.test(sessionId)) return { state: "waiting" };
+  try {
+    if (!(await openedHere(store, sessionId))) return { state: "waiting" };
+  } catch (error) {
+    console.error("reading a gift's checkout mark failed", error);
+    return { state: "waiting" };
+  }
   try {
     const session = (await onAccount("GET", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(sessionId)}`)) as {
       status?: unknown;

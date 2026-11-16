@@ -51,6 +51,7 @@
  * the address that would receive. The second one matters because the first one
  * cannot see a flood that arrives from many machines at once.
  */
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
@@ -371,11 +372,7 @@ export type LimitAnswer = "within" | "over" | "unknown";
 
 /** Counts one more in the hour's window at `key`; a count in any other shape is unknown, and nothing is sent on it. */
 async function hourCount(key: string, limit: number): Promise<LimitAnswer> {
-  const replies = repliesFor(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]), 2);
-  const count = countOf(replies?.[1]);
+  const count = windowCountOf(await redisPipeline(windowCount(key, RATE_WINDOW_SECONDS)));
   return count === null ? "unknown" : count <= limit ? "within" : "over";
 }
 
@@ -708,17 +705,16 @@ export async function takeSignInCode(request: unknown, typed: unknown): Promise<
   // The tries, counted before anything is compared: the address's in the hour and in the day, then the request's own.
   // The record's time is read with them: a record gone since the HMGET is recreated by HINCRBY without one, and is
   // let go here rather than kept forever (Claude 3 on #2736).
-  const counted = repliesFor(await redisPipeline([
-    ["SET", tries as string, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", tries as string],
-    ["SET", day as string, "0", "EX", CODE_DAY_SECONDS, "NX"],
-    ["INCR", day as string],
+  const raw = await redisPipeline([
+    ...windowCount(tries as string, RATE_WINDOW_SECONDS),
+    ...windowCount(day as string, CODE_DAY_SECONDS),
     ["HINCRBY", record, "n", 1],
     ["TTL", record],
     ["GET", last as string],
-  ]), 7);
-  const forAddress = countOf(counted?.[1]);
-  const forDay = countOf(counted?.[3]);
+  ]);
+  const counted = repliesFor(raw, 7);
+  const forAddress = windowCountOf(raw, 0, 7);
+  const forDay = windowCountOf(raw, 2, 7);
   const forRequest = countOf(counted?.[4]);
   const left = counted?.[5];
   const newest = counted?.[6];
@@ -857,7 +853,9 @@ export async function endAllSessions(email: string): Promise<number | null> {
     const keys = stringList(members);
     if (!keys) throw new SessionsUnknownError("an account's sessions");
     const marks = await Promise.all(keys.map((key) => secondKeyOf(key)));
-    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ["DEL", owned]];
+    // Only the sessions read leave the set (#4263, as dropSecondStep does): a login landing between the read and these
+    // deletes keeps its session named in the set, so the next "log out of all devices" still closes it.
+    const commands: (string | number)[][] = [...keys.map((key) => ["DEL", key]), ...marks.map((mark) => ["DEL", mark]), ...keys.map((key) => ["SREM", owned, key])];
     // Each delete answers 0 or 1: an answer missing or in another shape is not a session closed (CX-123 rule 24).
     if (!removedEach(await redisPipeline(commands), commands.length)) throw new SessionsUnknownError("the logging out of an account's sessions");
     return keys.length;

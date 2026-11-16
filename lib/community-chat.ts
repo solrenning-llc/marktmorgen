@@ -347,8 +347,11 @@ export function refusalWords(reason: ChatRefusal, slow: number, wait?: number): 
 
 /** How many messages the room holds right now. */
 export async function roomSize(id: string): Promise<number> {
-  const [n] = await redisPipeline([["ZCARD", roomKey(id)]]);
-  return Number(n) || 0;
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", roomKey(id)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the community room's messages");
+  return n;
 }
 
 /**
@@ -368,8 +371,12 @@ export async function roomSize(id: string): Promise<number> {
  */
 export async function searchRoom(id: string, used: string[]): Promise<ChatMessage[]> {
   if (!used.length) return [];
-  const [raw] = await redisPipeline([["ZREVRANGE", roomKey(id), 0, MAX_CHAT_KEPT - 1]]);
-  const rows = (Array.isArray(raw) ? raw : []).map(parse).filter((m): m is ChatMessage => m !== null);
+  // The room in its exact shape (CX-123 rule 24): a lost or off-shape reply is
+  // not "no match", so the search page says it could not search the room.
+  // Only an exact empty room has nothing to find.
+  const raw = stringList(repliesFor(await redisPipeline([["ZREVRANGE", roomKey(id), 0, MAX_CHAT_KEPT - 1]]), 1)?.[0]);
+  if (!raw) throw new UnknownReplyError("the room for a search");
+  const rows = raw.map(parse).filter((m): m is ChatMessage => m !== null);
   return rows.filter((message) => holdsAll(message.text, used));
 }
 

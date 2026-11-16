@@ -49,15 +49,26 @@ function reserve(cmd: (string | number)[]): number {
   if (!hash || hash.get('review') !== review || hash.get('policy') !== policy) return 0;
   const parse = parseAmount;
   const company = parse(hash.get('company'));
+  // v2 (R32 finding 1): a plan switched inside the window moves the field's one total under the current tier.
+  if (!TIERS.includes(String(tier))) return 0;
   const scopeField = 'tier:' + field, scope = hash.get(scopeField);
   const hasScope = hash.has(scopeField);
-  if (hasScope && (scope !== tier || !hash.has(String(field)))) return 0;
+  if (hasScope && (!TIERS.includes(String(scope)) || !hash.has(String(field)))) return 0;
   if (!hasScope && hash.has(String(field))) return 0;
+  if (hash.has(String(field)) && !Number.isSafeInteger(parse(hash.get(String(field))))) return 0;
+  const heldField = 'held:' + tier + ':' + field, held = hash.get(heldField);
+  if (hash.has(heldField) && (held !== '1' || !hasScope)) return 0;
+  const switched = hasScope && scope !== tier;
+  const leftField = switched ? 'held:' + scope + ':' + field : null;
+  if (leftField && hash.has(leftField) && hash.get(leftField) !== '1') return 0;
+  const claim = !hasScope || (switched && !hash.has(heldField));
   const slots = parse(hash.get('slots:' + tier));
-  if (!Number.isSafeInteger(slots) || slots > Number(funded) || (!hasScope && slots <= 0)) return 0;
+  if (!Number.isSafeInteger(slots) || slots > Number(funded) || (claim && slots <= 0)) return 0;
   const used = hash.has(String(field)) ? parse(hash.get(String(field))) : 0;
-  if (!Number.isSafeInteger(company) || !Number.isSafeInteger(used) || used > company || Number(amount) > Number(storeLimit) - used || Number(amount) > Number(companyLimit) - company) return 0;
-  if (!hasScope) { hash.set('slots:' + tier,String(slots-1)); hash.set(scopeField,String(tier)); }
+  if (!Number.isSafeInteger(company) || !Number.isSafeInteger(used) || used > company || used > Number(storeLimit) || Number(amount) > Number(storeLimit) - used || Number(amount) > Number(companyLimit) - company) return 0;
+  if (claim) hash.set('slots:' + tier, String(slots - 1));
+  if (leftField) hash.set(leftField, '1');
+  if (!hasScope || switched) hash.set(scopeField, String(tier));
   hash.set(String(field), String(used + Number(amount)));hash.set('company', String(company + Number(amount)));return 1;
 }
 export function settings(value: { available?: boolean; response?: unknown[] | null; failure?: boolean }) { if(value.available !== undefined)available=value.available;if(value.response !== undefined)response=value.response;if(value.failure !== undefined)failure=value.failure; }

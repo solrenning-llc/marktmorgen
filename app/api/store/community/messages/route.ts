@@ -101,7 +101,9 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
     let sent: Awaited<ReturnType<typeof send>>;
     progress.writing = true;
     try {
-      sent = await send(id, config.dm, key, to, text, store);
+      // Past the day's openings, a new request is refused before it is written
+      // (never written and then answered "slow", which invites a second copy).
+      sent = await send(id, config.dm, key, to, text, store, { mayAsk: owner || started });
     } catch (error) {
       // No room in the store's data room: nothing was sent (lib/store-data.ts).
       if (error instanceof DataRoomError) return back(`${box}/${pairOf(key, to)}`, "noroom");
@@ -117,13 +119,14 @@ async function act(request: NextRequest, progress: Progress): Promise<Response> 
               ? "dmbetween"
               : sent.reason === "empty"
                 ? "empty"
-                : "dmoff";
+                : sent.reason === "slow"
+                  ? "slow"
+                  : "dmoff";
       // "declined" answers exactly as success does, on purpose: somebody who
       // was turned down learns that their message went, and nothing else.
       // Telling them they were declined turns a quiet no into an argument.
-      return back(why === "dmsent" ? box : `${box}/${pairOf(key, to)}`, why);
+      return back(why === "dmsent" || why === "slow" ? box : `${box}/${pairOf(key, to)}`, why);
     }
-    if (!owner && !started && sent.asked) return back(box, "slow");
     return sent.asked ? back(box, "dmasked") : back(`${box}/${pairOf(key, to)}`, "dmsent");
   }
 

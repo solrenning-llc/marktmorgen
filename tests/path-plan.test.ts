@@ -9,4 +9,6 @@ is("negative use",pathPlanLine(-1,1000),null);
 is("unbounded use",pathPlanLine(Infinity,1000),null);
 is("no plan suggested where none can be had",pathPlanLine(900,1000,false),"You have used 900 of 1,000 studio requests this window.");
 is("above the limit remains factual",pathPlanLine(1001,1000)?.includes("1,001 of 1,000"),true);
+is("an unread count is said to be unknown, never hidden as nothing used",pathPlanLine(null,1000),"How many studio requests you have used this window could not be read just now. Reload the page to check.");
+is("an unread count with no known allowance says nothing",pathPlanLine(null,0),null);
 done();

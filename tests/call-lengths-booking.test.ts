@@ -16,7 +16,7 @@
  *   - the studio's save route refuses several lengths until the pages say
  *     each of them (the editor unit).
  */
-import { MAX_SETUP_LENGTHS, parseSetup, readSetup, type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import { MAX_SETUP_LENGTHS, parseSetup, readSetup, type CallSetup } from "@/lib/call-setup";
 import { MAX_CALL_LENGTHS, bookingLength, ownLength } from "@/lib/call-lengths";
 import { callCheckoutBody, holdAndCheckout, moveBooking, slotsForMove, type CallListing } from "@/lib/calls";
 import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -24,6 +24,7 @@ import { readListing, readProduct } from "@/lib/catalog";
 import type { Product, Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const bodies: URLSearchParams[] = [];
@@ -46,17 +47,6 @@ const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 30, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 30, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
 const LENGTHS = [{ minutes: 30, cents: 4500 }, { minutes: 60, cents: 8000 }];
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * 86_400_000);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 async function main(): Promise<void> {
   redis.clear();
@@ -156,7 +146,9 @@ async function main(): Promise<void> {
 
   part("Once the list is gone, a paid hour still moves as an hour");
   await setProductCall(OWNER, made.product.id, readSetup(weekly) as CallSetup);
-  const plainListing = (await readListing(store, made.product.id)) as CallListing;
+  // Read from the store as saved now: a listing read from the store record taken before the change still has the list,
+  // and a move that read the call before a change is refused (lib/calls.ts callUnchanged, issue #3983).
+  const plainListing = (await readListing((await storeForEmail(OWNER)) as Store, made.product.id)) as CallListing;
   const again = await moveBooking({ store, product: plainListing, session: long.session, booked: { start: later, end: later + 3_600_000, email: "ana@example.com", buyerTz: NY }, start: at + 3 * 3_600_000, origin: "https://marktmorgen.com" });
   is("the setup's own is half an hour, the booking stays an hour", again.ok ? again.end - again.start : again, 3_600_000);
 }

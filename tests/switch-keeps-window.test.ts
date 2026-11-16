@@ -554,7 +554,9 @@ async function main(): Promise<void> {
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
     // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.18 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.18"]);
+    // Merge of main into #3485 (16 November 2026): the second tier's write (tierFor's reads, the unconfirmed-buyer list)
+    // on main's costs leaves Scale's monthly worst month one cent less: 703.17 where 703.18 was, still above zero (MR).
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.17"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's

@@ -1985,7 +1985,10 @@ export class MemoryRedis {
           this.live(keys[0]);
           const record = this.data.get(keys[0]);
           if (record !== undefined && !(record instanceof Map)) throw new Error("WRONGTYPE");
+          // Its calls are billed beside the EVAL, as Upstash bills them (Claude 7's MÉDIO on #4472; tests/stock-sell-cost.test.ts).
+          this.scriptCalls += 1;
           if (this.run(["HDEL", keys[0], argv[0]]) !== 1) return 0;
+          this.scriptCalls += 1;
           this.run(["HINCRBY", keys[0], "#sold", 1]);
           return 1;
         }

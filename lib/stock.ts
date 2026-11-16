@@ -52,12 +52,6 @@ type Entry = { until: number; paid?: boolean };
 const stockKey = (id: string, productId: string) => `nl:stock:${id}:${productId}`;
 /** The field of a stock record that counts its units sold: never a checkout id (cs_) nor a provisional hold (p_). */
 const SOLD = "#sold";
-/**
- * The most sold units written the old way (a field each) one count folds into
- * SOLD, so a record written before the fold is moved over a little at a time,
- * each step short on the Redis side.
- */
-const FOLD_MOST = 200;
 
 /**
  * A unit sold, counted once (Claude 3's performance audit, 13 November 2026),
@@ -69,7 +63,10 @@ const FOLD_MOST = 200;
  * unit before the buyer can pay (withCartStockHolds, before the checkout is
  * handed over), and a hold is let go only once Stripe says its checkout
  * expired or once it is counted here, so a paid checkout always has its field
- * until it is counted.
+ * until it is counted. Billed as the EVAL and its two calls
+ * (STOCK_SELL_COMMANDS in tests/plan-cost-registry.ts), it runs once for each
+ * order's unit (confirmCartStock, or the settling of a lapsed hold Stripe says
+ * is paid), never on a page's count of what is left.
  * KEYS: the product's stock record; ARGV: the checkout's id. Returns 1 when counted now, 0 when there was nothing to count.
  */
 export const STOCK_SELL = `-- marktmorgen:stock-sell:v1
@@ -183,7 +180,6 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   const { entries, sold } = await readEntries(store, product);
   let used = sold;
   let checks = 0;
-  let folded = 0;
   let unresolved = 0;
   // Lapsed holds whose checkout could not be read: counted as used (the safe way to be wrong for selling), and
   // counted here so a refusal is never decided on them (stockLeftKnown).
@@ -191,12 +187,10 @@ async function countStock(store: Store, product: Listing, now: number, ask: bool
   const writes: (string | number)[][] = [];
   for (const [session, entry] of entries) {
     if (entry.paid) {
+      // A sale written the old way, a field each: counted as used, as main reads it, and never written by a page's
+      // count (Claude 7's MÉDIO on #4472: up to 200 STOCK_SELL scripts a product on every public page load, priced
+      // nowhere). Its own checkout's confirmation folds it into SOLD, once, the count unchanged (confirmCartStock).
       used += 1;
-      // A sale written the old way, a field each: folded into SOLD a little at a time, outside any lock, the count unchanged.
-      if (ask && folded < FOLD_MOST) {
-        folded += 1;
-        writes.push(sellCommand(store.statsId, product.id, session));
-      }
       continue;
     }
     if (entry.until > now) {
@@ -564,7 +558,19 @@ export async function confirmCartStock(store: Store, products: Listing[], sessio
   // only where this checkout held a unit: STOCK_SELL raises SOLD only when it let go of the checkout's own field, so a
   // thanks page opened again from an old receipt (before the product was limited, or past its unit's settling) never
   // spends one (main's #4535 rule, kept in the one Redis step).
-  await redisPipeline(limited.map((product) => sellCommand(statsId, product.id, session)));
+  // One HEXISTS a product first (Claude 7's MÉDIO on #4472): a thanks page opened again costs one read a product, as
+  // main's confirmation did, and the script (three billed commands) runs only where the checkout still holds a field,
+  // once in each order's life, inside STOCK_CONFIRM_COMMANDS_MOST (tests/stock-sell-cost.test.ts).
+  const held = await heldBy(limited.map((product) => stockKey(statsId, product.id)), session);
+  if (held.length === 0) return;
+  await redisPipeline(held.map((key) => ["EVAL", STOCK_SELL, 1, key, session]));
+}
+
+/** The stock records, of those named, on which this checkout still has its own field (a hold, or a sale written the old way). */
+async function heldBy(keys: string[], session: string): Promise<string[]> {
+  const receipt = await redisPipeline(keys.map((key) => ["HEXISTS", key, session]));
+  if (!Array.isArray(receipt) || receipt.length !== keys.length) throw new Error("Stock reading unavailable");
+  return keys.filter((_, i) => Number(receipt[i]) === 1);
 }
 
 /**

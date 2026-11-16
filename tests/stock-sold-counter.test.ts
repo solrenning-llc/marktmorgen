@@ -9,8 +9,10 @@
  *   - confirmStock told twice for one checkout counts the unit once, and told
  *     again long after (no mark is kept per sale, so nothing can expire) still once;
  *   - two buyers racing for the last unit: only one is counted, the count stays 0;
- *   - a record written the old way (a field per sale) is folded into the counter
- *     a little at a time, losing no sale, even with a fresh sale in the middle;
+ *   - a record written the old way (a field per sale) is counted right, a fresh
+ *     sale beside it is not lost, and each old sale is folded into the counter
+ *     by its own checkout's confirmation, never by a page's count (Claude 7's
+ *     MÉDIO on #4472: the page-load fold was priced nowhere);
  *   - a held unit handed back, and a refunded sale, still leave the count right.
  */
 import { parseProduct } from "@/lib/catalog";
@@ -99,22 +101,24 @@ async function main(): Promise<void> {
   await confirmStock(creator, last, session(2));
   is("and a checkout with no hold adds nothing, never below zero", [await stockLeft(creator, last), ((await redis.pipeline([["HGET", key("sc_last"), "#sold"]])) as unknown[])[0]], [0, "1"]);
 
-  part("A record written the old way is folded without losing a sale");
-  // 250 sales as the field-per-sale shape wrote them (until, paid), more than one fold (FOLD_MOST 200) takes.
+  part("A record written the old way loses no sale, and is folded only by its own sales");
+  // 250 sales as the field-per-sale shape wrote them (until, paid).
   const old = limited("sc_old", 1_000);
   const writes: (string | number)[][] = [];
   for (let i = 0; i < 250; i += 1) writes.push(["HSET", key("sc_old"), session(i), JSON.stringify({ until: 0, paid: true })]);
   await redis.pipeline(writes);
-  const firstCount = await stockLeft(creator, old);
-  is("the count is right straight away, before the fold finishes", firstCount, 750);
-  // A fresh sale lands while the old fields are still being folded.
+  const oldBytes = await storedBytes("sc_old");
+  is("the count is right straight away", await stockLeft(creator, old), 750);
+  // A fresh sale lands beside the old fields.
   await sell(old, 250);
-  const midCount = await stockLeft(creator, old);
-  is("a sale in the middle of folding is not lost", midCount, 749);
-  // Fold the rest (each count folds at most FOLD_MOST).
+  is("a fresh sale beside them is not lost", await stockLeft(creator, old), 749);
+  // Pages count it again and again: none of them writes (each would be a billed script no line prices).
   for (let round = 0; round < 5; round += 1) await stockLeft(creator, old);
-  is("after folding, the count still holds", await stockLeft(creator, old), 749);
-  is("and nothing of the old per-sale fields is left to read", (await storedBytes("sc_old")) <= PRODUCT_SIDE_BYTES, true);
+  is("pages counting it change nothing, the count still holds", [await stockLeft(creator, old), (await storedBytes("sc_old")) <= oldBytes + 16], [749, true]);
+  // An old sale's own checkout confirmed again (its thanks page opened again) folds it, the count unchanged.
+  for (let i = 0; i < 250; i += 1) await confirmStock(creator, old, session(i));
+  is("each old sale folded by its own confirmation, the count unchanged", await stockLeft(creator, old), 749);
+  is("and nothing of the old per-sale fields is left to read", [(await redis.pipeline([["HGET", key("sc_old"), "#sold"]]))[0], (await storedBytes("sc_old")) <= PRODUCT_SIDE_BYTES], ["251", true]);
 
   part("Handing a unit back, and a refund");
   const back = limited("sc_back", 3);

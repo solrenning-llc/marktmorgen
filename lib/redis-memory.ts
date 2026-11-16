@@ -217,6 +217,14 @@ export class MemoryRedis {
         return to < from ? "" : new TextDecoder().decode(bytes.slice(from, to + 1));
       }
       case "EVAL": {
+        // lib/plan-refund-flow.ts TAKE_REVIEW: the review pass taken only while it was issued for this token.
+        if (key.startsWith("-- marktmorgen:plan-refund-take-review:v1\n") && args[0] === "1" && args.length === 3) {
+          const [, pass, token] = args;
+          const held = this.run(["GET", pass]);
+          if (typeof held !== "string" || !held.startsWith(`${token}:`)) return null;
+          this.run(["DEL", pass]);
+          return held;
+        }
         // lib/flows.ts WRITE_FLOWS_IF: the workflows written only over the text they were read from, sent as its SHA-1.
         if (key.startsWith("-- marktmorgen:flows-write-if:v2\n") && args[0] === "1" && args.length === 5) {
           const [, list, had, expected, json] = args;
@@ -304,6 +312,21 @@ export class MemoryRedis {
           const first = this.zset(list)[0];
           if (first === undefined) this.run(["ZREM", stores, store]);
           else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
+        // lib/flow-runs.ts LEFT_IF_RUN: a run that still holds its address ends as left; one erased meanwhile is not written back.
+        if (key.startsWith("-- marktmorgen:flow-left-if-run:v1\n") && args[0] === "3" && args.length === 9) {
+          const [, run, log, index, email, now, entry, keep, person] = args;
+          if (this.run(["HEXISTS", run, "email"]) !== 1) {
+            this.run(["DEL", run, log]);
+            return 0;
+          }
+          this.run(["HDEL", run, "open"]);
+          this.run(["RPUSH", log, entry]);
+          this.run(["HSET", run, "email", email, "status", "left", "step", "-1", "note", "", "updatedAt", now]);
+          this.run(["ZADD", index, now, person]);
+          this.run(["EXPIRE", run, keep]);
+          this.run(["EXPIRE", log, keep]);
           return 1;
         }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.

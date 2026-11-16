@@ -26,7 +26,8 @@ const created: { body: Record<string, unknown>; requestId: string | null }[] = [
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status });
-  if (url.hostname === "api.stripe.com") return json({ data: [], has_more: false });
+  // Stripe lists read whole and exactly (lib/stripe-list.ts): an empty list says "object": "list", so the refunds read is complete (#4453).
+  if (url.hostname === "api.stripe.com") return json({ object: "list", data: [], has_more: false });
   if (url.hostname !== "api-m.paypal.com") return json({ error: "unexpected" }, 404);
   const headers = new Headers(init?.headers);
   if (url.pathname === "/v1/oauth2/token") {

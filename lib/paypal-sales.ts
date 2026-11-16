@@ -954,6 +954,15 @@ const CAPTURE_TAKEN_BACK: ReadonlySet<string> = new Set(["REFUNDED", "REVERSED",
 const CAPTURE_STATUSES_READ: ReadonlySet<string> = new Set([...CAPTURE_KEEPS, ...CAPTURE_TAKEN_BACK]);
 /** How often a paid order whose capture is in a status not known here is looked at once PayPal's 180 days are over. */
 const UNKNOWN_STATUS_LOOK_SECONDS = 86_400;
+/**
+ * How long a payment refunded in full whose telling to the store's webhooks failed (on.refunded threw: a deletion print
+ * or a once-only mark that did not read, rule 24) waits before it is looked at again, and told again then (review of
+ * #3491, MEDIUM): an hour, the watch's own first-week pace (nextLook), so an order owed its telling is never looked at
+ * more often than PAYPAL_REFUND_WATCH.looksPerOrderPerDayAtMost, and never past its paid record (daysWatchedAtMost).
+ * The event's id is its seed's (paypal:<capture>), so telling it again never sends it twice. PAYPAL_REFUND_TOLD in
+ * tests/plan-cost-registry.ts prices the look.
+ */
+export const REFUND_TELL_AGAIN_SECONDS = 3_600;
 /** How many due paid orders one run of the refund watch looks at for a store: PAYPAL_WATCH_BATCH, the one batch (PAYPAL_REFUND_WATCH and NOT_A_COST.REFUND_WATCH_BATCH in tests/plan-cost-registry.ts). */
 export const REFUND_WATCH_BATCH = PAYPAL_WATCH_BATCH;
 /** How many pending orders one run of the sweep asks PayPal about for a store: PAYPAL_WATCH_BATCH, the one batch (PAYPAL_PENDING_SWEEP and NOT_A_COST.PENDING_SWEEP_BATCH in tests/plan-cost-registry.ts). */
@@ -1141,7 +1150,22 @@ export async function watchPayPal(
       continue;
     }
     // Told as a refund only when it is one: the event says fully_refunded, which a chargeback or a failed payment is not.
-    if (on.refunded && status === "REFUNDED") await on.refunded(paid).catch((error) => console.error("telling of a PayPal refund failed", error));
+    // A telling that failed is owed, never lost (review of #3491, MEDIUM: emitEvent takes its mark back on a deletion
+    // print it cannot read): what this payment gave is still taken back below, but the order does not leave the watch;
+    // it is looked at again in REFUND_TELL_AGAIN_SECONDS and told then, once (the event's id is its seed's). Every
+    // other way below that keeps the order watched tells it again too.
+    const owed =
+      on.refunded && status === "REFUNDED"
+        ? await on.refunded(paid).then(
+            () => false,
+            (error: unknown) => {
+              console.error("telling of a PayPal refund failed; told again when the order is looked at in an hour", order, error);
+              return true;
+            },
+          )
+        : false;
+    // Where the order would leave the watch: kept for its telling's next try while it is owed.
+    const leaveCommand = (): (string | number)[] => (owed ? ["ZADD", watchKey(statsId), String(now + REFUND_TELL_AGAIN_SECONDS), order] : ["ZREM", watchKey(statsId), order]);
     // The record read in its exact envelope (Codex G on #2791; CX-123 rule 24): one reply, null or text. Anything else
     // is unknown, looked at again in an hour, never "no record".
     const read = repliesFor(await redisPipeline([["HGET", importedKey(statsId, paid.email), paid.product]]), 1);
@@ -1154,7 +1178,7 @@ export async function watchPayPal(
     // No record: nothing of this payment is held any more, so nothing to take back. A record that does not read is
     // unknown, never "not this payment's": looked at again in an hour (rule 30, Claude 4 on #2781).
     if (given === null) {
-      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      await redisPipeline([leaveCommand()]);
       continue;
     }
     let v: unknown;
@@ -1192,7 +1216,7 @@ export async function watchPayPal(
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]);
         continue;
       }
-      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      await redisPipeline([leaveCommand()]);
       continue;
     }
     const listed = (v as { items?: unknown }).items;
@@ -1247,7 +1271,7 @@ export async function watchPayPal(
         await redisPipeline([["ZADD", watchKey(statsId), String(now + 3600), order]]).catch(() => undefined);
         return false;
       }
-      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      await redisPipeline([leaveCommand()]);
       return true;
     };
     if (kept) {
@@ -1281,7 +1305,7 @@ export async function watchPayPal(
     );
     const answer = taken?.[0];
     if (answer === 1 || answer === 2) {
-      await redisPipeline([["ZREM", watchKey(statsId), order]]);
+      await redisPipeline([leaveCommand()]);
       if (answer === 1) revoked += 1;
     } else {
       await redisPipeline([["ZADD", watchKey(statsId), String(now + (answer === 0 ? 60 : 3600)), order]]).catch(() => undefined);

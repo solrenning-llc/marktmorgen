@@ -554,12 +554,20 @@ async function main(): Promise<void> {
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
     // Merge of main into #3491 (15 November 2026): this PR's deletion-print read in a webhook's try with main's costs
     // keeps one cent less on Studio and Scale monthly: 313.82 and 703.25, still above zero (MR). Cost is not lowered.
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.25 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.25"]);
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merge of main 7aa1ce65a3 (16 November 2026) into #3491: this PR's deletion-print read and main's outbox together;
+    // Scale's monthly worst month keeps 703.17 where main shows 703.18 (Store and Studio as main); still above zero (MR).
+    // Cost is not lowered. The PayPal refund owed on an unread print (review of #3491, MEDIUM) is the refund watch's, a
+    // company cost (PAYPAL_REFUND_TOLD), not a plan's line, so it moves no figure here.
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.17"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.70 and 579.98 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.98"]);
+    // Merge of main 7aa1ce65a3 (16 November 2026, with #4319's outbox) into #3491: the yearly month is main's, 37.04,
+    // 258.68 and 579.90, still above zero (MR). Cost is not lowered.
+    is("11: and 37.04, 258.68 and 579.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.90"]);
   } finally {
     Date.now = realNow;
   }

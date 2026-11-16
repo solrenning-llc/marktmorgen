@@ -1374,19 +1374,26 @@ export async function dropSpace(id: string, space: string): Promise<void> {
 /**
  * Deletes one member's own record (lib/community-erasure.ts): who they are,
  * their name and answers, their place in the directory, and the counts kept
- * for their limits. Answers the record as it was, for the keys it names
- * elsewhere (their handle, their unsubscribe token), or null.
+ * for their limits. Answers how many records its HDEL deleted (0 or 1);
+ * the keys the record names elsewhere (their handle, their unsubscribe token)
+ * are read and deleted before it, by the erasure (readMember).
  */
-export async function forgetMemberRecord(id: string, who: string): Promise<Member | null> {
-  if (!isRedisConfigured()) return null;
-  const [raw] = await redisPipeline([["HGET", membersKey(id), who]]);
-  const member = parseMember(raw);
-  await redisPipeline([
+export async function forgetMemberRecord(id: string, who: string): Promise<number> {
+  if (!isRedisConfigured()) return 0;
+  const rates = (Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind));
+  // Each delete's own answer, read exactly (CX-123 rule 24; Claude 7 on #3095): HDEL and ZREM of one field 0 or 1, the
+  // rate keys' DEL from 0 up to their number. Any other answer, or a pipeline that does not answer one for each, may
+  // have left the record there: it throws, and the erasure is retried, never reported done. The count is the HDEL's.
+  const replies = repliesFor(await redisPipeline([
     ["HDEL", membersKey(id), who],
     ["ZREM", dirKey(id), who],
-    ["DEL", ...(Object.keys(RATE_LIMITS) as RateKind[]).map((kind) => rateKey(id, who, kind))],
-  ]);
-  return member;
+    ["DEL", ...rates],
+  ]), 3);
+  const [record, listed, limits] = (replies ?? []).map(countOf);
+  if (!replies || (record !== 0 && record !== 1) || (listed !== 0 && listed !== 1) || limits === null || limits === undefined || limits > rates.length) {
+    throw new UnknownReplyError("a community member's record deleted");
+  }
+  return record;
 }
 
 /** Commands sent at once while reading a whole community for one member's copy. */

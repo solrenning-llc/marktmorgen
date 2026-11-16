@@ -71,7 +71,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   if (path === "/subscriptions/search") return json({ object: "search_result", data: [], has_more: false, next_page: null });
   if (path === "/invoices" && method === "GET") return json({ object: "list", data: world.invoices.filter((row) => row.subscription === url.searchParams.get("subscription")), has_more: false });
   const intent = path.match(/^\/payment_intents\/(pi_\w+)$/);
-  if (intent) return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, currency: "usd", amount: 6_900, amount_refunded: 0, disputed: false } });
+  if (intent) return json({ id: intent[1], latest_charge: { id: `ch_${intent[1].slice(3)}`, payment_intent: intent[1], currency: "usd", amount: 6_900, amount_refunded: 0, disputed: false } });
   if (path === "/refunds" && method === "GET") return json({ object: "list", data: world.refunds.filter((row) => row.charge === url.searchParams.get("charge")), has_more: false });
   if (path === "/refunds" && method === "POST") {
     const refund = { id: `re_${String(world.refunds.length + 1).padStart(8, "0")}`, object: "refund", charge: `ch_${String(form.get("payment_intent")).slice(3)}`, payment_intent: form.get("payment_intent"), amount: Number(form.get("amount")), status: "succeeded", currency: "usd" };

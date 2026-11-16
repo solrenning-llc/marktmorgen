@@ -40,7 +40,7 @@ async function main(): Promise<void> {
     await setSubscription(email, { customerId: "cus_Wg7RiskProof1", subscriptionId: "sub_Wg7RiskProof1", active: true, period: paidPeriod() });
     const store = (await storeForEmail(email))!;
     const now = Math.floor(Date.now() / 1000);
-    const charge = (id: string, outcome: unknown) => ({ id, object: "charge", outcome });
+    const charge = (id: string, outcome: unknown, review: unknown = null) => ({ id, object: "charge", outcome, review });
     const checkout = (id: string, paymentIntent: unknown, extra: Record<string, string> = {}, created = now) => ({
       id, status: "complete", payment_status: "paid", created, amount_total: 4900, currency: "usd",
       metadata: { store: store.handle, title: `Sale ${id}`, ...extra },
@@ -60,6 +60,10 @@ async function main(): Promise<void> {
       checkout("cs_test_trial", null, { trial_days: "7" }, now - 9),
       checkout("cs_test_customerobj", { id: "cus_x", object: "customer", latest_charge: charge("ch_c", { risk_level: "highest" }) }, {}, now - 12),
       checkout("cs_test_noobject", { id: "pi_y", latest_charge: charge("ch_y", { risk_level: "normal" }) }, {}, now - 13),
+      // Claude 7 on #3647: Radar's manual review, by the creator in their own Stripe account.
+      checkout("cs_test_review_open", { id: "pi_ro", object: "payment_intent", latest_charge: charge("ch_ro", { type: "manual_review", risk_level: "normal" }, { id: "prv_open", object: "review", open: true }) }, {}, now - 15),
+      checkout("cs_test_review_closed", { id: "pi_rc", object: "payment_intent", latest_charge: charge("ch_rc", { type: "manual_review", risk_level: "elevated" }, { id: "prv_closed", object: "review", open: false }) }, {}, now - 16),
+      checkout("cs_test_review_id", { id: "pi_ri", object: "payment_intent", latest_charge: charge("ch_ri", { type: "manual_review", risk_level: "normal" }, "prv_not_expanded") }, {}, now - 17),
     ] };
     intents = { object: "list", has_more: false, data: [
       { id: "pi_upsell_risky", object: "payment_intent", status: "succeeded", created: now - 10, amount: 900, currency: "usd",
@@ -77,6 +81,7 @@ async function main(): Promise<void> {
     const [sessionRead, intentRead] = calls.slice(before);
     is("the checkouts read expands each payment's charge", sessionRead.searchParams.getAll("expand[]").includes("data.payment_intent.latest_charge"), true);
     is("the one-click extras read expands each charge", intentRead.searchParams.getAll("expand[]").includes("data.latest_charge"), true);
+    is("and both expand the charge's review, so an open one is told from a closed one (Claude 7 on #3647)", [sessionRead.searchParams.getAll("expand[]").includes("data.payment_intent.latest_charge.review"), intentRead.searchParams.getAll("expand[]").includes("data.latest_charge.review")], [true, true]);
     if (list.state !== "ok") throw new Error("Expected a readable list");
     const risk = new Map(list.sales.map((sale) => [sale.reference, sale.risk]));
 
@@ -96,6 +101,11 @@ async function main(): Promise<void> {
     is("a payment that does not say what it is", risk.get("cs_test_noobject"), "not_available");
     is("an extra whose charge was not expanded", risk.get("pi_upsell_plain"), "not_available");
     is("an extra row that is not a payment, with a charge in it (Codex G on #3647)", risk.get("pi_upsell_wrongobj"), "not_available");
+
+    part("A review is in review only while it is open (Claude 7 on #3647)");
+    is("an open review: waiting for the creator's review", risk.get("cs_test_review_open"), "in_review");
+    is("a review the creator closed: the level Stripe gave, never in review for good", risk.get("cs_test_review_closed"), "elevated");
+    is("a review that was not expanded: not available, never in review and never normal", risk.get("cs_test_review_id"), "not_available");
 
     part("A free trial charged nothing, so it shows no risk");
     is("trial has no risk", risk.get("cs_test_trial"), null);

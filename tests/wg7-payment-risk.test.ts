@@ -30,7 +30,7 @@ is("normal, elevated and highest are read as they are", [riskLevelOf(charge("nor
 is("not assessed or unknown by Stripe: not available, never normal", [riskLevelOf(charge("not_assessed")), riskLevelOf(charge("unknown"))], ["not_available", "not_available"]);
 is("a value Stripe does not send (low, a number, a different case): not available", [riskLevelOf(charge("low")), riskLevelOf(charge(12)), riskLevelOf(charge("Normal"))], ["not_available", "not_available", "not_available"]);
 is("no outcome, no charge, a bare id or another object: not available", [riskLevelOf({ id: "ch_1", object: "charge" }), riskLevelOf(null), riskLevelOf("ch_1"), riskLevelOf({ id: "pi_1", object: "payment_intent", outcome: { risk_level: "normal" } }), riskLevelOf({ id: "ch_1", object: "charge", outcome: "normal" })], ["not_available", "not_available", "not_available", "not_available", "not_available"]);
-is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", in_review: "Risk: in review by Stripe", not_available: "Risk: not available" });
+is("the words on the sales list and the order", RISK_WORDS, { normal: "Risk: normal", elevated: "Risk: elevated", highest: "Risk: highest", in_review: "Risk: waiting for your review in Stripe", not_available: "Risk: not available" });
 is("no word says low and none is a score", Object.values(RISK_WORDS).some((w) => /\blow\b|\d/.test(w)), false);
 
 part(`A store's simple rules: at most ${MAX_RULES}, each kind once, read back whole or not at all`);
@@ -82,7 +82,12 @@ is("unknown rules on something not shipped hold nothing", shippingDecision({ rul
 
 part("A charge Stripe put in manual review is held, never shipped (Claude 3 review of #3633, LEVE 1)");
 const reviewed = { id: "ch_1", object: "charge", outcome: { type: "manual_review", risk_level: "normal" }, review: "prv_1" };
-is("outcome type manual_review, or an open review on the charge: in review", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "normal" }, review: null }), riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: { id: "prv_1", object: "review" } })], ["in_review", "in_review", "in_review"]);
+// Claude 7 on #3647: Stripe keeps outcome.type and charge.review after the review is closed, so only an open review,
+// read expanded, is "in review"; a closed one gives Stripe's level; one that cannot be read is not available.
+is("an open review, read expanded: in review", riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "review", open: true } }), "in_review");
+is("a closed review: the level Stripe gave, though outcome still says manual_review", riskLevelOf({ ...reviewed, outcome: { type: "manual_review", risk_level: "elevated" }, review: { id: "prv_1", object: "review", open: false } }), "elevated");
+is("a review not expanded, one with no open flag, or manual_review with no review: not available, never normal", [riskLevelOf(reviewed), riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "review" } }), riskLevelOf({ ...reviewed, review: null }), riskLevelOf({ ...reviewed, review: { id: "prv_1", object: "charge", open: true } })], ["not_available", "not_available", "not_available", "not_available"]);
+is("so a shipment under the rule is never sent clean on such a charge", shippingDecision({ rules: hold, physical: true, risk: riskLevelOf(reviewed) }), "risk_not_available");
 is("no review: the risk Stripe gave", riskLevelOf({ ...reviewed, outcome: { type: "authorized", risk_level: "normal" }, review: null }), "normal");
 is("in review under the rule: held", shippingDecision({ rules: hold, physical: true, risk: "in_review" }), "hold");
 

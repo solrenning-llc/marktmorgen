@@ -552,6 +552,8 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
     // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
     // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // #3446 (merged with main, 15 November 2026) prices a webhook try's read back of its delivery's line
@@ -561,6 +563,9 @@ async function main(): Promise<void> {
     // Merge of main into #3446 (16 November 2026, third pass): main's outbox cost (#4319) and this PR's webhook read-back
     // cost together keep two cents less on Scale monthly than main alone (703.16 where 703.18 was); Store and Studio as on
     // main. Still above zero (MR); cost is not lowered. Figures as the model computes them.
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #3446 (16 November 2026, fourth pass): main's model and this PR's read-back cost together;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
     is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.16 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.16"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.

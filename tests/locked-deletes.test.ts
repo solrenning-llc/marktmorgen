@@ -74,6 +74,7 @@ import { POST as rcommunity } from "@/app/api/store/community/route";
 import { POST as rcommunity_chat } from "@/app/api/store/community/chat/route";
 import { POST as rcommunity_events } from "@/app/api/store/community/events/route";
 import { POST as rcommunity_manage } from "@/app/api/store/community/manage/route";
+import { POST as rcommunity_approval } from "@/app/api/store/community/approval/route";
 import { POST as rcourse } from "@/app/api/store/course/route";
 import { POST as rcrm } from "@/app/api/store/crm/route";
 import { POST as rcompanies } from "@/app/api/store/companies/route";
@@ -131,6 +132,7 @@ const ROUTES: Record<string, Handler> = {
   "community/chat": rcommunity_chat as Handler,
   "community/events": rcommunity_events as Handler,
   "community/manage": rcommunity_manage as Handler,
+  "community/approval": rcommunity_approval as Handler,
   "course": rcourse as Handler,
   "companies": rcompanies as Handler,
   "crm": rcrm as Handler,
@@ -205,6 +207,8 @@ async function main(): Promise<void> {
   is("emptying the chat room is refused", await answer(await chat(json("/api/store/community/chat", locked, { handle: HANDLE, action: "clear" }))), LOCKED);
   is("taking a chat message out is refused", await answer(await chat(json("/api/store/community/chat", locked, { handle: HANDLE, action: "unsay", number: 1 }))), LOCKED);
   is("a reported post deleted from the studio is refused", await answer(await manage(json("/api/store/community/manage", locked, { action: "report-delete", report: "post:x" }))), LOCKED);
+  const approval = await route("community/approval");
+  is("a post waiting for approval not published from the studio is refused", await answer(await approval(json("/api/store/community/approval", locked, { action: "remove", item: "abcdef123456" }))), LOCKED);
 
   part("Events: canceling, deleting and moving one emails everyone coming");
   const events = await route("community/events");
@@ -370,6 +374,7 @@ async function main(): Promise<void> {
     ["crm", { action: "unpipeline", id: "x", moveTo: "x" }],
     ["notes", { action: "remove", id: "x" }],
     ["spend", { action: "remove", id: "x" }],
+    ["spend", { action: "remove-unreadable" }],
     ["outreach", { action: "drop", id: "x" }],
     ["mail", { action: "segment-remove", id: "x" }],
     ["mail", { action: "draft-remove", id: "x" }],
@@ -428,11 +433,15 @@ async function main(): Promise<void> {
     "assistant-memory": ["need:settings"],
     "assistant-settings": ["act:page:clear"],
     "blog": ["act:page:delete"],
+    "call": ["act:products:remove"],
+    "call-team": ["act:products:remove"],
     "bundle": ["act:products:clear", "not:a bundle made in the same request is taken back when its pictures fail"],
     "calendar": ["need:settings"],
     "community": ["lockedFor"],
     "community/chat": ["lockedFor"],
     "community/events": ["act:events:cancel", "act:events:delete", "lockedFor"],
+    "community/challenges": ["act:events:delete"],
+    "community/approval": ["act:community:held-remove", "need:settings"],
     "community/manage": ["act:community:report-delete", "need:settings"],
     "community/push": ["not:a member's own device, signed up for notifications again at will"],
     "community/rsvp": ["not:a member taking back their own place at an event"],
@@ -440,6 +449,7 @@ async function main(): Promise<void> {
     "course/comment": ["lockedFor"],
     "course/note": ["not:a student deleting only their own private lesson notes, never the creator's content"],
     "course/task": ["not:a student replacing or taking back their own handed-in work"],
+    "course/task/upload": ["not:a student's own door for a file to hand in: it takes back only the listing it made itself when the door is not opened"],
     "creator-card": ["act:page:remove"],
     "companies": ["act:orders:remove"],
     "crm": ["act:orders:undeal", "act:orders:unpipeline", "lockedFor"],
@@ -486,7 +496,7 @@ async function main(): Promise<void> {
   };
   // What deletes, and what sends or starts sending (an email, a batch, a queue that a job sends).
   const DELETES =
-    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(/;
+    /\bdel\(|dropStream\(|dropTask\(|removeProduct\(|deletePost\(|deleteComment\(|\bdrop[A-Z][A-Za-z]*\(|remove[A-Z][A-Za-z]*\(|delete[A-Z][A-Za-z]*\(|clear[A-Z][A-Za-z]*\(|\bforget[A-Z][A-Za-z]*\(|\brevoke[A-Z][A-Za-z]*\(|\bcancel[A-Z][A-Za-z]*\(|\["DEL"|\bqueue[A-Z][A-Za-z]*\(|\blaunch\(|\bsendBatch\(|\bresend[A-Z][A-Za-z]*\(|\badvance[A-Z][A-Za-z]*\(|\bsetProductCall\(|\bwriteTeam\(/;
   const walk = (dir: string): string[] =>
     readdirSync(dir).flatMap((name) => {
       const at = join(dir, name);
@@ -543,10 +553,12 @@ async function main(): Promise<void> {
       hide: "open:reversible", "hide-comment": "open:reversible", like: "open:adds", "like-comment": "open:adds", mute: "open:reversible",
       pin: "open:reversible", post: "lockedFor", profile: "open:edits", report: "open:adds", signout: "open:a person signing themselves out of the community",
       start: "open:reversible", unhide: "open:reversible", "unhide-comment": "open:reversible", unmute: "open:reversible", unpin: "open:reversible",
-      unstart: "open:reversible", vote: "open:adds",
+      unstart: "open:reversible", vote: "open:adds", withdraw: "open:a member taking back their own post or comment that waits for approval, or putting away the note about one",
     },
+    "community/approval": { approve: "open:adds", remove: "act:community:held-remove", setting: "need:settings" },
     "community/chat": { clear: "lockedFor", say: "open:adds", unsay: "lockedFor" },
     "community/events": { cancel: "act:events", create: "open:adds", delete: "act:events", edit: "lockedFor" },
+    "community/challenges": { create: "open:adds", delete: "act:events" },
     "community/manage": {
       access: "need:settings", dismiss: "open:a report set aside; the post or comment stays as it was", enable: "need:settings", member: "open:reversible",
       messages: "need:settings", onboarding: "need:settings", "report-delete": "act:community", rewards: "need:settings", room: "need:settings",
@@ -607,8 +619,8 @@ async function main(): Promise<void> {
     "reviews": { ask: "need:settings", hide: "open:reversible", photo: "act:reviews", reply: "open:adds", seen: "open:edits" },
     "saved-blocks": { apply: "open:adds", remove: "act:page", save: "open:adds", update: "open:edits" },
     "short-links": { add: "open:adds", remove: "act:page", target: "open:edits" },
-    "site-page": { add: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
-    "spend": { add: "open:adds", remove: "act:stats" },
+    "site-page": { add: "open:adds", copy: "open:adds", export: "open:reads", import: "open:adds", meta: "open:edits", order: "open:edits", remove: "act:page", save: "lockedFor" },
+    "spend": { add: "open:adds", remove: "act:stats", "remove-unreadable": "act:stats:remove" },
     "stores": { delete: "need:delete", select: "open:a person choosing which of their own stores the studio shows" },
     "stream/captions": { add: "open:adds", auto: "need:billing", quote: "open:reads", remove: "act:products" },
     "team": { invite: "need:team", leave: "open:a member leaving a team they were invited to, which deletes nothing of the store", remove: "need:team", revoke: "need:team", role: "need:team", "two-step": "need:team" },

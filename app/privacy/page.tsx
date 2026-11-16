@@ -12,6 +12,7 @@ import { isSesConfigured } from "@/lib/ses";
 import { isStreamConfigured } from "@/lib/stream";
 import { isVaultConfigured } from "@/lib/vault";
 import { GOOGLE_SIGNIN_APPROVED } from "@/lib/google-signin";
+import { HELD_DAYS, TOLD_DAYS } from "@/lib/community-approval-rules";
 
 export const metadata: Metadata = {
   title: "Privacy Policy — Marktmorgen",
@@ -396,8 +397,9 @@ export default function PrivacyPage() {
           that names the booking and its time, and we keep a mark that each
           reminder was sent for 14 days. If the buyer moves the booking
           to another time from the link in their email, we keep the new time
-          and how many times it was moved, tied to that checkout, for 200
-          days. The line in the creator&apos;s diary that keeps the time taken
+          and how many times it was moved, tied to that checkout, until 200
+          days after the call it was moved to, and never longer than two
+          years. The line in the creator&apos;s diary that keeps the time taken
           is let go {PAST_CALL_DAYS} days after the call ends; the booking
           itself stays on the creator&apos;s Stripe account. The same kind of cookie, for
           the same 32 minutes, is set when someone starts to buy a product sold
@@ -784,7 +786,16 @@ export default function PrivacyPage() {
           when the creator is trying two, each sent to a part of the list
           chosen at random. The tag is the same for everyone who got that
           email or that subject line: it lets the store count visits and sales
-          by email, and says nothing about who you are. Which of a
+          by email, and says nothing about who you are. In a one-off email
+          sent since November 6, 2026, each link first opens an address of
+          ours, the same for everyone who got the email, so the creator can
+          change where a wrong link leads after sending. Opening it counts as
+          one request of the store, as a page of the store does. Nothing about
+          who opened it, or when, is kept for that email or shown to the
+          creator. As on every page of the store, to limit abuse, a one-way
+          hash of the network address it is opened from is counted with that
+          day&apos;s requests from the same address, never with the email.
+          Which of a
           creator&apos;s automatic emails reach you is decided by what their
           list already holds about you — what you got or bought from them, and
           any labels their import brought or their automatic emails gave you
@@ -845,6 +856,13 @@ export default function PrivacyPage() {
           creator and never by other members. What is written is kept while
           the community exists, until its author or the creator deletes it;
           deleting a post deletes its comments, likes, reports and picture.
+          A creator may choose to approve posts or comments before they are
+          published. Until then, what is waiting for approval is seen only by
+          its author and the creator; if the creator does not publish it, the
+          author is told, and if nobody answers within {HELD_DAYS} days it is not
+          published. A short note about what was not published is kept for its
+          author for at most another {TOLD_DAYS} days. Deleting a member deletes
+          what they had waiting too.
           Who reported something is kept for 90 days, so each member&apos;s
           report counts once. The answer about whether someone may come in is
           kept for up to five minutes, a record of each announcement emailed
@@ -1199,7 +1217,10 @@ export default function PrivacyPage() {
           creator&apos;s choice and responsibility. We keep each address and its
           signing secret until the creator removes it, a mark of each event
           sent for 30 days so it is never sent twice, and each delivery, with
-          the answer the address gave, for up to seven days.
+          the answer the address gave, for up to seven days. When a free copy
+          or a list sign-up could not be passed on to those addresses at once,
+          we keep that event, with the same details, for up to seven days to
+          try again, and never send it about someone deleted from the store.
         </p>
         <p id="store-forms">
           <strong className="text-black">Forms and quizzes on a store&apos;s pages.</strong>{" "}
@@ -2231,7 +2252,9 @@ export default function PrivacyPage() {
             link that opens a page for a day or less; the list of addresses an
             email already going out is sent down, which passes a deleted address
             over (until it finishes, at most 60 days); a reminder waiting for its
-            hour, which is then not sent (at most a week); an import&apos;s file
+            hour, which is then not sent (at most a week); an event for the
+            creator&apos;s webhooks still waiting to be sent, which is then not
+            sent (at most a week); an import&apos;s file
             (14 days after it began); the events a store&apos;s webhooks already
             sent to the creator (7 days); and one-way marks that limit how often
             something is sent or asked (at most 32 days).

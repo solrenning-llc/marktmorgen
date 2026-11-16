@@ -107,10 +107,14 @@ const paidTo = async (store: Store) => (await readBook(store)).rows.find((r) => 
 const linkRead = (c: Commands) => c.length === 1 && c[0][0] === "GET" && c[0][1] === `nl:pp:${STATS}`;
 /** Rewrites the stored link's auto-pay switch, the sealed Secret left as it is. */
 async function storedAuto(value: unknown, drop = false): Promise<void> {
+  await storedField("auto", value, drop);
+}
+/** Rewrites one field of the stored link, the sealed Secret left as it is. */
+async function storedField(field: string, value: unknown, drop = false): Promise<void> {
   const [raw] = await real([["GET", `nl:pp:${STATS}`]]);
   const link = JSON.parse(String(raw)) as Record<string, unknown>;
-  if (drop) delete link.auto;
-  else link.auto = value;
+  if (drop) delete link[field];
+  else link[field] = value;
   await real([["SET", `nl:pp:${STATS}`, JSON.stringify(link)]]);
 }
 
@@ -173,6 +177,26 @@ async function main(): Promise<void> {
     part(`The link's auto-pay switch is ${label}: neither permission nor "off"`);
     await seed(store);
     await storedAuto(value, drop);
+    is("payday's auto-pay question rejects", await rejects(() => paysAutomatically(store)), true);
+    is("the studio view rejects", await rejects(() => readPayPal(store)), true);
+    const run = await sendPaydayEmails(Date.now() + 60_000, payday);
+    is("payday sends no PayPal batch and does not fail", [created.length, run.failed], [0, 0]);
+    is("and claims the month for the manual reminder", await claimed(), true);
+  }
+
+  // Codex g's MEDIUM (6896518230; Claude 6 on 094ff74db8): the time the link was made is part of the record. With
+  // auto-pay on and only `at` damaged, the record is in an unknown shape: neither permission to pay nor "off".
+  const badAt: [string, unknown, boolean][] = [
+    ["missing", undefined, true],
+    ['the string "yesterday"', "yesterday", false],
+    ["an object", {}, false],
+    ["zero", 0, false],
+  ];
+  for (const [label, value, drop] of badAt) {
+    part(`Auto-pay on, the link's time is ${label}: neither permission nor "off"`);
+    await seed(store);
+    await storedAuto(true);
+    await storedField("at", value, drop);
     is("payday's auto-pay question rejects", await rejects(() => paysAutomatically(store)), true);
     is("the studio view rejects", await rejects(() => readPayPal(store)), true);
     const run = await sendPaydayEmails(Date.now() + 60_000, payday);

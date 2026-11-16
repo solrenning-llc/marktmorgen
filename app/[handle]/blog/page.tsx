@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { storeRoot } from "@/lib/store-sitemap";
+import { storeAddress, storeRoot } from "@/lib/store-sitemap";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { normaliseHandle, storeForPage } from "@/lib/store";
@@ -62,11 +62,11 @@ export default async function BlogPage({ params, searchParams }: Params) {
           "@context": "https://schema.org",
           "@type": "Blog",
           name: w.blogOf(store.name),
-          url: `${SITE_URL}${base}`,
+          url: storeAddress(store, "/blog"),
           blogPost: posts.map((post) => ({
             "@type": "BlogPosting",
             headline: post.title,
-            url: `${SITE_URL}${base}/${postSegment(post)}`,
+            url: storeAddress(store, `/blog/${postSegment(post)}`),
             datePublished: new Date(post.publishedAt * 1000).toISOString(),
           })),
         }}

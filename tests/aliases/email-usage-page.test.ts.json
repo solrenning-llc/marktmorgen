@@ -38,5 +38,6 @@
   "@/lib/segments": "email-usage-page-world.tsx",
   "@/lib/flow-limits": "email-usage-page-world.tsx",
   "@/lib/flow-runs": "email-usage-page-world.tsx",
-  "@/lib/team": "email-usage-page-world.tsx"
+  "@/lib/team": "email-usage-page-world.tsx",
+  "@/components/automation-draft": "email-usage-page-world.tsx"
 }

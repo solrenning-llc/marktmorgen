@@ -34,6 +34,8 @@ export async function studioView() {
 }
 export function StudioHeader() { return null; }
 export function StudioStorePin({ children }: { children: ReactNode }) { return <>{children}</>; }
+/** Main's automation draft box (#3458) on the Email page, drawn as nothing here: this world checks the usage line only. */
+export function AutomationDraftBox() { return null; }
 export function EmailStudio({ used, monthKnown }: { used: number | null; monthKnown: boolean }) {
   return <div id="synthetic-composer" data-used={used === null ? "unknown" : used} data-month-known={String(monthKnown)}>Draft editor preserved</div>;
 }

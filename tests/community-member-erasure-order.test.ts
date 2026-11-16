@@ -52,7 +52,8 @@ async function main(): Promise<void> {
   is("record, handle and unsubscribe token gone", await left(), [0, 0, 0]);
 
   for (const [label, match] of [
-    ["the handle's deletion fails once", (cs: (string | number)[][]) => cs.some((c) => c[0] === "HDEL" && c[1] === HANDLES)],
+    // The handle goes in lib/community-mentions.ts FORGET_HANDLE (main since the merge of 16 November 2026), keyed on HANDLES.
+    ["the handle's deletion fails once", (cs: (string | number)[][]) => cs.some((c) => c[0] === "EVAL" && c[3] === HANDLES)],
     ["the unsubscribe token's deletion fails once", (cs: (string | number)[][]) => cs.some((c) => c[0] === "DEL" && c[1] === UNSUB)],
   ] as [string, (cs: (string | number)[][]) => boolean][]) {
     part(label);
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
   }) as typeof redis.pipeline;
   const odd = await run();
   redis.pipeline = pipe;
-  is("a count that is text is unknown", odd, "UnknownReply");
+  is("a count that is text is unknown", odd, "UnknownReplyError");
 
   part("A member who is not there");
   redis.clear();

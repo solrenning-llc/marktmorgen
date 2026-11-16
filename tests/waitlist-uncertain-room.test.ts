@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   let swaps = 0;
   redis.pipeline = (async (cs: (string | number)[][]) => {
     const replies = await pipe(cs);
-    if (cs.length === 1 && cs[0][0] === "EVAL" && String(cs[0][1]).startsWith("-- marktmorgen:hash-swap-if:v1") && cs[0][3] === again.key && swaps++ === 0) return [null];
+    if (cs.length === 1 && cs[0][0] === "EVAL" && String(cs[0][1]).startsWith("-- marktmorgen:waitlist-confirm:") && cs[0][4] === again.key && swaps++ === 0) return [null];
     return replies;
   }) as typeof redis.pipeline;
   const confirmed = await confirmSpot(tokenIn(sent.join("\n")), again.store);

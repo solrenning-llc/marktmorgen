@@ -26,6 +26,7 @@ import { fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { upsertContact } from "@/lib/contacts";
 import { SITE_URL } from "@/lib/site-url";
 import { handleLeadsToStore, storeHandleKey, type Listing, type Store } from "@/lib/store";
+import { takePublicRequest } from "@/lib/traffic";
 import { listingSizes, productIds } from "@/lib/catalog";
 import { speech } from "@/lib/buyer-words";
 import { givingWords } from "@/lib/buyer-words/giving";
@@ -183,11 +184,18 @@ export async function joinWaitlist(input: {
       continue;
     }
     // Asked again: written only over the place as it was read, counted at what
-    // it changed. A place that cannot be read is replaced by a new one.
+    // it changed.
     const before = parseEntry(existing);
-    const t = before?.t ?? newToken();
-    const asked = Boolean(before?.c) || consent;
-    const value = JSON.stringify({ at: before?.at ?? now(), ok: before?.ok ?? 0, c: asked, ...(asked && (before?.k || (consent && input.clicks)) ? { k: true } : {}), t } satisfies WaitEntry);
+    if (!before) {
+      // A place kept as text that does not read is unknown (#4792), never "not on the list": written over as a new one,
+      // it would lose a confirmed place and its leave token, take data room again and send a new confirmation. It is
+      // left as it is and nothing is sent; a link to confirm this request already wrote goes.
+      if (mustExist) await redisPipeline([["DEL", tokenKey(confirm)]]);
+      return "error";
+    }
+    const t = before.t;
+    const asked = Boolean(before.c) || consent;
+    const value = JSON.stringify({ at: before.at, ok: before.ok, c: asked, ...(asked && (before.k || (consent && input.clicks)) ? { k: true } : {}), t } satisfies WaitEntry);
     await links(t);
     lastLink = t;
     const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(sid, product.id), email, existing, value]]);
@@ -202,7 +210,6 @@ export async function joinWaitlist(input: {
       mustExist = true;
       continue;
     }
-    if (!before) await redisPipeline([["DEL", tokenKey(t)]]);
     mustExist = true;
   }
   if (!leave) {
@@ -264,36 +271,75 @@ export async function readWaitToken(token: string): Promise<TokenGrant | null> {
   return parseStoreWaitlistGrant(raw);
 }
 
+/**
+ * Writes a confirmed waitlist entry back only while its confirmation link still exists and the entry still holds what
+ * it was read with, in one step (#4268, #2576): KEYS[1] the link, KEYS[2] the waitlist; ARGV[1] the address, ARGV[2]
+ * the entry, ARGV[3] the entry as it was read. Answers 1 written, 0 not. Billed as one EVAL and the calls inside it,
+ * at most WAIT_CONFIRM_CALLS; lib/redis-memory.ts runs the same check in one step.
+ */
+const WAIT_CONFIRM = [
+  "-- marktmorgen:waitlist-confirm:v2",
+  'if redis.call("EXISTS", KEYS[1]) == 0 or redis.call("HGET", KEYS[2], ARGV[1]) ~= ARGV[3] then return 0 end',
+  'redis.call("HSET", KEYS[2], ARGV[1], ARGV[2])',
+  "return 1",
+].join("\n");
+
+/** The most redis.call one run of WAIT_CONFIRM makes: EXISTS, HGET and HSET (tests/waitlist-confirm-cost.test.ts). */
+export const WAIT_CONFIRM_CALLS = 3;
+
+/**
+ * Public requests of the store's a press takes before it writes anything (#4404): the page the button is on pays one,
+ * and a press that writes the entry back (WAIT_CONFIRM) or signs the address up to the list does more than that one
+ * pays for (the link and the store read again, the script and its calls, the sign-up's first round), so it takes one
+ * more first, or writes nothing. Held in tests/waitlist-confirm-cost.test.ts and named in tests/plan-cost-registry.ts.
+ */
+export const WAIT_CONFIRM_UNITS = 1;
+
 /** Presses the button in the email: the address now counts, and joins the creator's list if it asked to. */
-export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false }> {
+export async function confirmSpot(token: string, store: Store | null): Promise<{ ok: true; productId: string } | { ok: false; reason?: "busy" }> {
   const grant = await readWaitToken(token);
   if (!grant || grant.k !== "confirm" || !store || store.statsId !== grant.s) return { ok: false };
-  // Written only over the place as it was read, so a place deleted in between
-  // is not made again and two presses at once count its growth once.
+  const readPlace = async () => {
+    const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
+    return { raw, read: parseEntry(raw) };
+  };
+  const first = await readPlace();
+  if (!first.read) return { ok: false };
+  // Paid before it spends: a press that writes takes WAIT_CONFIRM_UNITS of the store's public requests, or is refused.
+  // A press whose first read is already confirmed writes nothing back, and one that is not pays here for both writes.
+  const joins = Boolean(first.read.c && store.listId);
+  // Refused for want of a request: the link still works, so the page says to press it again later, never "expired".
+  if ((!first.read.ok || joins) && !(await takePublicRequest(store, "public", Date.now(), WAIT_CONFIRM_UNITS))) return { ok: false, reason: "busy" };
+  // Both writes are fenced by this link (#4268): the person's erasure deletes it (its erasure note, joinWaitlist), so
+  // a press read before an erasure that completes meanwhile neither writes the entry back nor puts the address on
+  // the list again and lifts the erasure print. The entry is written only over the place as it was read (#2576), so a
+  // place deleted or changed in between is not made again and two presses at once count its growth once.
   let entry: WaitEntry | null = null;
   for (let tries = 0; tries < 3 && !entry; tries += 1) {
-    const [raw] = await redisPipeline([["HGET", listKey(grant.s, grant.p), grant.e]]);
-    const read = parseEntry(raw);
+    const { raw, read } = tries === 0 ? first : await readPlace();
     if (!read) return { ok: false };
     if (read.ok) {
       entry = read;
       break;
     }
     const next = JSON.stringify({ ...read, ok: now() });
-    const [swapped] = await redisPipeline([["EVAL", HASH_SWAP_IF, 1, listKey(grant.s, grant.p), grant.e, raw as string, next]]);
-    if (swapped !== 1) {
-      // Not known whether it was written (not an exact 0): what it would grow by is counted, never given back.
-      if (swapped !== 0) await noteGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
-      continue;
+    const [written] = await redisPipeline([["EVAL", WAIT_CONFIRM, 2, tokenKey(token), listKey(grant.s, grant.p), grant.e, next, raw as string]]);
+    if (written === 1) {
+      await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
+      entry = read;
+      break;
     }
-    await settleEntry(store, grant.s, grant.p, grant.e, raw as string, next);
-    entry = read;
+    // Not known whether it was written (not an exact 0): what it would grow by is counted, never given back.
+    if (written !== 0) await noteGrowth(store, grant.s, grant.p, grant.e, raw as string, next);
   }
   if (!entry) return { ok: false };
   if (entry.c && store.listId) {
-    await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid }, store).catch((error) =>
-      console.error("could not add a waitlist address to a list", error),
-    );
+    const added = await upsertContact(store.listId, grant.e, { agreed: true, explicit: true, clicks: entry.k === true, source: "free", at: new Date().toISOString(), sid: store.sid, fence: { key: tokenKey(token), seconds: CONFIRM_SECONDS } }, store, () => takePublicRequest(store, "public")).catch((error) => {
+      console.error("could not add a waitlist address to a list", error);
+      // An answer that is not known is not finished (CX-123 rule 24); a full list or room still confirms the spot.
+      return error instanceof UnknownReplyError ? ({ gone: true } as const) : null;
+    });
+    if (added?.gone) return { ok: false };
   }
   return { ok: true, productId: grant.p };
 }
@@ -648,9 +694,16 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
   if (!sid || !isRedisConfigured()) return 0;
   const address = normaliseEmail(email);
   const what = "the deletion of a person's waitlist places";
-  // One reply per product, each the place or a confirmed none (null); a
-  // pipeline that answered another number of replies is unknown as a whole.
-  const replies = productIds.length ? exactReplies(await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])), productIds.length, what) : [];
+  // One reply per product, each the place or a confirmed none (null); a pipeline that answered another number of
+  // replies, or a reply of another shape, is unknown (rule 24, #4383): UnknownReplyError, so the erasure is never
+  // reported complete while a place holding the address may still be there to be copied into a launch.
+  const answered = productIds.length ? await redisPipeline(productIds.map((p) => ["EVAL", HASH_TAKE_FIELD, 1, listKey(sid, p), address])) : [];
+  let replies: unknown[];
+  try {
+    replies = productIds.length ? exactReplies(answered, productIds.length, what) : [];
+  } catch {
+    throw new UnknownReplyError(what);
+  }
   const freed = productIds.flatMap((p, i) => {
     const raw = replies[i];
     return typeof raw === "string" ? [{ slot: waitSlot(p), bytes: placeBytes(sid, p, address, raw) }] : [];
@@ -658,7 +711,7 @@ export async function forgetWaitlistPerson(sid: string | null, productIds: strin
   // What was confirmed taken comes back; a place whose reply is unknown keeps its room.
   if (room && freed.length) await giveData(room, freed);
   const blanked = await blankInLists(productIds.map((p) => sendKey(sid, p)), address);
-  if (replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReply(what);
+  if (replies.some((raw) => raw !== null && typeof raw !== "string")) throw new UnknownReplyError(what);
   return freed.length + blanked;
 }
 

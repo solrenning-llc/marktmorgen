@@ -210,14 +210,15 @@ async function waitlists(): Promise<void> {
   is("no link with the address is left", (await redis.pipeline([["EXISTS", waitlistTokenKey(kaiLeave)], ["EXISTS", waitlistTokenKey(kaiConfirm)]])).map(Number), [0, 0]);
   is("nor any room", await used(store), beforeKai);
 
-  part("A place that cannot be read is replaced when its address asks again");
+  part("A place that cannot be read is left as it is when its address asks again (#4792)");
   const beforeLia = await used(store);
   await redis.pipeline([["HSET", ryeKey, "lia@example.com", "not json"]]);
   // Counted as it is, the way any write is.
   await noteData(store, [{ slot: `wl:${rye.id}`, bytes: dataBytes(["lia@example.com", "not json"], 1) }]);
-  is("asking again works", await enter("lia@example.com"), "sent");
+  // Written over as a new one, it would lose a confirmed place and its leave token and send a new confirmation.
+  is("asking again is refused, nothing sent", await enter("lia@example.com"), "error");
   const [lia] = await redis.pipeline([["HGET", ryeKey, "lia@example.com"]]);
-  is("the place is readable again", typeof JSON.parse(String(lia)).t, "string");
+  is("the place is kept as it was", lia, "not json");
   await forgetWaitlistPerson(store.statsId, [rye.id], "lia@example.com", store);
   is("and its room comes back whole", await used(store), beforeLia);
 

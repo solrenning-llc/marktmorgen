@@ -95,7 +95,8 @@ export const CALENDAR_POLL_SHAPE: ReadShape = {
  * the day's retry (4) and the making given back (DECRBY, INCRBY, EXPIRE: 3; the same
  * 3 when the copy's step found a deleted person instead, a making that did not fail); the store (its handle and its record: 2 GET) and its settings
  * written again when it was renamed (lib/calendar-sync.ts, ensureFeedToken:
- * GET and SET, 2); its Stripe pages; every call listing (one GET each, up to
+ * GET and, only over what was read, CALENDAR_CONFIG_SWAP billed as its script,
+ * GET and SET, 4; one try: review of #4007); its Stripe pages; every call listing (one GET each, up to
  * MAX_PRODUCTS, the catalog's head aside); each booking's moves
  * (lib/call-records.ts, readMoves: one GET a booking); four reads of each
  * booking's room and, for a video room not made yet, its making (SET NX and
@@ -114,7 +115,7 @@ export function calendarBuildCommands(listings: number, calls: number): number {
   // + 1: the bookers looked up among the store's deleted people (withoutErasedBookers, one HMGET); the copy kept, 4:
   // KEEP_COPY looks them up again where it writes (review of #2111). + LIST_TRY_COMMANDS: a store with no list, the
   // day's try mark (lib/store-readings.ts, listForNaming; the try itself is priced once a day in store-readings).
-  return 4 + 8 + 4 + 3 + 2 + 2 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1 + LIST_TRY_COMMANDS;
+  return 4 + 8 + 4 + 3 + 2 + 4 + listings + CALENDAR_BUILD_PER_BOOKING * calls + 4 + 2 + 1 + LIST_TRY_COMMANDS;
 }
 export const CALENDAR_BUILD_SHAPE: ReadShape = {
   seconds: 2,
@@ -136,9 +137,11 @@ export const CALENDAR_REFUSED_SHAPE: ReadShape = { seconds: 0.2, cpu: 0.01, comm
 /**
  * Refused answers priced in the feed's line, an hour: every one the address
  * may get before it stops (lib/calendar-sync.ts, CALENDAR_REFUSED_PER_HOUR;
- * inbox C4-33, light a), and the stop itself (GET, DEL, DEL, SET) at one
- * more. Past it the address is let go and what still asks it is an unknown
- * address, answered from the token's one read.
+ * inbox C4-33, light a), and the stop itself at one more: GET, the settings
+ * written only over what was read (CALENDAR_CONFIG_SWAP, billed as its script,
+ * GET and SET: 3; one try, review of #4007), DEL, DEL: 6, within a refused
+ * answer's 9. Past it the address is let go and what still asks it is an
+ * unknown address, answered from the token's one read.
  */
 export const CALENDAR_REFUSED_PRICED_PER_HOUR = CALENDAR_REFUSED_PER_HOUR + 1;
 
@@ -192,7 +195,7 @@ export const TOTALS_STORE_SHAPE: ReadShape = {
  * kind: its visits (readStats and readLife), its sales (readSales) or its
  * memberships, as TOTALS_STORE_SHAPE counts each; with the copy kept looked
  * at first (GET), the day's count (SET NX, INCRBY, EXPIRE NX: 3, and for a
- * heavy one its own SET NX and INCRBY: 5) and the reading kept (SET: at most
+ * heavy one its own INCRBY and EXPIRE NX: 5) and the reading kept (SET: at most
  * READING_COPY_MAX_BYTES). A refused count's DECRBY is in
  * KEPT_READINGS_SHAPE, where nothing is read. Priced, every reading of every
  * day, in the store-readings line (tests/plan-cost-registry.ts).

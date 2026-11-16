@@ -65,7 +65,7 @@ export async function feedToken(store: Store, productId: string, email: string):
   const existing = await indexedToken(sid, productId, email);
   if (existing === undefined) return null;
   const grant: FeedGrant = { s: sid, h: store.handle, p: productId, e: normaliseEmail(email) };
-  if (existing !== null && FEED_TOKEN.test(existing)) return withGrant(store, existing, grant);
+  if (existing !== null && FEED_TOKEN.test(existing)) return handedAgain(store, existing, grant);
   const token = randomBytes(24).toString("hex");
   // A listener's access is kept for good: counted in the store's room at what it adds (lib/order-data.ts).
   // The index, the product's note and the grant that holds the address are written in one script behind the index's
@@ -78,9 +78,21 @@ export async function feedToken(store: Store, productId: string, email: string):
     ["SET", tokenKey(token), JSON.stringify(grant), "NX"],
   ]);
   // Another call kept a token first: that one is handed out, once its grant is there.
-  if ("held" in wrote) return FEED_TOKEN.test(wrote.held) ? withGrant(store, wrote.held, grant) : null;
+  if ("held" in wrote) return FEED_TOKEN.test(wrote.held) ? handedAgain(store, wrote.held, grant) : null;
   // Only "OK" wrote the grant: on any other reply no link is given to a feed that may not open.
   return wrote.replies[2] === "OK" ? token : null;
+}
+
+/**
+ * A feed this address already has, handed out again: its product is noted first (Codex P, T, L and X5 on #4471). A
+ * feed granted before the note existed (13 November 2026) was never noted, so once its product left the catalog a
+ * person's deletion could not find it. The SADD is counted (lib/order-data.ts charges only a member it adds; one
+ * already there charges nothing) and read exactly: orderWrite throws on any reply but 0 or 1, and no link is handed
+ * out then.
+ */
+async function handedAgain(store: Store, token: string, grant: FeedGrant): Promise<string | null> {
+  await orderWrite(store, [["SADD", pidsKey(grant.s), grant.p]]);
+  return withGrant(store, token, grant);
 }
 
 /**

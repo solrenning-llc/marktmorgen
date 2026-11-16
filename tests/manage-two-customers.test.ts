@@ -32,6 +32,8 @@ const emails: { to: string | string[]; text: string }[] = [];
 let tierA = "";
 /** A customer whose memberships list Stripe does not answer. */
 let failing = "";
+/** A customer whose membership was sold as a number of payments (metadata.ends_after), so it has a set end. */
+let setEnd = "";
 
 const sub = (id: string, customer: string, created: number) => ({
   id,
@@ -50,7 +52,15 @@ const CUSTOMERS: Record<string, { id: string; created: number }[]> = {
     { id: "cus_Empty0000001", created: 3 },
   ],
   "eve@example.com": [{ id: "cus_Other0000001", created: 1 }],
+  // A frequent buyer: a full first page of customers (every checkout makes one), none holding a membership here, more behind it.
+  "frank@example.com": Array.from({ length: 20 }, (_, i) => ({ id: `cus_Frank${String(i).padStart(7, "0")}`, created: 100 - i })),
+  // A buyer whose one customer has more subscriptions than one page, none of them a membership of this store.
+  "gail@example.com": [{ id: "cus_Busy00000001", created: 1 }],
 };
+/** Addresses whose customers list Stripe answers with more pages behind the first. */
+const CUSTOMERS_MORE = new Set(["frank@example.com"]);
+/** Customers whose memberships list Stripe answers with more pages behind the first. */
+const SUBS_MORE = new Set(["cus_Busy00000001"]);
 const SUBS = (): Record<string, unknown[]> => ({
   cus_First0000001: [sub("sub_First0000001", "cus_First0000001", 1)],
   cus_Second000001: [sub("sub_Second000001", "cus_Second000001", 2)],
@@ -70,13 +80,16 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   const body = new URLSearchParams(init?.body ? String(init.body) : "");
   calls.push({ method, path, query: url.searchParams, body });
   if (method === "GET" && path === "/customers") {
-    return json({ object: "list", has_more: false, data: CUSTOMERS[url.searchParams.get("email") ?? ""] ?? [] });
+    const email = url.searchParams.get("email") ?? "";
+    return json({ object: "list", has_more: CUSTOMERS_MORE.has(email), data: CUSTOMERS[email] ?? [] });
   }
   if (method === "GET" && path.startsWith("/customers/")) return json({ id: path.split("/")[2], email: "dana@example.com" });
   if (method === "GET" && path === "/subscriptions") {
     const customer = url.searchParams.get("customer") ?? "";
     if (customer === failing) return json({ error: { message: "Stripe is down" } }, 500);
-    return json({ object: "list", has_more: false, data: SUBS()[customer] ?? [] });
+    const rows = (SUBS()[customer] ?? []) as ReturnType<typeof sub>[];
+    const data = customer === setEnd ? rows.map((row) => ({ ...row, metadata: { ...row.metadata, ends_after: "6" } })) : rows;
+    return json({ object: "list", has_more: SUBS_MORE.has(customer), data });
   }
   if (method === "POST" && path === "/billing_portal/configurations") return json({ id: "bpc_Config000001" });
   if (method === "POST" && path === "/billing_portal/sessions") return json({ id: "bps_1", url: `https://billing.stripe.com/p/session/${body.get("customer")}` });
@@ -193,6 +206,35 @@ async function main(): Promise<void> {
   const forgedKey = `nl:manage:link:${createHash("sha256").update(`nimbus-manage:${forged}`).digest("hex").slice(0, 40)}`;
   await redis.pipeline([["SET", forgedKey, JSON.stringify({ a: ACCOUNT, c: "cus_First0000001", h: "harbor", cs: ["cus_Other0000001", "cus_First0000001"] })]]);
   is("a record whose customers do not start with its own is no link", await membershipsFor(store, forged), null);
+
+  // Claude 7's ALTO at db6a5ea6ad: the portal's card-only check asked about the newest customer, while the page was
+  // made for the customer holding the named membership. A set end held by an older customer then opened the full
+  // portal, where Stripe can renew past the end that was sold.
+  part("Stripe's page for an older customer's set-end membership opens on the card only");
+  // A fresh link: the first one's opens are spent above.
+  is("a fresh link is emailed", await requestManageLink({ store, email: "dana@example.com", ip: "203.0.113.20", origin: "https://marktmorgen.com" }), "sent");
+  const fresh = /token=([0-9a-f]{64})/.exec(String(emails.at(-1)!.text))![1];
+  setEnd = "cus_First0000001";
+  const ended = await openPortal(store, fresh, "https://marktmorgen.com", "sub_First0000001");
+  is("the older customer's page opens", [ended.ok, sessions().at(-1)?.body.get("customer")], [true, "cus_First0000001"]);
+  is("straight to the card, since that customer holds a set end", sessions().at(-1)?.body.get("flow_data[type]"), "payment_method_update");
+  const newest = await openPortal(store, fresh, "https://marktmorgen.com", "sub_Second000001");
+  is("the newest customer, holding no set end, still gets the full page", [newest.ok, sessions().at(-1)?.body.get("customer"), sessions().at(-1)?.body.get("flow_data[type]")], [true, "cus_Second000001", null]);
+  setEnd = "cus_Second000001";
+  const older = await openPortal(store, fresh, "https://marktmorgen.com", "sub_First0000001");
+  is("and an older customer without one gets the full page though the newest holds one", [older.ok, sessions().at(-1)?.body.get("customer"), sessions().at(-1)?.body.get("flow_data[type]")], [true, "cus_First0000001", null]);
+  setEnd = "";
+
+  // Claude 7's MÉDIO at db6a5ea6ad: a full first page of customers with none holding a membership answered "error" on
+  // every try, while a stranger's address answered "sent", so the form told which addresses buy often here.
+  part("A frequent buyer's address answers as any other");
+  const ask = (email: string, ip: string) =>
+    requestManageLink({ store, email, ip, origin: "https://marktmorgen.com" }).catch((error: unknown) => `threw ${String(error)}`);
+  const mailed = emails.length;
+  is("a stranger's address: sent", await ask("nobody@example.com", "203.0.113.21"), "sent");
+  is("a frequent buyer with no membership on the first page: sent, the same answer", await ask("frank@example.com", "203.0.113.22"), "sent");
+  is("a customer with more subscriptions than one page and no membership on it: sent", await ask("gail@example.com", "203.0.113.23"), "sent");
+  is("and none of them is emailed a link", emails.length, mailed);
   done();
 }
 

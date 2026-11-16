@@ -26,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CALENDAR_BUILDS_PER_DAY, CALENDAR_CREDITS_PER_DAY, CALENDAR_RETRIES_PER_DAY, CALENDAR_FILE_MAX_BYTES, CALENDAR_MAX_EVENTS, CALENDAR_POLLS_PER_HOUR, CALENDAR_REFRESH_SECONDS, CALENDAR_REFUSED_PER_HOUR,
-  FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
+  CALENDAR_CONFIG_SWAP, FeedGone, bookedCalendar, bookedCalendarFeed, calendarView, ensureFeedToken, forgetStoreCalendar, keptSlots, newFeedToken, storeIdForToken,
 } from "@/lib/calendar-sync";
 import { planReminders } from "@/lib/call-records";
 import { GET as feedRoute } from "@/app/api/store/calendar/[token]/route";
@@ -69,18 +69,26 @@ globalThis.fetch = (async (input: string | URL | Request) => {
   return new Response(JSON.stringify({ object: "list", data, has_more: false }));
 }) as typeof fetch;
 
-/** Commands the database is sent while `work` runs. */
-async function counted<T>(work: () => Promise<T>): Promise<{ value: T; commands: number; widest: number }> {
+/**
+ * Commands the database is sent while `work` runs; `billed` takes a calendar settings swap as what it is billed
+ * (CALENDAR_CONFIG_SWAP: its script, its GET and, written, its SET), every other command as one.
+ */
+async function counted<T>(work: () => Promise<T>): Promise<{ value: T; commands: number; widest: number; billed: number }> {
   const real = redis.pipeline;
   let commands = 0;
   let widest = 0;
+  let billed = 0;
   redis.pipeline = async (batch) => {
     commands += batch.length;
     for (const command of batch) widest = Math.max(widest, command.length - 1);
-    return real(batch);
+    const replies = await real(batch);
+    batch.forEach((command, i) => {
+      billed += command[0] === "EVAL" && command[1] === CALENDAR_CONFIG_SWAP ? (replies[i] === 1 ? 3 : 2) : 1;
+    });
+    return replies;
   };
   try {
-    return { value: await work(), commands, widest };
+    return { value: await work(), commands, widest, billed };
   } finally {
     redis.pipeline = real;
   }
@@ -237,6 +245,10 @@ async function main(): Promise<void> {
     is(`the ${CALENDAR_REFUSED_PER_HOUR} refusals the line prices leave the address as it is`, [states.filter((x) => x === "paced").length, (await storeIdForToken(token))?.statsId], [CALENDAR_REFUSED_PER_HOUR, owner.statsId]);
     const one = await counted(() => bookedCalendarFeed(asked, quick, at + 60_000));
     is("the refusal that stops it: the pace, its count and the stop, within a refused shape and the stop priced as one more (its token's two reads aside)", [one.value.state, one.commands <= CALENDAR_REFUSED_SHAPE.commands - 2 + 4], ["paced", true]);
+    // Billed, the stop is its GET, the swap (its script, GET and SET) and the two DEL: 6, within the one more
+    // refused answer that prices it (review of #4007).
+    const STOP_BILLED = 1 + 3 + 2;
+    is("billed, the refusal that stops it is within a refused shape and the stop, which is within one more", [one.billed <= CALENDAR_REFUSED_SHAPE.commands - 2 + STOP_BILLED, STOP_BILLED <= CALENDAR_REFUSED_SHAPE.commands], [true, true]);
     is("one more: the address is let go", await storeIdForToken(token), null);
     const stopped = await calendarView(await load());
     is("the studio shows no address and says it was stopped, with when", [stopped.subscribeUrl, typeof stopped.stoppedAt === "string" && Date.parse(stopped.stoppedAt) === at + 60_000], [null, true]);
@@ -246,6 +258,13 @@ async function main(): Promise<void> {
     url = (await newFeedToken(await load())).subscribeUrl ?? "";
     token = url.slice(url.lastIndexOf("/") + 1).replace(/\.ics$/, "");
     is("a new address the creator asks for clears the note", (await calendarView(await load())).stoppedAt, null);
+    // The settings written again for a renamed store, measured as billed: GET and the swap, 4, as the making's count
+    // gives them (calendarBuildCommands; review of #4007); unchanged, only the GET.
+    const current = await load();
+    const renaming = await counted(() => ensureFeedToken({ ...current, handle: `${current.handle}-renamed` }));
+    const back = await counted(() => ensureFeedToken(current));
+    const unchanged = await counted(() => ensureFeedToken(current));
+    is("a rename refresh billed 4 commands each way, an unchanged one 1", [renaming.billed, back.billed, unchanged.billed], [4, 4, 1]);
     const editor = read("components/calendar-editor.tsx");
     is("the editor says the rule and how to keep the address: every 15 minutes or less often", editor.includes("Set your app to check every 15 minutes or less often") && editor.includes("view.stoppedAt ?"), true);
   }

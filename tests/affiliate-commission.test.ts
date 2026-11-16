@@ -113,7 +113,7 @@ async function main(): Promise<void> {
     amount_total: 10_400,
     amount_subtotal: 10_400,
     currency: "usd",
-    total_details: { amount_tax: 0 },
+    total_details: { amount_tax: 0, amount_shipping: 0 },
     payment_intent: "pi_1",
     metadata: { store: "harbor", product: "front", title: "Front + Add-on", ...meta },
     customer_details: { email: "buyer@example.com" },

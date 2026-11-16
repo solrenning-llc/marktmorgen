@@ -280,8 +280,10 @@ async function main(): Promise<void> {
   is("named under a product that is not held", await describe({ product: freeId, path: heldPicture }), [409, "on_hold", "nothing read"]);
   is("a picture on its sales page, named under another product", await describe({ product: freeId, path: heldPagePicture }), [409, "on_hold", "nothing read"]);
   is("named under a page of the store's own", await describe({ page: siteId, path: heldPicture }), [409, "on_hold", "nothing read"]);
-  is("a picture that is not a held product's still goes to the file store (nothing there here)", await describe({ product: freeId, path: freePicture }), [400, "invalid", "file store"]);
-  is("as from a page of the store's own", await describe({ page: siteId, path: freePicture }), [400, "invalid", "file store"]);
+  // Past the hold's door, the writing job is taken before the picture is read (lib/ai.ts describePicture, #2975), and
+  // the AI is off here, so it stops there: what matters is that the hold does not refuse it.
+  is("a picture that is not a held product's gets past the hold", (await describe({ product: freeId, path: freePicture }))[1] !== "on_hold", true);
+  is("as from a page of the store's own", (await describe({ page: siteId, path: freePicture }))[1] !== "on_hold", true);
 
   part("A hold whose taking off the store did not go through: still read by nobody but the owner");
   if (!(await setProductHidden(OWNER, pdfId, false)).ok) throw new Error("not shown again");

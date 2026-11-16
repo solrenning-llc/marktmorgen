@@ -265,6 +265,13 @@ async function main(): Promise<void> {
   is("the payday email says so too", /membership and plan payments/.test(manual.text), true);
   const fine = paydayEmail({ storeName: "Harbor", payday: 5, people: 1, totalCents: 100, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: true, invoicesChecked: true } as Parameters<typeof paydayEmail>[0]);
   is("and not when they were", /membership and plan payments/.test(fine.text), false);
+  // Claude 7's and Codex X5's LEVE on #3378: on a passing failure the email told the creator to download the batch, a
+  // file the server refuses until the page has read every payment again. It now says to wait for that first.
+  const refundsOpen = paydayEmail({ storeName: "Harbor", payday: 5, people: 1, totalCents: 100, currency: "usd", waitingCents: 0, hold: 0, refundsChecked: false, invoicesChecked: true } as Parameters<typeof paydayEmail>[0]);
+  for (const [what, mail] of [["invoices not all read", manual], ["refunds not all read", refundsOpen]] as const) {
+    is(`${what}: never "download the batch" before the page has checked again`, [mail.text.includes("Open your affiliate page, download the batch"), mail.text.includes("Once it shows every payment checked, download the batch")], [false, true]);
+  }
+  is("all read: the batch is downloaded at once, as before", [fine.text.includes("Open your affiliate page, download the batch"), fine.text.includes("Once it shows every payment checked")], [true, false]);
 
   done();
 }

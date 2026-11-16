@@ -26,7 +26,12 @@
  * sent, under a key made of when it was written (lib/email.ts, sendBatch). A
  * batch tried again, because the send or the clean-up after it did not come
  * back as asked, is the same batch under the same key, which the email
- * service sends to nobody twice. Never dropped: an address leaves the list
+ * service sends to nobody twice. The service keeps a key a day, and so does
+ * the batch: a send whose outcome stayed unknown (the service may have taken
+ * it and the answer was lost) is written down with when it was first tried,
+ * and UNKNOWN_SETTLED_MS after that, still within the day, the batch is taken
+ * as sent and its addresses leave the list, never tried again under a new
+ * key: an unknown never counts as "not sent". Never dropped: an address leaves the list
  * only after its batch was sent; a refusal, an answer out of shape or a
  * spent figure keeps everything where it is and the product is looked at
  * again RESTOCK_WAIT_MS later. Somebody who left meanwhile (an exact nil) is
@@ -39,6 +44,7 @@ import { type BatchMessage, sendBatch, sendEmail } from "@/lib/email";
 import { type Door, fromLine, releaseDay, render, reserveDay } from "@/lib/mail";
 import { productSegment } from "@/lib/product-slug";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { isSesConfigured, notYetTaken } from "@/lib/ses";
 import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
 import { SITE_URL } from "@/lib/site-url";
 import { stockLeft } from "@/lib/stock";
@@ -65,6 +71,12 @@ export const RESTOCK_BATCH = 100;
 export const RESTOCK_WAIT_MS = 15 * 60_000;
 /** How long a batch written down before its send is kept: within the day the email service keeps a batch's key. */
 const BATCH_SECONDS = 86_400;
+/**
+ * How long after its first unknown outcome a batch is taken as sent: well
+ * inside BATCH_SECONDS (written again at that first unknown), so the runs
+ * every RESTOCK_WAIT_MS settle it before it could end and a new batch start.
+ */
+export const UNKNOWN_SETTLED_MS = 20 * 3_600_000;
 
 const jobKey = (sid: string, pid: string) => `nl:sa:${sid}:${pid}:job`;
 
@@ -73,14 +85,23 @@ export function stockAlertsOpen(store: Store): boolean {
   return !store.suspended && Boolean(store.sid && store.statsId && store.mail?.address);
 }
 
-const pagePath = (store: Store) => `/@${store.handle}/back-in-stock`;
+/**
+ * The list's page with `query`, as an email links it: its store named by its own id too, which a change of handle or
+ * a handle let go never changes, so the page finds the store (app/[handle]/back-in-stock) for as long as the link works.
+ */
+const pageLink = (store: Store, query: string) => `/@${store.handle}/back-in-stock?${query}&i=${encodeURIComponent(store.sid ?? "")}`;
 
-/** The way out at the foot of both emails: the page with its button, and the one-click address a mail app uses (always this site's own). */
+/**
+ * The way out at the foot of both emails: the page with its button, and the
+ * one-click address a mail app uses (always this site's own). The one-click
+ * address names the store by its own id, which a change of handle or a
+ * handle let go never changes, so it works for as long as the link does.
+ */
 function door(store: Store, w: StockAlertWords, origin: string, leave: string, why: string): Door {
-  const page = `${origin}${pagePath(store)}?leave=${leave}`;
+  const page = `${origin}${pageLink(store, `leave=${leave}`)}`;
   return {
     page,
-    oneClick: `${SITE_URL}/api/store/stock-alert/leave?h=${encodeURIComponent(store.handle)}&t=${leave}`,
+    oneClick: `${SITE_URL}/api/store/stock-alert/leave?i=${encodeURIComponent(store.sid)}&t=${leave}`,
     why,
     label: w.doorLabel,
     after: w.doorAfter,
@@ -92,7 +113,7 @@ function door(store: Store, w: StockAlertWords, origin: string, leave: string, w
 /** The confirmation email: HTML and text, the creator's postal address, a way out; no tracked link, no picture. */
 export function confirmEmail(store: Store, product: Listing, links: { confirm: string; leave: string }, origin: string) {
   const w = stockAlertWords(store.language);
-  const body = [w.askLead(store.name, product.title), "", w.askOpen, `${origin}${pagePath(store)}?token=${links.confirm}`, "", w.askWorks, "", w.askIgnore].join("\n");
+  const body = [w.askLead(store.name, product.title), "", w.askOpen, `${origin}${pageLink(store, `token=${links.confirm}`)}`, "", w.askWorks, "", w.askIgnore].join("\n");
   return render(store, w.askSubject(product.title), body, null, door(store, w, origin, links.leave, w.askWhy(store.name, product.title)));
 }
 
@@ -120,37 +141,50 @@ export async function askBackInStock(input: { store: Store; product: Listing; em
   });
   if (!asked.ok) return asked.reason === "unknown" ? "error" : asked.reason;
   const mail = confirmEmail(store, product, asked, input.origin);
-  const sent = await sendEmail({
-    meter: { by: "store", store, kind: "transactional", asked: true },
-    from: fromLine(store),
-    to: input.email.trim(),
-    subject: mail.subject,
-    text: mail.text,
-    html: mail.html,
-    headers: mail.headers,
-  }).catch((error) => {
+  const written = { maybe: false };
+  const sent = await sendEmail(
+    {
+      meter: { by: "store", store, kind: "transactional", asked: true },
+      from: fromLine(store),
+      to: input.email.trim(),
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+      headers: mail.headers,
+      // The same confirmation asked again the same day is the same email under the same key: the service answers it
+      // once, so a retry after a lost answer never writes to them twice (Codex G on #3620).
+      idempotencyKey: `stock-alert-confirm:${store.statsId}:${product.id}:${asked.confirm}`,
+    },
+    { fetch: watching(written) },
+  ).catch((error) => {
     console.error("sending a back-in-stock confirmation failed", error);
     return false;
   });
   if (sent) return "sent";
-  // Its email did not go: a new place is taken back at once (one asked before keeps its own).
-  if (!asked.again) await leaveStockAlert(asked.leave, store).catch((error) => console.error("taking back an unconfirmed back-in-stock place failed", error));
+  // Known not sent (nothing was written to a service: no sender, the store's figure spent, a refusal before it): a new
+  // place is taken back at once (one asked before keeps its own). One the service may have taken (its answer lost, or
+  // Amazon, which sends with its own fetch) keeps its place: the email that went must still confirm (Codex G on #3620).
+  if (!asked.again && !written.maybe && !isSesConfigured()) {
+    await leaveStockAlert(asked.leave, store).catch((error) => console.error("taking back an unconfirmed back-in-stock place failed", error));
+  }
   return "unsent";
 }
 
 // ------------------------------------------------------------------ the restock job
 
-type Job = { at: number; emails: string[] };
+/** A batch: when it was written, its addresses and, once a send's outcome was unknown, when that was first. */
+type Job = { at: number; emails: string[]; unknownSince?: number };
 
 function parseJob(raw: unknown): Job | null {
   if (typeof raw !== "string" || raw.length > 64_000) return null;
   try {
     const value = JSON.parse(raw) as Record<string, unknown>;
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const { at, emails } = value;
+    const { at, emails, unknownSince } = value;
     if (typeof at !== "number" || !Number.isSafeInteger(at) || at <= 0) return null;
+    if (unknownSince !== undefined && (typeof unknownSince !== "number" || !Number.isSafeInteger(unknownSince) || unknownSince < at)) return null;
     if (!Array.isArray(emails) || !emails.length || emails.length > RESTOCK_BATCH || emails.some((e) => typeof e !== "string" || !e)) return null;
-    return { at, emails: emails as string[] };
+    return unknownSince === undefined ? { at, emails: emails as string[] } : { at, emails: emails as string[], unknownSince };
   } catch {
     return null;
   }
@@ -166,6 +200,48 @@ export type RestockDeps = {
 };
 
 const DEFAULTS: RestockDeps = { load: storeForIdExactly, readProduct: readListing, left: (store, product) => stockLeft(store, product), send: sendBatch };
+
+/** The statuses lib/resend-fallback-transport.ts reads as "not accepted"; any other answer, or none, may be a batch taken. */
+const NOT_TAKEN = new Set([400, 401, 403, 404, 405, 413, 415, 422, 429]);
+
+/**
+ * The fetch handed to sendBatch for this batch: it changes nothing, and notes when a batch was really written to the
+ * email service with no answer that it was turned away (thrown, timed out, accepted, 409, 5xx). Only that may be a
+ * batch taken; a "retry" with no such write is known not sent.
+ */
+function watching(written: { maybe: boolean }): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    let write = true;
+    try {
+      const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const path = new URL(input instanceof Request ? input.url : String(input)).pathname;
+      write = method !== "GET" && method !== "HEAD" && (path.endsWith("/emails/batch") || path.endsWith("/emails"));
+    } catch {
+      // Not read exactly: counted as a write.
+    }
+    if (!write) return fetch(input, init);
+    try {
+      const response = await fetch(input, init);
+      if (response.ok || !NOT_TAKEN.has(response.status)) written.maybe = true;
+      return response;
+    } catch (error) {
+      written.maybe = true;
+      throw error;
+    }
+  }) as typeof fetch;
+}
+
+/** Whether Amazon took anyone of this batch under its key: its markers, read exactly; unreadable counts as taken. */
+async function takenBySes(batchKey: string, messages: BatchMessage[]): Promise<boolean> {
+  const pending = await notYetTaken(batchKey, messages).catch(() => null);
+  return pending === null || pending.length < messages.length;
+}
+
+/**
+ * The slowest stock count of one product: lib/stock.ts asks Stripe about at most five holds that ran out, two seconds
+ * each (MAX_CHECKS × CHECK_MS there). A run starts a product only with this much of it left.
+ */
+export const RESTOCK_COUNT_MS = 10_000;
 
 /** What became of one product this run: "done" leaves the job, "later" waits RESTOCK_WAIT_MS, "again" is due again at once. */
 type Turn = { sent: number; next: "done" | "later" | "again" };
@@ -193,15 +269,29 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
     const leave = leaves[i];
     return leave ? [{ email, leave }] : [];
   });
-  if (going.length) {
+  // An outcome unknown long enough is taken as sent: the service may have written to them, so nobody is written to again.
+  const settled = job.unknownSince !== undefined && Date.now() - job.unknownSince >= UNKNOWN_SETTLED_MS;
+  if (going.length && !settled) {
     if (!(await reserveDay(going.length))) return { sent: 0, next: "later" };
     const messages: BatchMessage[] = going.map(({ email, leave }) => {
       const mail = backEmail(store, product, leave);
       return { from: fromLine(store), to: email, subject: mail.subject, text: mail.text, html: mail.html, replyTo: store.email, headers: mail.headers };
     });
-    const outcome = await deps.send(messages, `stock-alert:${sid}:${product.id}:${job.at}`, { by: "store", store, kind: "email" });
+    const written = { maybe: false };
+    const batchKey = `stock-alert:${sid}:${product.id}:${job.at}`;
+    const outcome = await deps.send(messages, batchKey, { by: "store", store, kind: "email" }, undefined, { fetch: watching(written) });
     if (outcome !== "sent") {
       await releaseDay(going.length);
+      // "retry" also means known not sent (a 429, no sender, unreadable state): that keeps everything and waits, however
+      // long. Only a batch the service may really have taken is written down, with when: its answer lost through the
+      // fetch handed over (Resend), or any address of it Amazon already took, by Amazon's own markers under this key
+      // (lib/ses.ts sends with its own fetch, so only those say so); markers that cannot be read count as taken.
+      // Asked again every run until the note is written, so a lost write is not forgotten.
+      if (outcome === "retry" && job.unknownSince === undefined && (written.maybe || (await takenBySes(batchKey, messages)))) {
+        if (!(await writeJob(sid, product.id, { ...job, unknownSince: Date.now() }).catch(() => false))) {
+          console.error("a back-in-stock batch that may be taken could not be written down; asked again next run");
+        }
+      }
       return { sent: 0, next: "later" };
     }
   }
@@ -209,10 +299,10 @@ async function sendJob(store: Store, product: Listing, job: Job, deps: RestockDe
   await clearStockAlerts(store, product.id, job.emails);
   const gone = repliesFor(await redisPipeline([["DEL", jobKey(sid, product.id)]]), 1);
   if (!gone || countOf(gone[0]) === null) throw new UnknownReplyError("a back-in-stock batch sent");
-  return { sent: going.length, next: "again" };
+  return { sent: settled ? 0 : going.length, next: "again" };
 }
 
-async function restockOne(member: string, budget: number, deps: RestockDeps): Promise<Turn> {
+async function restockOne(member: string, budget: number, deadline: number, deps: RestockDeps): Promise<Turn> {
   const cut = member.indexOf("|");
   const storeId = cut > 0 ? member.slice(0, cut) : "";
   const productId = cut > 0 ? member.slice(cut + 1) : "";
@@ -234,7 +324,13 @@ async function restockOne(member: string, budget: number, deps: RestockDeps): Pr
   if (product.hidden) return { sent: 0, next: "later" };
 
   const pending = await readJob(store.statsId, productId);
-  if (pending) return sendJob(store, product, pending, deps);
+  // A batch left waiting goes only when what is left of this run holds it whole (its key is its batch, so it is never
+  // cut): otherwise it waits for the next run, and the run's ceiling holds (Claude 3 on #3620).
+  // One taken as sent (UNKNOWN_SETTLED_MS) sends nothing, so it is settled whatever is left.
+  if (pending) {
+    const settling = pending.unknownSince !== undefined && Date.now() - pending.unknownSince >= UNKNOWN_SETTLED_MS;
+    return pending.emails.length > budget && !settling ? { sent: 0, next: "later" } : sendJob(store, product, pending, deps);
+  }
   // The list ended by itself (a year after its latest write) or was erased: nothing left to send for.
   const size = repliesFor(await redisPipeline([["HLEN", `nl:sa:${store.statsId}:${productId}`]]), 1);
   const count = size ? countOf(size[0]) : null;
@@ -242,6 +338,8 @@ async function restockOne(member: string, budget: number, deps: RestockDeps): Pr
   if (count === 0) return { sent: 0, next: "done" };
 
   if (restocked(0, await deps.left(store, product)) !== "yes") return { sent: 0, next: "later" };
+  // The count ran past the run's deadline: nothing is written down or sent this run; it goes on the next.
+  if (Date.now() > deadline) return { sent: 0, next: "later" };
   const everyone = await stockAlertAddresses(store, productId);
   const confirmed = everyone.filter((a) => a.confirmed).map((a) => a.email).sort();
   if (!confirmed.length) {
@@ -270,10 +368,11 @@ export async function runRestocks(deadline: number, deps: RestockDeps = DEFAULTS
   }
   let sent = 0;
   for (const member of members) {
-    if (Date.now() > deadline || sent >= RESTOCK_RUN_EMAILS) break;
+    // A product is started only when the run still holds its slowest stock count (Claude 3 on #3620).
+    if (Date.now() + RESTOCK_COUNT_MS > deadline || sent >= RESTOCK_RUN_EMAILS) break;
     let turn: Turn;
     try {
-      turn = await restockOne(member, RESTOCK_RUN_EMAILS - sent, deps);
+      turn = await restockOne(member, RESTOCK_RUN_EMAILS - sent, deadline, deps);
     } catch (error) {
       console.error("sending back-in-stock emails: a product could not be read as asked, so it waits", error);
       turn = { sent: 0, next: "later" };

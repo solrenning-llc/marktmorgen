@@ -20,6 +20,7 @@ import { POST as askRoute } from "@/app/api/store/stock-alert/route";
 import { POST as confirmRoute } from "@/app/api/store/stock-alert/confirm/route";
 import { POST as leaveRoute } from "@/app/api/store/stock-alert/leave/route";
 import { STOCK_ALERT_DUE } from "@/lib/stock-alerts";
+import { STOCK_ALERT_WORDS } from "@/lib/buyer-words/stock-alert";
 import { allowanceFor, askedCeiling } from "@/lib/store-allowance-rules";
 import { takeAllowance } from "@/lib/store-allowance";
 import { store as redis } from "./redis-stub";
@@ -28,10 +29,21 @@ import { done, is, part } from "./check";
 
 type Sent = { to: string | string[]; subject: string; text: string; html: string; headers?: Record<string, string> };
 const mails: Sent[] = [];
+/** Keys the stand-in service already answered, as Resend keeps them: a repeat is answered, never sent again. */
+const seenKeys = new Set<string>();
+/** The next send is taken, then its answer is lost on the way (a timeout after the service accepted it). */
+let loseNext = false;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com" && url.pathname === "/emails") {
+    const key = new Headers(init?.headers).get("Idempotency-Key");
+    if (key && seenKeys.has(key)) return new Response(JSON.stringify({ id: "email_1" }));
+    if (key) seenKeys.add(key);
     mails.push(JSON.parse(String(init?.body)) as Sent);
+    if (loseNext) {
+      loseNext = false;
+      throw new TypeError("fetch failed");
+    }
     return new Response(JSON.stringify({ id: "email_1" }));
   }
   if (url.hostname === "api.resend.com") return new Response(JSON.stringify({ id: "email_1" }));
@@ -82,7 +94,8 @@ async function main(): Promise<void> {
   part("An address asks on a sold-out product");
   const asked = await ask("Reader@Example.com");
   is("303 to the list's page, sent", [asked.status, asked.headers.get("location")], [303, `https://marktmorgen.com/@harbor/back-in-stock?product=${pid}&status=sent`]);
-  is("the address is not in the page's address", asked.headers.get("location")!.includes("example.com"), false);
+  // The typed address's own part, in any case or escaped: never in the page's address (no URL substring check on a host).
+  is("the address is not in the page's address", /reader/i.test(decodeURIComponent(asked.headers.get("location")!)), false);
   is("one email", mails.length, 1);
   const mail = mails[0];
   is("to the address typed", mail.to, ["Reader@Example.com"]);
@@ -91,7 +104,7 @@ async function main(): Promise<void> {
   const leave = tokenIn(mail.text, "leave");
   is("a confirm link and a stop link, to the list's page", [confirm.length, leave.length, mail.text.includes("https://marktmorgen.com/@harbor/back-in-stock?token=")], [48, 48, true]);
   is("HTML and text, each with the creator's postal address", [Boolean(mail.html), mail.text.includes(POSTAL), mail.html.includes(POSTAL)], [true, true, true]);
-  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"], mail.headers?.["List-Unsubscribe-Post"]], [`<https://marktmorgen.com/api/store/stock-alert/leave?h=harbor&t=${leave}>`, "List-Unsubscribe=One-Click"]);
+  is("one-click unsubscribe for mail apps", [mail.headers?.["List-Unsubscribe"], mail.headers?.["List-Unsubscribe-Post"]], [`<https://marktmorgen.com/api/store/stock-alert/leave?i=${store.sid}&t=${leave}>`, "List-Unsubscribe=One-Click"]);
   is("no picture, so nothing to track an opening", /<img\b/i.test(mail.html), false);
   is("the place is kept, not confirmed yet, and nothing is due", [typeof redis.run(["HGET", listKey, "reader@example.com"]), redis.run(["ZCARD", STOCK_ALERT_DUE])], ["string", 0]);
 
@@ -104,10 +117,29 @@ async function main(): Promise<void> {
   is("a made-up link", statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: "0".repeat(48) }))), "expired");
   is("the stop link cannot confirm", statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: leave }))), "expired");
 
+  part("A confirmation the service took, its answer lost: the place is kept and asking again sends nothing twice (Codex G on #3620)");
+  {
+    const before = mails.length;
+    loseNext = true;
+    const lost = await ask("lost@example.com", "7.7.5.1");
+    is("said not sent, as it may not have gone", statusOf(lost), "unsent");
+    is("the service did take it", mails.length - before, 1);
+    is("the new place is kept, never taken back on an unknown", typeof redis.run(["HGET", listKey, "lost@example.com"]), "string");
+    const link = tokenIn(mails[mails.length - 1].text, "token");
+    const pressed = await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: link }, "7.7.5.1"));
+    is("the link in the email that went still confirms", statusOf(pressed), "confirmed");
+    const again = await ask("lost@example.com", "7.7.5.2");
+    // The service's answer for that key is still unknown, so the sender keeps it and never writes it again; the email
+    // that went already carries a link that works.
+    is("asking again the same day: never \"sent\" twice, the unknown kept", statusOf(again), "unsent");
+    is("and no second email is written to them", mails.length - before, 1);
+  }
+
+
   part("The stop link, honored at once");
   const crossLeave = await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: leave }, "7.7.7.7", "cross-site"));
   is("the page's button is refused from another site", crossLeave.status, 403);
-  const oneClick = await leaveRoute(request(`/api/store/stock-alert/leave?h=harbor&t=${leave}`, null, "9.9.9.9", "cross-site"));
+  const oneClick = await leaveRoute(request(`/api/store/stock-alert/leave?i=${store.sid}&t=${leave}`, null, "9.9.9.9", "cross-site"));
   is("one click from a mail app: done", oneClick.status, 200);
   is("the place is gone", redis.run(["HEXISTS", listKey, "reader@example.com"]), 0);
   is("pressed again from the page: not on the list", statusOf(await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: leave }))), "gone");
@@ -161,6 +193,37 @@ async function main(): Promise<void> {
   mails.length = 0;
   await ask("lector@example.com", "8.8.2.1");
   is("Spanish subject and html lang", [mails[0]?.subject, mails[0]?.html.includes('lang="es-ES"')], ["Confirma: avísame cuando Signed Print vuelva", true]);
+
+  part("The links' own limit says how long it lasts: ten minutes, not an hour (Claude 3 on #3620, LOW 6)");
+  const confirms: (string | null)[] = [];
+  for (let i = 0; i < 21; i += 1) confirms.push(statusOf(await confirmRoute(request("/api/store/stock-alert/confirm", { handle: "harbor", token: "1".repeat(48) }, "6.6.6.1"))));
+  is("twenty confirm presses from one connection in ten minutes, then the links' notice", [confirms.slice(0, 20).every((c) => c === "expired"), confirms[20]], [true, "busy"]);
+  const leaves: (string | null)[] = [];
+  for (let i = 0; i < 301; i += 1) leaves.push(statusOf(await leaveRoute(request("/api/store/stock-alert/leave", { handle: "harbor", token: "1".repeat(48) }, "6.6.6.2"))));
+  is("three hundred stop presses from one connection in ten minutes, then the links' notice", leaves[300], "busy");
+  for (const [code, words] of Object.entries(STOCK_ALERT_WORDS)) {
+    is(`${code}: the links' notice names ten minutes`, words.notices.busy?.body.includes("10"), true);
+    is(`${code}: and never an hour`, words.notices.busy?.body === words.notices.limited.body, false);
+  }
+
+  part("One click from a mail app still works after the store lets its old address go");
+  mails.length = 0;
+  await ask("mover@example.com", "8.8.3.1");
+  const unsubscribe = (mails[0]?.headers?.["List-Unsubscribe"] ?? "").replace(/^<|>$/g, "");
+  const moverLink = new URL(unsubscribe || "https://marktmorgen.com/");
+  const moverLeave = moverLink.searchParams.get("t") ?? "";
+  is("the place is kept", typeof redis.run(["HGET", listKey, "mover@example.com"]), "string");
+  redis.run(["SET", "nl:store:handle:harbor", "released:owner@example.com"]);
+  const stranger = new URL(moverLink);
+  stranger.searchParams.set("i", "store_not_a_store");
+  stranger.searchParams.delete("h");
+  const notFound = await leaveRoute(request(`${stranger.pathname}${stranger.search}`, null, "9.9.3.2", "cross-site"));
+  is("a store that cannot be found is never a silent 200", notFound.status === 200, false);
+  is("and the place is still there", typeof redis.run(["HGET", listKey, "mover@example.com"]), "string");
+  const released = await leaveRoute(request(`${moverLink.pathname}${moverLink.search}`, null, "9.9.3.1", "cross-site"));
+  is("the email's own one-click link, after the old address was let go: done", [released.status, moverLeave.length], [200, 48]);
+  is("the place is gone", redis.run(["HEXISTS", listKey, "mover@example.com"]), 0);
+  is("pressed again: nothing left to stop, done", (await leaveRoute(request(`${moverLink.pathname}${moverLink.search}`, null, "9.9.3.1", "cross-site"))).status, 200);
 
   done();
 }

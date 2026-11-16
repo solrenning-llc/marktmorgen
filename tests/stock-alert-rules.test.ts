@@ -103,3 +103,15 @@ test("what a buyer already bought, when it cannot be read, refuses rather than l
   assert.equal(perBuyerAllows(Number.NaN, 0, 1), "unknown");
   assert.equal(perBuyerAllows(MAX_PER_BUYER + 1, 0, 1), "unknown");
 });
+
+test("a typed number is digits only, any all-zero entry is off, and a setting never stored is off (Claude 2 nuvem I and Claude 1 on #3607, LEVE)", () => {
+  // Number() would read "0x10" as 16 and "1e1" as 10: a creator's field takes digits only.
+  for (const read of [readLowStock, readPerBuyer]) {
+    for (const bad of ["0x10", "1e1", "+5", "5.0", "0b1", "１２"]) assert.equal(read(bad), null, `${read.name} ${bad}`);
+    for (const off of ["00", " 000 "]) assert.equal(read(off), 0, `${read.name} ${off}`);
+    assert.equal(read(" 012 "), 12, `${read.name} 012`);
+    // A product saved before these settings existed has none: off, so it keeps selling as before.
+    assert.equal(read(undefined), 0, `${read.name} undefined`);
+    assert.equal(read(null), null, `${read.name} null`);
+  }
+});

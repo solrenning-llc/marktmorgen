@@ -72,6 +72,7 @@ const MESSAGES: Record<string, string> = {
   caption_many: `A video holds captions in up to ${MAX_CAPTION_TRACKS} languages. Remove one first.`,
   caption_not_ready: "The video has to finish uploading before captions can be added.",
   caption_language: "Choose a language from the list.",
+  caption_writing: "AI captions in this language are still being written for this video. Add your own file once they are done, or after the request ends.",
   caption_unknown: "That video is not there anymore. Reload the page.",
   auto_not_ready: "The video has to finish uploading and being prepared before captions can be written.",
   auto_language: "Choose languages this video has no captions in yet, the one spoken first, three at most.",
@@ -234,8 +235,11 @@ export function CourseEditor({
   openFirst = null,
   look = null,
   language = "en",
+  draft = false,
 }: {
   productId: string;
+  /** Whether the course's product is hidden from the store (a draft): each lesson then says so (754 [STN1]). */
+  draft?: boolean;
   /** The store's look, so a lesson's text is previewed as students see it. */
   look?: StoreLook | null;
   /** The store's language, so the preview is marked as the lesson page is. */
@@ -356,6 +360,7 @@ export function CourseEditor({
           openLesson={openLesson}
           setOpenLesson={setOpenLesson}
           room={MAX_LESSONS - lessons}
+          draft={draft}
           run={run}
           onCourse={setCourse}
           onError={setError}
@@ -476,11 +481,14 @@ function ModuleCard({
   openLesson,
   setOpenLesson,
   room,
+  draft,
   run,
   onCourse,
   onError,
 }: {
   unit: CourseModule;
+  /** The course is a draft: each lesson says it is hidden. */
+  draft: boolean;
   index: number;
   last: boolean;
   busy: boolean;
@@ -589,6 +597,8 @@ function ModuleCard({
                   .join(" · ") || "empty"}
               </p>
             </div>
+            {/* Said in words on each lesson, not by colour, so a free preview is never taken for one buyers see (754 [STN1]). */}
+            {draft ? <p className="mt-1 text-sm text-ink-soft">Off your store: new buyers cannot see it, but people who already bought the course still do.</p> : null}
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-2 text-sm font-bold">
               <button type="button" className={small} onClick={() => setOpenLesson(openLesson === lesson.id ? null : lesson.id)} aria-expanded={openLesson === lesson.id}>
                 {openLesson === lesson.id ? "Close" : "Edit lesson"}
@@ -935,7 +945,7 @@ function LessonEditor({
         >
           {/* In the same card the lesson page puts behind the words, so the color behind them and the line length match. */}
           <div className="st-card p-5 sm:p-8">
-            {now.trim() ? <LessonText text={now} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
+            {now.trim() ? <LessonText text={now} lang={locale} /> : <p className="text-sm">The lesson&apos;s words appear here as you write.</p>}
           </div>
         </div>
       </div>

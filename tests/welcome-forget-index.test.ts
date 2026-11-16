@@ -86,13 +86,16 @@ async function queued(): Promise<string[]> {
 }
 
 async function fill(n: number, score: (i: number) => number): Promise<void> {
+  // One ZADD of up to 1,000 score/member pairs per batch, as Redis takes them: the same members at the same scores as
+  // one ZADD each, without the in-memory stand-in sorting the whole queue again after every single member.
   for (let start = 0; start < n; start += 1000) {
-    const batch: (string | number)[][] = [];
+    const pairs: string[] = [];
     for (let i = start; i < Math.min(n, start + 1000); i += 1) {
       const e = `other${i}@example.com`;
-      batch.push(["ZADD", DUE, String(score(i)), JSON.stringify({ s: "sid-other", i: OTHER_STATS, h: hash(e), e, t: `tok-${i}` })]);
+      pairs.push(String(score(i)), JSON.stringify({ s: "sid-other", i: OTHER_STATS, h: hash(e), e, t: `tok-${i}` }));
     }
-    await pipeline(batch);
+    const [added] = await pipeline([["ZADD", DUE, ...pairs]]);
+    if (added !== pairs.length / 2) throw new Error(`fill: ${String(added)} of ${pairs.length / 2} members added`);
   }
 }
 

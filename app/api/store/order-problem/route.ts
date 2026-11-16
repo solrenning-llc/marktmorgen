@@ -4,7 +4,7 @@ import { normaliseHandle, storeForHandle } from "@/lib/store";
 import { OrdersBusy, OrdersLate, findPurchase } from "@/lib/buyer-orders";
 import { fromAnotherSite, limited, withinLimit } from "@/lib/request-guard";
 import { readOrderProblem } from "@/lib/order-problem-rules";
-import { reportOrderProblem } from "@/lib/order-problem";
+import { ORDER_PROBLEM_COMMANDS, reportOrderProblem } from "@/lib/order-problem";
 
 // A note of 1,000 characters, each up to 12 bytes once form-encoded (a 4-byte character as %XX%XX%XX%XX), and the
 // other fields: a full note in any language fits, so it is never refused as too large before it is read.
@@ -74,6 +74,16 @@ export async function POST(request: NextRequest) {
     return back("error");
   }
   if (!found) return back("order");
+  // The filing's own commands (the per-buyer counter, the order's mark, the room) are paid from the lookup's meter
+  // before any is sent, as the withdrawal pays its reads (Claude 7 on #3837): a store that takes no more requests is
+  // "busy", with nothing marked or filed.
+  try {
+    await found.meter.take(ORDER_PROBLEM_COMMANDS);
+  } catch (error) {
+    if (error instanceof OrdersBusy || error instanceof OrdersLate) return back("busy");
+    console.error("paying for a report of a problem with an order failed", error);
+    return back("error");
+  }
   if (!(await withinLimit("order-problem", `${store.statsId}:${found.email}`, ORDER_PROBLEM_PER_DAY, 86_400))) return back("limited");
   try {
     return back(await reportOrderProblem(store, found.purchase, found.email, problem.problem));

@@ -438,7 +438,12 @@ function defaultStore(): BackupBucket | null {
   return config ? r2BackupStore(config) : null;
 }
 
-/** The keys and bytes of the last good set a new copy is compared with before the prune (inbox C4-36 item 1). */
+/**
+ * The size of the last good set a new copy is compared with before the prune (inbox C4-36 item 1). `keys` counts rows
+ * as a set's manifest does (a key copied in chunks counts each chunk), so a copy is always compared with a set by the
+ * same count, whether the set's size comes from the mark or from its manifest (Claude 7's MÉDIO 2 on #3293); the name
+ * is the stored mark's.
+ */
 type BackupBase = { keys: number; bytes: number };
 const isCount = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 
@@ -851,11 +856,11 @@ const shrank = (now: number, was: number) => now * 100 < was * (100 - BACKUP_SHR
  * is no mark at all, which the listing decides.
  */
 async function shrinkCheck(
-  copied: { keys: number; bytes: number },
+  copied: { rows: number; bytes: number },
   now: number,
   readMark: MarkReader,
 ): Promise<{ state: "ok" | "shrunk" | "unverified" | "unknown" | "none"; base: BackupBase | null; heldSince: number | null }> {
-  const fresh = { keys: copied.keys, bytes: copied.bytes };
+  const fresh = { keys: copied.rows, bytes: copied.bytes };
   let replies: unknown;
   try {
     replies = await readMark();
@@ -865,8 +870,11 @@ async function shrinkCheck(
   if (!Array.isArray(replies) || replies.length !== 1 || (replies[0] !== null && typeof replies[0] !== "string")) return { state: "unknown", base: null, heldSince: null };
   if (replies[0] === null) return { state: "none", base: fresh, heldSince: null };
   const kept = readLastOk(replies[0]);
-  const heldSince = kept?.heldSince ?? now;
-  const was = kept?.base;
+  // A mark that is there and does not read (bad JSON, a heldSince that is not a moment) is unknown: left as it is, never
+  // rewritten without its base (Claude 7's MÉDIO 1 on #3293; the invariant above, Claude 6's MEDIUM 2).
+  if (!kept) return { state: "unknown", base: null, heldSince: null };
+  const heldSince = kept.heldSince ?? now;
+  const was = kept.base;
   if (!was) return { state: "unverified", base: null, heldSince };
   return shrank(fresh.keys, was.keys) || shrank(fresh.bytes, was.bytes) ? { state: "shrunk", base: was, heldSince } : { state: "ok", base: fresh, heldSince: null };
 }
@@ -885,7 +893,7 @@ async function prune(
   store: BackupBucket,
   key: Uint8Array[],
   now: number,
-  copied: { id: string; keys: number; bytes: number; parts: number },
+  copied: { id: string; keys: number; rows: number; bytes: number; parts: number },
   readMark: MarkReader,
   folder: string | null,
 ): Promise<{ deleted: number; state: BackupPruneState; mark: MarkPlan }> {
@@ -920,7 +928,8 @@ async function prune(
         if (sets.length === 0 && others.some((o) => BACKUP_MONTH_MARK.test(o.id))) throw new Unverified();
         if (sets.length > 0) {
           const largest = { keys: Math.max(...sets.map((set) => set.keys)), bytes: Math.max(...sets.map((set) => set.bytes)) };
-          if (shrank(copied.keys, largest.keys) || shrank(copied.bytes, largest.bytes)) return { deleted, state: "prune_shrunk", mark: { base: largest, heldSince: now } };
+          // Rows with rows: the sets' sizes are their manifests' rows, a chunked key's chunks each (Claude 7's MÉDIO 2).
+          if (shrank(copied.rows, largest.keys) || shrank(copied.bytes, largest.bytes)) return { deleted, state: "prune_shrunk", mark: { base: largest, heldSince: now } };
         }
       }
       mark = { base: check.base, heldSince: null };
@@ -965,7 +974,7 @@ async function copy(
 ): Promise<
   | Exclude<BackupRunResult, { ok: true } | { reason: "copy_incomplete" }>
   | { ok: false; reason: "copy_incomplete"; keys: number; bytes: number; parts: number; progress: CopyProgress }
-  | { ok: true; id: string; keys: number; bytes: number; parts: number }
+  | { ok: true; id: string; keys: number; rows: number; bytes: number; parts: number }
 > {
   // The copy in parts (lib/backup-parts.ts): every part verified as written, the set verified by its manifest last; a
   // month's copy with every object in its folder, its id the manifest's there.
@@ -991,7 +1000,7 @@ async function copy(
   } catch {
     return { ok: false, reason: "export_error" };
   }
-  if (done.ok) return { ok: true, id: (folder ?? "") + done.id, keys: done.keys, bytes: done.bytes, parts: done.parts };
+  if (done.ok) return { ok: true, id: (folder ?? "") + done.id, keys: done.keys, rows: done.rows, bytes: done.bytes, parts: done.parts };
   if (done.reason === "paused") return { ok: false, reason: "copy_incomplete", keys: done.progress.keys, bytes: done.progress.bytes, parts: done.parts, progress: done.progress };
   // Sealing, a write or a read-back failed: every earlier set is left as it was.
   if (done.reason === "verify") return { ok: false, reason: "verify" };

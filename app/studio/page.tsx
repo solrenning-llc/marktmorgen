@@ -194,6 +194,7 @@ import { SETUP_STORAGE_BYTES, SETUP_VIDEO_SECONDS, standingOf, videoLimitFor } f
 import { CLOSING_DAYS, WARN_MONTH_DAYS, WARN_WEEK_DAYS, closingOf } from "@/lib/plan-closing";
 import { ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, closesStore, keptRoomFor } from "@/lib/plan-closing-rules";
 import { BUYER_NOTICE_DAYS } from "@/lib/closing-buyers-rules";
+import { AfterCancel } from "@/components/after-cancel";
 import { MAX_LEADS, listSize } from "@/lib/free";
 import { readableSize } from "@/lib/product-file";
 import {
@@ -3024,6 +3025,7 @@ export default async function StudioPage({
                         ? `Canceled during the trial. Your card will not be charged, and your store keeps taking payments until ${endsOn ?? "the trial ends"}.`
                         : `Canceled. Nothing more will be charged, and your store keeps taking payments until ${endsOn ?? "the end of the period you paid for"}.`}
                     </p>
+                    <AfterCancel endsOn={endsOn} trialing={trialing} id="after-cancel-set" />
                     <form action={`/api/billing/cancel${pin}`} method="post" className="mt-4">
                       <input type="hidden" name="intent" value="resume" />
                       <button
@@ -3210,6 +3212,7 @@ export default async function StudioPage({
                           ? `Your store keeps taking payments until ${endsOn ?? "the trial ends"}, and your card is never charged.`
                           : `Your store keeps taking payments until ${endsOn ?? "the end of the period you already paid for"}, and nothing more is charged.`}
                       </p>
+                      <AfterCancel endsOn={endsOn} trialing={trialing} id="after-cancel-confirm" />
                       {!closing && may("export") && standing !== "ended" && standing !== "none" ? (
                         <p className="mt-3 text-sm text-ink-soft">
                           Before you leave, review what is included in the data file and what is not.{" "}

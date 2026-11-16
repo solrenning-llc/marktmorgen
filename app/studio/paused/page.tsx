@@ -13,6 +13,7 @@ import { standingOf } from "@/lib/plan-standing";
 import { PLANS_ON_SALE } from "@/lib/opening";
 import { isBillingConfigured } from "@/lib/billing";
 import { can } from "@/lib/team-roles";
+import { AfterCancel } from "@/components/after-cancel";
 
 export const metadata: Metadata = {
   title: "Studio paused — Marktmorgen",
@@ -121,6 +122,7 @@ export default async function StudioPausedPage({ searchParams }: Params) {
                     <details>
                       <summary className="cursor-pointer text-sm font-bold text-ink underline underline-offset-2">Cancel the subscription</summary>
                       <p className="mt-2 text-sm text-ink-soft">Your store keeps taking payments until the end of the period you already paid for, and nothing more is charged.</p>
+                      <AfterCancel endsOn={null} trialing={false} id="after-cancel-paused" />
                       <form action={`/api/billing/cancel${pin}`} method="post" className="mt-3">
                         <input type="hidden" name="intent" value="cancel" />
                         <button type="submit" className="btn btn-secondary btn-sm">

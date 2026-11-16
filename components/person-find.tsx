@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "@/components/toast";
+import { EmailInput } from "@/components/email-input";
 
 /**
  * Looks up one buyer by their address (lib/buyer-profile.ts). The address is
@@ -43,19 +44,20 @@ export function PersonFind({ initial = "" }: { initial?: string }) {
         setBusy(false);
       }}
     >
-      <label className="min-w-0 flex-1 text-sm">
-        <span className="field-label">A buyer&apos;s email address</span>
-        <input
-          type="email"
+      <div className="min-w-0 flex-1 text-sm">
+        <label htmlFor="person-find-email" className="block">
+          <span className="field-label">A buyer&apos;s email address</span>
+        </label>
+        <EmailInput
+          id="person-find-email"
           required
           autoComplete="off"
-          spellCheck={false}
           className="field mt-1 py-2"
           placeholder="name@example.com"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={setEmail}
         />
-      </label>
+      </div>
       <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
         {busy ? "Looking…" : "Open their page"}
       </button>

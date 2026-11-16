@@ -87,6 +87,8 @@ export type SiteSnippetInput = {
   /** The store's description, the line under its name. */
   storeBio: string;
   storeName: string;
+  /** The sentence in the store's language for a page with none of the above (lib/buyer-words, pageDescription). */
+  general: string;
   /** Whether the page is on the store: it has a block and is not kept back. */
   shown: boolean;
 };
@@ -95,7 +97,8 @@ export type SiteSnippetInput = {
  * What one of the store's own pages (lib/site-page-rules.ts) gives search
  * engines, in its page's order (app/[handle]/[slug]/page.tsx): own title, else
  * "<page> — <store>"; own description, else the first hero's subheadline, else
- * the store's description, else "<page>, from <store>."; at most 300
+ * the store's description, else a sentence naming the page and the store in the
+ * store's language ("<page>, from <store>." in English); at most 300
  * characters. A page with no block, or kept back, is not on the store at all:
  * `waiting`, with what it will give once it shows.
  */
@@ -111,7 +114,7 @@ export function sitePageSnippet(input: SiteSnippetInput): SearchSnippet {
       ? [subheadline, "subheadline"]
       : input.storeBio
         ? [input.storeBio, "bio"]
-        : [`${input.pageTitle}, from ${input.storeName}.`, "sentence"];
+        : [input.general, "sentence"];
   return { title, titleFrom, description: description.slice(0, SITE_DESCRIPTION_MAX), descriptionFrom, waiting: !input.shown, kind: "site" };
 }
 

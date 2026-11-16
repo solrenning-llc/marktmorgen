@@ -257,6 +257,8 @@ export const en = {
 
   // ---- A product's page ----------------------------------------------------------------
   productDescription: (title: string, store: string) => `${title}, from the store of ${store}.`,
+  /** One of the store's own pages, for search engines when it has no description of its own (248 [ST1]). */
+  pageDescription: (page: string, store: string) => `${page}, from ${store}.`,
   insideTitle: (count: number) => `What is inside: ${count} products`,
   insideCourse: (lessons: number) => `Course, ${lessons} ${plural(lessons, "lesson", "lessons")} · `,
   insideNote: "Each one is yours straight after paying, as if you had bought it on its own.",

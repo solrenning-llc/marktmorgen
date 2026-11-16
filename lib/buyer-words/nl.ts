@@ -224,6 +224,7 @@ export const nl: BuyerWords = {
   madeWith: "Gemaakt met Marktmorgen",
 
   productDescription: (title, store) => `${title}, uit de winkel van ${store}.`,
+  pageDescription: (page, store) => `${page}, in de winkel van ${store}.`,
   insideTitle: (count) => `Wat erin zit: ${count} producten`,
   insideCourse: (lessons) => `Cursus, ${lessons} ${plural(lessons, "les", "lessen")} · `,
   insideNote: "Elk product is direct na betaling van jou, alsof je het los had gekocht.",

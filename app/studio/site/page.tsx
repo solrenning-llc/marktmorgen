@@ -19,6 +19,7 @@ import { featuredCards } from "@/lib/featured-cards";
 import { SITE_KINDS, siteKey } from "@/lib/site-page-rules";
 import { SitePageSettings, SitePagesList } from "@/components/site-pages-editor";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { speech } from "@/lib/buyer-words";
 
 export const metadata: Metadata = {
   title: "Your pages — Marktmorgen",
@@ -110,7 +111,7 @@ export default async function StudioSitePage({ searchParams }: Params) {
                       look={store.look}
                       storeName={store.name}
                       // What the public page falls back to for its search description (248 [ST1]).
-                      siteSearch={{ bio: store.bio }}
+                      siteSearch={{ bio: store.bio, general: speech(store).w.pageDescription(selected.title, store.name) }}
                       photo={store.photoId ? photoUrl(store.photoId) : null}
                       pageHref={`/@${store.handle}/${selected.slug}`}
                       shareUrl={`${base}/${selected.slug}`}

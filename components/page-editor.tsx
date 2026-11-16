@@ -351,8 +351,8 @@ export function PageEditor({
    * page, whose metadata is not a product's.
    */
   searchLine?: { aboutLine: string; general: string };
-  /** For one of the store's own pages: its description, which the page falls back to after its first subheadline. */
-  siteSearch?: { bio: string };
+  /** For one of the store's own pages: the store's description and the sentence in its language, which the page falls back to after its first subheadline. */
+  siteSearch?: { bio: string; general: string };
 }) {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>(() => toDrafts(templateDraft ?? initial));
@@ -2778,6 +2778,7 @@ export function PageEditor({
                     subheadline: drafts[0]?.block.kind === "hero" ? drafts[0].block.sub : "",
                     storeBio: siteSearch.bio,
                     storeName,
+                    general: siteSearch.general,
                     // On the store only with a block, and not while kept back (app/[handle]/[slug]/page.tsx).
                     shown: drafts.length > 0 && (!hidden || (showFrom > 0 && clock > 0 && showFrom * 1000 <= clock)),
                   })}

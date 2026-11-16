@@ -72,6 +72,7 @@ export async function generateMetadata({ params }: Pick<Params, "params">): Prom
     subheadline: hero?.sub ?? "",
     storeBio: store.bio,
     storeName: store.name,
+    general: speech(store).w.pageDescription(page.title, store.name),
     shown: true,
   });
   const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}` : null;

@@ -230,6 +230,7 @@ export const es: BuyerWords = {
   madeWith: "Hecho con Marktmorgen",
 
   productDescription: (title, store) => `${title}, de la tienda de ${store}.`,
+  pageDescription: (page, store) => `${page}, en la tienda de ${store}.`,
   insideTitle: (count) => `Lo que incluye: ${count} productos`,
   insideCourse: (lessons) => `Curso, ${lessons} ${plural(lessons, "lección", "lecciones")} · `,
   insideNote: "Cada uno es tuyo justo después de pagar, como si lo hubieras comprado por separado.",

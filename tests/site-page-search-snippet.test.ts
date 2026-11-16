@@ -8,6 +8,7 @@
  *     the rule's; a page kept back is not on the store (not found), and the rule says it waits;
  *   - the studio's store page editor is handed the store's description, and the editor draws the rule from what is
  *     typed: the first block's subheadline, the Hidden switch, and whether the page has a block at all;
+ *   - the sentence a page with nothing of its own gets is in the store's language (unit 5), English unchanged;
  *   - the preview's words for a store page, including the one said while it is not on the store.
  * Synthetic stores on the Redis stand-in; nothing reaches any service.
  */
@@ -16,10 +17,12 @@ import { readFileSync } from "node:fs";
 import { generateMetadata as siteMeta } from "@/app/[handle]/[slug]/page";
 import StudioSitePage from "@/app/studio/site/page";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { claimHandle, ensureStatsId, setSitePages, storeForEmail } from "@/lib/store";
+import { claimHandle, ensureStatsId, setLanguage, setSitePages, storeForEmail } from "@/lib/store";
 import { writePage } from "@/lib/sales-page-store";
 import { parsePage } from "@/lib/sales-page";
 import { siteKey } from "@/lib/site-page-rules";
+import { wordsIn } from "@/lib/buyer-words";
+import { LANGUAGE_CODES, parseLanguage } from "@/lib/store-language";
 import { PageEditor } from "@/components/page-editor";
 import * as snippetModule from "@/lib/product-search-snippet";
 import { SearchSnippetPreview } from "@/components/search-snippet-preview";
@@ -35,7 +38,7 @@ const NO_BIO = "site-snippet-b@example.com";
 const BIO = "Weeknight dinners for busy parents.";
 
 type Snippet = { title: string; description: string; titleFrom: string; descriptionFrom: string; waiting: boolean; kind: string };
-type Input = { seoTitle: string; seoDescription: string; pageTitle: string; subheadline: string; storeBio: string; storeName: string; shown: boolean };
+type Input = { seoTitle: string; seoDescription: string; pageTitle: string; subheadline: string; storeBio: string; storeName: string; general: string; shown: boolean };
 const rule = (snippetModule as Record<string, unknown>).sitePageSnippet as ((input: Input) => Snippet) | undefined;
 const snippet = (input: Input): Snippet | "missing" => (rule ? rule(input) : "missing");
 
@@ -60,7 +63,7 @@ function find(node: unknown, component: unknown): { props: Record<string, unknow
 const hero = (id: string, sub: string) => ({ id, kind: "hero", headline: "Hello", sub, media: "none", video: null });
 
 async function main(): Promise<void> {
-  const base: Input = { seoTitle: "", seoDescription: "", pageTitle: "About", subheadline: "", storeBio: "", storeName: "Harbor Kitchen", shown: true };
+  const base: Input = { seoTitle: "", seoDescription: "", pageTitle: "About", subheadline: "", storeBio: "", storeName: "Harbor Kitchen", general: "About, from Harbor Kitchen.", shown: true };
 
   part("The rule, in the store page's order");
   is("nothing of its own: the page's and store's names, and the sentence", snippet(base), {
@@ -109,10 +112,11 @@ async function main(): Promise<void> {
     answering(new Request(`${ORIGIN}/studio/site?page=${c.id}`, { headers: { cookie: `${SESSION_COOKIE}=${session}` } }));
     const editor = find(await StudioSitePage({ searchParams: Promise.resolve({ page: c.id }) }), PageEditor);
     is(`${name}: the studio mounts the store page editor`, Boolean(editor?.props.site), true);
-    const handed = editor?.props.siteSearch as { bio?: string } | undefined;
+    const handed = editor?.props.siteSearch as { bio?: string; general?: string } | undefined;
     is(`${name}: and hands it the store's description`, handed?.bio, c.store.bio);
+    is(`${name}: and the sentence in the store's language`, handed?.general, wordsIn(parseLanguage(c.store.language)).pageDescription?.(c.title, c.store.name));
     const shown = !("hidden" in c && c.hidden);
-    const expected = snippet({ ...c.seo, pageTitle: c.title, subheadline: c.sub, storeBio: handed?.bio ?? "", storeName: c.store.name, shown });
+    const expected = snippet({ ...c.seo, pageTitle: c.title, subheadline: c.sub, storeBio: handed?.bio ?? "", storeName: c.store.name, general: handed?.general ?? "", shown });
     if (expected === "missing") {
       is(`${name}: the rule`, "missing", "present");
       continue;
@@ -127,13 +131,28 @@ async function main(): Promise<void> {
     is(`${name}: and so are the shared link's`, [meta.openGraph?.title, meta.openGraph?.description], [expected.title, expected.description]);
   }
 
+  part("A store in another language says its sentence in that language (English unchanged)");
+  if (!(await setLanguage(NO_BIO, "es"))) throw new Error("setup");
+  answering(new Request(`${ORIGIN}/@quietkitchen/about`));
+  const spanish = await siteMeta({ params: Promise.resolve({ handle: "@quietkitchen", slug: "about" }) });
+  is("a Spanish store's page with nothing of its own", spanish.description, "About, en la tienda de Quiet Kitchen.");
+  const esSession = await openSession(NO_BIO);
+  answering(new Request(`${ORIGIN}/studio/site?page=sentence01`, { headers: { cookie: `${SESSION_COOKIE}=${esSession}` } }));
+  const esEditor = find(await StudioSitePage({ searchParams: Promise.resolve({ page: "sentence01" }) }), PageEditor);
+  is("and the studio hands the editor the same sentence", (esEditor?.props.siteSearch as { general?: string } | undefined)?.general, spanish.description);
+  for (const code of LANGUAGE_CODES) {
+    const said = wordsIn(code).pageDescription?.("Notes", "Quiet Kitchen") ?? "missing";
+    is(`${code}: the sentence names the page and the store`, said.includes("Notes") && said.includes("Quiet Kitchen") && !said.includes("${"), true);
+  }
+  is("English is the sentence the page always gave", wordsIn("en").pageDescription?.("About", "Harbor Kitchen"), "About, from Harbor Kitchen.");
+
   part("In the editor and the preview");
   const source = readFileSync("components/page-editor.tsx", "utf8");
   is("a store page draws sitePageSnippet when handed the store's description", /site && siteSearch \? \(\s*<SearchSnippetPreview\s*snippet=\{sitePageSnippet\(/.test(source), true);
   is("from the first block's subheadline as typed", source.includes('subheadline: drafts[0]?.block.kind === "hero" ? drafts[0].block.sub : ""'), true);
   is("on the store only with a block, and not while kept back", source.includes("shown: drafts.length > 0 && (!hidden || (showFrom > 0 && clock > 0 && showFrom * 1000 <= clock))"), true);
   const studioSite = readFileSync("app/studio/site/page.tsx", "utf8");
-  is("the studio's store pages hand the editor the store's description", studioSite.includes("siteSearch={{ bio: store.bio }}"), true);
+  is("the studio's store pages hand the editor the store's description and sentence", studioSite.includes("siteSearch={{ bio: store.bio, general: speech(store).w.pageDescription(selected.title, store.name) }}"), true);
   if (rule) {
     const fromBio = renderToStaticMarkup(SearchSnippetPreview({ snippet: rule({ ...base, storeBio: BIO }) as never }));
     is("the title's source names the page's title", fromBio.includes("From the page&#x27;s title and your store&#x27;s name."), true);

@@ -128,7 +128,7 @@ export async function POST(request: NextRequest) {
   if (live && !same) return back("playing");
   const got = live
     ? { kind: "stream" as const, ...live.player }
-    : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous });
+    : await lessonVideo(video, videoLimitFor(store), windowId(store), store, { anonymous, free: anonymous });
   if (claim && got?.kind !== "stream") await dropPlayingClaim(who, folder ?? "", claim);
   switch (got?.kind) {
     case "stream": {

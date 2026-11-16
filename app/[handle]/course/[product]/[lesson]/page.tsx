@@ -137,7 +137,8 @@ export default async function LessonPage({ params, searchParams }: Params) {
     if (pressed) return { kind: "stream", ...pressed };
     // A store with no plan that can be charged plays video for the hours
     // it has, and is paused past them (lib/plan-standing.ts).
-    return lessonPageVideo(file, videoLimitFor(store), windowId(store), store);
+    // Whoever does not hold the course plays a file as a free copy, paused with the store's free downloads.
+    return lessonPageVideo(file, videoLimitFor(store), windowId(store), store, { free: access.state !== "open" });
   };
   // What kept a press of Play from playing, said above the button (the route's own outcomes; anything else is none).
   const played = typeof query.play === "string" ? query.play : "";
@@ -359,6 +360,10 @@ export default async function LessonPage({ params, searchParams }: Params) {
                 <p className="st-note mt-6" role="status">
                   {/* A paid store's pause is its plan's hours used, never "no paid plan" (VR 2). */}
                   <strong>{w.pausedStrong}</strong>{` ${costStandingOf(store) === "paid" ? w.pausedPaidRest(store.name) : w.pausedRest(store.name)}`}
+                </p>
+              ) : video?.kind === "free_paused" ? (
+                <p className="st-note mt-6" role="status">
+                  <strong>{w.pausedStrong}</strong>{` ${w.freePausedRest}`}
                 </p>
               ) : video?.kind === "failed" ? (
                 <p className="st-note mt-6">{w.videoFailed(store.name)}</p>

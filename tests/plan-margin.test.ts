@@ -334,9 +334,11 @@ test("lesson pages supply the store's video allowance", () => {
   // Rule 23 (9 November 2026, pre-review of the video hours ceiling): was lessonVideo(lesson.video, ...) on the page. The
   // page now draws without holding (lessonPageVideo) and a press of Play holds (app/api/store/course/play/route.ts):
   // both supply the store's allowance and its window.
-  assert.match(page, /lessonPageVideo\(file, videoLimitFor\(store\), windowId\(store\), store\)/, "the lesson page must supply the store's allowance and its window");
+  // Rule 23 (merge of main, 16 November 2026): main's assertion was lessonVideo(lesson.video, ..., { free: access.state
+  // !== "open" }) on the page; main's free-copy pause now goes through lessonPageVideo and the press of Play.
+  assert.match(page, /lessonPageVideo\(file, videoLimitFor\(store\), windowId\(store\), store, \{ free: access\.state !== "open" \}\)/, "the lesson page must supply the store's allowance and its window");
   const play = readFileSync(join(process.cwd(), "app/api/store/course/play/route.ts"), "utf8");
-  assert.match(play, /lessonVideo\(video, videoLimitFor\(store\), windowId\(store\), store, \{ anonymous \}\)/, "a press of Play must supply the store's allowance and its window");
+  assert.match(play, /lessonVideo\(video, videoLimitFor\(store\), windowId\(store\), store, \{ anonymous, free: anonymous \}\)/, "a press of Play must supply the store's allowance and its window");
 });
 
 test("a store that pays nothing can cost next to nothing", () => {

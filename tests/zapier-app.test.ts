@@ -25,6 +25,7 @@ import { POST as postLeads } from "@/app/api/v1/leads/route";
 import { POST as postLabels } from "@/app/api/v1/leads/labels/route";
 import { POST as postAccess } from "@/app/api/v1/access/route";
 import { GET as getProducts } from "@/app/api/v1/products/route";
+import { POST as postCodes } from "@/app/api/v1/codes/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -81,6 +82,7 @@ function makeZ(key: string): Z {
     { test: /\/api\/v1\/leads$/, handler: postLeads },
     { test: /\/api\/v1\/access$/, handler: postAccess },
     { test: /\/api\/v1\/products/, handler: getProducts },
+    { test: /\/api\/v1\/codes$/, handler: postCodes },
   ];
   async function hooksRouter(request: Request): Promise<Response> {
     return request.method === "DELETE" ? deleteHook(request) : postHook(request);
@@ -197,7 +199,17 @@ async function main(): Promise<void> {
   is("each hook trigger stands for a webhook event", triggerEvents.every((e) => (["sale.completed", "refund.issued", "lead.captured", "list.joined", "membership.started", "membership.canceled", "call.booked", "call.moved"] as string[]).includes(e)), true);
   is("the product list is hidden from the trigger menu", app.triggers.product_list.display.hidden, true);
   is("adding a subscriber requires the agreement the list requires", app.creates.add_subscriber.operation.inputFields.some((f) => f.key === "agreed" && f.required === true), true);
-  is("the three actions are the API's writes", Object.keys(app.creates).sort(), ["add_subscriber", "change_labels", "give_access"]);
+  is("the four actions are the API's writes", Object.keys(app.creates).sort(), ["add_subscriber", "change_labels", "create_discount_code", "give_access"]);
+
+  part("A discount code is made only where the studio would make one, through the real route");
+  const codeRefused = await app.creates.create_discount_code.operation
+    .perform(makeZ(writer.key), bundle({ inputData: { code: "SPRING20", percent: "20" } }))
+    .then(() => "", (error: ZapierError) => error.code);
+  is("a store not taking payments is refused with the API's own reason, no code made", codeRefused, "not_selling");
+  const codeReader = await app.creates.create_discount_code.operation
+    .perform(makeZ(reader.key), bundle({ authData: { api_key: reader.key }, inputData: { code: "SPRING20", percent: "20" } }))
+    .then(() => "", (error: ZapierError) => error.code);
+  is("a key made to read cannot make a code", codeReader, "read_only");
 
   part("The action adds to the list only with agreement, through the real route");
   const addSub = app.creates.add_subscriber.operation;

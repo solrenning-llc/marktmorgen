@@ -23,10 +23,19 @@
  * first went through never adds the days again.
  *
  * Cost (MR): one studio request (the route's guard), the Stripe reads the
- * discount's own find makes and one write, all on the creator's account; two
- * Redis commands for the claim and the activity log's own two; and one email
- * to the member, taken from the store's own emails before it goes
- * (lib/email.ts, meter "store"/"email"), not sent when they are used up.
+ * discount's own find makes and one write, all on the creator's account; and
+ * one email to the member, taken from the store's own emails before it goes
+ * (lib/email.ts, meter "store"/"email"), not sent when they are used up. Every
+ * Redis command of a press is inside that one studio request's commands
+ * (UNIT_COST.studio, 27), at its most: the guard's own; the membership's lock
+ * tried with one SET NX every 20 to 250 ms for MEMBERSHIP_LOCK_WAIT_MS, at
+ * most 8 tries (lib/redis-lock.ts, takeLock), and let go (EVAL) or, after a
+ * write Stripe did not confirm, held a full term (EVAL, and a SET NX); the
+ * claim (SET NX) and, when nothing was done, its DEL; the member's cached
+ * status forgotten (DEL); the activity log's LPUSH and LTRIM; and what the
+ * email sends past its own take (Claude 7's MEDIUM 1 on #2912, held by
+ * tests/member-free-days-studio-unit.test.ts). A longer wait would poll past
+ * that unit.
  */
 import { onAccount, StripeError } from "@/lib/stripe-account";
 import { memberSubRows } from "@/lib/member-discount";
@@ -69,9 +78,14 @@ export type GiveResult =
 
 /** The lock every change to a membership takes: a switch between plans or to yearly, a pause (lib/membership-pause.ts). */
 const membershipLockKey = (subscription: string) => `nl:tier:${subscription}:lock`;
-/** As lib/membership-pause.ts: longer than the reads and the change at their ceiling, with room; a press waits at most 5 s. */
+/** As lib/membership-pause.ts: longer than the reads and the change at their ceiling, with room. */
 const MEMBERSHIP_LOCK_SECONDS = 120;
-const MEMBERSHIP_LOCK_WAIT_MS = 5_000;
+/**
+ * A press waits at most 1.2 s for a switch or a pause holding the membership, then answers "busy": 8 tries at the lock,
+ * so the whole press stays inside one studio request's commands (the header's cost note; Claude 7's MEDIUM 1 on #2912,
+ * where 5 s polled 23 times and went past it).
+ */
+const MEMBERSHIP_LOCK_WAIT_MS = 1_200;
 
 /**
  * Gives `days` free days on one of the member's running memberships: its next

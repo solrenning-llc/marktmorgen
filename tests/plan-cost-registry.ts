@@ -84,7 +84,8 @@ import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, 
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
 import { BODIES_PER_READ } from "@/lib/course";
-import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
+import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ, bookWork } from "@/lib/api-read-rules";
+import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { MAX_LEADS } from "@/lib/contact-rules";
 import { DATA_ROOM_BYTES, ENTRY_BYTES, NON_PAYING_DATA_ROOM_BYTES } from "@/lib/store-data-rules";
 import { ORDER_KEY_BYTES } from "@/lib/order-data";
@@ -755,6 +756,61 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
 
+/**
+ * The most times takeLock (lib/redis-lock.ts) tries a lock's SET NX while it waits `waitMs` for another holder: it
+ * sleeps 20 ms, doubled each try up to 250 ms, and tries again only while the next sleep still ends inside the wait;
+ * held to that loop's text in tests/paypal-press-cost.test.ts.
+ */
+export function lockTriesAtMost(waitMs: number): number {
+  let tries = 1;
+  let slept = 0;
+  for (let wait = 20; slept + wait <= waitMs; wait = Math.min(wait * 2, 250)) {
+    slept += wait;
+    tries += 1;
+  }
+  return tries;
+}
+/** The tries of the PayPal pay lock, waited on 5 s (lib/paypal-payouts.ts, payWithPayPal). */
+export const PAYPAL_PRESS_LOCK_TRIES = lockTriesAtMost(5_000);
+/**
+ * The Redis commands one press of "Pay with PayPal" sends besides its book read (lib/paypal-payouts.ts,
+ * payWithPayPal; Claude 7 on #4488): the link read, the lock's tries, who is on their way, the link read again for the
+ * token, who is on their way again, the lock held again (EVAL), the batch written down as on its way with its store
+ * (HSET, SADD), its settling at the most (held under PayPal's id and the "?" entry taken off, or the month's two
+ * counts when the answer is not known), and the lock let go (EVAL). Counted through the Redis stand-in on each path in
+ * tests/paypal-press-cost.test.ts.
+ */
+export const PAYPAL_PRESS_COMMANDS = 1 + PAYPAL_PRESS_LOCK_TRIES + 1 + 1 + 1 + 1 + 2 + 2 + 1;
+/**
+ * And its book read (lib/affiliates.ts, readBook, no deadline, `titles: false`) at the caps: the seven records, the
+ * PayPal refunds (BOOK_PAYPAL_REFUNDS), the moves and the refund marks, as bookWork counts them, with the eight counts it
+ * counts first kept as room (the press does not count them). No product is read for its title: a batch names none.
+ */
+export const PAYPAL_PRESS_BOOK_COMMANDS = bookWork({ kept: true, entries: 1, people: 1, leads: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER, stripe: true, products: 0 }, BOOK_STRIPE_PAGES).commands;
+/** How long one press runs at the most: the studio route's maxDuration and payday's (app/api/cron/affiliates/route.ts). */
+export const PAYPAL_PRESS_SECONDS = 60;
+/**
+ * One press, in dollars, whose book read sends `bookCommands` (bookWork at its size, titles not read): a call held at
+ * 2 GB for all its seconds, every command of its own above, the book's and the store figure's take. What the book read
+ * moves through the database by the byte (its records grow with the program) is not in it: the same open question for
+ * every reader of the whole book (the studio's affiliates page, the payout file, payday's email), not settled here
+ * and never read as zero.
+ */
+export function paypalPressCost(bookCommands: number): number {
+  return CALL + SHAPES.wait.cpu * CPU_SECOND + PAYPAL_PRESS_SECONDS * MEMORY_SECOND
+    + (PAYPAL_PRESS_COMMANDS + bookCommands + TAKE_COMMANDS) * COMMAND + 20_000 * DB_BYTE;
+}
+/** One press at the most: its book read at the caps. */
+export const PAYPAL_PRESS = paypalPressCost(PAYPAL_PRESS_BOOK_COMMANDS);
+/**
+ * Presses a store makes a month that take no integration unit: payday's auto-pay, once (lib/affiliate-payday.ts,
+ * claimMonth, then keepMonth confirmed BEFORE payWithPayPal, so a refused payday email, a press whose outcome is not
+ * known or a run stopped mid-press never brings a second press that month; Claude 6 on #4488). A press from the studio
+ * takes its units first (lib/paypal-payouts.ts, paypalPressUnits), so it is inside the figure; this one is added to
+ * the integrations line at PAYPAL_PRESS.
+ */
+export const PAYPAL_PRESSES_UNTAKEN = 1;
+
 /** Checkout-refusal panel, inside the existing studio unit (not added again):
  * one HMGET for seven UTC days plus last, with the writer's 60/300-character
  * code/message ceilings and safe integer counts. JSON control-character
@@ -1277,6 +1333,9 @@ export const COST_LINES: CostLine[] = [
       // CART_STOCK_COMMANDS_MOST, half of ORDER_COMPUTE at most. An opening whose answer is unknown asks nothing more: its holds lapse.
       { file: "lib/stock.ts", names: ["withCartStockHolds", "PENDING_MS", "releaseCartStockHolds", "STOCK_ADMIT", "STOCK_BIND", "stripeRefusedOpening", "LOCK_WAIT_MS = 500", "countStock(store, product, now, false)"] },
       { file: "app/api/store/free/download/route.ts", names: ["recordAffiliateLead"] },
+      // A course's checkout sent from a page that said its end date reads the course once, exactly (24 [E7], 9 November 2026).
+      { file: "app/api/store/checkout/route.ts", names: ["readCourseForSale(product.course.id)"] },
+      { file: "lib/course-access-end.ts", names: ["readCourseExact(id)"] },
       // An offer still waiting on Stripe is looked at by the five-minute job less often the longer it waits (WATCH_AFTER_MS),
       // and a bank payment still processing past its second day once a day until its seventh: OFFER_WATCH_LOOKS_MOST x
       // OFFER_WATCH_LOOK_COMMANDS_MOST commands at most, inside OFFER_WATCH_SHARE_OF_ORDER_COMPUTE.
@@ -1284,7 +1343,7 @@ export const COST_LINES: CostLine[] = [
       // A contact an order writes is written only over the row it was decided from (consent audit of 9 November 2026; review of #3448): its worst case, a script counted as 1 plus the calls inside it, held in tests/contacts-write-cost.test.ts.
       { file: "lib/contacts.ts", names: ["CONTACT_COMMANDS_MOST", "CONTACT_FENCED_WRITE_CALLS", "CONTACT_WRITE_CALLS"] },
     ],
-    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. Since 8 November 2026 the record is written only while that lock is still the writer's (lib/payment-request-store.ts, SAVE): a change's three writes become one script that runs five inside it, three commands more a change with Lua's own counted, and the request is made under its lock too, seven more (the lock, the script's three over the plain write, the release's three); at most 43 commands more a request, $0.000086 at Upstash's $2 a million, no other command and nothing more kept. A booked call's confirmation (lib/calls.ts, confirmBooking; Claude 5, 9 November 2026) writes its once-only mark and the time kept for good in one ORDER_WRITE_ONCE (lib/order-data.ts: ORDER_WRITE behind a GET of the mark, and a DEL of it only when a command was refused), in place of the two ORDER_WRITEs it took before, so one script and one charge of the room fewer; then it moves the mark on, at most three SETs (booked, buyer, done), and with Amazon each of its two emails takes lib/email.ts's own once-only claim (a SET NX each, as an order's confirmation does): a handful of commands more a booked call, which is CALL_ORDER_UNITS orders, inside the same ORDER_COMPUTE. A try that failed after the mark is finished by the next one (the thanks page, the studio's catch-up, the mail job, which read the mark with a GET in place of the EXISTS), which reads the diary's entry (one HGET) and does only what is still owed: the orders by their own seen marks, the lead by its HSETNX, the webhook and the phone alert by their own once-only marks, each email at most once; a page refreshed writes and charges nothing more Each move of the mark is one CONFIRM_STEP script (a GET and at most one SET of the same mark, in place of the SET it was), from the stage its writer read. A move before the confirmation was done writes the mark \"moved\" (five bytes, charged in the move's own ORDER_WRITE, in place of the \"1\" it wrote) and, when a confirmation was already begun, one CONFIRM_STEP more, which only shortens it; the next try then does what a booking does besides its two emails, which the move's emails stand in for (the same commands as a first confirmation, fewer emails), and moves \"moved\" on only to \"done\": no value outgrows what the room was charged for. A contact an order puts on the creator's list is written only over the row it was decided from (consent audit of 9 November 2026): at the most CONTACT_COMMANDS_MOST.upsert commands, a script counted as one plus every call inside it (CONTACT_WRITE_CALLS), inside ORDER_COMPUTE (a quarter of it at the most), with the order's checks two reads more inside ORDER_WRITE_IF_SAME; held in tests/contacts-write-cost.test.ts.",
+    basis: "The plan's figure, each order at the most one costs. An affiliate's lead for a free product claimed or a booked call (lib/affiliate-leads.ts, 18 October 2026) is three or four commands inside that order's own work, which ORDER_COMPUTE prices at well over a whole page, and no email; what it keeps is in the data room, taken before it is written. Nothing is sold past it: new orders are admitted only while the month's orders and the checkouts held from the last day are under the figure. A place in a purchase for several people is an order of the month it is taken in: inside its checkout's hold for a day, admitted when taken after (since 18 October 2026), its emails access emails. A payment request's record is changed under its own lock (since 18 October 2026, docs/security-audit-2026-10-18.md, MM-SA-02): four commands more a change, at most a dozen changes a request (made, sent, reminded twice, opened, paid, refunded), inside the same ORDER_COMPUTE. Since 8 November 2026 the record is written only while that lock is still the writer's (lib/payment-request-store.ts, SAVE): a change's three writes become one script that runs five inside it, three commands more a change with Lua's own counted, and the request is made under its lock too, seven more (the lock, the script's three over the plain write, the release's three); at most 43 commands more a request, $0.000086 at Upstash's $2 a million, no other command and nothing more kept. A booked call's confirmation (lib/calls.ts, confirmBooking; Claude 5, 9 November 2026) writes its once-only mark and the time kept for good in one ORDER_WRITE_ONCE (lib/order-data.ts: ORDER_WRITE behind a GET of the mark, and a DEL of it only when a command was refused), in place of the two ORDER_WRITEs it took before, so one script and one charge of the room fewer; then it moves the mark on, at most three SETs (booked, buyer, done), and with Amazon each of its two emails takes lib/email.ts's own once-only claim (a SET NX each, as an order's confirmation does): a handful of commands more a booked call, which is CALL_ORDER_UNITS orders, inside the same ORDER_COMPUTE. A try that failed after the mark is finished by the next one (the thanks page, the studio's catch-up, the mail job, which read the mark with a GET in place of the EXISTS), which reads the diary's entry (one HGET) and does only what is still owed: the orders by their own seen marks, the lead by its HSETNX, the webhook and the phone alert by their own once-only marks, each email at most once; a page refreshed writes and charges nothing more Each move of the mark is one CONFIRM_STEP script (a GET and at most one SET of the same mark, in place of the SET it was), from the stage its writer read. A move before the confirmation was done writes the mark \"moved\" (five bytes, charged in the move's own ORDER_WRITE, in place of the \"1\" it wrote) and, when a confirmation was already begun, one CONFIRM_STEP more, which only shortens it; the next try then does what a booking does besides its two emails, which the move's emails stand in for (the same commands as a first confirmation, fewer emails), and moves \"moved\" on only to \"done\": no value outgrows what the room was charged for. A contact an order puts on the creator's list is written only over the row it was decided from (consent audit of 9 November 2026): at the most CONTACT_COMMANDS_MOST.upsert commands, a script counted as one plus every call inside it (CONTACT_WRITE_CALLS), inside ORDER_COMPUTE (a quarter of it at the most), with the order's checks two reads more inside ORDER_WRITE_IF_SAME; held in tests/contacts-write-cost.test.ts. A course's checkout sent from a page that said the course's end date (24 [E7], 9 November 2026) reads the course record once more, exactly: one GET of at most the course record, inside the same ORDER_COMPUTE, nothing kept and nothing sent; the end shown rides on the Stripe session as one more metadata field.",
   },
   {
     id: "list-email",
@@ -1293,12 +1352,13 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "stopWriting(store.listId as string, r.to, \"refused\")"] },
-      { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS"] },
+      { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS", "notMaybeTaken(batchKey, pending)"] },
+      { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       // A community announcement batch reads its members' list rows once (one HMGET of at most CHECKED_BATCH_SIZE fields), far
       // inside what the batch's emails cost at PER_EMAIL (14 November 2026).
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+    basis: "Every monthly email sent, at the most an email costs. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
     id: "transactional-email",
@@ -1318,6 +1378,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
+      { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
@@ -1330,7 +1391,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/card-update.ts", names: ['redisPipeline([["DEL", key]])', "CARD_LINK_SECONDS"] },
       { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
   },
   {
     id: "ai",
@@ -1494,6 +1555,17 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/page-read-rules.ts", names: ["COLLECTION_PRODUCTS_PER_UNIT", "collectionUnits", "BUNDLE_ITEMS_PER_UNIT", "bundleItemUnits"] },
       { file: "app/[handle]/shop/[collection]/page.tsx", names: ["collectionUnits(ids.length)", "bundleItemUnits(items.length)"] },
       { file: "app/api/store/licence/route.ts", names: ["takePublicRequest(store, \"buyer\")"] },
+      // The course's start button (a "course-start" public request) keeps the learner's end on their student row (24 [E7]).
+      // Measured on 9 November 2026 (synthetic Redis and Stripe, a store with one course): reading a learner's courses
+      // right after recordEnrollment emptied their cache is GET, HGETALL, SET and one SISMEMBER for each course they
+      // have, and one Stripe list (two when the typed address differs from its normal form); the import read (HGETALL)
+      // and the community read (GET, ZSCORE, HGET, HGETALL) are added where the store has them. It is the reading the
+      // course page makes on every visit. In the paying browser it only comes before the course page's, which then
+      // finds it cached: GET, HGETALL and the SISMEMBERs more (and those two reads), no Stripe call more. On the
+      // emailed-link branch the student row is read first (HGET), and a learner with no row adds that HGET alone; for a
+      // row that exists the reading, the row's HSET and, for a new end, its room are paid first as one more public
+      // request (takePublicRequest), a later page of its own, refused past the store's window (C2's L-1 on #3445).
+      { file: "app/api/store/course/start/route.ts", names: ["purchaseStamp(store, email, product.id)", "noteStudentStamp(", "takePublicRequest(store, \"buyer\")"] },
       // A license key's device activation or release (610 [WP9] unit 2): at most ACTIVATION_COMMANDS commands and the record's
       // bytes, counted as ACTIVATION_REQUEST_UNITS requests before anything is read (the price is held in tests/licence-activations.test.ts);
       // its record takes its room in the store's data room before it is written (tests/store-data-registry.ts).
@@ -1617,6 +1689,12 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/deal-stage-trigger.ts", names: ["STAGE_TRIGGER_UNITS", "countStudio(store, null, STAGE_TRIGGER_UNITS)"] },
       // A store that kept tasks about people before their count has every task read once to make it, after tasksRecountUnits studio requests are taken (review of #1959, 4 November 2026).
       { file: "lib/crm.ts", names: ["TASKS_RECOUNT_UNITS", "tasksRecountUnits", "TASK_COUNT_FIELD"] },
+      // A campaign landing's save checks its words against up to AD_REVIEWS of the product's reviews: AD_CONTEXT_UNITS studio requests first, at the reviews' heaviest, refused without reading (Claude 5's review of #1950; tests/ad-context-cost.test.ts holds the bytes).
+      { file: "lib/ad-context.ts", names: ["AD_REVIEWS", "AD_REVIEW_BYTES", "STUDIO_REQUEST_BYTES", "AD_CONTEXT_UNITS"] },
+      // And the product's page it reads, measured first (keptPageBytes) and read no further (readPageWithin), counted at pageReadUnits in the save and the list (Claude 5's return on #1950; tests/campaign-landing-page-cost.test.ts).
+      { file: "lib/ad-context.ts", names: ["pageReadUnits"] },
+      { file: "lib/sales-page-store.ts", names: ["keptPageBytes", "readPageWithin", "PageGrown"] },
+      { file: "app/api/store/campaign-landing/route.ts", names: ["countStudio(store, null, AD_CONTEXT_UNITS + pageReadUnits(bytes))", "countStudio(store, null, pageReadUnits(bytes))"] },
       // The agenda of everyone's tasks reads every task: tasksRecountUnits(people) studio requests first, refused without reading (review of f6bd3d1f4, M1).
       { file: "app/api/store/person-tasks/route.ts", names: ["countStudio(store, null, units)", "TasksRecountRefused", "countStudio(store, null, tasksRecountUnits(people))", "taskPeople(store.statsId)"] },
       // Explaining a funnel check reads that funnel's checks again: FUNNEL_EXPLAIN_READ_UNITS more studio requests first, a studio page's in all (26 [E9]).
@@ -1748,12 +1826,16 @@ export const COST_LINES: CostLine[] = [
   {
     id: "integrations",
     feature: "Calls to other services: meetings and Zoom, a host's calendar checked by hand, Discord, email platforms, Meta ads, PayPal, affiliate kits and pay-to, outreach reads of a business's site, person lookups, the vault, video upload doors and captions, email pictures (17 October 2026)",
-    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration"),
+    // A press of "Pay with PayPal" takes its units at its size (paypalPressUnits); payday's auto-pay takes none, so it is added at its most (Claude 7 on #4488).
+    monthlyUsd: (tier) => figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS,
     sources: [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "integration"] },
       { file: "lib/metered-limits.ts", names: ["withinService", "withinServiceWhy"] },
+      { file: "app/api/store/affiliates/paypal/route.ts", names: ['withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))', "bookSizes(store)", "maxDuration = 60"] },
+      { file: "lib/paypal-payouts.ts", names: ["payWithPayPal", "holdLock(lock)", "withLock(`nl:pp:${statsId}:lock`, 120, 5_000", "readBook(store, undefined, { titles: false })", "paypalPressUnits", "PAYPAL_PRESS_BASE_UNITS", "PAYPAL_PRESS_UNIT_COMMANDS"] },
+      { file: "lib/affiliate-payday.ts", names: ["claimMonth", "if (!(await keepMonth(store.statsId, month))) throw", "payWithPayPal(store)"] },
     ],
-    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart.",
+    basis: "Every call of the window, held at 2 GB for ten seconds while the other service answers; what the service charges is nothing to us, and AI captions are bought apart. A press of \"Pay with PayPal\" costs more than a call (its own commands with both lock EVALs, its whole book read with no product read for its title, up to sixty seconds), so it takes PAYPAL_PRESS_BASE_UNITS and one more for each PAYPAL_PRESS_UNIT_COMMANDS of its book read at the program's size, counted first, which cover it at every size; payday's auto-pay, one a month, takes no unit and is added once at its most (PAYPAL_PRESS). The bytes the press's book read moves are the open question every reader of the whole book shares, not priced here and never zero.",
   },
   {
     id: "free-share",
@@ -2033,6 +2115,8 @@ export function nonPayingWorst(): number {
     + TRIAL_VIDEO_HOURS * hourCost()
     + TRIAL_DAILY_RUNS * 15 * WORST_COMMANDS_PER_RUN * COMMAND
     + (Object.keys(allowances) as AllowanceKind[]).reduce((sum, kind) => sum + figureCost(allowances, kind), 0)
+    // Its payday's auto-pay takes no integration unit (a press from the studio takes its own, paypalPressUnits).
+    + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS
     + ["imports", "clickfunnels", "funnel-share", "team-scheduling", "quizzes"].reduce((sum, id) => sum + creator(id), 0)
     // A store in its trial, or whose plan ended until its closing day, keeps its calendar feed and its readings of
     // its numbers (C4-4, review of #2111): their own lines, at Store's figures, which are more than a trial's.

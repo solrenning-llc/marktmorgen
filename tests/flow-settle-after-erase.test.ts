@@ -10,7 +10,7 @@
  * run it belongs to still holds its open attempt; erased, nothing is written.
  * Synthetic in-memory Redis only.
  */
-import { claimAttempts, countRetry, countWaits, forgetPersonCommands, noteRuns, openRuns, personOf, settleAttempts, type Settled } from "@/lib/flow-runs";
+import { claimAttempts, countRetry, countWaits, forgetPersonCommands, noteRuns, openRuns, personOf, settleAttempts, settleLeftIfRun, type Settled } from "@/lib/flow-runs";
 import { RUN_KEEP_SECONDS } from "@/lib/flow-limits";
 import { redisPipeline } from "@/lib/redis";
 import { advance, store as redis } from "./redis-stub";
@@ -154,7 +154,7 @@ async function main(): Promise<void> {
   // claims its own step; then A's late outcome, note or wait arrives. Each carries A's generation (written by
   // openRuns, read with the lease entry by lib/flows.ts) and, for an outcome, A's exact attempt: B is left as it is.
   const gen = async (email: string) => (await redisPipeline([["HGET", run(email), "gen"]]))[0] as string | null;
-  for (const lateWrite of ["confirmed", "uncertain", "deferred", "note", "wait", "claim"] as const) {
+  for (const lateWrite of ["confirmed", "uncertain", "deferred", "note", "wait", "claim", "left"] as const) {
     const email = `again-${lateWrite}@example.com`;
     await openRuns(FLOW, [email], now);
     const genA = (await gen(email)) ?? "";
@@ -171,6 +171,10 @@ async function main(): Promise<void> {
       await noteRuns(FLOW, [{ email, index: 0, stepId: "s1", kind: "run", state: "ended", note: "A's late note.", to: -1, status: "ended", gen: genA }], now + 120);
     } else if (lateWrite === "wait") {
       is("wait: A's late wait is not counted on B", (await countWaits(FLOW, [email], 0, now + 120, false, new Map([[email, genA]]))).get(email), null);
+    } else if (lateWrite === "left") {
+      // Main's #4307: A's person left the list during A's send, and the sender left them out. A's "left" carries A's
+      // generation, so it never ends B (merge of main into #4234, Claude 1 cloud c1-fila).
+      await settleLeftIfRun(FLOW, 0, "s1", "email", [email], "A's late left.", now + 120, new Map([[email, genA]]));
     } else if (lateWrite === "claim") {
       const lateClaim = await claimAttempts(FLOW, [email], 0, "s1", "email", now + 120, new Map([[email, genA]]));
       is("claim: A's late claim finds no run of its own", [lateClaim.claimed, lateClaim.open, lateClaim.gone], [[], [], [email]]);

@@ -90,8 +90,14 @@ export type BackupDeletionPage = {
   reason: "done" | "more" | "cutoff";
 };
 
-/** Stand-in until the fix: no bound. */
-export const BACKUP_FILES_ROOM_MOST = Number.MAX_SAFE_INTEGER;
+/**
+ * The largest room R a store's plan gives, in bytes: Scale's 80 GiB of storage (PAID_STORAGE_BYTES), 2 GiB of
+ * students' room (TASK_ROOM_BYTES) and 3,000 community pictures of 1 MB (COMMUNITY_PICTURES × PICTURE_BYTES), the R
+ * the per-plan lines of docs/backup-costs-2026-11-08.md (5b) are priced at. A stores page that gives more is refused:
+ * R is the only per-store byte bound the Worker has (5R kept, 4R read), so a larger one would raise its ceilings with
+ * no alarm (Claude 5's LOW 4 on #3340). tests/backup-files-worker.test.ts holds it to those constants.
+ */
+export const BACKUP_FILES_ROOM_MOST = 91_046_829_568;
 export type BackupStoreRoom = { store: string; roomBytes: number };
 export type BackupStoresPage = {
   version: 1;
@@ -255,7 +261,7 @@ export function parseStoresPage(raw: unknown): BackupStoresPage {
     if (typeof room.store !== "string" || !STORE_PATTERN.test(room.store)) fail(`stores[${i}].store is not a folder`);
     if (seen.has(room.store as string)) fail(`stores[${i}].store is listed twice`);
     seen.add(room.store as string);
-    if (typeof room.roomBytes !== "number" || !Number.isSafeInteger(room.roomBytes) || room.roomBytes <= 0) fail(`stores[${i}].roomBytes is not a positive count of bytes`);
+    if (typeof room.roomBytes !== "number" || !Number.isSafeInteger(room.roomBytes) || room.roomBytes <= 0 || room.roomBytes > BACKUP_FILES_ROOM_MOST) fail(`stores[${i}].roomBytes is not a positive count of bytes at most the dearest plan's room`);
     return { store: room.store as string, roomBytes: room.roomBytes as number };
   });
   const end = pageEnd(value, ["done", "more", "cutoff"]);

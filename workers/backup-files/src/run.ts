@@ -722,8 +722,9 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
   const etagHeld = etagChanged > 0 && over(etagChanged, storeObjects);
   if (etagHeld) raise(ctx, "etag_mass_change", { store, count: etagChanged });
 
-  await applyDeletions(ctx, state, source, { held: holds.length > 0 || ctx.recordsHold, etagHeld, orphans: listing.status === "complete", forcedOnly: false });
-
+  // The step is recorded before the deletions (Claude 5's MEDIUM 3 on #3340): a run cut short while deleting keeps
+  // it, so the next run does not list this store-source again, and the day's pages stay within the 10 it is priced at
+  // (reask counts on from `asked`). Deletions left undone are applied by the next day's step; none is lost.
   if (listing.status === "complete") {
     const sum = ctx.cycle.sums[source];
     sum.objects += objects;
@@ -731,7 +732,11 @@ async function stepList(ctx: Ctx, state: StoreState, source: BackupFilesSource):
     sum.stores += 1;
   }
   const status: StepState["status"] = listing.status !== "complete" ? "failed" : holds.length ? "held" : "listed";
-  ctx.cycle.steps[stepKey(source, store)] = { status, pending: pendingOf(state, source), pages: listing.pages, asked: listing.pages.length };
+  const step: StepState = { status, pending: pendingOf(state, source), pages: listing.pages, asked: listing.pages.length };
+  ctx.cycle.steps[stepKey(source, store)] = step;
+
+  await applyDeletions(ctx, state, source, { held: holds.length > 0 || ctx.recordsHold, etagHeld, orphans: listing.status === "complete", forcedOnly: false });
+  step.pending = pendingOf(state, source);
 }
 
 async function passList(ctx: Ctx): Promise<void> {
@@ -842,14 +847,18 @@ const isPart = (reply: unknown, partNumber: number): reply is PartState =>
  * so the charge is never refunded; past the ceiling nothing is read.
  */
 async function chargeRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number): Promise<boolean> {
-  const room = state.roomBytes;
-  if (room === null || readSince(ctx, state) + bytes > BACKUP_FILES_COPY_TIMES * room) {
-    raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
-    return false;
-  }
+  if (!fitsRead(ctx, state, source, bytes)) return false;
   state.read = addDay(state.read, ctx.day, 1, bytes);
   await saveStore(ctx, state);
   return true;
+}
+
+/** Whether `bytes` more of a source read fit the store's 4R in 32 days; alarms when they do not, unless told not to. */
+function fitsRead(ctx: Ctx, state: StoreState, source: BackupFilesSource, bytes: number, alarm = true): boolean {
+  const room = state.roomBytes;
+  if (room !== null && readSince(ctx, state) + bytes <= BACKUP_FILES_COPY_TIMES * room) return true;
+  if (alarm) raise(ctx, room === null ? "files_room" : "files_copy_ceiling", { source, store: state.store, bytes });
+  return false;
 }
 
 function copied(ctx: Ctx, state: StoreState, object: ObjectState): void {
@@ -888,7 +897,14 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   }
 
   if (src.upload && src.upload.key !== object.key) return;
+  const partEnd = (from: number) => Math.min(from + BACKUP_FILES_PART_BYTES, object.size) - 1;
   if (!src.upload) {
+    // The start is an attempt (Claude 5's HIGH on #3340): it counts toward the store's objects and its first part's
+    // bytes are charged with it, both checked before the call. A start that fails is saved as charged, alarmed, and
+    // not tried again for this object today, so a bucket that refuses starts costs at most one a large object a day,
+    // inside the 10,000 objects a store in 30 days.
+    const first = partEnd(0) + 1;
+    if (!fitsRead(ctx, state, source, first)) return;
     ctx.run.spend();
     let made: unknown;
     try {
@@ -897,8 +913,15 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
       made = null;
     }
     const id = (made as { uploadId?: unknown } | null)?.uploadId;
-    if (!made || typeof made !== "object" || typeof id !== "string" || !id || (made as { key?: unknown }).key !== object.name) return refuse("copy_unverified");
-    src.upload = { key: object.key, etag: object.etag, size: object.size, name: object.name, uploadId: id, parts: [], next: 0 };
+    if (!made || typeof made !== "object" || typeof id !== "string" || !id || (made as { key?: unknown }).key !== object.name) {
+      state.read = addDay(state.read, ctx.day, 1, 0);
+      object.refusedDay = ctx.day;
+      await saveStore(ctx, state);
+      return refuse("copy_unverified");
+    }
+    // One save: the upload, with its first part's charge (Claude 5's MEDIUM 2 on #3340).
+    state.read = addDay(state.read, ctx.day, 1, first);
+    src.upload = { key: object.key, etag: object.etag, size: object.size, name: object.name, uploadId: id, parts: [], next: 0, charged: first };
     await saveStore(ctx, state);
   }
   const upload = src.upload;
@@ -908,9 +931,13 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
   while (upload.next < object.size) {
     ctx.run.boundary(4);
     if (entry.expiresAt - ctx.opts.now() < BACKUP_FILES_URL_MARGIN_MS) return;
-    const end = Math.min(upload.next + BACKUP_FILES_PART_BYTES, object.size) - 1;
-    // Past the ceiling the upload is kept, its parts already paid; it resumes when the 32 days allow.
-    if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
+    const end = partEnd(upload.next);
+    // Paid already when its charge rode on the last save; otherwise charged and saved now. Past the ceiling the
+    // upload is kept, its parts already paid; it resumes when the 32 days allow.
+    if (upload.charged <= upload.next) {
+      if (!(await chargeRead(ctx, state, source, end - upload.next + 1))) return;
+      upload.charged = end + 1;
+    }
     const body = await readPart(ctx, entry, object, upload.next, end);
     if (typeof body === "string") return refuse(body);
     const partNumber = upload.parts.length + 1;
@@ -924,6 +951,15 @@ async function copyOne(ctx: Ctx, state: StoreState, source: BackupFilesSource, o
     if (!isPart(part, partNumber)) return refuse("copy_unverified");
     upload.parts.push({ partNumber, etag: part.etag });
     upload.next = end + 1;
+    // The last part's state rides on the save after complete. A run cut between them reads that part again, charged
+    // again: more, never less, than was read.
+    if (upload.next >= object.size) break;
+    // The next part's charge rides on this save when it fits: one state write a part (Claude 5's MEDIUM 2 on #3340).
+    const nextBytes = partEnd(upload.next) - upload.next + 1;
+    if (fitsRead(ctx, state, source, nextBytes, false)) {
+      state.read = addDay(state.read, ctx.day, 1, nextBytes);
+      upload.charged = upload.next + nextBytes;
+    }
     await saveStore(ctx, state);
   }
   ctx.run.spend();

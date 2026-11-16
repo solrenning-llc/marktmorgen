@@ -38,7 +38,11 @@ export type VersionState = { key: string; etag: string; size: number; name: stri
 export type PendingRecord = { key: string; recordedAt: number; reason: BackupDeletionReason; receivedAt: number };
 export type DayCount = { day: number; objects: number; bytes: number };
 export type PartState = { partNumber: number; etag: string };
-export type UploadState = { key: string; etag: string; size: number; name: string; uploadId: string; parts: PartState[]; next: number };
+/**
+ * `charged`: the source bytes already charged and saved for this upload, from 0; the part at `next` is paid when
+ * `charged` is past it. The charge of the next part rides on the save after a part (Claude 5's MEDIUM 2 on #3340).
+ */
+export type UploadState = { key: string; etag: string; size: number; name: string; uploadId: string; parts: PartState[]; next: number; charged: number };
 export type SourceState = {
   objects: Map<string, ObjectState>;
   versions: VersionState[];
@@ -153,13 +157,13 @@ function pendingRecord(v: unknown, what: string): PendingRecord {
   return { key: text(o.key, `${what}.key`), recordedAt: whole(o.recordedAt, `${what}.recordedAt`, 1), reason: reason(o.reason, `${what}.reason`), receivedAt: whole(o.receivedAt, `${what}.receivedAt`, 1) };
 }
 function uploadState(v: unknown, what: string): UploadState {
-  const o = exact(v, ["key", "etag", "size", "name", "uploadId", "parts", "next"], what);
+  const o = exact(v, ["key", "etag", "size", "name", "uploadId", "parts", "next", "charged"], what);
   const parts = list(o.parts, `${what}.parts`).map((p, i) => {
     const part = exact(p, ["partNumber", "etag"], `${what}.parts[${i}]`);
     return { partNumber: whole(part.partNumber, `${what}.parts[${i}].partNumber`, 1), etag: text(part.etag, `${what}.parts[${i}].etag`) };
   });
   if (!parts.every((p, i) => p.partNumber === i + 1)) fail(`${what}.parts are not numbered from 1`);
-  return { key: text(o.key, `${what}.key`), etag: text(o.etag, `${what}.etag`, 256), size: whole(o.size, `${what}.size`), name: text(o.name, `${what}.name`), uploadId: text(o.uploadId, `${what}.uploadId`), parts, next: whole(o.next, `${what}.next`) };
+  return { key: text(o.key, `${what}.key`), etag: text(o.etag, `${what}.etag`, 256), size: whole(o.size, `${what}.size`), name: text(o.name, `${what}.name`), uploadId: text(o.uploadId, `${what}.uploadId`), parts, next: whole(o.next, `${what}.next`), charged: whole(o.charged, `${what}.charged`) };
 }
 function sourceState(v: unknown, what: string): SourceState {
   const o = exact(v, ["objects", "versions", "pending", "listings", "received", "upload"], what);

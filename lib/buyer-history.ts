@@ -48,19 +48,27 @@ export type RefundHistory =
 export const REFUND_HISTORY_PER_DAY = 30;
 
 /**
- * The studio requests one check takes before Stripe is asked, one for each
- * read it may make (two spellings of the address), on top of the request
- * itself, as a scheduled discount code takes one for each call
- * (app/api/store/discount/route.ts, SCHEDULE_UNITS). The creator's Stripe
- * account bills none of them.
+ * The studio requests one check takes before Stripe is asked, on top of the
+ * request itself: enough to cover REFUND_HISTORY_READS listings at their
+ * worst (tests/plan-cost-registry.ts REFUND_HISTORY_READ, each one waited on
+ * for REFUND_HISTORY_READ_MS with an expanded page of the largest size), held
+ * by tests/buyer-history-cost.test.ts. Two did not cover them; three do
+ * (Claude 7 on #3841). The creator's Stripe account bills none of them.
  */
-export const REFUND_HISTORY_UNITS = 2;
+export const REFUND_HISTORY_UNITS = 3;
 
 /** The newest checkouts one check reads under each spelling of the address: Stripe's largest page. */
 export const REFUND_HISTORY_LIST = 100;
 
 /** A read gives up sooner than a payment would: this is only a look back. */
-const READ_CEILING_MS = 8_000;
+export const REFUND_HISTORY_READ_MS = 8_000;
+
+/**
+ * The most listings one check makes: one per spelling of the address (as typed, and as kept), never more. Each is
+ * priced at its worst, waited on for REFUND_HISTORY_READ_MS and an expanded page of the largest size, in
+ * tests/plan-cost-registry.ts REFUND_HISTORY_READ, which REFUND_HISTORY_UNITS must cover (Claude 7 on #3841).
+ */
+export const REFUND_HISTORY_READS = 2;
 
 const UNKNOWN: RefundHistory = { state: "unknown" };
 
@@ -142,14 +150,14 @@ export async function refundHistory(store: Store, email: string): Promise<Refund
   // keeps it in lowercase (lib/inbox.ts, readEmail), so from the studio there is one spelling to ask under. Whether
   // Stripe's filter finds a checkout typed with capitals is not confirmed here: the studio says the check was made
   // under the address as the conversation has it (components/inbox-history.tsx), never "none" for the person.
-  const variants = [...new Set([email.trim(), normaliseEmail(email)])].filter(Boolean);
+  const variants = [...new Set([email.trim(), normaliseEmail(email)])].filter(Boolean).slice(0, REFUND_HISTORY_READS);
   if (!variants.length) return UNKNOWN;
   const listings: unknown[] = [];
   try {
     for (const variant of variants) {
       const query = new URLSearchParams({ "customer_details[email]": variant, status: "complete", limit: String(REFUND_HISTORY_LIST) });
       query.append("expand[]", "data.payment_intent.latest_charge");
-      listings.push(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, undefined, undefined, READ_CEILING_MS));
+      listings.push(await onAccount("GET", account, `/checkout/sessions?${query}`, undefined, undefined, undefined, REFUND_HISTORY_READ_MS));
     }
   } catch (error) {
     console.error("reading a buyer's past refunds and disputes failed", error);

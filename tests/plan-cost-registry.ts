@@ -63,6 +63,7 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { REFUND_HISTORY_READ_MS, REFUND_HISTORY_READS } from "@/lib/buyer-history";
 import { BLOCK_CHECK_COMMANDS, BLOCK_ENTRY_BYTES } from "@/lib/buyer-block";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
@@ -744,6 +745,14 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   // (namesErased), before the endpoint is called: 11 commands a try in tests/webhook-erased-person.test.ts, inside the 20.
   webhook: request("wait", 20 + TAKE_COMMANDS, 40_000),
 };
+/**
+ * One refund-history check at its worst (lib/buyer-history.ts; Claude 7's MEDIUM on #3841): the inbox route's own
+ * studio request, and REFUND_HISTORY_READS listings of the creator's checkouts, each waited on for
+ * REFUND_HISTORY_READ_MS at 2 GB and an expanded page of STRIPE_PAGE_BYTES worked through. The route takes
+ * REFUND_HISTORY_UNITS studio requests more before Stripe is asked; tests/buyer-history-cost.test.ts holds that they
+ * cover it. The creator's Stripe account bills none of the reads.
+ */
+export const REFUND_HISTORY_READ = UNIT_COST.studio + REFUND_HISTORY_READS * ((REFUND_HISTORY_READ_MS / 1000) * MEMORY_SECOND + perMegabyte(STRIPE_PAGE_BYTES));
 
 /** Checkout-refusal panel, inside the existing studio unit (not added again):
  * one HMGET for seven UTC days plus last, with the writer's 60/300-character
@@ -1626,7 +1635,7 @@ export const COST_LINES: CostLine[] = [
       // five-minute job may make to switch it on (each one call to the creator's Stripe account, which bills none, and a few commands).
       { file: "app/api/store/discount/route.ts", names: ["countStudio(store, null, SCHEDULE_UNITS)"] },
       // A creator's look at a buyer's past refunds and disputes in the store (567 [GD1] (f), unit 3): at most REFUND_HISTORY_PER_DAY a store a day, each
-      // taking REFUND_HISTORY_UNITS more studio requests, one for each read of the creator's Stripe account (which bills none), before Stripe is asked.
+      // taking REFUND_HISTORY_UNITS more studio requests, which cover its reads at their worst (REFUND_HISTORY_READ; the creator's Stripe account bills none), before Stripe is asked.
       { file: "app/api/store/inbox/route.ts", names: ["countStudio(store, null, REFUND_HISTORY_UNITS)", "withinLimit(\"refund-history\""] },
       { file: "lib/buyer-history.ts", names: ["REFUND_HISTORY_UNITS", "REFUND_HISTORY_PER_DAY", "REFUND_HISTORY_LIST"] },
       { file: "lib/discount-schedule-rules.ts", names: ["SCHEDULE_UNITS = ACTIVATION_TRIES", "MAX_SCHEDULED_CODES"] },

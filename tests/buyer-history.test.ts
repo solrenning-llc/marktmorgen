@@ -162,7 +162,8 @@ async function main(): Promise<void> {
   const studioKey = keysAfter.find((key) => key.startsWith("nl:allow:studio:")) ?? "";
   const used = async () => Number((await redis.pipeline([["GET", studioKey]]))[0]);
   is("the request and one more for each Stripe read are counted in the store's studio figure", await used(), 1 + REFUND_HISTORY_UNITS);
-  is("one for each spelling of the address", REFUND_HISTORY_UNITS, 2);
+  // Three since #3841 (Claude 7): enough to cover both listings at their worst, held by tests/buyer-history-cost.test.ts.
+  is("enough for both listings at their worst (REFUND_HISTORY_READ)", REFUND_HISTORY_UNITS, 3);
   is("the address is not in any key's name", keysAfter.some((key) => key.toLowerCase().includes("buyer")), false);
   is("another store cannot ask about this conversation", (await route(OTHER, { action: "history", id: conversation.id })).status, 404);
   is("an unknown conversation", (await route(OWNER, { action: "history", id: "zzzzzzzzzzzz" })).status, 404);

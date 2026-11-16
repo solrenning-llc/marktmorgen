@@ -10,9 +10,10 @@ import {
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { fromAnotherSite, limited } from "@/lib/request-guard";
+import { visitorAddress } from "@/lib/traffic-rules";
 
 import { RESPONSES_KEY } from "@/lib/creator-research-store";
-import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, answerBytes } from "@/lib/creator-research-room";
+import { KEEP_RESEARCH_ANSWER, RESEARCH_ANSWERS_PER_DAY, RESEARCH_ANSWER_MAX_BYTES, RESEARCH_MAX_ANSWERS, answerBytes } from "@/lib/creator-research-room";
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 60 * 60;
 const MAX_BODY_BYTES = 20_000;
@@ -114,7 +115,12 @@ export async function POST(request: NextRequest) {
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "unknown";
-  const rateKey = `nl:rl:creators:${await hashIp(ip)}`;
+  // Per connection, never per raw address: an IPv6 host holds a whole /64, and each of its addresses would otherwise
+  // get its own five (Claude 7 on #3584: one /64 filled the list's 320 in seconds).
+  const rateKey = `nl:rl:creators:${await hashIp(visitorAddress(ip))}`;
+  // Everyone's new answers in one UTC day, under RESEARCH_ANSWERS_PER_DAY, so rotating connections can never fill the
+  // list (lib/creator-research-room.ts). Two days kept, so the day's count outlives the day it counts.
+  const dayKey = `nl:rl:creators:day:${new Date().toISOString().slice(0, 10)}`;
 
   const answer: CreatorAnswer & {
     id: string;
@@ -146,13 +152,25 @@ export async function POST(request: NextRequest) {
     const count = windowCountOf(await redisPipeline(windowCount(rateKey, RATE_WINDOW_SECONDS)));
     if (count === null || count < 1) throw new UnknownReplyError("the creator research count");
     if (count > RATE_LIMIT) return fail(429, "rate_limited");
+    // The day's count, read in its exact shape too: unread is never "room left" (CX-123 rule 24).
+    const today = windowCountOf(await redisPipeline(windowCount(dayKey, 2 * 86_400)));
+    if (today === null || today < 1) throw new UnknownReplyError("the creator research day's count");
+    if (today > RESEARCH_ANSWERS_PER_DAY) {
+      // Told to the owner (the log is read by the error alerts): more than a day's real answers came in.
+      if (today === RESEARCH_ANSWERS_PER_DAY + 1) console.error(`creator research: today's cap of ${RESEARCH_ANSWERS_PER_DAY} new answers was reached; later answers today are refused as busy`);
+      return fail(429, "busy");
+    }
 
     // The list's ceiling and the write in one step (lib/creator-research-room.ts): answers sent at once, a lost
     // reply or a failed step never leave it past the ceiling. Only 0 is full and only a length inside the
     // ceiling is saved; any other reply is not a confirmation (CX-123 rule 24).
     const kept = repliesFor(await redisPipeline([["EVAL", KEEP_RESEARCH_ANSWER, 1, RESPONSES_KEY, RESEARCH_MAX_ANSWERS, row]]), 1);
     const length = kept ? countOf(kept[0]) : null;
-    if (length === 0) return fail(503, "full");
+    if (length === 0) {
+      // A full list needs the owner's decision (export, then clear): said in the log every time it refuses one.
+      console.error(`creator research: the list is full (${RESEARCH_MAX_ANSWERS} answers); an answer was refused`);
+      return fail(503, "full");
+    }
     if (length === null || length > RESEARCH_MAX_ANSWERS) {
       throw new UnknownReplyError("keeping a creator research answer");
     }

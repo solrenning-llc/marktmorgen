@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   if (grant && result.ok && result.first) await countConfirmedLead(store, grant.e).catch((error) => console.error("counting a confirmed lead failed", error));
   const handle = store?.handle ?? grant?.h ?? "";
   const target = handle
-    ? `${origin}/@${handle}/waitlist?product=${encodeURIComponent(grant?.p ?? "")}&status=${result.ok ? "confirmed" : "expired"}`
+    ? `${origin}/@${handle}/waitlist?product=${encodeURIComponent(grant?.p ?? "")}&status=${result.ok ? "confirmed" : "reason" in result && result.reason === "busy" ? "busy" : "expired"}`
     : `${origin}/`;
   return new Response(null, { status: 303, headers: { Location: target, "Cache-Control": "no-store" } });
 }

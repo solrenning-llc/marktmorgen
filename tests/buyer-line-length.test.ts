@@ -37,6 +37,14 @@ test("the purchases page's closing note is at most 50ch wide", () => {
   assert.ok(cap !== null && cap <= 50, `class "${cls}"`);
 });
 
+// Claude 3 on #3997 (6912741283, MEDIUM): at 56ch, Chromium's Buyer action AAA measured this note at 85 characters a
+// line, over the 80 of WCAG 1.4.8 (about 1.5 characters a ch in its font); 50ch is what the notes beside it hold.
+test("the library's note on what stays while a store is open is at most 50ch wide", () => {
+  const cls = paragraphClass(readFileSync("app/library/page.tsx", "utf8"), "What you bought from a store is here");
+  const cap = capOf(cls);
+  assert.ok(cap !== null && cap <= 50, `class "${cls}"`);
+});
+
 test("the library's note on when purchases count is at most 50ch wide", () => {
   const cls = paragraphClass(readFileSync("app/library/page.tsx", "utf8"), "Purchases count from October 11, 2026");
   const cap = capOf(cls);

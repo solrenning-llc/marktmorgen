@@ -216,4 +216,11 @@ is("a kept object reads as none", readRecent(JSON.stringify({ 0: "tax" })), []);
 is("unknown ids and repeats are dropped", readRecent(["tax", "constructor", "tax", 3, "email"]), ["tax", "email"]);
 is("null reads as none", readRecent(null), []);
 
+part("A buyer is still found by what they paid (Claude 5 on #3525)");
+is("\"what a buyer paid\" finds the buyers", ids("what a buyer paid").includes("people"), true);
+is("\"buyer paid\" finds the buyers", ids("buyer paid").includes("people"), true);
+is("\"they paid\" finds the buyers", ids("they paid").includes("people"), true);
+is("\"paid\" for the owner finds the buyers too", ids("paid").includes("people"), true);
+is("\"paid\" for support finds the buyers, never an empty box", ids("paid", context("support")).includes("people"), true);
+
 done();

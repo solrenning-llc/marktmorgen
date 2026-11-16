@@ -17,18 +17,13 @@
  * Every link is the studio's own address for this store (studioPath), so a
  * result never opens another store. Nothing here prints what was searched.
  */
-import { type Card, idsOfKind, readCardsExact } from "@/lib/catalog";
+import { type Card, readCardsExact } from "@/lib/catalog";
 import type { Store } from "@/lib/store";
 import { type Permission, type Role, can } from "@/lib/team-roles";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { studioPath } from "@/lib/studio-route";
 import { galleryFor } from "@/lib/studio-modules";
-import { isDiscordConfigured } from "@/lib/discord";
-import { configuredProviders, offeredProviders } from "@/lib/meet-providers";
-import { sellsMemberships } from "@/lib/membership-manage";
-import { PRO_ON_SALE, hasPro } from "@/lib/plan";
-import { PLANS_ON_SALE } from "@/lib/opening";
-import { isBillingConfigured } from "@/lib/billing";
+import { studioGalleryContext } from "@/lib/studio-actions-offered";
 import { type SearchAnswer, type SearchGroup, pickMatches } from "@/lib/studio-search-rules";
 
 /** The answer for `query` (already cleaned, lib/studio-search-rules.ts cleanQuery) on `store`, for `role`. */
@@ -66,25 +61,9 @@ export async function studioSearch(store: Store, role: Role, query: string): Pro
     groups.push({ id: "pages", title: "Your pages", state: "ok", missing: 0, results });
   }
 
-  // As app/studio/add draws the gallery, without the one read it makes for a connected video call
-  // account: the module is shown when this store is offered one, which opens the same screen.
-  const cards = galleryFor(
-    {
-      may,
-      has: {
-        discord: isDiscordConfigured(),
-        meet: configuredProviders().length > 0 && offeredProviders(store).length > 0,
-        memberships: sellsMemberships(store),
-        calls: idsOfKind(store, "call").length > 0,
-        proOnSale: PRO_ON_SALE,
-      },
-      pro: store.subscriptionActive && hasPro(store.tier),
-      planHref: isBillingConfigured() && may("billing") ? `${studioPath(store)}#billing` : null,
-      billing: may("billing"),
-      onSale: PLANS_ON_SALE,
-    },
-    (segment) => studioPath(store, "", segment),
-  ).flatMap((section) => section.cards);
+  // The gallery's own context, shared with the box's "Things to do" (lib/studio-actions-offered.ts).
+  const ctx = studioGalleryContext(store, role);
+  const cards = ctx ? galleryFor(ctx, (segment) => studioPath(store, "", segment)).flatMap((section) => section.cards) : [];
   const reachable = cards.flatMap((card) =>
     card.state === "open"
       ? [{ id: card.id, title: card.title, detail: card.text, href: card.href }]

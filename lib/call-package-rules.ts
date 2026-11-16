@@ -46,6 +46,20 @@ export function parseCallPackage(raw: unknown): CallPackage | null {
   }
 }
 
+/**
+ * The sessions and days a package's checkout carries (metadata[sessions], metadata[days]), as packageCheckout
+ * (lib/call-packages.ts) writes them: whole numbers in plain text, 2 to 20 sessions and one of PACKAGE_DAYS. Anything
+ * else, missing included, is unknown: null, never no time limit nor one session (CX-123 rule 24).
+ */
+export function packageTermsOf(meta: Record<string, string | undefined>): { sessions: number; days: number } | null {
+  const whole = (value: unknown) => (typeof value === "string" && /^(0|[1-9]\d{0,3})$/.test(value) ? Number(value) : null);
+  const sessions = whole(meta.sessions);
+  const days = whole(meta.days);
+  if (sessions === null || sessions < MIN_PACKAGE_SESSIONS || sessions > MAX_PACKAGE_SESSIONS) return null;
+  if (days === null || !(PACKAGE_DAYS as readonly number[]).includes(days)) return null;
+  return { sessions, days };
+}
+
 /** What it saves against the sessions bought one by one, when it saves anything. */
 export function packageSaving(pkg: CallPackage, singleCents: number): number {
   return Math.max(0, pkg.sessions * singleCents - pkg.priceCents);

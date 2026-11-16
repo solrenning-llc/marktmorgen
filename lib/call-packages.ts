@@ -29,7 +29,7 @@ import { purchaseRefunded } from "@/lib/refunds";
 import { sendEmail } from "@/lib/email";
 import { applyTax, applyTaxDocuments, openKeepingTheSale } from "@/lib/tax";
 import { withLock } from "@/lib/redis-lock";
-import type { CallPackage } from "@/lib/call-package-rules";
+import { type CallPackage, packageTermsOf } from "@/lib/call-package-rules";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { speechFor, wordsIn } from "@/lib/buyer-words";
 import { bookingWords } from "@/lib/buyer-words/booking";
@@ -199,8 +199,12 @@ export async function recordPackage(input: { store: Store; session: Session; pro
   const email = typeof session.customer_details?.email === "string" ? normaliseEmail(session.customer_details.email) : "";
   if (!email) return null;
   const at = typeof session.created === "number" ? session.created : now();
-  const days = Number(meta.days) || 0;
-  const total = Math.max(1, Math.min(20, Number(meta.sessions) || 0));
+  // On the terms its checkout set, read exactly, before anything is written: unknown throws, and the checkout sweep
+  // counts the order as failed and reads it again (CX-123 rule 24), never a package with no last day or one session.
+  const terms = packageTermsOf(meta);
+  if (!terms) throw new Error(`call package ${checkout}: its sessions or days do not read`);
+  const days = terms.days;
+  const total = terms.sessions;
   const token = randomBytes(24).toString("hex");
   const bought: Bought = { s: store.statsId, h: store.handle, p: product.id, e: email, total, at, until: days ? at + days * 86_400 : 0, token, holds: [] };
   // Counted in the store's room at what they really add (lib/order-data.ts).

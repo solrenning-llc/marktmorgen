@@ -30,7 +30,11 @@ const pipeline = redis.pipeline.bind(redis);
 redis.pipeline = (async (batch: (string | number)[][]) => {
   commands.push(...batch);
   const replies = await pipeline(batch);
-  for (const reply of replies as unknown[]) if (typeof reply === "string") bytes += Buffer.byteLength(reply);
+  // An MGET answers a list of values (this branch's batched reads, lib/redis-mget.ts): its values count as a GET's would.
+  for (const reply of replies as unknown[]) {
+    if (typeof reply === "string") bytes += Buffer.byteLength(reply);
+    else if (Array.isArray(reply)) for (const value of reply) if (typeof value === "string") bytes += Buffer.byteLength(value);
+  }
   return replies;
 }) as typeof redis.pipeline;
 
@@ -71,7 +75,10 @@ async function storeOf(count: number): Promise<Store> {
   } as unknown as Store;
 }
 
-const listingGets = () => commands.filter((c) => c[0] === "GET" && String(c[1]).startsWith(`nl:catalog:${CATALOG}:l:`)).length;
+// The listings read, one GET each or many to an MGET (since the merge with main: this branch reads them in lots).
+const isListing = (key: unknown) => String(key).startsWith(`nl:catalog:${CATALOG}:l:`);
+const listingGets = () =>
+  commands.reduce((n, c) => n + (c[0] === "GET" && isListing(c[1]) ? 1 : c[0] === "MGET" ? c.slice(1).filter(isListing).length : 0), 0);
 
 async function measure(read: () => Promise<unknown>): Promise<{ gets: number; bytes: number; ms: number }> {
   commands = [];

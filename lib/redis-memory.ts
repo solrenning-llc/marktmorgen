@@ -331,6 +331,18 @@ export class MemoryRedis {
           const [, hold, token] = args;
           return this.run(["GET", hold]) === token ? this.run(["DEL", hold]) : 0;
         }
+        // lib/group-buy.ts PLACE_DROP: a place's mark taken off only while it is still exactly the text its open wrote.
+        if (key.startsWith("-- marktmorgen:group-place-drop:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, members, field, text] = args;
+          return this.run(["HGET", members, field]) === text ? this.run(["HDEL", members, field]) : 0;
+        }
+        // lib/group-buy.ts PLACE_CLAIM: a place's mark claimed for an open only while it is still the text read.
+        if (key.startsWith("-- marktmorgen:group-place-claim:v1\n") && args[0] === "1" && args.length === 5) {
+          const [, members, field, read, claimed] = args;
+          if (this.run(["HGET", members, field]) !== read) return 0;
+          this.run(["HSET", members, field, claimed]);
+          return 1;
+        }
         // lib/upsell.ts ORPHAN_RELEASE: an offer's orphan claim deleted only while it is still exactly the record read.
         if (key.startsWith("-- marktmorgen:upsell-orphan-release:v1\n") && args[0] === "1" && args.length === 3) {
           const [, record, read] = args;
@@ -476,6 +488,24 @@ export class MemoryRedis {
           if (path !== "") this.run(["HSET", files, path, bytes]);
           this.run(review === "1" ? ["ZADD", waiting, at, member] : ["ZREM", waiting, member]);
           this.run(["ZADD", all, at, member]);
+          return 1;
+        }
+        // lib/email-sync.ts WRITE_IF_READ: how a try went written (and queued) only over the job record as it was read.
+        if (key.startsWith("-- marktmorgen:esync-write-if-read:v1\n") && args[0] === "2" && args.length === 8) {
+          const [, job, queue, expected, json, seconds, due, member] = args;
+          const held = this.run(["GET", job]);
+          if (held === null || held === undefined) return 0;
+          if (held !== expected) return -1;
+          this.run(["SET", job, json, "EX", seconds]);
+          if (due !== "") this.run(["ZADD", queue, due, member]);
+          return 1;
+        }
+        // lib/email-sync.ts FLY_IF_READ: a try marked in flight only while the job record holds what was read.
+        if (key.startsWith("-- marktmorgen:esync-fly-if-read:v2\n") && args[0] === "2" && args.length === 6) {
+          const [, job, fly, expected, ms, id] = args;
+          if (this.run(["GET", job]) !== expected) return 0;
+          this.run(["SADD", fly, id]);
+          this.run(["PEXPIRE", fly, ms]);
           return 1;
         }
         // lib/product-about.ts WRITE_ABOUT_IF: the description written only over the one it was read as.
@@ -1458,16 +1488,20 @@ export class MemoryRedis {
           this.run(["DECRBY", args[1], back]);
           return back;
         }
-        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with an upload's batch when it carries one.
-        if (key.startsWith("-- marktmorgen:import-job-write-if:v1\n") && ((args[0] === "1" && args.length === 5) || (args[0] === "2" && args.length === 8))) {
+        // lib/imports.ts JOB_WRITE_IF: an import written only over the text it was read as, with what ARGV[4] names in the
+        // same step: "rows", an upload's batch onto its rows; "active", the import onto the active set; "", nothing more.
+        if (
+          key.startsWith("-- marktmorgen:import-job-write-if:v2\n") &&
+          ((args[0] === "1" && args.length === 6 && args[5] === "") || (args[0] === "2" && args.length === 9 && args[6] === "rows") || (args[0] === "2" && args.length === 8 && args[6] === "active"))
+        ) {
           const two = args[0] === "2";
-          const [expected, text, seconds, batch, rowSeconds] = args.slice(two ? 3 : 2);
+          const [expected, text, seconds, what, value, rowSeconds] = args.slice(two ? 3 : 2);
           if (this.run(["GET", args[1]]) !== expected) return 0;
-          this.run(["SET", args[1], text, "EX", seconds]);
-          if (two) {
-            this.run(["RPUSH", args[2], batch]);
+          if (what === "rows") {
+            this.run(["RPUSH", args[2], value]);
             this.run(["EXPIRE", args[2], rowSeconds]);
-          }
+          } else if (what === "active") this.run(["SADD", args[2], value]);
+          this.run(["SET", args[1], text, "EX", seconds]);
           return 1;
         }
         if (key.startsWith("-- marktmorgen:decr-to-zero:v1\n") && args[0] === "1" && args.length === 2) {
@@ -2513,6 +2547,14 @@ export class MemoryRedis {
       case "ZSCORE": {
         const found = this.zset(key).find((e) => e.member === args[0]);
         return found ? String(found.score) : null;
+      }
+      case "ZMSCORE": {
+        // Redis 6.2: one answer per member asked, its score as text or null, in the order asked.
+        const z = this.zset(key);
+        return args.map((member) => {
+          const found = z.find((e) => e.member === member);
+          return found ? String(found.score) : null;
+        });
       }
       case "ZREMRANGEBYRANK": {
         const z = this.zset(key);

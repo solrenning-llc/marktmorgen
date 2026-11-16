@@ -40,6 +40,8 @@ let firstAt: number | null = null;
 // The window's units taken when each Stripe call was made, on the request being watched.
 let atStripe: number[] = [];
 let netNow = 0;
+// INCRBY commands on the store's window, on the request being watched.
+let incrsNow = 0;
 // A paid booking's checkout, as Stripe answers it for a buyer's move; anything else is an empty list.
 const paidSessions = new Map<string, Record<string, unknown>>();
 globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -56,7 +58,7 @@ const NY = "America/New_York";
 const WEEKDAYS: [number, number][][] = [[], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], [[540, 1020]], []];
 const weekly = { kind: "weekly", minutes: 30, tz: NY, weekly: WEEKDAYS, noticeHours: 1, horizonDays: 14, bufferMinutes: 0, room: "https://example.com/room", video: false, meet: null, seats: 1, sessions: [] };
 
-type Watched = { stripe: number; units: number; net: number; firstAt: number | null; atStripe: number[]; result: unknown };
+type Watched = { stripe: number; units: number; net: number; incrs: number; firstAt: number | null; atStripe: number[]; result: unknown };
 
 async function watch(headers: Record<string, string>, run: () => Promise<unknown>): Promise<Watched> {
   answering(new Request("https://marktmorgen.com/x", { headers }));
@@ -64,12 +66,13 @@ async function watch(headers: Record<string, string>, run: () => Promise<unknown
   const before = stripe;
   unitsNow = 0;
   netNow = 0;
+  incrsNow = 0;
   firstAt = null;
   atStripe = [];
   redis.pipeline = async (cmds) => {
     for (const c of cmds) {
       if (!String(c[1]).startsWith("nl:traffic:r:")) continue;
-      if (c[0] === "INCRBY") { unitsNow += Number(c[2]); netNow += Number(c[2]); }
+      if (c[0] === "INCRBY") { unitsNow += Number(c[2]); netNow += Number(c[2]); incrsNow += 1; }
       if (c[0] === "DECRBY") netNow -= Number(c[2]);
     }
     return original(cmds);
@@ -84,7 +87,7 @@ async function watch(headers: Record<string, string>, run: () => Promise<unknown
   } finally {
     redis.pipeline = original;
   }
-  return { stripe: stripe - before, units: unitsNow, net: netNow, firstAt, atStripe, result };
+  return { stripe: stripe - before, units: unitsNow, net: netNow, incrs: incrsNow, firstAt, atStripe, result };
 }
 
 const resting = (result: unknown) => (result as { type?: unknown } | null)?.type === StoreResting;
@@ -155,6 +158,14 @@ async function main(): Promise<void> {
     () => EmbedCard({ params: Promise.resolve({ handle: "@admitembed", product: embed.call }), searchParams: Promise.resolve({ mm: "overlay", view: "times" }) } as never));
   is("(fact) the frame asks Stripe for the times", framed.stripe >= 1, true);
   is("the frame takes the times' requests before Stripe is asked", (framed.firstAt ?? 0) >= 1 + bookTimesUnits(1), true);
+  // One count for the frame and its times (tests/embed-card-metered.test.ts: one INCRBY of the store's requests).
+  is("the frame and its times are one INCRBY of the store's requests", framed.incrs, 1);
+  is("which counts the frame and its times together", framed.units, 1 + bookTimesUnits(1));
+  // Asked of a frame on a site the creator did not list: no calendar, so its times are given back and only the frame counts.
+  const offList = await watch({ "x-forwarded-for": "198.51.100.42", "user-agent": "curl/8", referer: "https://elsewhere.example/page" },
+    () => EmbedCard({ params: Promise.resolve({ handle: "@admitembed", product: embed.call }), searchParams: Promise.resolve({ mm: "overlay", view: "times" }) } as never));
+  is("(fact) off the creator's list, the frame asks Stripe nothing", offList.stripe, 0);
+  is("(fact) off the creator's list, only the frame's own request stays counted", offList.net, 1);
   const embedRest = await shop("admitembed2");
   if (!(await setEmbedSites(embedRest.owner, ["https://coach.example.com"])).ok) throw new Error("embed setup");
   // Room for the frame itself, none for its times.
@@ -162,6 +173,7 @@ async function main(): Promise<void> {
   const short = await watch({ "x-forwarded-for": "198.51.100.41", "user-agent": "curl/8", referer: "https://coach.example.com/page" },
     () => EmbedCard({ params: Promise.resolve({ handle: "@admitembed2", product: embedRest.call }), searchParams: Promise.resolve({ mm: "overlay", view: "times" }) } as never));
   is("with no room for its times, the frame asks Stripe nothing", short.stripe, 0);
+  is("(fact) with no room for its times, only the frame's own request stays counted", short.net, 1);
   is("and says the times could not be read", html(short.result).includes(bookingWords(embedRest.store.language).timesUnread.replace(/'/g, "&#x27;")), true);
 
   part("(c) What a reading of the times costs in the store's requests");

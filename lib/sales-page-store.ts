@@ -32,8 +32,8 @@
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { dropLandings } from "@/lib/campaign-landing-store";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
-import { takePictureDoor } from "@/lib/picture-door";
+import { HDEL_IF_EQUAL, UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { returnToDoor, takePictureDoor } from "@/lib/picture-door";
 import { EMPTY_PAGE, MAX_STORED_PAGE_BYTES, type SalesPage, parsePage, picturePaths } from "@/lib/sales-page";
 import { sectionsOn } from "@/lib/saved-blocks";
 import { usesCommands } from "@/lib/saved-block-store";
@@ -104,8 +104,15 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  * Another page's picture is refused as before. A picture from before the door
  * existed stays on the page that shows it: it is never new there.
  *
- * Those taken from the door are claimed even when another is refused, so the
- * creator's save tried again still finds them; nothing is deleted here.
+ * A save that is refused writes none of them down as this page's (Codex N1 on
+ * #2843, MEDIUM): written down and then refused, a picture the creator's next
+ * save left out was owned for good by a page that never showed it, kept and
+ * refused to every other page. What this call took from the door goes back on
+ * it instead: unchecked, as it was noted; checked, as put back once
+ * (lib/picture-door.ts putBackOnce), so the next save that shows it checks it
+ * again only paid for as a studio request (lib/picture-check.ts), and the
+ * studio-blob line holds. A name the door did not give this save refuses it
+ * before anything is read. Nothing is deleted here.
  * `check` is given the ones this call took from the door, before any of them is
  * written down as this page's, and answers which are pictures (MR audit gap 1:
  * each is asked about in the file store once, when taken). Only those become
@@ -133,22 +140,38 @@ export async function claimNewPictures(
   const unclaimed = unique.filter((_, i) => list[i] !== pageId);
   const taken = await takePictureDoor(unclaimed);
   const tookNow = unclaimed.filter((path) => taken.has(path));
+  // One the door did not give this save can never be claimed: refused before anything is read, and what it took goes
+  // back on the door as it was noted, unchecked (Codex N1 on #2843).
+  if (tookNow.length !== unclaimed.length) {
+    await returnToDoor(tookNow.map((path) => [path, taken.get(path) as number]));
+    return false;
+  }
   // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
   // A check that did not finish puts its picture back on the door (lib/picture-check.ts), and the save throws, so the
-  // route answers server_error and the creator's save tried again checks it again (Claude 2 on #2843, 6750890970); the
-  // pictures that passed are written down first, so that save does not check them again.
+  // route answers server_error and the creator's save tried again checks it again (Claude 2 on #2843, 6750890970).
   const checks = check && tookNow.length ? await check(new Map(tookNow.map((path) => [path, taken.get(path) as number]))) : { good: tookNow, unknown: [] };
   const checked = new Set(checks.good);
   const fresh = tookNow.filter((path) => checked.has(path));
-  let held = true;
-  if (fresh.length) {
-    await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
-    const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
-    const now = Array.isArray(after) ? after : [];
-    held = !fresh.some((_, i) => now[i] !== pageId);
+  // Those that passed go back on the door, as put back once, whenever the save is not taken whole: written down first
+  // and then refused, one the next save left out would stay this page's for good (Codex N1 on #2843, MEDIUM).
+  const backChecked = (paths: string[]) => returnToDoor(paths.map((path) => [path, Math.floor(taken.get(path) as number) + 0.5]));
+  if (checks.unknown.length || fresh.length !== unclaimed.length) {
+    await backChecked(fresh);
+    if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
+    return false;
   }
-  if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
-  return held && fresh.length === unclaimed.length;
+  if (fresh.length === 0) return true;
+  await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
+  const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
+  if (Array.isArray(after) && after.length === fresh.length && fresh.every((_, i) => after[i] === pageId)) return true;
+  // Not all written down as this page's (another page's first, or a reply not known): only this attempt's own are let
+  // go of, each only while it still names this page (HDEL_IF_EQUAL), and those go back on the door; none was this
+  // page's before (unclaimed), so a field naming it now was written by this save.
+  const undone = repliesFor(await redisPipeline(fresh.map((path) => ["EVAL", HDEL_IF_EQUAL, 1, picsKey(statsId), path, pageId])), fresh.length);
+  const counts = undone ? undone.map(countOf) : null;
+  if (!counts || counts.some((c) => c !== 0 && c !== 1)) throw new UnknownReplyError("page pictures: letting go of a refused claim");
+  await backChecked(fresh.filter((_, i) => counts[i] === 1));
+  return false;
 }
 
 /**

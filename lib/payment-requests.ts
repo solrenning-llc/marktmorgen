@@ -268,7 +268,9 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
         // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
         if (known.status === "open") {
           const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-          if (closed.status !== "expired") return { ok: false, reason: "error" };
+          // Closed only on Stripe's receipt for this very checkout (Codex L on #4455): an "expired" naming another
+          // session says nothing about this one, which may still be paid.
+          if (closed.id !== request.session || closed.status !== "expired") return { ok: false, reason: "error" };
         }
       }
     }
@@ -558,7 +560,9 @@ export async function markPaidOutside(
         if (known.status === "complete") return { ok: false, reason: "processing" };
         if (known.status === "open") {
           const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-          if (closed.status !== "expired") return { ok: false, reason: "error" };
+          // Closed only on Stripe's receipt for this very checkout (Codex L on #4455): an "expired" naming another
+          // session says nothing about this one, which may still be paid.
+          if (closed.id !== request.session || closed.status !== "expired") return { ok: false, reason: "error" };
         }
       }
     }

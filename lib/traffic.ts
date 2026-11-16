@@ -271,39 +271,44 @@ async function restingNow(store: Store, now: number, who: "public" | "buyer", fr
     // its connection's share of the day, unless it is asked for by a service
     // many people's apps share (a podcast app's servers), which is bounded
     // by its own feed instead.
-    return await countRequest(folder, store, window, who, now, 1, from.shared ? null : await askingConnection());
+    return (await countRequestAt(folder, store, window, who, now, 1, from.shared ? null : await askingConnection())).at;
   } catch { return 0; }
 }
 
 /**
- * One more request answered for this store's public side, counted in its
- * window: its place among the window's requests (its last unit's, 1 or more)
- * when it fits, where public pages rest at 95% of the window's requests and
- * what buyers have at all of them (lib/traffic-rules.ts, requestLimitFor);
- * 0 when it does not. A count that cannot be made is a request refused.
+ * A public request's take, said three ways (outage drill, 13 November 2026): "ok" counted within the window; "over"
+ * refused by a figure that was read (the window, the connection's share, a free store's place); "unknown" when the
+ * count could not be made, so a caller can say "not checked just now" instead of "too many". Both refuse.
  */
-async function countRequest(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<number> {
+export type RequestTake = "ok" | "over" | "unknown";
+
+async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<RequestTake> {
+  return (await countRequestAt(folder, store, window, who, now, units, client, giveBack)).take;
+}
+
+/** countRequestWhy with the request's place among the window's requests (its last unit's, 1 or more) when it is "ok", 0 otherwise (#2571). */
+async function countRequestAt(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<{ take: RequestTake; at: number }> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return 0;
-  if (!Number.isSafeInteger(units) || units < 1) return 0;
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return { take: "unknown", at: 0 };
+  if (!Number.isSafeInteger(units) || units < 1) return { take: "unknown", at: 0 };
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return 0;
+  if (!(await admitNonPaying(store, now))) return { take: "over", at: 0 };
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return 0;
+  if (client && (await overShare(folder, window, whole, client, units, now))) return { take: "over", at: 0 };
   const key = requestsKey(folder, window.id);
   const reply = await redisPipeline([["INCRBY", key, units]]);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
   // or a second item, is a count that cannot be made: the request is refused.
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return 0;
+  if (!Number.isSafeInteger(n) || n < units) return { take: "unknown", at: 0 };
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   // A hold refused over the window (`giveBack`, a reading set aside at its worst) is not left counted: nothing was
   // read for it. A request refused as a page resting stays counted, as it always has.
   if (n > limit && giveBack) await redisPipeline([["DECRBY", key, units]]).catch(() => {});
-  return n <= limit ? n : 0;
+  return n <= limit ? { take: "ok", at: n } : { take: "over", at: 0 };
 }
 
 /**
@@ -333,15 +338,25 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+  return (await takePublicWhy(store, who, now, units, shared, giveBack)) === "ok";
+}
+
+async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<RequestTake> {
+  if (!isRedisConfigured()) return "unknown";
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return false;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return (await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack)) > 0;
+    if (!window) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "over";
+    return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
-    return false;
+    // Redis or the store's folder could not be reached: a count that was not made, never room, and never "too many".
+    return "unknown";
   }
+}
+
+/** takePublicRequest, said three ways (RequestTake): for a page that tells "too many" apart from "not checked just now". */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now()): Promise<RequestTake> {
+  return takePublicWhy(store, who, now, 1, false, false);
 }
 
 /**

@@ -129,4 +129,34 @@ is("words for a kept date past the range: null", releaseWords({ at: 8.64e12 + 1,
 is("words for a kept zone that is not one: null", releaseWords({ ...jan, zone: "Mars/Olympus" }), null);
 is("moving a date past the range keeps it as it was", inZone({ ...jan, at: 8.64e12 + 1 }, "Europe/Berlin"), { ...jan, at: 8.64e12 + 1 });
 
+part("A kept fixed date that does not read whole is unknown, never open (Codex V 6895659302, Claude 5 on #3653, MÉDIO)");
+{
+  const julyDrip = s("2027-07-01T00:00:00Z");
+  const damaged: [string, unknown][] = [
+    ["a negative instant with a zone and clock that are not ones", { at: -1, zone: "bad", wall: "x" }],
+    ["the instant moved 30 days before the clock typed", { ...jan, at: jan.at - 30 * 86_400 }],
+    ["the instant moved by 30 seconds", { ...jan, at: jan.at + 30 }],
+    ["a zone that is not one", { ...jan, zone: "Mars/Olympus" }],
+    ["a zone not as it was resolved", { ...jan, zone: "america/new_york" }],
+    ["a malformed clock", { ...jan, wall: "2027-01-11 09:00" }],
+    ["an instant and clock before the year 2000", { at: s("1999-06-01T00:00:00Z"), zone: "UTC", wall: "1999-06-01T00:00" }],
+    ["an instant of zero (a missing field read as 0)", { at: 0, zone: "UTC", wall: "1970-01-01T00:00" }],
+    ["a missing instant", { zone: jan.zone, wall: jan.wall }],
+    ["an instant in text", { ...jan, at: String(jan.at) }],
+    ["not a record", "2027-01-11T09:00"],
+  ];
+  for (const [label, bad] of damaged) {
+    const fixed = bad as FixedRelease;
+    is(`module, ${label}: a schedule problem`, scheduleProblem({ dripDays: 0, fixed }), "format");
+    is(`module, ${label}: unknown`, releaseState(releaseAt({ module: { dripDays: 0, fixed }, lesson: null, dripOpensAt: julyDrip }), Number.MAX_SAFE_INTEGER), "unknown");
+    is(`lesson, ${label}: a schedule problem against its module`, scheduleProblem({ dripDays: 0, fixed }, jan), "format");
+    is(`lesson, ${label}: unknown`, releaseState(releaseAt({ module: { dripDays: 0, fixed: jan }, lesson: fixed, dripOpensAt: julyDrip }), Number.MAX_SAFE_INTEGER), "unknown");
+    is(`module of a lesson, ${label}: a schedule problem`, scheduleProblem({ dripDays: 0, fixed: jan }, fixed), "format");
+    is(`words, ${label}: null`, releaseWords(fixed), null);
+  }
+  is("control: a date from fixedRelease reads", [scheduleProblem({ dripDays: 0, fixed: jan }), releaseAt({ module: { dripDays: 0, fixed: jan }, lesson: null, dripOpensAt: julyDrip })], [null, jan.at]);
+  const moved = inZone(jan, "Europe/Berlin");
+  is("control: a date moved to another zone still reads", [scheduleProblem({ dripDays: 0, fixed: moved }), releaseAt({ module: { dripDays: 0, fixed: moved }, lesson: null, dripOpensAt: julyDrip })], [null, jan.at]);
+}
+
 done();

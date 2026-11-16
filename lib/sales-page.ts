@@ -81,12 +81,15 @@ export const MAX_PAGE_BYTES = 120_000;
 export const MAX_STORED_PAGE_BYTES = MAX_PAGE_BYTES * 3;
 /**
  * The studio units a draft's publish takes before it reads its sales page (app/api/store/product/route.ts,
- * "visibility"): the record is read twice, for the check and again under the store lock its saves are written under
- * (Codex P on #3693), each read one GET of the whole stored record, the page and its second version, at most
- * MAX_STORED_PAGE_BYTES (Claude 6 on #3693), at the 50,000 bytes one studio unit is priced at (UNIT_COST.studio in
- * tests/plan-cost-registry.ts). Taken besides the request's own unit (Claude 7 on #3693).
+ * "visibility"), for a kept record of `bytes` UTF-8 bytes (STRLEN, lib/sales-page-store.ts keptPageBytes): the record is
+ * read twice, for the check and again under the store lock its saves are written under (Codex P on #3693), each read
+ * one GET of the whole record, the page and its second version, which moves its bytes, not its code units (Claude 6 on
+ * #3693), at the 50,000 bytes one studio unit is priced at (UNIT_COST.studio in tests/plan-cost-registry.ts). Taken
+ * besides the request's own unit (Claude 7 on #3693); a record grown past them before the second read is not read.
  */
-export const PUBLISH_PAGE_UNITS = Math.ceil((2 * MAX_STORED_PAGE_BYTES) / 50_000);
+export function publishPageUnits(bytes: number): number {
+  return Math.ceil((2 * Math.max(0, bytes)) / 50_000);
+}
 /** Things said about it elsewhere, in one block; the words of one, the name beside it, and its link. */
 export const MAX_QUOTES = 6;
 export const MAX_QUOTE = 400;

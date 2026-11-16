@@ -48,19 +48,24 @@ import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { templateLeft } from "@/lib/template-text";
-import { readPage } from "@/lib/sales-page-store";
-import { PUBLISH_PAGE_UNITS } from "@/lib/sales-page";
+import { keptPageBytes, readPage } from "@/lib/sales-page-store";
+import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
 
 /**
  * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
- * under the store lock: PUBLISH_PAGE_UNITS; Claude 7 on #3693). Null when paid, or when there is no page to read; the
- * studio's own "used" answer when the units are refused, and then nothing is read.
+ * under the store lock), by the kept record's own bytes (publishPageUnits; Claude 7 and Claude 6 on #3693), and says
+ * how many bytes were paid for. No page: nothing read or taken. A size that does not read: unknown, nothing is read.
+ * Units refused: the studio's own "used" answer, and nothing is read.
  */
-async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { page?: unknown }): Promise<Response | null> {
-  if (!draft.page || !store.statsId) return null;
-  const paid = await countStudio(store, null, PUBLISH_PAGE_UNITS);
-  return paid.ok ? null : Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });
+async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { id: string; page?: unknown }): Promise<{ paid: number } | Response> {
+  if (!draft.page || !store.statsId) return { paid: 0 };
+  const bytes = await keptPageBytes(store.statsId, draft.id);
+  if (bytes === null) return Response.json({ ok: false, error: "unknown" }, { status: 503 });
+  const units = publishPageUnits(bytes);
+  if (units === 0) return { paid: 0 };
+  const paid = await countStudio(store, null, units);
+  return paid.ok ? { paid: bytes } : Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });
 }
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
@@ -430,18 +435,18 @@ export async function POST(request: NextRequest) {
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
       // A publish reads its sales page twice (the check, then under the lock), up to MAX_PAGE_BYTES each: those reads
       // are paid for in studio units before either is made, or nothing is read (PUBLISH_PAGE_UNITS; Claude 7 on #3693).
-      let pagePaid = false;
+      let pagePaid = 0;
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
         const draft = await readListing(guarded.store, id);
         if (draft) {
-          const unpaid = await payPageReads(guarded.store, draft);
-          if (unpaid) return unpaid;
+          const pay = await payPageReads(guarded.store, draft);
+          if (pay instanceof Response) return pay;
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
-          pagePaid = Boolean(draft.page);
+          pagePaid = pay.paid;
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
           // Nor while its sales page, in either version, still holds a part a template left to write: saving it
@@ -465,7 +470,9 @@ export async function POST(request: NextRequest) {
       const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
         if (!now.page || !store.statsId) return true;
         // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
-        if (!pagePaid) {
+        // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
+        const keptBytes = await keptPageBytes(store.statsId, now.id);
+        if (keptBytes === null || keptBytes > pagePaid) {
           pageChanged = true;
           return false;
         }

@@ -2,7 +2,7 @@ import { agreementsAllowed } from "@/lib/agreement-rules";
 import { readFlowListStrict } from "@/lib/flow-list";
 import { FLOW_TRIGGERS, type FlowTrigger, MAX_FLOW_WAIT_HOURS } from "@/lib/flow-rules";
 import { MAX_FLOWS, MAX_RETRIES_BY_YOU, MAX_STEPS, MAX_WAIT_DAYS_PER_STEP, RUN_KEEP_SECONDS, activeFlowLimit, dailyRunLimit, startableFlows } from "@/lib/flow-limits";
-import { type WaitReason, nextTry, stopWaiting } from "@/lib/flow-retry";
+import { type WaitReason, looksUsed, nextTry, stopWaiting } from "@/lib/flow-retry";
 import { allowanceWindow } from "@/lib/allowance-window";
 import { END, afterIndex, checkRoutes, elseIndex } from "@/lib/flow-paths";
 import { RUN_EVENT_BYTES, RUN_RECORD_CHARS, type Settled, admitRuns, claimAttempts, countRetry, countWaits, forgetHeldCommand, forgetIndexCommand, forgetPersonCommands, noteRuns, openRuns, personOf, readRun, refuseRuns, releaseHold, runPeople, settleAttempts } from "@/lib/flow-runs";
@@ -168,6 +168,37 @@ const QUEUE = "nl:mail:flowq";
 const LEASE = "nl:mail:flowq:lease";
 const LEASE_SECONDS = 15 * 60;
 /**
+ * Moves each member from one sorted set to another, at a score, in one step (CX-123 rule 24): a member is written to
+ * KEYS[2] only by whoever took it off KEYS[1], and the answer is 1 or 0 for each, in order. Taking due runs off the
+ * queue into the lease, and putting them back, never leaves a run in neither: a reply lost after it ran leaves the run
+ * moved, where the next run's orphan pass (or the queue itself) finds it.
+ */
+export const FLOW_MOVE = `-- marktmorgen:flow-move:v1
+local out = {}
+for i = 2, #ARGV do
+  if redis.call('ZREM', KEYS[1], ARGV[i]) == 1 then
+    redis.call('ZADD', KEYS[2], ARGV[1], ARGV[i])
+    out[#out + 1] = 1
+  else
+    out[#out + 1] = 0
+  end
+end
+return out`;
+
+/** Moves `members` from `from` to `to` at `score`: true for each one this call moved. An answer of another shape throws. */
+async function moveMembers(from: string, to: string, score: number, members: string[]): Promise<boolean[]> {
+  if (!members.length) return [];
+  const reply = repliesFor(await redisPipeline([["EVAL", FLOW_MOVE, 2, from, to, score, ...members]]), 1);
+  const moved = reply?.[0];
+  if (!Array.isArray(moved) || moved.length !== members.length) throw new UnknownReplyError("a move in the sequence queue");
+  return moved.map((value) => {
+    const n = countOf(value);
+    if (n !== 0 && n !== 1) throw new UnknownReplyError("a move in the sequence queue");
+    return n === 1;
+  });
+}
+
+/**
  * Queues a run's next attempt only while this step's lease entry is still there, in one command: a stop step of
  * another workflow removes that entry (act, "stop"), and then nothing of the run is queued again. KEYS: the lease,
  * the queue; ARGV: the lease member, the score, the queue member. 1 when queued, 0 when the run was taken out.
@@ -220,21 +251,17 @@ export async function flowsBytes(listId: string | null): Promise<number | null> 
   return reply ? exactReply.countOf(reply[0]) : null;
 }
 
+/**
+ * The store's workflows, read exactly (CX-123 rule 24): none only when Redis says nil. A reply missing, extra, of
+ * another type or not a list of workflows throws UnknownReplyError, never "no workflows": a closed store's erasure
+ * (lib/closed-store-data.ts marksOf) and a person's copy (lib/person-copy.ts) must not go on without them. Callers
+ * that can do without (data-recount, buyer-profile, checkout-sweep) catch it themselves.
+ */
 export async function readFlows(listId: string | null): Promise<Flow[]> {
   if (!listId || !isRedisConfigured()) return [];
-  const [raw] = await redisPipeline([["GET", flowsKey(listId)]]);
-  return parseFlows(raw);
+  return readFlowsExact(listId);
 }
 
-function parseFlows(raw: unknown): Flow[] {
-  if (typeof raw !== "string") return [];
-  try {
-    const list = JSON.parse(raw) as Flow[];
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * The store's workflows for the sender (sendDueSteps): none only when Redis says exactly nil; a reply that is missing
@@ -713,9 +740,14 @@ async function act(store: Store, flows: Flow[], action: FlowAction, emails: stri
     const ended: string[] = [];
     for (const email of emails) {
       try {
-        const reply = await redisPipeline(queuedOf(store, target, [email]));
-        const fromQueue = Number(reply[0]) || 0;
-        const fromLease = Number(reply[1]) || 0;
+        // Read exactly (CX-123 rule 24, as erase reads its own): every ZREM answers a whole count, the queue's and the
+        // lease's in turn. A reply missing, cut short or of another shape is not a removal, nor proof that they were not
+        // there: it throws, and the step is deferred and tried again, never recorded as "not waiting".
+        const removal = queuedOf(store, target, [email]);
+        const counts = (repliesFor(await redisPipeline(removal), removal.length) ?? []).map(countOf);
+        if (counts.length !== removal.length || counts.some((count) => count === null)) throw new FlowWriteUnconfirmed();
+        const fromQueue = counts.reduce<number>((sum, count, i) => (i % 2 === 0 ? sum + (count as number) : sum), 0);
+        const fromLease = counts.reduce<number>((sum, count, i) => (i % 2 === 1 ? sum + (count as number) : sum), 0);
         if (fromQueue > 0) {
           ended.push(email);
           out.push({ email, state: "confirmed", changed: true, note: `Taken out of “${target.name}”.` });
@@ -1060,7 +1092,11 @@ async function waitOrStop(
   const queue: (string | number)[][] = [];
   const outcomes: Settled[] = [];
   if (!people.length) return { queue, outcomes };
-  const counted = await countWaits(flowId, people.map((p) => p.email), index, nowSeconds);
+  // A look while the store is switched off is counted as half a wait (lib/flow-limits.ts, SWITCHED_OFF_LOOKS_PER_WAIT);
+  // a batch waits for one reason, but each person is counted by their own.
+  const off = people.filter((p) => p.reason === "switched_off").map((p) => p.email);
+  const whole = people.filter((p) => p.reason !== "switched_off").map((p) => p.email);
+  const counted = new Map([...(await countWaits(flowId, whole, index, nowSeconds)), ...(await countWaits(flowId, off, index, nowSeconds, true))]);
   for (const p of people) {
     const count = counted.get(p.email) ?? null;
     const stop = stopWaiting(count, nowSeconds);
@@ -1068,7 +1104,7 @@ async function waitOrStop(
       outcomes.push({ email: p.email, state: "failed", note: stop ?? "Stopped here.", to: -1, status: "ended" });
       continue;
     }
-    queue.push(["ZADD", QUEUE, nextTry(p.reason, count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
+    queue.push(["ZADD", QUEUE, nextTry(p.reason, p.reason === "switched_off" ? looksUsed(count) : count.waits, nowSeconds, { ...known, since: count.since }), `${group}|${p.email}`]);
     outcomes.push({ email: p.email, state: "deferred", note: p.note, to: index });
   }
   return { queue, outcomes };
@@ -1138,23 +1174,19 @@ export async function sendDueSteps(
   // What an earlier run took and never finished goes back in the queue first.
   const [stuck] = await redisPipeline([["ZRANGEBYSCORE", LEASE, 0, Math.floor(Date.now() / 1000), "LIMIT", 0, 1000]]);
   const orphans = Array.isArray(stuck) ? (stuck as string[]) : [];
-  if (orphans.length) {
-    const back = await redisPipeline(orphans.map((m) => ["ZREM", LEASE, m]));
-    const mine = orphans.filter((_, i) => Number(back[i]) === 1);
-    if (mine.length) await redisPipeline(mine.map((m) => ["ZADD", QUEUE, Math.floor(Date.now() / 1000), m]));
-  }
+  if (orphans.length) await moveMembers(LEASE, QUEUE, Math.floor(Date.now() / 1000), orphans);
   while (Date.now() < deadline) {
     const now = Math.floor(Date.now() / 1000);
     const [due] = await redisPipeline([["ZRANGEBYSCORE", QUEUE, 0, now, "LIMIT", 0, 300]]);
     const members = Array.isArray(due) ? (due as string[]) : [];
     if (!members.length) break;
     // Whoever removes a member from the queue is the one who sends it.
-    const taken = await redisPipeline(members.map((m) => ["ZREM", QUEUE, m]));
-    const owned = members.filter((_, i) => Number(taken[i]) === 1);
-    if (owned.length) await redisPipeline(owned.map((m) => ["ZADD", LEASE, now + LEASE_SECONDS, m]));
+    // Off the queue and into the lease in one step: an answer not read leaves them leased, sent by nobody this run,
+    // and the orphan pass puts them back once the lease runs out.
+    const taken = await moveMembers(QUEUE, LEASE, now + LEASE_SECONDS, members);
     const groups = new Map<string, string[]>();
     members.forEach((member, i) => {
-      if (Number(taken[i]) !== 1) return;
+      if (!taken[i]) return;
       // listId|handle|flowId|step|address — an address may itself hold a "|".
       const parts = member.split("|");
       const group = parts.slice(0, 4).join("|");
@@ -1166,9 +1198,7 @@ export async function sendDueSteps(
       // another workflow, done earlier in this batch, removes it (act, "stop"), and that run stays ended. As with the
       // orphans above, whoever removes the lease entry is the one who puts it back.
       const putBack = async (at: number) => {
-        const back = await redisPipeline(emails.map((email) => ["ZREM", LEASE, `${group}|${email}`]));
-        const held = emails.filter((_, i) => Number(back[i]) === 1);
-        if (held.length) await redisPipeline(held.map((email) => ["ZADD", QUEUE, at, `${group}|${email}`]));
+        await moveMembers(LEASE, QUEUE, at, emails.map((email) => `${group}|${email}`));
       };
       if (Date.now() > deadline) {
         // Out of time: back in the queue for the next run, untouched.
@@ -1230,7 +1260,7 @@ export async function sendDueSteps(
     }
     // Switched off after notices about its content (lib/takedown.ts; any value but nothing or "" reads as off, rule
     // 24): no step is done, an email or an action. Each waits as every other wait does (waitOrStop: counted on the
-    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), MAX_WAITS_PER_RUN times at the most, then
+    // run, its looks spread over MAX_WAIT_DAYS_PER_STEP (lib/flow-retry.ts), each half a wait of MAX_WAITS_PER_RUN, then
     // the run stops, saying why), queued only
     // while its lease entry is still there. Nothing is claimed, so an attempt an earlier try left open stays open.
     if (store.suspended) {

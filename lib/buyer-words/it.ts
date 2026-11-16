@@ -189,8 +189,9 @@ export const it: BuyerWords = {
   whoAnswers: (store) =>
     `${store} è il venditore e risponde di ciò che compri, dei rimborsi e dell'eventuale diritto di recesso. Marktmorgen ospita le pagine del negozio e non è parte del contratto di vendita.`,
   noPaymentsTitle: "Questo negozio non può ancora accettare pagamenti.",
-  noPaymentsBody: (store) => `I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
-  noPaymentsBodyOne: (store) => `Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta. Per acquistare, scrivi direttamente a ${store}.`,
+  noPaymentsBody: "I prezzi qui sopra sono reali, ma qui nulla può addebitare una carta.",
+  noPaymentsBodyOne: "Il prezzo qui sopra è reale, ma qui nulla può addebitare una carta.",
+  noPaymentsWrite: (store) => `Scrivi a ${store}`,
 
   notices: {
     soldout: { title: "È appena andato esaurito", body: "L'ultimo è stato venduto un attimo prima che premessi acquista. Non è stato addebitato nulla." },
@@ -287,6 +288,8 @@ export const it: BuyerWords = {
   openFullSize: "Apri questa immagine a grandezza intera",
   countdownUnits: { days: "giorni", hours: "ore", min: "min", sec: "sec" },
   until: (when) => `Fino a ${when}`,
+  countdownPause: "Metti in pausa il conto alla rovescia",
+  countdownResume: "Riprendi il conto alla rovescia",
 
   restingTitle: "Questa pagina è in pausa per ora",
   restingBody: (store) =>

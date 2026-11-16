@@ -8,12 +8,12 @@
 import { TEST_CONSENT } from "./digital-consent-fixture";
 import { claimHandle, ensureStatsId, addProduct, setProductLink, setSubscription, setPayPalSeller, setAffiliateSetting, storeForEmail } from "@/lib/store";
 import { readListing } from "@/lib/catalog";
-import { captureOrder, openOrder, watchPayPal } from "@/lib/paypal-sales";
+import { PAYPAL_REFUNDS_READ, captureOrder, openOrder, watchPayPal } from "@/lib/paypal-sales";
 import { handOverPayPal } from "@/lib/paypal-delivery";
 import { readBook } from "@/lib/affiliates";
 import { NO_AFFILIATES } from "@/lib/affiliate-setting";
 import { setSendHooksForTests } from "@/lib/webhooks";
-import { store as redis } from "./redis-stub";
+import { advance, store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 
@@ -31,7 +31,8 @@ const AFF = "0123456789ab";
 const PARTNER = "ba9876543210";
 let made = 0;
 const captures = new Map<string, string>();
-const orderId = (n: number) => `5O190127TN36472${String(n).padStart(2, "0")}`;
+// Four digits, so the many sales below each get their own order and capture.
+const orderId = (n: number) => `5O190127TN364${String(n).padStart(4, "0")}`;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -47,7 +48,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   const capture = /^\/v2\/checkout\/orders\/([A-Z0-9]+)\/capture$/.exec(url.pathname)?.[1];
   if (capture) {
-    const cap = `3C679366HH9088${capture.slice(-2)}`;
+    const cap = `3C679366HH90${capture.slice(-4)}`;
     captures.set(cap, "COMPLETED");
     return json({
       id: capture,
@@ -136,6 +137,36 @@ async function main(): Promise<void> {
   const blind = await readBook(store);
   redis.pipeline = pipeline;
   is("refunds not checked, so nothing is paid on what is owed", blind.refundsChecked, false);
+
+  // Claude 4 on #4131 (6918081668, MEDIUM): main keeps PayPal's refunds in full for good, by payment, and asks the book's
+  // own payments by name (lib/paypal-sales.ts backKey); a mark of a refund in part must meet the same two rules.
+  part("More partial refunds than one listing reads never hold the whole book");
+  const calm = await readBook(store);
+  is("control: the book is checked", calm.refundsChecked, true);
+  const payableBefore = calm.rows.find((r) => r.affiliate.id === AFF)?.payable;
+  const many: string[] = [];
+  // On the largest plan only so this many orders are admitted in one month; what is checked is the book.
+  const busy = { ...store, tier: "scale" as const };
+  for (let i = 0; i <= PAYPAL_REFUNDS_READ; i++) {
+    const opened = await openOrder(busy, product, "https://marktmorgen.com", { meta: {}, digitalConsent: TEST_CONSENT });
+    if (!opened.ok) throw new Error(`no order: ${JSON.stringify(opened)}`);
+    const paid = await captureOrder(busy, opened.order);
+    if (!paid.ok) throw new Error(`not paid: ${paid.reason}`);
+    captures.set(paid.paid.capture, "PARTIALLY_REFUNDED");
+    many.push(opened.order);
+  }
+  await redis.pipeline([["ZADD", `nl:ppsell:watch:${store.statsId}`, ...many.flatMap((order) => ["0", order])]]);
+  for (let run = 0; run < Math.ceil(many.length / 25) + 2; run++) {
+    await watchPayPal(store, Date.now() + 10_000, { handOver: async () => {}, dropStart: async () => {}, refunded: async () => {} });
+  }
+  const crowded = await readBook(store);
+  is(`${many.length} sales refunded in part, none of them the book's: the book is still checked`, crowded.refundsChecked, true);
+  is("and what the affiliate is owed is what it was before them", crowded.rows.find((r) => r.affiliate.id === AFF)?.payable, payableBefore);
+
+  part("A partial refund older than the sales' 400 days still earns nothing");
+  advance(401 * 86_400_000);
+  const late = (await readBook(store)).lines.find((l) => l.aff === AFF && l.ref === `paypal:${sold.order}`);
+  is("its line still says partly refunded and earns nothing, never the commission on the whole price", [late?.status, late?.commission], ["partly refunded", 0]);
 
   done();
 }

@@ -147,6 +147,23 @@ export class MemoryRedis {
           if (n >= Number(below)) return -1;
           return this.run(["INCR", counter]);
         }
+        // lib/submission-store.ts SUBMISSION_SLOT_TAKE: a slot's turn taken off only while still at the score read.
+        if (key.startsWith("-- marktmorgen:submission-slot-take:v1\n") && args[0] === "1" && args.length === 4) {
+          const [, list, member, score] = args;
+          const held = this.run(["ZSCORE", list, member]);
+          if (held === null || held === undefined || Number(held) !== Number(score)) return 0;
+          this.run(["ZREM", list, member]);
+          return 1;
+        }
+        // lib/submission-store.ts SUBMISSION_SLOT_STORE_NEXT: the store's turn taken off when its list is empty, else
+        // set to the soonest turn on it.
+        if (key.startsWith("-- marktmorgen:submission-slot-store-next:v1\n") && args[0] === "2" && args.length === 4) {
+          const [, list, stores, store] = args;
+          const first = this.zset(list)[0];
+          if (first === undefined) this.run(["ZREM", stores, store]);
+          else this.run(["ZADD", stores, String(first.score), store]);
+          return 1;
+        }
         // lib/form-store.ts FIND_FORM_RESPONSE: the first kept response written with this id, as its text, or nil.
         // lib/removed-courses.ts NOTE_REMOVED_COURSE: the list keeps the course and its product, the course's own key its
         // lessons and modules, written together; a course on the list has both replaced (0); a new one is added
@@ -2360,10 +2377,12 @@ export class MemoryRedis {
       case "ZADD": {
         const z = this.zset(key);
         // Flags before the first score, in any order, as Redis reads them. "NX": a member already there keeps the
-        // score it has. "XX": only a member already there is moved. "CH": count the members changed too.
+        // score it has. "XX": only a member already there is moved. "GT"/"LT": a member already there is moved only to
+        // a greater/lesser score (a new member is still added). "CH": count the members changed too.
         let flags = 0;
-        while (flags < args.length && ["NX", "XX", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
+        while (flags < args.length && ["NX", "XX", "GT", "LT", "CH"].includes(String(args[flags]).toUpperCase())) flags += 1;
         const set = new Set(args.slice(0, flags).map((flag) => String(flag).toUpperCase()));
+        if ((set.has("GT") && set.has("LT")) || (set.has("NX") && (set.has("GT") || set.has("LT")))) throw new Error("ERR GT, LT, and/or NX options at the same time are not compatible");
         const onlyNew = set.has("NX");
         const onlyOld = set.has("XX");
         const pairs = args.slice(flags);
@@ -2375,7 +2394,7 @@ export class MemoryRedis {
           const member = pairs[i + 1];
           const at = z.findIndex((e) => e.member === member);
           if (at >= 0) {
-            if (!onlyNew && z[at].score !== score) {
+            if (!onlyNew && z[at].score !== score && !(set.has("GT") && score <= z[at].score) && !(set.has("LT") && score >= z[at].score)) {
               z[at].score = score;
               changed += 1;
             }

@@ -19,8 +19,10 @@
  */
 import { MAX_SUBMISSION_NOTE, MAX_WAITING_PER_BUYER, type SubmissionSetup } from "@/lib/submission-rules";
 import {
+  SUBMISSION_SLOT_SWEEP_COMMANDS,
   SUBMISSION_STEP_COMMANDS,
   buyerSlotFor,
+  settleSubmissionSlots,
   SUBMISSION_SWEEP_GRACE_SECONDS,
   type DoorSteps,
   abortSubmissionDoor,
@@ -35,7 +37,7 @@ import {
 } from "@/lib/submission-store";
 import { type DataStore, dataKey, dataUsed, takeData } from "@/lib/store-data";
 import { contentRoomFor, dataBytes } from "@/lib/store-data-rules";
-import { readVaultPath } from "@/lib/vault-rules";
+import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -277,11 +279,14 @@ async function main(): Promise<void> {
       const timed = Number((await redis.pipeline([["HGET", room, `~${month}`]]))[0] ?? 0);
       is("its record's bytes are counted in the data room until it expires", timed >= dataBytes([recKey, recJson], 1), true);
       const slot = Number((await redis.pipeline([["HGET", room, buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? -1);
-      // One place weighs its member on the lesson and its entry in the store, with a path at its longest.
+      // One place weighs its member on the lesson, its entry in the store, with a path at its longest, and its slot's
+      // turn on the store's list at its longest (review of #3568, Claude 6).
       const longestPath = "v".repeat("vault/".length + 32 + 1 + 36 + 1 + 16 + 1 + 120);
+      const turn = dataBytes([`nl:sub:slots:${"f".repeat(64)}`, `sbl:${"0".repeat(32)}|${"c".repeat(64)}|${"l".repeat(64)}|${"b".repeat(64)}`], 1);
       const onePlace =
         dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1) +
-        dataBytes([`nl:sub:who:${FOLDER}:${ANA}`, [COURSE, lesson, "0".repeat(32), longestPath].join("|")], 1);
+        dataBytes([`nl:sub:who:${FOLDER}:${ANA}`, [COURSE, lesson, "0".repeat(32), longestPath].join("|")], 1) +
+        turn;
       is("the buyer's slot holds the one place, not the upload's door", slot, onePlace);
       is("so the room is lighter than with the upload open", ((await dataUsed(SHOP))?.used ?? -1) < usedBefore + dataBytes([recKey, recJson], 1), true);
     }
@@ -518,6 +523,70 @@ async function main(): Promise<void> {
     }
     const slot = Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, lesson, DAN) ?? ""]]))[0] ?? 0);
     is("a place taken between the two reads leaves the slot at its most", racing.ok && slot > 0 && (await used()) > base, true);
+  }
+
+  // Review of #3568 (Claude 6, MEDIUM): an upload opened and simply left kept the buyer's slot at its most for good,
+  // since only a refusal, a close or a give-up set it back. The daily sweep now sets it back to what is still held once
+  // every door opened on it has had its day.
+  part("An upload opened and left is given back by the daily sweep, never while a newer one may be open");
+  {
+    const lesson = "lesson0left1";
+    const EVE = "e".repeat(32);
+    // Only this part's opens on the sweep's lists: the earlier parts' uploads have their own days.
+    await redis.pipeline([["DEL", `nl:sub:slots:${FOLDER}`], ["DEL", "nl:sub:slotdue"]]);
+    const slotOf = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, lesson, EVE) ?? ""]]))[0] ?? 0);
+    const w = world();
+    const left = await openSubmissionDoor({ ...ask(EVE), lessonId: lesson }, w.steps);
+    is("control: the upload opened", left.ok, true);
+    const most = await slotOf();
+    is("control: its slot is at its most", most > 0, true);
+    const before = await commandsOf(() => settleSubmissionSlots(NOW + 3600));
+    is("within the door's day, the sweep leaves the slot as it is", [before.value.settled, await slotOf()], [0, most]);
+    const later = NOW + UPLOAD_SECONDS + 1;
+    const swept = await commandsOf(() => settleSubmissionSlots(later));
+    is("once the door's day is over, the sweep sets the slot back to what is held: nothing", [swept.value.settled, await slotOf()], [1, 0]);
+    is("inside the commands each open pays for its sweep", swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
+    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 3 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
+    is("and nothing is left on the list for it", await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`], ["ZSCORE", "nl:sub:slotdue", `${dataKey(SHOP)?.slice(8)}|${FOLDER}`]]), [0, null]);
+    const again = await commandsOf(() => settleSubmissionSlots(later + 60));
+    is("a second sweep finds nothing to do", again.value.settled, 0);
+
+    // Only the latest door's end counts: an older open never brings the slot's turn forward.
+    const first = await openSubmissionDoor({ ...ask(EVE, 50 * MiB, later), lessonId: lesson }, w.steps);
+    const second = await openSubmissionDoor({ ...ask(EVE, 50 * MiB, later + 3000), lessonId: lesson }, w.steps);
+    is("control: two uploads opened", [first.ok, second.ok], [true, true]);
+    const atFirstEnd = await settleSubmissionSlots(later + UPLOAD_SECONDS + 10);
+    is("when only the first door's day is over, the slot stays at its most", [atFirstEnd.settled, (await slotOf()) > 0], [0, true]);
+
+    // An open during the sweep is never left uncounted: it lands between the sweep's read of the list and its turn.
+    const original = redis.pipeline.bind(redis);
+    let opened = false;
+    redis.pipeline = (async (list: (string | number)[][]) => {
+      if (!opened && list.some((c) => c[0] === "EVAL" && String(c[1]).includes("marktmorgen:submission-slot-take"))) {
+        opened = true;
+        redis.pipeline = original;
+        const racing = await openSubmissionDoor({ ...ask(EVE, 50 * MiB, later + UPLOAD_SECONDS + 4000), lessonId: lesson }, w.steps);
+        is("control: an upload opened during the sweep", racing.ok, true);
+      }
+      return original(list);
+    }) as typeof redis.pipeline;
+    try {
+      await settleSubmissionSlots(later + UPLOAD_SECONDS + 3600);
+    } finally {
+      redis.pipeline = original;
+    }
+    is("the open made during the sweep keeps the slot at its most", (await slotOf()) > 0, true);
+    is("and its turn is still on the list", Number((await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`]]))[0]), 1);
+
+    // A file closed and kept stays counted after the sweep: the slot is set to what is held, never below it.
+    const kept = "lesson0kept1";
+    const keptSlot = async () => Number((await redis.pipeline([["HGET", dataKey(SHOP) ?? "", buyerSlotFor(FOLDER, COURSE, kept, EVE) ?? ""]]))[0] ?? 0);
+    const sent = await openSubmissionDoor({ ...ask(EVE), lessonId: kept }, w.steps);
+    if (!sent.ok) throw new Error("open refused");
+    await closeSubmissionDoor({ ...where(EVE), lessonId: kept, data: SHOP, note: "" }, sent.upload.pathname, ["e"], NOW, w.steps);
+    const afterClose = await keptSlot();
+    await settleSubmissionSlots(NOW + UPLOAD_SECONDS + 1);
+    is("a kept file's place stays counted after the sweep", [afterClose > 0, await keptSlot()], [true, afterClose]);
   }
 }
 

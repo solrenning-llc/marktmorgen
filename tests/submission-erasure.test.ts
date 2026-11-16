@@ -157,6 +157,10 @@ async function main(): Promise<void> {
     is("their places are let go", await liveCount(FOLDER, COURSE, lesson(1), ANA, NOW), 0);
     is("their room slots are emptied, so the store's room keeps nothing of them", await Promise.all([1, 2, 3].map((n) => slotOf(ANA, lesson(n)))), [null, null, null]);
     is("another buyer's slot stays", (await slotOf(BOB, lesson(1))) !== null, true);
+    // Their slots' turns on the store's list name them (review of #3568, Claude 6): taken off with them, another's kept.
+    const turns = ((await redis.pipeline([["ZRANGEBYSCORE", `nl:sub:slots:${FOLDER}`, "-inf", "+inf"]]))[0] as string[]) ?? [];
+    is("their slots' turns on the store's list are gone with them", turns.filter((member) => member.endsWith(`|${ANA}`)), []);
+    is("another buyer's turn stays", turns.some((member) => member.endsWith(`|${BOB}`)), true);
     is("another buyer's record stays", (await readSubmission(FOLDER, bobs.id))?.path, bobs.path);
     is("and is still on the list", (await due()).includes(bobs.path), true);
     is("deleted again, nothing more goes", await forgetSubmissionsPerson(FOLDER, ANA, [], steps), 0);

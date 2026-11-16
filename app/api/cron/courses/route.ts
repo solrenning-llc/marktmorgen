@@ -10,7 +10,7 @@ import { SITE_URL } from "@/lib/site-url";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
 import { sweepCommunityUploads } from "@/lib/community-files";
-import { sweepSubmissions } from "@/lib/submission-store";
+import { settleSubmissionSlots, sweepSubmissions } from "@/lib/submission-store";
 
 /**
  * Run on a schedule by Vercel: tells each student when a module of their
@@ -18,7 +18,8 @@ import { sweepSubmissions } from "@/lib/submission-store";
  * And deletes files students uploaded for an assignment and never handed
  * in (lib/assignment.ts), and community pictures never put in a post
  * (lib/community-files.ts), a day on. And deletes the files buyers sent for
- * review whose keeping time ended, and their records (lib/submission-store.ts).
+ * review whose keeping time ended, and their records (lib/submission-store.ts), and sets back the room a buyer's
+ * upload opened and left still held, once its day is over (settleSubmissionSlots).
  */
 export async function GET(request: NextRequest) {
   // Vercel sends the secret with every scheduled run, compared here in
@@ -52,6 +53,14 @@ export async function GET(request: NextRequest) {
       console.error("could not sweep submissions past their keeping time", error);
       return null;
     });
+    // Not read exactly: said, never "0 settled"; every slot keeps its turn for the next run.
+    const slots = await settleSubmissionSlots(Math.floor(Date.now() / 1000)).then(
+      (done) => done.settled,
+      (error: unknown) => {
+        console.error("could not set back the room of buyer uploads left open", error);
+        return null;
+      },
+    );
     return Response.json(
       {
         ok: true,
@@ -61,6 +70,8 @@ export async function GET(request: NextRequest) {
         ...(pictures === null ? { picturesFailed: true } : {}),
         expiredSubmissions: submissions,
         ...(submissions === null ? { submissionsFailed: true } : {}),
+        submissionSlots: slots,
+        ...(slots === null ? { submissionSlotsFailed: true } : {}),
       },
       { headers: { "Cache-Control": "no-store" } },
     );

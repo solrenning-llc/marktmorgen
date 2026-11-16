@@ -27,13 +27,14 @@ import { addProduct, claimHandle, ensureStatsId, setProductCall, setStripeAccoun
 import type { Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { type CallListing, holdAndCheckout, moveBooking } from "@/lib/calls";
-import { type CallSetup, zonedToUtc } from "@/lib/call-setup";
+import type { CallSetup } from "@/lib/call-setup";
 import { REMINDER_QUEUE, markBookingsChanged, movedKey, planCheck, planReminders, readMoves } from "@/lib/call-records";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { writeTeam } from "@/lib/team-booking";
 import { hostId, readClaims } from "@/lib/host-claims";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { weekdayAt } from "./weekday";
 import { paidPeriod } from "./billing-period-fixture";
 
 const HOUR = 3_600_000;
@@ -112,17 +113,6 @@ const weekly = {
   seats: 1,
   sessions: [],
 } as unknown as CallSetup;
-
-function weekdayAt(days: number, minute: number): number {
-  for (let d = days; d < days + 8; d += 1) {
-    const day = new Date(Date.now() + d * DAY);
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: NY, year: "numeric", month: "2-digit", day: "2-digit", weekday: "short" }).formatToParts(day);
-    const get = (t: string) => p.find((x) => x.type === t)?.value ?? "";
-    if (get("weekday") === "Sat" || get("weekday") === "Sun") continue;
-    return zonedToUtc(Number(get("year")), Number(get("month")), Number(get("day")), minute, NY) as number;
-  }
-  throw new Error("no weekday");
-}
 
 type World = { store: Store; call: CallListing; full: Product & { call: CallSetup } };
 
@@ -220,8 +210,8 @@ async function main(): Promise<void> {
     ["a list holding OK", ["OK"]],
     ["an object", { ok: true }],
   ];
-  // One weekday each, none of them the healthy one's: weekdayAt skips a weekend to the Monday after it.
-  const days = [...new Set(Array.from({ length: 16 }, (_, i) => weekdayAt(11 + i, 600)))].filter((t) => t !== A);
+  // One weekday each, none of them the healthy one's (the 10th): the 11th to the 19th weekdays from today, all inside the 30-day horizon.
+  const days = Array.from({ length: shapes.length + 3 }, (_, i) => weekdayAt(11 + i, 600));
   for (const [n, [what, value]] of shapes.entries()) {
     const B = days[n];
     const session = await sellSession(w, B);

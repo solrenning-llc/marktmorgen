@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { normaliseHandle, storeForPage } from "@/lib/store";
+import { normaliseHandle, storeForId, storeForPage } from "@/lib/store";
 import { lookStyle } from "@/lib/store-look";
 import { readListing } from "@/lib/catalog";
 import { ALERT_TOKEN, stockAlertLink } from "@/lib/stock-alerts";
@@ -35,17 +35,31 @@ export default async function BackInStockPage({ params, searchParams }: Params) 
   const decoded = decodeURIComponent(raw);
   if (!decoded.startsWith("@")) notFound();
   const store = await storeForPage(normaliseHandle(decoded));
-  if (!store) notFound();
-
   const query = await searchParams;
   const read = (name: string) => (typeof query[name] === "string" ? (query[name] as string) : "");
+  // An email's link names its store by its own id too: a handle let go, or taken since by another store, sends the
+  // link on to that store's current page, the link kept whole (Claude 1 on #3620).
+  const id = read("i");
+  if (id && /^[a-z0-9]{1,64}$/.test(id) && store?.sid !== id) {
+    const owner = await storeForId(id);
+    if (owner?.handle) {
+      const kept = new URLSearchParams();
+      for (const name of ["token", "leave", "status", "product"]) if (read(name)) kept.set(name, read(name));
+      kept.set("i", id);
+      redirect(`/@${owner.handle}/back-in-stock?${kept.toString()}`);
+    }
+  }
+  if (!store) notFound();
+
   const token = read("token");
   const leave = read("leave");
   const status = read("status");
   if (!token && !leave && !status) redirect(`/@${store.handle}`);
 
   const asked = token || leave;
-  const link = asked && ALERT_TOKEN.test(asked) ? await stockAlertLink(asked).catch(() => null) : null;
+  // A link that could not be read is not a link that is gone: it gets the error notice, never a confident "no" (rule 24).
+  let unread = false;
+  const link = asked && ALERT_TOKEN.test(asked) ? await stockAlertLink(asked).catch(() => { unread = true; return null; }) : null;
   const grant = link && link.statsId === store.statsId ? link : null;
   const productId = grant?.productId ?? read("product");
   const listed = productId ? await readListing(store, productId).catch(() => null) : null;
@@ -65,7 +79,9 @@ export default async function BackInStockPage({ params, searchParams }: Params) 
   );
 
   let body: React.ReactNode;
-  if (token) {
+  if (unread) {
+    body = say(w.notices.error.title, w.notices.error.body);
+  } else if (token) {
     body =
       grant?.kind === "confirm" ? (
         <>

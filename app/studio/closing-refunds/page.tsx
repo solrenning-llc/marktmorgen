@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { studioPath, studioView } from "@/lib/studio-route";
 import { STORE_ID_PATTERN } from "@/lib/store";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { ClosingRefundsConfirm } from "@/components/closing-refunds-confirm";
 import { closingOf } from "@/lib/plan-closing";
@@ -63,12 +64,7 @@ export default async function ClosingRefundsPage({ searchParams }: Params) {
     <StudioHeader current={store} role={view.role} stores={view.stores} owned={view.owned} action={{ href: back, label: "Back to the studio", short: "Studio" }} />
     <StudioStorePin sid={store.sid}>
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <nav aria-label="Breadcrumb" className="text-sm text-ink-soft">
-          <ol className="flex flex-wrap gap-2">
-            <li><a href={back} className="underline">Studio</a> <span aria-hidden="true">/</span></li>
-            <li aria-current="page">Refund unused time</li>
-          </ol>
-        </nav>
+        <StudioTrail store={store} home={back} here="Refund unused time" />
         <h1 className="t-h2 mt-3">Refund the time your members paid for after your store closes</h1>
         {!closingRead.ok ? (
           <p className="mt-4 max-w-2xl text-ink-soft">{`We could not check whether your store is closing just now. Please reload this page in a minute. If your store is closing, on its closing day we try to make the refunds this page lists, from your Stripe balance. ${CAN_FAIL} ${UNLISTED}`}</p>

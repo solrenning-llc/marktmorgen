@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { formatMoney } from "@/lib/money";
 
-export type WaitingLine = { ref: string; at: number; title: string; aff: string; base: number; rate: number; commission: number; currency: string };
+export type WaitingLine = { ref: string; at: number; title: string; aff: string; base: number; rate: number; commission: number; currency: string; second?: boolean };
 
 const money = (cents: number, currency: string) => formatMoney(Math.max(0, cents), currency);
 const day = (seconds: number) => {
@@ -92,7 +92,7 @@ export function AffiliateUnconfirmed({ lines, total, who, days }: { lines: reado
               <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                 <span className="min-w-0">
                   <span className="block font-semibold text-ink">{line.title}</span>
-                  <span className="block text-xs text-ink-soft [overflow-wrap:anywhere]">{`${day(line.at)} · ${who2} · ${money(line.base, line.currency)} before tax · ${line.rate}% · A sale by somebody they invited`}</span>
+                  <span className="block text-xs text-ink-soft [overflow-wrap:anywhere]">{`${day(line.at)} · ${who2} · ${money(line.base, line.currency)} before tax · ${line.rate}% · ${line.second ? "A sale by somebody they invited" : "Their own sale"}`}</span>
                 </span>
                 <span className="text-right">
                   <span className="block font-semibold tabular-nums text-ink">{money(line.commission, line.currency)}</span>

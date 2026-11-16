@@ -194,7 +194,7 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
           }))}
           leadsTotal={book ? book.lines.filter((line) => line.how === "lead").length : 0}
           unconfirmed={(book?.lines ?? [])
-            .filter((line) => line.how === "tier2" && line.status === "buyer not confirmed")
+            .filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus")
             .sort((a, b) => b.at - a.at)
             .slice(0, 50)
             .map((line) => ({
@@ -206,8 +206,9 @@ export default async function StudioAffiliatesPage({ searchParams }: Params) {
               rate: line.rate,
               commission: line.commission,
               currency: line.currency,
+              second: line.how === "tier2",
             }))}
-          unconfirmedTotal={book?.unconfirmed ?? 0}
+          unconfirmedTotal={(book?.lines ?? []).filter((line) => line.unconfirmed === 1 && line.commission > 0 && line.how !== "lead" && line.how !== "bonus").length}
           unconfirmedDays={UNCONFIRMED_DAYS}
           payouts={book?.payouts ?? []}
           refundsChecked={book?.refundsChecked ?? true}

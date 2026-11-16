@@ -306,6 +306,12 @@ export type Referral = {
    * refunds and disputes can only be read there (readBook).
    */
   acct?: string;
+  /**
+   * 1 together with buyerUnknown when the first tier cannot be judged either: the buyer is not known, or the
+   * affiliate's own record does not read, so whether this was their own purchase is not known. Their commission waits
+   * as the second tier does (rule 30 on #3485); the re-read decides both.
+   */
+  selfUnknown?: 1;
 };
 
 /**
@@ -665,6 +671,7 @@ function parseReferral(raw: unknown): Referral | null {
       ...(value.buyerUnknown === 1 ? { buyerUnknown: 1 as const } : {}),
       // Kept exactly as written: any other value is still another account than the store's, never "the same one".
       ...(value.acct !== undefined ? { acct: typeof value.acct === "string" ? value.acct : "" } : {}),
+      ...(value.selfUnknown === 1 ? { selfUnknown: 1 as const } : {}),
       // Sales written down before a code or a bond could credit anybody have
       // neither field, and every one of those came from a click. `byCode` is
       // read for the ones written in between.
@@ -4017,6 +4024,11 @@ export type Line = Referral & {
    * known, so it is never payable (Row.payable leaves it out), while the rest of the book still is.
    */
   unchecked?: true;
+  /**
+   * 1 while this line waits for its buyer to be confirmed, whatever else happened to it (a partial refund too): it is
+   * counted as waiting, never payable, and listed for the creator to approve.
+   */
+  unconfirmed?: 1;
 };
 
 /** A lead as the book shows it (lib/affiliate-lead-rules.ts). The address is masked on an affiliate's own page. */
@@ -4344,7 +4356,9 @@ export function settleLine(referral: Referral, refunded: number, whole?: number)
       : back > 0
         ? "partly refunded"
         : "earned";
-  return { ...referral, refunded: back, commission: referral.self ? 0 : commissionOn(kept, referral.rate), status };
+  // Its buyer not known (rule 30 on #3485): the affiliate's own commission waits whatever its refund status (unconfirmed),
+  // out of what is paid automatically and out of a month's bonus count, until the job or the creator decides it.
+  return { ...referral, refunded: back, commission: referral.self ? 0 : commissionOn(kept, referral.rate), status, ...(referral.selfUnknown && !referral.self ? { unconfirmed: 1 as const } : {}) };
 }
 
 /**
@@ -4761,9 +4775,12 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
       const out = paid.filter((p) => p.aff === affiliate.id && p.currency === store.currency).reduce((sum, p) => sum + p.cents, 0);
       // A lead waits until the creator approves it (lib/affiliate-leads.ts decideLeads); a sale, until the store's wait has passed.
       // A second tier whose buyer was not confirmed is never paid automatically: the creator may pay it by hand.
-      const waiting = own.filter((l) => (l.how === "lead" ? l.status !== "approved" : l.at > until || l.status === "buyer not confirmed")).reduce((sum, l) => sum + l.commission, 0);
-      // A held line (its refunds never read) is never paid, whether or not it is still waiting.
-      const holding = own.filter((l) => l.unchecked && !(l.how === "lead" ? l.status !== "approved" : l.at > until || l.status === "buyer not confirmed")).reduce((sum, l) => sum + Math.max(0, l.commission), 0);
+      // A line whose buyer is not confirmed (either tier, rule 30 on #3485) waits whatever its refund status (M1).
+      const waits = (l: Line) => (l.how === "lead" ? l.status !== "approved" : l.at > until || l.unconfirmed === 1 || l.status === "buyer not confirmed");
+      const waiting = own.filter(waits).reduce((sum, l) => sum + l.commission, 0);
+      // A held line (its refunds never read) is never paid, whether or not it is still waiting; one that also waits is
+      // subtracted once, through waiting (Claude 6's LOW on 8c01646e5d: held by tests/affiliate-tier-review-c3c4.test.ts).
+      const holding = own.filter((l) => l.unchecked && !waits(l)).reduce((sum, l) => sum + Math.max(0, l.commission), 0);
       const owed = earned - out;
       const flags = flagsOf.get(affiliate.id) ?? [];
       const payable = owed <= 0 ? owed : Math.max(0, Math.min(owed, earned - waiting - holding - out));
@@ -4790,7 +4807,8 @@ export async function readBook(store: Store, only?: string, limits: { deadline?:
     .sort((a, b) => b.owed - a.owed || b.affiliate.appliedAt - a.affiliate.appliedAt);
   const elsewhere =
     lines.filter((l) => l.currency !== store.currency).length + paid.filter((p) => p.currency !== store.currency).length;
-  const unconfirmed = lines.filter((l) => l.how === "tier2" && l.status === "buyer not confirmed").length;
+  // Sales, not lines: a sale waiting on both tiers is one.
+  const unconfirmed = new Set(lines.filter((l) => l.unconfirmed === 1 && l.commission > 0).map((l) => l.ref.replace(/^tier2:/, ""))).size;
   return { rows, lines, payouts: paid, refundsChecked, invoicesChecked, currency: store.currency, elsewhere, unconfirmed };
 }
 
@@ -4915,7 +4933,8 @@ export function bonusLines(store: Pick<Store, "affiliates" | "currency">, lines:
   if (!goals.length) return [];
   const months = new Map<string, Line[]>();
   for (const line of lines) {
-    if (line.commission <= 0 || line.how === "partner" || line.how === "bonus" || line.how === "tier2" || line.how === "lead" || line.currency !== store.currency) continue;
+    // A sale whose buyer is not confirmed counts once it is decided (rule 30 on #3485), never toward a bonus before.
+    if (line.commission <= 0 || line.unconfirmed === 1 || line.how === "partner" || line.how === "bonus" || line.how === "tier2" || line.how === "lead" || line.currency !== store.currency) continue;
     const key = `${line.aff}|${new Date(line.at * 1000).toISOString().slice(0, 7)}`;
     months.set(key, [...(months.get(key) ?? []), line]);
   }
@@ -4966,26 +4985,44 @@ function tierOwn(recruit: Affiliate, up: Affiliate | undefined, email: string): 
  * a buyer who is somebody else; tierOff when the buyer is the recruit or their inviter; buyerUnknown when the order
  * named no buyer, or the affiliates do not read (never denied nor paid on a guess). Two record reads at the most.
  */
-async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tierOff?: 1; buyerUnknown?: 1 }> {
-  // Read exactly: a record that does not read is not known, never "no such affiliate" (M2 of the reviews of #3485).
+async function tierFor(store: Store, aff: string, buyer: string): Promise<{ tierOff?: 1; buyerUnknown?: 1; selfUnknown?: 1; self?: true }> {
+  const decided = await decideBuyer(store, aff, buyer);
+  // Not known: both tiers wait (rule 30 on #3485), and the five-minute job reads the buyer again (settleUnconfirmed).
+  if (decided === "unknown") return { buyerUnknown: 1, selfUnknown: 1 };
+  // The affiliate's own purchase, as this exact read finds it (the writers' isSelf throws on a record that does not
+  // read, rule 24, so both readings agree; the job's re-read of a waiting sale sets it the same way).
+  return { ...(decided.tierOff ? { tierOff: 1 as const } : {}), ...(decided.self ? { self: true as const } : {}) };
+}
+
+/**
+ * Whether a buyer is the affiliate themselves (self) and whether the second tier is off (tierOff: the recruit or their
+ * inviter), or "unknown" when the buyer is not known or a record does not read exactly (readAffiliateKnown, M2 of the
+ * reviews of #3485: never "no such affiliate"). An affiliate with no record at all is nobody's: nothing to decide.
+ * Two record reads at the most.
+ */
+async function decideBuyer(store: Store, aff: string, buyer: string): Promise<{ self: boolean; tierOff: boolean } | "unknown"> {
   const recruit = await readAffiliateKnown(store, aff);
-  if (recruit === undefined) return { buyerUnknown: 1 };
-  if (!recruit?.by) return {};
-  if (!buyer) return { buyerUnknown: 1 };
+  if (recruit === undefined) return "unknown";
+  if (!recruit) return { self: false, tierOff: false };
+  if (!buyer) return "unknown";
+  const self = ownAddress(recruit, buyer);
+  if (!recruit.by) return { self, tierOff: false };
   const up = await readAffiliateKnown(store, recruit.by.id);
-  if (up === undefined) return { buyerUnknown: 1 };
-  return tierOwn(recruit, up ?? undefined, buyer) ? { tierOff: 1 } : {};
+  if (up === undefined) return "unknown";
+  return { self, tierOff: tierOwn(recruit, up ?? undefined, buyer) };
 }
 
 /** Invoices paid from this time (epoch seconds, 9 November 2026 00:00 UTC) with no buyer's address wait for their second tier. */
 export const TIER_BUYER_FROM = 1_794_182_400;
 
 /** The second tier of a membership's invoice, decided as it is read (recurringReferrals). */
-function tierOfInvoice(byId: Map<string, Affiliate>, aff: string, buyer: string, paidAt: number): { tierOff?: 1; buyerUnknown?: 1 } {
+function tierOfInvoice(byId: Map<string, Affiliate>, aff: string, buyer: string, paidAt: number): { tierOff?: 1; buyerUnknown?: 1; selfUnknown?: 1 } {
   const recruit = byId.get(aff);
-  if (!recruit?.by) return {};
-  if (!buyer) return paidAt >= TIER_BUYER_FROM ? { buyerUnknown: 1 } : {};
-  return tierOwn(recruit, byId.get(recruit.by.id), buyer) ? { tierOff: 1 } : {};
+  if (!recruit) return {};
+  // No address on an invoice paid since TIER_BUYER_FROM waits on both tiers (rule 30 on #3485) until the creator approves
+  // it (approveUnconfirmed: approveRenewal writes it down, and the book then reads that sale, never the invoice again).
+  if (!buyer) return paidAt >= TIER_BUYER_FROM ? { buyerUnknown: 1, selfUnknown: 1 } : {};
+  return recruit.by && tierOwn(recruit, byId.get(recruit.by.id), buyer) ? { tierOff: 1 } : {};
 }
 
 const UNCONFIRMED_COUNTS = ["waited", "decided", "approved", "failed", "reads"] as const;
@@ -5058,6 +5095,7 @@ export async function approveUnconfirmed(store: Store, ref: string): Promise<"ap
   if (!kept.buyerUnknown) return "not-waiting";
   const whole = JSON.parse(read[0]) as Record<string, unknown>;
   delete whole.buyerUnknown;
+  delete whole.selfUnknown;
   // Written only over exactly the sale read: one decided meanwhile by the sweep, or deleted, is left as it is.
   const swapped = await decideOnce(store.statsId, sale, read[0], JSON.stringify(whole));
   if (swapped === "unknown") return "unknown";
@@ -5098,8 +5136,9 @@ async function approveRenewal(store: Store, invoiceId: string): Promise<"approve
   const line = invoiceLine(invoice, meta, byId, titles);
   if (!line) return "gone";
   if (!line.buyerUnknown) return "not-waiting";
-  const { buyerUnknown: _waits, ...decided } = line;
+  const { buyerUnknown: _waits, selfUnknown: _self, ...decided } = line;
   void _waits;
+  void _self;
   const written = await orderWrite(store, [["HSETNX", salesKey(store.statsId as string), invoiceId, JSON.stringify(decided)]]);
   if (written[0] !== 1) return written[0] === 0 ? "not-waiting" : "unknown";
   await countUnconfirmed({ approved: 1 });
@@ -5113,6 +5152,8 @@ export const UNCONFIRMED_READ_AGAIN = 24 * 60 * 60;
 /** Days after the sale that an order is read again by itself; past them it waits for the creator's own approval (approveUnconfirmed). */
 export const UNCONFIRMED_DAYS = 14;
 const UNCONFIRMED_RETRY = 60 * 60;
+/** A read that failed is tried again within the hour for the sale's first day, then daily: about 37 reads of a sale at the most. */
+const retryAfter = (saleAt: number, now: number): number => (now - saleAt < 86_400 ? UNCONFIRMED_RETRY : UNCONFIRMED_READ_AGAIN);
 
 /**
  * The address the buyer of one sale gave, read from where the sale was made: "" when that record names none, a thrown
@@ -5171,6 +5212,8 @@ async function settleUnconfirmedRun(store: Store, now: number, deadline: number 
     const raw = raws[i];
     if (raw !== null && typeof raw !== "string") {
       out.failed += 1;
+      // Moved like a failed read (Claude 7's LEVE on #3485), so five such replies never hold the batch's place.
+      await redisPipeline([later(ref, UNCONFIRMED_RETRY)]).catch(() => undefined);
       continue;
     }
     const sale = parseReferral(raw);
@@ -5188,24 +5231,27 @@ async function settleUnconfirmedRun(store: Store, now: number, deadline: number 
         out.waiting += 1;
         continue;
       }
-      const tier = await tierFor(store, sale.aff, buyer);
-      if (tier.buyerUnknown) {
-        await redisPipeline([later(ref, UNCONFIRMED_RETRY)]);
+      const decided = await decideBuyer(store, sale.aff, buyer);
+      if (decided === "unknown") {
+        await redisPipeline([later(ref, retryAfter(sale.at, now))]);
         out.waiting += 1;
         continue;
       }
       const whole = JSON.parse(raw as string) as Record<string, unknown>;
       delete whole.buyerUnknown;
+      delete whole.selfUnknown;
+      if (decided.tierOff) whole.tierOff = 1;
+      if (decided.self) whole.self = true;
       // Written only over exactly the sale read: one the creator approved meanwhile, or deleted, is left as it is.
-      const swapped = await decideOnce(statsId, ref, raw as string, JSON.stringify({ ...whole, ...tier }));
-      if (swapped === "unknown") throw new UnknownReplyError("a sale's second tier decided");
+      const swapped = await decideOnce(statsId, ref, raw as string, JSON.stringify(whole));
+      if (swapped === "unknown") throw new UnknownReplyError("a sale's tiers decided");
       if (swapped === "written") out.decided += 1;
       await redisPipeline([["ZREM", unconfirmedKey(statsId), ref]]).catch(() => undefined);
     } catch (error) {
       if (error instanceof PassTimeSpent) break;
       out.failed += 1;
       console.error("a sale's buyer could not be read; left waiting", ref, error instanceof Error ? error.message : "");
-      await redisPipeline([later(ref, UNCONFIRMED_RETRY)]).catch(() => undefined);
+      await redisPipeline([later(ref, retryAfter(sale.at, now))]).catch(() => undefined);
     }
   }
   return out;
@@ -5258,8 +5304,9 @@ export function tierLines(everyone: Affiliate[], lines: Line[], flags: Map<strin
     if (percent <= 0) continue;
     const settled = settleLine({ ref: `tier2:${line.ref}`, pi: line.pi, aff: up.id, at: line.at, product: line.product, title: line.title, base: line.base, total: line.total, currency: line.currency, rate: percent, self: false, how: "tier2" }, line.refunded);
     // Waiting whatever its refund or dispute status (M1 of the reviews of #3485): a partial refund never puts a tier
-    // whose buyer is not confirmed in what is paid automatically. Refunded in full it has nothing left to wait for.
-    out.push(tier === "waits" && settled.commission > 0 ? { ...settled, status: "buyer not confirmed" } : settled);
+    // whose buyer is not confirmed in what is paid automatically (its own flag, unconfirmed, read by readBook's waiting).
+    // Refunded in full it has nothing left to wait for.
+    out.push(tier === "waits" && settled.commission > 0 ? { ...settled, status: "buyer not confirmed", unconfirmed: 1 as const } : settled);
   }
   return out;
 }

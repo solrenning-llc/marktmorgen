@@ -578,7 +578,9 @@ export default function DevelopersPage() {
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
-          the list, switched off. If it was switched off but your codes could not be read back from Stripe, the answer
+          the list, switched off. A code set to start later loses its start date too, so it never comes back on by itself;
+          while that start is being handled the answer is 409 <code className="font-mono">busy</code>, and trying again
+          a moment later works. If it was switched off but your codes could not be read back from Stripe, the answer
           has <code className="font-mono">stopped</code> with its id, <code className="font-mono">listed: false</code> and{" "}
           <code className="font-mono">data: null</code>: read them again with GET. Making and switching off need a key
           that writes; all three answer 409{" "}

@@ -289,6 +289,19 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
 }
 
 /**
+ * A public request's take, said three ways (outage drill, 13 November 2026): "ok" counted within the window; "over"
+ * refused by a figure that was read (the window, the connection's share, a free store's place); "unknown" when the
+ * count could not be made, so a caller can say "not checked just now" instead of "too many". Both refuse.
+ */
+export type RequestTake = "ok" | "over" | "unknown";
+
+/** countRequest, said three ways (RequestTake): the same count, a refused hold (`giveBack`) given back. */
+async function countRequestWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units = 1, client: string | null = null, giveBack = false): Promise<RequestTake> {
+  const counted = await countRequestsWhy(folder, store, window, who, now, units, client, giveBack ? units : 0);
+  return counted === "all" ? "ok" : counted === "unknown" ? "unknown" : "over";
+}
+
+/**
  * What fits of `units` requests counted in one INCRBY, of which the last
  * `hold` are a hold (a reading set aside at its worst): "all" when every unit
  * fits; past the window, the hold is not left counted, since nothing was read
@@ -297,27 +310,34 @@ async function countRequest(folder: string, store: Store, window: AllowanceWindo
  */
 type Counted = "all" | "base" | "none";
 async function countRequests(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units: number, client: string | null, hold: number): Promise<Counted> {
+  const counted = await countRequestsWhy(folder, store, window, who, now, units, client, hold);
+  return counted === "all" || counted === "base" ? counted : "none";
+}
+
+/** countRequests, saying why nothing fits: "over" for a figure that was read, "unknown" for a count not made (RequestTake). */
+async function countRequestsWhy(folder: string, store: Store, window: AllowanceWindow, who: "public" | "buyer", now: number, units: number, client: string | null, hold: number): Promise<"all" | "base" | "over" | "unknown"> {
   const whole = requestLimitFor(store, now / 1000);
   const limit = who === "buyer" ? whole : publicVisitLimit(whole);
-  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "none";
-  if (!Number.isSafeInteger(units) || units < 1 || !Number.isSafeInteger(hold) || hold < 0 || hold > units) return "none";
+  if (!Number.isSafeInteger(limit) || limit <= 0 || !FOLDER_PATTERN.test(folder)) return "unknown";
+  if (!Number.isSafeInteger(units) || units < 1 || !Number.isSafeInteger(hold) || hold < 0 || hold > units) return "unknown";
   // A store that pays nothing answers only while it holds one of the month's places (lib/free-pool-rules.ts).
-  if (!(await admitNonPaying(store, now))) return "none";
+  if (!(await admitNonPaying(store, now))) return "over";
   // One connection's share of the day first (lib/traffic-rules.ts, clientDayShare):
   // past it this connection alone is refused, and nothing is counted against the store.
-  if (client && (await overShare(folder, window, whole, client, units, now))) return "none";
+  if (client && (await overShare(folder, window, whole, client, units, now))) return "over";
   const key = requestsKey(folder, window.id);
   const reply = await redisPipeline([["INCRBY", key, units]]);
   // Only Redis's own answer to this one command counts (Codex G2 on #2583):
   // one reply, an integer at least `units`. Anything else, a `true`, a text
   // or a second item, is a count that cannot be made: the request is refused.
   const n = Array.isArray(reply) && reply.length === 1 && typeof reply[0] === "number" ? reply[0] : NaN;
-  if (!Number.isSafeInteger(n) || n < units) return "none";
+  if (!Number.isSafeInteger(n) || n < units) return "unknown";
   if (n === units) await redisPipeline([["EXPIRE", key, keepSecondsFor(window, now)]]);
   if (n <= limit) return "all";
   // A hold refused over the window (a reading set aside at its worst) is not left counted: nothing was read for it.
+  // A request refused as a page resting stays counted, as it always has.
   if (hold > 0) await redisPipeline([["DECRBY", key, hold]]).catch(() => {});
-  return hold > 0 && hold < units && n - hold <= limit ? "base" : "none";
+  return hold > 0 && hold < units && n - hold <= limit ? "base" : "over";
 }
 
 /**
@@ -347,15 +367,25 @@ export async function holdPublicRequests(store: Store, units: number, now: numbe
 }
 
 async function takePublic(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<boolean> {
-  if (!isRedisConfigured()) return false;
+  return (await takePublicWhy(store, who, now, units, shared, giveBack)) === "ok";
+}
+
+async function takePublicWhy(store: Store, who: "public" | "buyer", now: number, units: number, shared: boolean, giveBack: boolean): Promise<RequestTake> {
+  if (!isRedisConfigured()) return "unknown";
   try {
     const window = allowanceWindow(store, now);
-    if (!window) return false;
-    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return false;
-    return await countRequest(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
+    if (!window) return "unknown";
+    if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return "over";
+    return await countRequestWhy(await storeFolder(storeRef(store)), store, window, who, now, units, shared ? null : await askingConnection(), giveBack);
   } catch {
-    return false;
+    // Redis or the store's folder could not be reached: a count that was not made, never room, and never "too many".
+    return "unknown";
   }
+}
+
+/** takePublicRequest, said three ways (RequestTake): for a page that tells "too many" apart from "not checked just now". */
+export async function takePublicRequestWhy(store: Store, who: "public" | "buyer" = "public", now = Date.now()): Promise<RequestTake> {
+  return takePublicWhy(store, who, now, 1, false, false);
 }
 
 /**

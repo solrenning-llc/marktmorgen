@@ -285,8 +285,13 @@ export async function POST(request: NextRequest) {
       // Reading the inviting program's people for the cap is paid from the answering creator's own studio requests
       // (`charge`, guarded.store), taken at its worst first and given back down to what was read. Not taken: 429,
       // nothing read or written, the offer kept.
-      const made = await acceptPartnership(from, guarded.email, invite.share, charge);
+      const made = await acceptPartnership(from, guarded.email, invite.share, charge, invite.at);
       if (!made.ok && made.reason === "resting") return fail("studio_used", 429);
+      // Declined or removed by that store after this offer was made (#4045): the offer no longer stands, taken out.
+      if (!made.ok && made.reason === "withdrawn") {
+        await answerInvite(guarded.email, invite.id);
+        return fail("gone");
+      }
       if (!made.ok && (made.reason === "committed" || made.reason === "crowded")) return fail(`offer_${made.reason}`, 409);
       if (!made.ok) return fail(made.reason === "full" ? "full" : "unavailable");
       await answerInvite(guarded.email, invite.id);
@@ -296,6 +301,9 @@ export async function POST(request: NextRequest) {
       // A partner the creator brings from outside: they need no account here,
       // only an address that can receive PayPal. Checked against the same cap
       // as any other share, before the email goes out.
+      // A store switched off after notices about its content takes nobody new (lib/affiliates.ts takesNewAffiliates):
+      // said in its own words, before the cap is read or paid for; nothing is sent.
+      if (store.suspended) return fail("suspended");
       const share = parsePartnerShare({ percent: body.percent, products: body.products });
       if (!share) return fail(Array.isArray(body.products) && body.products.length ? "share_percent" : "share_products");
       // Checked again, under the partner lock, when the invitation is accepted.

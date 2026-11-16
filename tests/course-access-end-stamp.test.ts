@@ -338,7 +338,9 @@ async function main(): Promise<void> {
   part("L-A (C2 focal): a learner with no end needs no answer from Stripe");
   stripeDown = true;
   await recordOpen(a.store, "la-open@example.test", a.product.id, SET_AT + DAY);
-  is("Stripe down, a group place: open, not \"could not check\"", (await gate(a.store, a.product, course, "la-open@example.test", LATER)).state, "open");
+  // Main's rule (lib/learn.ts courseLedger, `undecided`): with Stripe's answer not had whole, a course written down
+  // here is not opened on it, a group place included; it is said as a check not made (merge of main into #3445).
+  is("Stripe down, a group place: a check not made (unknown), never ended or not bought", (await gate(a.store, a.product, course, "la-open@example.test", LATER)).state, "unknown");
   stripeDown = false;
 
   part("L-B (C2 focal): the start button keeps the student's stamp right");

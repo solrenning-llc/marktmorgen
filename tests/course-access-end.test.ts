@@ -167,11 +167,13 @@ async function main(): Promise<void> {
     } finally {
       redis.pipeline = pipeline;
     }
-    // Stripe down, the sale written down here: its stamp is only on the Stripe session.
+    // Stripe down, the sale written down here: whether it was refunded is unknown, so main's rule (CX-123 rule 24,
+    // lib/learn.ts courseLedger, `undecided`) keeps the course shut as a check not made, date or no date; it is never
+    // opened on a guess, nor said as ended or not bought (merge of main into #3445).
     stripeDown = true;
     await recordEnrollment(store, "written@example.test", product.id, JOINED);
-    is("Stripe cannot be asked, the course has a date: unchecked", (await courseAccess(store, product, await passFor("written@example.test"), ended)).state, "unchecked");
-    is("Stripe cannot be asked, the course has no date: open", (await courseAccess(store, product, await passFor("written@example.test"), base)).state, "open");
+    is("Stripe cannot be asked, the course has a date: a check not made (unknown)", (await courseAccess(store, product, await passFor("written@example.test"), ended)).state, "unknown");
+    is("Stripe cannot be asked, the course has no date: a check not made (unknown)", (await courseAccess(store, product, await passFor("written@example.test"), base)).state, "unknown");
     stripeDown = false;
     is("nobody signed in: closed, as before", (await courseAccess(store, product, { get: () => undefined }, ended)).state, "closed");
   } finally {

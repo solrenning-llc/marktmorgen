@@ -48,15 +48,29 @@ def main():
     def state():
         return [redis.command("GET", keys[1]), redis.command("HGETALL", keys[2]), redis.command("HGETALL", keys[3])]
 
-    def command_stats():
-        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", redis.command("INFO", "COMMANDSTATS")) if m[1] != "info"}
+    def command_stats(text):
+        return {m[1]: int(m[2]) for m in re.finditer(r"cmdstat_([^:]+):calls=(\d+),", text) if m[1] != "info"}
+
+    # INFO COMMANDSTATS counts every client's commands, and CI's Redis service runs its health check
+    # (`redis-cli ping`) every 5 s. MULTI/EXEC runs both INFOs and the one measured command as one
+    # transaction, so no other client's command is counted (the sibling of the shipment-mail and
+    # store-data flakes). A second client PINGs during the measured step, the health check made deterministic.
+    health_check = LocalRedis()
+
+    def measured(fn):
+        assert redis.command("MULTI") == "OK"
+        assert redis.command("INFO", "COMMANDSTATS") == "QUEUED"
+        assert health_check.command("PING") == "PONG"
+        assert fn() == "QUEUED", "a measured step issues exactly one command"
+        assert redis.command("INFO", "COMMANDSTATS") == "QUEUED"
+        before, result, after = redis.command("EXEC")
+        before, after = command_stats(before), command_stats(after)
+        return result, sum(n - before.get(name, 0) for name, n in after.items())
 
     try:
         setup()
-        before = command_stats()
-        assert commit() == 1
-        after = command_stats()
-        commands = sum(n - before.get(name, 0) for name, n in after.items())
+        result, commands = measured(commit)
+        assert result == 1, result
         assert commands <= 27, commands
         assert state() == ["1", [str(hour), "1"], [str(hour), "8960"]]
         assert redis.command("PTTL", keys[0]) > 399 * 86_400_000
@@ -226,6 +240,7 @@ def main():
         print("PASS: negative control without Redis-time guard reproduces expiry-driven duplicate settlement")
     finally:
         redis.command("DEL", *keys)
+        health_check.close()
         redis.close()
 
 

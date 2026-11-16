@@ -49,6 +49,27 @@ def main():
     numbers = "marktmorgen:integration:rcpt:n:" + uuid.uuid4().hex
     counter = "marktmorgen:integration:rcpt:seq:" + uuid.uuid4().hex
     redis = Redis()
+    # INFO commandstats counts every client's commands. CI's Redis service runs its health check
+    # (`redis-cli ping`, .github/workflows/product-checks.yml) every 5 s, and a PING that landed between two separate
+    # INFOs was counted as ours: 14 against 13 in form-opportunity-redis job 133014027214 (the sibling of
+    # scripts/test_shipment_mail_outbox_redis.py's (28, 27)). MULTI/EXEC runs both INFOs and the one measured command
+    # as one transaction, so no other client's command can come in between. A second client sends a PING during every
+    # measured step, the health check made deterministic: it must never be counted.
+    health_check = Redis()
+
+    def stats(text):
+        return {m[1]: int(m[2]) for m in re.finditer(r"^cmdstat_([^:]+):calls=(\d+)", text, re.M) if m[1] != "info"}
+
+    def measured(fn):
+        """The one command fn sends and the commands Redis ran for it, not counting the INFO that read the count."""
+        assert redis.command("MULTI") == "OK"
+        assert redis.command("INFO", "commandstats") == "QUEUED"
+        assert health_check.command("PING") == "PONG"
+        assert fn() == "QUEUED", "a measured step issues exactly one command"
+        assert redis.command("INFO", "commandstats") == "QUEUED"
+        before, reply, after = redis.command("EXEC")
+        before, after = stats(before), stats(after)
+        return reply, sum(n - before.get(cmd, 0) for cmd, n in after.items())
 
     def take(client, limit, *triples, always=False, month="2026-10"):
         flat = [str(part) for triple in triples for part in triple]
@@ -100,16 +121,12 @@ def main():
         # Changed (rule 23): b518e114f took at most two a call and left the rest counted, the room fuller than it was.
         idle = ["2020-%02d" % m for m in range(1, 13)] + ["2021-01"]
 
-        def commands():
-            stats = redis.command("INFO", "commandstats")
-            return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
-
         def billed(months):
             redis.command("DEL", room)
             redis.command("HSET", room, "#", str(len(months) * 164), "~", ",".join(months), *[part for m in months for part in ("~" + m, "100")])
-            before = commands()
-            assert take(redis, 100_000, ("a", "p:new", 10), month="2026-11") == [1, 74]
-            return commands() - before
+            reply, used = measured(lambda: take(redis, 100_000, ("a", "p:new", 10), month="2026-11"))
+            assert reply == [1, 74], reply
+            return used
 
         assert billed(idle[:1]) == billed(idle)
         assert redis.command("HEXISTS", room, "~") == 0
@@ -165,18 +182,11 @@ def main():
         receipt_number = receipt_script(root, take_data)
         ceiling = receipt_ceiling(root)
 
-        def calls():
-            stats = redis.command("INFO", "commandstats")
-            return sum(int(n) for n in re.findall(r"^cmdstat_[^:]+:calls=(\d+)", stats, re.M))
-
         def number(reference, limit=10**9):
             return redis.command("EVAL", receipt_number, 3, room, numbers, counter, limit, "2026-11", reference, 352, 368)
 
         def billed(reference, limit=10**9):
-            before = calls()
-            reply = number(reference, limit)
-            # Less the INFO that read the count before it.
-            return reply, calls() - before - 1
+            return measured(lambda: number(reference, limit))
 
         most = 0
         for idle in (0, 1, 13, 40, 520):
@@ -215,6 +225,7 @@ def main():
         print("PASS: a receipt count that is not a whole number takes no room and gives no number")
     finally:
         redis.command("DEL", room, numbers, counter)
+        health_check.close()
         redis.close()
 
 

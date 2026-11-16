@@ -6,7 +6,7 @@ import { readTeam } from "@/lib/team";
 import { can } from "@/lib/team-roles";
 import { assignTo, conversationOf, openConversation, readInbox, replyTo, setStatus, suggestReply } from "@/lib/inbox";
 import { blockPerson, blockedState, unblockPerson } from "@/lib/buyer-block";
-import { REFUND_HISTORY_PER_DAY, REFUND_HISTORY_UNITS, refundHistory } from "@/lib/buyer-history";
+import { REFUND_HISTORY_PER_DAY, REFUND_HISTORY_SCREEN, REFUND_HISTORY_UNITS, refundHistory } from "@/lib/buyer-history";
 import { withinLimit } from "@/lib/request-guard";
 import { countStudio } from "@/lib/studio-route";
 import { CONVERSATION_ID, parseInboxSetting } from "@/lib/inbox-rules";
@@ -92,6 +92,8 @@ export async function POST(request: NextRequest) {
         return removed === "error" ? refuse("error", 503) : answer({ ok: true, blocked: false });
       }
       case "history": {
+        // Held until the studio's screen exists (REFUND_HISTORY_SCREEN, Claude 7 on #3841): nothing read, counted or kept.
+        if (!REFUND_HISTORY_SCREEN.shown) return refuse("none", 404);
         const conversation = id ? await conversationOf(store.statsId, id) : null;
         if (!conversation) return refuse("none", 404);
         // Nothing to read, so none of the day's checks or the studio's requests is spent on it.

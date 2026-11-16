@@ -11,7 +11,7 @@
 import { NextRequest } from "next/server";
 import { claimHandle, ensureStatsId, ensureStoreId, setInboxSetting, setStripeAccount, setSubscription, storeForEmail, type Store } from "@/lib/store";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { REFUND_HISTORY_LIST, REFUND_HISTORY_PER_DAY, REFUND_HISTORY_UNITS, historyFrom, refundHistory } from "@/lib/buyer-history";
+import { REFUND_HISTORY_LIST, REFUND_HISTORY_PER_DAY, REFUND_HISTORY_SCREEN, REFUND_HISTORY_UNITS, historyFrom, refundHistory } from "@/lib/buyer-history";
 import { readInbox, startChat } from "@/lib/inbox";
 import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import { POST as inboxRoute } from "@/app/api/store/inbox/route";
@@ -146,6 +146,9 @@ async function main(): Promise<void> {
   replies = { "buyer@example.com": { status: 200, body: { object: "list", data: [paid("cs_x", null)], has_more: false } } };
   is("a charge not given: could not check", await refundHistory(store, "buyer@example.com"), unknown);
 
+  // The route's action is held while the studio's screen does not exist (tests/buyer-history-held.test.ts); turned on
+  // here, for this file only, to hold what it does once the screen ships.
+  REFUND_HISTORY_SCREEN.shown = true;
   part("The studio's inbox asks for it");
   redis.clear();
   const mara = await shop(OWNER, "mara", ACCOUNT);
@@ -193,6 +196,7 @@ async function main(): Promise<void> {
   calls = [];
   is("past the day's checks: refused", await route(OWNER, { action: "history", id: conversation.id }), { status: 429, body: { ok: false, error: "limited" } });
   is("and Stripe is not asked", calls.length, 0);
+  REFUND_HISTORY_SCREEN.shown = false;
 
   done();
 }

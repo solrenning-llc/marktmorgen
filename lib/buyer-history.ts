@@ -44,6 +44,15 @@ export type RefundHistory =
   | { state: "none" }
   | { state: "unknown" };
 
+/**
+ * Whether the studio's screen for this look exists (Claude 7's MEDIUM 2 on #3841, rule VR 2: what does not work today
+ * does not appear). It does not yet (components/inbox-history.tsx is future work), so the inbox route refuses the
+ * "history" action before anything is read, counted or kept, and neither the Privacy Policy nor the person-data list
+ * describes it: their words wait in docs/held/inbox-refund-history.md, to come back with the screen. Only the screen's
+ * own change turns it on; tests turn it on to exercise the route (tests/buyer-history.test.ts).
+ */
+export const REFUND_HISTORY_SCREEN: { shown: boolean } = { shown: false };
+
 /** How many checks a store may ask for in a day, each at most two Stripe reads. */
 export const REFUND_HISTORY_PER_DAY = 30;
 

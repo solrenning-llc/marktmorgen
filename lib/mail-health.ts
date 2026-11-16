@@ -77,6 +77,7 @@ import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
 import { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS, RAMP_FIRST, RAMP_GAP_MINUTES, RAMP_LAST, RAMP_TRIGGER } from "@/lib/mail-health-rules";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 export { BOUNCE_FLOOR, BOUNCE_RATE, COMPLAINT_FLOOR, COMPLAINT_RATE, HEALTH_WINDOW_DAYS, PAUSE_DAYS };
 
@@ -406,6 +407,8 @@ export function pauseNote(pause: Pause): string {
 export async function forgetHealthPerson(store: Pick<Store, "sid" | "listId">, email: string): Promise<number> {
   const id = healthId(store);
   if (!id || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]);
-  return Number(gone) || 0;
+  // Read exactly (CX-123 rule 24): anything but a count throws, so the erasure is "incomplete" and pressed again.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", seenKey(id, normaliseEmail(email))]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("an address's mail-health mark deleted");
+  return gone;
 }

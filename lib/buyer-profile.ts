@@ -762,8 +762,12 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
 /** Deletes the team's notes about one person (lib/person-erasure.ts). */
 export async function forgetNotesPerson(statsId: string | null, person: string): Promise<number> {
   if (!statsId || !PERSON_KEY.test(person) || !isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]);
-  return Number(gone) || 0;
+  // Both replies read exactly (CX-123 rule 24): anything but a count throws, so the erasure is "incomplete" and pressed
+  // again, never "0 removed" over notes that may still be there.
+  const replies = repliesFor(await redisPipeline([["DEL", notesKey(statsId, person)], ["SREM", whoKey(statsId), person]]), 2);
+  const gone = countOf(replies?.[0]);
+  if (gone === null || countOf(replies?.[1]) === null) throw new UnknownReplyError("a person's notes deleted");
+  return gone;
 }
 
 /** Spends a search's token once the person it found is deleted (lib/person-erasure.ts). */

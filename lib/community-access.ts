@@ -632,9 +632,15 @@ export async function openCommunityLink(token: string): Promise<LinkGrant | null
 export async function forgetAccessPerson(id: string, email: string, spaceIds: string[], productIds: string[]): Promise<number> {
   if (!isRedisConfigured()) return 0;
   const key = emailKey(email);
-  const replies = await redisPipeline([
-    ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
-    ["HDEL", `nl:cm:${id}:wel`, key],
-  ]);
-  return replies.reduce<number>((sum, n) => sum + (Number(n) || 0), 0);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["DEL", okKey(id, email), ...spaceIds.map((space) => `nl:cm:${id}:sp:ok:${space}:${key}`), ...productIds.map((p) => `nl:cm:${id}:sg:${p}:${key}`)],
+      ["HDEL", `nl:cm:${id}:wel`, key],
+    ]),
+    2,
+  );
+  // Each count read exactly (CX-123 rule 24): anything else throws, so the erasure is "incomplete" and pressed again.
+  const counts = replies?.map(countOf);
+  if (!counts || counts.some((n) => n === null)) throw new UnknownReplyError("a member's community access deleted");
+  return (counts as number[]).reduce((sum, n) => sum + n, 0);
 }

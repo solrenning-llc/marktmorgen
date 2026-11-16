@@ -27,6 +27,7 @@ import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import type { Store } from "@/lib/store";
 import { isResting, recordParts } from "@/lib/traffic";
 import { ROOM_IDLE_PARTS, ROOM_LIVE_PARTS } from "@/lib/traffic-rules";
+import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 
 export type Grant = {
   /** What opens the room's shared answers (lib/chat-pass.ts). */
@@ -100,6 +101,8 @@ export async function grantRoom(
 /** Deletes the leave one member holds in the room (lib/community-erasure.ts). */
 export async function forgetGrantPerson(id: string, who: string): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [gone] = await redisPipeline([["DEL", grantKey(id, who)]]);
-  return Number(gone) || 0;
+  // Read exactly (CX-123 rule 24): anything but a count throws, so the erasure is "incomplete" and pressed again.
+  const gone = countOf(repliesFor(await redisPipeline([["DEL", grantKey(id, who)]]), 1)?.[0]);
+  if (gone === null) throw new UnknownReplyError("a member's room leave deleted");
+  return gone;
 }

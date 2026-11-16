@@ -64,3 +64,7 @@ export async function takeAllowance(_store: unknown, kind: string, n = 1) {
   state.events.push(`allowance:${kind}:${n}`);
   return state.allowance ? { ok: true as const } : { ok: false as const, reason: "used" as const, message: "Your plan's studio requests for this month are used up." };
 }
+// Main's lib/email.ts gives a store's email figure back when a batch answers "retry, unsent" (47486a7289): recorded only.
+export async function giveAllowance(_store: unknown, kind: string, n = 1) {
+  state.events.push(`give:${kind}:${n}`);
+}

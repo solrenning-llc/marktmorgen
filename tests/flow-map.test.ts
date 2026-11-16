@@ -176,7 +176,7 @@ part("The picture in the studio");
   const titleId = html.match(/<title id="([^"]+)"/)?.[1] ?? "none";
   is("its scroll box takes focus and is named by the picture's title (2.1.1)", [figure.includes('tabindex="0"'), figure.includes(`aria-labelledby="${titleId}"`), figure.includes("focus-visible:")], [true, true, true]);
   const decode = (t: string) => t.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&");
-  const boxes = [...html.matchAll(/<g>(?:<rect[^>]*><\/rect>)((?:<text[^>]*>[^<]*<\/text>)+)<\/g>/g)].map((m) => decode([...m[1].matchAll(/>([^<]*)</g)].map((t) => t[1]).filter(Boolean).join(" ")));
+  const boxes = [...html.matchAll(/<g[^>]*>(?:<rect[^>]*><\/rect>)((?:<text[^>]*>[^<]*<\/text>)+)<\/g>/g)].map((m) => decode([...m[1].matchAll(/>([^<]*)</g)].map((t) => t[1]).filter(Boolean).join(" ")));
   const items = [...html.matchAll(/<li[^>]*><span[^>]*>(\d+)\.<\/span><span>([^<]*)<\/span>/g)].map((m) => decode(`${m[1]}. ${m[2]}`));
   is("each box says what its line in the list says", [boxes.slice(0, steps.length), boxes.length], [items, steps.length + 1]);
 }

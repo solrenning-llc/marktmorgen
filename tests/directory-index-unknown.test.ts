@@ -8,8 +8,15 @@
  * "The program list is unavailable just now" state (app/affiliate-programs/page.tsx, `readDirectory().catch(() => null)`).
  *
  * Siblings in readDirectory: a store read that failed dropped that program from the page that was then kept, and a
- * failed numbers read kept a row without its numbers for ten minutes. A failed store read now fails the read; a
- * failed numbers read still shows the row without numbers (as before) but nothing is kept.
+ * failed numbers read kept a row without its numbers for ten minutes. A failed numbers read still shows the row
+ * without numbers (as before) but nothing is kept.
+ *
+ * Codex N1 on #2921 (MEDIUM): a failed store read first failed the whole read, so one listed store whose read failed
+ * every time showed "unavailable" (noindex) to every visitor, ten minutes after ten minutes. That store is now left
+ * out of the page and counted (readDirectoryPage's `omitted`), never taken for a store that is not there: the page
+ * lists the others and says how many could not be read; that page is kept ten minutes, so the builds stay one in ten
+ * minutes, and the next build reads the store again. Only when no program could be read (every store read failed,
+ * or none of the others lists one) does the read still fail, and the page say the list could not be checked.
  *
  * An exact empty set (SCARD 0, SSCAN ["0", []]) is still a true empty.
  *
@@ -21,7 +28,7 @@
  */
 import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, listedCount, listedStores, rememberListing } from "@/lib/directory-index";
 import * as directory from "@/lib/affiliate-directory";
-import { readDirectory } from "@/lib/affiliate-directory";
+import { readDirectory, readDirectoryPage } from "@/lib/affiliate-directory";
 import { UnknownReplyError } from "@/lib/redis-reply";
 import { parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { addProduct, claimHandle, ensureStatsId, setAffiliateSetting, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
@@ -47,6 +54,15 @@ async function failure(run: () => Promise<unknown>): Promise<string> {
 
 async function kept(): Promise<unknown> {
   return (await original([["GET", DIRECTORY_CACHE]]))[0];
+}
+
+/** A kept page's size: its rows and the programs it says it left out. Null when nothing is kept. */
+function keptPage(raw: unknown): { rows: number; omitted: number } | null {
+  if (typeof raw !== "string") return null;
+  const value = JSON.parse(raw) as unknown;
+  if (Array.isArray(value)) return { rows: value.length, omitted: 0 };
+  const page = value as { rows: unknown[]; omitted: number };
+  return { rows: page.rows.length, omitted: page.omitted };
 }
 
 /** The build mark and its seconds left: [value, TTL]. */
@@ -151,12 +167,14 @@ async function main(): Promise<void> {
     if (word === "GET" && key !== DIRECTORY_CACHE && ++storeReads === 1) throw new Error("synthetic network failure");
     return original(commands);
   }) as typeof redis.pipeline;
-  const storeFailure = await failure(() => readDirectory());
+  const storeFailure = await readDirectoryPage();
   redis.pipeline = original;
-  is("the read fails instead of showing one program as the whole list", storeFailure.startsWith("other:") && storeFailure.includes("synthetic network failure"), true);
-  is("and keeps no page with one program missing", await kept(), null);
-  advance(600_001);
-  is("healthy again ten minutes later, both are listed", (await readDirectory()).map((row) => row.handle).sort(), ["breadhouse", "yogaroom"]);
+  is("the read shows the program it could read and counts the one it could not, never as a program not there", [storeFailure.rows.length, storeFailure.omitted], [1, 1]);
+  is("the page kept says one program is missing, it is not the whole list", keptPage(await kept()), { rows: 1, omitted: 1 });
+  is("inside the hour the kept page still says so", (await readDirectoryPage()).omitted, 1);
+  // One build an hour (#3118): the next build comes once the hour's kept page and count have run out.
+  advance(3_600_001);
+  is("healthy again an hour later, both are listed, none left out", await readDirectoryPage().then((p) => [p.rows.map((row) => row.handle).sort(), p.omitted]), [["breadhouse", "yogaroom"], 0]);
 
   part("Sibling: a numbers read that failed is not kept for ten minutes");
   redis.clear();
@@ -288,27 +306,32 @@ async function main(): Promise<void> {
   let outcomes: string[] = [];
   let seen = await counted(async () => void (outcomes = await visits(5)), storeFails);
   is("a store read failing every time: 5 visits walk the listed set once", seen.SSCAN, 1);
-  is("the first read fails as the store read, the nine after it are unknown without building", [outcomes[0]?.startsWith("other:"), outcomes.slice(1).every((o) => o === "UnknownReplyError")], [true, true]);
-  // SET: the first read's SET NX and its "failed" mark, then one SET NX for each of the nine; no numbers read at all.
-  is("each of those nine sends its GET and its SET NX alone", [seen.SET, seen.HGETALL ?? 0], [11, 0]);
-  is("the mark says failed, for ten minutes", await mark(), ["failed", 600]);
-  is("and no page is kept", await kept(), null);
+  // Codex N1 on #2921 (MEDIUM): the one store is left out and counted; the other two programs stay on the page.
+  is("all ten reads answer, none is \"unavailable\"", outcomes.every((o) => o === "answered"), true);
+  // SET: the build's SET NX, its page and (#3062) the last good build kept for a visit past the ceiling; the nine
+  // reads after it are the kept page's GET alone.
+  is("one build: its SET NX, the page it keeps and its last good build, nothing more", seen.SET, 3);
+  is("the build drops its mark, no \"failed\" hold", await mark(), [null, -2]);
+  is("the page kept lists the two it read and says one could not be", keptPage(await kept()), { rows: 2, omitted: 1 });
   advance(300_000);
   seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
-  is("five minutes later still no build", [seen.SSCAN ?? 0, outcomes.every((o) => o === "UnknownReplyError")], [0, true]);
+  is("five minutes later still no build, and every read answers", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered")], [0, true]);
   advance(300_001);
+  // One build an hour (C1-20261109-1603-TODOS-71, #3118): the kept page lasts the hour, so ten minutes later
+  // nothing is built and the kept page answers.
   seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
-  // One build an hour (C1-20261109-1603-TODOS-71): the failed build spent the hour's place, so ten minutes later the
-  // mark has ended but nothing is built; the visits are shown the control's last good build, checked.
-  is("ten minutes after the failure, nothing is built inside the hour: the last good build is shown", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered"), seen.SMISMEMBER], [0, true, 6]);
+  is("ten minutes later, inside the hour, still no build: the kept page answers", [seen.SSCAN ?? 0, outcomes.every((o) => o === "answered")], [0, true]);
   advance(3_000_000);
-  seen = await counted(async () => void (outcomes = await visits(3)), storeFails);
-  is("an hour after the failure, one build again, and failing, the next ten minutes again", [seen.SSCAN, outcomes[0]?.startsWith("other:"), outcomes.slice(1).every((o) => o === "UnknownReplyError")], [1, true, true]);
-  is("a save of a program in the window drops the kept page, not the mark", await (async () => {
+  let again: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
+  seen = await counted(async () => void (again = await readDirectoryPage()), storeFails);
+  is("an hour later, one build reads the store again, and still leaves it out", [seen.SSCAN, again.rows.length, again.omitted], [1, 2, 1]);
+  is("a save of a program in the window drops the kept page; the hour's build is spent, so the last good build is shown, checked, with its count", await (async () => {
     const store = await storeForEmail("bravoshop@example.com");
     if (store) await rememberListing(store);
-    return [(await mark())[0], await failure(() => readDirectory())];
-  })(), ["failed", "UnknownReplyError"]);
+    let page: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
+    const built = await counted(async () => void (page = await readDirectoryPage()), storeFails);
+    return [built.SSCAN ?? 0, built.SMISMEMBER ?? 0, page.rows.length, page.omitted];
+  })(), [0, 1, 2, 1]);
 
   redis.clear();
   for (const name of SHOPS) await selling(`${name}@example.com`, name, name, true);
@@ -369,10 +392,69 @@ async function main(): Promise<void> {
     is(`a build mark answering ${label} is unknown and builds nothing`, [outcome, sscans], ["UnknownReplyError", 0]);
   }
 
+  part("One store that cannot be read never takes the whole directory down (Codex N1 on #2921, MEDIUM)");
+  redis.clear();
+  const TWENTY = Array.from({ length: 20 }, (_, i) => `shop${String.fromCharCode(97 + i)}${String.fromCharCode(97 + i)}`);
+  for (const name of TWENTY) await selling(`${name}@example.com`, name, name);
+  is("control: twenty programs are listed", await readDirectoryPage().then((p) => [p.rows.length, p.omitted]), [20, 0]);
+  // The control's build spent the hour's place (#3118): it is given back, as a fresh hour.
+  await original([["DEL", DIRECTORY_CACHE], ["DEL", DIRECTORY_BUILDS]]);
+  const brokenStore = await storeForEmail("shopcc@example.com");
+  const broken = `nl:store:id:${brokenStore?.sid}`;
+  const brokenFails = (commands: Commands) => {
+    if (commands[0]?.[0] === "GET" && commands[0][1] === broken) throw new Error("Redis error: synthetic persistent failure");
+  };
+  let firstRead: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
+  let secondRead: Awaited<ReturnType<typeof readDirectoryPage>> = { rows: [], omitted: 0 };
+  seen = await counted(async () => {
+    firstRead = await readDirectoryPage();
+    secondRead = await readDirectoryPage();
+  }, brokenFails);
+  is("the first read lists the 19 it could read and counts the one it could not", [firstRead.rows.length, firstRead.omitted, firstRead.rows.some((row) => row.handle === "shopcc")], [19, 1, false]);
+  is("the second read, the build mark untouched, is not \"unavailable\": the same 19 and the one", [secondRead.rows.length, secondRead.omitted], [19, 1]);
+  is("one build for both reads", seen.SSCAN, 1);
+  is("no \"failed\" hold, and the page is kept the hour, as a healthy one", [(await mark())[0], keptPage(await kept()), Number((await original([["TTL", DIRECTORY_CACHE]]))[0]) <= 3_600], [null, { rows: 19, omitted: 1 }, true]);
+  is("readDirectory, for any other caller, gives the same 19 rows", (await readDirectory()).length, 19);
+  advance(3_600_001);
+  is("the store readable again, the next build lists all twenty", await readDirectoryPage().then((p) => [p.rows.length, p.omitted, p.rows.some((row) => row.handle === "shopcc")]), [20, 0, true]);
+
+  await original([["DEL", DIRECTORY_CACHE]]);
+  await unmarked();
+  const allFail = await counted(async () => void (outcomes = [await failure(() => readDirectoryPage())]), (commands) => {
+    if (commands[0]?.[0] === "GET" && String(commands[0][1]).startsWith("nl:store:id:")) throw new Error("Redis error: synthetic every store failure");
+  });
+  is("every store read failing is still not \"no program\": the read fails and the list could not be checked", [outcomes[0]?.startsWith("other:"), allFail.SSCAN, await kept(), (await mark())[0]], [true, 1, null, "failed"]);
+
+  redis.clear();
+  await selling("solo@example.com", "soloshop", "Solo Shop");
+  await original([["DEL", DIRECTORY_CACHE]]);
+  const soloStore = await storeForEmail("solo@example.com");
+  await original([["SADD", "nl:dir:listed", "sid_not_a_store_id"]]);
+  const solo = `nl:store:id:${soloStore?.sid}`;
+  await counted(async () => void (outcomes = [await failure(() => readDirectoryPage())]), (commands) => {
+    if (commands[0]?.[0] === "GET" && commands[0][1] === solo) throw new Error("Redis error: synthetic persistent failure");
+  });
+  is("one store left out and no other program read: never \"no program is listed yet\", the read fails", [outcomes[0]?.startsWith("other:"), await kept()], [true, null]);
+  is("an old kept page (a bare list of rows) still reads, with nothing left out", await (async () => {
+    await original([["SET", DIRECTORY_CACHE, "[]", "EX", 600]]);
+    return readDirectoryPage();
+  })(), { rows: [], omitted: 0 });
+  for (const [label, raw] of [["omitted not a whole number", '{"rows":[],"omitted":1.5}'], ["omitted negative", '{"rows":[],"omitted":-1}'], ["rows not a list", '{"rows":{},"omitted":1}']] as const) {
+    await original([["SET", DIRECTORY_CACHE, raw, "EX", 600]]);
+    await unmarked();
+    const sscans = await counted(async () => void (await readDirectoryPage().catch(() => null)));
+    is(`a kept page with ${label} is not taken, the page is built again`, sscans.SSCAN, 1);
+  }
+
   part("The page and its metadata share one directory read a request");
   const page = readFileSync(join(process.cwd(), "app/affiliate-programs/page.tsx"), "utf8");
-  is("readDirectory is called once in the page, inside React's cache()", [page.match(/readDirectory\(/g)?.length, /const directory = cache\(\(\) => readDirectory\(\)\.catch\(\(\) => null\)\);/.test(page)], [1, true]);
+  is("readDirectoryPage is called once in the page, inside React's cache()", [page.match(/readDirectory(Page)?\(/g)?.length, /const directory = cache\(\(\) => readDirectoryPage\(\)\.catch\(\(\) => null\)\);/.test(page)], [1, true]);
   is("and generateMetadata and the page both read it", page.match(/await directory\(\)/g)?.length, 2);
+  is("a page with a program left out says how many, and that they did not leave (rule 27)", [
+    /could not be read just now and/.test(page),
+    /This does not mean they left the list\./.test(page),
+    /directoryPage\.omitted > 0/.test(page),
+  ], [true, true, true]);
 
   done();
 }

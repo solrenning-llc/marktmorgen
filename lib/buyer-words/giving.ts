@@ -26,6 +26,12 @@ const S = " ";
 
 type Notice = { title: string; body: string };
 
+/** "A", "A and B", "A, B and C": the parts that are there, said with the language's own "and". */
+function series(parts: (string | false)[], and: string): string {
+  const said = parts.filter((part): part is string => Boolean(part));
+  return said.length < 2 ? said.join("") : `${said.slice(0, -1).join(", ")} ${and} ${said[said.length - 1]}`;
+}
+
 const en = {
   // ---- Shared by several pages and emails -------------------------------------------
   checkInbox: "Check your inbox",
@@ -119,6 +125,10 @@ const en = {
     expired: {
       title: "This link has expired",
       body: "A confirmation link works for 7 days. Join again from the product's page; it takes a few seconds.",
+    },
+    busy: {
+      title: "We could not confirm your spot just now",
+      body: "Your link still works. Press it again in a little while.",
     },
   } as Record<string, Notice>,
   confirmSpotTitle: "Confirm your spot",
@@ -254,8 +264,9 @@ const en = {
   giftReceiptSubject: (title: string) => `Your gift is on its way: ${title}`,
   aGift: (title: string) => `A gift: ${title}`,
   giftFor: (email: string) => `For: ${email}`,
-  weEmailed: (email: string, withMessage: boolean) =>
-    `We emailed ${email} just now, with your name${withMessage ? " and your message" : ""} and a link to open it. It is theirs, on their address; you do not get a copy.`,
+  // Only what the email to them carried (lib/gifts.ts): a name left empty is sent as "Someone", never said to be yours.
+  weEmailed: (email: string, withName: boolean, withMessage: boolean) =>
+    `We emailed ${email} just now, with ${series([withName && "your name", withMessage && "your message", "a link to open it"], "and")}. It is theirs, on their address; you do not get a copy.`,
 
   // ---- Leaving a review: its page --------------------------------------------------------------
   reviewMetaTitle: "Your review",
@@ -483,6 +494,10 @@ const es: GivingWords = {
       title: "Este enlace ha caducado",
       body: "Un enlace de confirmación funciona durante 7 días. Vuelve a apuntarte desde la página del producto; solo tarda unos segundos.",
     },
+    busy: {
+      title: "No pudimos confirmar tu plaza ahora mismo",
+      body: "Tu enlace sigue funcionando. Vuelve a pulsarlo dentro de un rato.",
+    },
   },
   confirmSpotTitle: "Confirma tu plaza",
   confirmSpotBody: (store, title) =>
@@ -609,8 +624,8 @@ const es: GivingWords = {
   giftReceiptSubject: (title) => `Tu regalo va en camino: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabamos de enviar un email a ${email} con tu nombre${withMessage ? ", tu mensaje" : ""} y un enlace para abrirlo. Es suyo, en su dirección; tú no recibes una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabamos de enviar un email a ${email} con ${series([withName && "tu nombre", withMessage && "tu mensaje", "un enlace para abrirlo"], "y")}. Es suyo, en su dirección; tú no recibes una copia.`,
 
   reviewMetaTitle: "Tu reseña",
   orderRefundedTitle: "Este pedido se reembolsó",
@@ -822,6 +837,10 @@ const fr: GivingWords = {
       title: "Ce lien a expiré",
       body: `Un lien de confirmation fonctionne pendant 7 jours. Inscrivez-vous de nouveau depuis la page du produit${S}; cela ne prend que quelques secondes.`,
     },
+    busy: {
+      title: "Nous n'avons pas pu confirmer votre place pour le moment",
+      body: "Votre lien fonctionne toujours. Réessayez un peu plus tard.",
+    },
   },
   confirmSpotTitle: "Confirmez votre place",
   confirmSpotBody: (store, title) => `Appuyez sur le bouton et ${store} vous enverra un seul e-mail, quand ${title || "il"} sera en vente.`,
@@ -945,8 +964,8 @@ const fr: GivingWords = {
   giftReceiptSubject: (title) => `Votre cadeau est en route${S}: ${title}`,
   aGift: (title) => `Un cadeau${S}: ${title}`,
   giftFor: (email) => `Pour${S}: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Nous venons d'envoyer un e-mail à ${email}, avec votre nom${withMessage ? ", votre message" : ""} et un lien pour l'ouvrir. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Nous venons d'envoyer un e-mail à ${email}, avec ${series([withName && "votre nom", withMessage && "votre message", "un lien pour l'ouvrir"], "et")}. C'est à cette personne, sur son adresse${S}; vous ne recevez pas de copie.`,
 
   reviewMetaTitle: "Votre avis",
   orderRefundedTitle: "Cette commande a été remboursée",
@@ -1157,6 +1176,10 @@ const de: GivingWords = {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Bestätigungslink funktioniert 7 Tage lang. Tragen Sie sich auf der Seite des Produkts erneut ein; das dauert nur wenige Sekunden.",
     },
+    busy: {
+      title: "Wir konnten Ihren Platz gerade nicht bestätigen",
+      body: "Ihr Link funktioniert weiterhin. Versuchen Sie es etwas später noch einmal.",
+    },
   },
   confirmSpotTitle: "Bestätigen Sie Ihren Platz",
   confirmSpotBody: (store, title) =>
@@ -1280,8 +1303,8 @@ const de: GivingWords = {
   giftReceiptSubject: (title) => `Ihr Geschenk ist unterwegs: ${title}`,
   aGift: (title) => `Ein Geschenk: ${title}`,
   giftFor: (email) => `Für: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Wir haben ${email} soeben eine E-Mail geschickt, mit Ihrem Namen${withMessage ? ", Ihrer Nachricht" : ""} und einem Link zum Öffnen. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Wir haben ${email} soeben eine E-Mail geschickt, mit ${series([withName && "Ihrem Namen", withMessage && "Ihrer Nachricht", "einem Link zum Öffnen"], "und")}. Es gehört der beschenkten Person, unter ihrer Adresse; Sie erhalten keine Kopie.`,
 
   reviewMetaTitle: "Ihre Bewertung",
   orderRefundedTitle: "Diese Bestellung wurde erstattet",
@@ -1492,6 +1515,10 @@ const it: GivingWords = {
       title: "Questo link è scaduto",
       body: "Un link di conferma funziona per 7 giorni. Iscriviti di nuovo dalla pagina del prodotto; bastano pochi secondi.",
     },
+    busy: {
+      title: "Non siamo riusciti a confermare il tuo posto in questo momento",
+      body: "Il tuo link funziona ancora. Riprova tra poco.",
+    },
   },
   confirmSpotTitle: "Conferma il tuo posto",
   confirmSpotBody: (store, title) =>
@@ -1618,8 +1645,8 @@ const it: GivingWords = {
   giftReceiptSubject: (title) => `Il tuo regalo è in arrivo: ${title}`,
   aGift: (title) => `Un regalo: ${title}`,
   giftFor: (email) => `Per: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Abbiamo appena inviato un'email a ${email}, con il tuo nome${withMessage ? ", il tuo messaggio" : ""} e un link per aprirlo. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Abbiamo appena inviato un'email a ${email}, con ${series([withName && "il tuo nome", withMessage && "il tuo messaggio", "un link per aprirlo"], "e")}. È suo, sul suo indirizzo; tu non ne ricevi una copia.`,
 
   reviewMetaTitle: "La tua recensione",
   orderRefundedTitle: "Questo ordine è stato rimborsato",
@@ -1830,6 +1857,10 @@ const nl: GivingWords = {
       title: "Deze link is verlopen",
       body: "Een bevestigingslink werkt 7 dagen. Meld je opnieuw aan via de pagina van het product; dat duurt een paar seconden.",
     },
+    busy: {
+      title: "We konden je plek nu niet bevestigen",
+      body: "Je link werkt nog. Probeer het over een tijdje opnieuw.",
+    },
   },
   confirmSpotTitle: "Bevestig je plek",
   confirmSpotBody: (store, title) => `Druk op de knop en ${store} mailt je één keer, zodra ${title || "het"} te koop is.`,
@@ -1951,8 +1982,8 @@ const nl: GivingWords = {
   giftReceiptSubject: (title) => `Je cadeau is onderweg: ${title}`,
   aGift: (title) => `Een cadeau: ${title}`,
   giftFor: (email) => `Voor: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `We hebben ${email} zojuist gemaild, met je naam${withMessage ? ", je bericht" : ""} en een link om het te openen. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
+  weEmailed: (email, withName, withMessage) =>
+    `We hebben ${email} zojuist gemaild, met ${series([withName && "je naam", withMessage && "je bericht", "een link om het te openen"], "en")}. Het is van de ontvanger, op diens adres; jij krijgt geen kopie.`,
 
   reviewMetaTitle: "Je beoordeling",
   orderRefundedTitle: "Deze bestelling is terugbetaald",
@@ -2163,6 +2194,10 @@ const pt: GivingWords = {
       title: "Esta ligação expirou",
       body: "Uma ligação de confirmação funciona durante 7 dias. Volte a inscrever-se a partir da página do produto; demora apenas alguns segundos.",
     },
+    busy: {
+      title: "Não conseguimos confirmar o seu lugar neste momento",
+      body: "A sua ligação continua a funcionar. Tente novamente daqui a pouco.",
+    },
   },
   confirmSpotTitle: "Confirme o seu lugar",
   confirmSpotBody: (store, title) =>
@@ -2289,8 +2324,8 @@ const pt: GivingWords = {
   giftReceiptSubject: (title) => `O seu presente está a caminho: ${title}`,
   aGift: (title) => `Um presente: ${title}`,
   giftFor: (email) => `Para: ${email}`,
-  weEmailed: (email, withMessage) =>
-    `Acabámos de enviar um email para ${email}, com o seu nome${withMessage ? ", a sua mensagem" : ""} e uma ligação para o abrir. É da pessoa, no endereço dela; não recebe uma cópia.`,
+  weEmailed: (email, withName, withMessage) =>
+    `Acabámos de enviar um email para ${email}, com ${series([withName && "o seu nome", withMessage && "a sua mensagem", "uma ligação para o abrir"], "e")}. É da pessoa, no endereço dela; não recebe uma cópia.`,
 
   reviewMetaTitle: "A sua avaliação",
   orderRefundedTitle: "Esta encomenda foi reembolsada",

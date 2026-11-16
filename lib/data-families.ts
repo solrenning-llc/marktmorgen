@@ -24,12 +24,12 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:mail:unsub:", "nl:mv:", "nl:mv:link:", "nl:outreach:", "nl:outreach:stoplink:", "nl:path:",
   "nl:payreq:due", "nl:payreq:o:", "nl:payreq:p:", "nl:payreq:r:", "nl:payreq:s:", "nl:person:",
   "nl:pfunnel:done:", "nl:pfunnel:seen:", "nl:pfunnels:", "nl:pkg:", "nl:pkg:s:", "nl:pkg:t:", "nl:pod:", "nl:pod:by:",
-  "nl:pod:t:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
+  "nl:pod:t:", "nl:ppsell:back:", "nl:preview:", "nl:product:about:", "nl:product:landing:", "nl:product:note:", "nl:product:page:",
   "nl:product:pages:", "nl:product:pics:", "nl:rcpt:n:", "nl:rcpt:seq:", "nl:recover:off:", "nl:rev:", "nl:rev:all:", "nl:rev:new:",
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
   "nl:taxobs:v1:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
-  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
+  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
 ];
 
@@ -50,12 +50,12 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:call:creator-reminded:", "nl:call:lock:", "nl:call:moved:", "nl:call:reminded:", "nl:call:remindq",
   "nl:call:room:", "nl:card:link:", "nl:card:open:", "nl:card:opens:", "nl:catalog:move:cursor",
   "nl:chatsum:", "nl:cimg:", "nl:cimg:doors", "nl:cimg:n:", "nl:closed:batch", "nl:closed:due", "nl:closed:lock", "nl:closed:walk", "nl:closing:credit:", "nl:closing:final", "nl:closing:held", "nl:closing:lock", "nl:closing:paid:", "nl:closing:refund:", "nl:closing:shut:", "nl:closing:told:", "nl:closing:undo", "nl:closing:work:", "nl:cm:evmail:",
-  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:",
+  "nl:cm:evmailq", "nl:cm:evq", "nl:cm:link:", "nl:cm:mail:", "nl:cm:mailq", "nl:cm:rl:", "nl:confirm:", "nl:confirm-room:",
   "nl:contract-reserve:v1", "nl:copy:lock:", "nl:cotrouble:", "nl:cotrouble:mail:", "nl:coursegone:", "nl:courses:drip", "nl:courses:lock",
   "nl:creators:responses", "nl:crm:co:lock:", "nl:crm:fields:", "nl:crm:stages:", "nl:crm:tasklock:", "nl:crm:taskrecount:", "nl:dc:due", "nl:dc:lock", "nl:dc:ok:", "nl:dsched:", "nl:dsched:due", "nl:dsched:lock:",
   "nl:dc:srv:", "nl:dc:state:", "nl:dir:listed", "nl:dir:page", "nl:domain:", "nl:dun:", "nl:dun:card:",
   "nl:dun:cards:", "nl:dun:count:", "nl:dun:cursor", "nl:dun:report:", "nl:erase:ix:", "nl:erase:link:", "nl:transparency:", "nl:transparency:acted:", "nl:transparency:since",
-  "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
+  "nl:esync:bad:", "nl:esync:cfg:", "nl:esync:fly:", "nl:esync:j:", "nl:esync:log:", "nl:esync:q", "nl:esync:seen:",
   "nl:exposure:v1:", "nl:exposure:v1:YYYY-MM", "nl:fair:c:", "nl:firstsale:", "nl:flow-rotate:", "nl:forms:", "nl:free:claim:",
   "nl:free:in:", "nl:free:n:", "nl:free:uses:", "nl:fshare:", "nl:fshare:n:", "nl:fshares:", "nl:fuse:",
   "nl:fuse:m:", "nl:gift:", "nl:gift:pi:", "nl:goal:", "nl:grp:", "nl:grp:pi:", "nl:grp:take:",
@@ -71,7 +71,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
   "nl:mail:ramp:", "nl:mail:segs:", "nl:mail:used:", "nl:manage:link:", "nl:manage:opens:",
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
-  "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
+  "nl:meet:refresh:", "nl:meet:refund-turns", "nl:meet:refund-turns:said", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:gone:", "nl:metaads:gen", "nl:metaads:pass", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
@@ -115,7 +115,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
-  "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
+  "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:", "nl:wf:ver:pause:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
@@ -243,6 +243,8 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:cm:": E, "nl:cm:evmail:": X(30), "nl:cm:evmailq": I, "nl:cm:evq": I, "nl:cm:link:": X(1),
   "nl:cm:mail:": X(30), "nl:cm:mailq": I, "nl:cm:rl:": E, "nl:cm:unsub:": T("nl:cm:"),
   "nl:confirm:": X(40),
+  // A checkout whose admitted room was given back, once (lib/purchase-email.ts), an hour past its held hours.
+  "nl:confirm-room:": X(2),
   "nl:contract-reserve:v1": C,
   // A store copy's progress, named by the receiving store (lib/store-copy.ts), seven days; its one-step lock, a minute.
   "nl:copy:": er(7), "nl:copy:lock:": X(1),
@@ -262,7 +264,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:domain:": T("prepare"),
   "nl:dun:": E, "nl:dun:card:": E, "nl:dun:cards:": E, "nl:dun:count:": E, "nl:dun:cursor": C, "nl:dun:report:": E,
   "nl:erase:ix:": E, "nl:erase:link:": Cr(1), "nl:transparency:": C, "nl:transparency:acted:": C, "nl:transparency:since": C, "nl:erased:": E,
-  "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
+  "nl:esync:bad:": E, "nl:esync:cfg:": E, "nl:esync:fly:": X(1), "nl:esync:j:": T("prepare", 7), "nl:esync:log:": E, "nl:esync:q": I,
   "nl:esync:seen:": X(30), "nl:esync:tags:": E,
   "nl:exposure:v1:": C, "nl:exposure:v1:YYYY-MM": C,
   "nl:fair:c:": E,
@@ -315,7 +317,11 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:mail:mk:": T("nl:store:leads:", 400), "nl:mail:paused:": E, "nl:mail:queue": I, "nl:mail:ramp:": E, "nl:mail:segs:": E,
   "nl:mail:unsub:": T("nl:store:leads:"), "nl:mail:used:": E,
   "nl:manage:link:": X(1), "nl:manage:opens:": X(1), "nl:manage:portal:": E,
-  "nl:meet:conn:": E, "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E, "nl:meet:rf:": E,
+  "nl:meet:conn:": E, "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E,
+  // The meetings' refund job's rotation (lib/call-meetings.ts): a member per member of nl:meet:stores, taken out with it
+  // within a run (ZINTERSTORE), and the day's log line of a late turn.
+  "nl:meet:refund-turns": Cr(1), "nl:meet:refund-turns:said": Cr(1),
+  "nl:meet:rf:": E,
   "nl:meet:state:": X(1), "nl:meet:stores": I, "nl:meet:test:": E, "nl:meet:user:": I, "nl:meet:zoomseen:": C,
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:gone:": Cr(1), "nl:metaads:gen": C, "nl:metaads:pass": C, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
@@ -370,7 +376,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   // nl:pp:settle:after: one store id for the whole company, where the daily PayPal settling stopped, gone in 7 days.
   "nl:pp:": E, "nl:pp:item:": X(400), "nl:pp:open:": E, "nl:pp:settle:after": Cr(7), "nl:pp:stores": I, "nl:pp:unk:month:": Cr(400),
   "nl:ppsell:o:": T("nl:ppsell:sales:", 30), "nl:ppsell:own:": E, "nl:ppsell:paid:": T("nl:ppsell:sales:"), "nl:ppsell:pending:": E,
-  "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
+  "nl:ppsell:back:": E, "nl:ppsell:refunded:": E, "nl:ppsell:reversed:": E, "nl:ppsell:sales:": E, "nl:ppsell:watch:": E, "nl:ppsell:handover:": E,
   // A PayPal order canceled because PayPal never confirmed it (lib/paypal-sales.ts, CANCELED_KEPT_SECONDS): named by the
   // order, written once and gone within thirty days; the company's line of its notices the sender refused, each member
   // gone once sent, once its store is gone or another store now (retryPayPalCancelNotices), or within thirty days.
@@ -463,7 +469,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:seen:": Cr(9), "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },
-  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E,
+  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E, "nl:wf:ver:": E, "nl:wf:ver:idx:": E, "nl:wf:ver:pause:": X(1),
   "nl:wl:": E, "nl:wl:jobs": I, "nl:wl:t:": T("nl:erase:ix:", 7),
   "nl:wo:due": I, "nl:wo:n:": E, "nl:wo:r:": E, "nl:wo:start:": E,
   "nl:yearask:": E, "nl:yearask:count:": E, "nl:yearask:cursor": C,

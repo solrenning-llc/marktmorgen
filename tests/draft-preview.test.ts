@@ -101,7 +101,8 @@ async function main(): Promise<void> {
   await (clearTakenDown as (store: unknown, id: string, seen: string | null) => Promise<void>)(store, draft.product.id, seenBefore);
   is("a takedown that landed after the read keeps its mark through the publish's clear", await isTakenDown(store, draft.product.id), true);
   const productRoute = readFileSync("app/api/store/product/route.ts", "utf8");
-  // Since the merge with main the publish passes a callback (the locked page re-read), so the call is found by its start.
+  // Merge of main (16 November 2026): main's publish passes a check under the save lock as a fourth argument, so the
+  // call is found by its start.
   const publishAt = productRoute.indexOf("const done = await setProductHidden(ref, id, body.hidden");
   is("the product route reads the mark before it publishes, and clears only that one", [productRoute.lastIndexOf("takenDownMark(", publishAt) > 0, productRoute.includes("clearTakenDown(guarded.store, id, seenMark)")], [true, true]);
   await (clearTakenDown as (store: unknown, id: string, seen: string | null) => Promise<void>)(store, draft.product.id, marks.takenDownMark ? await marks.takenDownMark(store, draft.product.id) : null);

@@ -52,7 +52,7 @@ import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { readPage } from "@/lib/sales-page-store";
 import { quietedBy } from "@/lib/extras-notes";
-import { clearTakenDown, takenDownMark } from "@/lib/draft-preview";
+import { clearTakenDown, revokeDraftPreview, takenDownMark } from "@/lib/draft-preview";
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -453,6 +453,15 @@ export async function POST(request: NextRequest) {
       // The takedown mark as it was before this publish: only that one is cleared after it, so a takedown that lands in
       // between keeps its own (Codex L's MEDIUM 1 on #3597). A mark that cannot be read is never cleared (null).
       const seenMark = body.hidden === false && !guarded.store.suspended ? await takenDownMark(guarded.store, id).catch(() => null) : null;
+      // Published: the draft's preview link ends first, so a later unpublish never opens it again (Claude 4 cloud AE on
+      // #3597, LEVE 2). One that cannot be confirmed ended publishes nothing: the creator tries again.
+      if (body.hidden === false && guarded.store.statsId) {
+        const ended = await revokeDraftPreview(guarded.store, id).then(() => true, (error: unknown) => {
+          console.error("a draft's preview link could not be ended before publishing", error);
+          return false;
+        });
+        if (!ended) return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+      }
       const done = await setProductHidden(ref, id, body.hidden);
       result = done.ok ? { ok: true, product: done.product } : done;
       // Published again: a mark from a takedown no longer holds its previews back (lib/draft-preview.ts). A clear

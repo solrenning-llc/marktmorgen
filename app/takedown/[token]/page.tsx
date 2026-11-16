@@ -5,7 +5,7 @@ import { LegalPage, LegalSection } from "@/components/legal-page";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { isOperator } from "@/lib/search-console";
 import { TakedownButton } from "@/components/takedown-actions";
-import { openReport, reportedProduct, unsentNotices } from "@/lib/takedown";
+import { openReport, operatorProducts, reportedProduct, unsentNotices } from "@/lib/takedown";
 import { NewTab } from "@/components/new-tab";
 
 export const metadata: Metadata = { title: "A notice — Marktmorgen", robots: { index: false, follow: false } };
@@ -26,9 +26,19 @@ export default async function TakedownPage({ params }: Params) {
   const opened = await openReport(token);
   if (!opened) notFound();
   const { report, store } = opened;
-  // The product the address points at, however far down the list, and the first page of the rest.
-  const pointed = store ? await reportedProduct(report, store) : null;
-  const products = store ? [...(pointed && !pointed.hidden ? [pointed] : []), ...store.catalog.head.filter((p) => !p.hidden && p.id !== pointed?.id)] : [];
+  // The product the address points at, however far down the list, a draft included (its preview link is what a
+  // notice about it names), and the first page of the rest. One that cannot be read is said, and the page goes on.
+  let pointed: Awaited<ReturnType<typeof reportedProduct>> = null;
+  let pointedUnknown = false;
+  if (store) {
+    try {
+      pointed = await reportedProduct(report, store);
+    } catch (error) {
+      console.error("the product a notice points at could not be read", error);
+      pointedUnknown = true;
+    }
+  }
+  const products = store ? operatorProducts(store, pointed) : [];
   // Taken down, but the email to the creator did not go out (Claude 6 on #3087): listed whenever the page is opened,
   // so the notice the law asks for can still be sent after the page that failed was closed.
   // Content up again stays listed, with a note: the statement of reasons is still owed (EU DSA Art. 17(1)). An owed
@@ -61,6 +71,7 @@ export default async function TakedownPage({ params }: Params) {
               : "Nothing taken down from it before."}
           </p>
           {owedUnknown ? <p>We could not check whether an email to the creator is still owed. Reload this page to check again.</p> : null}
+          {pointedUnknown ? <p>We could not check which product the notice points at. Reload this page to check again.</p> : null}
           {owed.length ? (
             <>
               <p className="font-semibold text-black">Taken down, but we could not confirm the creator was told</p>
@@ -94,10 +105,13 @@ export default async function TakedownPage({ params }: Params) {
             <>
               <p className="font-semibold text-black">Its products</p>
               <ul className="space-y-3">
-                {products.map((p) => (
+                {products.map(({ product: p, draft, named }) => (
                   <li key={p.id} className="flex flex-wrap items-center justify-between gap-2">
-                    <span>{p.title}{p.id === pointed?.id ? " (the page the notice names)" : ""}</span>
-                    <TakedownButton token={token} action={{ type: "product", id: p.id }} label="Unpublish this product" />
+                    <span>
+                      {p.title}
+                      {draft ? " (a draft: the notice names its preview link)" : named ? " (the page the notice names)" : ""}
+                    </span>
+                    <TakedownButton token={token} action={{ type: "product", id: p.id }} label={draft ? "Close this draft's preview link" : "Unpublish this product"} />
                   </li>
                 ))}
               </ul>

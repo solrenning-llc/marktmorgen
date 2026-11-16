@@ -910,7 +910,9 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
- * Taking a payment back (its two marks, or one for a refund, the buyer's record, a course start) happens once an order
+ * The take-back marks (ZADD and EXPIRE of the refund set, and of the reversed set for a capture reversed, failed or
+ * declined) are counted on every refund look, retries included, in PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost
+ * (Claude 6 on #3464). The rest of taking a payment back (the buyer's record, a course start) happens once an order
  * and is not priced apart here: an open gap, never zero. A scheduled job bounded by its schedule and the batch, a
  * company fixed cost like HAND_OVER_BATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by tests/paypal-reversed-access.test.ts.
  */
@@ -930,8 +932,11 @@ export const PAYPAL_REFUND_WATCH = {
  * - scriptsPerRefundLook / writesPerScript: one script, one write;
  * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (EXISTS, TYPE,
  *   HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET): 11;
+ * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
+ *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
+ *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
  * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
- *   tells nothing, so its worst is one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ *   tells nothing, so its worst is the marks, one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
  *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
  *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
  * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
@@ -941,6 +946,7 @@ export const PAYPAL_REFUND_KEPT = {
   scriptsPerRefundLook: 1,
   writesPerScript: 1,
   commandsPerScriptAtMost: 11,
+  markCommandsPerRefundLookAtMost: 4,
   retryWritesPerFailedLook: 1,
   looksPerDayAtMost: 24,
   daysAtMost: 400,

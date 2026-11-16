@@ -325,11 +325,20 @@ async function main(): Promise<void> {
     // failed or declined also its own mark's. The WHOLE command list of a failed look is held to the lines' sum, so
     // no step in that path can go uncounted: the run's two list reads (the pending sweep's and the watch's), the watch
     // line's own two (the paid record's GET and the list write), the one script, and the marks (PAYPAL_REFUND_KEPT).
-    for (const status of ["REFUNDED", "REVERSED"]) {
+    // The sibling retry (rule 30): a buyer's record read whose reply is not exact also puts the order back an hour on,
+    // after the marks and the script; its one HGET is the buyer's record of PAYPAL_REFUND_WATCH's open gap (main's).
+    const failures = [
+      { name: "the lasting write", command: "EVAL", prefix: `nl:ppsell:back:${SID}`, reply: "garbled" as unknown },
+      { name: "the buyer's record read", command: "HGET", prefix: `nl:imp:buy:${SID}`, reply: 42 as unknown },
+    ];
+    for (const status of ["REFUNDED", "REVERSED"]) for (const failure of failures) {
       await setup();
       captures.set(CAPTURE, status);
-      const look = await scripts(() => answering("EVAL", `nl:ppsell:back:${SID}`, "garbled", () => watch()));
+      const look = await scripts(() => answering(failure.command, failure.prefix, failure.reply, () => watch()));
+      const label = `${status}, ${failure.name} unknown`;
+      is(`${label}: looked at again an hour on, one script`, [look.kept.length, look.sent.filter((c) => c[0] === "ZADD" && c[1] === `nl:ppsell:watch:${SID}`).length], [1, 1]);
       const counted = [
+        (c: (string | number)[]) => failure.command === "HGET" && c[0] === "HGET" && String(c[1]).startsWith(failure.prefix),
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:pending:${SID}`,
         (c: (string | number)[]) => c[0] === "ZRANGEBYSCORE" && c[1] === `nl:ppsell:watch:${SID}`,
         (c: (string | number)[]) => c[0] === "GET" && c[1] === `nl:ppsell:paid:${ORDER}`,
@@ -342,11 +351,11 @@ async function main(): Promise<void> {
         if (at >= 0) rest.splice(at, 1);
       }
       const marks = new Set([`nl:ppsell:refunded:${SID}`, `nl:ppsell:reversed:${SID}`]);
-      is(`${status}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
-      is(`${status}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
+      is(`${label}: every other command of a failed look is a take-back mark (ZADD or EXPIRE of its set)`, rest.every((c) => (c[0] === "ZADD" || c[0] === "EXPIRE") && marks.has(String(c[1]))), true);
+      is(`${label}: the marks of a failed look are within the line`, rest.length <= PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost, true);
       is(
-        `${status}: the whole failed look is within the lines' sum`,
-        look.sent.length <=
+        `${label}: the whole failed look is within the lines' sum`,
+        look.sent.length - (failure.command === "HGET" ? 1 : 0) <=
           PAYPAL_PENDING_SWEEP.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.listReadsPerStoreRun +
             PAYPAL_REFUND_WATCH.ownCommandsPerOrderLook +

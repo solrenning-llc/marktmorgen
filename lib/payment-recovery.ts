@@ -42,6 +42,7 @@
  * anybody's Stripe dashboard for it to work.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { resumePoint } from "@/lib/store-walk-resume";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
 import { claimMark, claimValue, releaseMark } from "@/lib/claim-mark";
 import { onAccount, platformKey } from "@/lib/stripe-account";
@@ -502,10 +503,10 @@ export async function recoverFailedPayments(deadline: number): Promise<{ stores:
   const counts = { stores: 0, sent: 0 };
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
 
-  const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  const point = resumePoint(await redisPipeline([["GET", CURSOR_KEY]]));
+  if (!point) throw new UnknownReplyError("where the failed-payment emails stopped");
+  let cursor = point.cursor;
+  let skip = point.skip;
 
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);

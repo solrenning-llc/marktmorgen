@@ -22,6 +22,7 @@
  *   nl:verified:cursor      where the last daily pass stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { resumePoint } from "@/lib/store-walk-resume";
 import { types } from "node:util";
 import { readFullNumbers } from "@/lib/mcp-tools";
 import { readTitles } from "@/lib/catalog";
@@ -151,12 +152,10 @@ export async function sendVerified(deadline: number): Promise<{ stores: number }
   if (!isRedisConfigured()) return counts;
   // Where the last pass stopped: a string, or null before the first pass. Any other reply is unknown and the
   // pass stops here, so the kept position is not overwritten by one counted from the start (CX-123 rule 24).
-  const read = repliesFor(await redisPipeline([["GET", CURSOR_KEY]]), 1);
-  const saved = read?.[0];
-  if (!read || (saved !== null && typeof saved !== "string")) throw new UnknownReplyError("where the shared numbers' last pass stopped");
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  const point = resumePoint(await redisPipeline([["GET", CURSOR_KEY]]));
+  if (!point) throw new UnknownReplyError("where the shared numbers' last pass stopped");
+  let cursor = point.cursor;
+  let skip = point.skip;
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;

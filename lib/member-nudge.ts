@@ -16,6 +16,8 @@
  *   nl:nudge:cursor                          where the last run stopped
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { resumePoint } from "@/lib/store-walk-resume";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { platformKey } from "@/lib/stripe-account";
 import { isSenderConfigured, sendEmail } from "@/lib/email";
 import { type Store, storesAfter } from "@/lib/store";
@@ -134,10 +136,10 @@ export async function nudgesThisMonth(store: Store, now = Date.now()): Promise<n
 export async function sendMemberNudges(deadline: number): Promise<{ stores: number; sent: number }> {
   const counts = { stores: 0, sent: 0 };
   if (!isRedisConfigured() || !platformKey() || !isSenderConfigured()) return counts;
-  const [saved] = await redisPipeline([["GET", CURSOR_KEY]]);
-  const [savedCursor, savedDone] = typeof saved === "string" ? saved.split("|") : ["0", "0"];
-  let cursor = /^\d+$/.test(savedCursor ?? "") ? savedCursor : "0";
-  let skip = Number(savedDone) || 0;
+  const point = resumePoint(await redisPipeline([["GET", CURSOR_KEY]]));
+  if (!point) throw new UnknownReplyError("where the member nudges stopped");
+  let cursor = point.cursor;
+  let skip = point.skip;
   while (Date.now() < deadline) {
     const { stores, next } = await storesAfter(cursor);
     let done = 0;

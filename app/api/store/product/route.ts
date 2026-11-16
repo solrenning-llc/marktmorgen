@@ -1,9 +1,11 @@
+import { runningSubscriptions } from "@/lib/payment-methods";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";
 import { handsOver, takesLastDelivery } from "@/lib/product-option";
 import { storeKey } from "@/lib/learn";
 import { imagePaths } from "@/lib/product-image";
+import { dropMirroredPicture } from "@/lib/picture-r2-copy";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
@@ -26,7 +28,8 @@ import {
   type Product,
 } from "@/lib/store";
 import { MAX_LINK_LENGTH, readLink } from "@/lib/product-link";
-import { readRecurring } from "@/lib/product-recurring";
+import { everyOf, readRecurring } from "@/lib/product-recurring";
+import { everyProblem } from "@/lib/recurring-every-rules";
 import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
@@ -186,8 +189,9 @@ export async function POST(request: NextRequest) {
   // Absent or unrecognised means a single sale, which is what a product is
   // unless the creator says otherwise. A trial or a payment count that was
   // typed and is not a whole number in range is said, not dropped.
-  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments);
-  if (recurring === "trial" || recurring === "payments") {
+  // How often it charges (609 [WP8]): `everyCount`, absent or 1 for every interval; only a listed choice is kept.
+  const recurring = readRecurring(text(body.every, 10), body.trial, body.payments, body.everyCount);
+  if (recurring === "trial" || recurring === "payments" || recurring === "every") {
     return Response.json({ ok: false, error: recurring }, { status: 400 });
   }
   // The suggested price, when the buyer chooses what to pay, as typed: it is
@@ -268,6 +272,19 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Charged every N (609 [WP8]): what is still counted in single weeks or months is refused with its reason, against
+  // the product as this save leaves it, so nothing is ever charged on a schedule its page does not say.
+  if ((action === "add" || action === "edit") && recurring && everyOf(recurring) > 1) {
+    const current = action === "edit" ? await readListing(guarded.store, id) : null;
+    const problem = everyProblem(everyOf(recurring), {
+      intro: intro === undefined ? current?.intro : intro,
+      yearly: yearly === undefined ? current?.yearly : yearly,
+      inTiers: action === "edit" && guarded.store.tiers.includes(id),
+      payments: recurring.payments,
+    });
+    if (problem) return Response.json({ ok: false, error: `every_${problem}` }, { status: 400 });
+  }
+
   try {
     let result: Outcome;
     // A removal whose campaign landings could not be confirmed gone (lib/sales-page-store.ts PageDropIncomplete).
@@ -336,6 +353,15 @@ export async function POST(request: NextRequest) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
+      // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
+      // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
+      // every product, not only one paid now: a membership edited to free first still charges its members (#4074).
+      // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
+      if (before && guarded.store.stripeAccountId) {
+        const running = await runningSubscriptions(guarded.store, id);
+        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
+        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+      }
       // Its waitlist's hold and drop are paid for before anything goes (WAITLIST_DROP_UNITS, lib/waitlist.ts; #4462).
       const paid = await takeAllowance(guarded.store, "studio", WAITLIST_DROP_UNITS);
       if (!paid.ok) return paid.reason === "used" ? refusedJson("used", paid.message) : Response.json({ ok: false, error: "unavailable" }, { status: 503 });
@@ -391,6 +417,8 @@ export async function POST(request: NextRequest) {
         const had: { pathname: string }[] = filesOnProduct(going);
         // Its picture goes with it, and so does its long description.
         had.push(...imagePaths(going.image).map((pathname) => ({ pathname })));
+        // And its copy in the pictures' own bucket, when it was copied there (#4237, item 4).
+        if (going.image?.r2) await dropMirroredPicture(imagePaths(going.image));
         // A course takes its lessons with it: their records, and their files.
         if (removedCourse) had.push(...filesInCourse(removedCourse));
         // And the work its students handed in for its assignments (lib/assignment.ts).

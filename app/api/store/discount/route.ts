@@ -127,14 +127,20 @@ export async function POST(request: NextRequest) {
     // The schedules beside them, read exactly: a code waiting for its start is never shown as simply off.
     const kept = await readSchedules(store.statsId);
     if (list.state !== "ok" || !kept.ok) {
+      // A make, a stop or a schedule change Stripe already did is said as
+      // done, so it is not pressed again; only the list after it is
+      // unconfirmed, and nothing is written from it. The studio shows its
+      // "could not confirm" words.
+      if (action !== "list") return Response.json({ ok: true, done: action, listed: false });
       return Response.json({ ok: false, error: "stripe" }, { status: 502 });
     }
-    await setHasDiscounts(
-      ref,
-      list.codes.some((entry) => entry.active),
-    );
+    // A live code on the page is enough for the box; "no live code" only
+    // from a list read to its end. A page with more behind it leaves the bit
+    // as it was (rule 24), and the studio says it shows the newest codes.
+    const live = list.codes.some((entry) => entry.active);
+    if (live || list.complete) await setHasDiscounts(ref, live);
 
-    return Response.json({ ok: true, codes: list.codes, schedules: kept.schedules, ...(cancelState ? { canceled: cancelState } : {}) });
+    return Response.json({ ok: true, codes: list.codes, complete: list.complete, schedules: kept.schedules, ...(cancelState ? { canceled: cancelState } : {}) });
   } catch (error) {
     console.error("changing a discount code failed", error);
     return Response.json({ ok: false, error: "server_error" }, { status: 500 });

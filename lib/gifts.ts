@@ -179,28 +179,6 @@ function parseKeptGift(raw: string, id: string): Gift | null {
   }
 }
 
-/**
- * Whether a gift is given, read exactly, for a run that found another run's
- * giving mark (Codex CX1 on #2726; CX-123 rule 24): one reply, the record as
- * text, JSON of this gift, and `given` a positive whole number of seconds
- * (true) or absent (false). Anything else is unknown and throws, so nothing
- * is said as given that is not.
- */
-async function givenExactly(id: string): Promise<boolean> {
-  const raw = repliesFor(await redisPipeline([["GET", giftKey(id)]]), 1)?.[0];
-  let record: unknown = null;
-  try {
-    record = typeof raw === "string" ? JSON.parse(raw) : null;
-  } catch {
-    record = null;
-  }
-  if (!record || typeof record !== "object" || Array.isArray(record) || (record as { id?: unknown }).id !== id) throw new UnknownReplyError("a gift's record");
-  const given = (record as { given?: unknown }).given;
-  if (given === undefined) return false;
-  if (typeof given === "number" && Number.isSafeInteger(given) && given > 0) return true;
-  throw new UnknownReplyError("a gift's record");
-}
-
 /** Writes a gift down; true only when Redis answered the write in its exact shape ("OK"). */
 async function saveGift(gift: Gift, seconds: number): Promise<boolean> {
   return repliesFor(await redisPipeline([["SET", giftKey(gift.id), JSON.stringify(gift), "EX", seconds]]), 1)?.[0] === "OK";
@@ -286,10 +264,11 @@ export async function deliverGift(input: {
   const value = claimValue();
   const claimed = await claimMark(mark, 300, value);
   if (claimed === "taken") {
-    // Another run holds the mark. "already" only once the gift is given (Claude 4 on #2726): confirmGift
-    // (lib/purchase-email.ts) keeps its "sent" mark on "already", so said while the other run may still fail, the
-    // paid gift would never be given. Thrown, no "sent" mark is kept and the next run tries again.
-    if (await givenExactly(id)) return "already";
+    // Another run holds the mark: thrown, even once the gift is given (Claude 2 K and Claude 6 on #2872).
+    // confirmGift (lib/purchase-email.ts) keeps its "sent" mark on "already", and the run holding the mark may have
+    // written the gift given and died before its emails: "already" here would certify an email never sent, and
+    // nothing would tell it again. Thrown, no "sent" mark is kept; the run holding the mark keeps its own once it has
+    // told, and if it died, the next run takes the mark once it runs out and tells from the given record (M1's path).
     throw new Error("another run is giving this gift right now");
   }
   if (claimed === "unknown") throw new UnknownReplyError("a gift's giving mark");
@@ -316,8 +295,8 @@ export async function deliverGift(input: {
     return "already";
   }
   // The mark is kept, not let go, once the gift is given: it runs out by itself, after the caller has kept its
-  // "sent" mark, so a run that comes in meanwhile reads "taken" and given and says "already" instead of telling and
-  // confirming a second time (#2872 review M1).
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and throws instead of telling and confirming a second
+  // time (#2872 review M1), and never certifies an email this run may not have sent (Claude 6 on #2872).
   if (kept.given) {
     await tellGift(input, kept, kept.session ?? (typeof session.id === "string" ? session.id : ""));
     return "given";

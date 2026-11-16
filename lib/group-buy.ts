@@ -266,15 +266,16 @@ export async function settleGroup(input: {
   const claimed = await claimMark(settling, 300, mark);
   if (claimed === "unknown") throw new UnknownReplyError("a purchase for several's settling mark");
   if (claimed === "taken") {
-    // Another run is settling it. "already" only once it is paid: confirmGroup (lib/purchase-email.ts) keeps its
-    // "sent" mark on "already", so said while the other run may still fail, the paid purchase would never be settled
-    // (as deliverGift does since Claude 4 on #2726). Thrown, no "sent" mark is kept and the next run tries again.
-    if ((await readGroupExactly(id))?.paid) return "already";
+    // Another run is settling it: thrown, even once it is paid (Claude 2 K and Claude 6 on #2872). confirmGroup
+    // (lib/purchase-email.ts) keeps its "sent" mark on "already", and the run holding the mark may have written the
+    // purchase paid and died before its receipt: "already" here would certify a receipt never sent, and the places'
+    // link would never reach the payer. Thrown, no "sent" mark is kept; the run holding the mark keeps its own once it
+    // has sent, and if it died, the next run takes the mark once it runs out and sends from the paid record (M1's path).
     throw new Error("another run is settling this purchase for several right now");
   }
   // The mark is kept, not let go, once the purchase is paid: it runs out by itself, after the caller has kept its
-  // "sent" mark, so a run that comes in meanwhile reads "taken" and paid and says "already" instead of sending and
-  // confirming a second time (#2872 review M1).
+  // "sent" mark, so a run that comes in meanwhile reads "taken" and throws instead of sending and confirming a second
+  // time (#2872 review M1), and never certifies a receipt this run may not have sent (Claude 6 on #2872).
   if (group.paid) {
     await sendPaidReceipt(input, group);
     return "settled";

@@ -68,7 +68,8 @@ import { idsIn } from "@/lib/data-recount";
 import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
-import { FINAL_INDEX } from "@/lib/closing-holds";
+import { FINAL_INDEX, finalScoreOf } from "@/lib/closing-holds";
+import { standingOf } from "@/lib/plan-standing";
 import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForRefExact, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
@@ -236,6 +237,20 @@ return 1`;
  */
 export class EntryNotWithdrawnError extends UnknownReplyError {}
 
+/**
+ * The store's plan runs again (paid or in trial) and its closing day has not begun (not in FINAL_INDEX), read before
+ * anything of it is touched and again under its lock right before its record goes (Claude 5's MEDIUM on #3643): nothing
+ * of it was prepared past that read, and its record stays. The caller takes it out of line, never moved back a walk,
+ * as lib/plan-closing.ts closeOne does for a plan that runs again ("running").
+ */
+export class PlanRunsAgainError extends Error {}
+
+/** A plan that runs, as closeOne reads it: paid or in trial (standingOf). One ended, or never had, is not running. */
+function planRuns(store: Store, now: number): boolean {
+  const standing = standingOf(store, now / 1000);
+  return standing === "paid" || standing === "trial";
+}
+
 /** How many times prepareStore tries to take such an entry out before it throws EntryNotWithdrawnError. */
 const WITHDRAW_TRIES = 2;
 
@@ -285,6 +300,16 @@ async function del(keys: string[]): Promise<void> {
  */
 export async function prepareStore(store: Store, now = Date.now()): Promise<Batched | null> {
   const ref = storeRef(store);
+  // A plan that runs again keeps the store (Claude 5's MEDIUM on #3643): a preparation that stopped after its entry was
+  // confirmed, an entry not confirmed out, and the walk's start (startableBatch) put a store back in line after
+  // closeOne had taken it out for a running plan, and the next run erased it. Read before anything of it is touched:
+  // a closing day that has begun (FINAL_INDEX) is seen through whatever happens to the plan since, as closeOne does;
+  // otherwise a running plan throws PlanRunsAgainError. The place in the final line read exactly (finalScoreOf): one that
+  // does not read throws UnknownReplyError, neither ended nor running (rule 24), and the store waits a walk untouched.
+  // One command, and only for a store whose plan reads running (PLAN_RUNS_READ_COMMANDS, tests/plan-cost-registry.ts).
+  if (planRuns(store, now) && finalScoreOf(await redisPipeline([["ZSCORE", FINAL_INDEX, ref]])) === null) {
+    throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
+  }
   const { marks } = await marksOf(store);
   const extra: string[] = [];
   // Its calendar hosts' claims, which are kept by the host, across the stores they serve.
@@ -324,7 +349,8 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // Out of the closing day's line before its record goes (queue item 307 [EC1]): a new store its owner opens
   // under the same key is never taken for this one. A plan paid under this store's addresses after this is
   // still found by their mark (lib/closing-plan-guard.ts, markShut).
-  await redisPipeline([["ZREM", FINAL_INDEX, ref]]);
+  // Its answer says whether its closing day had begun (1: it was in that line), read again under the lock below.
+  const finalGone = countOf(repliesFor(await redisPipeline([["ZREM", FINAL_INDEX, ref]]), 1)?.[0]);
   const entry: Batched = {
     ref,
     email: store.email,
@@ -363,6 +389,15 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   // a delete or a rewrite may land with its answer lost (Codex L and Codex P on #3643). It is never taken out for it: the
   // walk reads the record before it starts (startableBatch) and walks the entry only once the record is confirmed gone.
   const closed = await closeStoreRecord(store, [], async (fresh) => {
+    // A plan started since the read above, seen under the lock before the record goes (Claude 5's MEDIUM on #3643):
+    // unless its closing day had begun (the ZREM above took it out of that line), the record stays and the store leaves
+    // the line; its entry, still pending, is never walked and is taken out by the idle pass (withdrawPending). That
+    // ZREM's answer not known is neither (rule 24): the record stays and the store waits a walk. No command is added:
+    // the record is the one closeStoreRecord read again.
+    if (fresh && planRuns(fresh, now) && finalGone !== 1) {
+      if (finalGone === 0) throw new PlanRunsAgainError(`a closing store's plan runs again: ${ref}`);
+      throw new UnknownReplyError("a closing store's place in the final closing line (ZREM)");
+    }
     if (fresh) {
       const never = new Set([store, fresh].flatMap((s) => [s.stripeCustomerId, s.subscriptionId, s.stripeAccountId, s.email]));
       const added = (await recordIds(fresh)).filter((id) => !own.has(id) && !never.has(id));
@@ -1090,6 +1125,13 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
         try {
           prepared = await prepareStore(store, now);
         } catch (error) {
+          if (error instanceof PlanRunsAgainError) {
+            // Its plan runs again (Claude 5's MEDIUM on #3643): out of line, never prepared, as closeOne takes it out.
+            // An entry of it left in the batch is never walked while its record stands (startableBatch, withdrawPending).
+            console.error("a closing store's plan runs again; it leaves the line, not prepared", error);
+            await redisPipeline([["ZREM", DUE_KEY, ref]]);
+            continue;
+          }
           if (error instanceof EntryNotWithdrawnError) {
             // Never moved back: the record at this key is another store's, which must not be prepared under it.
             console.error("a closing store's walk entry, with another store at its key, was not confirmed taken out; no walk starts in this run", error);

@@ -39,7 +39,7 @@ import { COMMAND, DB_BYTE, DB_BYTE_MONTH, ORDER_COST, ORDER_LIBRARY, PER_PAYMENT
 import { FAMILIES, lifetimeByteMonths, partAverage } from "./store-data-registry";
 import { MAX_TEAM } from "@/lib/team";
 import { STORE_LOCK_TRIES } from "@/lib/read-ceilings";
-import { PREPARE_COMMANDS } from "./plan-cost-registry";
+import { PLAN_RUNS_READ_COMMANDS, PREPARE_COMMANDS } from "./plan-cost-registry";
 
 test("a closing's worst cost, part by part, for each plan and for a free trial", () => {
   for (const tier of TIERS) {
@@ -128,6 +128,19 @@ test("a closing's last steps pay for the record's going under the store's lock, 
   const startable = walkStart.slice(walkStart.indexOf("async function startableBatch"), walkStart.indexOf("async function moveBack"));
   assert.match(startable, /storeRecordAt\(entry\.ref\)/);
   assert.doesNotMatch(startable, /for \(let tries/);
+});
+
+test("a running plan's place in the final closing line is read once before a store is prepared, and priced (Claude 5 on #3643)", () => {
+  const source = readFileSync(join(process.cwd(), "lib/closed-store-data.ts"), "utf8");
+  const prepare = source.slice(source.indexOf("export async function prepareStore"), source.indexOf("export const DELETE_SETTLES_MS"));
+  // One ZSCORE, only for a plan that reads running, before anything of the store is touched; the lock's check reads the
+  // record closeStoreRecord already read and the ZREM's own answer, with no command of its own.
+  assert.equal(prepare.match(/\["ZSCORE", FINAL_INDEX, ref\]/g)?.length, 1);
+  assert.ok(prepare.indexOf("planRuns(store, now)") < prepare.indexOf("readTeam("), "read before anything is touched");
+  assert.match(prepare, /planRuns\(fresh, now\) && finalGone !== 1/);
+  assert.equal(PLAN_RUNS_READ_COMMANDS, 1);
+  const hosts = (1 + MAX_TEAM) * (2 * 50 + 5);
+  assert.ok(PREPARE_COMMANDS >= hosts + 100 + STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3 + 1 + PLAN_RUNS_READ_COMMANDS, `priced at ${PREPARE_COMMANDS} commands`);
 });
 
 test("an entry taken out, with another store at the key, costs no more than the record's going it replaces (Revisor 2 on #3643)", () => {

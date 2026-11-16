@@ -1875,7 +1875,14 @@ export const CLOSE_RECORD_COMMANDS = STORE_LOCK_TRIES + 1 + 1 + 1 + 3 + 3;
  * per entry), so it never walks a store whose record is still there (Codex L, Codex P and Claude 2 cloud L on #3643).
  */
 export const WALK_START_READ_COMMANDS = 1;
-export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS;
+/**
+ * A closing store whose plan reads running (paid or in trial) has its place in the final closing line read before
+ * anything of it is touched (lib/closed-store-data.ts prepareStore: one ZSCORE), so a store whose plan runs again is
+ * never erased while its closing day has not begun (Claude 5's MEDIUM on #3643). Read again under the store's lock from
+ * the record closeStoreRecord already reads and the ZREM's own answer: no command more.
+ */
+export const PLAN_RUNS_READ_COMMANDS = 1;
+export const PREPARE_COMMANDS = (1 + MAX_TEAM) * (2 * 50 + 5) + 100 + CLOSE_RECORD_COMMANDS + WALK_START_READ_COMMANDS + PLAN_RUNS_READ_COMMANDS;
 
 /** What the whole export reads at the most, for a store of `bytes`: every product, course, lesson, post and form there can be, each read together, and its contacts a thousand at a command, each page with a read of the store's fields' values for its people a field (lib/store-export.ts). */
 export function exportCommands(bytes: number): number {

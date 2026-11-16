@@ -259,7 +259,11 @@ async function main(): Promise<void> {
   const otherHash = `nl:keys:${"b".repeat(32)}:${app.id}:sale`;
   await real([["HSET", otherHash, "cs_test_someone_else", "OTHER-AAAA"]]);
   is("its family is the license keys', counted in the room and erased on closing", [closingFamilyOf(saleHash), countedInRoom(saleHash), CLOSING[closingFamilyOf(saleHash)]?.how], ["nl:keys:", true, "erase"]);
-  const closing = await prepareStore(store);
+  // A store closes once its plan has ended: one whose plan runs again is never prepared (Claude 5's MEDIUM on #3643).
+  await setSubscription(OWNER, { active: false });
+  const ended = await storeForEmail(OWNER);
+  if (!ended) throw new Error("setup: the closing store");
+  const closing = await prepareStore(ended);
   // prepareStore answers null when it prepared nothing (#3643): here the store must be prepared.
   if (!closing) throw new Error("the closing store was not prepared");
   const owners = { byMark: new Map(closing.marks.map((mark) => [mark, closing.ref])), byHandle: new Map(closing.handles.map((handle) => [handle, closing.ref])), byRef: new Map([[closing.ref, closing.ref]]) };

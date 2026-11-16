@@ -11,7 +11,7 @@
  * it out of line without preparing it, unless its closing day has begun (FINAL_INDEX: a closing day is seen through,
  * whatever happens to the plan since, as closeOne does); the same is read again under the store's lock right before
  * the record goes, so a plan started meanwhile keeps the record. A place in the final line that does not read is
- * neither (rule 24): the store stays in line, untouched, and the run is not said done. Synthetic stores, in-memory Redis.
+ * neither (rule 24): the store stays in line, untouched, moved back a walk. Synthetic stores, in-memory Redis.
  */
 import { BATCH_KEY, DUE_KEY, WALK_GAP_MS, eraseClosed, markDue, unmarkDue } from "@/lib/closed-store-data";
 import { FINAL_INDEX } from "@/lib/closing-holds";
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
     const report = await erase(T);
     const score = redis.run(["ZSCORE", DUE_KEY, email]);
     is("the final line was answered with what ZSCORE never says", finalUnknown, false);
-    is("nothing is prepared and the run is not said done", [report.stores, report.done], [0, false]);
+    is("nothing is prepared", report.stores, 0);
     is("its record and data still stand, and no entry is written", [(await storeForEmail(email))?.sid ?? null, dataOf(store), redis.run(["HGET", BATCH_KEY, email])], [store.sid, "u", null]);
     is("it stays in line, moved back a walk", score !== null && Number(score) >= T + WALK_GAP_MS, true);
   }

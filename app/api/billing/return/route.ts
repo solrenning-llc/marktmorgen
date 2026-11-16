@@ -51,6 +51,12 @@ export async function GET(request: NextRequest) {
       return away(origin, studio("billing=already"));
     }
     if (!own && !started.active) return away(origin, studio("billing=unconfirmed"));
+    // Stripe could not be asked about it: nothing is known, so nothing is
+    // written. Written as not running, a store with no plan yet (a first
+    // payment, a trial just started) would be recorded as a plan that ended
+    // today and put in the line the closing job walks. The studio and the
+    // daily job read it again.
+    if (started.unknown) return away(origin, studio("billing=unconfirmed"));
 
     const saved = await setSubscription(ref, {
       customerId: started.customerId,

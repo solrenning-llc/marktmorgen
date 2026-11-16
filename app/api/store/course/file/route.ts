@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
   const file = found && Number.isInteger(index) ? found.lesson.files[index] : undefined;
   if (!found || !file) return plain(404, "Not found.");
 
+  // Not even a free preview's download while the store is switched off after a report (lib/takedown.ts), except to its
+  // students, as the lesson page (app/[handle]/course/[product]/[lesson]/page.tsx): they keep what they could open.
+  if (found.lesson.preview && store.suspended && (await courseAccess(store, product, await cookies())).state !== "open") return plain(404, "Not found.");
   if (!found.lesson.preview) {
     // Said to the student in the store's language (lib/buyer-words/courses.ts).
     const w = coursesWords(store.language);

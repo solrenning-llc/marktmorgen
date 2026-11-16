@@ -38,3 +38,25 @@ export function sendCount(reach: number, used: number, allowance: number): SendC
     line: `This email uses ${emails(reach)}; ${left === 1 ? "1 is" : `${n(left)} are`} left this month right now. ${times === 1 ? "That leaves room for this one only." : `If nothing else uses emails, that is enough to write to these people up to ${n(times)} times this month, this one included.`}`,
   };
 }
+
+/**
+ * The "Bought in the last" window to offer for an email past what is left
+ * (460 [EL4], unit 2; added 16 November 2026), or null when there is none.
+ *
+ * Past what is left, the composer offers the choice that already exists, the
+ * buyers still active (461 [EL5], lib/segments-rules.ts ACTIVE_DAYS): the
+ * widest window first, so the fewest people are left out, then one narrower
+ * window at a time while the email is still past. Never a window that the
+ * "Has not bought in the last" choice would leave empty, never a window that
+ * is not one of the choices, and nothing inside the month. It only names the
+ * window: the creator presses to choose it, sees the new count, and still
+ * presses send; the server still refuses what goes past the month.
+ */
+export function activeOffer(over: boolean, activeDays: number, quietDays: number, windows: readonly number[]): number | null {
+  if (!over || !Number.isSafeInteger(activeDays) || !Number.isSafeInteger(quietDays) || activeDays < 0 || quietDays < 0) return null;
+  // Only windows a buyer can still be in: wider than the quiet days, when they are set.
+  const open = [...windows].filter((d) => Number.isSafeInteger(d) && d > 0 && d > quietDays).sort((a, b) => b - a);
+  if (activeDays === 0) return open[0] ?? null;
+  if (!windows.includes(activeDays)) return null;
+  return open.find((d) => d < activeDays) ?? null;
+}

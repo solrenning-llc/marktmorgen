@@ -3,7 +3,7 @@
 import { type ImportReportLine, type ImportedStep, SequenceImportBox, reportWords } from "@/components/sequence-import-box";
 import type { LibraryEmailDraft, LibrarySequenceDraft } from "@/lib/template-library-intents";
 import { AiAssist, AiOn } from "@/components/ai-assist";
-import { sendCount } from "@/lib/send-count";
+import { activeOffer, sendCount } from "@/lib/send-count";
 import { afterSwitch, emailName, setAsideCount, setAsideNote, takeNewest } from "@/lib/set-aside";
 import { EMAIL_GOALS, type EmailGoal } from "@/lib/ai-rules";
 import { appendSequenceDraft, sequenceDraftSlots, DEFAULT_SEQUENCE_DRAFT, type DraftedStep, SEQUENCE_DRAFT_COUNTS } from "@/lib/sequence-draft";
@@ -821,6 +821,16 @@ function Compose(props: {
   // A label still being typed is not counted yet: no count is shown for a label other than the one typed.
   const reach = !invalidSpent && cleanLabel === countedLabel && reachResult?.key === countKey ? reachResult.count : null;
   const monthCount = reach !== null && !later && props.month ? sendCount(reach, props.month.used, props.month.allowance) : null;
+  // Past what is left, the buyers still active (460 [EL4], unit 2; 461 [EL5]): one window at a time, the widest first (lib/send-count.ts).
+  const offerDays = monthCount?.over ? activeOffer(true, activeDays, quietDays, ACTIVE_DAYS) : null;
+  // Set only when the creator pressed the offer, so the focus never moves by itself (WCAG 3.2.5).
+  const focusActive = useRef(false);
+  const activeBox = useRef<HTMLSelectElement>(null);
+  useEffect(() => {
+    if (!focusActive.current) return;
+    focusActive.current = false;
+    activeBox.current?.focus();
+  }, [activeDays, more]);
   const testPreview = testing ? subjectTestPreview(subject, { subjectB, share, hours, by }, reach) : null;
   const invalidTest = testing && testPreview?.state !== "ready";
   const reachPending = !invalidSpent && (reachResult?.key !== countKey || cleanLabel !== countedLabel);
@@ -1224,7 +1234,7 @@ function Compose(props: {
             {/* 461 [EL5]: the buyers still active, from the same buyers' ledger. */}
             <label className="block">
               <span className="field-label">Bought in the last</span>
-              <select className="field mt-2" value={activeDays} onChange={(e) => setActiveDays(Number(e.target.value))} aria-describedby="mail-active-help">
+              <select id="mail-active" ref={activeBox} className="field mt-2" value={activeDays} onChange={(e) => setActiveDays(Number(e.target.value))} aria-describedby="mail-active-help">
                 <option value={0}>Any time, or never</option>
                 {ACTIVE_DAYS.map((d) => (
                   <option key={d} value={d}>{`${d} days`}</option>
@@ -1264,6 +1274,14 @@ function Compose(props: {
         <p className="text-sm font-semibold text-ink" role="status">{invalidSpent ? "Correct the spending amount before checking recipients." : reach === null ? (reachPending ? "Checking recipients…" : "The recipient count is unavailable. Check it again before sending or scheduling.") : `${n(reach)} ${reach === 1 ? "person" : "people"}${narrowedNow && asOf !== null ? `, from your buyers ${asOfWords(asOf)}` : ""}`}</p>
         {/* What this email is of the month's emails, from the two numbers already on the page (lib/send-count.ts), read out when it changes. */}
         <p className={`text-sm ${monthCount?.over ? "font-semibold text-ink" : "text-ink-soft"}`} aria-live="polite" data-send-count>{monthCount?.line ?? ""}</p>
+        {offerDays !== null ? (
+          <div>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={locked} aria-describedby="mail-active-offer-hint" data-active-offer onClick={() => { setActiveDays(offerDays); setMore(true); focusActive.current = true; }}>
+              {`Write only to buyers who bought in the last ${offerDays} days`}
+            </button>
+            <span id="mail-active-offer-hint" className="field-hint mt-1 block">People who never bought from you are left out. You see the new count before anything is sent.</span>
+          </div>
+        ) : null}
         {reach === null && !invalidSpent ? <button type="button" className="btn btn-secondary btn-sm" disabled={locked || reachPending} aria-busy={reachPending} onClick={() => setCountRevision(value => value + 1)}>{reachPending ? "Checking recipients…" : "Check recipients again"}</button> : null}
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-0 flex-1">

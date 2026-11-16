@@ -123,6 +123,31 @@ async function main(): Promise<void> {
   const coursePage = readFileSync("app/[handle]/course/[product]/page.tsx", "utf8");
   is("and so does the course's own page", /!open && !settled && selling && endsAt !== null \? w\.accessEndsFact/.test(coursePage), true);
 
+  // A route that already read the course hands it to the gate, so a stamped learner's request never reads the record
+  // a second time (Claude 5's L1 on #3445): every courseAccess call after the route's own readCourse passes it.
+  part("a route hands the gate the course it already read");
+  const callsIn = (source: string): string[] => {
+    const calls: string[] = [];
+    for (let at = source.indexOf("courseAccess("); at >= 0; at = source.indexOf("courseAccess(", at + 1)) {
+      let depth = 0;
+      let end = at + "courseAccess".length;
+      for (; end < source.length; end += 1) {
+        if (source[end] === "(") depth += 1;
+        else if (source[end] === ")" && --depth === 0) break;
+      }
+      calls.push(source.slice(at, end + 1));
+    }
+    return calls;
+  };
+  for (const file of ["app/api/store/course/note/route.ts", "app/api/store/course/file/route.ts"]) {
+    const after = readFileSync(file, "utf8").split("export async function").map((handler) => {
+      const read = handler.indexOf("const course = await readCourse(");
+      return read < 0 ? [] : callsIn(handler.slice(read));
+    }).flat();
+    is(`${file}: the gate is asked after the route's own read, and every such call passes the course`,
+      [after.length > 0, after.filter((call) => !call.endsWith(", course)"))], [true, []]);
+  }
+
   part("the learner's gate, with the real ledger");
   redis.clear();
   // Synthetic Stripe: the stamped learner's purchase, or an outage.

@@ -602,6 +602,33 @@ async function main(): Promise<void> {
   const lateRows = Number((await redis.pipeline([["GET", lateRowsKey]]))[0] ?? 0) - rowsBefore;
   is("a deletion that lands before the write sends nothing: refused, no deal, the month's rows given back", [printed, lateIn.status, lateIn.body.error, lateDeals.length, lateRows], [true, 409, "erased", 0, 0]);
 
+
+  part("Claude 5 on #2048: a file whose new deals' own fields do not fit is refused before the month's rows and the room's work");
+  // TAKE_DATA counts a new slot's own field too (64 bytes, lib/store-data.ts): the check before the rows counts it, so a
+  // file that fits only without those fields is refused at one read, sent again and again.
+  const fieldsFile = Array.from({ length: 200 }, (_, i) => row(String(7200 + i), `Field deal ${i}`, "New", "Sales"));
+  const gauge = await paidStore("hubsgauge");
+  const gaugeBefore = (await dataUsed(gauge.store))?.used ?? 0;
+  is("control: the file fits an empty store", (await call({ action: "save", header: HEADER, rows: fieldsFile }, gauge.session)).status, 200);
+  const needs = ((await dataUsed(gauge.store))?.used ?? 0) - gaugeBefore;
+  const tight = await paidStore("hubstight");
+  const tightUsed = (await dataUsed(tight.store))?.used ?? 0;
+  await takeData(tight.store, [{ slot: "filler", bytes: contentRoomFor(tight.store) - tightUsed - (needs - 32 * 200) - 64, set: true }]);
+  const tightRowsKey = `nl:imports:rows:${tight.store.sid}:${windowId(tight.store, Date.now())}`;
+  const tightRowsBefore = Number((await redis.pipeline([["GET", tightRowsKey]]))[0] ?? 0);
+  const tightReal = redis.pipeline.bind(redis);
+  let tightWork = 0;
+  const tightAnswers: string[] = [];
+  try {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      for (const c of commands) if (c[0] === "EVAL" && c[1] === TAKE_DATA) tightWork += (c.length - 7) / 3;
+      return tightReal(commands);
+    }) as typeof redis.pipeline;
+    for (let i = 0; i < 3; i++) tightAnswers.push(String((await call({ action: "save", header: HEADER, rows: fieldsFile }, tight.session)).body.error));
+  } finally { redis.pipeline = tightReal; }
+  const tightRows = Number((await redis.pipeline([["GET", tightRowsKey]]))[0] ?? 0) - tightRowsBefore;
+  is("sent three times: refused each time, with no room work per deal and no rows taken", [tightAnswers, tightWork, tightRows, await dealCount(tight.store.statsId!)], [["store_full", "store_full", "store_full"], 0, 0, 0]);
+
   done();
 }
 

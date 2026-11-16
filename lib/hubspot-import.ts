@@ -311,6 +311,9 @@ function planAgainst(
   };
 }
 
+/** What the data room counts for a slot's own field while it is there (TAKE_DATA, lib/store-data.ts). */
+const NEW_FIELD_BYTES = 64;
+
 /** A whole count of bytes as the room keeps it, or null: anything else is unknown. */
 const roomCount = (value: unknown): number | null => {
   if (value === null) return 0;
@@ -401,7 +404,12 @@ export async function importHubSpotDeals(store: Store, file: HubSpotFile, option
     // costs a read each time. A room that cannot be read is unknown, never empty: refused as unavailable. The
     // per-deal take below still decides, in one step; this only refuses what it would surely refuse.
     const room = importRoom(snapshot.raw, pipelines, deals);
-    const grows = room.take.reduce((sum, change) => sum + change.bytes, 0);
+    // Each new slot's own field is counted too, as TAKE_DATA counts it (64 bytes, lib/store-data.ts; Claude 5 on #2048):
+    // every deal here is new (an id already here is never written over), and the pipelines' slot is new only when the
+    // store has no pipelines record yet. Counted short of that, a file could pass here and take the month's rows and
+    // the room's work for each deal before the take refused it.
+    const newFields = deals.length + (pipelines && !snapshot.raw ? 1 : 0);
+    const grows = room.take.reduce((sum, change) => sum + change.bytes, 0) + NEW_FIELD_BYTES * newFields;
     const used = await liveDataUsed(store, now);
     if (used === null) return refuse("unavailable", HUBSPOT_IMPORT_WORDS.unavailable);
     if (grows > 0 && used + grows > contentRoomFor(store, nowSeconds)) return refuse("store_full", dataFullWords(used, dataRoomFor(store, nowSeconds), largerPlanFor(store, nowSeconds)));

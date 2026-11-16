@@ -44,6 +44,23 @@ async function main(): Promise<void> {
   is("a list answered in another shape is unknown, never no sales", await readPayPalSales(statsId, 0, 10).then((r) => r.partial, () => "threw"), "threw");
   redis.pipeline = original;
 
+  // Codex L and Codex V on #4001 (MEDIUM): a sale's record is kept PAID_KEPT_SECONDS (400 days) by its own expiry, while
+  // its member in the list goes only at the next sale's trim. A member whose record expired by design is outside what
+  // is kept, so a whole reading stays whole; a record missing inside its keeping window is still a sale not read.
+  await redisPipeline([["DEL", salesKey, paidKey(order(1)), paidKey(order(2))]]);
+  const now = Math.floor(Date.now() / 1000);
+  const old = now - 401 * 86_400;
+  await redisPipeline([["ZADD", salesKey, String(at), order(1)], ["SET", paidKey(order(1)), record(statsId, 1, at)], ["ZADD", salesKey, String(old), order(3)]]);
+  is("a member whose record expired by design is outside the whole reading", await readPayPalSales(statsId, 0, 10).then((r) => [r.sales.length, r.partial], () => "threw"), [1, false]);
+  const inside = now - 399 * 86_400;
+  await redisPipeline([["ZADD", salesKey, String(inside), order(4)]]);
+  is("a record missing inside its keeping window is still unknown", await readPayPalSales(statsId, 0, 10).then((r) => [r.sales.length, r.partial], () => "threw"), [1, true]);
+  await redisPipeline([["ZREM", salesKey, order(4)]]);
+  redis.pipeline = (async (commands: (string | number)[][]) =>
+    commands[0][0] === "ZREVRANGEBYSCORE" ? [[order(1), "not a time"]] : original(commands)) as typeof redis.pipeline;
+  is("a member's time in another shape is unknown, never taken for expired", await readPayPalSales(statsId, 0, 10).then((r) => r.partial, () => "threw"), "threw");
+  redis.pipeline = original;
+
   done();
 }
 

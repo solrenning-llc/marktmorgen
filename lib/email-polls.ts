@@ -31,6 +31,30 @@ export const pollKey = (broadcastId: string) => `nl:mail:bc:${broadcastId}:poll`
 
 const isPlace = (place: unknown): place is number => typeof place === "number" && Number.isInteger(place) && place >= 0 && place < MAX_LEADS;
 
+/**
+ * One vote, or its taking back, in one step with the poll's end (recordVote). KEYS[1] the poll's votes; ARGV the
+ * recipient's place, the answer's index ("" to take it back) and the end in seconds. Answers {fields changed, EXPIREAT's
+ * answer}. A vote whose end did not set (EXPIREAT other than 1) is undone in the same step: the key it made is
+ * deleted, an answer it replaced is put back, a field it added is taken out, so no vote is kept without its end.
+ * Modelled by lib/redis-memory.ts.
+ */
+export const POLL_VOTE = `-- marktmorgen:email-poll-vote:v1
+local key, field = KEYS[1], ARGV[1]
+if ARGV[2] == '' then
+  local n = redis.call('HDEL', key, field)
+  return {n, redis.call('EXPIREAT', key, ARGV[3])}
+end
+local existed = redis.call('EXISTS', key)
+local before = redis.call('HGET', key, field)
+local n = redis.call('HSET', key, field, ARGV[2])
+local e = redis.call('EXPIREAT', key, ARGV[3])
+if e ~= 1 then
+  if existed == 0 then redis.call('DEL', key)
+  elseif before then redis.call('HSET', key, field, before)
+  else redis.call('HDEL', key, field) end
+end
+return {n, e}`;
+
 export type VoteResult = "recorded" | "withdrawn" | "closed" | "invalid" | "unknown";
 
 /**
@@ -46,14 +70,16 @@ export async function recordVote(broadcastId: string, place: number, option: num
   const key = pollKey(broadcastId);
   const until = Math.ceil(closesAt / 1000) + POLL_RESULTS_DAYS * 86_400;
   try {
-    const write = option === null ? ["HDEL", key, String(place)] : ["HSET", key, String(place), String(option)];
-    const replies = repliesFor(await redisPipeline([write, ["EXPIREAT", key, until]]), 2);
-    const changed = replies ? countOf(replies[0]) : null;
+    // The vote and its end in one step (POLL_VOTE): a vote whose end did not set is taken back in the same step, so no
+    // vote is ever kept, or counted, without its end (Codex X4 on #3673).
+    const replies = repliesFor(await redisPipeline([["EVAL", POLL_VOTE, 1, key, String(place), option === null ? "" : String(option), until]]), 1);
+    const pair = replies && Array.isArray(replies[0]) && replies[0].length === 2 ? (replies[0] as unknown[]) : null;
+    const changed = pair ? countOf(pair[0]) : null;
     if (changed === null || changed > 1) return "unknown";
     // A vote kept must go by itself when promised (app/privacy#email-polls): its end not set is not a vote kept.
     // Taking back a vote never cast leaves no key, so its end answers 0 there.
-    const ended = replies ? countOf(replies[1]) : null;
-    if (ended === null || (option !== null && ended !== 1)) return "unknown";
+    const ended = pair ? countOf(pair[1]) : null;
+    if (ended === null || ended > 1 || (option !== null && ended !== 1)) return "unknown";
     return option === null ? "withdrawn" : "recorded";
   } catch (error) {
     console.error("keeping a poll vote failed", error);

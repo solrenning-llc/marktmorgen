@@ -85,7 +85,7 @@ export type ErasureSize = {
  * and (C7 courses hunt) the read of the store's dropped courses (lib/removed-courses.ts), one command, whose courses
  * are then counted with the rest (ERASE_PER.courses, .lessons): 550 before it; and (#4471) the private podcast feeds of
  * removed products: the count of the store's noted products (SCARD), their set read with whether the walk of feeds
- * granted before the note is done (SMEMBERS and HGET), and, until it is, this person's own indexes looked for by at most
+ * granted before the note is done (SMEMBERS and HMGET), and, until it is, this person's own indexes looked for by at most
  * NOTE_INLINE_PAGES (4) SCAN pages: 551 before them.
  */
 export const ERASE_FIXED_COMMANDS = 558;

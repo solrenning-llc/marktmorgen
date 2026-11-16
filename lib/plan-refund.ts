@@ -178,11 +178,15 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
         if (!disputes || disputePage.has_more !== false) return { refund: { kind: "unknown", reason: "unreadable" } };
         // More than one, or none listed although the charge says disputed: not decided here.
         if (disputes.length !== 1) return { refund: { kind: "unknown", reason: "unreadable" } };
-        // Only this charge's own row decides (rule 30): one of another charge, or naming none, is unknown, so a dispute
-        // won elsewhere never makes the guarantee payable on a charge whose own dispute may be lost (Claude 5 on #3133).
-        if (idOf(disputes[0].charge) !== chargeId) return { refund: { kind: "unknown", reason: "unreadable" } };
-        disputeStatus = typeof disputes[0].status === "string" ? disputes[0].status : "unknown";
-        disputedCents = num(disputes[0].amount);
+        // The one row must prove it is this charge's own dispute (#4468, rule 30): the list's filter is not proof, and
+        // another payment's lost or won dispute would hide or allow this refund (also Claude 5 on #3133). Its payment intent, when given, must match too.
+        const dispute = disputes[0];
+        const intent = dispute.payment_intent;
+        if (idOf(dispute.charge) !== chargeId || (intent != null && idOf(intent) !== idOf(charge.payment_intent))) {
+          return { refund: { kind: "unknown", reason: "unreadable" } };
+        }
+        disputeStatus = typeof dispute.status === "string" ? dispute.status : "unknown";
+        disputedCents = num(dispute.amount);
       }
       const lines = embedded(invoice.lines);
       if (!lines) return { refund: { kind: "unknown", reason: "unreadable" } };
@@ -190,7 +194,12 @@ export async function readPlanRefund(store: Store, nowSeconds = Math.floor(Date.
       const price = obj(line?.price);
       const interval = obj(price?.recurring)?.interval;
       const cycle = interval === "year" ? "year" : interval === "month" ? "month" : planOf(sub).cycle;
-      const fee = obj(charge.balance_transaction);
+      // Stripe's fee is taken only from this charge's own balance transaction: its source is this charge and its type a
+      // charge's (or a payment's, for a py_ charge). One that belongs to another charge, or whose source cannot be read,
+      // would size the refund with a fee that is not this payment's: the fee is then unread, never another's or zero
+      // (rule 30, issue #4450).
+      const bt = obj(charge.balance_transaction);
+      const fee = bt && idOf(bt.source) === chargeId && (bt.type === "charge" || bt.type === "payment") ? bt : null;
       const paidAt = num(obj(invoice.status_transitions)?.paid_at);
       const input: PlanRefundCharge = {
         currency: typeof charge.currency === "string" ? charge.currency : "",

@@ -111,7 +111,9 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/course-finish.ts", how: "erased", what: "The marks that they opened and finished each course" },
   { file: "lib/quiz.ts", how: "erased", what: "Their quiz tries, results and passes" },
   { file: "lib/assignment.ts", how: "erased", what: "The work they handed in for assignments, files included, and your feedback on it" },
-  { file: "lib/submission-store.ts", how: "open", what: "Files they sent you for review on a lesson, with their note and address, and their uploads still open. Not reached by deletion yet: this cannot be turned on for any lesson until it is" },
+  // Nothing is kept yet: no code writes a lesson's setup until the studio's setting (#3571), so no buyer can send a file,
+  // and the deletion and the copy of what they send arrive before it (#3570, "erased", with lib/person-copy.ts).
+  { file: "lib/submission-store.ts", how: "none", what: "Files buyers send for review on a lesson: nothing is kept yet, since no lesson can ask for one until its deletion and its copy are in place" },
   { file: "lib/certificate.ts", how: "erased", what: "Their certificates; a certificate's page then says it was not found" },
   { file: "lib/lesson-comments.ts", how: "erased", what: "Their comments under lessons, the answers under them, and the name they chose" },
   { file: "lib/lesson-notes.ts", how: "erased", what: "Their private notes on lessons, which only they could see" },

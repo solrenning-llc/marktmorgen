@@ -15,6 +15,7 @@ import {
   bookingsWork, codeMakeWork, codeStopWork, codesWork, eventsWork, keptNumbersWork, listPageMost, membershipsWork, numbersWork, productsPageWork, scannedPageWork, studentsPageWork,
 } from "@/lib/api-read-rules";
 import { BOOK_STRIPE_PAGES } from "@/lib/affiliates";
+import { MAX_CODES } from "@/lib/discount";
 
 /** What each reading that reads more than a page counts as, from the code that takes it (lib/api-read-rules.ts). */
 const STUDENTS_PAGE_COUNTS = 1 + apiReadUnits(studentsPageWork(API_PAGE, 1));
@@ -116,7 +117,8 @@ export default function DevelopersPage() {
         <p>
           Every answer is JSON. A list comes as <code className="font-mono">data</code>, and a long list comes a page at a
           time with <code className="font-mono">next</code>: send it back as <code className="font-mono">?cursor=</code> for
-          the next page, until it is <code className="font-mono">null</code>.
+          the next page, until it is <code className="font-mono">null</code>. A cursor a list did not give is answered 400{" "}
+          <code className="font-mono">invalid_cursor</code>: start again without one.
           {` A page holds about ${API_PAGE} rows. Products never has more; your list, your members and a course's students can have a few more on a page, and a page can come back empty before the last one, so keep asking until next is null. Times are ISO 8601, in UTC. Amounts are in the currency's smallest unit — cents for dollars.`}
         </p>
         <p>
@@ -148,7 +150,7 @@ export default function DevelopersPage() {
 429  {"error": "monthly_limit", "message": "This read takes ${n(BOOKINGS_COUNT)} of your store's API requests, more than your store has left, so nothing was read."}
 429  {"error": "monthly_limit", "message": "This read may take up to ${n(LIST_PAGE_HELD)} of your store's API requests, more than your store has left, so nothing was read."}
 400  {"error": "unknown_field", "message": "No item in this answer has a field named “nothing_here”."}
-400  {"error": "fields", "message": "“bad-name” cannot be a field name. Use letters, digits and underscores, at most 30 fields."}
+400  {"error": "fields", "message": "“bad-name” cannot be a field name. A field name is lowercase letters, digits and underscores, starting with a letter, up to ${FIELD_NAME_MAX} characters; ask for at most ${MAX_FIELDS_ASKED} fields."}
 429  {"error": "no_place", "message": "Stores without a paid plan are full for this month, so this can't run right now. …"}
 409  {"error": "store_full", "message": "Your store's data room is full, so nothing was added. …"}
 403  {"error": "key_paused", "message": "This key is paused: the store's team now logs in with a second step, and the key was made without one. …"}
@@ -561,7 +563,9 @@ export default function DevelopersPage() {
       <LegalSection title="Discount codes">
         <Endpoint path="/api/v1/codes">
           Your discount codes, read from your own Stripe account as your studio lists them: what each takes off, how many
-          times it was used, its limit, its smallest order and whether it is live.
+          times it was used, its limit, its smallest order and whether it is live. One answer holds your{" "}
+          {MAX_CODES} newest codes; <code className="font-mono">has_more</code> is true when you have older ones too,
+          which you can see in your Stripe dashboard.
         </Endpoint>
         <p>{`Reading them asks your Stripe account, so it counts as ${n(CODES_COUNT)} of your API requests; making a code counts as ${n(CODE_MAKE_COUNT)} and switching one off as ${n(CODE_STOP_COUNT)}, taken before Stripe is asked.`}</p>
         <Endpoint method="POST" path="/api/v1/codes">
@@ -574,7 +578,10 @@ export default function DevelopersPage() {
         </Endpoint>
         <Endpoint method="DELETE" path="/api/v1/codes?id=promo_…">
           Switches one of your store&apos;s codes off. Stripe never deletes a code that may be on a receipt, so it stays in
-          the list, switched off. Making and switching off need a key that writes; all three answer 409{" "}
+          the list, switched off. If it was switched off but your codes could not be read back from Stripe, the answer
+          has <code className="font-mono">stopped</code> with its id, <code className="font-mono">listed: false</code> and{" "}
+          <code className="font-mono">data: null</code>: read them again with GET. Making and switching off need a key
+          that writes; all three answer 409{" "}
           <code className="font-mono">not_selling</code> while your store is not taking payments.
         </Endpoint>
       </LegalSection>

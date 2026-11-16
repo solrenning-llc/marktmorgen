@@ -122,4 +122,23 @@ is("counts by stage, with late apart", queueCounts([doneOld, later, doneNew, soo
 part("Stages in words, never by color alone");
 is("each stage has its words", STAGE_LABELS, { received: "Received", in_production: "In production", delivered: "Delivered" });
 
+part("An unreadable clock is never \"not late\" (Codex L and the earlier review on #3627, LEVE)");
+const throwsOn = (f: () => unknown) => {
+  try {
+    f();
+    return false;
+  } catch {
+    return true;
+  }
+};
+for (const clock of [NaN, Infinity, -1, 0, 1.5]) {
+  is(`isLate refuses the clock ${clock}`, throwsOn(() => isLate(late, clock)), true);
+  is(`refundOffered refuses the clock ${clock}`, throwsOn(() => refundOffered(late, clock)), true);
+  is(`daysLeft refuses the clock ${clock}`, throwsOn(() => daysLeft(late, clock)), true);
+  is(`queueCounts refuses the clock ${clock}`, throwsOn(() => queueCounts([late], clock)), true);
+}
+is("a readable clock still answers", [isLate(late, NOW), typeof daysLeft(late, NOW)], [true, "number"]);
+is("startOrder keeps the days as a number, never a typed text", startOrder({ paidAt: PAID, days: "5" as unknown as number })?.days ?? null, 5);
+is("so what it keeps is read back whole", parseMadeOrder(startOrder({ paidAt: PAID, days: "5" as unknown as number })) !== null, true);
+
 done();

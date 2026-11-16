@@ -64,8 +64,19 @@ export function parseProductionDays(raw: unknown): number | null {
 
 /** A paid order, received at its payment; null when the time or the days are not valid. */
 export function startOrder(input: { paidAt: number; days: number }): MadeOrder | null {
-  if (!isTime(input.paidAt) || parseProductionDays(input.days) === null) return null;
-  return { paidAt: input.paidAt, days: input.days, steps: [{ stage: "received", at: input.paidAt }] };
+  const days = parseProductionDays(input.days);
+  if (!isTime(input.paidAt) || days === null) return null;
+  // The days as read, a number, never the raw value a caller typed (Codex L on #3627): parseMadeOrder reads it back.
+  return { paidAt: input.paidAt, days, steps: [{ stage: "received", at: input.paidAt }] };
+}
+
+/**
+ * The time a reader is asked at, in seconds: one that is not a real time (NaN, a fraction, zero or less, past the
+ * range) is unknown and throws, never read as "not late" or as a count of days (Codex L on #3627).
+ */
+function clock(now: number): number {
+  if (!isTime(now)) throw new RangeError("an unreadable clock for a made-to-order reading");
+  return now;
 }
 
 /** The second the order is due: the payment plus the days promised. */
@@ -122,9 +133,10 @@ export function moveStage(order: MadeOrder, next: OrderStage, now: number): Stag
   return { ok: true, order: { ...order, steps: [...order.steps, { stage: next, at: now }] } };
 }
 
-/** Past the date promised and not delivered. On the promised second itself it is not late yet. */
+/** Past the date promised and not delivered. On the promised second itself it is not late yet. An unreadable clock throws. */
 export function isLate(order: MadeOrder, now: number): boolean {
-  return stageOf(order) !== "delivered" && now > promisedBy(order);
+  const at = clock(now);
+  return stageOf(order) !== "delivered" && at > promisedBy(order);
 }
 
 /** Whether it was delivered after the date promised; false while not delivered. */
@@ -138,8 +150,9 @@ export function deliveredLate(order: MadeOrder): boolean {
  * negative when late, also counted up; null once delivered.
  */
 export function daysLeft(order: MadeOrder, now: number): number | null {
+  const at = clock(now);
   if (stageOf(order) === "delivered") return null;
-  const remaining = promisedBy(order) - now;
+  const remaining = promisedBy(order) - at;
   return remaining >= 0 ? Math.ceil(remaining / DAY_SECONDS) : -Math.ceil(-remaining / DAY_SECONDS);
 }
 
@@ -166,6 +179,7 @@ export function sortQueue(orders: readonly MadeOrder[]): MadeOrder[] {
 
 /** How many orders are at each stage, and how many of those not delivered are late. */
 export function queueCounts(orders: readonly MadeOrder[], now: number): Record<OrderStage | "late", number> {
+  clock(now);
   const counts: Record<OrderStage | "late", number> = { received: 0, in_production: 0, delivered: 0, late: 0 };
   for (const order of orders) {
     counts[stageOf(order)] += 1;

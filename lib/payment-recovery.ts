@@ -68,6 +68,13 @@ const cardCursorKey = (account: string) => `nl:dun:cards:${account}`;
 export const CARD_PAGES = 5;
 /** Cards looked up one by one, for memberships paid with the customer's card rather than their own. */
 export const CARD_LOOKUPS = 20;
+/**
+ * At most this many card notices written per store per run (16 November 2026): each is a claim, a card link, an email
+ * and, for a card page already finished, up to four Stripe calls, so the run's cost has a ceiling before it is spent
+ * (regra MR), as failed renewals have PER_STORE. A notice past it waits for the next run: the run that stopped at it
+ * leaves the reading where it began, so the same pages are read again, and a member told already is never told twice.
+ */
+export const CARD_NOTICES_PER_RUN = 100;
 const SENT_SECONDS = 90 * 86_400;
 /**
  * At most this many failed renewals written about per store per run (Claude 3 on #2714): each is a claim, a card

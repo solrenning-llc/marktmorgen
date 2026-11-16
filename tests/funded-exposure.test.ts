@@ -1,8 +1,12 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { assessFundedExposure, fundedExposureDetails, EXPOSURE_SCOPES } from '@/lib/funded-exposure-rules';
 import { assessCustomerWorstCase } from '@/lib/net-margin-rules';
 import { zeroExposureFixture } from './margin-test-fixtures';
+// The synthetic review names this month when it is made (tests/margin-test-fixtures.ts zeroExposureFixture) and the
+// code reads the month again on every call: a run crossing 00:00 UTC on a month's last day failed the review. Only Date
+// is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 function loss(cents:number){const r=zeroExposureFixture();r.cases.trial.maximumMonthlyCases=3;r.cases.trial.worstCase!.costCeilings.ai=cents;r.monthlyBudgetCents=cents*3;return r;}
 test('zero revenue is not a profitable customer but its whole known cost can be financed',()=>{const r=loss(100);assert.equal(assessCustomerWorstCase(r.cases.trial.worstCase).approved,false);assert.deepEqual(assessFundedExposure(r),{approved:true,reason:'approved',requiredBudgetCents:300,monthlyBudgetCents:300});});
 test('one cent under the simultaneous exposure refuses approval',()=>{const r=loss(100);r.monthlyBudgetCents=299;assert.equal(assessFundedExposure(r).reason,'underfunded');});

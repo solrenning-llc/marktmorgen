@@ -174,6 +174,15 @@ async function main(): Promise<void> {
   const noPosts = await aboutCounts(store, id, (await readConfig(id))!);
   spoil = "none";
   is("posts left out, joined real", [noPosts?.posts ?? "omitted", noPosts?.joined], ["omitted", 2]);
+  // Codex G's LOW on #3016: a kept record that parses to JSON null (or any non-object) is unknown, not a throw.
+  const [newest] = (await redis.pipeline([["ZREVRANGE", `nl:cm:${id}:feed`, 0, 0]]))[0] as string[];
+  const kept = (await redis.pipeline([["GET", `nl:cm:${id}:p:${newest}`]]))[0] as string;
+  for (const bad of ["null", "7", "[]"]) {
+    await redis.pipeline([["SET", `nl:cm:${id}:p:${newest}`, bad], ["DEL", `nl:cm:${id}:about`]]);
+    const odd = await aboutCounts(store, id, (await readConfig(id))!).then((c) => c, (e: unknown) => `threw: ${String(e)}`);
+    is(`a post record of ${bad}: posts left out, joined real, nothing kept`, [typeof odd === "object" && odd !== null ? (odd.posts ?? "omitted") : odd, typeof odd === "object" && odd !== null ? odd.joined : null, (await redis.pipeline([["EXISTS", `nl:cm:${id}:about`]]))[0]], ["omitted", 2, 0]);
+  }
+  await redis.pipeline([["SET", `nl:cm:${id}:p:${newest}`, kept]]);
   sent = [];
   await takePublicRequest(store, "buyer", Date.now(), requestLimitFor(store));
   is("(the store's requests used up)", await takePublicRequest(store, "public", Date.now(), 1), false);

@@ -14,6 +14,7 @@ import { FAMILIES, UNITS, afterEndByteMonths, itemBytes, keptParts, partAverage,
 import { ADD_ON_LINES, COST_LINES, PER_PAYMENT_LINES } from "./plan-cost-registry";
 import { DATA_ROOM_BYTES, ITEM_DATA_BYTES, MAX_ORDER_ITEMS, NON_PAYING_DATA_ROOM_BYTES, ORDER_DATA_BYTES, contentRoomFor, orderDataBytes, orderReserveFor } from "@/lib/store-data-rules";
 import { TIERS } from "@/lib/plan";
+import { OUTBOX_MAX_KEPT, OUTBOX_RECORD_MAX_BYTES } from "@/lib/webhook-outbox";
 
 const root = process.cwd();
 const read = (file: string) => readFileSync(join(root, file), "utf8");
@@ -135,4 +136,18 @@ test("the arithmetic: an average never above what is kept at once, and every pla
 test("the cost registry prices the room and what is kept outside it, and keeps nothing open", () => {
   assert.ok(COST_LINES.some((line) => line.id === "database-storage"));
   assert.ok(PER_PAYMENT_LINES.some((line) => line.id === "retained-data"));
+});
+
+test("the webhook outbox is priced at its own ceiling: a store can fill the whole outbox, never more", () => {
+  // lib/webhook-outbox.ts keeps at most OUTBOX_MAX_KEPT events of at most OUTBOX_RECORD_MAX_BYTES for the whole site,
+  // counted in the script that keeps one (OUTBOX_ADMIT). One store may take all of it, so its worst case is the whole
+  // outbox, each record with its key and its member in the due line; a per-request figure above that ceiling counts
+  // bytes the code never keeps (Claude 4 on the US$ 65 first year, 16 November 2026).
+  const records = FAMILIES["nl:hookout:@lib/webhook-outbox.ts"];
+  const ceiling = OUTBOX_MAX_KEPT * (OUTBOX_RECORD_MAX_BYTES + 2 * 256);
+  for (const tier of TIERS) {
+    const peak = (records.parts ?? []).reduce((sum, part) => sum + partPeak(part, tier), 0);
+    assert.ok(peak > 0, `${tier}: the outbox is priced`);
+    assert.ok(peak <= ceiling, `${tier}: the outbox is priced at ${peak} bytes, above the ${ceiling} the code can keep`);
+  }
 });

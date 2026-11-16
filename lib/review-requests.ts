@@ -68,6 +68,8 @@ export const REVIEW_STOP = /^[0-9a-f]{40}$/;
 
 const sha = (value: string) => createHash("sha256").update(value).digest("hex");
 const sentKey = (reference: string) => `nl:rev:ask:sent:${reference}`;
+/** That address's stop on review requests, for the person's copy to read (lib/person-copy.ts). */
+export const reviewStopMarkKey = (statsId: string, email: string) => offKey(statsId, email);
 const offKey = (statsId: string, email: string) => `nl:rev:off:${statsId}:${sha(`nimbus-review-off:${normaliseEmail(email)}`).slice(0, 32)}`;
 const stopKey = (token: string) => `nl:rev:stop:${token}`;
 

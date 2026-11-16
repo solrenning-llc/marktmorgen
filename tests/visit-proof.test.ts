@@ -20,6 +20,7 @@ import { publicVisitLimit, visitLimitFor } from "@/lib/traffic-rules";
 import { botid, type Verdict } from "./visit-proof-world";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+import { withinOneUtcDay } from "./one-utc-day";
 
 const PHONE = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
 
@@ -38,6 +39,17 @@ async function hit(handle: string, n: number, verdict: Verdict, kind: "v" | "p" 
 }
 
 async function main(): Promise<void> {
+  // The checks read the visits of the window the clock is in, before and after; a real month end passing between the
+  // two read the new window's 0 against the old one's count (got -1). The clock stays inside one UTC day.
+  const realClock = withinOneUtcDay();
+  try {
+    await checks();
+  } finally {
+    realClock();
+  }
+}
+
+async function checks(): Promise<void> {
   redis.clear();
   const env = process.env as Record<string, string | undefined>;
   env.VERCEL = "1";

@@ -176,7 +176,15 @@ const EVENT_PAGES = 10;
  * is read whole to decide, but no more than this is spent on it in one run, as when only its first page was read;
  * the rest wait for the next run.
  */
-const OFFERS_PER_RUN = 100;
+export const OFFERS_PER_RUN = 100;
+
+/**
+ * The most commands a come-back link not written as asked costs, with nothing sent (Claude 7 on #3889): the link taken
+ * back (DEL, 1) and this run's two marks let go (releaseMark: lib/redis-lock.ts RELEASE, one EVAL and its GET and DEL,
+ * 3 each, as Upstash bills a script). At most OFFERS_PER_RUN offers a store a run; priced in tests/plan-cost-registry.ts
+ * (come-back-unwritten-links) and held in tests/winback-link-write-exact.test.ts.
+ */
+export const UNWRITTEN_LINK_COMMANDS = 7;
 
 async function sweepStore(store: Store, deadline: number, now: number): Promise<number> {
   const account = store.stripeAccountId as string;

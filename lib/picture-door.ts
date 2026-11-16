@@ -1,6 +1,7 @@
 import { del, head } from "@/lib/blob";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { essentialLimitState, type LimitState } from "@/lib/request-guard";
 
 /**
  * Pictures let in through the picture door (app/api/store/image/upload) and
@@ -30,16 +31,34 @@ import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
  * never delete it. A picture put on before this rule stays where it is shown
  * and can still be kept or replaced there.
  *
- * One list per store's picture folder, so one store's doors never push out
- * another's. Notes older than PICTURE_DOOR_SECONDS, and past the newest
- * PICTURE_DOOR_MAX of the store, are dropped as new ones come in, and the list
- * itself expires a window after its last note; a dropped or stale note is
- * never taken, so its file is never deleted by a failure (it costs storage, at
- * most MAX_IMAGE_BYTES in lib/product-image.ts), never deleted wrongly.
+ * One list per store's picture folder, so one store's doors never fill
+ * another's. Notes older than PICTURE_DOOR_SECONDS are dropped as new ones
+ * come in, and the list itself expires a window after its last note; a stale
+ * note is never taken, so its file is never deleted by a failure (it costs
+ * storage, at most MAX_IMAGE_BYTES in lib/product-image.ts), never deleted
+ * wrongly.
+ *
+ * Each door is a write to the file store, and a picture never put on anything
+ * stays there, so the doors are capped before one is signed (owner rule MR: a
+ * ceiling before every spend; rule 24 inventory A1, 8 November 2026): a store
+ * already holding PICTURE_DOOR_MAX fresh notes is refused, counted exactly,
+ * never by pushing its oldest out (which let the door open without end), and
+ * a store's doors are counted by the hour (PICTURE_DOORS_PER_HOUR) before the
+ * file store is asked. A count that cannot be read opens nothing.
  */
 export const PICTURE_DOOR_SECONDS = 24 * 60 * 60;
-/** The most notes a store keeps, newest first: past it the oldest go, and their files are kept, not deleted. */
+/** The most fresh notes a store may hold, nothing taken yet: one more door is refused (PictureDoorFull), none pushed out. */
 export const PICTURE_DOOR_MAX = 1_000;
+/** The doors a store may open in an hour, counted before the file store is asked or anything is signed. */
+export const PICTURE_DOORS_PER_HOUR = 200;
+
+/** The store already holds PICTURE_DOOR_MAX fresh doors: nothing was noted, and the door is not opened. */
+export class PictureDoorFull extends Error {
+  constructor() {
+    super("pictures_waiting");
+    this.name = "PictureDoorFull";
+  }
+}
 
 /** A picture's path is images/<folder>/<file>; its store's list is named by the folder. */
 function doorsKey(path: string): string | null {
@@ -48,8 +67,21 @@ function doorsKey(path: string): string | null {
 }
 
 /**
- * Writes down a picture the door just signed for, in milliseconds; old notes are dropped with it. False when it
- * could not be written: such an upload could never be put on anything, so the door is not opened for it.
+ * Counts one door of this picture's store in the hour, before anything is asked of the file store: "within", or
+ * "exceeded" past PICTURE_DOORS_PER_HOUR, or "unknown" when the count could not be read (lib/request-guard.ts,
+ * essentialLimitState), which opens nothing. A count taken is spent, even when the door is refused later.
+ */
+export async function pictureDoorHour(path: string): Promise<LimitState> {
+  const key = doorsKey(path);
+  if (!key) return "unknown";
+  return essentialLimitState("picture-door", key.slice("nl:pictures:doors:".length), PICTURE_DOORS_PER_HOUR, 60 * 60);
+}
+
+/**
+ * Writes down a picture the door just signed for, in milliseconds; stale notes are dropped with it. False when it
+ * could not be written or its count could not be read: such an upload could never be put on anything, so the door is
+ * not opened for it. Throws PictureDoorFull, with nothing noted, when the store already held PICTURE_DOOR_MAX fresh
+ * notes.
  */
 export async function notePictureDoor(path: string, now = Date.now()): Promise<boolean> {
   const key = doorsKey(path);
@@ -57,14 +89,19 @@ export async function notePictureDoor(path: string, now = Date.now()): Promise<b
   const replies = repliesFor(await redisPipeline([
     ["ZREMRANGEBYSCORE", key, 0, now - PICTURE_DOOR_SECONDS * 1000],
     ["ZADD", key, now, path],
-    ["ZREMRANGEBYRANK", key, 0, -(PICTURE_DOOR_MAX + 1)],
+    ["ZCARD", key],
     ["EXPIRE", key, PICTURE_DOOR_SECONDS],
   ]), 4);
-  // Noted only on its whole acknowledgement (Codex P on #2156): a count for each trim, 0 or 1 for the add, and 1
-  // for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
+  // Noted only on its whole acknowledgement (Codex P on #2156): a count for the trim, 0 or 1 for the add, the list's
+  // exact count, and 1 for the expiry the add made possible. Anything else is not a note, and the upload is not opened.
   if (!replies) return false;
-  const [trimmed, added, kept, expires] = replies.map(countOf);
-  return trimmed !== null && (added === 0 || added === 1) && kept !== null && expires === 1;
+  const [trimmed, added, held, expires] = replies.map(countOf);
+  if (trimmed === null || (added !== 0 && added !== 1) || held === null || expires !== 1) return false;
+  if (held <= PICTURE_DOOR_MAX) return true;
+  // Past the cap with this one: it is taken back off (best effort; a note left on a name with no file deletes nothing
+  // and goes with the day), and the door is refused.
+  if (added === 1) await redisPipeline([["ZREM", key, path]]).catch(() => {});
+  throw new PictureDoorFull();
 }
 
 /**
@@ -116,15 +153,13 @@ export async function takePictureDoor(paths: string[], now = Date.now()): Promis
  * only while no file has it, and an upload can never write over a file; the
  * time read here is a second check that a file stored before its note (a door
  * asked again for somebody's picture) is kept. Anything that cannot be read is
- * kept. A note given back once (givePictureDoorBack) already spent this head's
- * share on its first check, so its file is kept, unread. Best effort: nothing
- * here throws.
+ * kept. Best effort: nothing here throws.
  */
 export async function dropTakenPictures(taken: Map<string, number>, paths: string[]): Promise<void> {
   const ours: string[] = [];
   for (const path of new Set(paths)) {
     const noted = taken.get(path);
-    if (noted === undefined || wasGivenBack(noted)) continue;
+    if (noted === undefined) continue;
     const stored = await head(path).then((found) => new Date(found.uploadedAt).getTime(), () => NaN);
     if (Number.isFinite(stored) && stored > noted) ours.push(path);
   }
@@ -132,35 +167,23 @@ export async function dropTakenPictures(taken: Map<string, number>, paths: strin
 }
 
 /**
- * What a note given back after an unknown check carries on top of its time (ms): the door writes whole milliseconds
- * (Date.now()), so a time with this half is a note given back once (givePictureDoorBack), never given back again.
+ * Whether a note was put back on the door once already (returnToDoor): its time carries half a millisecond. A picture
+ * taken with such a note is checked again only paid for as a studio request (lib/picture-check.ts pictureChecker).
  */
-export const GIVEN_BACK = 0.5;
-
-/** Whether a note taken from the door (its time, from takePictureDoor) was given back once already. */
-export function wasGivenBack(noted: number): boolean {
-  return !Number.isInteger(noted);
-}
+export const putBackOnce = (noted: number): boolean => !Number.isInteger(noted);
 
 /**
- * Puts back on the door, once, the notes of pictures whose check met an unknown before it read anything (a passing
- * outage of the file store on its head: lib/picture-check.ts, checkedPictures; Claude 2 on #2843), with the time each
- * was signed for and GIVEN_BACK on top, so the creator's save tried again takes it and checks it, and a note given
- * back is never given back twice. That one more head is the share of the clean-up head its check is counted with
- * (tests/plan-cost-registry.ts, pictureCheckBlob), which a note given back never sends (dropTakenPictures), so a
- * picture is still asked about within its one check in all, and read at most once. A note already given back, or
- * one past its window, is not put back. Best effort: when it cannot be written the file is kept, never deleted.
+ * Puts pictures this request took from the door back on it, each at the time given (ms), after a check of the file
+ * did not finish (Claude 2 on #2843, 6750890970): the file is kept, and a later save finds the picture and checks it
+ * again. Only a path with a door list; best effort, nothing here throws (a note not put back leaves a file nothing
+ * shows, kept: storage, never a picture deleted).
  */
-export async function givePictureDoorBack(notes: Map<string, number>, now = Date.now()): Promise<void> {
-  const byKey = new Map<string, (string | number)[]>();
-  for (const [path, noted] of notes) {
+export async function returnToDoor(entries: ReadonlyArray<readonly [string, number]>): Promise<void> {
+  const commands: (string | number)[][] = [];
+  for (const [path, at] of entries) {
     const key = doorsKey(path);
-    if (!key || wasGivenBack(noted) || !(noted > 0 && noted >= now - PICTURE_DOOR_SECONDS * 1000)) continue;
-    byKey.set(key, [...(byKey.get(key) ?? []), noted + GIVEN_BACK, path]);
+    if (!key || !Number.isFinite(at) || at <= 0) continue;
+    commands.push(["ZADD", key, at, path], ["EXPIRE", key, PICTURE_DOOR_SECONDS]);
   }
-  if (byKey.size === 0 || !isRedisConfigured()) return;
-  // NX: a note there now is the door's own and keeps its time. The list lives a window after this, as after a note.
-  await redisPipeline([...byKey].flatMap(([key, pairs]) => [["ZADD", key, "NX", ...pairs], ["EXPIRE", key, PICTURE_DOOR_SECONDS]])).catch(
-    (error: unknown) => console.error("could not give pictures back to the door; they are kept", error),
-  );
+  if (commands.length && isRedisConfigured()) await redisPipeline(commands).catch(() => {});
 }

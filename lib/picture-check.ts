@@ -8,19 +8,16 @@
  * (lib/sales-page.ts, PicturesBlock).
  */
 import { BlobNotFoundError } from "@vercel/blob";
-import { del, get, head } from "@/lib/blob";
-import { givePictureDoorBack } from "@/lib/picture-door";
+import { get, head } from "@/lib/blob";
+import { dropTakenPictures, putBackOnce, returnToDoor } from "@/lib/picture-door";
 import { IMAGE_CONTENT_TYPES, MAX_IMAGE_BYTES } from "@/lib/product-image";
 import { sniffPhotoType } from "@/lib/store-photo";
 
-/**
- * The first bytes of a stored file, to see what it really is; null when the file store says it is not there (404).
- * Any other answer without the file's bytes throws: unknown, never "not a picture".
- */
-async function firstBytes(path: string): Promise<Uint8Array | null> {
+/** The first bytes of a stored file, to see what it really is; "gone" when the store says there is no such file, null when its answer is not known. */
+async function firstBytes(path: string): Promise<Uint8Array | "gone" | null> {
   const found = await get(path, { access: "private" });
-  if (!found) return null;
-  if (found.statusCode !== 200 || !found.stream) throw new Error(`a picture's read answered ${found.statusCode}`);
+  if (!found) return "gone";
+  if (found.statusCode !== 200 || !found.stream) return null;
   const reader = found.stream.getReader();
   const chunks: Uint8Array[] = [];
   let length = 0;
@@ -41,66 +38,75 @@ async function firstBytes(path: string): Promise<Uint8Array | null> {
 }
 
 /**
- * What the file store proves about a file: a picture; not one (not there, too big, or its own bytes are not a JPEG's
- * or a WebP's the store agrees with), with when it was stored (NaN when it is not there); or unknown, when a head or a
- * read failed any other way (a timeout, a 5xx, a reset), saying whether a read was sent. Never throws.
+ * What the file store says of a file: "picture" when it is there, weighs no more than a picture may, and is a JPEG or
+ * a WebP by its own bytes; "not" when the store answered and it is none of that (no such file, too big, other bytes);
+ * "unknown" when the store did not answer (a timeout, a 5xx, a reset), never read as "not" (Claude 2 on #2843,
+ * 6750890970; CX-123 rule 24).
  */
-type Verdict = { kind: "picture" } | { kind: "not_picture"; storedAt: number } | { kind: "unknown"; read: boolean };
-
-async function verdictOf(path: string): Promise<Verdict> {
+export async function pictureVerdict(path: string): Promise<"picture" | "not" | "unknown"> {
   let found: Awaited<ReturnType<typeof head>>;
   try {
     found = await head(path);
   } catch (error) {
-    return error instanceof BlobNotFoundError ? { kind: "not_picture", storedAt: Number.NaN } : { kind: "unknown", read: false };
+    return error instanceof BlobNotFoundError ? "not" : "unknown";
   }
-  const storedAt = new Date(found.uploadedAt).getTime();
-  if (found.size > MAX_IMAGE_BYTES) return { kind: "not_picture", storedAt };
-  let bytes: Uint8Array | null;
+  if (found.size > MAX_IMAGE_BYTES) return "not";
+  let bytes: Uint8Array | "gone" | null;
   try {
     bytes = await firstBytes(path);
   } catch {
-    return { kind: "unknown", read: true };
+    return "unknown";
   }
-  const kind = bytes ? sniffPhotoType(bytes) : null;
-  const good = kind !== null && (IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) && kind === found.contentType;
-  return good ? { kind: "picture" } : { kind: "not_picture", storedAt };
+  if (bytes === "gone") return "not";
+  if (bytes === null) return "unknown";
+  const kind = sniffPhotoType(bytes);
+  return kind !== null && (IMAGE_CONTENT_TYPES as readonly string[]).includes(kind) && kind === found.contentType ? "picture" : "not";
 }
 
-/** True when the file is there, weighs no more than a picture may, and is a JPEG or a WebP by its own bytes. */
+/** True when the file is there, weighs no more than a picture may, and is a JPEG or a WebP by its own bytes; anything not known is false. */
 export async function isStoredPicture(path: string): Promise<boolean> {
-  return (await verdictOf(path)).kind === "picture";
+  return (await pictureVerdict(path)) === "picture";
 }
 
-/** What checkedPictures answers: the pictures, and those whose check met an unknown (kept, never deleted). */
+/** What the checks of a page save's pictures found: the pictures, and those whose check did not finish. */
 export type PictureChecks = { good: string[]; unknown: string[] };
 
 /**
- * Of the pictures a page save has just taken from the picture door (lib/sales-page-store.ts, claimNewPictures, before
- * any is written down as the page's), with when the door signed for each, checks each in the file store, once (MR
- * audit gap 1: a save tried again never asks Blob about the same picture twice). Answers those that are pictures.
+ * The check of the pictures a page save has just taken from the picture door (lib/sales-page-store.ts,
+ * claimNewPictures, before any is written down as the page's), each with when the door noted it. Each is checked in
+ * the file store once (MR audit gap 1). Those that are not pictures are deleted through dropTakenPictures, so a file
+ * stored before its note is kept: taken from the door by this very save, a file stored after it is nobody else's.
  *
- * Only a check that proves a file is not a picture deletes it, and only a file stored strictly after the door noted
- * it (the second check dropTakenPictures makes, from the head this check already sent): taken from the door by this
- * very save, it is nobody else's. A check that met an unknown (a passing outage of the file store) deletes nothing and
- * is answered as unknown, so the save is refused as one to try again (Claude 2 on #2843, MEDIUM). When nothing was
- * read yet, its note is given back to the door once (lib/picture-door.ts, givePictureDoorBack), so the creator's save
- * tried again checks it within the same one check; once read, it is never read again: kept, unchecked, refused.
+ * A check that does not finish deletes nothing (Claude 2 on #2843, 6750890970): the picture is put back on the door,
+ * once (returnToDoor, putBackOnce), so the creator's save tried again checks it again. That check made again is paid
+ * for before it is made, one studio request each (`pay`), so the studio-blob line's bound still holds (a check costs
+ * less than a studio request at its dearest); refused, nothing is checked and the picture is put back as it was. A
+ * check made again that does not finish either leaves the file kept, out of the door: the creator uploads it again.
  */
-export async function checkedPictures(taken: Map<string, number>): Promise<PictureChecks> {
-  const good: string[] = [];
-  const bad: string[] = [];
-  const unknown: string[] = [];
-  const again = new Map<string, number>();
-  for (const [path, noted] of taken) {
-    const verdict = await verdictOf(path);
-    if (verdict.kind === "picture") good.push(path);
-    else if (verdict.kind === "unknown") {
-      unknown.push(path);
-      if (!verdict.read) again.set(path, noted);
-    } else if (Number.isFinite(verdict.storedAt) && verdict.storedAt > noted) bad.push(path);
-  }
-  if (bad.length) await del(bad).catch((error: unknown) => console.error("could not delete files that are not pictures", error));
-  if (again.size) await givePictureDoorBack(again);
-  return { good, unknown };
+export function pictureChecker(pay: (units: number) => Promise<boolean>): (taken: ReadonlyMap<string, number>) => Promise<PictureChecks> {
+  return async (taken) => {
+    const again = [...taken].filter(([, at]) => putBackOnce(at)).map(([path]) => path);
+    const paid = again.length === 0 || (await pay(again.length).catch(() => false));
+    const good: string[] = [];
+    const bad: string[] = [];
+    const unknown: string[] = [];
+    const back: [string, number][] = [];
+    for (const [path, at] of taken) {
+      if (!paid && putBackOnce(at)) {
+        unknown.push(path);
+        back.push([path, at]);
+        continue;
+      }
+      const verdict = await pictureVerdict(path);
+      if (verdict === "picture") good.push(path);
+      else if (verdict === "not") bad.push(path);
+      else {
+        unknown.push(path);
+        if (!putBackOnce(at)) back.push([path, Math.floor(at) + 0.5]);
+      }
+    }
+    if (bad.length) await dropTakenPictures(new Map(taken), bad);
+    if (back.length) await returnToDoor(back);
+    return { good, unknown };
+  };
 }

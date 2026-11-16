@@ -114,17 +114,10 @@ export async function claimPictures(statsId: string, productId: string, paths: s
  * neither in the door nor owned, refused by every later save, never put on
  * unchecked.
  * A take from the door that cannot be confirmed throws (takePictureDoor), so
- * the page is refused with server_error before it is written. So does a check
- * that met an unknown (a passing outage of the file store; Claude 2 on #2843):
- * after those it proved pictures are written down, the page is refused with
- * server_error ("try again"), nothing of it deleted, and its note given back
- * once when nothing was read yet (lib/picture-check.ts, checkedPictures).
+ * the page is refused with server_error before it is written.
  */
 export async function claimNewPictures(
-  statsId: string,
-  pageId: string,
-  paths: string[],
-  check?: (taken: Map<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
+  statsId: string, pageId: string, paths: string[], check?: (taken: ReadonlyMap<string, number>) => Promise<{ good: string[]; unknown: string[] }>,
 ): Promise<boolean> {
   const unique = [...new Set(paths)];
   if (unique.length === 0) return true;
@@ -141,18 +134,21 @@ export async function claimNewPictures(
   const taken = await takePictureDoor(unclaimed);
   const tookNow = unclaimed.filter((path) => taken.has(path));
   // Checked before they are written down as this page's, and only those that are pictures are (Codex Z on #2843).
+  // A check that did not finish puts its picture back on the door (lib/picture-check.ts), and the save throws, so the
+  // route answers server_error and the creator's save tried again checks it again (Claude 2 on #2843, 6750890970); the
+  // pictures that passed are written down first, so that save does not check them again.
   const checks = check && tookNow.length ? await check(new Map(tookNow.map((path) => [path, taken.get(path) as number]))) : { good: tookNow, unknown: [] };
   const checked = new Set(checks.good);
   const fresh = tookNow.filter((path) => checked.has(path));
+  let held = true;
   if (fresh.length) {
     await redisPipeline(fresh.map((path) => ["HSETNX", picsKey(statsId), path, pageId]));
     const [after] = await redisPipeline([["HMGET", picsKey(statsId), ...fresh]]);
     const now = Array.isArray(after) ? after : [];
-    if (fresh.some((_, i) => now[i] !== pageId)) return false;
+    held = !fresh.some((_, i) => now[i] !== pageId);
   }
-  // Unknown is never "not a picture" (Claude 2 on #2843): refused as a save to try again, nothing deleted.
-  if (checks.unknown.length) throw new Error("page pictures: a check that did not finish");
-  return fresh.length === unclaimed.length;
+  if (checks.unknown.length) throw new Error("page pictures: a check of the file store did not finish");
+  return held && fresh.length === unclaimed.length;
 }
 
 /**

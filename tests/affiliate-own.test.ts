@@ -87,7 +87,7 @@ async function main(): Promise<void> {
   const line = [{ affiliate: sara, cents: 3000 }];
   const body = JSON.parse(batchBody(store, line, "nl-x")) as { items: { receiver: string }[] };
   is("PayPal is sent there", body.items[0].receiver, "sara.pay@example.com");
-  is("and the file for PayPal says the same", paypalCsv(line, "usd", "note").split(",")[0], "sara.pay@example.com");
+  is("and the file for PayPal says the same", paypalCsv(line, "usd", "note").split(",")[0], '"sara.pay@example.com"');
   await setPayAddress(store, sara, "");
   is("emptied: back to the address they joined with", payAddress((await readAffiliate(store, AFF))!), "sara@example.com");
   is("told again", emails.length, 2);

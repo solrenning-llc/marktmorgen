@@ -1472,7 +1472,7 @@ export const COST_LINES: CostLine[] = [
     monthlyUsd: ALL_TIERS_SAME(0),
     sources: [
       { file: "lib/embed-open.ts", names: ["isResting", "OPENS_PER_TEN_MINUTES"] },
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? await isResting(store) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["StoreBeacon", "const resting = store && product ? (times ? times.admitted === \"resting\" : await isResting(store)) : false;", "readScriptOpen(store, mode, query, Boolean(product))"] },
       { file: "app/embed/[handle]/join/page.tsx", names: ["StoreBeacon"] },
     ],
     basis: "Each render of a card is one of the store's public requests, taken once, after the store and the listing are read and before anything else (stock, keys, bumps, the summary, the script's open), as the store's own product page does (isResting, #4634); an open by the script does not take a second one, and an open of a product that cannot be read takes its own (readScriptOpen's counted, Claude 7 on #4645); a resting store's card reads nothing more. Its worst product render (limited stock with lapsed holds, keys, a bump, the summary, opened by the script) and a weekly call's times in a frame on a listed site (view=times: slotsForProduct, its held and booked times, the calendar and the call's sessions, Stripe stood in; not a team's) are each measured against COMMANDS.laterPage + COMMANDS.laterCount in tests/embed-card-metered.test.ts; an open of a card counts as a visit, sent by the card's own beacon like any page of the store (app/api/store/hit, through the host's browser check), and rests with the public pages, so it is inside the visits line, and a checkout from it is an order.",
@@ -1582,8 +1582,10 @@ export const COST_LINES: CostLine[] = [
       // A booking page is counted before its call is read, and its open times are taken before the creator's Stripe account is asked,
       // for a page and for a booking's move (traffic audit, 9 November 2026; bookTimesRead held in tests/plan-cost-registry.test.ts).
       { file: "app/[handle]/book/[product]/page.tsx", names: ["if (await isResting(store)) {", "if (!proved || (await isResting(store, undefined, \"buyer\"))) return", "!(await payBookTimes(store, pkg ? \"buyer\" : \"public\"))", "(await payBookTimes(store, \"buyer\")) ? await slotsForMove("] },
-      // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026).
-      { file: "app/embed/[handle]/[product]/page.tsx", names: ["(await payBookTimes(store, \"public\")) ? await slotsForProduct("] },
+      // The calendar embedded on a creator's listed site pays for its times as the booking page does (pre-review, 9 November 2026),
+      // held in the frame's own count, one INCRBY for both (tests/embed-card-metered.test.ts), and given back when not drawn.
+      { file: "app/embed/[handle]/[product]/page.tsx", names: ["await admitPageAndHold(store, timesHold)", "bookTimesUnits(idsOfKind(store, \"call\").length)", "if (times && !calendar) await times.release();", "timesPaid ? await slotsForProduct("] },
+      { file: "lib/traffic.ts", names: ["export async function admitPageAndHold(", "countRequests(folder, store, window, who, now, 1 + hold,", "if (hold > 0) await redisPipeline([[\"DECRBY\", key, hold]])"] },
       { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
       { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
       // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).

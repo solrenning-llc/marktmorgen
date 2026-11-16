@@ -3,8 +3,10 @@ import { type Reward, pointsOf, readRewards } from "@/lib/community-points";
 import { idsOfKind, readCards } from "@/lib/catalog";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { studioPath, studioView } from "@/lib/studio-route";
+import { countStudio, studioPath, studioView } from "@/lib/studio-route";
+import { unlocksOf } from "@/lib/community-locked";
 import { StudioHeader } from "@/components/studio-header";
+import { StudioTrail } from "@/components/breadcrumb";
 import { StudioStorePin } from "@/components/studio-store-pin";
 import { formatMoney } from "@/lib/money";
 import { SITE_URL } from "@/lib/site-url";
@@ -22,6 +24,10 @@ import { announcementReach, canAnnounceByEmail } from "@/lib/community-mail";
 import { can } from "@/lib/team-roles";
 import { CommunityStudio, type QueueRow, type StudioMember } from "@/components/community-studio";
 import { CommunityEventsStudio, type StudioEvent } from "@/components/community-events-studio";
+import { CommunityChallengesStudio, type StudioChallenge } from "@/components/community-challenges-studio";
+import { challengeCounts, keptChallenges } from "@/lib/community-challenges";
+import { challengeWindowState, CHALLENGE_DAY_MS } from "@/lib/community-challenge-rules";
+import { challengeDate } from "@/lib/buyer-words/challenges";
 import { CommunityApprovalStudio, type HeldRow, type SpaceRule } from "@/components/community-approval-studio";
 import { approvalsOf, heldDaysLeft, heldQueue } from "@/lib/community-approval";
 import { VIDEO_ROOM_NOTE } from "@/lib/call-rooms";
@@ -84,6 +90,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];
+  let challenges: StudioChallenge[] | null = [];
   // Google Calendar and Zoom (lib/meet-connect.ts): which accounts an event
   // can have a meeting made on, for the form. Nothing is read when the
   // deployment has neither.
@@ -139,6 +146,26 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
         return m ? [{ name: m.n, email: m.e, at: r.at }] : [];
       }),
       post: e.post,
+    });
+    // The challenges (lib/community-challenges.ts), with their counts: counts
+    // that do not read are shown as not known, never as 0 (rule 30).
+    // A list that does not read is said to be unreadable, never shown as none (rule 24).
+    const kept = await keptChallenges(id, now).catch(() => null);
+    const counted = kept ? await challengeCounts(id, kept, now).catch(() => null) : null;
+    challenges = kept === null ? null : kept.map((c) => {
+      const state = challengeWindowState(c.start, c.end, now);
+      const n = counted?.get(c.id) ?? null;
+      return {
+        id: c.id,
+        title: c.title,
+        task: c.task,
+        from: challengeDate("en-US", c.start),
+        to: challengeDate("en-US", c.end - CHALLENGE_DAY_MS),
+        state: state === "invalid" ? "ended" : state,
+        joined: n?.joined ?? null,
+        checkIns: n?.checkIns ?? null,
+        today: n?.today ?? null,
+      };
     });
     coming = soon.map((e, i) => shape(e, i));
     over = past.events.map((e, i) => shape(e, soon.length + i));
@@ -251,6 +278,13 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             : formatMoney(p.priceCents, store.currency),
   }));
 
+  // "View as a member" draws a space shown Visible and locked as a member sees it (542 [CM1]): its way in worked out
+  // by the real page's own unlocksOf, its reads paid in studio requests first; refused or failed, each says it is not known.
+  const unlocks =
+    config && can(view.role, "settings")
+      ? await unlocksOf(store, config, (units) => countStudio(store, null, units).then((counted) => counted.ok, () => false))
+      : null;
+
   return (
     <div className="min-h-screen bg-paper text-ink">
       <StudioHeader
@@ -263,7 +297,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
       <StudioStorePin sid={store.sid}>
 
       <main id="content" className="container-page pb-20 pt-10 sm:pt-14">
-        <p className="eyebrow">Community</p>
+        <StudioTrail store={store} here="Community" />
         <h1 className="t-h2 mt-3">A place for your buyers</h1>
         <p className="mt-3 max-w-2xl text-ink-soft">
           Posts, comments and likes in spaces you set up, live events members RSVP to and join from the page, a
@@ -286,6 +320,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
           isOwner={view.role === "owner"}
           approval={config ? <CommunityApprovalStudio rules={rules} queue={held} canSettings={can(view.role, "settings")} /> : null}
           rewards={rewards}
+          lockedPreview={config ? { unlocks, language: store.language, look: store.look } : null}
           courses={[...course].flatMap((id) => {
             const card = cards.get(id);
             return card ? [{ id, title: card.title }] : [];
@@ -309,6 +344,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
             ) : null
           }
         />
+        {config ? <CommunityChallengesStudio challenges={challenges} canManage={can(view.role, "events")} /> : null}
       </main>
       </StudioStorePin>
     </div>

@@ -120,6 +120,8 @@ import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import { READ_PDF_JOBS, READ_PDF_PAGES } from "@/lib/ai-rules";
 import type { PageFacts } from "@/lib/page-facts";
 import { blockWords } from "@/lib/buyer-words/blocks";
+import { productSearchSnippet } from "@/lib/product-search-snippet";
+import { SearchSnippetPreview } from "@/components/search-snippet-preview";
 import type { LanguageCode } from "@/lib/store-language";
 import { NewTab } from "@/components/new-tab";
 import { serverNote } from "@/lib/server-note";
@@ -294,6 +296,7 @@ export function PageEditor({
   pagesToCopy = [],
   featurable = [],
   site,
+  searchLine,
   startTest = false,
 }: {
   /** Opened from "Worth knowing" to test a second headline (lib/insights.ts): the test is switched on, ready to write. */
@@ -340,6 +343,13 @@ export function PageEditor({
    * a draft written from the product, what visitors to it did.
    */
   site?: { id: string; kinds: readonly BlockKind[]; forms?: { id: string; name: string }[] };
+  /**
+   * What a product's public page falls back to for its search description when the fields below are empty: the
+   * start of its About text and the general sentence in the store's language, made by the studio's page as the
+   * public page makes them, so "What search engines are given" is what the page sends (248 [ST1]). None for a store
+   * page, whose metadata is not a product's.
+   */
+  searchLine?: { aboutLine: string; general: string };
 }) {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>(() => toDrafts(templateDraft ?? initial));
@@ -2742,6 +2752,19 @@ export function PageEditor({
                 <textarea id="seo-description" className="field" rows={2} maxLength={MAX_SEO_DESCRIPTION} value={seoDescription} placeholder={product.summary || "One or two sentences on what it is."} onChange={(e) => setSeoDescription(e.target.value)} />,
                 counter(seoDescription, MAX_SEO_DESCRIPTION),
               )}
+              {searchLine && !site ? (
+                <SearchSnippetPreview
+                  snippet={productSearchSnippet({
+                    seoTitle,
+                    seoDescription,
+                    productTitle: product.title,
+                    summary: product.summary,
+                    storeName,
+                    aboutLine: searchLine.aboutLine,
+                    general: searchLine.general,
+                  })}
+                />
+              ) : null}
               {site ? null : (
                 <p className="text-xs text-ink-soft">
                   The picture a shared link unfolds into is made from the product&apos;s picture, its title, price and — once buyers review it — its stars.

@@ -17,7 +17,8 @@ import { StudioStorePin } from "@/components/studio-store-pin";
 import { canSell } from "@/lib/store-checkout";
 import { imageUrl } from "@/lib/product-image";
 import { photoUrl } from "@/lib/photo-limits";
-import { readAbout } from "@/lib/product-about";
+import { aboutExcerpt, readAbout } from "@/lib/product-about";
+import { speech } from "@/lib/buyer-words";
 import { PAGE_TEMPLATES, blocksFromTemplate, BLOCK_KINDS, type SalesPage, EMPTY_PAGE, MAX_BLOCKS } from "@/lib/sales-page";
 import { readPage } from "@/lib/sales-page-store";
 import { summaryOf, visibleReviews } from "@/lib/reviews";
@@ -241,6 +242,9 @@ export default async function StudioPagesPage({ searchParams }: Params) {
               templateDraft={templateDraft}
               folder={await imageFolder(view.ref)}
               about={about}
+              // What the public page falls back to for its search description, made as the page makes it
+              // (app/[handle]/p/[product]/page.tsx), so the studio can show what is given (248 [ST1]).
+              searchLine={{ aboutLine: aboutExcerpt(about), general: speech(store).w.productDescription(selected.title, store.name) }}
               look={store.look}
               storeName={store.name}
               photo={store.photoId ? photoUrl(store.photoId) : null}

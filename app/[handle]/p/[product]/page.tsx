@@ -44,6 +44,7 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { IMAGE_SIZES } from "@/lib/product-image";
 import { aboutBlocks, aboutExcerpt, readAbout } from "@/lib/product-about";
+import { productSearchSnippet } from "@/lib/product-search-snippet";
 import { activePlan, bumpTargets } from "@/lib/product-extras";
 import { activePwyw } from "@/lib/pay-what-you-want";
 import { stockLeft } from "@/lib/stock";
@@ -153,9 +154,16 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { store, product } = found;
   const [about, page] = await Promise.all([product.about ? readAbout(store.statsId, product.id) : Promise.resolve(""), pageOf(store, product)]);
   if (page === "unread") return { title: `${speech(store).w.notAvailable} — ${store.name}`, robots: { index: false, follow: true } };
-  const description =
-    page.seoDescription || product.summary || aboutExcerpt(about) || speech(store).w.productDescription(product.title, store.name);
-  const title = page.seoTitle || `${product.title} — ${store.name}`;
+  // The same rule the studio shows under the page's search fields (248 [ST1], lib/product-search-snippet.ts).
+  const { title, description } = productSearchSnippet({
+    seoTitle: page.seoTitle,
+    seoDescription: page.seoDescription,
+    productTitle: product.title,
+    summary: product.summary,
+    storeName: store.name,
+    aboutLine: aboutExcerpt(about),
+    general: speech(store).w.productDescription(product.title, store.name),
+  });
   const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}` : null;
   // On the creator's own domain the page's address is the short one, /p/<id>,
   // which the proxy serves there (proxy.ts), as the store page's is "/".

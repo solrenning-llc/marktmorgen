@@ -25,6 +25,7 @@ import { saleHandles } from "@/lib/store";
 import { EMAIL_PATTERN, MAX_EMAIL_LENGTH, normaliseEmail } from "@/lib/auth";
 import { NIMBUS_FROM, isSenderConfigured, sendEmail } from "@/lib/email";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { windowCount, windowCountOf } from "@/lib/window-count";
 import { StripeListUnreadable, ownField, plainObject, readStripePage } from "@/lib/stripe-list";
 import { orderWrite } from "@/lib/order-data";
 import { StripeError, onAccount, platformKey } from "@/lib/stripe-account";
@@ -95,19 +96,18 @@ const configKey = (account: string, language: unknown = "en") => {
 /** What Stripe's own pages are asked to speak (the portal's `locale`). */
 const stripeLocale = (store: Store) => LANGUAGES[parseLanguage(store.language)].stripe;
 
-/** An incomplete reply cannot prove that a request fits its funded limit. */
-function confirmedCount(reply: unknown): number | null {
-  if (!Array.isArray(reply) || reply.length !== 2 || !Object.hasOwn(reply, 0) || !Object.hasOwn(reply, 1)) return null;
-  const [set, count] = reply;
-  if (set !== "OK" && set !== null) return null;
-  return typeof count === "number" && Number.isSafeInteger(count) && count >= 1 ? count : null;
+/**
+ * One count of `key` in a window of `seconds` (lib/window-count.ts: INCR, then EXPIRE … NX), read only in its exact
+ * shape. An incomplete reply cannot prove that a request fits its funded limit, so it is null, never a count; and a
+ * key the INCR made after its window ran out is given its expiry back by the EXPIRE, never kept counting for good
+ * (review of #2498: the SET NX EX + INCR pair left such a key with no expiry, and the link or address refused forever).
+ */
+async function confirmedCount(key: string, seconds: number): Promise<number | null> {
+  return windowCountOf(await redisPipeline(windowCount(key, seconds)));
 }
 
 async function within(key: string, limit: number): Promise<boolean> {
-  const count = confirmedCount(await redisPipeline([
-    ["SET", key, "0", "EX", RATE_WINDOW_SECONDS, "NX"],
-    ["INCR", key],
-  ]));
+  const count = await confirmedCount(key, RATE_WINDOW_SECONDS);
   if (count === null) throw new Error("Membership request limit could not be confirmed");
   return count <= limit;
 }
@@ -344,10 +344,7 @@ export async function openPortal(store: Store, token: string, origin: string): P
   if (!grant || grant.a !== store.stripeAccountId) return { ok: false, reason: "expired" };
 
   const key = await opensKey(token);
-  const count = confirmedCount(await redisPipeline([
-    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
-    ["INCR", key],
-  ]));
+  const count = await confirmedCount(key, MANAGE_LINK_SECONDS);
   if (count === null) return { ok: false, reason: "error" };
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 
@@ -683,10 +680,7 @@ export async function openCancel(store: Store, token: string, subscription: stri
   // The same counter as the portal button: one link opens Stripe a limited
   // number of times, whichever button is pressed.
   const key = await opensKey(token);
-  const count = confirmedCount(await redisPipeline([
-    ["SET", key, "0", "EX", MANAGE_LINK_SECONDS, "NX"],
-    ["INCR", key],
-  ]));
+  const count = await confirmedCount(key, MANAGE_LINK_SECONDS);
   if (count === null) return { ok: false, reason: "error" };
   if (count > MAX_OPENS) return { ok: false, reason: "used" };
 

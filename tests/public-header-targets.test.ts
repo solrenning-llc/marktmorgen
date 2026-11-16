@@ -15,10 +15,22 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SiteNav } from "@/components/site-nav";
+// The server menu: the same markup as the client SiteNav, handed the plans' real state (its required opening prop, since dcf463a65f).
+import { SiteNav } from "@/components/site-nav-server";
 import { done, is, part } from "./check";
 
 const nav = renderToStaticMarkup(createElement(SiteNav));
+
+/** Drops every tag until none is left, so a tag cut in two cannot rebuild one (CodeQL js/incomplete-multi-character-sanitization). */
+function withoutTags(text: string): string {
+  let before: string;
+  let after = text;
+  do {
+    before = after;
+    after = before.replace(/<[^>]*>/g, "");
+  } while (after !== before);
+  return after;
+}
 
 /** Every opening tag of an interactive element (a, button) in the markup, with its class list. */
 function targets(html: string): { tag: string; classes: string[]; text: string }[] {
@@ -26,7 +38,7 @@ function targets(html: string): { tag: string; classes: string[]; text: string }
   const pattern = /<(a|button)\b([^>]*)>([\s\S]*?)<\/\1>/g;
   for (let match = pattern.exec(html); match; match = pattern.exec(html)) {
     const cls = /class="([^"]*)"/.exec(match[2])?.[1] ?? "";
-    out.push({ tag: match[1], classes: cls.split(/\s+/).filter(Boolean), text: match[3].replace(/<[^>]+>/g, "").trim() });
+    out.push({ tag: match[1], classes: cls.split(/\s+/).filter(Boolean), text: withoutTags(match[3]).trim() });
   }
   return out;
 }

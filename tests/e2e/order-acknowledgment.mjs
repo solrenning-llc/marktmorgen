@@ -18,8 +18,9 @@ export async function checkOrderDraftProtection({page,is,label}){
 
 /** All order mutations intercepted; never change creator content or public ordering. */
 export async function checkOrderAcknowledgment({browser,LOCAL,fixture,is}){
- const usual=["products","quotes","links","tips","signup","faq","contact","community"];
- const moved=["quotes","products",...usual.slice(2)];
+ // The welcome video is a part right after the products since 496 [ME1] unit 3 (lib/store-order.ts), so moving the products down swaps them with it.
+ const usual=["products","intro","quotes","links","tips","signup","faq","contact","community"];
+ const moved=["intro","products",...usual.slice(2)];
  const cases=[
  {name:"HTTP",status:500,reply:v=>v},{name:"truthy",reply:v=>({...v,ok:"true"})},
  {name:"missing",reply:()=>({ok:true})},{name:"different order",reply:v=>({...v,order:[...v.order].reverse()})},

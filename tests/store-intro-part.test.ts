@@ -24,6 +24,8 @@ const studio = readFileSync("app/studio/page.tsx", "utf8");
 const editor = readFileSync("components/intro-editor.tsx", "utf8");
 const features = readFileSync("lib/feature-pages.ts", "utf8");
 const coach = readFileSync("lib/store-coach.ts", "utf8");
+const introE2e = readFileSync("tests/e2e/intro-acknowledgment.mjs", "utf8");
+const orderE2e = readFileSync("tests/e2e/order-acknowledgment.mjs", "utf8");
 
 function main(): void {
   part("The welcome video is a part of the page order");
@@ -53,6 +55,11 @@ function main(): void {
   is("the features page no longer promises it under the name", /welcome video[^.]*under them/.test(card), false);
   is("and says it goes after the products or above them, as the creator chooses", card.includes("a welcome video from YouTube, Vimeo or Loom, after your products or above them, as you choose"), true);
   is("the store coach names it without a place", coach.includes('label: "A welcome video",'), true);
+  // The browser check of the video box (store-copy.mjs, in CI) waits for the note's own words: it must wait for these.
+  is("the video box's browser check waits for the note as it now reads", [introE2e.includes('"A "+provider+" video. It loads only when a visitor presses play."'), introE2e.includes("under your name")], [true, false]);
+  // The browser check of Page order (store-copy.mjs, in CI) names the usual order: it must be the code's.
+  is("the order's browser check starts from the usual order as the code has it", orderE2e.includes(`const usual=${JSON.stringify(USUAL_ORDER)};`), true);
+  is("and the note says it, word for word", editor.includes("? `A ${PROVIDER_NAMES[video.provider]} video. It loads only when a visitor presses play.`"), true);
 }
 
 main();

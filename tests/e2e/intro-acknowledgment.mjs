@@ -52,7 +52,7 @@ export async function checkIntroAcknowledgment({browser,LOCAL,fixture,axeSource,
    const input=page.getByLabel("Welcome video (optional)",{exact:true});const form=input.locator("..");
    for(const scenario of cases){
     await input.fill(source.url);
-    await page.waitForFunction(provider=>document.querySelector("#intro-note")?.textContent?.includes("A "+provider+" video, under your name."),{youtube:"YouTube",vimeo:"Vimeo",loom:"Loom"}[source.video.provider]);
+    await page.waitForFunction(provider=>document.querySelector("#intro-note")?.textContent?.includes("A "+provider+" video. It loads only when a visitor presses play."),{youtube:"YouTube",vimeo:"Vimeo",loom:"Loom"}[source.video.provider]);
     if(scenario===cases[0])await checkIntroDraftProtection({page,is,label:"local draft/"+source.video.provider+"/"+width});
     let release;const held=new Promise(resolve=>{release=resolve;});work={scenario,held};
     const seen=page.waitForRequest(r=>r.method()==="POST"&&new URL(r.url()).pathname==="/api/store/intro");seen.catch(()=>{});

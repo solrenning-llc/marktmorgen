@@ -123,11 +123,11 @@ const BARE_LINK = /\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?!js\b)[a-z]{2,}(?:\/\S*)?\b/
 /** Invisible format characters (zero-width and the like), which could split an address so no pattern sees it. */
 const FORMAT = /\p{Cf}/gu;
 /**
- * A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits with spaces, dots, hyphens or brackets.
+ * A phone number, as lib/inbox-rules.ts forAi reads one: eight or more digits in any script (\p{Nd}, as cleanReviewText reads them; Claude 6 on #3652) with spaces, dots, hyphens or brackets.
  * Wide on purpose (Claude 1 on #3652, LEVE): a long date or figure ("2026-11-11", "1 000 000") goes too, losing a few
  * words a member typed rather than ever keeping a way to reach them.
  */
-const PHONE = /\+?\(?\d[\d\s().-]{7,}\d/g;
+const PHONE = /\+?\(?\p{Nd}[\p{Nd}\s().-]{7,}\p{Nd}/gu;
 /**
  * A social handle: "@" and a name (an address is taken out above), also glued to punctuation such as "ig:@name" or
  * "(@name)" (Claude 3 nuvem M on #3652); never after a letter, a digit, "@" or "." ("5@ each" stays).

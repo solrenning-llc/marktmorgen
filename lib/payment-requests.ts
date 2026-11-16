@@ -216,12 +216,11 @@ export type CheckoutRefusal = "closed" | "paused" | "error" | "busy" | "gone";
 const CHECKOUT_STATES: ReadonlySet<string> = new Set(["open", "complete", "expired"]);
 
 /**
- * Whether the checkout Stripe answered for a request's session is that request's own (#4447): `{}` (a session Stripe no
- * longer has, after a 404) is no checkout and passes; otherwise its id must be the request's session, and a paid one
- * must name this request and this store in its metadata. Anything else is someone else's answer.
+ * Whether the checkout Stripe answered for a request's session is that request's own (#4447): its id must be the
+ * request's session, and a paid one must name this request and this store in its metadata. Anything else is someone
+ * else's answer. (A session Stripe no longer has, a 404, is read as null by the caller and never reaches here.)
  */
 function ownRequestCheckout(known: Record<string, unknown>, request: { id: string; session: string }, store: Store): boolean {
-  if (Object.keys(known).length === 0) return true;
   if (known.id !== request.session) return false;
   if (!isSettled(known)) return true;
   const meta = (known.metadata ?? {}) as Record<string, string>;
@@ -253,6 +252,10 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
       // status not known here, another checkout's id) says nothing about whether it is still payable, so nothing new
       // opens beside it (Claude 7, 14 November 2026).
       if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      // Only this request's own checkout is reused or written down (#4447, review of #4455): a paid one naming another
+      // request or store is a read error, so the buyer is never sent to another request's page and this request is
+      // never written down with another's payment.
+      if (known && !ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
       if (known) {
         // Within 23 hours, the same page again.
         if (known.status === "open" && typeof known.url === "string" && known.url && now - request.sessionAt < REUSE_SECONDS * 1000) return { ok: true, url: known.url };
@@ -265,7 +268,9 @@ export async function openRequestCheckout(store: Store, id: string, origin: stri
         // Still open but about to close: closed on Stripe before another opens, and nothing opens if it cannot be.
         if (known.status === "open") {
           const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-          if (closed.status !== "expired") return { ok: false, reason: "error" };
+          // Closed only on Stripe's receipt for this very checkout (Codex L on #4455): an "expired" naming another
+          // session says nothing about this one, which may still be paid.
+          if (closed.id !== request.session || closed.status !== "expired") return { ok: false, reason: "error" };
         }
       }
     }
@@ -609,6 +614,9 @@ export async function markPaidOutside(
       // status not known here, another checkout's id) says nothing about whether it is still payable or paid, so nothing
       // is marked, closed or written down (Claude 7, 14 November 2026).
       if (known && (known.id !== request.session || !CHECKOUT_STATES.has(String(known.status)))) return { ok: false, reason: "error" };
+      // The checkout read must be this request's own (#4447): a paid one that names another request or store is a read
+      // error, so this request is never written down with another's payment, nor its checkout closed or marked on that answer.
+      if (known && !ownRequestCheckout(known, request, store)) return { ok: false, reason: "error" };
       if (known) {
         if (isSettled(known)) {
           await markPaid(store, request.id, known, now);
@@ -617,7 +625,9 @@ export async function markPaidOutside(
         if (known.status === "complete") return { ok: false, reason: "processing" };
         if (known.status === "open") {
           const closed = (await onAccount("POST", store.stripeAccountId, `/checkout/sessions/${encodeURIComponent(request.session)}/expire`, new URLSearchParams())) as Record<string, unknown>;
-          if (closed.status !== "expired") return { ok: false, reason: "error" };
+          // Closed only on Stripe's receipt for this very checkout (Codex L on #4455): an "expired" naming another
+          // session says nothing about this one, which may still be paid.
+          if (closed.id !== request.session || closed.status !== "expired") return { ok: false, reason: "error" };
         }
       }
     }

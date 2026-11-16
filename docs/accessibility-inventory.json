@@ -1324,6 +1324,7 @@
     "components/affiliate-promotion-results.tsx",
     "components/affiliate-studio.tsx",
     "components/affiliate-summary.tsx",
+    "components/after-cancel.tsx",
     "components/agent-proposals.tsx",
     "components/agreements-studio.tsx",
     "components/ai-assist.tsx",

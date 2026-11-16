@@ -5,6 +5,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
+import {AfterCancel} from '@/components/after-cancel';
 
 // Extract on every run so a captured fixture can never hide a product regression.
 const path='app/studio/page.tsx';
@@ -33,7 +34,8 @@ const extracted=`function ExitSource({canExport=true,trialing=false,endsOn='Nov 
   return <>${expression(found.data[0])}${expression(found.cancel[0])}</>;
 }`;
 const compiled=ts.transpileModule(extracted,{compilerOptions:{jsx:ts.JsxEmit.React,target:ts.ScriptTarget.ES2022}}).outputText;
-const ExitSource=new Function('React',compiled+'\nreturn ExitSource;')(React) as React.ComponentType<Record<string,unknown>>;
+// The exit's own list of what happens next (STN10 unit 1) is the real component.
+const ExitSource=new Function('React','AfterCancel',compiled+'\nreturn ExitSource;')(React,AfterCancel) as React.ComponentType<Record<string,unknown>>;
 
 const render=(canExport=true,trialing=false,endsOn:string|null='Nov 30, 2026')=>renderToStaticMarkup(React.createElement(ExitSource,{canExport,trialing,endsOn}));
 const exit=(html:string)=>html.match(/<details\b[^>]*>[\s\S]*?<\/details>/)?.[0]??'';

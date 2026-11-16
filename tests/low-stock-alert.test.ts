@@ -23,9 +23,12 @@ const OWNER = "kiln.owner@example.com";
 const DAY = 86_400_000;
 const emails: { to: string; subject: string; text: string }[] = [];
 let refuseEmails = false;
+/** Every call to the email provider, refused or not. */
+let posts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
   if (url.hostname === "api.resend.com") {
+    posts += 1;
     if (refuseEmails) return new Response(JSON.stringify({ message: "synthetic refusal" }), { status: 422 });
     const body = JSON.parse(String(init?.body)) as { to: string | string[]; subject: string; text: string };
     emails.push({ to: [body.to].flat()[0], subject: body.subject, text: body.text });
@@ -123,6 +126,38 @@ async function main(): Promise<void> {
   refuseEmails = false;
   is("so the same day, the email back: told then", await tellLowStock(store, quiet.product, 4, now + 8 * DAY), "told");
   is("one email in all", emails.length - sentBefore, 1);
+
+  part("Whether the emails are stopped, unread: nothing spent (Claude 5 on #3725, MEDIUM 1)");
+  for (const [label, odd] of [["a reply in another shape", "odd"], ["a read that throws", "throw"]] as const) {
+    const item = await addProduct(OWNER, `Jug ${label}`, "", "30", null);
+    if (!item.ok) throw new Error("no product");
+    await setLowStock(store, item.product.id, 5, 10);
+    const healthy = redis.pipeline.bind(redis);
+    redis.pipeline = async (commands) => {
+      if (commands.some((c) => c[0] === "SISMEMBER")) {
+        if (odd === "throw") throw new Error("Redis request failed with status 503");
+        return [];
+      }
+      return healthy(commands);
+    };
+    const first = await tellLowStock(store, item.product, 4, now + 10 * DAY).catch(() => "threw");
+    redis.pipeline = healthy;
+    is(`${label}: unknown, never "no" and never a throw`, first, "unknown");
+    is(`${label}: the crossing was not spent, so the next check tells it`, await tellLowStock(store, item.product, 4, now + 10 * DAY), "told");
+  }
+
+  part(`A send that keeps failing is tried at most ${LOW_STOCK_ALERTS_A_STORE_DAY} times a day for the store (Claude 5 on #3725, MEDIUM 2)`);
+  const stuck = await addProduct(OWNER, "Saucer", "", "30", null);
+  if (!stuck.ok) throw new Error("no product");
+  await setLowStock(store, stuck.product.id, 5, 10);
+  refuseEmails = true;
+  const postsBefore = posts;
+  const tries = [];
+  for (let i = 0; i < 8; i += 1) tries.push(await tellLowStock(store, stuck.product, 4, now + 12 * DAY));
+  refuseEmails = false;
+  is(`eight checks of a refused send: at most ${LOW_STOCK_ALERTS_A_STORE_DAY} calls to the provider`, posts - postsBefore <= LOW_STOCK_ALERTS_A_STORE_DAY, true);
+  is("each one unknown or no, never told", tries.every((r) => r === "unknown" || r === "no"), true);
+  is("the next day it is told", await tellLowStock(store, stuck.product, 4, now + 13 * DAY), "told");
   done();
 }
 

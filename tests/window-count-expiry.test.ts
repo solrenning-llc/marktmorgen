@@ -60,7 +60,7 @@ async function main(): Promise<void> {
     expireBetween = true;
     await takeMoveRoom(store);
     is("no move count is left without an expiry", moveKeys().filter((k) => redis.run(["TTL", k]) === -1), []);
-    is("and a move is still counted within afterwards", await takeMoveRoom(store), "within");
+    is("and a move is still counted within afterward", await takeMoveRoom(store), "within");
   }
 
   part("The window starts with the first use and is not moved by the next ones (the EXPIRE's NX)");

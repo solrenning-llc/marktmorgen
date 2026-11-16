@@ -145,7 +145,11 @@ export function paydayEmail(input: {
           "When a payment has gone out, write it down with Mark as paid on that same page. The affiliate then sees it on their own page, with the date and your reference.",
         ]
       : [
-          "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
+          // On a passing failure the batch file is refused until the page has read every payment again (unsettledBook):
+          // never told to download it first (Claude 7's and Codex X5's LEVE on #3378).
+          !input.refundsChecked || !input.invoicesChecked
+            ? "Open your affiliate page. Once it shows every payment checked, download the batch and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:"
+            : "Open your affiliate page, download the batch, and upload it to your own PayPal or Wise. The money goes straight from your account to theirs — it never passes through us, so there is nothing to wait for once you have sent it:",
           studio,
           "",
           "When it has gone out, mark the batch as paid on that same page. Each affiliate then sees it on their own page, with the date and your reference.",

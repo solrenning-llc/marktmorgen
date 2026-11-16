@@ -20,6 +20,7 @@ import { breakRunning, pauseView } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS, PAUSE_EVERY_DAYS } from "@/lib/plan-pause-rules";
 import { MarkShipped } from "@/components/mark-shipped";
 import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { PayPalWaiting } from "@/components/paypal-waiting-notice";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
@@ -377,6 +378,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta found no ad account to read",
     body: "The Facebook login you used cannot see any ad account. Nothing was kept. Connect again with the login that runs your ads.",
   },
+  // Meta told us, while it was connecting, that this Facebook login removed the app or asked for its data to be deleted.
+  removed: {
+    title: "Nothing was connected",
+    body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
   refused: {
     title: "Meta did not finish connecting",
     body: "Nothing was kept. Connect again in a moment.",
@@ -717,6 +723,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   deleted: {
     title: "The store was deleted",
     body: "Its addresses answer nothing for 30 days, and then anyone may take them. Your other stores are as they were.",
+  },
+  partly: {
+    title: "The store was deleted, but a last step was not confirmed",
+    body: "We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
   },
   confirm: {
     title: "Type the store's address to delete it",
@@ -2578,6 +2588,8 @@ export default async function StudioPage({
                   </details>
                 </>
               ) : (
+                <>
+                <PayPalWaiting store={store} />
                 <form action={`/api/store/paypal/connect${pin}`} method="post" className="mt-5">
                   <button type="submit" className="btn btn-primary">
                     Connect your PayPal account
@@ -2587,6 +2599,7 @@ export default async function StudioPage({
                     one, and to confirm what Marktmorgen may do. Then it sends you back here.
                   </p>
                 </form>
+                </>
               )}
             </div>
             ) : null}

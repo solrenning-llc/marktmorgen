@@ -40,6 +40,13 @@
  * whatever number closes. Each step can be run again; the walk is resumable
  * from where it stopped, page by page, and a key already gone is passed over.
  *
+ * A store its owner deletes from the studio (lib/store.ts deleteStore) takes
+ * the same walk instead of closing (Claude 6's probe P3 on #3643): its entry
+ * is written under its lock before its record goes (queueDeleted), waits for
+ * the next walk to begin and joins it once its record is gone
+ * (admitDeleted), and is taken out of the batch when the walk is done, with
+ * no closing record and no email (it was deleted, not closed).
+ *
  *   nl:closed:due     sorted set  a store's key -> when its records came due (ms)
  *   nl:closed:batch   hash        a store's key -> what the walk needs of it (JSON), while its walk runs
  *   nl:closed:walk    hash        cursor, started, finished
@@ -62,11 +69,12 @@ import { readAllListings } from "@/lib/catalog";
 import { readCourses } from "@/lib/course";
 import { readFlows } from "@/lib/flows";
 import { FINAL_INDEX } from "@/lib/closing-holds";
-import { type Store, accountStores, closeStoreRecord, saleHandles, storeFolder, storeForRefExact, storeRecordAt, storeRef } from "@/lib/store";
+import { type Store, accountStores, closeStoreRecord, saleHandles, settleDeletedStore, storeExactly, storeFolder, storeForRefExact, storeRecordAt, storeRef } from "@/lib/store";
 import { domainKey } from "@/lib/domains";
 import { dropTeam, memberStores, readTeam } from "@/lib/team";
 import { hostCalendarKeys } from "@/lib/host-calendar";
 import { revokeAllKeys } from "@/lib/api-keys";
+import { forgetBoth, queueStoreForget } from "@/lib/store-forget-retry";
 import { forgetStoreWebhooks } from "@/lib/webhooks";
 import { forgetStoreSync } from "@/lib/email-sync";
 import { forgetShipmentMail } from "@/lib/shipment-mail-outbox";
@@ -138,6 +146,12 @@ export type Batched = {
    * finish writes nothing at its address. Set only over the exact entry read (REWRITE_ENTRY).
    */
   marksOnly?: true;
+  /** Deleted from the studio (queueDeleted), not closed: no closing record is written and nobody is emailed when its walk is done. */
+  deleted?: true;
+  /** Waits for the next walk to begin (admitDeleted): it is never walked or finished by a walk already under way, which may have passed its keys. */
+  queued?: true;
+  /** A deleted store's addresses that still led to it when it was deleted, held back again at its admission (settleDeletedStore). */
+  holds?: string[];
 };
 
 /** Every file-like record in what a store keeps: a path and the day it was added. */
@@ -375,13 +389,149 @@ export async function prepareStore(store: Store, now = Date.now()): Promise<Batc
   throw new EntryNotWithdrawnError("a closing store's walk entry, taken out with another store at its key (EVAL)");
 }
 
+/**
+ * How long a deleted store's entry waits for its record to go: deleteStore writes it under the store's lock, held
+ * LOCK_SECONDS at the most, and deletes the record right after. A record still there past this was never deleted
+ * (the person was told it went wrong), and its entry is dropped, never walked.
+ */
+export const DELETE_SETTLES_MS = 60 * 60 * 1000;
+
+/**
+ * A store deleted from the studio (lib/store.ts deleteStore, app/api/store/stores): what the walk needs of it, written
+ * under its lock before its record goes, so its keys named by its ids (its page photo, its list, its data room...) are
+ * erased by the walk as a closed store's are (Claude 6's probe P3 on #3643, rule 30). Until then they stayed for good,
+ * with nothing naming them. It waits for the next walk to begin (`queued`). Only HSET's own count is a write: any
+ * other answer throws, and the store is not deleted (rule 24).
+ */
+export async function queueDeleted(store: Store, now = Date.now()): Promise<Batched> {
+  const ref = storeRef(store);
+  const { marks } = await marksOf(store);
+  const entry: Batched = {
+    ref,
+    email: store.email,
+    sid: store.sid,
+    statsId: store.statsId,
+    name: store.name,
+    handle: store.handle,
+    handles: [...saleHandles(store)],
+    holds: [store.handle, ...store.previousHandles],
+    marks,
+    endedAt: now,
+    at: now,
+    deleted: true,
+    queued: true,
+  };
+  const written = repliesFor(await redisPipeline([["HSET", BATCH_KEY, ref, JSON.stringify(entry)]]), 1)?.[0];
+  if (written !== 0 && written !== 1) throw new UnknownReplyError("a deleted store's walk entry written");
+  return entry;
+}
+
+/**
+ * One entry of the batch changed only while it is still exactly the text read, in one step (a compare-and-set):
+ * ARGV[3] written in its place, or, when ARGV[3] is empty, the field dropped. 1 changed, 0 not (another write landed
+ * meanwhile, such as a retried delete's fresh entry, and is kept). Modelled by lib/redis-memory.ts.
+ */
+export const BATCH_SWAP = `-- marktmorgen:closed-batch-swap:v1
+if redis.call('HGET', KEYS[1], ARGV[1]) ~= ARGV[2] then return 0 end
+if ARGV[3] == '' then redis.call('HDEL', KEYS[1], ARGV[1]) else redis.call('HSET', KEYS[1], ARGV[1], ARGV[3]) end
+return 1`;
+
+/** BATCH_SWAP's answer read exactly: true changed, false kept (changed meanwhile), null unknown (rule 24). */
+async function swapEntry(ref: string, read: string, next: string): Promise<boolean | null> {
+  const reply = repliesFor(await redisPipeline([["EVAL", BATCH_SWAP, 1, BATCH_KEY, ref, read, next]]), 1)?.[0];
+  return reply === 1 ? true : reply === 0 ? false : null;
+}
+
+/**
+ * Before a walk begins: deleted stores waiting in the batch join it once Redis says their record is gone (nil). One
+ * whose record still stands is never walked: it waits while its delete may be under way (DELETE_SETTLES_MS), and is
+ * then dropped. A record not read, or a write not confirmed, leaves the entry waiting and the run unsure (rule 24).
+ *
+ * Each change is made only over the exact entry read (BATCH_SWAP), never by a plain HSET or HDEL: this takes no store
+ * lock, and a retried delete may write a fresh entry into the same field under its own lock after this read the old
+ * one (Codex T and reviewer 2 on #3670). The old entry's hour then said nothing about the new delete, and dropping or
+ * rewriting the field lost the fresh entry, so the deleted store's id-named keys stayed for good. A field that changed
+ * meanwhile is left as it is, for the next walk to read again.
+ *
+ * Its record read gone (Redis's own nil), this exact read stands in for any the delete could not make, so what the
+ * delete does once the record is gone is done again here, before its entry joins the walk (Claude 6's two LOWs and
+ * reviewer C3 on #3670): its addresses held back and its places released (settleDeletedStore), which a delete that
+ * answered `unsure` never tried again; and its webhooks, API keys and assistant notes forgotten (forgetBoth), which a
+ * delete whose record went with a reply lost, and whose read after it failed too, never forgot, while its API key's
+ * lookup (family "prepare") is not erased by the walk. A forget that fails leaves the entry waiting, since the walk
+ * erases the API keys' list that leads to the lookups, and goes in the line the daily job tries again
+ * (queueStoreForget). Each step can run again; one not confirmed leaves the entry waiting and the run unsure.
+ */
+async function admitDeleted(entries: Map<string, Batched>, raws: Map<string, string>, now: number, deadline: number): Promise<{ admitted: number; sure: boolean }> {
+  let admitted = 0;
+  let sure = true;
+  for (const [ref, entry] of entries) {
+    if (!entry.queued) continue;
+    // Past the run's time, the rest wait for the next run.
+    if (Date.now() > deadline) {
+      sure = false;
+      break;
+    }
+    const read = raws.get(ref);
+    if (read === undefined) {
+      sure = false;
+      continue;
+    }
+    let standing: Store | null;
+    try {
+      standing = await storeExactly(ref);
+    } catch (error) {
+      console.error("a deleted store's record could not be read; its walk waits", error);
+      sure = false;
+      continue;
+    }
+    if (!standing) {
+      let settled: boolean;
+      try {
+        settled = await settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] });
+      } catch (error) {
+        console.error("a deleted store's addresses held back and its places released: not confirmed; its walk waits", error);
+        settled = false;
+      }
+      if (!settled) {
+        sure = false;
+        continue;
+      }
+      try {
+        await forgetBoth(entry.statsId ?? null, entry.sid);
+      } catch (error) {
+        // Not admitted: the walk would erase the API keys' list (nl:api:keys:<sid>), the only way to their lookups,
+        // and a later try would then find none to forget (reviewer C3's LEVE on #3670). The entry waits for the next
+        // run's try; the daily job's line tries meanwhile, while the list still stands.
+        console.error("forgetting a deleted store's webhooks, keys and assistant notes at its walk failed; its walk waits, and it is put in line to try again", error);
+        sure = false;
+        try {
+          await queueStoreForget(entry.statsId ?? null, entry.sid);
+        } catch (queued) {
+          console.error("putting a deleted store's webhooks, keys and assistant notes in line failed", queued);
+        }
+        continue;
+      }
+      const walkable: Batched = { ...entry };
+      delete walkable.queued;
+      const set = await swapEntry(ref, read, JSON.stringify(walkable));
+      if (set === true) admitted += 1;
+      else if (set === null) sure = false;
+      continue;
+    }
+    if (now - entry.at <= DELETE_SETTLES_MS) continue;
+    if ((await swapEntry(ref, read, "")) === null) sure = false;
+  }
+  return { admitted, sure };
+}
+
 /** Who owns a key: the closing store one of whose ids names it. */
 type Owners = { byMark: Map<string, string>; byHandle: Map<string, string>; byRef: Map<string, string> };
 
 function ownersOf(batch: Batched[]): Owners {
   const owners: Owners = { byMark: new Map(), byHandle: new Map(), byRef: new Map() };
   for (const entry of batch) {
-    if (entry.unfinished || entry.pending) continue;
+    if (entry.unfinished || entry.pending || entry.queued) continue;
     for (const mark of entry.marks) owners.byMark.set(mark, entry.ref);
     // A store walked by its own ids only (marksOnly): its address and handles may be another store's now.
     if (entry.marksOnly) continue;
@@ -731,6 +881,7 @@ async function readBatch(): Promise<{ entries: Map<string, Batched>; raws: Map<s
   const list = stringList(repliesFor(await redisPipeline([["HGETALL", BATCH_KEY]]), 1)?.[0]);
   if (!list || list.length % 2 !== 0) throw new UnknownReplyError("the closing walk's batch (HGETALL)");
   const entries = new Map<string, Batched>();
+  // Each entry's text exactly as read, so a change is made only over it (admitDeleted, BATCH_SWAP).
   const raws = new Map<string, string>();
   let unreadable = 0;
   for (let i = 0; i + 1 < list.length; i += 2) {
@@ -775,12 +926,16 @@ async function withdrawPending(batch: { entries: Map<string, Batched>; raws: Map
  * delete or a rewrite not known to have landed, or another store's) is never walked: it is taken out, only while it
  * still holds the exact text read (WITHDRAW_ENTRY), and its store is put back in line (ZADD NX) to be prepared again.
  * True only when every record read and every taking-out was confirmed; otherwise no walk starts in this run. No
- * preparation runs while a walk is on, so the entries a walk starts with are the ones it finishes.
+ * preparation runs while a walk is on, so the entries a walk starts with are the ones it finishes. A deleted store's
+ * entry (queueDeleted) is never put in the closing line: one still waiting is left to its admission (admitDeleted), and
+ * one admitted is walked as before, or by its own ids only when another store's record is at its key.
  */
 async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<string, string> }, now: number): Promise<boolean> {
   let confirmed = true;
   for (const [field, entry] of batch.entries) {
-    if (entry.pending || entry.unfinished) continue;
+    // A deleted store still waiting (queued) is read by its own admission (admitDeleted), never here: putting it in the
+    // closing line would close it instead, and taking its entry out would lose its ids.
+    if (entry.pending || entry.unfinished || entry.queued) continue;
     let read: Awaited<ReturnType<typeof storeRecordAt>>;
     try {
       read = await storeRecordAt(entry.ref);
@@ -808,6 +963,10 @@ async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<
       confirmed = false;
       continue;
     }
+    // A deleted store (queueDeleted), admitted once its record read gone, is never put in the closing line: that would
+    // close it, with a closing record and an email, though its owner deleted it. Its own record read there again is
+    // walked with it, by its ids and its key, as the walk does for every admitted deleted store (admitDeleted).
+    if (entry.deleted) continue;
     // Put back in line first, and taken out of the batch only once that is confirmed (Codex L on #3643): the other
     // order, with the ZADD's answer lost, left the store in neither, and its record was never erased. Back in line
     // with its entry still there is safe: the entry is never walked while its record is read there, and it is taken
@@ -856,8 +1015,11 @@ async function finishStores(entries: Iterable<[string, Batched]>, finish: Finish
   let confirmed = true;
   for (const [ref, entry] of entries) {
     if (Date.now() > deadline) return null;
+    // A deleted store waiting for the next walk was not walked by this one (admitDeleted).
+    if (entry.queued) continue;
     try {
-      await finish(entry, now);
+      // A deleted store has no closing record, and its owner deleted it: only a closed store is finished.
+      if (!entry.deleted) await finish(entry, now);
     } catch (error) {
       console.error("a closed store's records are gone but its last mark could not be written; it is finished again on the next run", error);
       left += 1;
@@ -950,12 +1112,19 @@ export async function eraseClosed(deadline: number, finish: Finisher, now = Date
     if (entryLeft) return { ...report, done: false };
     // A pending entry never starts a walk (Codex on #3643): it is taken out here, on this run and the next ones until
     // Redis confirms it, and one not confirmed out leaves the run unsure.
+    const first = await readBatch();
+    if (!(await withdrawPending(first))) unsure = true;
+    // Deleted stores waiting since the last walk join this one, once their records are gone (admitDeleted).
+    const admission = await admitDeleted(first.entries, first.raws, now, deadline);
+    report.stores += admission.admitted;
+    if (!admission.sure) unsure = true;
+    // Read again: the admission rewrote its entries (BATCH_SWAP), and startableBatch changes an entry only over its
+    // exact text. Only entries whose record is confirmed gone are walked; anything not known stops the walk from starting.
     const waiting = await readBatch();
-    if (!(await withdrawPending(waiting))) unsure = true;
-    // Only entries whose record is confirmed gone are walked; anything not known stops the walk from starting.
     if (!(await startableBatch(waiting, now))) return { ...report, done: false };
-    // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again.
-    if (![...waiting.entries.values()].some((entry) => !entry.unfinished && !entry.pending)) return { ...report, done: !unsure };
+    // Only a store not walked yet starts a walk: one left unfinished is finished again above, never walked again; one
+    // still pending or waiting to be admitted is not walked.
+    if (![...waiting.entries.values()].some((entry) => !entry.unfinished && !entry.pending && !entry.queued)) return { ...report, done: !unsure };
     await redisPipeline([["HSET", WALK_KEY, "phase", "walk", "cursor", "0", "started", now]]);
     phase = "walk";
     cursor = "0";

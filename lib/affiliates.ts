@@ -113,7 +113,7 @@ import { type BookSizes, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { affiliateForCodes, codeOwners, promoCodesOn } from "@/lib/affiliate-codes";
 import { MAX_COMMITTED_SHARE, type PartnerShare, type ShareProblem, parsePartnerShare, shareOn, shareProblem } from "@/lib/partner-share";
 import { type Held, LockBusyError, holdLock, withLock } from "@/lib/redis-lock";
-import { bondFor, rememberBuyer } from "@/lib/affiliate-bond";
+import { bondFor, forgetBondCommand, rememberBuyer } from "@/lib/affiliate-bond";
 import { offerPartnership } from "@/lib/partner-invites";
 import type { Store } from "@/lib/store";
 import { plainAmount } from "@/lib/money";
@@ -3419,30 +3419,49 @@ async function paypalDone(statsId: string, order: string): Promise<void> {
  * is on now or not: put on the store's list first, so whatever fails after leaves it there for the sweep's next pass
  * (notePayPalPendings); read at its hand-over against the time it was paid, and again until PENDING_LINK_SECONDS after
  * it, credited once at the share of the sale, or nobody's; read but sold at a share not known now, or past the
- * deadline, the creator is told with the same retries. Off the list once decided.
+ * deadline, the creator is told with the same retries. Off the list once decided. Answers the affiliate the sale is
+ * credited to through its link, by this call or an earlier one (so the sweep can take back a bond written for a person
+ * deleted meanwhile), or null.
  */
-async function settlePayPalPending(store: Store, paid: Paid, title: string, now: number, send: PendingSend, remember = true): Promise<void> {
+async function settlePayPalPending(store: Store, paid: Paid, title: string, now: number, send: PendingSend, remember = true): Promise<string | null> {
   const statsId = store.statsId as string;
   const raw = paid.meta?.[VIA_PENDING_META];
   const ref = `paypal:${paid.order}`;
   await paypalDue(statsId, paid.order, now);
   const mark = await readPendingMark(statsId, ref);
-  if (mark !== null && isFinal(mark)) return paypalDone(statsId, paid.order);
+  if (mark !== null && isFinal(mark)) {
+    await paypalDone(statsId, paid.order);
+    // Already credited: the affiliate is answered again, so a sweep that could not take back a deleted person's bond
+    // (notePayPalPendings) tries again; nothing is written again.
+    return mark.startsWith("credited:") ? mark.slice("credited:".length) || null : null;
+  }
   const tell = async (why: TellWhy) => {
     const told = await tellPending(store, ref, raw, why, send);
     if (told !== "refused") await paypalDone(statsId, paid.order);
   };
-  if (mark?.startsWith("tell:")) return tell(mark === "tell:share" ? "share" : mark === "tell:own" ? "own" : "unread");
+  if (mark?.startsWith("tell:")) {
+    await tell(mark === "tell:share" ? "share" : mark === "tell:own" ? "own" : "unread");
+    return null;
+  }
   // Read at its hand-over first (seen:0 marks that it was), then told past the deadline.
-  if (mark === "seen:0" && now - paid.at >= PENDING_LINK_SECONDS) return tell("unread");
+  if (mark === "seen:0" && now - paid.at >= PENDING_LINK_SECONDS) {
+    await tell("unread");
+    return null;
+  }
   const outcome = await decidePending(store, raw, paid.at);
   if (outcome.kind === "unknown") {
     if (mark === null) await writePendingMark(statsId, ref, "seen:0");
-    return;
+    return null;
   }
-  if (outcome.kind === "share" || outcome.kind === "own") return tell(outcome.kind);
+  if (outcome.kind === "share" || outcome.kind === "own") {
+    await tell(outcome.kind);
+    return null;
+  }
   const share = outcome.kind === "credit" ? saleShare(outcome.pending, paid.product, outcome.affiliate.rate) : 0;
-  if (share === null) return tell("share");
+  if (share === null) {
+    await tell("share");
+    return null;
+  }
   const rate = share;
   if (outcome.kind === "credit" && rate > 0) {
     const sale = { ref, pi: paypalPaymentId(paid.capture), at: paid.at, product: paid.product, title: title.slice(0, 200), base: paid.cents, total: paid.cents, currency: readCurrencyCode(paid.currency) };
@@ -3450,8 +3469,10 @@ async function settlePayPalPending(store: Store, paid: Paid, title: string, now:
     // Not for a person deleted at their own request (creditPayPalSale's `remember`, lib/paypal-delivery.ts).
     if (remember) await rememberBuyer(store, paid.email, outcome.affiliate.id, store.affiliates.rule).catch((error) => console.error("remembering an affiliate's buyer failed", error));
   }
-  await writePendingMark(statsId, ref, outcome.kind === "credit" && rate > 0 ? `credited:${outcome.affiliate.id}` : "none");
+  const credited = outcome.kind === "credit" && rate > 0 ? outcome.affiliate.id : null;
+  await writePendingMark(statsId, ref, credited ? `credited:${credited}` : "none");
   await paypalDone(statsId, paid.order);
+  return credited;
 }
 
 /**
@@ -3467,6 +3488,9 @@ export async function notePayPalPendings(store: Store, now = Math.floor(Date.now
   const orders = read ? stringList(read[0]) : null;
   if (!orders) throw new UnknownReplyError("the PayPal orders whose affiliate link is pending");
   let failed = 0;
+  // The store's list of deleted people, read once a run at the first order that needs it (lib/paypal-delivery.ts,
+  // imported here when needed: it imports this file).
+  let deletions: { listId: string; erasedSincePaid: (listId: string, paid: Paid, own?: boolean) => Promise<boolean> } | null = null;
   for (const order of orders) {
     try {
       const paid = await readPaidExact(order);
@@ -3475,8 +3499,30 @@ export async function notePayPalPendings(store: Store, now = Math.floor(Date.now
         await paypalDone(statsId, order);
         continue;
       }
+      // The person deleted from the store at their own request since paying (Claude 4 cloud AB, MEDIUM on #3479): a link
+      // confirmed now credits the sale paid, with nothing that names them (no bond), as the hand-over and creditAgain do.
+      // A mark that does not read throws (rule 24): the order stays on the list, uncredited, for the next pass.
+      if (!deletions) {
+        const delivery = await import("@/lib/paypal-delivery");
+        deletions = { listId: await delivery.deletionListId(store), erasedSincePaid: delivery.erasedSincePaid };
+      }
+      const erased = await deletions.erasedSincePaid(deletions.listId, paid, true);
       const listing = await readListing(store, paid.product).catch(() => null);
-      await settlePayPalPending(store, paid, listing?.title ?? "", now, send);
+      const credited = await settlePayPalPending(store, paid, listing?.title ?? "", now, send, !erased);
+      // Read once more after the bond, as creditAgain does: a deletion that wrote its mark between the read above and
+      // the bond did not see that bond, so it is taken back here; also when the first read said erased, so a bond an
+      // earlier try wrote before stopping goes too. The forget's reply is read exactly: anything but 0 or 1 throws, and
+      // the order is put back on the list, so the next pass, finding it credited (its mark final, nothing credited
+      // twice), reads and takes back again.
+      if (credited && (erased || (await deletions.erasedSincePaid(deletions.listId, paid, true)))) {
+        try {
+          const replies = repliesFor(await redisPipeline([forgetBondCommand(statsId, paid.email, credited)]), 1);
+          if (!replies || (replies[0] !== 0 && replies[0] !== 1)) throw new UnknownReplyError("taking back the bond of a person deleted during a pending PayPal link's sweep");
+        } catch (error) {
+          await paypalDue(statsId, paid.order, now).catch(() => undefined);
+          throw error;
+        }
+      }
     } catch (error) {
       failed += 1;
       console.error("a PayPal order's pending affiliate link was left for the next run", order, error instanceof Error ? error.message : "");

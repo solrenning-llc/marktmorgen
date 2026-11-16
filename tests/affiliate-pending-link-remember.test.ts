@@ -150,6 +150,36 @@ async function main(): Promise<void> {
     is("credited by the sweep", (await sale(`paypal:${paid.order}`))?.aff, ANA);
     is("the bond written before the deletion was seen is taken back", await bondCount(), 1);
   }
+
+  part("taking the bond back does not answer: the order stays on the list and the next pass takes it back");
+  {
+    const paid = await unreadAtHandOver("PPORDERREMEMBER8", "lost@example.com");
+    const mark = ownErasureField(listId, paid.email);
+    const real = redis.pipeline.bind(redis);
+    let fired = false;
+    let forgets = 0;
+    redis.pipeline = (async (b: Parameters<typeof real>[0]) => {
+      if (b.length === 1 && b[0][0] === "EVAL" && b[0][3] === `nl:aff:${statsId}:bond`) {
+        forgets += 1;
+        return ["?"];
+      }
+      const answer = await real(b);
+      if (!fired && b.length === 1 && b[0][0] === "HGET" && b[0][1] === suppressedKey(listId) && b[0][2] === mark) {
+        fired = true;
+        await real([ownErasureCommand(listId, paid.email, NOW + 1)]);
+      }
+      return answer;
+    }) as typeof redis.pipeline;
+    const failed = await notePayPalPendings(sellsPayPal, NOW + 300, send);
+    redis.pipeline = real;
+    is("the forget was asked and did not answer", [fired, forgets, failed], [true, 1, 1]);
+    is("the bond is still there for now", await bondCount(), 2);
+    is("the order is kept on the list", await listed(paid.order), true);
+    await notePayPalPendings(sellsPayPal, NOW + 600, send);
+    is("the next pass takes the bond back", await bondCount(), 1);
+    is("and the order leaves the list", await listed(paid.order), false);
+    is("credited once", (await sale(`paypal:${paid.order}`))?.aff, ANA);
+  }
 }
 
 main().then(done, (error) => {

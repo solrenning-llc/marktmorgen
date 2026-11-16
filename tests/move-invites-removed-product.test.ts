@@ -18,6 +18,7 @@ import { COPIERS } from "@/lib/person-copy";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "move-invites-removed@example.com";
 const ADA = "ada-moved@example.com";
@@ -25,6 +26,8 @@ const BEN = "ben-moved@example.com";
 const CARL = "carl-moved@example.com";
 
 async function main(): Promise<void> {
+  // Main's removal asks Stripe for running memberships first (#4074); none run here (tests/stripe-no-running.ts).
+  answerNoRunningSubscriptions();
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   await claimHandle(OWNER, "moveinvitesgone", "Move Invites Gone", "");

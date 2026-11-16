@@ -16,10 +16,13 @@ import { deleted } from "./podcast-removed-blob-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "pod-removed-unknown-read@example.com";
 
 async function main(): Promise<void> {
+  // Main's removal asks Stripe for running memberships first (#4074); none run here (tests/stripe-no-running.ts).
+  answerNoRunningSubscriptions();
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   await claimHandle(OWNER, "podunknownread", "Pod Unknown Read", "");

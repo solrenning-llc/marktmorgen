@@ -18,12 +18,15 @@ import { erasePerson } from "@/lib/person-erasure";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "move-invites-race@example.com";
 const ADA = "ada-race-probe@example.com";
 const BEN = "ben-race-probe@example.com";
 
 async function main(): Promise<void> {
+  // Main's removal asks Stripe for running memberships first (#4074); none run here (tests/stripe-no-running.ts).
+  answerNoRunningSubscriptions();
   redis.clear();
   process.env.UPSTASH_REDIS_REST_URL ??= "http://stub";
   await claimHandle(OWNER, "moveinvitesrace", "Move Invites Race", "");

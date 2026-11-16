@@ -24,6 +24,7 @@ import { deleted } from "./podcast-removed-blob-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "podcast-removed-legacy@example.com";
 const BUYER = "early-listener@example.com";
@@ -67,6 +68,8 @@ const feedKeys = () => redis.keys().filter((k) => k.startsWith("nl:pod:t:") || k
 const holdingAddress = (email: string) => redis.keys().filter((k) => k.startsWith("nl:pod:t:")).filter((k) => String(redis.run(["GET", k])).includes(email)).length;
 
 async function main(): Promise<void> {
+  // Main's removal asks Stripe for running memberships first (#4074); none run here (tests/stripe-no-running.ts).
+  answerNoRunningSubscriptions();
   part("1. A feed made before feeds were listed by product: the erasure still reaches it after the product goes");
   await setUp();
   const early = await podcastProduct("Early Radio");

@@ -18,6 +18,7 @@ import { deleted } from "./podcast-removed-blob-world";
 import { paidPeriod } from "./billing-period-fixture";
 import { done, is, part } from "./check";
 import { store as redis } from "./redis-stub";
+import { answerNoRunningSubscriptions } from "./stripe-no-running";
 
 const OWNER = "podcast-drop-page-back@example.com";
 const BUYER = "early-listener@example.com";
@@ -81,6 +82,8 @@ async function failingOnce<T>(match: (c: (string | number)[]) => boolean, how: "
 }
 
 async function main(): Promise<void> {
+  // Main's removal asks Stripe for running memberships first (#4074); none run here (tests/stripe-no-running.ts).
+  answerNoRunningSubscriptions();
   const cases: [string, (c: (string | number)[]) => boolean, "throw" | "unknown" | "lost"][] = [
     // Claude 1 cloud's triage of #3473, MEDIUM: the SREM ran and its answer was lost, so nothing listed the page again.
     ["the answer of taking the page off the list is lost", (c) => c[0] === "SREM" && String(c[1]).startsWith("nl:pod:ls:"), "lost"],

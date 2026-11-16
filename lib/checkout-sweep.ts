@@ -338,6 +338,15 @@ type WalkKind = "complete" | "expired";
 const walkKey = (kind: WalkKind, account: string, store: Store) => `nl:sweep:walk:${kind}:${account}:${store.sid || store.handle}`;
 const WALK_SESSION = /^cs_(?:test|live)_[A-Za-z0-9]{10,200}$/;
 /**
+ * The day's paid checkouts whose affiliate step ended with a known answer (noteSession finished, or nothing on the
+ * order to pass on), so the walk, which reads the day's checkouts again every run, never passes them on again
+ * (Claude 4 cloud X and Codex G on #4413: with buyers kept, every paid checkout with an address read its buyer's bond
+ * again every five minutes). A sorted set by session id, scored by when it was settled, trimmed to the walk's day
+ * (CONFIRM_WITHIN_SECONDS) at every write and kept no longer: at most one member for each of the day's paid
+ * checkouts, a session id of at most 208 characters, no address. The five-minute job's own, like its walk's place.
+ */
+const affiliateSettledKey = (account: string, store: Store) => `nl:sweep:aff:${account}:${store.sid || store.handle}`;
+/**
  * A walk that has taken longer than this to reach the end of the day's checkouts is said in the log, every run it
  * goes on: an order paid in the last part of its checkout's day may then be read late, or leave the day before the
  * walk reaches it (an hour is twelve runs, at most 3,600 sessions of one kind, when the store is reached every run).
@@ -550,10 +559,23 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
     // it are counted as failed and wait for the next pass (the writes are HSETNX, so a retry records a share once),
     // while the confirmations, the library and the rest below go on. A click wins over a code (Codex H2 on #3238):
     // an order whose `via` is an affiliate id is decided by noteSession without the codes, the same test it uses.
-    if (affiliatesOn(store) && paid.length) {
+    // Asked first, in one command: which of the page's paid checkouts already had their affiliate step settled
+    // (affiliateSettledKey). An answer in another shape settles nobody: every one is passed on, as before.
+    const settledKey = store.stripeAccountId ? affiliateSettledKey(store.stripeAccountId, store) : "";
+    const settledBefore = new Set<string>();
+    if (affiliatesOn(store) && paid.length && settledKey) {
+      const scores = await redisPipeline([["ZMSCORE", settledKey, ...paid.map((row) => row.id as string)]])
+        .then((reply) => repliesFor(repliesFor(reply, 1)?.[0], paid.length))
+        .catch(() => null);
+      paid.forEach((row, i) => {
+        const score = scores?.[i];
+        if (typeof score === "string" || typeof score === "number") settledBefore.add(row.id as string);
+      });
+    }
+    if (affiliatesOn(store) && paid.some((row) => !settledBefore.has(row.id as string))) {
       // A gift through "Support my work" sold nothing, so it earns nobody a share (lib/store-tips.ts),
       // and a payment request is the creator's own bill to someone they already deal with (lib/payment-requests.ts).
-      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request");
+      const sold = paid.filter((row) => row.metadata?.kind !== "tip" && row.metadata?.kind !== "request" && !settledBefore.has(row.id as string));
       const needsCodes = (row: SessionRecord) =>
         promoCodesOn(row as { discounts?: unknown }).length > 0 && !AFFILIATE_ID_PATTERN.test(row.metadata?.via ?? "");
       const coded = sold.some(needsCodes);
@@ -565,6 +587,8 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         coded ? codeOwners(store).catch(unread("the codes given to affiliates")) : new Map<string, string>(),
         listPartners(store).catch(unread("the store's partners")),
       ]);
+      // Settled this run with a known answer: noteSession finished, or there was nothing on the order to pass on.
+      const settledNow: string[] = [];
       for (const row of sold) {
         const id = row.id as string;
         if (partners === null || (owners === null && needsCodes(row))) {
@@ -580,11 +604,22 @@ async function sweepStore(store: Store, counts: SweepCounts, deadline: number, r
         if (row.metadata?.via || code || partners.length || byBuyer) {
           try {
             await noteSession(store, row as Parameters<typeof noteSession>[1], owners ?? undefined, partners);
+            settledNow.push(id);
           } catch (error) {
             failOrder(id);
             console.error("an affiliate's sale was left for the next run", id, describe(error));
           }
-        }
+        } else settledNow.push(id);
+      }
+      // Written once the page's step is done; a write that fails leaves them unsettled, passed on again next run,
+      // where noteSession's writes (HSETNX) record nothing twice.
+      if (settledNow.length && settledKey) {
+        const at = Math.floor(Date.now() / 1000);
+        await redisPipeline([
+          ["ZADD", settledKey, ...settledNow.flatMap((id) => [at, id])],
+          ["ZREMRANGEBYSCORE", settledKey, "-inf", at - CONFIRM_WITHIN_SECONDS - 1],
+          ["EXPIRE", settledKey, CONFIRM_WITHIN_SECONDS],
+        ]).catch((error) => console.error("noting the checkouts whose affiliate step is settled failed; read again next run", store.handle, describe(error)));
       }
     }
     // The store's first sale ever, noted once, with the yearly plan offered

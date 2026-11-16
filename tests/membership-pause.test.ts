@@ -17,7 +17,8 @@ import { isLiveSub, memberState } from "@/lib/membership-access";
 import { pauseMembership, resumeMembership } from "@/lib/membership-pause";
 import { membershipsFor, requestManageLink } from "@/lib/membership-manage";
 import { claimHandle, ensureStatsId, setLanguage, setPauseMonths, setStripeAccount, storeForEmail } from "@/lib/store";
-import { store as redis } from "./redis-stub";
+import { emailKey, paidCourses, storeKey } from "@/lib/learn";
+import { store as redis, redisPipeline } from "./redis-stub";
 import { done, is, part } from "./check";
 
 const DAY = 86_400;
@@ -86,7 +87,8 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
     return json({ id: `email_${emails.length}` });
   }
   const path = url.pathname.replace(/^\/v1/, "");
-  if (path === "/customers" && method === "GET") return json({ data: [{ id: "cus_Member000001" }] });
+  // A list as Stripe gives it, with has_more (rule 23: fixture only; findMember reads lists exactly since sweep APP2).
+  if (path === "/customers" && method === "GET") return json({ data: [{ id: "cus_Member000001" }], has_more: false });
   if (path === "/customers/cus_Member000001") return json({ id: "cus_Member000001", email: "member@example.com" });
   // Altered 2026-11-09 (rule 23): a Stripe list carries has_more, and subsOf now reads the page in its exact shape (readStripePage).
   if (path === "/subscriptions" && method === "GET") return json({ data: [sub], has_more: false });
@@ -151,8 +153,13 @@ async function main(): Promise<void> {
   decline = true;
   is("during it, resuming takes a payment that day; a declined card leaves it paused", [(await resumeMembership(store, token, "sub_Member0000001", PERIOD_END + DAY)).ok ? "resumed" : "declined", posts.at(-1)!.get("payment_behavior")], ["declined", "error_if_incomplete"]);
   decline = false;
+  // The member opened a course while paused: the course door kept what it read (lib/learn.ts, ten minutes).
+  await paidCourses(store, "member@example.com");
+  const keptCourses = async () => (await redisPipeline([["EXISTS", `nl:learn:paid:${storeKey(store)}:${emailKey("member@example.com")}`]]))[0];
+  is("a course door read during the pause keeps its answer", await keptCourses(), 1);
   const back = await resumeMembership(store, token, "sub_Member0000001", PERIOD_END + DAY);
   is("and with a good card it starts a new period from that day", [back.ok, posts.at(-1)!.get("billing_cycle_anchor"), posts.at(-1)!.get("proration_behavior")], [true, "now", "none"]);
+  is("and the doors ask again at once, as the page says everything is open again", await keptCourses(), 0);
   store = (await storeForEmail(OWNER))!;
   is("switched off, nothing can be paused", [(await setPauseMonths(OWNER, 0)).ok, (await pauseMembership((await storeForEmail(OWNER))!, token, "sub_Member0000001", 1, NOW)).ok], [true, false]);
 

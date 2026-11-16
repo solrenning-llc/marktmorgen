@@ -76,8 +76,10 @@ part("A refunded first year stays under the owner's ceiling with the logo at the
   // BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), as tests/read-ceilings.test.ts and tests/plan-margin.test.ts hold it: the owner's
   // ceiling is US$ 66, the dollar over US$ 65 room for every picture upload's Blob operations only
   // (the picture-uploads line, #2803). So the year with that line stays under US$ 66, and without it, under US$ 65 as before.
-  const uploads = COST_LINES.find((l) => l.id === "picture-uploads")?.monthlyUsd(tier) ?? 0;
-  is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture uploads' line and US$66 with it (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, that line ${uploads.toFixed(4)})`,
+  // Rule 23 (#2801, the thumbnail copy): the thumbnail's Blob operations are a picture upload's too, so they are in that
+  // dollar with the picture-uploads line, as tests/read-ceilings.test.ts counts them on this branch. The US$ 66 does not move.
+  const uploads = ["picture-uploads", "picture-thumbnails"].reduce((sum, id) => sum + (COST_LINES.find((l) => l.id === id)?.monthlyUsd(tier) ?? Number.NaN), 0);
+  is(`a refunded Store first year, repriced at the dearest region, is under US$65 without the picture uploads' lines and US$66 with them (now ${year.toFixed(4)}, repriced ${(year + extra).toFixed(4)}, those lines ${uploads.toFixed(4)})`,
     year + extra - uploads < 65 && year + extra < 66, true);
 }
 

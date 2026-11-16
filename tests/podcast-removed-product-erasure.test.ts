@@ -14,7 +14,7 @@
  * it are reached only by that walk (known limit).
  */
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import test from "node:test";
 import { erasePerson } from "@/lib/person-erasure";
 import * as access from "@/lib/podcast-access";
@@ -22,6 +22,8 @@ import { CLOSING, COUNTED_FAMILIES } from "@/lib/data-families";
 import { addProduct, claimHandle, ensureListId, ensureStatsId, ensureStoreId, removeProduct, setSubscription, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
+import { NextRequest } from "next/server";
+import { GET as recountCron } from "@/app/api/cron/recount/route";
 
 const owner = "podcast-removed-owner@example.test";
 const person = "podcast-removed-person@example.test";
@@ -139,4 +141,73 @@ test("an unknown reply to the note hands out no link", () => quietly(async () =>
   let token: unknown;
   try { token = await access.feedToken((await storeForEmail(owner))!, pid, person).catch((error: unknown) => error); } finally { redis.pipeline = original; }
   assert.ok(typeof token !== "string", "no link while its product's note is unknown");
+}));
+
+/**
+ * A feed granted before the product note existed, as the code then left it: the index and the grant with the address,
+ * no member in nl:pod:pids:<sid>. Written directly, never by this head's feedToken (Codex P, N1, T and X5).
+ */
+async function legacyWorld() {
+  const { sid, pid } = await world();
+  redis.run(["DEL", `nl:pod:pids:${sid}`]);
+  const made = await addProduct(owner, "Synthetic old podcast", "", "27", null);
+  assert.ok(made.ok);
+  const old = made.product.id;
+  const token = randomBytes(24).toString("hex");
+  const address = sha(`nimbus-podcast:${person}`).slice(0, 32);
+  redis.run(["SET", `nl:pod:by:${sid}:${old}:${address}`, token]);
+  redis.run(["SET", grantKey(token), JSON.stringify({ s: sid, h: "podremoved", p: old, e: person })]);
+  return { sid, pid, old, token };
+}
+
+delete process.env.CRON_SECRET;
+
+// Codex N1, T and X5 (HIGH): a feed granted before the note, whose product was removed before this change.
+test("a feed granted before the note, of a product removed before this change, is reached by a person's deletion", () => quietly(async () => {
+  const { sid, old, token } = await legacyWorld();
+  assert.ok((await removeProduct(owner, old)).ok);
+  assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, old]), 0, "nothing notes the removed product yet");
+  const result = await erasePerson((await storeForEmail(owner))!, person, { kind: "person" });
+  assert.equal(result.ok, true);
+  assert.equal(redis.run(["GET", grantKey(token)]), null, "the old grant, with the address, is gone");
+}));
+
+// Codex P and T (HIGH): the same feed, whose product is removed only after this change, nobody asking for it again.
+test("a feed granted before the note, of a product removed after this change, is reached by a person's deletion", () => quietly(async () => {
+  const { old, token } = await legacyWorld();
+  const shop = (await storeForEmail(owner))!;
+  assert.ok(shop.catalog.items.some((item) => item.id === old), "the product was still in the catalog");
+  assert.ok((await removeProduct(owner, old)).ok);
+  const result = await erasePerson((await storeForEmail(owner))!, person, { kind: "person" });
+  assert.equal(result.ok, true);
+  assert.equal(redis.run(["GET", grantKey(token)]), null, "the old grant, with the address, is gone");
+}));
+
+test("the copy of a person's data lists a feed granted before the note, of a removed product", () => quietly(async () => {
+  const { old } = await legacyWorld();
+  assert.ok((await removeProduct(owner, old)).ok);
+  const shop = (await storeForEmail(owner))!;
+  const catalog = shop.catalog.items.map((item) => item.id);
+  assert.ok((await access.feedsOf(shop, catalog, person)).includes(old));
+}));
+
+test("while the old feeds cannot be walked, a deletion is never said to be done", () => quietly(async () => {
+  const { old, token } = await legacyWorld();
+  assert.ok((await removeProduct(owner, old)).ok);
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => (commands.some((c) => c[0] === "SCAN") ? [{ garbled: true }] : original(commands));
+  try {
+    const result = await erasePerson((await storeForEmail(owner))!, person, { kind: "person" });
+    assert.equal(result.ok, false, "never done while an old grant may be left");
+    assert.ok(!result.ok && result.reason === "incomplete" && result.failed.includes("lib/podcast-access.ts"));
+  } finally { redis.pipeline = original; }
+  assert.notEqual(redis.run(["GET", grantKey(token)]), null, "and the grant is still there to be deleted on the next try");
+}));
+
+test("the hourly one-time job notes the products of feeds granted before the note", () => quietly(async () => {
+  const { sid, old } = await legacyWorld();
+  assert.ok((await removeProduct(owner, old)).ok);
+  const answer = await recountCron(new NextRequest("https://local.example/api/cron/recount"));
+  assert.equal(answer.status, 200);
+  assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, old]), 1, "the removed product is noted");
 }));

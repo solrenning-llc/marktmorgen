@@ -153,9 +153,16 @@ export function funnelProblem(funnel: Funnel, products: Listing[], owner: Listin
     const target = products.find((p) => p.id === step.productId);
     if (!target || target.id === owner.id || !canBeBumped(target)) return "target";
     if (step.priceCents < MIN_BUMP_CENTS || step.priceCents > target.priceCents) return "price";
-    // Having just bought it, the buyer is never offered it again.
+    // A bundle holding the product the funnel follows: the buyer has just paid for it.
+    if ((target.bundle ?? []).includes(owner.id)) return "repeat";
+    // Having just bought it, or a bundle that holds it, the buyer is never offered it again (DISC-B-2), on its own
+    // or inside a later bundle.
+    const got = new Set([step.productId, ...(target.bundle ?? [])]);
     for (const id of after(funnel, step.yes)) {
-      if (funnel.steps.find((s) => s.id === id)?.productId === step.productId) return "repeat";
+      const later = funnel.steps.find((s) => s.id === id)?.productId;
+      if (later === undefined) continue;
+      const inside = products.find((p) => p.id === later)?.bundle ?? [];
+      if (got.has(later) || inside.some((item) => got.has(item))) return "repeat";
     }
   }
   return null;
@@ -285,6 +292,8 @@ export function funnelPosition(
     const answer = answers.get(stepSlot(funnel, step));
     if (answer === "paid") {
       have.add(step.productId);
+      // A bundle paid for hands over what it holds: none of it is offered again (DISC-B-2).
+      for (const item of products.find((p) => p.id === step.productId)?.bundle ?? []) have.add(item);
       id = step.yes;
       continue;
     }
@@ -295,7 +304,8 @@ export function funnelPosition(
     if (answer === "failed") return { kind: "stopped", step };
     if (answer === "pending") return { kind: "waiting", step };
     const target = stepOffered(products, step);
-    if (!target || have.has(target.id)) {
+    // Passed over when the buyer has it, or has anything a bundle offered here holds.
+    if (!target || have.has(target.id) || (target.bundle ?? []).some((item) => have.has(item))) {
       id = step.no;
       continue;
     }

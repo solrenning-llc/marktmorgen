@@ -126,6 +126,10 @@ const en = {
       title: "This link has expired",
       body: "A confirmation link works for 7 days. Join again from the product's page; it takes a few seconds.",
     },
+    busy: {
+      title: "We could not confirm your spot just now",
+      body: "Your link still works. Press it again in a little while.",
+    },
   } as Record<string, Notice>,
   confirmSpotTitle: "Confirm your spot",
   /** `title` is empty when the product is gone. */
@@ -490,6 +494,10 @@ const es: GivingWords = {
       title: "Este enlace ha caducado",
       body: "Un enlace de confirmación funciona durante 7 días. Vuelve a apuntarte desde la página del producto; solo tarda unos segundos.",
     },
+    busy: {
+      title: "No pudimos confirmar tu plaza ahora mismo",
+      body: "Tu enlace sigue funcionando. Vuelve a pulsarlo dentro de un rato.",
+    },
   },
   confirmSpotTitle: "Confirma tu plaza",
   confirmSpotBody: (store, title) =>
@@ -829,6 +837,10 @@ const fr: GivingWords = {
       title: "Ce lien a expiré",
       body: `Un lien de confirmation fonctionne pendant 7 jours. Inscrivez-vous de nouveau depuis la page du produit${S}; cela ne prend que quelques secondes.`,
     },
+    busy: {
+      title: "Nous n'avons pas pu confirmer votre place pour le moment",
+      body: "Votre lien fonctionne toujours. Réessayez un peu plus tard.",
+    },
   },
   confirmSpotTitle: "Confirmez votre place",
   confirmSpotBody: (store, title) => `Appuyez sur le bouton et ${store} vous enverra un seul e-mail, quand ${title || "il"} sera en vente.`,
@@ -1164,6 +1176,10 @@ const de: GivingWords = {
       title: "Dieser Link ist abgelaufen",
       body: "Ein Bestätigungslink funktioniert 7 Tage lang. Tragen Sie sich auf der Seite des Produkts erneut ein; das dauert nur wenige Sekunden.",
     },
+    busy: {
+      title: "Wir konnten Ihren Platz gerade nicht bestätigen",
+      body: "Ihr Link funktioniert weiterhin. Versuchen Sie es etwas später noch einmal.",
+    },
   },
   confirmSpotTitle: "Bestätigen Sie Ihren Platz",
   confirmSpotBody: (store, title) =>
@@ -1498,6 +1514,10 @@ const it: GivingWords = {
     expired: {
       title: "Questo link è scaduto",
       body: "Un link di conferma funziona per 7 giorni. Iscriviti di nuovo dalla pagina del prodotto; bastano pochi secondi.",
+    },
+    busy: {
+      title: "Non siamo riusciti a confermare il tuo posto in questo momento",
+      body: "Il tuo link funziona ancora. Riprova tra poco.",
     },
   },
   confirmSpotTitle: "Conferma il tuo posto",
@@ -1837,6 +1857,10 @@ const nl: GivingWords = {
       title: "Deze link is verlopen",
       body: "Een bevestigingslink werkt 7 dagen. Meld je opnieuw aan via de pagina van het product; dat duurt een paar seconden.",
     },
+    busy: {
+      title: "We konden je plek nu niet bevestigen",
+      body: "Je link werkt nog. Probeer het over een tijdje opnieuw.",
+    },
   },
   confirmSpotTitle: "Bevestig je plek",
   confirmSpotBody: (store, title) => `Druk op de knop en ${store} mailt je één keer, zodra ${title || "het"} te koop is.`,
@@ -2169,6 +2193,10 @@ const pt: GivingWords = {
     expired: {
       title: "Esta ligação expirou",
       body: "Uma ligação de confirmação funciona durante 7 dias. Volte a inscrever-se a partir da página do produto; demora apenas alguns segundos.",
+    },
+    busy: {
+      title: "Não conseguimos confirmar o seu lugar neste momento",
+      body: "A sua ligação continua a funcionar. Tente novamente daqui a pouco.",
     },
   },
   confirmSpotTitle: "Confirme o seu lugar",

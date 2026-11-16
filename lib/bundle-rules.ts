@@ -295,6 +295,13 @@ export function extraFromMeta(meta: Record<string, string | undefined> | null | 
 }
 
 /**
+ * The most products deliveredIds can hand over for one checkout: the product, each bump, a bundle's items for the
+ * product and for each bump, and the affiliate's extras. What a payment's list of reviews is kept whole up to
+ * (lib/reviews.ts).
+ */
+export const MAX_DELIVERED = 1 + BUMP_KEYS.length + MAX_BUNDLE_ITEMS * (1 + BUMP_KEYS.length) + MAX_AFFILIATE_EXTRAS;
+
+/**
  * Every product a checkout hands over, by id: the product bought, the one
  * ticked at checkout, and every product of either when it is a bundle, each
  * once. What refunds, reviews, keys, the community's door and courses read.

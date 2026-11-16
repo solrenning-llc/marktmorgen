@@ -13,6 +13,7 @@ import { SESSION_COOKIE } from "@/lib/auth";
 import { contentOpenTo } from "@/lib/child-safety";
 import { seesDrafts } from "@/lib/draft-view";
 import { lookStyle } from "@/lib/store-look";
+import { StoreResting } from "@/components/store-resting";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { bookingLength, offeredLengths, ownLength } from "@/lib/call-lengths";
@@ -44,7 +45,8 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { handle, product: productId } = await params;
   const decoded = decodeURIComponent(handle);
   const store = decoded.startsWith("@") ? await storeForPage(normaliseHandle(decoded)).catch(() => null) : null;
-  const product = (store ? await readListing(store, productId) : null);
+  // Nothing of a store switched off after a report (lib/takedown.ts) is named in the tab.
+  const product = (store && !store.suspended ? await readListing(store, productId) : null);
   // A draft call's tab names nothing for whoever only knows its id (MM-SA-30): the same as an id that does not exist.
   const session = (await cookies()).get(SESSION_COOKIE)?.value;
   // A call held for a child-safety report, or whose mark cannot be read, names nothing to anyone but the store's owner,
@@ -89,12 +91,16 @@ export default async function BookPage({ params, searchParams }: Params) {
   const pkgToken = typeof query.pkg === "string" ? query.pkg : "";
   const found = pkgToken ? await boughtByToken(pkgToken) : null;
   const pkg = found && found.bought.s === store.statsId && found.bought.p === product.id ? found : null;
+  const pkgState = pkg ? await packageState(pkg.bought) : null;
+  // Switched off after notices about its content (lib/takedown.ts), as the store's own page; a booking
+  // already paid (moved above) and a package already bought with a session still to book are the buyer's, and keep
+  // their way in. A package used up or past its last day books nothing, so it opens nothing either (Codex G on #3193).
+  if (store.suspended && !(pkgState && pkgState.left > 0)) return <StoreResting store={store} suspended />;
   // A draft call is left off the store (lib/catalog.ts): its title, price and
   // times are for the store's owner and team, signed in, and for a package
   // already bought for it (a booking already paid is moved above, read from
   // its own order). Anyone else goes where an id that does not exist goes (MM-SA-30).
   if (product.hidden && !pkg && !(await seesDrafts(store, (await cookies()).get(SESSION_COOKIE)?.value))) redirect(`/@${store.handle}`);
-  const pkgState = pkg ? await packageState(pkg.bought) : null;
   // Coming soon or not (lib/waitlist.ts): a state that could not be read is unknown, never "launched" (rule 24), so the
   // calendar books and sells nothing then and says the times could not be read, as when the times themselves cannot be.
   const soon = await isSoon(store, product.id).catch(() => null);
@@ -343,7 +349,8 @@ function Shell({ store, children }: { store: Store; children: React.ReactNode })
           <Link href={`/@${store.handle}`} className="st-footer-link inline-flex min-h-11 items-center text-sm font-semibold">
             {w.backTo(store.name)}
           </Link>
-          <StoreTracking store={store} presence />
+          {/* Switched off after a report (lib/takedown.ts): what stays open carries no ad pixels and counts no visit. */}
+          {store.suspended ? null : <StoreTracking store={store} presence />}
         </div>
       </main>
     </div>

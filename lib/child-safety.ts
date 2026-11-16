@@ -379,11 +379,11 @@ export async function hideHeldProducts(now = Date.now(), until = Date.now() + HI
 
 const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist, pre-orders, call setup or package, offer after paying, description or buyers' reviews, from the studio or the AI agent, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. Its course pages and files, podcast feed and episodes, preview and shared card are closed to everyone but the store's owner. People who bought it before may still reach its files through download links: switching that off is not automatic yet. Closing the store, or its plan ending, still deletes it, and so does erasing the creator's data: to keep it, suspend the store instead of closing it.",
-  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
-  not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 8 says.",
-  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 8 says.`,
-  unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 8 says.",
-  failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 8 says.",
+  no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 9 says.`,
+  unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 9 says.",
+  failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 9 says.",
 };
 
 const NOTICE_NOT_KEPT = "The notice itself could not be confirmed as kept, and the person was told to try again: if no notice email with this address reaches the support inbox, act on this email alone.";

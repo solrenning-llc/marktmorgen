@@ -438,14 +438,15 @@ export default async function StudioCoursePage({
                       <td className="whitespace-nowrap py-2 pr-3">{day(student.lastSeen)}</td>
                       {quizLessons.length ? (
                         <td className="whitespace-nowrap py-2 pr-3 tabular-nums">
-                          {`${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
+                          {/* Null: this student's passes could not be read just now (rule 24), never shown as 0. */}
+                          {passed[i] === null ? "Could not be read" : `${quizLessons.filter((id) => passed[i]?.has(id)).length} of ${quizLessons.length}`}
                         </td>
                       ) : null}
                       {seesBuyers ? (
                         <td className="py-2">
                           <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
                             <StudentAccess productId={product.id} email={student.email} blocked={student.blocked} />
-                            {quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
+                            {passed[i] !== null && quizLessons.some((id) => !passed[i]?.has(id)) ? <GiveTriesBack productId={product.id} email={student.email} /> : null}
                           </span>
                         </td>
                       ) : null}

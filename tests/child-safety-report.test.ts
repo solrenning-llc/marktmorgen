@@ -21,6 +21,8 @@ import { POST as reportRoute } from "@/app/api/report/route";
 import { readListing } from "@/lib/catalog";
 import { fileReport, openReport, takeDown } from "@/lib/takedown";
 import TakedownPage from "@/app/takedown/[token]/page";
+import { answering } from "./security/next-headers";
+import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { type ReactNode, isValidElement } from "react";
 import { transparencyCounts } from "@/lib/transparency";
 import { store as redis } from "./redis-stub";
@@ -253,7 +255,11 @@ async function main(): Promise<void> {
       is("other: it states what the person confirmed on the form", (notice?.text ?? "").includes("accurate and complete to the best of their knowledge"), true);
     }
     const token = notice?.text.match(/\/takedown\/([0-9a-f]{48})/)?.[1] ?? "";
+    // Only the operator opens a notice (#4036, main's app/takedown/[token]/page.tsx reads the session cookie): the page
+    // is read as the operator (process.env.DEMO_STUDIO_ADMIN, as tests/takedown-review-3087.test.ts does).
+    answering(new Request(`https://marktmorgen.com/takedown/${token}`, { headers: { cookie: `${SESSION_COOKIE}=${await openSession(process.env.DEMO_STUDIO_ADMIN ?? "")}` } }));
     const page = wordsOf(await TakedownPage({ params: Promise.resolve({ token }) }));
+    answering(null);
     is(`${report.kind}: the notice page states no oath under penalty of perjury, nor both statements for a report that has none`, [/perjury/i.test(page), report.kind === "child_safety" && /Signed:|both statements/.test(page)], [false, false]);
     is(`${report.kind}: the notice page shows no empty sender name`, /From:\s*</.test(page), false);
     if (report.kind === "child_safety") is("child_safety: the notice page names the kind", [page.includes("Child safety report"), page.includes("Notice of illegal content")], [true, false]);

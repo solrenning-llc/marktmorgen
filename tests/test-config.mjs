@@ -83,6 +83,7 @@ function centralAliases(file,root,here){
  if(file==='alt-ai-order.test.ts'||file==='alt-ai-order-page.test.ts')aliases['@/lib/blob']=join(here,'alt-ai-order-world.ts');
  if(['review-g2-card-read-completeness.test.ts','creator-card-partial-read-g.test.ts','creator-card-remove-race-g.test.ts','creator-card-reload-delete-g.test.ts','creator-card-reload-held.test.ts','studio-team-two-step-unknown.test.ts','studio-import-unknown.test.ts','studio-calendar-unknown.test.ts'].includes(file))aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='plan-invoices.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
+ if(file==='child-safety-report.test.ts')aliases['next/headers']=join(here,'security/next-headers.ts');
  if(file==='meeting-disabled-settings.test.ts')aliases['next/navigation']=join(here,'next-navigation-stub.ts');
  if(file==='zoom-arrival.test.ts')aliases['next/navigation']=join(here,'meeting-withdrawal-page-world.ts');
  if(file==='meeting-disabled-withdrawal.test.ts'){

@@ -97,8 +97,10 @@ export function isLiveSub(sub: unknown): boolean {
  * payment plan. A plan is also a subscription, but it pays for something
  * already handed over and ends by itself; it never closes anything.
  */
-export function soldAMembership(product: Listing, session: { mode?: unknown; metadata?: Record<string, string> | null }): boolean {
-  return product.recurring !== null && session.mode === "subscription" && session.metadata?.kind !== "plan";
+export function soldAMembership(_product: Listing, session: { mode?: unknown; metadata?: Record<string, string> | null }): boolean {
+  // Read from the checkout, never from what the product is now: a membership the creator later turned into a
+  // one-off sale was still sold as a membership, and stays judged by it.
+  return session.mode === "subscription" && session.metadata?.kind !== "plan";
 }
 
 /**

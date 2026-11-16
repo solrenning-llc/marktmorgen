@@ -125,6 +125,9 @@ export async function POST(request: NextRequest) {
     if (error instanceof Error && error.message === "storage_limit") return fail(quotaRefusal);
     if (error instanceof Error && (error.message === "storage_pending" || error.message === "storage_busy")) return fail("uploads_pending", 409);
     if (error instanceof Error && error.message === "busy") return fail("slow_down", 429);
+    // The store's Blob folder is listed once a UTC day (lib/blob-tally.ts) and today's listing left no total: said as
+    // such, never as "try again in a few minutes".
+    if (error instanceof Error && error.message === "storage_daily") return fail("storage_daily", 503);
     if (error instanceof Error && error.message.startsWith("storage_")) return fail("files_unavailable", 503);
     console.error("a file upload's door failed", error);
     return fail("server_error", 500);

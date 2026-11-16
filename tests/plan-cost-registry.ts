@@ -62,6 +62,7 @@ import { VISITS_INCLUDED } from "@/lib/traffic-rules";
 import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { PAID_UPLOAD_OPENS, uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
+import { BLOB_MEASURES_PER_DAY } from "@/lib/blob-tally";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
@@ -428,9 +429,21 @@ export const BLOB_HEAD_TRIES = BLOB_PUT_TRIES;
  * try (MR audit item 9, Claude 4 C4-20261106-2790-C56-167), until an official source says otherwise.
  */
 export const BLOB_TOKEN_TRIES = BLOB_PUT_TRIES;
-/** filesHeld (lib/file-store.ts) lists at most this many pages of 1000, each an Advanced Operation tried as a put is; a vault open measures once. */
+/** blobHeld (lib/file-store.ts) lists at most this many pages of 1000, each an Advanced Operation tried as a put is; a vault open measures once. */
 export const BLOB_LIST_PAGES = 20;
 export const BLOB_LIST_MEASURES_PER_OPEN = 1;
+/**
+ * Listings of a store's Blob folder a month: at most one a UTC day (lib/blob-tally.ts, BLOB_MEASURES_PER_DAY; the owner's
+ * decision of 16 November 2026, "Medir só 1x por dia"), in a 31-day month, and never more than the opens that ask.
+ */
+export const BLOB_LIST_MEASURES_A_MONTH = 31 * BLOB_MEASURES_PER_DAY;
+/**
+ * Store commands a vault open's measure sends for the daily total (lib/blob-tally.ts, blobHeldToday) at the most: the
+ * kept total read, the day's mark taken (SET NX), the total written or read again, and one MGET of the hourly tally.
+ */
+export const BLOB_TALLY_OPEN_COMMANDS = 4;
+/** Store commands a write into a store's Blob folder sends first (lib/blob-tally.ts, tallyBlobWrite): INCRBY and EXPIRE. */
+export const BLOB_TALLY_WRITE_COMMANDS = 2;
 /** One studio picture door (app/api/store/image/upload): its put and its token, every try, and the head that checks the name is free. */
 export const STUDIO_DOOR_BLOB = (BLOB_PUT_TRIES + BLOB_TOKEN_TRIES) * BLOB_ADVANCED_OP + BLOB_HEAD_TRIES * BLOB_SIMPLE_OP;
 /**
@@ -514,7 +527,9 @@ export const TASK_DOOR_ADVANCED_OPERATIONS = 3;
 export const TASK_DOOR_COST =
   request("wait", 40 + TAKE_COMMANDS, MAX_STORE_BYTES + COURSE_BYTES + LISTING_BYTES + TASK_BYTES + DONE_SET_BYTES)
   + TASK_DOOR_SIMPLE_OPERATIONS * BLOB_SIMPLE_OPERATION + TASK_DOOR_ADVANCED_OPERATIONS * BLOB_ADVANCED_OPERATION
-  + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE;
+  + TASK_SWEEP_COMMANDS * COMMAND + 2 * TASK_WORK_BYTES * DB_BYTE
+  // The put token is tallied before it is made (lib/blob.ts, lib/blob-tally.ts): two commands, 16 November 2026.
+  + BLOB_TALLY_WRITE_COMMANDS * COMMAND;
 /**
  * One certificate of completion drawn as a PDF file (app/[handle]/certificate/[id]/pdf/route.ts): the store and the
  * certificate (or the sample's course and listing) read, its two counts (REQUEST_COMMANDS each), the fonts embedded and the page drawn at a
@@ -1255,17 +1270,20 @@ export const COST_LINES: CostLine[] = [
   {
     id: "blob-list",
     feature: "Vercel Blob listing for the storage measurement of a vault open: every page, every try (MR audit item 5, 6 November 2026)",
-    monthlyUsd: (tier) => PAID_UPLOAD_OPENS[tier] * BLOB_LIST_MEASURES_PER_OPEN * BLOB_LIST_PAGES * BLOB_PUT_TRIES * BLOB_ADVANCED_OP,
+    monthlyUsd: (tier) => Math.min(PAID_UPLOAD_OPENS[tier] * BLOB_LIST_MEASURES_PER_OPEN, BLOB_LIST_MEASURES_A_MONTH) * BLOB_LIST_PAGES * BLOB_PUT_TRIES * BLOB_ADVANCED_OP
+      + PAID_UPLOAD_OPENS[tier] * BLOB_TALLY_OPEN_COMMANDS * COMMAND,
     sources: [
-      { file: "lib/file-store.ts", names: ["filesHeld", "page < 20", "blob.list"] },
-      { file: "lib/storage-quota.ts", names: ["storageUsed", "filesHeld(folder)"] },
-      { file: "lib/vault-storage.ts", names: ["openReservedVault", "storageUsed(input.folder, limit)"] },
+      { file: "lib/file-store.ts", names: ["filesHeldToday", "blobHeld", "page < 20", "blob.list"] },
+      { file: "lib/blob-tally.ts", names: ["blobHeldToday", "BLOB_MEASURES_PER_DAY", "\"NX\"", "MGET", "tallyBlobWrite"] },
+      { file: "lib/blob.ts", names: ["tallyBlobWrite(pathname, bodyBytes(body))", "tallyBlobWrite(pathname, maximumSizeInBytes)"] },
+      { file: "lib/storage-quota.ts", names: ["storageUsedToday", "filesHeldToday"] },
+      { file: "lib/vault-storage.ts", names: ["openReservedVault", "storageUsedToday(input.folder, limit)"] },
       { file: "lib/storage-reservations.ts", names: ["reserveStorage", "await measure()"] },
       { file: "app/api/store/vault/route.ts", names: ["reserveStoreUpload(store, bytes, \"r2\")", "openReservedVault"] },
       { file: "lib/upload-budget.ts", names: ["!uploadBackendOpen(backend)"] },
       { file: "lib/upload-budget-policy.ts", names: ["PAID_UPLOAD_OPENS", "{ r2: true, blob: false, stream: false }"] },
     ],
-    basis: "A list is an Advanced Operation and goes through the same retrying request as a put (@vercel/blob list() calls requestApi), so BLOB_PUT_TRIES each; vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026, prices it as Regional, and it is counted at the dearest regional rate, gru1, US$ 7.00 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. filesHeld lists the store's prefix up to 20 pages of 1000, a page one Advanced Operation. A paying plan reaches it through one door, a vault open (openReservedVault, one measure per reserveStorage, so one per open), and each open first spends one of the plan's PAID_UPLOAD_OPENS (reserveStoreUpload), so a retry by the browser is another counted open. The product-file door (app/api/store/file/route.ts) and the stream door (app/api/store/stream/route.ts) are closed: reserveStoreUpload answers false for any backend but r2 before their measure. Not in this line, and said so: the studio page's measure for a store whose plan has ended (app/studio/page.tsx, once per render, STUDIO_PAGE_UNITS) and the daily closing job's measures and lists of ended stores (lib/plan-closing.ts), which a store that pays nothing causes and which belong to the closing exposure; and dropStamped (lib/pdf-stamp.ts), whose listFiles has no page cap and lists one product file's stamped copies, one per sale, on a legacy Blob path only (a vault path lists R2): unbounded until a cap or an official count of copies exists, never counted as zero.",
+    basis: "Since the owner's decision of 16 November 2026 (\"Medir só 1x por dia\", #2848), the store's Blob folder is listed at most once a UTC day (lib/blob-tally.ts, blobHeldToday: the day's mark taken with SET NX, under the storage lease), so at most BLOB_LIST_MEASURES_A_MONTH listings a 31-day month and never more than the opens; every other open reads the day's kept total and the hourly tally of writes into the folder since (BLOB_TALLY_OPEN_COMMANDS store commands an open), each write tallied before it is sent (lib/blob.ts: a put by its bytes, a put token at its maximum size; BLOB_TALLY_WRITE_COMMANDS each, counted with the assignment door in TASK_DOOR_COST), and a write of unknown size into the folder refused, so the total is never less than what is held. A list is an Advanced Operation and goes through the same retrying request as a put (@vercel/blob list() calls requestApi), so BLOB_PUT_TRIES each; vercel.com/docs/vercel-blob/usage-and-pricing, read on 6 November 2026, prices it as Regional, and it is counted at the dearest regional rate, gru1, US$ 7.00 a million (vercel.com/docs/pricing/regional-pricing, read on 7 November 2026), because the store's Blob region is not reviewed. filesHeld lists the store's prefix up to 20 pages of 1000, a page one Advanced Operation. A paying plan reaches it through one door, a vault open (openReservedVault, one measure per reserveStorage, so at most one listing per open and one a day), and each open first spends one of the plan's PAID_UPLOAD_OPENS (reserveStoreUpload), so a retry by the browser is another counted open. The product-file door (app/api/store/file/route.ts) and the stream door (app/api/store/stream/route.ts) are closed: reserveStoreUpload answers false for any backend but r2 before their measure. Not in this line, and said so: the studio page's measure for a store whose plan has ended (app/studio/page.tsx, once per render, STUDIO_PAGE_UNITS) and the daily closing job's measures and lists of ended stores (lib/plan-closing.ts), which a store that pays nothing causes and which belong to the closing exposure; and dropStamped (lib/pdf-stamp.ts), whose listFiles has no page cap and lists one product file's stamped copies, one per sale, on a legacy Blob path only (a vault path lists R2): unbounded until a cap or an official count of copies exists, never counted as zero; and the tally's two commands for a stamped copy or a PDF preview written on a legacy Blob path (lib/pdf-stamp.ts, lib/pdf-preview.ts), which ride with those writes, not priced by this line.",
   },
   {
     id: "free-delivery",

@@ -1,9 +1,9 @@
 import { reserveStorage, bindStorage, releaseStorage, retireStorage } from "@/lib/storage-reservations";
-import { storageUsed, type StorageUse } from "@/lib/storage-quota";
+import { storageUsedToday, type StorageUse } from "@/lib/storage-quota";
 import { openVaultUpload, closeVaultUpload, abortVaultUpload, vaultReservationId, retireVaultSession, retireExpiredVaultSession } from "@/lib/vault";
 import { readVaultPath, UPLOAD_SECONDS } from "@/lib/vault-rules";
 
-export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsed(input.folder, limit)) {
+export async function openReservedVault(input: Parameters<typeof openVaultUpload>[0], limit: number, measure: () => Promise<StorageUse> = () => storageUsedToday(input.folder, limit)) {
   // Opportunistic cleanup is bounded to one session per admission attempt.
   await retireStorage(input.folder, Date.now() - UPLOAD_SECONDS * 1000,
     async row => !!row.pathname && !!row.uploadId && retireExpiredVaultSession(row.pathname, row.uploadId));

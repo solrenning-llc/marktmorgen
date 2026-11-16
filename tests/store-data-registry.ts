@@ -995,6 +995,9 @@ export const FAMILIES: Record<string, Family> = {
   // R20 finding 3: the page a supporter comes back to asks Stripe only about a checkout this mark says the store opened.
   "nl:tip:co:@lib/store-tip-checkout.ts": short("A gift's checkout opened by the store's tip checkout, a hash of the store and the session (TIP_MARK_SECONDS, two days)", "request", 2, MARK, REQ("tip")),
   "nl:storage:pending:@lib/storage-reservations.ts": short("Uploads reserved and not finished", "upload", 1, 512),
+  // The owner's "Medir só 1x por dia" (16 November 2026): a store's Blob folder listed once a UTC day, the total kept and
+  // the writes since tallied by the hour, every key kept BLOB_TALLY_KEEP_SECONDS (three days) from its last write.
+  "nl:storage:blob:@lib/blob-tally.ts": { what: "The store's Blob folder: the day's listed total, the day's one listing and the bytes written since, by the hour", parts: [capped((1 + 3 + 3 * 24) * KEY, "One total, a mark a day for three days and a count an hour for three days.", src("lib/blob-tally.ts", "BLOB_TALLY_KEEP_SECONDS = 3 * 86_400", "BLOB_MEASURES_PER_DAY"))] },
   "nl:alert:@lib/store-alerts.ts": { what: "Alerts sent to the creator", parts: [capped(30 * KEY + 14 * 10 * KEY, "One per kind, and the goals' a month.")] },
   "nl:alert:seen:@lib/store-alerts.ts": company("A store's alerts checked a day", "The company's daily job."),
   "nl:allow:@lib/store-allowance.ts": { what: "Each figure taken in the window", parts: [capped((8 * 2 + 13) * KEY, "Eight figures, the window and the one before; and the studio requests held for scheduled emails in each month ahead, at most 13 (a year ahead, lib/store-allowance.ts holdAllowanceAt).")] },

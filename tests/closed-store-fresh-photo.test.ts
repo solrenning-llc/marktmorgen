@@ -41,8 +41,14 @@ let withdrawUnknown = 0;
 let deleteAckLost = false;
 // The entry's rewrite without `pending` lands, and its answer is lost on the way back (Codex P on #3643).
 let unpendAckLost = false;
+// The ZADD that puts a closing store back in line is not done, and no answer comes back (Codex L on #3643).
+let dueAddLost = false;
 const realPipeline = redis.pipeline.bind(redis);
 redis.pipeline = async (commands: (string | number)[][]) => {
+  if (dueAddLost && commands.length === 1 && commands[0][0] === "ZADD" && commands[0][1] === DUE_KEY && commands[0][2] === "NX") {
+    dueAddLost = false;
+    return [null];
+  }
   if (deleteAckLost && commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).startsWith("-- marktmorgen:fenced-del:v1")) {
     deleteAckLost = false;
     await realPipeline(commands);
@@ -446,6 +452,29 @@ async function main(): Promise<void> {
     is("its record is still there", (await storeForEmail(email))?.sid ?? null, store.sid);
     is("its data is not erased", redis.run(["GET", `nl:zz:${store.statsId}:data`]), "z");
     is("nothing of it is finished", after.finished, 0);
+  }
+
+  part("Codex L on #3643 (MEDIUM, kept by Claude 7): a recreated record whose store's put back in line is lost is never forgotten");
+  redis.clear();
+  {
+    const email = "lostdue@example.com";
+    const store = await makeStore(email, "lostdue");
+    redis.run(["SET", `nl:zz:${store.statsId}:data`, "w"]);
+    const now = Date.now();
+    // As a run leaves it after the store was prepared and its ref taken out of line (ZREM), with its record written
+    // again by a late writer: a confirmed entry in the batch, the record there, and the ref out of the due line.
+    const entry = { ref: email, email, sid: store.sid, statsId: store.statsId, name: store.name, handle: store.handle, handles: [store.handle], marks: [store.sid, store.statsId].sort(), endedAt: now, at: now };
+    redis.run(["HSET", BATCH_KEY, email, JSON.stringify(entry)]);
+    is("setup: the ref is out of line", redis.run(["ZSCORE", DUE_KEY, email]), null);
+    dueAddLost = true;
+    const first = await erase(now);
+    is("the run is not said done, and nothing is walked", [first.done, first.finished], [false, 0]);
+    const kept = redis.run(["HGET", BATCH_KEY, email]) !== null || redis.run(["ZSCORE", DUE_KEY, email]) !== null;
+    is("the store is still remembered: its entry kept in the batch, or its ref back in line", kept, true);
+    let finished = 0;
+    for (let i = 1; i <= 3 && (await storeForEmail(email)) !== null; i += 1) finished += (await erase(now + i * (WALK_GAP_MS + 1))).finished;
+    is("later runs prepare it again and erase it: its record is gone", await storeForEmail(email), null);
+    is("and its data with it", redis.run(["GET", `nl:zz:${store.statsId}:data`]), null);
   }
 
   // The record key of an email, found by what it holds (lib/store.ts ownerKey is not exported).

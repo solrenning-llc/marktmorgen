@@ -419,6 +419,33 @@ async function main(): Promise<void> {
   advance(3_600_001);
   is("the store readable again, the next build lists all twenty", await readDirectoryPage().then((p) => [p.rows.length, p.omitted, p.rows.some((row) => row.handle === "shopcc")]), [20, 0, true]);
 
+  // rvB4 on #2921 (MEDIUM, rule 24): a store's id read answering in another shape is not "no such store" either. It is
+  // left out and counted like a throw, never dropped from the page with nothing said (storeForIdExact, not storeForId).
+  for (const [label, reply] of [["a number", 42], ["an empty string", ""], ["a list", ["x"]]] as const) {
+    await original([["DEL", DIRECTORY_CACHE]]);
+    await unmarked();
+    redis.pipeline = (async (commands: Commands) => {
+      if (commands[0]?.[0] === "GET" && commands[0][1] === broken) return [reply];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const shaped = await readDirectoryPage();
+    redis.pipeline = original;
+    is(`RED: rvB4 on #2921: a store id read answering ${label}: the 19 listed and the one counted as left out`, [shaped.rows.length, shaped.omitted, shaped.rows.some((row) => row.handle === "shopcc")], [19, 1, false]);
+  }
+  await original([["DEL", DIRECTORY_CACHE]]);
+  await unmarked();
+  is("a store id read that is nil is a store that is not there, not one left out", await (async () => {
+    redis.pipeline = (async (commands: Commands) => {
+      if (commands[0]?.[0] === "GET" && commands[0][1] === broken) return [null];
+      return original(commands);
+    }) as typeof redis.pipeline;
+    const page = await readDirectoryPage();
+    redis.pipeline = original;
+    return [page.rows.length, page.omitted];
+  })(), [19, 0]);
+  await original([["DEL", DIRECTORY_CACHE]]);
+  await unmarked();
+
   await original([["DEL", DIRECTORY_CACHE]]);
   await unmarked();
   const allFail = await counted(async () => void (outcomes = [await failure(() => readDirectoryPage())]), (commands) => {

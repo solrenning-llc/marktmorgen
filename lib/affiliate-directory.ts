@@ -47,7 +47,7 @@
  *                 longer listed (DIRECTORY_LAST)
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { type Store, storeForId } from "@/lib/store";
+import { type Store, storeForIdExact } from "@/lib/store";
 import { recordListings, type Listing } from "@/lib/catalog";
 import { RECURRING_ALWAYS, commissionOn, commissionRate } from "@/lib/affiliate-setting";
 import { activeIntro } from "@/lib/intro-price";
@@ -572,11 +572,13 @@ async function buildDirectory(): Promise<{ rows: DirectoryRow[]; sids: string[];
   } while (cursor !== "0" && sids.size < MAX_ROWS);
   // A store read that failed is not a program that is not there: that store is
   // left out and counted, and the page says how many could not be read. One store
-  // never takes the whole directory down (Codex N1, MEDIUM on #2921).
+  // never takes the whole directory down (Codex N1, MEDIUM on #2921). Read exactly
+  // (storeForIdExact, the same two GETs): a reply in another shape or a record that
+  // cannot be read throws and is counted too, never taken for no store (rvB4 on #2921).
   const failures: unknown[] = [];
   const stores = await Promise.all(
     [...sids].slice(0, MAX_ROWS).map((sid) =>
-      storeForId(sid).catch((error: unknown) => {
+      storeForIdExact(sid).catch((error: unknown) => {
         failures.push(error);
         return null;
       }),

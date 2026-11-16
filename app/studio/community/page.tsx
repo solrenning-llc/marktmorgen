@@ -86,7 +86,7 @@ export default async function StudioCommunityPage({ searchParams }: Params) {
   let rules: SpaceRule[] | null = [];
   let held: HeldRow[] | null = [];
   let members: StudioMember[] = [];
-  let totals: { members: number; listed: number | null; posts: number | null; reach: number } = { members: 0, listed: 0, posts: 0, reach: 0 };
+  let totals: { members: number | null; listed: number | null; posts: number | null; reach: number } = { members: 0, listed: 0, posts: 0, reach: 0 };
   let rewards: Reward[] = [];
   let coming: StudioEvent[] = [];
   let over: StudioEvent[] = [];

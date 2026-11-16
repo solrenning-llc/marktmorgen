@@ -129,7 +129,7 @@ export function CommunityStudio({
   products: ProductChoice[];
   queue: QueueRow[] | null;
   members: StudioMember[];
-  totals: { members: number; listed: number | null; posts: number | null; reach: number };
+  totals: { members: number | null; listed: number | null; posts: number | null; reach: number };
   canEmail: boolean;
   /**
    * Whether this person may set the community up (lib/team-roles.ts,
@@ -252,7 +252,7 @@ function Basics({
   busy: string | null;
   run: Runner;
   problem: Problem;
-  totals: { members: number; listed: number | null; posts: number | null; reach: number };
+  totals: { members: number | null; listed: number | null; posts: number | null; reach: number };
   canEmail: boolean;
 }) {
   const [name, setName] = useState(config.name);
@@ -272,7 +272,7 @@ function Basics({
       </p>
       <div className="mt-4 grid grid-cols-3 gap-3 text-center">
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
-          <p className="text-xl font-semibold tabular-nums">{totals.members}</p>
+          <p className="text-xl font-semibold tabular-nums">{totals.members === null ? "Not counted" : totals.members}</p>
           <p className="text-xs text-ink-soft">have come in</p>
         </div>
         <div className="rounded-[var(--r-sm)] bg-sand p-3">
@@ -1157,7 +1157,7 @@ function Members({
   problem,
 }: {
   members: StudioMember[];
-  total: number;
+  total: number | null;
   busy: string | null;
   run: Runner;
   problem: Problem;
@@ -1169,7 +1169,7 @@ function Members({
     <section className="card mt-8 p-6 sm:p-8" aria-labelledby="cm-members-title">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="cm-members-title" className="text-lg font-semibold tracking-[-0.02em] text-ink">Members</h2>
-        <span className="tag">{`${total} ${total === 1 ? "has" : "have"} come in`}</span>
+        <span className="tag">{total === null ? "Not counted" : `${total} ${total === 1 ? "has" : "have"} come in`}</span>
       </div>
       <p className="mt-2 text-ink-soft">
         Everyone who has opened the community, most recently here first. Their addresses are shown to you, never to other
@@ -1236,7 +1236,9 @@ function Members({
           ))}
         </ul>
       )}
-      {total > members.length ? (
+      {total === null ? (
+        <p className="mt-3 text-sm text-ink-soft">{`Showing the ${members.length} most recently here. The total could not be counted just now.`}</p>
+      ) : total > members.length ? (
         <p className="mt-3 text-sm text-ink-soft">{`Showing the ${members.length} most recently here, of ${total}.`}</p>
       ) : null}
     </section>

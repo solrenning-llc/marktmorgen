@@ -45,7 +45,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
+import { UnknownReplyError, countOf, repliesFor, scanPage } from "@/lib/redis-reply";
 import { type DataOwner, orderWrite } from "@/lib/order-data";
 import { normaliseEmail } from "@/lib/auth";
 import { emailKey } from "@/lib/learn";
@@ -798,21 +798,24 @@ async function exactCount(key: string): Promise<number | null> {
  * Everyone who has come in, for the creator's list: a page at a time, in the
  * order Redis keeps them. `cursor` is Redis's own, "0" to begin.
  */
-export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number; bytes: number }> {
-  const [reply, total] = await redisPipeline([
+export async function memberPage(id: string, cursor: string, count = 200): Promise<{ members: Member[]; next: string; total: number | null; bytes: number }> {
+  const replies = repliesFor(await redisPipeline([
     ["HSCAN", membersKey(id), cursor, "COUNT", count],
     ["HLEN", membersKey(id)],
-  ]);
-  if (!Array.isArray(reply) || reply.length < 2) return { members: [], next: "0", total: Number(total) || 0, bytes: 0 };
-  const flat = Array.isArray(reply[1]) ? (reply[1] as unknown[]) : [];
+  ]), 2);
+  // A page read in its exact shape (a cursor and field-value pairs) or thrown: an odd one is never "no members, the
+  // walk is over", which would cut the announcement emails (mailableMembers) short with nothing said (rule 24).
+  const page = replies ? scanPage([replies[0]]) : null;
+  if (!page || page.items.length % 2 !== 0) throw new UnknownReplyError("a community's members page");
   const members: Member[] = [];
-  for (let i = 0; i + 1 < flat.length; i += 2) {
-    const member = parseMember(flat[i + 1]);
+  for (let i = 0; i + 1 < page.items.length; i += 2) {
+    const member = parseMember(page.items[i + 1]);
     if (member) members.push(member);
   }
   // The bytes the scan answered with, for a reading that pays for them (lib/api-read.ts, members).
-  const bytes = flat.reduce((n: number, v) => n + Buffer.byteLength(String(v)), 0);
-  return { members, next: String(reply[0]), total: Number(total) || 0, bytes };
+  const bytes = page.items.reduce((n: number, v) => n + Buffer.byteLength(v), 0);
+  // The total (HLEN) read exactly: null when it is not known, never 0.
+  return { members, next: page.next, total: replies ? countOf(replies[1]) : null, bytes };
 }
 
 /** Every member who asked for announcement emails and is still here. */

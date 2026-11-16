@@ -19,9 +19,9 @@ Under the one receiving model (the dearer of Stripe 6.6% + 30¢ and Paddle 5% + 
 
 | Plan | Lowest price with nothing per-use included, monthly | The same, yearly | Today's price |
 | --- | --- | --- | --- |
-| Store | $118.58 | $1,210.90 | $69 / $690 |
-| Studio | $174.55 | $1,851.73 | $449 / $4,490 |
-| Scale | $272.33 | $2,988.53 | $999 / $9,990 |
+| Store | $118.58 | $1,211.45 | $69 / $690 |
+| Studio | $174.55 | $1,851.85 | $449 / $4,490 |
+| Scale | $272.33 | $2,988.80 | $999 / $9,990 |
 
 Store cannot be sold at Stan Creator's $29 without cutting those unprinted ceilings too, which this proposal does not do.
 
@@ -68,7 +68,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $299 / $2,990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $349 / $3,490 | 3.7% | 60.42% | 60.04% | $210.88 | 2.85 |
 | $399 / $3,990 **(recommended)** | 10.5% | 60.41% | 60.02% | $241.04 | 2.49 |
-| $499 / $4,990 | 23.7% | 60.41% | 60.01% | $301.45 | 1.99 |
+| $499 / $4,990 | 23.7% | 60.40% | 60.01% | $301.44 | 1.99 |
 | $999 / $9,990 | 88.7% | 60.41% | 60.01% | $603.58 | 0.99 |
 
 **The rule for the recommended point**: the lowest price on the list at which every per-use figure is at least 10% of #553's (before rounding down) on both intervals. A lower price wins the comparison beside the competitor's card; below 10% the plan includes too little to read as a plan; everything above the included amount is sold in packs at 60% or more, so a heavy user pays for what they use. This is a rule, not a measurement: the price that maximizes profit depends on how many creators buy at each price, which is unknown until sales open. The table above gives the owner the figure to judge it by (customers needed to equal one #553 customer).

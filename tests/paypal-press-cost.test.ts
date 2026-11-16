@@ -6,22 +6,23 @@
  * the whole book, who is on their way twice, the token's link, the lock held again (EVAL), the batch written down, its
  * settling and the lock let go (EVAL): 18 or more commands with two affiliates. Here each is counted, through the
  * Redis stand-in, on the paths that send the most, and held under PAYPAL_PRESS_COMMANDS (the press's own) and
- * PAYPAL_PRESS_BOOK_COMMANDS (its book read at the caps), which price PAYPAL_PRESS in the integrations line.
- * Synthetic: stand-ins for PayPal, Stripe and Redis.
+ * bookWork (its book read at its size; PAYPAL_PRESS_BOOK_COMMANDS at the caps). A studio press takes the integration
+ * units that cover it at the program's size, counted first (paypalPressUnits); payday's auto-pay, which takes none, is
+ * priced once a month in the integrations line at PAYPAL_PRESS. Synthetic: stand-ins for PayPal, Stripe and Redis.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { connectPayPal, payWithPayPal } from "@/lib/paypal-payouts";
+import { PAYPAL_PRESS_BASE_UNITS, PAYPAL_PRESS_UNIT_COMMANDS, connectPayPal, payWithPayPal, paypalPressUnits } from "@/lib/paypal-payouts";
 import { bookSizes, readBook, BOOK_STRIPE_PAGES } from "@/lib/affiliates";
 import { bookWork } from "@/lib/api-read-rules";
-import { STORE_ALLOWANCES, NON_PAYING_ALLOWANCES } from "@/lib/store-allowance-rules";
+import { STORE_ALLOWANCES } from "@/lib/store-allowance-rules";
 import type { Store } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import {
   COST_LINES, PAYPAL_PRESS, PAYPAL_PRESS_BOOK_COMMANDS, PAYPAL_PRESS_COMMANDS, PAYPAL_PRESS_LOCK_TRIES, PAYPAL_PRESS_SECONDS,
-  PAYPAL_PRESSES_UNTAKEN, TAKE_COMMANDS, UNIT_COST, figureCost, nonPayingWorst, paypalPressExcess, request, lockTriesAtMost,
+  PAYPAL_PRESSES_UNTAKEN, COMMAND, TAKE_COMMANDS, UNIT_COST, figureCost, paypalPressCost, request, lockTriesAtMost,
 } from "./plan-cost-registry";
 
 const STATS = "statspress1";
@@ -55,6 +56,7 @@ function shop(): Store {
     statsId: STATS,
     stripeAccountId: "acct_1TestPress00001",
     currency: "usd",
+    catalog: { items: [] },
     affiliates: { enabled: true, percent: 30, days: 30, rates: {}, payday: 5, hold: 0 },
   } as unknown as Store;
 }
@@ -93,7 +95,7 @@ async function seed(store: Store, people: number, open: number): Promise<void> {
 async function press(store: Store): Promise<{ press: string[]; book: string[]; result: Awaited<ReturnType<typeof payWithPayPal>> }> {
   counting = true;
   sent = [];
-  await readBook(store);
+  await readBook(store, undefined, { titles: false });
   const book = sent;
   sent = [];
   const result = await payWithPayPal(store);
@@ -116,7 +118,8 @@ async function main(): Promise<void> {
     is(`${people} affiliates: sent`, result.ok, true);
     const own = all.length - book.length;
     is(`${people} affiliates: the press's own commands (${own}) are within PAYPAL_PRESS_COMMANDS (${PAYPAL_PRESS_COMMANDS})`, own <= PAYPAL_PRESS_COMMANDS, true);
-    is(`${people} affiliates: its book read (${book.length}) is within what bookWork counts at its size`, book.length <= bookWork(sizes!, BOOK_STRIPE_PAGES).commands, true);
+    is(`${people} affiliates: its book read (${book.length}) is within what bookWork counts at its size`, book.length <= bookWork({ ...sizes!, products: 0 }, BOOK_STRIPE_PAGES).commands, true);
+    is(`${people} affiliates: the units it takes (${paypalPressUnits(sizes!)}) cover what it sent`, paypalPressUnits(sizes!) * UNIT_COST.integration >= paypalPressCost(book.length + 8) && own + book.length + 8 <= PAYPAL_PRESS_COMMANDS + bookWork({ ...sizes!, products: 0 }, BOOK_STRIPE_PAGES).commands, true);
     is(`${people} affiliates: and within PAYPAL_PRESS_BOOK_COMMANDS (${PAYPAL_PRESS_BOOK_COMMANDS})`, book.length <= PAYPAL_PRESS_BOOK_COMMANDS, true);
     // The lock: taken, held again once before the batch is written down, let go. One hold: a second one in a row
     // with nothing awaited between them would be a command that buys nothing.
@@ -151,27 +154,43 @@ async function main(): Promise<void> {
   is("the lock's waits are still 20 ms doubled up to 250 ms", lockSource.includes("for (let wait = 20; ; wait = Math.min(wait * 2, 250))"), true);
   is("the press still waits 5 s for its lock", paySource.includes("withLock(`nl:pp:${statsId}:lock`, 120, 5_000, async (lock): Promise<PayResult>"), true);
   is("the tries counted from that schedule", PAYPAL_PRESS_LOCK_TRIES, lockTriesAtMost(5_000));
-  is("the book read at the caps, priced", PAYPAL_PRESS_BOOK_COMMANDS >= bookWork({ kept: true, entries: 1, people: 1, leads: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER, stripe: true, products: Number.MAX_SAFE_INTEGER }, BOOK_STRIPE_PAGES).commands, true);
+  // The press reads the book with no product titles (a batch names none), so its products are never read.
+  is("the press reads no product for its title", paySource.includes("const book = await readBook(store, undefined, { titles: false });"), true);
+  is("the book read at the caps, priced", PAYPAL_PRESS_BOOK_COMMANDS >= bookWork({ kept: true, entries: 1, people: 1, leads: Number.MAX_SAFE_INTEGER, paypalRefunds: Number.MAX_SAFE_INTEGER, stripe: true, products: 0 }, BOOK_STRIPE_PAGES).commands, true);
   const route = readFileSync(join(process.cwd(), "app/api/store/affiliates/paypal/route.ts"), "utf8");
   const cron = readFileSync(join(process.cwd(), "app/api/cron/affiliates/route.ts"), "utf8");
   is("the studio's press and payday's run stop by PAYPAL_PRESS_SECONDS", [route, cron].every((s) => new RegExp(`export const maxDuration = (\\d+);`).test(s) && Number(/export const maxDuration = (\d+);/.exec(s)![1]) <= PAYPAL_PRESS_SECONDS), true);
-  is("the studio's press takes its integration unit before it reads", route.indexOf('withinServiceWhy("paypal-pay"') >= 0 && route.indexOf('withinServiceWhy("paypal-pay"') < route.indexOf("payWithPayPal(store)"), true);
+  const sizesAt = route.indexOf("const sizes = await bookSizes(store);");
+  const takeAt = route.indexOf('withinServiceWhy("paypal-pay", store.handle, 6, 3600, store, paypalPressUnits(sizes))');
+  is("the studio's press counts the program, then takes its units, before it reads or sends", sizesAt > 0 && sizesAt < takeAt && takeAt < route.indexOf("payWithPayPal(store)"), true);
+  is("a program not counted is never taken as small", route.includes("if (!sizes) return fail(\"error\", 502);"), true);
 
-  part("PAYPAL_PRESS prices every command counted, held all its seconds, and the integrations line pays for it");
+  part("The units a press takes cover it at every size; payday's auto-pay is in the integrations line");
   is("a press at the most", PAYPAL_PRESS >= request("wait", PAYPAL_PRESS_COMMANDS + PAYPAL_PRESS_BOOK_COMMANDS + TAKE_COMMANDS, 20_000), true);
   is("held for the whole of its seconds, not a call's ten", PAYPAL_PRESS > UNIT_COST.integration, true);
+  is("each unit past the base pays for at least its commands", PAYPAL_PRESS_UNIT_COMMANDS * COMMAND <= UNIT_COST.integration, true);
+  is("the base pays for the press with an empty book", PAYPAL_PRESS_BASE_UNITS * UNIT_COST.integration >= paypalPressCost(0), true);
+  let sizesChecked = 0;
+  for (const entries of [0, 1, 3, 1_000, 200_000]) for (const people of [0, 1, 40, 1_000]) for (const leads of [0, 1, 99, 100, 101, 200, 5_000]) {
+    for (const paypalRefunds of [0, 1, 39, 40, 41, 499, 500, 501, 20_000]) for (const stripe of [false, true]) for (const products of [0, 50, 5_000]) {
+      const sizes = { kept: true, entries, people: Math.min(people, entries), leads: Math.min(leads, entries), paypalRefunds, stripe, products };
+      const commands = bookWork({ ...sizes, products: 0 }, BOOK_STRIPE_PAGES).commands;
+      assert.ok(paypalPressUnits(sizes) * UNIT_COST.integration >= paypalPressCost(commands), `${JSON.stringify(sizes)}: ${paypalPressUnits(sizes)} units < ${paypalPressCost(commands)}`);
+      sizesChecked += 1;
+    }
+  }
+  is(`the units cover the press at ${sizesChecked} sizes`, sizesChecked > 1_000, true);
+  is("a book not kept costs the base", paypalPressUnits({ kept: false, entries: 0, people: 0, leads: 0, paypalRefunds: 0, stripe: true, products: 9 }), PAYPAL_PRESS_BASE_UNITS);
   const line = COST_LINES.find((l) => l.id === "integrations")!;
   for (const tier of ["creator", "pro", "scale"] as const) {
-    // Every integration unit of the month spent on a press, and payday's auto-pay, which takes none.
-    const want = figureCost(STORE_ALLOWANCES[tier], "integration") + STORE_ALLOWANCES[tier].integration * (PAYPAL_PRESS - UNIT_COST.integration) + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS;
-    is(`${tier}: the integrations line pays every press at its most`, line.monthlyUsd(tier) >= want - 1e-12, true);
-    is(`${tier}: paypalPressExcess is that difference`, Math.abs(paypalPressExcess(STORE_ALLOWANCES[tier].integration) - (want - figureCost(STORE_ALLOWANCES[tier], "integration"))) < 1e-12, true);
+    is(`${tier}: the integrations line pays the figure and payday's auto-pay at its most`, Math.abs(line.monthlyUsd(tier) - (figureCost(STORE_ALLOWANCES[tier], "integration") + PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS)) < 1e-12, true);
   }
   is("payday's auto-pay: one a store a month (claimMonth)", PAYPAL_PRESSES_UNTAKEN, 1);
-  // A store that pays nothing can press with its own integration figure: its share carries the same excess.
+  const payday = readFileSync(join(process.cwd(), "lib/affiliate-payday.ts"), "utf8");
+  is("payday claims the month before it pays by itself", payday.indexOf("claimMonth(store.statsId, month)") > 0 && payday.indexOf("claimMonth(store.statsId, month)") < payday.indexOf("await payWithPayPal(store)"), true);
   const registry = readFileSync(join(process.cwd(), "tests/plan-cost-registry.ts"), "utf8");
   const worst = registry.slice(registry.indexOf("export function nonPayingWorst"), registry.indexOf("\n}\n", registry.indexOf("export function nonPayingWorst")));
-  is("a store that pays nothing carries it too, at its own figure", worst.includes("paypalPressExcess(allowances.integration)") && nonPayingWorst() > paypalPressExcess(NON_PAYING_ALLOWANCES.trial.integration), true);
+  is("a store that pays nothing carries its payday's auto-pay too", worst.includes("PAYPAL_PRESSES_UNTAKEN * PAYPAL_PRESS"), true);
   done();
 }
 

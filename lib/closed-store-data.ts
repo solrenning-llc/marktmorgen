@@ -808,6 +808,16 @@ async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<
       confirmed = false;
       continue;
     }
+    // Put back in line first, and taken out of the batch only once that is confirmed (Codex L on #3643): the other
+    // order, with the ZADD's answer lost, left the store in neither, and its record was never erased. Back in line
+    // with its entry still there is safe: the entry is never walked while its record is read there, and it is taken
+    // out on this or a later run.
+    const back = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, entry.ref]]).catch(() => null), 1)?.[0];
+    if (back !== 0 && back !== 1) {
+      console.error("a closing store whose record is still there was not confirmed put back in line; its entry stays, and no walk starts in this run", back);
+      confirmed = false;
+      continue;
+    }
     const taken = raw === undefined ? null : repliesFor(await redisPipeline([["EVAL", WITHDRAW_ENTRY, 1, BATCH_KEY, field, raw]]).catch(() => null), 1)?.[0];
     if (taken !== 0 && taken !== 1) {
       console.error("a closing entry whose record is still there was not confirmed taken out; no walk starts in this run", taken);
@@ -815,8 +825,6 @@ async function startableBatch(batch: { entries: Map<string, Batched>; raws: Map<
       continue;
     }
     batch.entries.delete(field);
-    const back = repliesFor(await redisPipeline([["ZADD", DUE_KEY, "NX", now, entry.ref]]).catch(() => null), 1)?.[0];
-    if (back !== 0 && back !== 1) confirmed = false;
   }
   return confirmed;
 }

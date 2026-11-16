@@ -471,8 +471,7 @@ async function main(): Promise<void> {
     is("the run is not said done, and nothing is walked", [first.done, first.finished], [false, 0]);
     const kept = redis.run(["HGET", BATCH_KEY, email]) !== null || redis.run(["ZSCORE", DUE_KEY, email]) !== null;
     is("the store is still remembered: its entry kept in the batch, or its ref back in line", kept, true);
-    let finished = 0;
-    for (let i = 1; i <= 3 && (await storeForEmail(email)) !== null; i += 1) finished += (await erase(now + i * (WALK_GAP_MS + 1))).finished;
+    for (let i = 1; i <= 3 && (await storeForEmail(email)) !== null; i += 1) await erase(now + i * (WALK_GAP_MS + 1));
     is("later runs prepare it again and erase it: its record is gone", await storeForEmail(email), null);
     is("and its data with it", redis.run(["GET", `nl:zz:${store.statsId}:data`]), null);
   }

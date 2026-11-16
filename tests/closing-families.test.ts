@@ -41,6 +41,8 @@ const TIMED_IN_CODE: Record<string, [string, string]> = {
   "nl:pictures:doors:": ["lib/picture-door.ts", "PICTURE_DOOR_SECONDS"],
   // A buyer's withdrawal from an order (EU art. 11a, 588 [KB9]): written with its expiry.
   "nl:withdraw:": ["lib/withdrawal.ts", "WITHDRAWAL_KEEP_DAYS"],
+  // A webhook event kept to be tried again (a capped part: the whole outbox, OUTBOX_MAX_KEPT records): kept a week at most.
+  "nl:hookout:": ["lib/webhook-outbox.ts", "OUTBOX_KEEP_SECONDS"],
 };
 /** A person's records across stores that hold a store's id among others and run out by the quarter (lib/joined-stores.ts), and the file that writes them. */
 const PERSON_RECORDS: Record<string, string> = {

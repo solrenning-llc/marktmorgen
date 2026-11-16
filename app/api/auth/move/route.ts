@@ -213,7 +213,9 @@ async function finishMove(from: string, to: string, link: string, away: (path: s
     if (!teams || unswept.size) {
       const dropped = await dropMemberships(from, unswept).catch(() => null);
       if (!dropped?.settled) console.error("a place on a team, or an API key made from one, may be left under an address an account moved away from", { from });
-      keys = dropped !== null && dropped.unswept.length === 0;
+      // Held only when the clean-up settled with nothing left open: it may answer unsettled with no store listed (one it
+      // could not read, with no sweep left from the carry), and that is not known as held either (Codex X2 on #3326, rule 24).
+      keys = dropped?.settled === true && dropped.unswept.length === 0;
     }
     // The old address is told the move finished every time, now, before anything else can stop it: the notice when
     // the move was asked for (lib/auth.ts sendMoveLink) says only that it may happen, and a move nobody there made is

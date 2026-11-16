@@ -98,11 +98,16 @@ async function commandsOf<T>(work: () => Promise<T>): Promise<{ value: T; comman
     redis.pipeline = original;
   }
 }
+/** Whether a pipeline's first command is `name`: "ZADD", or "ZADD XX" for one whose third word is XX (the record's write). */
+const firstIs = (list: (string | number)[][], name: string) => {
+  const [command, flag] = name.split(" ");
+  return String(list[0]?.[0]) === command && (!flag || String(list[0]?.[2]) === flag);
+};
 /** Answers one pipeline whose first command is `name` with nothing, as a reply out of shape. */
 function breakNext(name: string) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       return [];
     }
@@ -116,7 +121,7 @@ function breakNext(name: string) {
 function landThenLose(name: string, thenGet = false) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       if (thenGet) breakNext("GET");
       await original(list);
@@ -129,7 +134,7 @@ function landThenLose(name: string, thenGet = false) {
 function sendThenFail(name: string, runs: boolean) {
   const original = redis.pipeline.bind(redis);
   redis.pipeline = (async (list: (string | number)[][]) => {
-    if (String(list[0]?.[0]) === name) {
+    if (firstIs(list, name)) {
       redis.pipeline = original;
       if (runs) await original(list);
       throw new Error("fetch failed");
@@ -300,10 +305,23 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    breakNext("ZADD");
+    breakNext("ZADD XX");
     is("a record write answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file it would have named is deleted", w.calls.includes("vault:delete"), true);
     is("Redis confirms no record was written", await readSubmission(FOLDER, idOf(path)), null);
+  }
+  {
+    // Rule 24 on the kept file's turn (review of #3568, MEDIUM A): a turn not known to be written keeps nothing.
+    redis.pipeline = PIPELINE;
+    const lesson = "lesson0turn1";
+    const at = { ...where(), lessonId: lesson };
+    const w = world();
+    const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
+    const path = opened.ok ? opened.upload.pathname : "";
+    breakNext("ZADD GT");
+    is("a kept file's turn answered out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
+    is("and nothing is kept: no record, and its file deleted", [await readSubmission(FOLDER, idOf(path)), w.calls.includes("vault:delete")], [null, true]);
+    redis.pipeline = PIPELINE;
   }
   part("A record that may have been written never loses its file (review of #3568, Codex C2)");
   {
@@ -312,7 +330,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    landThenLose("ZADD");
+    landThenLose("ZADD XX");
     is("a record written whose answer was lost is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("its file is kept", w.calls.includes("vault:delete"), false);
     is("for the record that names it", (await readSubmission(FOLDER, idOf(path)))?.path, path);
@@ -324,7 +342,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    landThenLose("ZADD", true);
+    landThenLose("ZADD XX", true);
     is("a lost answer whose read-back is out of shape is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "unknown");
     is("and the file is kept, never deleted on a guess", w.calls.includes("vault:delete"), false);
   }
@@ -335,7 +353,7 @@ async function main(): Promise<void> {
     const w = world();
     const opened = await openSubmissionDoor({ ...ask(), lessonId: lesson }, w.steps);
     const path = opened.ok ? opened.upload.pathname : "";
-    sendThenFail("ZADD", true);
+    sendThenFail("ZADD XX", true);
     is("a write sent and never answered is unknown", await threw(() => closeSubmissionDoor({ ...at, data: SHOP, note: "" }, path, ["e"], NOW, w.steps)), "Error: fetch failed");
     is("and the file is kept: the write may have landed", w.calls.includes("vault:delete"), false);
     is("as it did here", (await readSubmission(FOLDER, idOf(path)))?.path, path);
@@ -536,7 +554,7 @@ async function main(): Promise<void> {
     const swept = await commandsOf(() => settleSubmissionSlots(later));
     is("once the door's day is over, the sweep sets the slot back to what is held: nothing", [swept.value.settled, await slotOf()], [1, 0]);
     is("inside the commands each open pays for its sweep", swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
-    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 3 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
+    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 2 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
     is("and nothing is left on the list for it", await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`], ["ZSCORE", "nl:sub:slotdue", `${dataKey(SHOP)?.slice(8)}|${FOLDER}`]]), [0, null]);
     const again = await commandsOf(() => settleSubmissionSlots(later + 60));
     is("a second sweep finds nothing to do", again.value.settled, 0);

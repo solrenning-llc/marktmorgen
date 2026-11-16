@@ -132,3 +132,35 @@ test("Meta: a pass stopped by an unknown reply hands back the store it already f
   const second = await settle(() => forgetMetaUser(user));
   assert.deepEqual((second.value ?? []).map((one) => one.statsId), ["b-store"]);
 });
+
+test("Meta: 51 kept stores ahead of an old one: a later pass still reaches and forgets it (Claude 7 on #4647)", async () => {
+  redis.clear();
+  const user = "10150000000000053";
+  const now = Date.now();
+  // Kept: connected after the notice, so each pass leaves them in the index. Their ids sort before the old store's.
+  const kept = ids(51, "ka");
+  for (const s of kept) {
+    redis.run(["SADD", metaUserKey(user), s]);
+    redis.run(["SET", metaConnKey(s), JSON.stringify({ user, token: "sealed", accounts: [], account: "", sid: "sid-1", connectedAt: now, owner: { email: `owner@${s}.example`, handle: s } })]);
+  }
+  seedMeta(user, "zz-old");
+  const cutoff = now - 60_000;
+  let reached = false;
+  for (let i = 0; i < 40 && !reached; i += 1) {
+    const out = await settle(() => forgetMetaUser(user, cutoff));
+    const forgot = out.error ? forgotOf(out.error) : (out.value ?? []).map((one) => one.statsId);
+    reached = forgot.includes("zz-old");
+  }
+  assert.equal(reached, true, "the old store is forgotten by some pass");
+  assert.equal(redis.run(["EXISTS", metaConnKey("zz-old")]), 0, "its connection is gone");
+  assert.equal(kept.filter((s) => redis.run(["EXISTS", metaConnKey(s)]) === 1).length, 51, "every kept store is kept");
+});
+
+test("Meta: a pass's start is a place in id order, wrapping around", async () => {
+  redis.clear();
+  const user = "10150000000000054";
+  const stores = ids(60, "wr");
+  for (const s of stores) seedMeta(user, s);
+  const out = await settle(() => forgetMetaUser(user, Number.POSITIVE_INFINITY, 55));
+  assert.deepEqual(forgotOf(out.error).sort(), [...stores.slice(55), ...stores.slice(0, 45)].sort());
+});

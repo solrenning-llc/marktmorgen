@@ -24,6 +24,7 @@
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { applyListedAssistant } from "@/lib/assistant-billing";
 import {
+  BillingError,
   type SubscriptionState,
   isAddOn,
   customerOf,
@@ -70,7 +71,14 @@ export type SyncCounts = {
  * Stripe could not be asked, and changes nothing. Returns whether it wrote.
  */
 export async function recordState(store: Store, state: SubscriptionState): Promise<boolean> {
-  if (state.state === "unknown") return false;
+  const plan = changeOf(store, state);
+  if (!plan) return false;
+  return (await setSubscription(storeRef(store), plan)) !== null;
+}
+
+/** What a state would write over the store's snapshot, or null when it changes nothing (or is unknown). */
+function changeOf(store: Store, state: SubscriptionState): Parameters<typeof setSubscription>[1] | null {
+  if (state.state === "unknown") return null;
   const active = state.state === "active";
   const plan = active ? { tier: state.tier, cycle: state.cycle, trialEnds: state.trialing ? state.until : 0, shared: state.shared, period: state.period, renewalUnpaid: state.renewalUnpaid === true } : null;
   if (
@@ -78,9 +86,9 @@ export async function recordState(store: Store, state: SubscriptionState): Promi
     (!plan || (plan.tier === store.tier && plan.cycle === store.cycle && plan.trialEnds === store.trialEnds && plan.shared === store.shared && samePeriod(plan.period, store.period ?? null) &&
       plan.renewalUnpaid === (store.renewalUnpaidSince ?? 0) > 0))
   ) {
-    return false;
+    return null;
   }
-  return (await setSubscription(storeRef(store), { active, ...(plan ?? {}) })) !== null;
+  return { active, ...(plan ?? {}) };
 }
 
 /**
@@ -172,14 +180,22 @@ async function applyListed(subscription: Record<string, unknown>, counts: SyncCo
   }
   if (!store) return false;
 
-  // The one this store wrote down: Stripe's word stands.
+  // The one this store wrote down: Stripe's word stands, but only its word
+  // now. The page was read before the rows ahead of this one were applied
+  // (each can take Stripe calls of its own), so this row can be older than
+  // what the store wrote down since: a plan the money-back refund or the
+  // cancel button ended, or a switch. A change it would make is written only
+  // from a fresh read of this one subscription (readSubscription, which also
+  // observes contract funding); one Stripe cannot give writes nothing, and
+  // step 2 asks about the store again.
   if (store.subscriptionId === id) {
-    const state=stateOf(subscription);
-    if(state.state==='active'&&hasContractFunding(subscription)){
-      const observed=await startedFromObservedSubscription(store,subscription);if(!observed)return false;
-      state.period=observed.period;
-    }
-    if (await recordState(store, state)) counts.updated += 1;
+    if (!changeOf(store, stateOf(subscription))) return true;
+    const now = await readSubscription(id, store);
+    if (now.state === "unknown") return false;
+    // Written only over the snapshot this was decided on (Codex U's MÉDIO on #4002): a plan the money-back refund or
+    // the cancel button ended after Stripe answered, or a switch, refuses the write, and the next run reads Stripe again.
+    const plan = changeOf(store, now);
+    if (plan && (await setSubscription(storeRef(store), plan, store)) !== null) counts.updated += 1;
     return true;
   }
 
@@ -204,6 +220,7 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
   // so the oldest subscriptions are reached too.
   const [saved] = await redisPipeline([["GET", LIST_CURSOR_KEY]]);
   let after: string | undefined = typeof saved === "string" && SUBSCRIPTION_ID.test(saved) ? saved : undefined;
+  let restarted = false;
   const stop = async () => {
     if (after) await redisPipeline([["SET", LIST_CURSOR_KEY, after, "EX", CURSOR_SECONDS]]);
     return false;
@@ -220,6 +237,17 @@ async function syncListed(deadline: number, seen: Set<string>, counts: SyncCount
     } catch (error) {
       counts.failed += 1;
       console.error("reading the list of subscriptions failed", error);
+      // A place Stripe says it does not know (the key moved to another
+      // account or mode, or the subscription went with its customer) is
+      // refused on every run: kept, it would stop step 1 for good. It is
+      // dropped and the list is read from its start, once in this run. Any
+      // other refusal keeps the place, so the next run reads it again.
+      if (after && !restarted && error instanceof BillingError && error.code === "resource_missing") {
+        restarted = true;
+        after = undefined;
+        await redisPipeline([["DEL", LIST_CURSOR_KEY]]);
+        continue;
+      }
       return stop();
     }
     const { data, hasMore } = listedPage;

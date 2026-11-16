@@ -14,6 +14,9 @@
  *     a folder past that fails the pass (counted, then given up and reported), never listed further;
  *   - a round of the line takes at most FORGET_TRIES tries and FORGET_LATE_PASSES passes cut off by the deadline;
  *   - a round the closing walk starts after one was given up forgets keys only, not files again;
+ *   - a round the closing walk starts after one that finished, or after the delete's own try listed every folder,
+ *     forgets keys only too, so a store's files take the delete's try and one round of the line at most (Claude 6's
+ *     MEDIUM on 8a05d01969: a finished round left nothing that said so, and the walk's next round listed again);
  *   - the delete's first try lists with the same ceiling.
  * Synthetic only.
  */
@@ -21,7 +24,7 @@ import { readFileSync } from "node:fs";
 import * as filesModule from "@/lib/deleted-store-files";
 import { OutOfTime, deletedStoreFolders, removeDeletedStoreFiles } from "@/lib/deleted-store-files";
 import * as lineModule from "@/lib/store-forget-retry";
-import { FORGET_TRIES, queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
+import { FORGET_TRIES, type ForgetWork, queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
 import { claimHandle, createStore, imageFolder, setCommunity, storeFolder, storeRef } from "@/lib/store";
 import { communityFolder } from "@/lib/community-image";
 import { TIERS } from "@/lib/plan";
@@ -127,6 +130,60 @@ async function main(): Promise<void> {
     asked.push(args[4]);
   });
   is("a store in its first round still has its files deleted", asked, [true]);
+
+  // Claude 6's probe on 8a05d01969: the route's round finishes, then the walk's admission starts another round.
+  part("A round the closing walk starts after a round that finished does not list files again");
+  redis.clear();
+  const seen: boolean[] = [];
+  const record: ForgetWork = async (_statsId, _sid, _community, _until, filesToo) => {
+    seen.push(filesToo);
+  };
+  const probe = "c".repeat(32);
+  await queueStoreForget("st_probe", probe, Date.now(), null);
+  const routeRound = await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  for (let walk = 0; walk < 3; walk += 1) {
+    await queueStoreForget("st_probe", probe);
+    await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  }
+  is("the first round lists its files and finishes; every round the walk starts after it forgets keys only", [routeRound.done, seen], [1, [true, false, false, false]]);
+
+  part("The delete's own try listed every folder: a round the closing walk starts after it does not list them again");
+  redis.clear();
+  seen.length = 0;
+  const listed = "d".repeat(32);
+  const note = (lineModule as Record<string, unknown>).noteStoreFilesForgotten;
+  is("the line notes a deleted store whose files were all seen to", typeof note, "function");
+  if (typeof note === "function") await (note as (sid: string) => Promise<void>)(listed);
+  await queueStoreForget("st_listed", listed);
+  await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  is("the walk's round forgets keys only", seen, [false]);
+  const routeText = readFileSync("app/api/store/stores/route.ts", "utf8");
+  is("the delete notes it once every folder was listed", /listedAll \? noteStoreFilesForgotten\(/.test(routeText.replace(/\s+/g, " ")), true);
+
+  part("What says a store's files are done is read exactly: unknown is never done");
+  redis.clear();
+  seen.length = 0;
+  const unread = "e".repeat(32);
+  const real = redis.pipeline.bind(redis);
+  const garble = (match: (command: (string | number)[]) => boolean, bad: unknown) => {
+    redis.pipeline = async (commands: (string | number)[][]) => {
+      const replies = (await real(commands)) as unknown[];
+      return commands.map((command, i) => (match(command) ? bad : replies[i]));
+    };
+  };
+  garble((command) => command[0] === "HEXISTS" && command[1] === "nl:forget:files", "1");
+  const refused = await rejects(() => queueStoreForget("st_unread", unread));
+  redis.pipeline = real;
+  is("a read of it in another shape puts nothing in line (the walk tries again), never a round taken as done", [refused, (await real([["HLEN", "nl:forget:q"]]))[0]], [true, 0]);
+  await queueStoreForget("st_unread", unread, Date.now(), null);
+  garble((command) => command[0] === "HSET" && command[1] === "nl:forget:files", "OK");
+  const unsure = await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  redis.pipeline = real;
+  is("a note of it not confirmed: the round is not over, it stays in line as a failed try", [unsure.done, unsure.failed, (await real([["HLEN", "nl:forget:q"]]))[0]], [0, 1, 1]);
+  await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  await queueStoreForget("st_unread", unread);
+  await retryStoreForgets(Date.now() + 10_000, Date.now(), record);
+  is("its files are tried again inside that round, then the walk's round forgets keys only", seen, [true, true, false]);
 
   part("The delete's first try lists with the same ceiling");
   const route = readFileSync("app/api/store/stores/route.ts", "utf8");

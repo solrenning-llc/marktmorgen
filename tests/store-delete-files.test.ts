@@ -11,7 +11,7 @@ import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { sweepTaskUploads } from "@/lib/assignment";
 import { deleteFile } from "@/lib/file-store";
-import { retryStoreForgets } from "@/lib/store-forget-retry";
+import { queueStoreForget, retryStoreForgets } from "@/lib/store-forget-retry";
 import { claimHandle, createStore, ensureStatsId, imageFolder, storeFolder, storeRef } from "@/lib/store";
 import { files, state } from "./store-delete-files-world";
 import { done, is, part } from "./check";
@@ -46,6 +46,14 @@ async function main(): Promise<void> {
   is("the store is deleted", [response.status, response.headers.get("Location")?.includes("stores=deleted")], [303, true]);
   is("its pictures and its leftover file are deleted with it", [files.has(picture), files.has(leftover)], [false, false]);
   is("the account's first store keeps its own", files.has(homePicture), true);
+  // Claude 6's MEDIUM on #4348 @8a05d01969: every folder listed at the delete, a round the closing walk's admission
+  // starts later (lib/closed-store-data.ts admitDeleted) forgets the keys only, and lists none of its folders again.
+  const filesAsked: boolean[] = [];
+  await queueStoreForget(made.store.statsId ?? null, made.store.sid);
+  await retryStoreForgets(Date.now() + 30_000, Date.now(), async (_statsId, _sid, _community, _until, filesToo) => {
+    filesAsked.push(filesToo);
+  });
+  is("a round the walk starts after it does not list its folders again", filesAsked, [false]);
 
   part("A file store that does not answer at the delete");
   const second = await createStore(owner, "filesother", "Files other", "");

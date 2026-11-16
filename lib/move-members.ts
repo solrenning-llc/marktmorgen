@@ -18,6 +18,7 @@ import { OrdersPausedError } from "@/lib/order-admission";
 import { randomBytes } from "node:crypto";
 import { EMAIL_PATTERN, normaliseEmail } from "@/lib/auth";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, listSlots, repliesFor } from "@/lib/redis-reply";
 import type { Listing, Product, Store } from "@/lib/store";
 import { readListing, readProduct } from "@/lib/catalog";
 import { addressHash } from "@/lib/imported-purchases";
@@ -31,7 +32,6 @@ import { moveWords } from "@/lib/buyer-words/move";
 import { activeIntro } from "@/lib/intro-price";
 import { firstChargeAt, linkSeconds, reminderAt } from "@/lib/move-rules";
 import { giveData, needData } from "@/lib/store-data";
-import { UnknownReplyError, repliesFor } from "@/lib/redis-reply";
 import { takePublicRequest } from "@/lib/traffic";
 import { AFFILIATE_STRIPE_PAGES_PER_UNIT } from "@/lib/public-read-rules";
 import { dataBytes } from "@/lib/store-data-rules";
@@ -582,23 +582,28 @@ export async function forgetInvitesPerson(store: Pick<Store, "sid" | "statsId">,
   if (!store.statsId || !productIds.length || !isRedisConfigured()) return 0;
   const statsId = store.statsId;
   const fields = productIds.map((p) => inviteField(email, p));
-  // CX-123 rule 24 (Claude 4, C4-2890): a reply out of its exact shape is unknown, never "no invitations": it throws,
-  // so the erasure lists this part as not finished instead of reporting 0 while the invitation and its link stay.
-  const rows = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1)?.[0];
-  if (!Array.isArray(rows) || rows.length !== fields.length || rows.some((row) => row !== null && typeof row !== "string")) {
-    throw new UnknownReplyError("a person's invitations");
-  }
-  // An invitation kept under the person's field is deleted even when its record no longer reads: its field, schedule and
-  // checkout mark are known from the field alone; only a link read from the record can be deleted by its token.
-  const held = fields.flatMap((field, i) => (rows[i] === null ? [] : [{ field, invite: parseInvite(rows[i]) }]));
+  // Read exactly (unknown is never zero): a reply in another shape, or a kept invite that does not read, may still
+  // hold the address and its reminder, so it is never said to be forgotten. It throws, and the erasure reports this
+  // part as not done and tries again (lib/person-erasure.ts), the way forgetLeadPerson does.
+  const what = "a person's membership move invitations";
+  const replies = repliesFor(await redisPipeline([["HMGET", invitesKey(statsId), ...fields]]), 1);
+  const rows = replies ? listSlots(replies[0]) : null;
+  if (!rows || rows.length !== fields.length) throw new UnknownReplyError(what);
+  const held: { field: string; invite: Invite }[] = [];
+  fields.forEach((field, i) => {
+    if (rows[i] === null) return;
+    const invite = parseInvite(rows[i]);
+    if (!invite) throw new UnknownReplyError(what);
+    held.push({ field, invite });
+  });
   if (!held.length) return 0;
-  const links = held.flatMap((h) => (h.invite ? [linkKey(h.invite.t)] : []));
-  await redisPipeline([
+  const gone = repliesFor(await redisPipeline([
     ["HDEL", invitesKey(statsId), ...held.map((h) => h.field)],
-    ...(links.length ? [["DEL", ...links]] : []),
+    ["DEL", ...held.map((h) => linkKey(h.invite.t))],
     ["ZREM", DUE_KEY, ...held.map((h) => `${store.sid}|${h.field}`)],
     // The checkout their link last opened, kept a day so it is not opened twice.
     ["DEL", ...held.map((h) => openKey(statsId, h.field))],
-  ]);
+  ]), 4);
+  if (!gone || gone.some((n) => { const c = countOf(n); return c === null || c > held.length; })) throw new UnknownReplyError(what);
   return held.length;
 }

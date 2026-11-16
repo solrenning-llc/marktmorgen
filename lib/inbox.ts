@@ -301,7 +301,7 @@ export type ChatResult = { ok: true; thread: VisitorThread } | { ok: false; reas
 export async function startChat(input: { store: Store; email: unknown; name: unknown; text: unknown; ip: string; now?: number }): Promise<ChatResult> {
   const { store } = input;
   if (!chatOpen(store)) return { ok: false, reason: "closed" };
-  if (!(await withinLimit("chat-start", `${store.statsId}:${input.ip}`, 5, 3_600))) return { ok: false, reason: "limited" };
+  if (!(await withinLimit("chat-start", `${store.statsId}|${input.ip}`, 5, 3_600))) return { ok: false, reason: "limited" };
   // A store whose data room is full is not taking messages here: said as closed, nothing kept.
   const made = await open({ ...input, source: "chat" }).catch((error) => {
     if (error instanceof DataRoomError) return { ok: false as const, reason: "closed" as const };
@@ -789,6 +789,9 @@ export async function forgetInboxPerson(statsId: string | null, email: string): 
 /** How many conversations the inbox keeps: what deleting a person reads (lib/person-erasure.ts). */
 export async function conversationCount(statsId: string | null): Promise<number> {
   if (!statsId || !isRedisConfigured()) return 0;
-  const [n] = await redisPipeline([["ZCARD", indexKey(statsId)]]);
-  return Math.min(Number(n) || 0, MAX_CONVERSATIONS);
+  // Read exactly (unknown is never zero): it sizes the studio allowance a person's erasure takes before its work runs
+  // (lib/person-erasure.ts, erasureSize), so a reply in another shape throws and the erasure answers "unavailable".
+  const n = countOf(repliesFor(await redisPipeline([["ZCARD", indexKey(statsId)]]), 1)?.[0]);
+  if (n === null) throw new UnknownReplyError("the count of the inbox's conversations");
+  return Math.min(n, MAX_CONVERSATIONS);
 }

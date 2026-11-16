@@ -26,7 +26,7 @@ import { aiAvailableFor, answerModel, askModel, jsonIn } from "@/lib/ai";
 import { inTrial } from "@/lib/mail";
 import { formatMoney } from "@/lib/money";
 import { speech } from "@/lib/buyer-words";
-import { speaksOfTerms } from "@/lib/store-assistant-rules";
+import { heldToFacts, speaksOfTerms } from "@/lib/store-assistant-rules";
 import { type Listing, type Store, isFree } from "@/lib/store";
 import { membershipPrice } from "@/lib/product-recurring";
 import { activeIntro, introLineEnglish } from "@/lib/intro-price";
@@ -73,8 +73,16 @@ export function answersAllowance(store: Store, now = Date.now()): number {
 export async function answersUsed(store: Store, now = Date.now()): Promise<number> {
   const key = monthKey(store, new Date(now));
   if (!store.statsId || !isRedisConfigured() || !key) return 0;
-  const [used] = await redisPipeline([["GET", key]]);
-  return Math.max(0, Number(used) || 0);
+  const reply = repliesFor(await redisPipeline([["GET", key]]), 1);
+  // Exact (rule 24): a key not there yet is 0; a count in another shape, or a missing reply, is unknown, never 0.
+  if (!reply) throw new UnknownReplyError("the answers used this month");
+  if (reply[0] === null) return 0;
+  const used = reply[0];
+  // Either representation is checked after it is converted: a decimal string past Number.MAX_SAFE_INTEGER would
+  // otherwise round to a count that was never stored and be shown as exact.
+  const n = typeof used === "string" && /^(0|[1-9][0-9]{0,15})$/.test(used) ? Number(used) : typeof used === "number" ? used : NaN;
+  if (!Number.isSafeInteger(n) || n < 0) throw new UnknownReplyError("the answers used this month");
+  return n;
 }
 
 /** How a product is handed over, in a sentence that is true of every store here. */
@@ -366,7 +374,9 @@ export async function answerQuestion(input: {
   if (typeof kept === "string") {
     try {
       const value = JSON.parse(kept) as { answer?: unknown; known?: unknown };
-      if (typeof value.answer === "string" && value.answer) return { ok: true, answer: value.answer, known: value.known === true };
+      // An answer kept before it was held to the page (#4050) is never served: the model is asked anew.
+      const held = value.known !== true || (typeof value.answer === "string" && heldToFacts(value.answer, facts));
+      if (typeof value.answer === "string" && value.answer && held) return { ok: true, answer: value.answer, known: value.known === true };
     } catch {}
   }
 
@@ -391,9 +401,15 @@ export async function answerQuestion(input: {
   const said = shaped && typeof json.answer === "string" ? json.answer.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER) : "";
   // Never shown, whatever the model was told: an answer about terms on a page cut short (see above).
   const termsCut = cut && said !== "" && speaksOfTerms(said);
-  const known = shaped && json.known === true && said !== "" && !termsCut;
+  // Never shown, and never kept: a code, a discount, a deadline, a number, a link or an address the page does not
+  // state (#4050), held exactly as the store assistant's chat is (heldToFacts). The visitor reads the plain
+  // "not known" sentence; the question is not filed, since the model said the page answers it.
+  const invented = shaped && json.known === true && said !== "" && !termsCut && !heldToFacts(said, facts);
+  const known = shaped && json.known === true && said !== "" && !termsCut && !invented;
   // Said in the store's language (lib/buyer-words), like the rest of its page.
   const answer = known ? said : termsCut ? speech(store).w.askTermsCut() : speech(store).w.askUnknown(store.name);
+  // Not kept either, so the same question is put to the model again rather than answered "not known" for a day.
+  if (invented) return { ok: true, answer, known };
 
   const commands: (string | number)[][] = [["SET", answerKey(hash), JSON.stringify({ answer, known }), "EX", ANSWER_KEPT_SECONDS]];
   // The page does say it, so it is not on the creator's list of what pages are missing.

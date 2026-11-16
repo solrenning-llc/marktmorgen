@@ -446,6 +446,23 @@ async function main(): Promise<void> {
     states.push((await readUpsell(id))?.state ?? null);
   }
   is("RED: DISC-C-4: a \"succeeded\" answer that is not this payment intent is never written down as paid", states.map((s) => s !== "paid"), [true, true]);
+  // DISC-C-4 next to main's audit R48 (tests/r48-email-amounts.test.ts): an amount or a currency that is there must be
+  // the one asked, so an answer for another amount or currency stays pending; an answer with no amount at all is this
+  // payment intent by its id, object and currency, written down as paid, its email without an amount line.
+  const amounts: Json[] = [
+    { id: "pi_test_otheramount1", object: "payment_intent", status: "succeeded", amount: 2900, currency: "usd" },
+    { id: "pi_test_othercurren1", object: "payment_intent", status: "succeeded", amount: 1900, currency: "eur" },
+    { id: "pi_test_noamount0001", object: "payment_intent", status: "succeeded", currency: "usd" },
+  ];
+  const amountStates: unknown[] = [];
+  for (const [i, reply] of amounts.entries()) {
+    const id = `cs_test_codeorder00000${i + 4}`;
+    sessions[id] = paidWithCode(id);
+    intentAnswer = () => answer(reply);
+    await take(id);
+    amountStates.push((await readUpsell(id))?.state ?? null);
+  }
+  is("DISC-C-4 with R48: another amount or currency stays pending; no amount at all is paid on its own id", amountStates, ["pending", "pending", "paid"]);
 
   // -------------------------------------------------------------------------
   part("11. The creator's numbers for a discounted sale, partly refunded (lib/discount-impact.ts)");

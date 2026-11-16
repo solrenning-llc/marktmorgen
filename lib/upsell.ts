@@ -565,7 +565,11 @@ export async function takeUpsell(input: {
     // Only Stripe's answer for this charge (rule 30, DISC-C-4): a payment intent, with its id, for the amount and
     // currency asked. Any other answer proves nothing: the offer stays pending, with no id taken from it, and is
     // found among the buyer's payments and settled from what Stripe says (settleOne), never written down as paid.
-    const own = pi.object === "payment_intent" && /^pi_\w+$/.test(id) && pi.amount === step.priceCents && typeof pi.currency === "string" && pi.currency.toLowerCase() === store.currency.toLowerCase();
+    // An answer with no amount at all (audit R48) is still this payment intent by its id, object and currency: it
+    // goes on as Stripe says, and its email leaves the amount line out (afterPaid). An amount that is there and is
+    // not the one asked is another charge's.
+    const amountAsked = pi.amount === undefined || pi.amount === null || pi.amount === step.priceCents;
+    const own = pi.object === "payment_intent" && /^pi_\w+$/.test(id) && amountAsked && typeof pi.currency === "string" && pi.currency.toLowerCase() === store.currency.toLowerCase();
     if (!own) {
       await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, customer, at: Date.now() });
       return { kind: "checking" };

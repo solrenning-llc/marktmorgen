@@ -23,11 +23,21 @@ process.env.STRIPE_SECRET_KEY = "sk_test_paid_outside_only";
 const sessions: Record<string, Record<string, unknown>> = {};
 const expired: string[] = [];
 let expireFails = false;
+/** When set, the next expire POST is answered with this body, and the request's own checkout is left as it is. */
+let expireReceipt: Record<string, unknown> | null = null;
+/** Checkouts this run asked Stripe to open (POST /checkout/sessions). */
+let openedCheckouts = 0;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const path = new URL(String(input)).pathname.replace(/^\/v1/, "");
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  if (path === "/checkout/sessions" && init?.method === "POST") openedCheckouts += 1;
   const close = /^\/checkout\/sessions\/(cs_test_[A-Za-z0-9]+)\/expire$/.exec(path);
   if (close && init?.method === "POST") {
+    if (expireReceipt) {
+      const receipt = expireReceipt;
+      expireReceipt = null;
+      return answer(receipt);
+    }
     if (expireFails) return answer({ error: { message: "This Checkout Session is not in an expireable state." } }, 400);
     expired.push(close[1]);
     return answer({ ...sessions[close[1]], status: "expired" });
@@ -119,6 +129,22 @@ async function main(): Promise<void> {
   await withSession(reqH, "cs_test_sessionofH1", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_sessionofH1" });
   const own = await openRequestCheckout(store, reqH, "https://marktmorgen.com", day);
   is("control: its own open checkout is the page again", own.ok ? own.url : own.reason, "https://checkout.stripe.com/c/pay/cs_test_sessionofH1");
+  part("Codex L's HIGH on #4455: an expiry receipt for another checkout is not this one closed");
+  const reqJ = await make();
+  await withSession(reqJ, "cs_test_ownprobe1234", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_ownprobe1234" });
+  expireReceipt = { id: "cs_test_someoneelse1", object: "checkout.session", status: "expired" };
+  const foreign = await markPaidOutside(store, reqJ, { method: "cash", note: "", paidAt: day });
+  const afterJ = await requestOf(store, reqJ);
+  is("the creator's mark: refused, the request still open and unmarked, its own checkout still open", [foreign.ok ? "marked" : foreign.reason, afterJ?.state, afterJ?.outside, sessions.cs_test_ownprobe1234?.status], ["error", "open", undefined, "open"]);
+  const reqK = await make();
+  await withSession(reqK, "cs_test_ownprobe5678", { status: "open", payment_status: "unpaid", url: "https://checkout.stripe.com/c/pay/cs_test_ownprobe5678" });
+  expireReceipt = { id: "cs_test_someoneelse2", object: "checkout.session", status: "expired" };
+  const before = openedCheckouts;
+  // A day later: the open checkout is past its reuse, so the buyer's press closes it before opening another.
+  const buyer = await openRequestCheckout(store, reqK, "https://marktmorgen.com", Date.now() + 86_400_000);
+  is("the buyer's press: an error, and no second checkout opened beside the one still open", [buyer.ok ? "sent" : buyer.reason, openedCheckouts - before, sessions.cs_test_ownprobe5678?.status], ["error", 0, "open"]);
+  expireReceipt = null;
+
   part("A checkout Stripe no longer has (404): no checkout, marked");
   const missing = await make();
   await changeRequest(store, missing, (r) => ({ next: { ...r, session: "cs_test_goneone1234", sessionAt: Date.now() }, answer: true }));

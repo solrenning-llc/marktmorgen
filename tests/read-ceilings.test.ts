@@ -349,7 +349,7 @@ async function main(): Promise<void> {
     // Inbox C4-33 (1): the day's heavy readings are the most the margin allows, with the room that exists: the first
     // payment refunded in full (tests/plan-margin.test.ts) stays under the owner's ceiling, computed as that test does.
     // The ceiling is US$ 66 under BROADCAST-262 (owner, 16 Nov 2026 02:15 Fortaleza: "sim, US$66"), US$ 65 before; its
-    // item 4 names this course-drip PR (#3344) to be counted against US$ 66. The readings figure is still the one sized
+    // item 4 names the course-drip PR (#3344) among those counted against US$ 66. The readings figure is still the one sized
     // under US$ 65, where one more heavy reading a day passes it.
     const keptToClosing = (paidStorageBytes("creator") / GB) * STORAGE_PER_GB * ((CLOSING_DAYS + WARN_WEEK_DAYS) / 30);
     const year = worstCost("creator") + providerFeeUsd(PRICES_WITHOUT_COMMISSION.creator.year) + keptToClosing;

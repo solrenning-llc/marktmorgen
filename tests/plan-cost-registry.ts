@@ -428,13 +428,18 @@ export function dripRunMonthlyUsd(tier: Tier): number {
   return DRIP_RUNS_PER_MONTH * (dripRunCommandsPerStore(entries) * COMMAND + dripRunBytesPerStore(entries) * DB_BYTE);
 }
 /**
- * The migration of a store's courses from the old global set, once (line course-drip-index-migration): each course's
- * outline read once to write its card (DRIP_BATCH at an MGET, its card's SET and its room), every outline at most the
- * store's data room together. Its students' pages are walked inside the monthly line's page budget.
+ * The migration of a store's courses from the old global set, once (line course-drip-index-migration): what no page
+ * of the walk holds. Each course's outline is read once, through the walk's MGET (readCoursesEach), one MGET a run whose
+ * courses have no card and at most DRIP_INDEX_PAGES_RUN outlines in it, every outline at most the store's data room
+ * together; and its pending set and the stores' set are written once. Its card (its room's EVAL and its SET NX, one
+ * card's bytes) is written on a page the walk takes from its budget (lib/learn.ts walkPending, `budget -= 1`), a page
+ * the monthly line already pays at DRIP_WALK_PAGE_COMMANDS commands and a card plus a page of rows; counting it here
+ * too paid it twice (Claude 4 cloud V, 16 November 2026; tests/drip-migration-page-budget.test.ts). Its students'
+ * pages are walked inside the same budget.
  */
 export function dripMigrationUsd(tier: Tier): number {
-  const commands = 2 * Math.ceil(MAX_PRODUCTS / DRIP_BATCH) + 2 * MAX_PRODUCTS + 3;
-  const bytes = DATA_ROOM_BYTES[tier] + MAX_PRODUCTS * (DRIP_CARD_MAX_BYTES + DRIP_PENDING_MEMBER_BYTES);
+  const commands = Math.ceil(MAX_PRODUCTS / DRIP_INDEX_PAGES_RUN) + 3;
+  const bytes = DATA_ROOM_BYTES[tier] + MAX_PRODUCTS * DRIP_PENDING_MEMBER_BYTES;
   return commands * COMMAND + bytes * DB_BYTE;
 }
 
@@ -1883,7 +1888,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     feature: "A store's drip courses moved from the old global set into its own index, once (lib/learn.ts, migrateDrip; docs/drip-due-index.md; 15 November 2026)",
     monthlyUsd: (tier) => dripMigrationUsd(tier),
     sources: [{ file: "lib/learn.ts", names: ["migrateDrip", "DRIP_SET", "A course of the old set, with no card yet"] }],
-    basis: "Once for each store that had drip courses before the index: each course of the old set (at most MAX_PRODUCTS) has its outline read once (every outline together at most the store's data room, DATA_ROOM_BYTES) and its card written (its SET and its room), DRIP_BATCH at an MGET; its pending set and the stores' set written once. No course enters the old set any more, so a store made since never pays it. Its students' pages are walked within the monthly line's page budget (course-drip-run).",
+    basis: "Once for each store that had drip courses before the index: each course of the old set (at most MAX_PRODUCTS) has its outline read once (every outline together at most the store's data room, DATA_ROOM_BYTES), through the walk's MGET, one a run whose courses have no card, at most DRIP_INDEX_PAGES_RUN outlines in it; its pending set and the stores' set written once. Its card (its room and its SET NX) is written on a page the walk takes from its budget, a page the monthly line (course-drip-run) already pays, so it is not counted here again (tests/drip-migration-page-budget.test.ts). No course enters the old set any more, so a store made since never pays it. Its students' pages are walked within the monthly line's page budget (course-drip-run).",
   },
   {
     id: "retained-files",

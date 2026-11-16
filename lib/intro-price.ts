@@ -49,7 +49,7 @@ export function parseIntro(raw: unknown): Intro | null {
 export type IntroCandidate = {
   id: string;
   priceCents: number;
-  recurring: { interval: Interval; trialDays: number; payments: number } | null;
+  recurring: { interval: Interval; trialDays: number; payments: number; every?: number } | null;
   options: unknown[];
   pwyw: unknown;
   /** A yearly price beside the monthly one (lib/yearly-price.ts): one offer at a time. */
@@ -73,6 +73,8 @@ export function introProblem(product: IntroCandidate, intro: Intro, minCents: nu
   if (tiers.includes(product.id)) return "tiers";
   if (product.yearly) return "yearly";
   if (intro.cents < minCents || intro.cents >= product.priceCents) return "price";
+  // Counted in single weeks or months, so never on one charged every few (609 [WP8]).
+  if ((recurring.every ?? 1) > 1) return "count";
   if (intro.count < 1 || intro.count > (recurring.interval === "month" ? MAX_INTRO_COUNT : 1)) return "count";
   return null;
 }

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { Icon } from "@/components/icons";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { SESSION_COOKIE, emailForSession } from "@/lib/auth";
 import { storeForEmail } from "@/lib/store";
 import { inviterFor } from "@/lib/creator-invites";

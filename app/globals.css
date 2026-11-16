@@ -96,6 +96,7 @@
   --mint-soft: #e5f6ef;
   --mint-lift: #6fe3ba;
   --amber: #8a4f00;
+  --amber-text: #6b3d00; /* warning copy on amber-soft: 8.32:1 (amber itself is 5.97:1) */
   --amber-soft: #fdf3e1;
   /* The same two signals at the weight they need to read on navy. */
   --amber-lift: #ffc77a;
@@ -246,11 +247,24 @@ body {
   color: var(--violet-ink);
 }
 
-:where(a, button, [role="button"], input, select, textarea, summary):focus-visible,
+/* [tabindex="0"]: a box made focusable so the keyboard can scroll it (a wide table, a long text) gets the same ring
+   as a control, not only the browser's own (2.4.7, 2.4.13; tests/focus-ring-regions.test.ts). */
+:where(a, button, [role="button"], input, select, textarea, summary, [tabindex="0"]):focus-visible,
 :where(input[type="radio"]):focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
   border-radius: 6px;
+}
+
+/* A file field kept visually hidden (sr-only) behind a label drawn as a button takes the Tab key, but its own ring is
+ * clipped to one pixel: the ring goes on the label that is seen, whether it wraps the field, comes just before it or
+ * just after it (WCAG 2.4.7, 2.4.13; tests/file-input-focus-ring.test.ts). In forced colors the outline keeps a system
+ * color of its own. */
+label:has(> input[type="file"].sr-only:focus-visible),
+label:has(+ input[type="file"].sr-only:focus-visible),
+input[type="file"].sr-only:focus-visible + label {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
 }
 
 /*
@@ -1212,7 +1226,7 @@ html {
 }
 .tag-next {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 .tag-brand {
   background: var(--lilac);
@@ -2377,6 +2391,16 @@ a.chip {
   border-color: var(--st-accent-text);
   box-shadow: 0 0 0 3px var(--st-accent-soft);
 }
+/* No block of the digital consent box is wider than 80 characters, wherever it is drawn (1.4.8 AAA,
+   tests/consent-box-line-length.test.ts): its paragraphs and the sentence the buyer checks (the label's span); its
+   error box and its screen-reader-only line keep their width. In @layer components at no weight, like the store
+   front's caps below: where the box sits in .st-measure or [data-store-layout] their narrower 34ch still applies,
+   and Tailwind's utilities still win. */
+@layer components {
+  :where([data-digital-consent]) :where(p:not(.st-note, .sr-only), label > span) {
+    max-width: 46ch;
+  }
+}
 /* Keyboard focus stays distinct even when a creator picks a very pale or
    dark accent. Each opaque band is large enough to be seen on its own. */
 .st-field:focus-visible {
@@ -2568,6 +2592,14 @@ select.st-field:not([multiple]),
    a 44 px target (WCAG 2.5.5 AAA). Not a summary, which would lose its disclosure triangle (below), nor a link
    inside a quote's caption, which breaks with its sentence (2.5.5 exempts a link in a sentence). */
 [data-store-layout] .st-footer-link:not(summary, figcaption > *) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+}
+/* The same on every other page under a store (tip, waitlist, letters, blog, manage, renew, pay, ...): a way back drawn
+   directly inside a <div> or <nav> stands alone, so it is a 44 px target too (2.5.5 AAA,
+   tests/store-back-links-target.test.ts). A link in a sentence sits in a <p> or <span> and keeps its line. */
+.st-page :is(div, nav) > a.st-footer-link {
   display: inline-flex;
   align-items: center;
   min-height: 2.75rem;
@@ -5018,6 +5050,15 @@ fieldset:disabled .cm-poll-row {
   .st-has-sticky {
     padding-bottom: 6.5rem;
   }
+  /*
+   * WCAG 2.2 2.4.11/2.4.12: the browser keeps what has keyboard focus above the
+   * bar instead of under it (tests/sticky-buy-focus.test.ts). Held while the bar
+   * is away too: focus can scroll the buy box off screen, and the bar then comes
+   * back over what was just focused.
+   */
+  html:has(.st-sticky-buy) {
+    scroll-padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  }
 }
 .st-sticky-price {
   min-width: 0;
@@ -5312,6 +5353,7 @@ html:has([data-product-editor]) {
   --danger: #ff7b6e;
   --amber-soft: #2e2210;
   --amber: #ffcf8a;
+  --amber-text: #ffcf8a;
   --background: var(--paper);
   --foreground: var(--ink);
 }

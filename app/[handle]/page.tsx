@@ -1,4 +1,5 @@
 import { VisitUsBlock } from "@/components/visit-us-block";
+import { StoreTrustCard } from "@/components/store-trust-card";
 import { assistReminderShown } from "@/lib/assistant-reminder";
 import { withinStore } from "@/lib/metered-limits";
 import { StorePagesNav } from "@/components/store-pages-nav";
@@ -21,7 +22,8 @@ import { StoreTipBox } from "@/components/store-tip-box";
 import { kitShown } from "@/lib/store-kit";
 import { kitWords } from "@/lib/buyer-words/kit";
 import { Icon } from "@/components/icons";
-import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchStore, searchWords } from "@/lib/catalog";
+import { MAX_STORE_SEARCH, STORE_PAGE_SIZE, searchWords } from "@/lib/catalog";
+import { SEARCH_UNAVAILABLE, searchStorePaid } from "@/lib/store-search-index";
 import { StoreQuotes } from "@/components/store-quotes";
 import { showsRating, storeSummary } from "@/lib/review-summary";
 import { RatingLine } from "@/components/review-list";
@@ -72,6 +74,7 @@ import { outOfKeys } from "@/lib/licence-keys";
 import { ProductCard } from "@/components/store-product";
 import { canWrite } from "@/lib/mail";
 import { canUseDomain } from "@/lib/domains";
+import { storeAddress } from "@/lib/store-sitemap";
 import { SITE_URL } from "@/lib/site-url";
 import { summaries } from "@/lib/reviews";
 import { SHOWN_FROM, readSoldCounts, refreshSoldCounts, stale } from "@/lib/sold-count";
@@ -113,13 +116,13 @@ export async function generateMetadata({ params, searchParams }: Params): Promis
   if (!found) return { title: "Not found — Marktmorgen" };
   const { store } = found;
 
-  // A store on its own live domain names that as its address for search engines.
-  const ownDomain = store.domain?.liveAt && canUseDomain(store) ? `https://${store.domain.name}/` : null;
-
   return {
     title: `${store.name} — Marktmorgen`,
     description: store.bio || speech(store).w.storeDescription(store.name),
-    ...(ownDomain ? { alternates: { canonical: ownDomain } } : {}),
+    // The one address the store names as its own, as its map lists it: its live domain's, or
+    // marktmorgen.com/@handle however the handle was written in the address bar (/@LocalShop
+    // draws the same page, and must not be a second address of it).
+    alternates: { canonical: storeAddress(store) },
     // An empty store has nothing to offer a search engine yet. One with
     // something on it does, so it stops hiding the moment it has. A page of
     // links alone counts: it is a page somebody may be looking for.
@@ -220,8 +223,15 @@ export default async function StorePage({ params, searchParams }: Params) {
     wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0
       ? await withinStore("store-search", `${(await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown"}|${store.handle}`, 30, 600, store)
       : false;
-  const searching = searchAllowed ? wantedSearch : "";
-  const results = searching ? await searchStore(store, searching) : null;
+  // A search pays for what it reads before reading it (lib/store-search-index.ts): the full read of the store's
+  // listings once for everybody, as shared work kept ten minutes, then only the matches it shows and their checkout
+  // boxes. Refused, it reads nothing and the page says why, as for the per-connection limit (c1-cost-store-search).
+  const answer = searchAllowed ? await searchStorePaid(store, wantedSearch) : null;
+  // A store whose index is too large to keep offers no search for now, and says so; its products are listed as usual.
+  const searchUnavailable = answer === SEARCH_UNAVAILABLE;
+  const results = answer === SEARCH_UNAVAILABLE ? null : answer;
+  const searchRefused = wantedSearch !== "" && searchable && searchWords(wantedSearch).length > 0 && !results;
+  const searching = results ? wantedSearch : "";
   // A search that found nothing is counted, by its words only (lib/stats.ts, countSearchMiss).
   if (results && results.total === 0 && store.statsId && !isBot((await headers()).get("user-agent") ?? "")) {
     const statsId = store.statsId;
@@ -429,17 +439,23 @@ export default async function StorePage({ params, searchParams }: Params) {
                           {bw.searchButton}
                         </button>
                       </div>
-                      {wantedSearch && !searchAllowed && searchWords(wantedSearch).length > 0 ? (
-                        <p className="st-note mt-3 text-sm" role="status">{bw.searchSlow}</p>
+                      {searchRefused ? (
+                        <p className="st-note mt-3 text-sm" role="status">{searchUnavailable ? bw.searchUnavailable : bw.searchSlow}</p>
                       ) : null}
                       {results ? (
                         <p className="mt-3 flex flex-wrap items-baseline justify-between gap-2 text-sm" role="status">
-                          <span className="font-semibold">{results.total ? bw.searchFound(results.total, searching) : bw.searchNone(searching)}</span>
+                          <span className="font-semibold">{results.total > results.listings.length
+                              ? bw.searchCut(results.listings.length, results.total, searching)
+                              : results.total
+                                ? bw.searchFound(results.total, searching)
+                                : bw.searchNone(searching)}</span>
                           <a href={pageHref(store.handle, 1, reachedOn !== null)} className="st-footer-link">
                             {bw.searchClear}
                           </a>
                         </p>
                       ) : null}
+                      {/* How the results are ordered (EU 2011/83/EU Art. 6a(1)(a)): searchStore keeps the creator's own product order, nothing is paid for. */}
+                      {results && results.total ? <p className="mt-1 text-sm">{bw.searchOrder(store.name)}</p> : null}
                     </form>
                   ) : null}
                   {/* The creator's collections, each a page of its own (lib/store-collections.ts). */}
@@ -690,6 +706,8 @@ export default async function StorePage({ params, searchParams }: Params) {
 
           {/* "Visit us" (lib/visit-us.ts): the creator's address, hours and phone, as typed; no map, nothing looked up or tracked. */}
           {store.visitUs ? <VisitUsBlock visitUs={store.visitUs} language={store.language} /> : null}
+          {/* "About this store": facts worked out from the record, each shown only when the creator turns it on (lib/store-trust.ts). */}
+          <StoreTrustCard store={store} />
 
           <div className="mt-12 text-center">
             {/* The store's blog, once it has a post (lib/store-blog.ts): known from the record, with no read. */}

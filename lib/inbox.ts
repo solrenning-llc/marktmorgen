@@ -449,10 +449,12 @@ export async function visitorSend(
   const read = await readRecord(found.statsId, found.id);
   if (!read || read.kept.token !== token) return { ok: false, reason: "gone" };
   const conversation = read.kept;
+  // The hour's limit first (Claude 7 on #3839): a blocked person's loop with a valid token is bounded by it, and the
+  // block list is read at most VISITOR_PER_HOUR times an hour for a conversation.
+  if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   // A buyer's own order case and their own withdrawal are never stopped by a block (567 [GD1]): they protect what they
   // already paid for (review of #3839).
   if (conversation.source !== "order" && conversation.source !== "withdrawal" && !(await mayWrite(store, conversation.email))) return { ok: false, reason: "closed" };
-  if (!(await withinLimit("chat-send", `${found.statsId}:${found.id}`, VISITOR_PER_HOUR, 3_600))) return { ok: false, reason: "limited" };
   if (store.period?.funded === true && !(await reservePaidResourceWindow(store))) return { ok: false, reason: "closed" };
   if (!(await takeAllowance(store, "inbox", 1, now)).ok) return { ok: false, reason: "limited" };
   const message: Message = { at: now, from: "visitor", text };

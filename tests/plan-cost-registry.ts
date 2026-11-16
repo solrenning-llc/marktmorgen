@@ -63,6 +63,7 @@ import { ORDERS_INCLUDED } from "@/lib/order-rules";
 import { AUTOMATIC_AI_STORE_MICRO_USD } from "@/lib/ai-spend-policy";
 import { uploadWorstCostMicroUsd } from "@/lib/upload-budget-policy";
 import { DAILY_RUNS_BY_TIER, WORST_COMMANDS_PER_RUN } from "@/lib/flow-limits";
+import { BLOCK_CHECK_COMMANDS, BLOCK_ENTRY_BYTES } from "@/lib/buyer-block";
 import { IMPORT_ALLOWANCES, IMPORT_MIN_ROWS_PER_UPLOAD, IMPORT_WORST_BYTES_PER_ROW, IMPORT_WORST_COMMANDS_PER_ROW } from "@/lib/import-limits";
 import { BATCH_BYTES, HELD_UPLOAD_SWEEP_COMMANDS, IMPORT_END_EXTRA_COMMANDS, JOB_WRITE_IF_EXTRA_COMMANDS, MAX_REPORT_ROWS } from "@/lib/imports";
 import { GIVE_BACK_FLOOR_EXTRA_COMMANDS } from "@/lib/mail";
@@ -719,8 +720,9 @@ export const UNIT_COST: Record<AllowanceKind, number> = {
   studio: request("studio", 20 + TAKE_COMMANDS + LOCKED_UNTIL_STAR_COMMANDS, 50_000),
   // An API request: the key, the store and the answer.
   api: request("light", 20 + TAKE_COMMANDS, 20_000),
-  // A message written to the inbox, and its index.
-  inbox: request("light", 12 + TAKE_COMMANDS, 4_000),
+  // A message written to the inbox, and its index, and the block check every buyer message makes (EXISTS and HGET, its
+  // entry up to BLOCK_ENTRY_BYTES; lib/buyer-block.ts, Claude 7's MEDIUM on #3839).
+  inbox: request("light", 12 + TAKE_COMMANDS + BLOCK_CHECK_COMMANDS, 4_000 + BLOCK_ENTRY_BYTES),
   // An email sent from inside a request or a job already counted, and its count.
   email: PER_EMAIL + TAKE_COMMANDS * COMMAND,
   transactional: PER_EMAIL + (6 + TAKE_COMMANDS) * COMMAND,

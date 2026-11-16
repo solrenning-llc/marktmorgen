@@ -378,6 +378,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta found no ad account to read",
     body: "The Facebook login you used cannot see any ad account. Nothing was kept. Connect again with the login that runs your ads.",
   },
+  // Meta told us, while it was connecting, that this Facebook login removed the app or asked for its data to be deleted.
+  removed: {
+    title: "Nothing was connected",
+    body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
   refused: {
     title: "Meta did not finish connecting",
     body: "Nothing was kept. Connect again in a moment.",
@@ -718,6 +723,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   deleted: {
     title: "The store was deleted",
     body: "Its addresses answer nothing for 30 days, and then anyone may take them. Your other stores are as they were.",
+  },
+  partly: {
+    title: "The store was deleted, but a last step was not confirmed",
+    body: "We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
   },
   confirm: {
     title: "Type the store's address to delete it",

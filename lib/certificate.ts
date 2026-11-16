@@ -218,9 +218,17 @@ export const certificateProbe = (courseId: string, who: string): (string | numbe
 /** How many certificates of a course deleting a person looks through for ones issued before byKey was kept. */
 const LEGACY_SCAN = 500;
 
+/**
+ * The certificate kept under this id: null for a confirmed none (nil) or a
+ * record that is itself malformed; any other reply throws UnknownReply
+ * (CX-123 rule 24), so the page that proves a certificate never says "not
+ * found", and a withdrawal never says "no such certificate", on a guess.
+ */
 export async function readCertificate(id: string): Promise<Certificate | null> {
   if (!isRedisConfigured() || !CERT_ID_PATTERN.test(id)) return null;
-  const [raw] = await redisPipeline([["GET", certKey(id)]]);
+  const what = "a certificate's record";
+  const [raw] = exactReplies(await redisPipeline([["GET", certKey(id)]]), 1, what);
+  if (raw !== null && typeof raw !== "string") throw new UnknownReply(what);
   return parseCertificate(raw);
 }
 

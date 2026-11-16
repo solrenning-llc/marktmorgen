@@ -1,4 +1,5 @@
 import { HELD_RECHECKS_PER_DAY, HELD_RETRY_COUNTER_SECONDS, HELD_MONTH_COUNT_SECONDS, heldRecheckMemoryUsd } from "@/lib/held-store-rules";
+import { HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS } from "@/lib/hubspot-import";
 import { CURRENT_MAIL_REPORT_ADMISSION } from "@/lib/mail-report";
 /**
  * Every metered feature's per-store worst month, in one registry (added 17
@@ -1335,7 +1336,8 @@ export const COST_LINES: CostLine[] = [
     feature: "Moving from ClickFunnels (#519): dry runs, saved pages read, funnel checks and funnels made",
     monthlyUsd: (tier) => {
       const a = IMPORT_ALLOWANCES[tier];
-      return a.checks * request("heavy", 8 + 6, BATCH_BYTES)
+      // A check is a ClickFunnels dry run or a HubSpot one (#2048, the same "import-preview-month"): each at the dearer.
+      return a.checks * Math.max(request("heavy", 8 + 6, BATCH_BYTES), request("heavy", HUBSPOT_CHECK_COMMANDS, HUBSPOT_CHECK_BYTES))
         + a.buyerChecks * request("heavy", 506 + 6, BATCH_BYTES)
         + a.pageReads * request("heavy", 4, 2 * MAX_TRIMMED_PAGE_CHARS)
         + a.funnelChecks * request("heavy", 29, 10 * MAX_PAGE_BYTES)
@@ -1344,10 +1346,12 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/import-limits.ts", names: ["IMPORT_ALLOWANCES"] },
       { file: "app/api/store/import/route.ts", names: ["import-preview-month", "import-preview-buyers-month"] },
+      { file: "app/api/store/import/hubspot/route.ts", names: ["import-preview-month"] },
+      { file: "lib/hubspot-import.ts", names: ["HUBSPOT_CHECK_COMMANDS", "HUBSPOT_CHECK_BYTES", "DEAL_JSON_MAX_BYTES"] },
       { file: "app/api/store/import/funnel/route.ts", names: ["import-cf-page-month", "import-cf-plan-month", "import-cf-save-month"] },
       { file: "docs/clickfunnels-import.md", names: ["Worst-case commands per call"] },
     ],
-    basis: "Each path's monthly figure at docs/clickfunnels-import.md's command ceilings, each request at its shape and the bytes it moves.",
+    basis: "Each path's monthly figure at docs/clickfunnels-import.md's command ceilings, each request at its shape and the bytes it moves. A check is counted for a ClickFunnels dry run and for a HubSpot one alike, so each is priced at the dearer of the two: a HubSpot dry run reads every deal its file names that is already here, whole (lib/hubspot-import.ts HUBSPOT_CHECK_BYTES, 1,000 deals at DEAL_JSON_MAX_BYTES), in HUBSPOT_CHECK_COMMANDS.",
   },
   {
     id: "funnel-share",

@@ -311,6 +311,24 @@ function planAgainst(
   };
 }
 
+/**
+ * The most one stored deal's JSON weighs (parseDeal, lib/crm-rules.ts): its title, note, next action and two
+ * addresses at their caps, each UTF-16 unit at most 3 bytes (a quote or a new line is 2 once escaped), with its ids,
+ * stage, dates, amount and keys. tests/hubspot-import.test.ts holds a deal at every cap under it.
+ */
+export const DEAL_JSON_MAX_BYTES = 4_096;
+
+/**
+ * What a dry run reads at the most (Claude 5's cost MEDIUM on #2048): the store's pipelines and the ids of its deals
+ * (the snapshot), its deleted people's prints for the file's addresses, and every deal the file names that is already
+ * here, whole (readDealMarks), each at DEAL_JSON_MAX_BYTES. Priced as the check it is counted as (tests/plan-cost-registry.ts,
+ * line clickfunnels, "import-preview-month").
+ */
+export const HUBSPOT_CHECK_BYTES = MAX_DEALS * (DEAL_JSON_MAX_BYTES + 64) + 64 * 1024;
+
+/** The commands one dry-run request sends at the most, the route's own (session, allowances) included. */
+export const HUBSPOT_CHECK_COMMANDS = 14;
+
 /** What the data room counts for a slot's own field while it is there (TAKE_DATA, lib/store-data.ts). */
 const NEW_FIELD_BYTES = 64;
 

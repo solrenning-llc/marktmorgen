@@ -27,9 +27,9 @@ import { POST as CRM_POST } from "@/app/api/store/crm/route";
 import { crmAnswer } from "@/lib/crm-response";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
 import { CRM_LOCK_WAIT_MS, IMPORT_CRM_DEALS, dealCount, readDeal, readDeals, readOpportunityReview, readPipelines, savePipelineChange, takeCrmLock, writeDeal } from "@/lib/crm";
-import { MAX_DEALS, MAX_STAGES, PIPELINES_BY_TIER, allStages } from "@/lib/crm-rules";
+import { MAX_DEALS, MAX_DEAL_CENTS, MAX_STAGES, PIPELINES_BY_TIER, allStages, parseDeal } from "@/lib/crm-rules";
 import { STAGE_PAST_REASON, pipelineRoomReason } from "@/lib/hubspot-csv";
-import { HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
+import { DEAL_JSON_MAX_BYTES, HUBSPOT_CHECK_BYTES, HUBSPOT_CHECK_COMMANDS, HUBSPOT_IMPORT_WORDS, type HubSpotImportResult, hubSpotDealId, hubSpotDealNote, importHubSpotDeals } from "@/lib/hubspot-import";
 import { takeImportRows } from "@/lib/imports";
 import { IMPORT_ALLOWANCES } from "@/lib/import-limits";
 import { LockBusyError, releaseLock } from "@/lib/redis-lock";
@@ -628,6 +628,38 @@ async function main(): Promise<void> {
   } finally { redis.pipeline = tightReal; }
   const tightRows = Number((await redis.pipeline([["GET", tightRowsKey]]))[0] ?? 0) - tightRowsBefore;
   is("sent three times: refused each time, with no room work per deal and no rows taken", [tightAnswers, tightWork, tightRows, await dealCount(tight.store.statsId!)], [["store_full", "store_full", "store_full"], 0, 0, 0]);
+
+
+  part("Claude 5 on #2048: a dry run's reads stay within what a check is priced at");
+  // Every deal a file names already here, each at the most a stored deal weighs (parseDeal's caps, characters of
+  // three bytes, quotes and new lines escaped): the dry run reads them all once (readDealMarks).
+  const heavy = await paidStore("hubsheavy");
+  const heavyId = heavy.store.statsId!;
+  const heavyStages = allStages(await readPipelines(heavyId));
+  const fat = (n: number) => "\u20ac\"".repeat(Math.ceil(n / 2)).slice(0, n);
+  const fatDeals = Array.from({ length: MAX_DEALS }, (_, i) => parseDeal({
+    id: hubSpotDealId(String(8000 + i)), title: fat(90), email: `${"q".repeat(60)}@${"d".repeat(180)}.com`, cents: MAX_DEAL_CENTS, stage: heavyStages[0].id,
+    note: `${hubSpotDealNote(String(8000 + i), "", false)}\n${fat(480)}`, nextAction: fat(200), dueDate: "2026-12-31", assignee: `${"a".repeat(60)}@${"b".repeat(180)}.com`,
+    formResponseRef: "f".repeat(64), createdAt: 1_799_999_999, updatedAt: 1_799_999_999,
+  }, heavyStages)!);
+  is("control: every deal reads at the most a stored deal weighs", fatDeals.every((d) => Buffer.byteLength(JSON.stringify(d)) <= DEAL_JSON_MAX_BYTES), true);
+  await redis.pipeline([["HSET", `nl:crm:deals:${heavyId}`, ...fatDeals.flatMap((d) => [d.id, JSON.stringify(d)])]]);
+  const heavyReal = redis.pipeline.bind(redis);
+  let heavyCommands = 0;
+  let heavyBytes = 0;
+  let heavyCheck: { status: number };
+  try {
+    redis.pipeline = (async (commands: (string | number)[][]) => {
+      heavyCommands += commands.length;
+      const out = await heavyReal(commands);
+      heavyBytes += Buffer.byteLength(JSON.stringify(out));
+      return out;
+    }) as typeof redis.pipeline;
+    heavyCheck = await call({ action: "check", header: HEADER, rows: fatDeals.map((_, i) => row(String(8000 + i), `Deal ${i}`, "New", "Sales")) }, heavy.session);
+  } finally { redis.pipeline = heavyReal; }
+  const importOnly = { commands: heavyCommands, bytes: heavyBytes };
+  console.log("HubSpot dry run at its worst", JSON.stringify(importOnly));
+  is("a dry run of a file naming every deal reads within HUBSPOT_CHECK_BYTES, in HUBSPOT_CHECK_COMMANDS", [heavyCheck.status, heavyBytes <= HUBSPOT_CHECK_BYTES, heavyCommands <= HUBSPOT_CHECK_COMMANDS], [200, true, true]);
 
   done();
 }

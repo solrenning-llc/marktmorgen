@@ -51,6 +51,7 @@ import { LANGUAGES } from "@/lib/store-language";
 import { type CameFrom, hasSource } from "@/lib/came-from";
 import { applyTax, applyTaxDocuments, refusedTaxDocuments, withoutTaxDocuments } from "@/lib/tax";
 import { inTheCurrencyShown, isSettled, onlyInstantMethods, reusableMethod, saveCardForOffers } from "@/lib/instant-pay";
+import { BUYER_CURRENCY_LIVE, DEFAULT_BUYER_CURRENCY_MODE, accountSettlementCurrency, applyBuyerCurrency, buyerCurrencyPlan, hasApplicationFee, hasTaxRates, settlesIn } from "@/lib/buyer-currency";
 import { activePwyw, pwywPriceId } from "@/lib/pay-what-you-want";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import { imageUrl } from "@/lib/product-image";
@@ -492,6 +493,16 @@ export async function createCheckout(
     body.set("metadata[upsell_key]", extras.upsellKey);
   }
 
+  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
+  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
+  // A purchase for several people holds its places too. Admitted before anything
+  // is read from or made on the creator's Stripe account for this checkout (its
+  // coupons and codes, below): a checkout the store cannot take reads nothing
+  // (rule MR; audit G2).
+  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
+  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
+  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
+
   // The box a buyer types a discount code into, shown only by a store that has
   // one. An empty box on every checkout is an invitation to go and look for a
   // code that does not exist, and a buyer who leaves to search for one is a
@@ -727,6 +738,22 @@ export async function createCheckout(
   // line is still at its floor here, which is the least it can be.
   applyShare(body, store, { recurring, least: leastPaid(linesTotal(body).cents, mayComeOff) });
 
+  // The buyer's own currency (22 [E5] unit 3a, lib/buyer-currency.ts): off
+  // while BUYER_CURRENCY_LIVE is false, so Stripe's conversion stays off as
+  // inTheCurrencyShown set it above. Judged here, after the share, on the
+  // session as it will be sent. The creator's choice and own prices arrive
+  // with their fields in unit 3b; until then a store is (a), automatic.
+  if (BUYER_CURRENCY_LIVE) {
+    applyBuyerCurrency(body, buyerCurrencyPlan({
+      live: BUYER_CURRENCY_LIVE,
+      mode: DEFAULT_BUYER_CURRENCY_MODE,
+      fee: hasApplicationFee(body),
+      settles: settlesIn(store.currency, await accountSettlementCurrency(store.stripeAccountId)),
+      manualPrices: false,
+      taxRates: hasTaxRates(body),
+    }));
+  }
+
   // The yes, with its version, its kind and its time, written last before the
   // order is admitted, with a field held back for the admitted mark: refused
   // rather than dropped when Stripe's fields have no room for it
@@ -752,13 +779,6 @@ export async function createCheckout(
   if (singleDigital && (confirmationRuntime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE) !== "never_activated") {
     throw new Error("The payment page could not be opened");
   }
-
-  // A paid store's new orders stop at its plan's figure (lib/order-admission.ts):
-  // admitted here, before Stripe's page opens, so nobody is stopped while paying.
-  // A purchase for several people holds its places too.
-  const admitted = await admitOrders(store, 1 + (extras.group ? extras.group.people : 0), Date.now(), itemsHandedOver([product, ...added.map((offer) => offer.target)]));
-  if (!admitted.ok) throw new OrdersPausedError(admitted.reason);
-  if (admitted.hour !== null) body.set(`metadata[${ADMITTED_FIELD}]`, String(admitted.hour));
 
   // Where the receipt page sends the buyer back to, and the sale.completed
   // webhook's source: written last, and only while Stripe's fifty metadata

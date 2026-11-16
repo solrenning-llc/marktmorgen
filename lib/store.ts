@@ -810,6 +810,14 @@ export type Store = {
    * directly. Null when PayPal is not connected.
    */
   paypalSeller: PayPalSeller | null;
+  /**
+   * The PayPal account the store sold through until the creator disconnected it, and when (`at`, in milliseconds),
+   * kept so the sweep can still ask PayPal about the orders it took: a pending payment that completes is handed over,
+   * a refund takes the purchase back (lib/paypal-sales.ts, paypalMerchant). Kept at most PAYPAL_PAST_SECONDS after the
+   * disconnection, and cleared as soon as no order of the store is left waiting on PayPal. Absent on stores written
+   * before 12 November 2026, and on stores that never disconnected one.
+   */
+  paypalPast?: PayPalSeller | null;
 };
 
 /** A PayPal account a store sells through: PayPal's id for it, and when it was connected. */
@@ -1095,7 +1103,8 @@ function parseStore(raw: unknown): Store | null {
       winback: parseWinBack(value.winback),
       welcomeOffer: parseWelcomeOffer(value.welcomeOffer),
       inbox: parseInboxSetting(value.inbox),
-      sale: parseSale(value.sale),
+      // The currency's smallest charge goes with the sale and the fair price, set again on every read (DISC-S-1).
+      sale: { ...parseSale(value.sale), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       pastSales: parsePastSales(value.pastSales),
       tiers: parseTiers(value.tiers),
       // Stores written before communities existed simply have none.
@@ -1130,7 +1139,7 @@ function parseStore(raw: unknown): Store | null {
       assistantPlan: parseAssistantPlan(value.assistantPlan),
       nextOffer: parseNextOffer(value.nextOffer),
       assistReminder: parseAssistReminder(value.assistReminder),
-      fair: parseFair(value.fair),
+      fair: { ...parseFair(value.fair), floorCents: currencyRule(parseCurrency(value.currency)).minCharge },
       cartDeal: parseCartDeal(value.cartDeal),
       // Stores written before a store could pick its language speak English.
       language: parseLanguage(value.language),
@@ -1143,6 +1152,7 @@ function parseStore(raw: unknown): Store | null {
       pastBuyers: value.pastBuyers === true,
       // Stores written before PayPal selling existed sell through Stripe only.
       paypalSeller: parsePayPalSeller(value.paypalSeller),
+      paypalPast: parsePayPalSeller(value.paypalPast),
     };
   } catch {
     return null;
@@ -1941,11 +1951,18 @@ export async function createStore(
   const sid = newListId();
   const ref = extraRef(sid);
   const account = await accountKey(email);
-  const [, count] = await redisPipeline([
+  const added = repliesFor(await redisPipeline([
     ["SADD", account, sid],
     ["SCARD", account],
-  ]);
-  if (Number(count) + 1 > MAX_STORES_PER_ACCOUNT) {
+  ]), 2);
+  // Read exactly (unknown is never zero): each store brings free allowances the company pays for, so a count in
+  // another shape (NaN before, which passed the ceiling) takes the new id back out and makes no store.
+  const count = added ? countOf(added[1]) : null;
+  if (count === null) {
+    await redisPipeline([["SREM", account, sid]]);
+    throw new UnknownReplyError("an account's count of stores");
+  }
+  if (count + 1 > MAX_STORES_PER_ACCOUNT) {
     await redisPipeline([["SREM", account, sid]]);
     return { ok: false, reason: "too_many", limit: MAX_STORES_PER_ACCOUNT };
   }
@@ -1974,7 +1991,7 @@ export async function createStore(
 
 export type DeleteResult =
   | { ok: true; store: Store }
-  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" };
+  | { ok: false; reason: "none" | "first" | "products" | "paying" | "domain" | "closing" };
 
 /**
  * Deletes one of an account's other stores, while there is nothing in it to
@@ -1996,6 +2013,11 @@ export async function deleteStore(email: string): Promise<DeleteResult> {
     if (productCount(store) > 0) return { ok: false, reason: "products" };
     if (store.subscriptionActive) return { ok: false, reason: "paying" };
     if (store.domain) return { ok: false, reason: "domain" };
+    // A store whose plan ended is closing: its members are held, then refunded what they paid for and lost, and
+    // told, all found by its record. Deleted by hand, the daily runs dropped it as gone and its members stayed paused
+    // at Stripe for good, unrefunded and never told (Claude 7's hunt). It is removed by its closing instead, as a
+    // move to another sign-in is refused (closingUnderway); a line that does not read throws and deletes nothing.
+    if (await closingUnderway(store)) return { ok: false, reason: "closing" };
 
     const released = `${RELEASED_PREFIX}${new Date().toISOString()}`;
     const handles = [store.handle, ...store.previousHandles];
@@ -4651,6 +4673,23 @@ export async function setPayPalSeller(email: string, merchant: string | null): P
   return patchStore(email, () => ({ paypalSeller: seller }));
 }
 
+/**
+ * Stops selling through the creator's PayPal (app/api/store/paypal/disconnect) and keeps the account it sold through
+ * as paypalPast, so the orders PayPal still holds are answered: handed over when a pending payment completes, taken
+ * back when refunded, cancelled with a notice when never confirmed (lib/paypal-sales.ts, watchPayPal).
+ */
+export async function disconnectPayPalSeller(email: string): Promise<Store | null> {
+  return patchStore(email, (store) => ({
+    paypalSeller: null,
+    paypalPast: store.paypalSeller && store.paypalSeller.merchant ? { merchant: store.paypalSeller.merchant, at: Date.now() } : (store.paypalPast ?? null),
+  }));
+}
+
+/** Forgets the disconnected PayPal account once nothing of it is left to ask about; only the one written at `at`. */
+export async function forgetPayPalPast(email: string, at: number): Promise<Store | null> {
+  return patchStore(email, (store) => (store.paypalPast && store.paypalPast.at === at ? { paypalPast: null } : null));
+}
+
 export type ExitOfferResult = { ok: true; store: Store } | { ok: false; reason: "none" | "unknown" | "not_free" };
 
 export type SectionsResult = { ok: true; store: Store } | { ok: false; reason: "none" | "unknown" };
@@ -4665,6 +4704,27 @@ export async function setSitePages(email: string, raw: unknown): Promise<Section
   const result = await withStore<SectionsResult>(email, async (store, save) => {
     const sitePages = parseSitePages(raw);
     if (sitePages.some((page) => page.target && !hasProduct(store, page.target))) return { ok: false, reason: "unknown" };
+    return { ok: true, store: await save({ ...store, sitePages, statsId: store.statsId ?? newListId() }) };
+  });
+  return result ?? { ok: false, reason: "none" };
+}
+
+export type SitePagesChange = { ok: true; store: Store } | { ok: false; reason: string };
+
+/**
+ * Changes the store's own pages from the list as it is under the store's write lock, never from a copy a request
+ * read before it: `change` gets the latest pages and the store, and answers the whole new list, or a reason to
+ * refuse that is passed back as it is (nothing is written). The new list is held to the same rules as setSitePages.
+ */
+export async function changeSitePages(
+  email: string,
+  change: (pages: SitePage[], store: Store) => SitePage[] | { refuse: string },
+): Promise<SitePagesChange> {
+  const result = await withStore<SitePagesChange>(email, async (store, save) => {
+    const next = change(store.sitePages, store);
+    if (!Array.isArray(next)) return { ok: false, reason: next.refuse };
+    const sitePages = parseSitePages(next);
+    if (sitePages.length !== next.length || sitePages.some((page) => page.target && !hasProduct(store, page.target))) return { ok: false, reason: "unknown" };
     return { ok: true, store: await save({ ...store, sitePages, statsId: store.statsId ?? newListId() }) };
   });
   return result ?? { ok: false, reason: "none" };
@@ -4839,4 +4899,25 @@ export async function setExitOffer(email: string, productId: string | null): Pro
     return { ok: true, store: await save({ ...store, exitOffer: product.id }) };
   });
   return result ?? { ok: false, reason: "none" };
+}
+
+export type LegalResult =
+  | { ok: true; store: Store; product: Product }
+  | { ok: false; reason: "none" | "unknown" | "ship_first" | "quantity_price" };
+
+/**
+ * Saves the legal information of a product the creator ships (618 [SZ2];
+ * lib/physical-legal-record.ts), already checked field by field, or clears it
+ * (null). On the product record, under the store's write: only while the
+ * product is shipped, and a net quantity only for a price it has now.
+ */
+export async function setProductLegal(email: string, id: string, legal: import("@/lib/physical-legal-record").PhysicalLegal | null): Promise<LegalResult> {
+  const done = await onProduct<"ship_first" | "quantity_price">(email, id, (product) => {
+    if (legal === null) return { ...product, legal: null };
+    if (!product.shipping) return { ok: false, reason: "ship_first" };
+    const prices = new Set(["", ...product.options.map((option) => option.id)]);
+    if (legal.quantities.some((quantity) => !prices.has(quantity.price))) return { ok: false, reason: "quantity_price" };
+    return { ...product, legal };
+  });
+  return done.ok ? { ok: true, store: done.store, product: done.product } : done;
 }

@@ -53,7 +53,7 @@ function main(): void {
   }
   is("the two-step hint is still read with its field", read("components/two-step-manager.tsx").includes('describedBy="two-step-backup-hint"') && read("components/two-step-manager.tsx").includes('id="two-step-backup-hint"'), true);
   is("the controlled fields keep the parent's state", ["setEmail", "setAddress", "setBackup"].every((setter) => FIELDS.some(([file]) => read(file).includes(`onChange={${setter}}`))), true);
-  // The lost-email page (app/signin/lost) waits on the open PR that holds it.
+  // The lost-email page (app/signin/lost) and the fields unit 4 took: tests/email-more-fields.test.ts.
   is("the embed keeps its fixed-height plain field", /<input id="embed-join-email" type="email"/.test(read("app/embed/[handle]/join/page.tsx")), true);
   const everyFile = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? everyFile(join(dir, d.name)) : d.name.endsWith(".tsx") ? [join(dir, d.name)] : []));
   const sources = [...everyFile("app"), ...everyFile("components")].map((file) => [file, read(file)] as const);

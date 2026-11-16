@@ -1,4 +1,5 @@
 import { PendingSubmit } from "@/components/pending-submit";
+import { EmailField } from "@/components/email-field";
 import Link from "next/link";
 import { MorningLogo } from "@/components/morning-header";
 import type { Metadata } from "next";
@@ -50,10 +51,12 @@ export default async function LostEmailPage({ searchParams }: { searchParams: Pr
                 {`Type the address you log in with. If your account has a recovery address, we email a link there that lets you in at once. Your products, pages, buyers and numbers are open straight away; ${LOCKED_LIST} open ${LOCK_DAYS} days later, unless you log in with your old inbox, a passkey or your app's code before then. That wait is only for what someone who got into an old inbox could take.`}
               </p>
               <form method="post" action="/api/auth/lost" className="mt-3 space-y-3">
-                <label className="block" htmlFor="lost-email">
-                  <span className="field-label">The address you log in with</span>
-                  <input id="lost-email" name="email" type="email" required maxLength={254} autoComplete="email" className="field mt-2" />
-                </label>
+                <div>
+                  <label className="block" htmlFor="lost-email">
+                    <span className="field-label">The address you log in with</span>
+                  </label>
+                  <EmailField id="lost-email" name="email" required autoComplete="email" className="field mt-2" store={false} />
+                </div>
                 <PendingSubmit label="Email my recovery address" pending="Sending…" className="btn btn-primary" />
               </form>
             </>

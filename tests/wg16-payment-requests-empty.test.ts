@@ -21,7 +21,7 @@ is(
 is("no jump while sending is closed: the action needs open as well as canSend", /action=\{canSend && open \?/.test(requests), true);
 // LEVE 2 (WCAG 2.4.9, AAA): the link's own text says what it makes.
 is("the link names what it writes", requests.includes('label: "Write your first payment request"') && !requests.includes('label: "Write the first one"'), true);
-is("the jump goes to the form's first field, which exists", /<input id="pr-email"/.test(requests), true);
+is("the jump goes to the form's first field, which exists", /<EmailInput id="pr-email"/.test(requests), true);
 is("the form is drawn only for someone who may send, as the jump is", requests.includes("{canSend ? (\n        <form onSubmit={create}"), true);
 is("no bare sentence left", requests.includes('<p className="mt-3 text-ink-soft">No requests yet.</p>'), false);
 

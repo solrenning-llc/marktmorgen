@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { agreementReply, type AgreementAction, type AgreementReply } from "@/lib/agreement-reply";
 import { agreementEditorVersion } from "@/lib/agreement-editor-version";
 import { toast } from "@/components/toast";
+import { EmailInput } from "@/components/email-input";
 import { Icon } from "@/components/icons";
 import { emailsUsedLine } from "@/lib/store-allowance-rules";
 import { type Currency, fieldPrefix, formatMoney, isCurrency, readMoney } from "@/lib/money";
@@ -246,10 +247,12 @@ export function AgreementsStudio({
                   <option value="proposal">Proposal</option>
                 </select>
               </label>
-              <label className="block">
-                <span className="text-sm font-semibold text-ink">Their email</span>
-                <input id="ag-email" className="field mt-1" type="email" autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
-              </label>
+              <div>
+                <label className="block" htmlFor="ag-email">
+                  <span className="text-sm font-semibold text-ink">Their email</span>
+                </label>
+                <EmailInput id="ag-email" className="field mt-1" autoComplete="off" required value={email} onChange={setEmail} />
+              </div>
               <label className="block">
                 <span className="text-sm font-semibold text-ink">Their name (optional)</span>
                 <input id="ag-name" className="field mt-1" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} />

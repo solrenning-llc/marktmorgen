@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { paymentRequestReply, type RequestAction } from "@/lib/payment-request-reply";
 import { toast } from "@/components/toast";
+import { EmailInput } from "@/components/email-input";
 import { StudioEmptyState } from "@/components/empty-state";
 import { Icon } from "@/components/icons";
 import { emailsUsedLine } from "@/lib/store-allowance-rules";
@@ -228,10 +229,12 @@ export function PaymentRequestsStudio({
           </p>
           {!open ? <p className="notice notice-error mt-4" role="alert">{closedWhy}</p> : null}
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <label className="block">
-              <span className="text-sm font-semibold text-ink">Their email</span>
-              <input id="pr-email" className="field mt-1" type="email" autoComplete="off" required maxLength={254} value={email} onChange={(e) => setEmail(e.target.value)} />
-            </label>
+            <div>
+              <label className="block" htmlFor="pr-email">
+                <span className="text-sm font-semibold text-ink">Their email</span>
+              </label>
+              <EmailInput id="pr-email" className="field mt-1" autoComplete="off" required value={email} onChange={setEmail} />
+            </div>
             <label className="block">
               <span className="text-sm font-semibold text-ink">Their name (optional)</span>
               <input id="pr-name" className="field mt-1" maxLength={MAX_NAME} value={name} onChange={(e) => setName(e.target.value)} />

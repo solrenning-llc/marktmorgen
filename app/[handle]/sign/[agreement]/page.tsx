@@ -14,6 +14,7 @@ import { agreementOf, readVersion } from "@/lib/agreement-store";
 import { requestOf } from "@/lib/payment-request-store";
 import { statusOf as requestStatus } from "@/lib/payment-request-rules";
 import { requestLink } from "@/lib/payment-requests";
+import { EmailField } from "@/components/email-field";
 import { PrintButton } from "@/components/print-button";
 import { StoreResting } from "@/components/store-resting";
 
@@ -142,7 +143,7 @@ export default async function AgreementPage({ params, searchParams }: Params) {
               <label className="mt-5 block text-sm font-semibold" htmlFor="sign-name">{w.nameLabel}</label>
               <input id="sign-name" name="name" required minLength={2} maxLength={MAX_SIGNED_NAME} autoComplete="name" className="st-field mt-1" />
               <label className="mt-4 block text-sm font-semibold" htmlFor="sign-email">{w.emailLabel}</label>
-              <input id="sign-email" name="email" type="email" required maxLength={254} autoComplete="email" className="st-field mt-1" />
+              <EmailField id="sign-email" name="email" required autoComplete="email" language={store.language} className="st-field mt-1" />
               <label className="mt-4 flex items-start gap-3 text-sm">
                 <input type="checkbox" name="agree" value="yes" required className="mt-1" />
                 <span>{w.consent}</span>

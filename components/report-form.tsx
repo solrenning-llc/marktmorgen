@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { UrlField } from "@/components/url-field";
+import { EmailInput } from "@/components/email-input";
 import { type LinkCheck, checkWith } from "@/lib/url-check";
 import { reportAnswer } from "@/lib/report-response";
 import { MAX_REPORT_CONTACT, MAX_REPORT_NAME, MAX_REPORT_TEXT, MAX_REPORT_URL, REPORT_PROBLEMS, type ReportKind } from "@/lib/takedown-rules";
@@ -109,7 +110,7 @@ export function ReportForm({ url: given }: { url: string }) {
         </div>
         <div>
           <label htmlFor="report-email" className="field-label">Your email</label>
-          <input id="report-email" type="email" required maxLength={MAX_REPORT_CONTACT} autoComplete="email" value={fields.email} onChange={set("email")} className={field} />
+          <EmailInput id="report-email" required maxLength={MAX_REPORT_CONTACT} autoComplete="email" value={fields.email} onChange={(email) => setFields({ ...fields, email })} className={field} />
         </div>
       </div>
       <div>

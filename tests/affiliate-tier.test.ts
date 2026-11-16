@@ -16,11 +16,18 @@
  *   - each affiliate's own page shows their second tier and never the
  *     recruit's sales as their own.
  */
+import { mock } from "node:test";
 import { NO_AFFILIATES, parseAffiliateSetting } from "@/lib/affiliate-setting";
 import { type Affiliate, type Line, openAffiliateLink, readAffiliate, readBook, recruiterFor, requestAffiliateLink, tierLines } from "@/lib/affiliates";
 import { claimHandle, ensureStatsId, setAffiliateSetting, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
+
+// A store with no plan counts its emails in the calendar month (lib/allowance-window.ts), and sendEmail (lib/email.ts)
+// refuses a send whose window changed while it was going out: a run crossing 00:00 UTC on a month's last day during the
+// invitation email answered with no link sent. Only Date is stopped, for the whole run; timers and performance.now()
+// run as usual.
+mock.timers.enable({ apis: ["Date"], now: Date.now() });
 
 process.env.RESEND_API_KEY = "re_test_tier_only_a_stand_in";
 process.env.STRIPE_SECRET_KEY = "sk_test_tier_only_a_stand_in";
@@ -126,7 +133,7 @@ async function main(): Promise<void> {
   // The whole of the recruit's sale given back: nothing for either of them.
   globalThis.fetch = (async (input: string | URL | Request) =>
     String(input).includes("/refunds")
-      ? new Response(JSON.stringify({ object: "list", data: [{ status: "succeeded", payment_intent: "pi_cs_one", amount: 10_000 }], has_more: false }), { status: 200 })
+      ? new Response(JSON.stringify({ object: "list", data: [{ id: "re_one", object: "refund", status: "succeeded", payment_intent: "pi_cs_one", amount: 10_000, currency: "usd" }], has_more: false }), { status: 200 })
       : new Response(JSON.stringify({ object: "list", data: [], has_more: false }), { status: 200 })) as typeof fetch;
   store = { ...store, stripeAccountId: "acct_test_tier" };
   book = await readBook(store);

@@ -33,6 +33,7 @@ import { canSellProduct, createCheckout } from "@/lib/store-checkout";
 import { PRODUCT_SAFETY_WORDS, productSafetyWords } from "@/lib/buyer-words/product-safety";
 import { LANGUAGE_CODES } from "@/lib/store-language";
 import { ProductSafetyFacts } from "@/components/product-safety-facts";
+import { UnknownReplyError } from "@/lib/redis-reply";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
@@ -141,7 +142,15 @@ async function main(): Promise<void> {
   const savedListing = (await redis.pipeline([["GET", listingKey]]))[0];
   await redis.pipeline([["SET", extrasKey, "{not json"]]);
   store = (await storeForEmail(OWNER))!;
-  is("its record unreadable: no legal record, and its checkout leaves the EU/EEA out though the listing is marked", [await readProductLegal(store, id), shippingNow((await readProduct(store, id))!)?.countries], [null, ["US"]]);
+  // Since main's exact product read (lib/catalog.ts, productRead; CX-123 rule 24), an unreadable record is unknown: the
+  // product is not read at all (UnknownReplyError), so no checkout is made, still never one open to the EU/EEA.
+  let unreadable: unknown = null;
+  try {
+    await readProduct(store, id);
+  } catch (error) {
+    unreadable = error;
+  }
+  is("its record unreadable: no legal record, and the product is not read, so no checkout reaches the EU/EEA though the listing is marked", [await readProductLegal(store, id), unreadable instanceof UnknownReplyError], [null, true]);
   await redis.pipeline([["SET", extrasKey, String(savedExtras)]]);
   const record = catalogRecord(store.catalog);
   const forged = parseCatalog({ ...record, head: [{ ...JSON.parse(String(savedListing)), safetyFilled: "yes" }] }, null).head[0];

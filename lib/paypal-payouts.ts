@@ -701,13 +701,24 @@ async function settleUnknown(store: Store, field: string, seen: OpenBatch, auth:
   });
 }
 
+/** The store the daily settling last reached; the next run starts after it. */
+const SETTLE_AFTER = "nl:pp:settle:after";
+const SETTLE_AFTER_SECONDS = 7 * 86_400;
+
 /** The daily job: every store with a batch still open. */
 export async function settleAllPayPal(deadline: number): Promise<number> {
   if (!isRedisConfigured()) return 0;
-  const [sids] = await redisPipeline([["SMEMBERS", STORES]]);
+  const [sids, after] = await redisPipeline([["SMEMBERS", STORES], ["GET", SETTLE_AFTER]]);
+  // In id order, starting after the store where the last run stopped (#4620): slow stores at the front never take
+  // every day's run from the stores behind them. An unread place starts at the front, as before.
+  const all = (Array.isArray(sids) ? sids : []).filter((sid): sid is string => typeof sid === "string").sort();
+  const from = typeof after === "string" ? all.findIndex((sid) => sid > after) : 0;
+  const start = from < 0 ? 0 : from;
   let done = 0;
-  for (const sid of Array.isArray(sids) ? (sids as string[]) : []) {
+  for (const sid of [...all.slice(start), ...all.slice(0, start)]) {
     if (Date.now() >= deadline) break;
+    // Kept before the store is settled, so a run cut short inside it goes on with the next store the next day.
+    await redisPipeline([["SET", SETTLE_AFTER, sid, "EX", SETTLE_AFTER_SECONDS]]).catch((error) => console.error("the PayPal settling's place could not be kept", error));
     let store: Store | null;
     try {
       store = await storeForId(sid);

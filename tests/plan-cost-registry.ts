@@ -1293,12 +1293,13 @@ export const COST_LINES: CostLine[] = [
     sources: [
       { file: "lib/plan.ts", names: ["PRO_MONTHLY_EMAILS", "SCALE_MONTHLY_EMAILS", "TRIAL_MONTHLY_EMAILS"] },
       { file: "lib/mail.ts", names: ["reserve", "takeFromMonth", "stopWriting(store.listId as string, r.to, \"refused\")"] },
-      { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS"] },
+      { file: "lib/email.ts", names: ["notYetTaken(batchKey, [...result.taken, ...result.refused.map((r) => r.message)])", "REFUSED_ADDRESS", "notMaybeTaken(batchKey, pending)"] },
+      { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       // A community announcement batch reads its members' list rows once (one HMGET of at most CHECKED_BATCH_SIZE fields), far
       // inside what the batch's emails cost at PER_EMAIL (14 November 2026).
       { file: "lib/community-mail.ts", names: ["keptOnList"] },
     ],
-    basis: "Every monthly email sent, at the most an email costs. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
+    basis: "Every monthly email sent, at the most an email costs. A plain batch's email that goes by Amazon (sendBatch: product updates, community announcements, review asks, imports; never a list batch) takes at most three commands more for its possibly-taken mark (lib/ses.ts, 13 November 2026): a SET NX before Amazon is asked, a GET when the batch is tried again, a DEL when Amazon says for certain it did not take it, kept two days at most; about $0.000006 at Upstash's $2 a million, inside what an email is priced at. One the email service refuses for good in a list batch (lib/email.ts ListBatchOutcome, 9 November 2026) is taken from the month before it is tried like any other and stays taken: it pays for asking Amazon (nothing for a refusal), for its own did mark read back with the batch (one GET; each accepted one reads its own inside its own email) and, refused as an address, for taking it off the list (lib/contacts.ts stopWriting: at most three rounds of an HGET and the CAS_HSET script with its read-back, then an INCR, about sixteen commands), about $0.00004 at Upstash's $2 a million, inside what an email is priced at. The address is then off the list for good, so it is never paid for twice; nothing more is kept.",
   },
   {
     id: "transactional-email",
@@ -1318,6 +1319,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/store-allowance-rules.ts", names: ["STORE_ALLOWANCES", "email"] },
       { file: "lib/email.ts", names: ["EmailMeter", "metered"] },
       { file: "lib/store-contact.ts", names: ["MAX_PER_DAY"] },
+      { file: "lib/ses.ts", names: ["markMaybe", "unmarkMaybe", "notMaybeTaken"] },
       { file: "lib/checkout-ask.ts", names: ["ASKS_PER_STORE_DAY"] },
       { file: "lib/assistant-reminder-rules.ts", names: ["ASSIST_REMINDERS_PER_STORE_DAY"] },
       { file: "lib/winback.ts", names: ["ONCE_PER_DAYS"] },
@@ -1330,7 +1332,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/card-update.ts", names: ['redisPipeline([["DEL", key]])', "CARD_LINK_SECONDS"] },
       { file: "lib/payment-recovery.ts", names: ["const CARD_PAGES = 5", "releaseMark(key, value)"] },
     ],
-    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them.",
+    basis: "The plan's store emails, each at the most an email costs and its count; the daily and per-person limits only spread them. One sent in a plain batch by Amazon (community event notices, waitlist launches) takes at most three commands more for its possibly-taken mark (lib/ses.ts: a SET NX, a GET on a retry, a DEL when Amazon did not take it), inside what an email is priced at.",
   },
   {
     id: "ai",

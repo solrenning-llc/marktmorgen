@@ -98,6 +98,17 @@ const REFUND_ID = /^(re|pyr)_[A-Za-z0-9]+$/;
 /** Subscriptions that bill nothing more. */
 const ENDED = new Set(["canceled", "incomplete_expired"]);
 
+/**
+ * The exact subscription a stored decision names, or null when it names none: only `act:<subscription id>` may lead
+ * to a refund or an ending (Codex X4 on #4168; a bare `act:` once refunded and "ended" `/subscriptions/`, whose 404
+ * was read as ended, and closed the warning while the real subscription kept billing).
+ */
+const decidedSubscription = (value: string): string | null => {
+  if (!value.startsWith("act:")) return null;
+  const subscription = value.slice(4);
+  return SUBSCRIPTION_ID.test(subscription) ? subscription : null;
+};
+
 export type FraudWarningCounts = {
   seen: number;
   refunded: number;
@@ -231,7 +242,11 @@ async function applyWarning(
   const id = idOf(warning.id);
   if (known === "final" || known === "unmatched") return "skipped";
   // Already decided: refund what may still be left and end the subscription, whatever the warning says now.
-  if (known?.startsWith("act:")) return settle(id, warning, known.slice(4), budget, deadline);
+  if (known?.startsWith("act:")) {
+    const subscription = decidedSubscription(known);
+    if (!subscription) throw new Error("the stored early fraud warning decision is invalid");
+    return settle(id, warning, subscription, budget, deadline);
+  }
   // A warning first seen when it is no longer actionable (disputed, or fully refunded, before we acted) goes the same
   // way: settle refunds only an actionable warning, so nothing is refunded, but the subscription that charged the card
   // the issuer called stolen still ends (review of #4168, second round, MEDIUM): otherwise the next renewal charges it again.
@@ -278,7 +293,18 @@ export async function syncPlanFraudWarnings(
     return counts;
   }
   const seen = new Map<string, string>();
-  for (let i = 0; i < pairs.length; i += 2) seen.set(pairs[i], pairs[i + 1]);
+  for (let i = 0; i < pairs.length; i += 2) {
+    const id = pairs[i];
+    const decision = pairs[i + 1];
+    // A field that is not one of the three shapes is not read as anything: the run acts on nothing and the field
+    // stays as it is, visible, so it is never taken as "final" nor its warning as decided afresh.
+    if (!WARNING_ID.test(id) || (decision !== "final" && decision !== "unmatched" && !decidedSubscription(decision))) {
+      counts.failed += 1;
+      console.error("early fraud warnings: a stored decision is invalid; nothing is acted on this run");
+      return counts;
+    }
+    seen.set(id, decision);
+  }
   const listed = new Set<string>();
   const since = nowSeconds - LOOKBACK_DAYS * 24 * 60 * 60;
   let after = "";
@@ -333,16 +359,27 @@ export async function syncPlanFraudWarnings(
   if (!listDone) console.error("early fraud warnings: more than one run's pages; the oldest wait for the next run");
   // Decided, and no longer listed: their subscriptions are ended by id. Taken in a random order, so the same
   // MAX_RETRIES that keep failing never stand in front of the others on every run.
-  const due = [...seen].filter(([id, what]) => what.startsWith("act:") && !listed.has(id));
+  // Only after the whole window was read (Claude 7 on #4168, MEDIUM): a decision whose refund was held (the run's
+  // MAX_REFUNDS, its deadline) is "not listed" too when a page failed or the list went past MAX_PAGES, and closing it
+  // as "final" there would leave its payment never refunded. With the window read to its end, a decision not listed is
+  // older than LOOKBACK_DAYS; until then it waits, still decided, for a run that lists it.
+  const windowRead = listDone && readable;
+  if (!windowRead) console.error("early fraud warnings: the window was not read to its end; decided warnings not listed wait for the next run");
+  const due = windowRead
+    ? [...seen].flatMap(([id, what]) => {
+      const subscription = decidedSubscription(what);
+      return subscription && !listed.has(id) ? [[id, subscription] as const] : [];
+    })
+    : [];
   for (let i = due.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [due[i], due[j]] = [due[j], due[i]];
   }
   const stale = due.slice(0, MAX_RETRIES);
-  for (const [id, what] of stale) {
+  for (const [id, subscription] of stale) {
     if (Date.now() > deadline) return counts;
     try {
-      if (await endSubscription(what.slice(4))) {
+      if (await endSubscription(subscription)) {
         await remember(id, "final");
         counts.ended += 1;
       } else held += 1;

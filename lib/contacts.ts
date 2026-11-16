@@ -369,8 +369,12 @@ export const CONTACT_COMMANDS_MOST = {
   noteProduct: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
   takeBackRound: 1 + 1 + 2,
   takeBack: CONTACT_WRITE_TRIES * (1 + 1 + 2) + 1,
-  /** tokensFor for `n` addresses: both reads, and for each a token's record, its checked write (1 + 2 calls) and, lost, the record taken back. */
-  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + n * (1 + 3 + 1)),
+  /**
+   * tokensFor for `n` addresses: both reads, and one script (TOKEN_CAS_HSET) whose calls for each are its row, its
+   * print, the record and the row written (Codex V on #3925); nothing is taken back, since a record is made only with
+   * its row. No more than before for any n: 3 + 4n against 2 + 5n.
+   */
+  tokens: (n: number): number => CONTACT_WRITE_TRIES * (2 + 1 + n * 4),
 } as const;
 
 /**
@@ -559,9 +563,12 @@ export async function importContacts(
   let full = false;
   for (let i = 0; i < emails.length; i += 500) {
     const chunk = emails.slice(i, i + 500);
-    const [rows, prints] = await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]);
-    const found = Array.isArray(rows) ? rows : [];
-    const deleted = Array.isArray(prints) ? prints : [];
+    // Both answers read whole (rule 24; Codex V on #3925): an answer about who was deleted that is cut short or of
+    // another shape is unknown, never "nobody deleted", so a deleted address is never pasted back in as agreed.
+    const replies = repliesFor(await redisPipeline([["HMGET", key, ...chunk], suppressedAmongCommand(listId, chunk)]), 2);
+    if (!replies) throw new UnknownReplyError("the contacts and deleted people of a pasted import");
+    const found = fieldsOf(replies[0], chunk.length, "the contacts of a pasted import");
+    const deleted = erasedOf(replies[1], chunk.length, "the deleted people of a pasted import");
     // Each write, with the fingerprint of what its address held when read (CAS_HSET, as importContactRows writes).
     const writes: { email: string; value: string; was: string }[] = [];
     const sizes: { before: Contact | null; next: Contact }[] = [];
@@ -760,15 +767,21 @@ export async function previewContactRows(
 export async function importContactRows(listId: string, rows: ImportedContact[], data: DataStore): Promise<ContactOutcome[]> {
   if (!isRedisConfigured() || !listId || rows.length === 0) return rows.map(() => "full");
   const key = leadsKey(listId);
-  const [size, found, prints] = await redisPipeline([
-    ["HLEN", key],
-    ["HMGET", key, ...rows.map((r) => r.email)],
-    suppressedAmongCommand(listId, rows.map((r) => r.email)),
-  ]);
+  const replies = repliesFor(
+    await redisPipeline([
+      ["HLEN", key],
+      ["HMGET", key, ...rows.map((r) => r.email)],
+      suppressedAmongCommand(listId, rows.map((r) => r.email)),
+    ]),
+    3,
+  );
+  // Read whole, as the paste reads them (Codex V on #3925): unknown is never "nobody deleted".
+  if (!replies) throw new UnknownReplyError("the contacts and deleted people of an imported file");
+  const size = replies[0];
   let room = MAX_LEADS - (Number(size) || 0);
   const now = new Date().toISOString();
-  const existing = Array.isArray(found) ? found : [];
-  const deleted = Array.isArray(prints) ? prints : [];
+  const existing = fieldsOf(replies[1], rows.length, "the contacts of an imported file");
+  const deleted = erasedOf(replies[2], rows.length, "the deleted people of an imported file");
   // Each write, with the fingerprint of what its address held when read.
   const writes: { email: string; value: string; was: string; row: number }[] = [];
   const sizes: { before: Contact | null; next: Contact }[] = [];
@@ -860,6 +873,70 @@ async function casWrite(key: string, writes: { email: string; value: string; was
     // Anything else: whether the script ran is not known, and nothing is written without its check (an unsubscribe
     // made since this read would be written over). The caller answers "not known" and tries again later.
     throw new UnknownReplyError("a contact write");
+  }
+}
+
+/**
+ * For each address of tokensFor, in one step: when its erasure print is not in the store's prints (KEYS[2],
+ * lib/suppression.ts) and its contact still holds what was read (by its SHA-1, as CAS_HSET), the unsubscribe link's
+ * record (KEYS[2 + n]) and then the contact with its token; otherwise nothing, for that address. ARGV, five an address:
+ * the address, its print, the SHA-1 read, the contact to write and the record's text. Answers 1 (written) or 0 each.
+ */
+const TOKEN_CAS_HSET = [
+  // Its first line names it, so the tests' Redis (lib/redis-memory.ts) runs the same check in one step.
+  "-- marktmorgen:contact-token-cas-hset:v1",
+  "local out = {}",
+  "for i = 1, #ARGV, 5 do",
+  "  local n = (i - 1) / 5 + 3",
+  '  local cur = redis.call("HGET", KEYS[1], ARGV[i])',
+  '  local seen = ""',
+  "  if cur then seen = redis.sha1hex(cur) end",
+  '  if redis.call("HEXISTS", KEYS[2], ARGV[i + 1]) == 0 and seen == ARGV[i + 2] then',
+  '    redis.call("SET", KEYS[n], ARGV[i + 4])',
+  '    redis.call("HSET", KEYS[1], ARGV[i], ARGV[i + 3])',
+  "    out[#out + 1] = 1",
+  "  else",
+  "    out[#out + 1] = 0",
+  "  end",
+  "end",
+  "return out",
+].join("\n");
+
+/**
+ * Writes each link that its address may still have (TOKEN_CAS_HSET); says which were written. Each answer exactly 1 or
+ * 0; anything else, a failed call included, is unknown and throws UnknownReplyError, never "written" and never "not
+ * deleted" (rule 24): the send stops for a retry, which reads again. A step that ran with its answer lost left a
+ * record and a token on a row nobody deleted, which that read finds and uses.
+ */
+async function tokenCasWrite(listId: string, key: string, handle: string, writes: { email: string; value: string; was: string; token: string }[]): Promise<boolean[]> {
+  let sent: unknown;
+  try {
+    sent = await redisPipeline([
+      [
+        "EVAL",
+        TOKEN_CAS_HSET,
+        2 + writes.length,
+        key,
+        suppressedKey(listId),
+        ...writes.map((w) => tokenKey(w.token)),
+        ...writes.flatMap((w) => [w.email, suppressionPrint(listId, w.email), w.was, w.value, `${listId}|${w.email}|${handle}`]),
+      ],
+    ]);
+  } catch {
+    // Whether the step ran is not known: never "not written", never "written".
+    throw new UnknownReplyError("an unsubscribe link's write");
+  }
+  const each = repliesFor(repliesFor(sent, 1)?.[0], writes.length);
+  if (!each || !each.every((v) => v === 0 || v === 1)) throw new UnknownReplyError("an unsubscribe link's write");
+  return each.map((v) => v === 1);
+}
+
+/** An answer about which of `count` addresses were deleted (suppressedAmongCommand), whole, or UnknownReplyError naming `what`. */
+function erasedOf(reply: unknown, count: number, what: string): (string | number | null)[] {
+  try {
+    return wholeErasedReply(reply, count);
+  } catch {
+    throw new UnknownReplyError(what);
   }
 }
 
@@ -1012,25 +1089,15 @@ export async function tokensFor(
       writes.push({ email, value: JSON.stringify({ ...contact, t: token }), was: sha1(raw), token });
     });
     if (!writes.length) break;
-    // The token's own record first, so a link is never sent that leads
-    // nowhere; then each contact only if it is still as it was read, so an
-    // unsubscribe made meanwhile is never written over, and two sends at
-    // once keep one token between them.
-    // Each record answered exactly "OK", or no token is handed out nor kept on a contact: a token whose record may not
-    // exist would put a link and a one-click header leading nowhere into this email and every later one (rule 24).
-    const records = await redisPipeline(writes.map((w) => ["SET", tokenKey(w.token), `${listId}|${w.email}|${handle}`]));
-    const set = repliesFor(records, writes.length);
-    if (!set || set.some((reply) => reply !== "OK")) {
-      await redisPipeline(writes.map((w) => ["DEL", tokenKey(w.token)])).catch(() => null);
-      throw new UnknownReplyError("an unsubscribe link's record");
-    }
-    const done = await casWrite(key, writes);
+    // The token's record and the token on the contact are written in one step (TOKEN_CAS_HSET), and only where the
+    // address's erasure print is still not there and the contact still holds what was read: an erasure that wrote its
+    // print since the read above gets no link, no token on its row and no record naming it, and an unsubscribe made
+    // meanwhile is never written over; two sends at once keep one token between them (Codex V on #3925, MÉDIO 1).
+    const done = await tokenCasWrite(listId, key, handle, writes);
     writes.forEach((w, i) => {
       if (done[i]) out.set(w.email, w.token);
     });
-    const lost = writes.filter((_, i) => !done[i]);
-    if (lost.length) await redisPipeline(lost.map((w) => ["DEL", tokenKey(w.token)]));
-    pending = lost.map((w) => w.email);
+    pending = writes.filter((_, i) => !done[i]).map((w) => w.email);
   }
   return out;
 }

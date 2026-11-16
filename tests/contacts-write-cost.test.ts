@@ -30,6 +30,9 @@ function billed(commands: Commands, scriptCalls: number): number {
     else if (head.startsWith("-- marktmorgen:store-data:")) continue;
     else if (head.startsWith("-- marktmorgen:contact-write-if:v1")) total += 1 + scriptCalls;
     else if (head.startsWith("-- marktmorgen:contact-cas-hset:v1")) total += 1 + 2 * ((c.length - 4) / 3);
+    // lib/contacts.ts TOKEN_CAS_HSET: for each address (its keys after the list's and the prints'), its row, its print,
+    // the record and the row written.
+    else if (head.startsWith("-- marktmorgen:contact-token-cas-hset:v1")) total += 1 + 4 * (Number(c[2]) - 2);
     else total += 1000; // a script this test does not know is not free
   }
   return total;
@@ -70,7 +73,7 @@ async function main() {
     is("an unsubscribe at the most", t.unsubscribe, t.tries * t.unsubscribeRound);
     is("a purchase noted: the row, the checked write (1 + 2) and, once, its read back", [t.noteProductRound, t.noteProduct], [4, t.tries * 4 + 1]);
     is("taking back the permission: the row, the checked write (1 + 2) and, once, its read back", [t.takeBackRound, t.takeBack], [4, t.tries * 4 + 1]);
-    is("links for n addresses: per round both reads, a record and a checked write (1 + 2) and a taken-back record each", [t.tokens(1), t.tokens(10)], [t.tries * (2 + 1 + 3 + 1), t.tries * (2 + 10 * (1 + 3 + 1))]);
+    is("links for n addresses: per round both reads and one script with 4 calls each (row, print, record, row written)", [t.tokens(1), t.tokens(10)], [t.tries * (2 + 1 + 4), t.tries * (2 + 1 + 10 * 4)]);
     is("an order's sign-up is inside the order's own compute", t.upsert * COMMAND <= ORDER_COMPUTE, true);
   }
 

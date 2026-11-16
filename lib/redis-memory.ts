@@ -239,6 +239,28 @@ export class MemoryRedis {
           }
           return out;
         }
+        // lib/contacts.ts TOKEN_CAS_HSET: for each address, the unsubscribe link's record and the contact with its token,
+        // only while the address's erasure print is not there and the contact holds what was read (Codex V on #3925).
+        if (key.startsWith("-- marktmorgen:contact-token-cas-hset:v1\n")) {
+          const keys = Number(args[0]);
+          const count = keys - 2;
+          if (!Number.isSafeInteger(keys) || count < 1 || args.length !== 1 + keys + 5 * count) throw new Error("ERR wrong number of arguments for the token write");
+          const [list, marks] = [args[1], args[2]];
+          const records = args.slice(3, 3 + count);
+          const argv = args.slice(1 + keys);
+          const out: number[] = [];
+          for (let j = 0; j < count; j += 1) {
+            const [field, print, was, value, record] = argv.slice(5 * j, 5 * j + 5);
+            const current = this.run(["HGET", list, field]);
+            const seen = typeof current === "string" ? createHash("sha1").update(current).digest("hex") : "";
+            if (this.run(["HEXISTS", marks, print]) === 0 && seen === was) {
+              this.run(["SET", records[j], record]);
+              this.run(["HSET", list, field, value]);
+              out.push(1);
+            } else out.push(0);
+          }
+          return out;
+        }
         // lib/contacts.ts CONTACT_WRITE_IF: a contact's row written only while it and the address's deleted mark hold what was read, with its counts.
         // With the person's set of stores joined (KEYS[5], ARGV[9] the store, ARGV[10] its day), added to after the checks.
         if (key.startsWith("-- marktmorgen:contact-write-if:v1\n") && ((args[0] === "4" && args.length === 13) || (args[0] === "5" && args.length === 16))) {

@@ -76,7 +76,8 @@ async function main(): Promise<void> {
 
   part("The token record's write answers in an unknown shape");
   await upsertContact(listId, "one@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
-  trap = (commands) => (commands.length > 0 && commands.every((c) => c[0] === "SET" && String(c[1]).startsWith("nl:mail:unsub:")) ? Promise.resolve([]) : null);
+  // The record is written in one step with the token on the contact (lib/contacts.ts TOKEN_CAS_HSET); that step answers in another shape.
+  trap = (commands) => (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes("contact-token-cas-hset") ? Promise.resolve([]) : null);
   const first = await outcome(() => tokensFor(listId, ["one@example.com"], store.handle));
   trap = null;
   const handed = first === "threw" ? "" : first.get("one@example.com") ?? "";
@@ -99,11 +100,10 @@ async function main(): Promise<void> {
   await upsertContact(listId, "three@example.com", { agreed: true, explicit: true, source: "free" }, ROOM);
   let evalRan = false;
   trap = (commands) => {
-    if (commands.length === 1 && commands[0][0] === "EVAL") {
-      // The script ran (its HSET landed: the in-memory Redis does not run this script, so the write is made here) and its answer was lost.
+    if (commands.length === 1 && commands[0][0] === "EVAL" && String(commands[0][1]).includes("contact-token-cas-hset")) {
+      // The script ran (the in-memory Redis runs its stand-in: the record and the token on the row landed) and its answer was lost.
       evalRan = true;
-      const [, , , hash, field, , value] = commands[0];
-      return real([["HSET", hash, field, value]]).then(() => { throw new Error("Redis request failed with status 502"); });
+      return real(commands).then(() => { throw new Error("Redis request failed with status 502"); });
     }
     if (evalRan) return contactsRead(commands, listId, [null]);
     return null;

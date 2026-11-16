@@ -35,7 +35,7 @@
 import { createHash } from "node:crypto";
 import { redisPipeline } from "@/lib/redis";
 import { repliesFor } from "@/lib/redis-reply";
-import { NIMBUS_FROM, sendEmail } from "@/lib/email";
+import { NIMBUS_FROM, type SendOutcome, sendEmailOutcome } from "@/lib/email";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
 import { type Store, ensureStatsId, setProductHidden, storeRef } from "@/lib/store";
 import { productIdFromAddress, readListingExactly } from "@/lib/catalog";
@@ -52,7 +52,7 @@ const COUNT_SECONDS = 2 * 86_400;
 /** How long a reported product is kept from removal, editing and publishing: a year from the report and a margin. */
 export const KEEP_SECONDS = 400 * 86_400;
 
-export type HoldOutcome = "held" | "no_product" | "not_held" | "capped" | "unknown" | "failed";
+export type HoldOutcome = "held" | "no_product" | "not_held" | "outside" | "capped" | "unknown" | "failed";
 
 const storeTag = (store: Pick<Store, "statsId" | "handle">) => store.statsId || `h:${store.handle}`;
 const countKey = (store: Pick<Store, "statsId" | "handle">, day: string) => `nl:csa:held:${storeTag(store)}:${day}`;
@@ -134,6 +134,9 @@ export async function heldInSale(store: Store, product: Listing, bumps: readonly
  */
 export async function holdReported(report: { kind: ReportKind; url: string }, store: Store, now = Date.now()): Promise<HoldOutcome> {
   if (report.kind !== "child_safety") return "not_held";
+  // Only an address on Marktmorgen itself names content it hosts: another host whose path imitates a store's route
+  // (https://evil.example/@victim/p/<id>) never takes a real product off (Codex U and Codex L on #3587).
+  if (!onMarktmorgen(report.url)) return "outside";
   try {
     // Read exactly (rule 24): an address that names no product of this store is no_product; a read that fails or
     // answers off its shape is unknown, never "names nothing" (lib/takedown.ts reportedProduct swallows it).
@@ -179,6 +182,7 @@ const WHAT_HAPPENED: Record<HoldOutcome, string> = {
   held: "The product it points at was taken off the store at once (unpublished), so visitors can no longer see or buy it. Nothing was deleted: its files and records are kept as they are. For 400 days the creator cannot remove it, change it or publish it again, nor replace or delete its files, price options, picture, page, podcast episodes, course lessons, lesson captions, license keys, bundle list, waitlist, pre-orders, call setup or package, offer after paying, description or buyers' reviews, from the studio or the AI agent, and it goes into no bundle. A bundle that already held it is not sold, and a checkout box that offered it, or such a bundle, is not shown or charged. People who bought it before may still reach its files: switching that off is not automatic yet. Closing the store, or its plan ending, still deletes it, and so does erasing the creator's data: to keep it, suspend the store instead of closing it.",
   no_product: "The address does not name a product of a store, so nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
   not_held: "Nothing was taken off automatically. Act on it by hand, as docs/incident-response.md section 9 says.",
+  outside: "The address is not a Marktmorgen address, so nothing was taken off automatically, even if its path looks like a store's. Act on it by hand, as docs/incident-response.md section 9 says.",
   capped: `This store already had ${CHILD_SAFETY_HOLDS_PER_DAY} products taken off automatically today, so nothing more was. Act on it by hand, as docs/incident-response.md section 9 says.`,
   unknown: "Taking it off the store could not be confirmed. Act on it now by hand, as docs/incident-response.md section 9 says.",
   failed: "Taking it off the store did not work. Act on it now by hand, as docs/incident-response.md section 9 says.",
@@ -195,6 +199,17 @@ function productIdIn(url: string, store: Store): string | null {
     return segment ? productIdFromAddress(store, segment) : null;
   } catch {
     return null;
+  }
+}
+
+/** Whether an address is on Marktmorgen itself, over https: the only kind a report may act on automatically. */
+function onMarktmorgen(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    return parsed.protocol === "https:" && (host === "marktmorgen.com" || host === "www.marktmorgen.com");
+  } catch {
+    return false;
   }
 }
 
@@ -254,7 +269,9 @@ export async function alertOwner(
           ? "The steps are in docs/incident-response.md. The request itself, with the person's signature, is in the notice email."
           : `The steps are in docs/incident-response.md. ${NOTICE_NOT_KEPT}`,
       ];
-  return sendEmail({
+  // False only when certainly refused: an answer that is not known may have gone, and counts as sent (rule 30), so
+  // the route never asks the reporter to try again for an email the guard would not send twice.
+  const delivery = await sendEmailOutcome({
     meter: { by: "company" },
     from: NIMBUS_FROM,
     to: SUPPORT_EMAIL,
@@ -263,10 +280,8 @@ export async function alertOwner(
     // One urgent email per request a day: a retry of the same request (address, sender, words) does not send it twice,
     // and a new request on the same address, by another person or about another image, still does.
     idempotencyKey: `report-urgent-${report.kind}-${createHash("sha256").update(`${report.url}\n${report.email ?? ""}\n${report.work ?? ""}`).digest("hex").slice(0, 24)}-${new Date(now).toISOString().slice(0, 10)}`,
-  })
-    .catch(() => false)
-    .then((sent) => {
-      if (!sent) console.error("the urgent report email was not sent", report.kind);
-      return sent;
-    });
+  }).catch((): SendOutcome => "refused");
+  if (delivery === "refused") console.error("the urgent report email was not sent", report.kind);
+  else if (delivery === "uncertain") console.error("the urgent report email may not have been sent", report.kind);
+  return delivery !== "refused";
 }

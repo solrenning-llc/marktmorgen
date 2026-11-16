@@ -569,7 +569,9 @@ async function main(): Promise<void> {
     // The outbox priced at its own ceiling (claude4/keep/hookout-capped, 16 November 2026): a store may fill the whole
     // outbox, never more; with this PR's drip runs, a little more kept a month than before.
     // The drip walk priced with its ZMSCORE and first starts' bytes (Claude 5 on #3344): a cent or two less kept.
-    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.21 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.21"]);
+    // Merge of main into #3344 (16 November 2026, after #4488 and #3819): both together, Store 45.10 -> 45.09;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.09, 313.80 and 703.21 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.09", "313.80", "703.21"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's

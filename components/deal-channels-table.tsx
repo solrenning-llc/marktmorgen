@@ -67,7 +67,7 @@ function ChannelRows({ result, currency }: { result: DealChannels; currency: str
   const cell = (tally: { deals: number; cents: number }) => `${tally.deals} · ${money(tally.cents)}`;
   return (
     <>
-      <div className="mt-4 overflow-x-auto">
+      <div className="mt-4 overflow-x-auto" tabIndex={0} role="region" aria-label="Deals by channel, as a table">
         <table className="w-full min-w-[32rem] text-left text-sm">
           <caption className="sr-only">Your deals&apos; count and value by the channel their person first came from</caption>
           <thead>

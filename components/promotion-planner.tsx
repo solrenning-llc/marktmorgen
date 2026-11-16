@@ -8,9 +8,9 @@ import { CAMPAIGN_MEDIA, POST_PLACES, type CampaignMedium } from "@/lib/share-li
 import { formatMoney } from "@/lib/money";
 import { channelName } from "@/lib/channel-names";
 import { copyCampaignLink } from "@/lib/campaign-copy";
-import { NO_CAMPAIGN_RESULTS, showCampaignResults } from "@/lib/campaign-results-jump";
+import { campaignResultsMissing, showCampaignResults } from "@/lib/campaign-results-jump";
 
-export function PromotionPlanner({ data, range, products }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[] }) {
+export function PromotionPlanner({ data, range, products, spendUnread = false }: { data: StatsData; range: PromotionWindow; products: PromotionProduct[]; spendUnread?: boolean }) {
   const id = useId();
   const plan = promotionChoices(data, range, products);
   const [selected, setSelected] = useState("");
@@ -75,7 +75,7 @@ export function PromotionPlanner({ data, range, products }: { data: StatsData; r
       <button type="button" className="btn btn-primary" disabled={!link} onClick={() => void copy()}>Copy campaign link</button>
       <button type="button" className="btn btn-secondary" aria-describedby={id + "-results-status"} onClick={() => setNoResults(!showCampaignResults(target => document.getElementById(target), matchMedia("(prefers-reduced-motion: reduce)").matches))}>See campaign results</button>
     </div>
-    <p id={id + "-results-status"} className="mt-2 text-xs text-ink-soft" role="status">{noResults ? NO_CAMPAIGN_RESULTS : ""}</p>
+    <p id={id + "-results-status"} className="mt-2 text-xs text-ink-soft" role="status">{noResults ? campaignResultsMissing(spendUnread) : ""}</p>
     <p id={id + "-copy-status"} className="mt-2 text-xs text-ink-soft" role="status">{copied === link && link ? "Campaign link copied." : copied === "selected:" + link ? "The campaign link is selected. Copy it using your keyboard or device menu." : copied === "failed:" + link ? "Select the campaign link above and copy it." : "Share this link, then review its recorded visits and payments in Campaigns. Results are not guaranteed; gross revenue excludes refunds, fees and other costs."}</p>
   </section>;
 }

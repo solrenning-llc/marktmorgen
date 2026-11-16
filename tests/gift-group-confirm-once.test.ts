@@ -113,6 +113,29 @@ async function main(): Promise<void> {
     const m1Third = await outcome(confirmPurchase(store, m1.s.id, m1.s as never));
     is("threw, then sent, then already", [m1First, m1Second, m1Third], ["threw", "sent", "already"]);
     is("the room is held through the throw, then given back once", [m1AfterFirst, await held(m1.hour)], [m1.before, m1.before - 1]);
+
+    part(`${kind}: the run holding the mark dies after its record write, before its email; a run without the mark never certifies "sent"`);
+    const dead = await twoAdmitted(kind);
+    // The dying run: its write marking the record given or paid lands, and every Redis call after it never answers.
+    let dying = false;
+    redis.pipeline = (async (commands: Command[]) => {
+      if (dying) return new Promise<never>(() => {});
+      const replies = await real(commands);
+      if (commands.some((c) => c[0] === "SET" && c[1] === dead.record && /"(given|paid)":/.test(String(c[2])))) dying = true;
+      return replies;
+    }) as typeof redis.pipeline;
+    void confirmPurchase(store, dead.s.id, dead.s as never).catch(() => undefined);
+    for (let i = 0; i < 10_000 && !dying; i += 1) await new Promise((r) => setImmediate(r));
+    for (let i = 0; i < 50; i += 1) await new Promise((r) => setImmediate(r));
+    restore();
+    const beside = await outcome(confirmPurchase(store, dead.s.id, dead.s as never));
+    const mark = (await real([["GET", `nl:confirm:${dead.s.id}`]]))[0] ?? null;
+    advance(301_000);
+    const after = await outcome(confirmPurchase(store, dead.s.id, dead.s as never));
+    const markAfter = (await real([["GET", `nl:confirm:${dead.s.id}`]]))[0] ?? null;
+    is("the dying run wrote its record and stopped before its email", dying, true);
+    is("the run beside it, without the mark, throws and keeps no sent mark", [beside, mark], ["threw", null]);
+    is("once the mark runs out, the next run tells (M1's path) and answers sent", [after, markAfter], ["sent", "sent"]);
   }
   done();
 }

@@ -37,7 +37,7 @@ import { notFound, permanentRedirect, redirect } from "next/navigation";
 import { cache } from "react";
 import { type Listing, type Store, isFree, normaliseHandle, storeForPage } from "@/lib/store";
 import { moneyField } from "@/lib/money";
-import { productIdFromAddress, readListing, readListings } from "@/lib/catalog";
+import { productIdFromAddress, readAsking, readListing, readListings } from "@/lib/catalog";
 import { canSell, canSellProduct, sellableOptions } from "@/lib/store-checkout";
 import { canGiveProduct } from "@/lib/free";
 import { lookStyle } from "@/lib/store-look";
@@ -323,7 +323,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
         </Link>
       </p>
     ) : null;
-  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts] = await Promise.all([
+  const [about, stock, noKeys, savedPage, summary, related, inside, soldCounts, courseFacts, asksAtCheckout] = await Promise.all([
     product.about ? aboutOf(store.statsId, product.id) : Promise.resolve(""),
     // A count that cannot be read is unknown, never "no limit" nor "keys left" (CX-123 rule 24), as on the store page.
     stockLeft(store, product).catch(() => undefined),
@@ -338,6 +338,10 @@ export default async function ProductPage({ params, searchParams }: Params) {
     readSoldCounts(store).catch(() => null),
     // A course's video total, from what the video service measured (292 [SQ3], lib/course-facts.ts).
     product.course ? readCourse(product.course.id).then((course) => (course ? readCourseFacts(course) : null)).catch(() => null) : Promise.resolve(null),
+    // Whether it asks questions at checkout: then it is bought here, from the buy box that asks them, and is not
+    // offered for a cart, whose checkout refuses it (#4350). Read only where the cart would be offered; unknown is
+    // not "asks nothing" (rule 24), so the cart is not offered then either.
+    cartOn && !soon && cartable(product) ? readAsking(store, [product.id]).then((asking) => asking.has(product.id)).catch(() => true) : Promise.resolve(true),
   ]);
   // Its page could not be read: said so, with no buy box, as a blog post that cannot be read is (unit B).
   if (savedPage === "unread") {
@@ -474,7 +478,7 @@ export default async function ProductPage({ params, searchParams }: Params) {
       ) : (
         <BuyBox store={store} product={product} related={related} remaining={remaining} writes={canWrite(store)} selling={selling} ready={bundleReady} soon={soon} preorder={preorder} bundleItems={inside} pickAgain={query.pick === "count"} consentAgain={consentAgain && !giftProblem && !groupProblem} embed={embedSite || embedReturn ? { site: embedSite, back: embedReturn } : null} chosenOption={linkedChoice} />
       )}
-      {cartOn && !soon && !unread && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
+      {cartOn && !soon && !unread && !asksAtCheckout && cartable(product) && remaining !== 0 ? <AddToCart handle={store.handle} productId={product.id} lang={store.language} deal={store.cartDeal.on ? store.cartDeal : null} /> : null}
       {/* A question before buying, answered from this page (lib/answers.ts): only where the creator switched it on. */}
       {selling && answersOn(store) ? (
         <AskBox

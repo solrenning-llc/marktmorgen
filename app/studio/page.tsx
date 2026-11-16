@@ -2,6 +2,7 @@ import { serviceAllowanceWords } from "@/lib/store-allowance";
 import { placeLine } from "@/lib/call-place";
 import { planAboveSold } from "@/lib/larger-plan";
 import { SalesLevers } from "@/components/sales-levers";
+import { EmailField } from "@/components/email-field";
 import { costsPaused } from "@/lib/plan-standing";
 import { INTEGRATION_PAUSED_WORDS, META_READ_PAUSED } from "@/lib/integration-pause";
 import { PlanDisputeNotice } from "@/components/plan-dispute-notice";
@@ -3523,18 +3524,20 @@ export default async function StudioPage({
                 method="post"
                 className="mt-5 flex flex-wrap items-end gap-3"
               >
-                <label className="flex-1 basis-64 text-sm font-bold text-ink">
-                  Move to
-                  <input
-                    type="email"
+                <div className="flex-1 basis-64">
+                  <label htmlFor="account-move-email" className="block text-sm font-bold text-ink">
+                    Move to
+                  </label>
+                  <EmailField
+                    id="account-move-email"
                     name="email"
                     autoComplete="off"
                     required
-                    maxLength={254}
                     placeholder="you@somewhere-else.com"
                     className="field mt-1"
+                    store={false}
                   />
-                </label>
+                </div>
                 <button
                   type="submit"
                   className="btn btn-primary"

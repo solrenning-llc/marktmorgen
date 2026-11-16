@@ -20,6 +20,7 @@ import { breakRunning, pauseView } from "@/lib/plan-pause";
 import { PLAN_BREAKS_ENABLED, PAID_MONTHS_BEFORE_PAUSE, PAUSE_MONTHS, PAUSE_EVERY_DAYS } from "@/lib/plan-pause-rules";
 import { MarkShipped } from "@/components/mark-shipped";
 import { paypalSalesConfigured } from "@/lib/paypal-sales";
+import { PayPalWaiting } from "@/components/paypal-waiting-notice";
 import { lowestPriceCents } from "@/lib/product-option";
 import { SaleEditor } from "@/components/sale-editor";
 import { FairPriceEditor } from "@/components/fair-price-editor";
@@ -377,6 +378,11 @@ const META_NOTICES: Record<string, { title: string; body: string }> = {
     title: "Meta found no ad account to read",
     body: "The Facebook login you used cannot see any ad account. Nothing was kept. Connect again with the login that runs your ads.",
   },
+  // Meta told us, while it was connecting, that this Facebook login removed the app or asked for its data to be deleted.
+  removed: {
+    title: "Nothing was connected",
+    body: "While this was connecting, Meta told us to delete this Facebook login's data. So nothing was kept, and the permission was given back to Meta. Connect again if you still want your ads read.",
+  },
   refused: {
     title: "Meta did not finish connecting",
     body: "Nothing was kept. Connect again in a moment.",
@@ -725,6 +731,10 @@ const STORES_NOTICES: Record<string, { title: string; body: string }> = {
   deleted: {
     title: "The store was deleted",
     body: "Its addresses answer nothing for 30 days, and then anyone may take them. Your other stores are as they were.",
+  },
+  partly: {
+    title: "The store was deleted, but a last step was not confirmed",
+    body: "We could not confirm one last step, such as holding back its addresses for 30 days or taking it off its team's lists. Your other stores are as they were.",
   },
   confirm: {
     title: "Type the store's address to delete it",
@@ -1334,7 +1344,7 @@ export default async function StudioPage({
     <div className="min-h-screen bg-paper text-ink">
       {store && view ? (
         <StudioHeader
-          current={store}
+          current={current ?? store}
           role={role}
           stores={view.stores}
           owned={view.owned}
@@ -2586,6 +2596,8 @@ export default async function StudioPage({
                   </details>
                 </>
               ) : (
+                <>
+                <PayPalWaiting store={store} />
                 <form action={`/api/store/paypal/connect${pin}`} method="post" className="mt-5">
                   <button type="submit" className="btn btn-primary">
                     Connect your PayPal account
@@ -2595,6 +2607,7 @@ export default async function StudioPage({
                     one, and to confirm what Marktmorgen may do. Then it sends you back here.
                   </p>
                 </form>
+                </>
               )}
             </div>
             ) : null}
@@ -2681,7 +2694,13 @@ export default async function StudioPage({
                       : <>{"The last moment to start a plan and keep this store was "}<strong>{momentWords(lastPlanMoment(closing.day))}</strong>{". It has passed, so a plan can no longer be started for it."}</>}
                   </p>
                 )}
-                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store. */}
+                {/* A GET form, not a link: a link may be prefetched, and each prefetch would read the whole store.
+                    Once the plan has ended, that file is the owner's only (issue #4081, app/api/store/export/route.ts). */}
+                {role !== "owner" ? (
+                  <p className="mt-5 text-sm text-ink-soft">
+                    Now that the plan has ended, only the store&rsquo;s owner can download the whole store&rsquo;s file. Ask them to download it before the closing day.
+                  </p>
+                ) : (
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <form action="/api/store/export" method="get" className="max-w-full">
                     <input type="hidden" name="store" value={store.sid} />
@@ -2694,6 +2713,7 @@ export default async function StudioPage({
                     {`One file: your store's address, name, bio, links, currency and the date it was created, your products and their pages, thank-you notes, posts, courses with every lesson's text, forms and their answers, contacts and your orders as a spreadsheet. ${ENDED_STORE_EXPORTS === 1 ? "Once" : `${ENDED_STORE_EXPORTS} times`} now that your plan has ended, whatever your store's size, so download it when you are ready to keep it. Files and videos download from their own pages. Nothing else is in it. For example, files, videos, community posts, email sequences and broadcasts, reviews, coupons, affiliates, the times of booked calls (their payments are in your orders), funnels and CRM deals and tasks stay in your studio.`}
                   </span>
                 </div>
+                )}
                 <p className="mt-3 text-sm text-ink-soft">
                   {`We email you ${WARN_MONTH_DAYS} days before that day and ${WARN_WEEK_DAYS} days before it, and nothing is removed sooner than a week after the last of those emails.`}
                 </p>

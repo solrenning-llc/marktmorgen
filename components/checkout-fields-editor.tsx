@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import type { Product } from "@/lib/store";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 import {
   type CheckoutField,
   FIELD_TYPES,
@@ -31,7 +32,13 @@ const subscribeReady = () => () => {};
 const clientReady = () => true;
 const serverReady = () => false;
 
+/** What the checkout questions say for a refusal with no question named: its own words, or the hold's (cloud P on #3471). */
+export function fieldsRefusal(code: unknown): string {
+  return problemText(typeof code === "string" ? code : "", undefined);
+}
+
 function problemText(reason: string, at: number | undefined): string {
+  if (reason === "on_hold" || reason === "hold_unread") return STUDIO_MESSAGES[reason];
   const which = at === undefined ? "" : `Question ${at + 1}: `;
   const text: Record<string, string> = {
     label: "give it a label the buyer will read.",

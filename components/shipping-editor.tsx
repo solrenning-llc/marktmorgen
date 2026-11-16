@@ -9,8 +9,18 @@ import { useStoreCurrency } from "@/components/store-currency";
 import { MAX_SHIP_NOTE, MAX_SHIPPING_SKU, SHIP_REGIONS, type ShipRegion, readCountries, shipProblem, parseShipping } from "@/lib/shipping";
 
 import { confirmsShipping } from "@/lib/shipping-confirmation";
+import { STUDIO_MESSAGES } from "@/lib/studio-messages";
 
 const UNKNOWN_SAVE = "Shipping was not confirmed. Reload to check its status before trying again.";
+
+/**
+ * What the shipping form says for a refusal: its own words, the hold's for a product held for a report (cloud P on
+ * #3471), or that the save was not confirmed.
+ */
+export function shippingRefusal(code: unknown): string {
+  if (code === "on_hold" || code === "hold_unread") return STUDIO_MESSAGES[code];
+  return typeof code === "string" && Object.hasOwn(MESSAGES, code) ? MESSAGES[code] : UNKNOWN_SAVE;
+}
 
 const subscribeReady = () => () => {};
 const clientReady = () => true;
@@ -78,7 +88,7 @@ export function ShippingEditor({ product }: { product: Product }) {
         return;
       }
       const refusal = data && typeof data === "object" && Object.hasOwn(data, "ok") && (data as {ok?:unknown}).ok === false && Object.hasOwn(data,"error") ? (data as {error?:unknown}).error : null;
-      setError(typeof refusal === "string" && Object.hasOwn(MESSAGES,refusal) ? MESSAGES[refusal] : UNKNOWN_SAVE);
+      setError(shippingRefusal(refusal));
     } catch {
       setError(UNKNOWN_SAVE);
     } finally {

@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const real = redis.pipeline.bind(redis);
   redis.pipeline = (async (commands: (string | number)[][]) =>
     commands[0]?.[0] === "GET" && String(commands[0]?.[1] ?? "").startsWith("nl:csa:keep:") ? [42] : real(commands)) as typeof redis.pipeline;
-  for (const [what, route, path, body] of asks) is(`${what}: unknown hold`, await send(route, path, body(held)), [503, "unavailable"]);
+  for (const [what, route, path, body] of asks) is(`${what}: unknown hold`, await send(route, path, body(held)), [503, "hold_unread"]);
   redis.pipeline = real;
 
   done();

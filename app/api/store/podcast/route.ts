@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { deleteFile as del, headFile as head } from "@/lib/file-store";
+import { headFile as head } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import { setPodcastEpisodes, setProductPodcast, storeFolder, storeForEmail } from "@/lib/store";
 import { guardStoreWrite, text } from "@/lib/store-request";
 import { ownsPath } from "@/lib/product-file";
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
       // Audio the product's file or another episode still uses (written before the check above) is kept.
       const gone = result.removed;
       const shared = gone !== null && (product.file?.pathname === gone.pathname || result.podcast.episodes.some((episode) => episode.pathname === gone.pathname));
-      if (gone && !shared) await del(gone.pathname).catch((error: unknown) => console.error("could not delete an episode's audio", error));
+      if (gone && !shared) await deleteOrSweep(gone.pathname, "an episode's audio");
       return Response.json({ ok: true, podcast: result.podcast });
     });
   } catch (error) {

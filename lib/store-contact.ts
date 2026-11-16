@@ -52,7 +52,7 @@ export async function sendContact(input: { store: Store; name: string; email: st
   const email = normaliseEmail(raw);
   const name = line(input.name, MAX_NAME);
   const who = store.statsId ?? store.handle;
-  const byIp = await essentialLimitState("contact-ip", `${who}:${input.ip}`, 3, 3_600);
+  const byIp = await essentialLimitState("contact-ip", `${who}|${input.ip}`, 3, 3_600);
   if (byIp !== "within") return byIp === "exceeded" ? "limited" : "error";
   const byStore = await essentialLimitState("contact-store", who, MAX_PER_DAY, 86_400);
   if (byStore !== "within") return byStore === "exceeded" ? "limited" : "error";

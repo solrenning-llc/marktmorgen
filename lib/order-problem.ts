@@ -36,6 +36,16 @@ import type { Store } from "@/lib/store";
 import type { Purchase } from "@/lib/buyer-orders";
 import { ORDER_PROBLEM_REPLY_DAYS, type OrderProblem, caseText, replyDueAt } from "@/lib/order-problem-rules";
 
+/**
+ * The Redis commands a filing sends of its own, at its worst, beyond the inbox message (Claude 7's MEDIUM on #3837):
+ * the per-buyer counter (SET NX, INCR: 2), the order's mark read (GET: 1) and taken (SET NX: 1), or read again when it
+ * was taken meanwhile (GET: 1, and then nothing else), the data room's EVAL (1), and after the write the case's own
+ * record read when the filing threw (lib/inbox.ts keptExactly, GET: 1) with the mark kept (SET XX: 1), or the mark given
+ * back (DEL: 1). The route takes them from the lookup's own meter (found.meter) before the counter is read, so they are
+ * paid by the buyer's requests (ORDERS_UNIT_COMMANDS each), never by the inbox message's unit, which the message uses.
+ */
+export const ORDER_PROBLEM_COMMANDS = 7;
+
 /** How long a filing in progress holds the order's mark before it ends by itself. */
 export const ORDER_PROBLEM_PENDING_SECONDS = 300;
 

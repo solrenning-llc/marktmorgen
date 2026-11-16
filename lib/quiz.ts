@@ -364,6 +364,8 @@ const quizKey = (courseId: string, lessonId: string) => `nl:course:${courseId}:q
 const triesKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:tries:${who}`;
 const resultKey = (courseId: string, lessonId: string, who: string) => `nl:course:${courseId}:quiz:${lessonId}:result:${who}`;
 const passedKey = (courseId: string, who: string) => `nl:course:${courseId}:passed:${who}`;
+/** A command answering 1 when this learner passed a quiz in a course: a dropped one's probe (lib/person-erasure.ts). */
+export const passedProbe = (courseId: string, who: string): (string | number)[] => ["EXISTS", passedKey(courseId, who)];
 
 export async function readQuizFor(courseId: string, lessonId: string): Promise<Quiz | null> {
   if (!isRedisConfigured() || !ITEM_ID_PATTERN.test(lessonId)) return null;
@@ -635,11 +637,28 @@ export async function passedForGate(courseId: string, who: string): Promise<Set<
   return (await passedExactly(courseId, who)) ?? new Set();
 }
 
-/** Several students at once, for the studio's list. */
-export async function passedFor(courseId: string, who: string[]): Promise<Set<string>[]> {
+/**
+ * The same passes for a page that reports progress (Claude 1 cloud R on #4558): null when the reply is in an unknown
+ * shape, so the page says it could not be checked, never "nothing passed"; a gate it also decides reads null as
+ * nothing passed, as passedForGate does.
+ */
+export async function passedOrUnknown(courseId: string, who: string): Promise<Set<string> | null> {
+  if (!isRedisConfigured()) return new Set();
+  return passedExactly(courseId, who);
+}
+
+/**
+ * Several students at once, for the studio's list. A student whose passes answered in an unknown shape (or every
+ * student, when the pipeline's reply is not one per student) reads null, never "nothing passed" (CX-123 rule 24).
+ */
+export async function passedFor(courseId: string, who: string[]): Promise<(Set<string> | null)[]> {
   if (!isRedisConfigured() || who.length === 0) return who.map(() => new Set());
-  const rows = await redisPipeline(who.map((w) => ["SMEMBERS", passedKey(courseId, w)]));
-  return rows.map((raw) => new Set(Array.isArray(raw) ? (raw as string[]) : []));
+  const rows = repliesFor(await redisPipeline(who.map((w) => ["SMEMBERS", passedKey(courseId, w)])), who.length);
+  if (!rows) return who.map(() => null);
+  return rows.map((raw) => {
+    const members = stringList(raw);
+    return members ? new Set(members) : null;
+  });
 }
 
 /**

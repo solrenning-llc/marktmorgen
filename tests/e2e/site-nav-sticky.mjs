@@ -39,7 +39,7 @@ process.stdout.write(JSON.stringify({ "/help/buyers": renderToStaticMarkup(creat
         const page = await browser.newPage({ viewport: { width, height: 800 } });
         await page.setContent(`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Menu check</title><style>${css}</style></head><body>${body}</body></html>`);
         await page.evaluate(() => window.scrollTo(0, 1500));
-        const top = await page.evaluate(() => Math.round(document.querySelector('nav[aria-label="Main"]')?.getBoundingClientRect().top ?? NaN));
+        const top = await page.evaluate(() => Math.round(document.querySelector('nav[aria-label="Main"]')?.closest("header")?.getBoundingClientRect().top ?? NaN));
         const ok = top === 0;
         if (!ok) failed++;
         console.log(`${ok ? "ok  " : "FAIL"}  ${path} at ${width} px, scrolled 1,500 px: the menu's top is ${top}`);

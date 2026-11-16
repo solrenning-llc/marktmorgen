@@ -245,7 +245,7 @@ try{
  // every control is 44 by 44 px (2.5.5: the site's menu, its footer's short links, the way back to the store, the trail),
  // and the 1.4.8 checks above hold. Baseline at 320 and 1280 px; its time is printed so its cost is measured.
  const missingStarted=Date.now();let missingCases=0;
- for(const width of [320,1280])for(const [path,want] of [["/@nosuchstore",404],["/@localshop/nothing-here",404],["/help/buyers",200]]){
+ for(const width of [320,1280])for(const [path,want,siteMenu] of [["/@nosuchstore",404,true],["/@localshop/nothing-here",404,false],["/help/buyers",200,true]]){
   const context=await browser.newContext({viewport:{width,height:900},serviceWorkers:"block",extraHTTPHeaders:{"x-forwarded-for":"198.51.100."+(100+missingCases)}});
   try{
    const page=await context.newPage();const errors=[];page.on("pageerror",error=>errors.push(redact(error)));
@@ -257,8 +257,14 @@ try{
    const small=await targetsUnder44(page),off=await blocksOff148(page);
    // The site's menu stays on screen when the page scrolls (#3997 review): a page that wraps <SiteNav /> in its own
    // <header> lets the sticky menu scroll away with that short wrapper. Only where the page is long enough to scroll.
-   const menuTop=await page.evaluate(async()=>{const nav=document.querySelector('nav[aria-label="Main"]');if(!nav)return null;const room=document.documentElement.scrollHeight-innerHeight;if(room<200)return 0;scrollTo(0,Math.min(1500,room));await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const top=Math.round(nav.getBoundingClientRect().top);scrollTo(0,0);return top;});
-   if(menuTop!==0)throw Error("The site menu does not stay on screen when "+path+" scrolls: its top is "+menuTop);
+   // What sticks is the menu's <header> (components/site-nav.tsx), measured itself: the nav inside it is hidden under
+   // lg and sits below the header's top in its row. The scroll is instant, not the page's smooth scroll-behavior, so
+   // the reading is where it lands. The store's own 404 (app/[handle]/not-found.tsx) draws the store's header, not
+   // the site's menu, so the check runs only where SiteNav is drawn (#3997 review, Claude 6 rvB3).
+   if(siteMenu){
+    const menuTop=await page.evaluate(async()=>{const header=document.querySelector('nav[aria-label="Main"]')?.closest("header");if(!header)return null;const room=document.documentElement.scrollHeight-innerHeight;if(room<200)return 0;scrollTo({top:Math.min(1500,room),behavior:"instant"});await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const top=Math.round(header.getBoundingClientRect().top);scrollTo({top:0,behavior:"instant"});return top;});
+    if(menuTop!==0)throw Error("The site menu does not stay on screen when "+path+" scrolls: its top is "+menuTop);
+   }
    audits++;console.log("MISSING_PAGE_AUDIT:"+JSON.stringify({engine,width,path,small,off,...result}));
    if(result.scroll>result.client||result.violations.length||small.length||off.length||errors.length)throw Error("Missing-page accessibility failure "+JSON.stringify({violations:result.violations,small,off,errors}));
    if(result.incomplete.length)gaps.push({width,mode:"baseline",state:"missing "+path,manualReview:result.incomplete});

@@ -177,6 +177,39 @@ async function main(): Promise<void> {
   tamper = null;
   is("both paid lines are booked, none left waiting", [cased.paid, cased.waiting, cased.released], [2, 0, 0]);
   is("the book holds both amounts once, and the batch is closed", [await paidCents(store), await fields()], [4500, []]);
+
+  // Claude 5 on #4682 (6920583705, MÉDIO, money): an item that did NOT pay (FAILED, RETURNED, BLOCKED, REFUNDED,
+  // REVERSED) released its line whatever receiver PayPal named, so the next payday paid the affiliate again. A read of
+  // another receiver's item proves neither the payment nor its failure: the line stays on its way, as for SUCCESS.
+  type Item = { transaction_status?: string; payout_item: { receiver?: string } };
+  for (const status of ["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "FAILED, no receiver"]) {
+    part(`A ${status} item whose receiver is not the one it was sent to stays on its way`);
+    await seed(store);
+    next = "make";
+    is("control: a batch is made", (await payWithPayPal(store)).ok, true);
+    tamper = (body) => {
+      const first = body.items[0] as unknown as Item;
+      first.transaction_status = status.split(",")[0];
+      if (status.includes("no receiver")) delete first.payout_item.receiver;
+      else first.payout_item.receiver = "different@example.test";
+    };
+    const held = await settlePayPal(store);
+    tamper = null;
+    is("the mismatched line is not released (stays on its way); the other is booked", [held.paid, held.waiting, held.released], [1, 1, 0]);
+    posts = 0;
+    receivers = [];
+    await payWithPayPal(store);
+    is("no second payment is sent to the same affiliate", receivers.flat().includes("sara@example.com"), false);
+  }
+
+  part("Control: a FAILED item for the receiver it was sent to is released, as before");
+  await seed(store);
+  next = "make";
+  is("control: a batch is made", (await payWithPayPal(store)).ok, true);
+  tamper = (body) => { (body.items[0] as unknown as Item).transaction_status = "FAILED"; };
+  const failed = await settlePayPal(store);
+  tamper = null;
+  is("released, owed again; the other booked", [failed.paid, failed.waiting, failed.released], [1, 0, 1]);
   done();
 }
 

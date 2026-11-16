@@ -69,6 +69,13 @@ function parseEntry(raw: unknown): { reason: string; at: number } | null {
 }
 
 /**
+ * The commands one check sends (EXISTS and HGET, the entry up to BLOCK_ENTRY_BYTES), on every buyer message through
+ * startChat, handOver, visitorSend and sendContact: priced in the inbox unit (tests/plan-cost-registry.ts
+ * UNIT_COST.inbox) and held by tests/buyer-block-commands-priced.test.ts (Claude 7's MEDIUM on #3839).
+ */
+export const BLOCK_CHECK_COMMANDS = 2;
+
+/**
  * Whether a person is blocked in a store; "unknown" when it cannot be read
  * exactly. A store with no list blocks nobody, which needs no key to say.
  */

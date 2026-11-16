@@ -116,7 +116,9 @@ is("'10m' with nothing given is still listed as written", safely(() => unsourced
 is("'$10m' is still ten million", safely(() => unsourcedNumbers(["Raised $10m"], "10 minutes")), ["$10m"]);
 is("'10M' is still ten million", safely(() => unsourcedNumbers(["10M views"], "10 minutes")), ["10M"]);
 is("'3D printing' is not a 3", safely(() => unsourcedNumbers(["3D printing basics"], "")), []);
-is("an ordinal of a part is not a figure, like 'second' in words", safely(() => unsourcedNumbers(["In the 2nd week, the 1st draft"], "")), []);
+// An ordinal of a time ("the 2nd week") is a deadline as often as an order, so it is listed to check (Claude 7's MEDIUM
+// on #3437): a prompt to read it, never a refusal. The 1st draft is still a part.
+is("an ordinal of a part is not a figure; an ordinal of a time is listed to check", safely(() => unsourcedNumbers(["In the 2nd week, the 1st draft"], "")), ["2"]);
 // A bare ordinal ("the 3rd and the 4th") names no part, so it is listed to check (Codex G's MEDIUM on #3437): a
 // prompt to read it, never a refusal.
 is("a bare ordinal is listed to check", safely(() => unsourcedNumbers(["the 3rd and the 4th"], "")), ["3", "4"]);
@@ -139,11 +141,17 @@ is("'a 10m call' is still the 10 minutes given", safely(() => unsourcedNumbers([
 is("'our 10th year in business' claims a figure", safely(() => unsourcedNumbers(["Celebrating our 10th year in business"], "")), ["10"]);
 is("'our 1000th customer' claims a figure", safely(() => unsourcedNumbers(["Be our 1000th customer"], "")), ["1000"]);
 is("'the 10th year' the creator gave is not invented", safely(() => unsourcedNumbers(["Our 10th year"], "ten years in business")), []);
-is("a lesson's order is still not a figure", safely(() => unsourcedNumbers(["In the 2nd lesson and the 10th week"], "")), []);
+is("a lesson's order is still not a figure; the 10th week is listed to check", safely(() => unsourcedNumbers(["In the 2nd lesson and the 10th week"], "")), ["10"]);
 // Codex G's MEDIUM on #3437: an ordinal in a ranking or a count claims a figure; only a part of the draft is ordered.
 is("'Our 10th sale', 'Ranked 3rd' and 'our 10th-year anniversary' claim figures", safely(() => unsourcedNumbers(["Our 10th sale broke a record. Ranked 3rd in the market. Celebrate our 10th-year anniversary."], "", "en")), ["10", "3"]);
 is("'our 10th-year anniversary' alone claims a figure", safely(() => unsourcedNumbers(["Celebrate our 10th-year anniversary."], "", "en")), ["10"]);
 is("'We were 1st' claims a figure", safely(() => unsourcedNumbers(["We were 1st to market"], "")), ["1"]);
 is("the 1st draft, the 3rd step, the 2nd module and the 4th email are parts", safely(() => unsourcedNumbers(["The 1st draft, the 3rd step, the 2nd module and the 4th email"], "")), []);
+
+part("An ordinal of a time hides no deadline (Claude 7's MEDIUM on #3437)");
+is("'by your 3rd week' is a deadline, listed", safely(() => unsourcedNumbers(["See results by your 3rd week."], "", "en")), ["3"]);
+is("'by the 30th day' is a deadline, listed with what it promises", safely(() => unsourcedNumbers(["By the 30th day you will lose 10 pounds."], "", "en")), ["30", "10"]);
+is("'after the 5th session' is a deadline, listed with what it promises", safely(() => unsourcedNumbers(["After the 5th session, clients double revenue."], "", "en")), ["5", "double"]);
+is("controls: the 1st draft, the 3rd step and the 2nd module are still parts", safely(() => unsourcedNumbers(["The 1st draft, the 3rd step and the 2nd module"], "", "en")), []);
 
 done();

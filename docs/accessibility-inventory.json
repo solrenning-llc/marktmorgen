@@ -953,6 +953,12 @@
       "parameters": []
     },
     {
+      "source": "app/start-here/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/start-here",
+      "parameters": []
+    },
+    {
       "source": "app/status/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/status",
@@ -1331,6 +1337,7 @@
     "components/assistant-reminder-box.tsx",
     "components/attribution-table.tsx",
     "components/audio-embed.tsx",
+    "components/automation-draft.tsx",
     "components/beside-stores.tsx",
     "components/block-picker.tsx",
     "components/block-rewrite.tsx",
@@ -1620,6 +1627,7 @@
     "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
+    "components/start-quiz.tsx",
     "components/stats-panel.tsx",
     "components/step-count.tsx",
     "components/sticky-buy.tsx",
@@ -1654,6 +1662,7 @@
     "components/structured-data.tsx",
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
+    "components/studio-bell.tsx",
     "components/studio-header.tsx",
     "components/studio-help.tsx",
     "components/studio-screens.tsx",
@@ -1700,6 +1709,7 @@
     "components/who-answers.tsx",
     "components/winback-editor.tsx",
     "components/withdrawal-where.tsx",
+    "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
     "components/yearly-ask-editor.tsx"
   ],
@@ -1802,6 +1812,7 @@
     "app/api/store/assistant/route.ts",
     "app/api/store/attribution/route.ts",
     "app/api/store/audience/route.ts",
+    "app/api/store/automation-draft/route.ts",
     "app/api/store/blog/route.ts",
     "app/api/store/book/move/route.ts",
     "app/api/store/book/route.ts",
@@ -2135,6 +2146,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 146
+    "pageTemplates": 147
   }
 }

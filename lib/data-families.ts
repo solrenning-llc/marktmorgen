@@ -29,7 +29,7 @@ export const COUNTED_FAMILIES: readonly string[] = [
   "nl:rev:off:", "nl:rev:pay:", "nl:rev:stop:", "nl:rev:sum:", "nl:rev:vis:", "nl:save:", "nl:sblock:uses:",
   "nl:sold:", "nl:stamp:copy:", "nl:stock:", "nl:store:leads:", "nl:stream:cap:", "nl:stream:v:",
   "nl:taxobs:v1:", "nl:tier:price:", "nl:upd:last:", "nl:upd:latest:", "nl:upd:off:", "nl:upd:stop:", "nl:vcard:", "nl:watch:last:",
-  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
+  "nl:wf:held:", "nl:wf:log:", "nl:wf:run:", "nl:wf:runs:", "nl:wf:ver:", "nl:wf:ver:idx:", "nl:wl:", "nl:wl:t:", "nl:yearask:",
   "nl:yearly:price:",
 ];
 
@@ -71,7 +71,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:mail:flowstats:", "nl:mail:health:", "nl:mail:lock", "nl:mail:paused:", "nl:mail:queue",
   "nl:mail:ramp:", "nl:mail:segs:", "nl:mail:used:", "nl:manage:link:", "nl:manage:opens:",
   "nl:manage:portal:", "nl:meet:conn:", "nl:meet:gone:", "nl:meet:lock:", "nl:meet:log:", "nl:meet:q", "nl:meet:r:",
-  "nl:meet:refresh:", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
+  "nl:meet:refresh:", "nl:meet:refund-turns", "nl:meet:refund-turns:said", "nl:meet:rf:", "nl:meet:state:", "nl:meet:stores", "nl:meet:test:", "nl:meet:user:",
   "nl:meet:zoomseen:", "nl:member:status:", "nl:metaads:conn:", "nl:metaads:gone:", "nl:metaads:gen", "nl:metaads:pass", "nl:metaads:read:", "nl:metaads:reading:",
   "nl:metaads:state:", "nl:metaads:stores", "nl:metaads:user:", "nl:mnum:", "nl:monthly:lock",
   "nl:monthly:seen:", "nl:monthly:sent:", "nl:mv:due", "nl:next:", "nl:next:lock:", "nl:nlink:", "nl:nlink:opens:", "nl:none",
@@ -115,7 +115,7 @@ export const ELSEWHERE_FAMILIES: readonly string[] = [
   "nl:upsell:pending", "nl:usage-watch:told", "nl:vault:fresh:", "nl:vault:up:", "nl:verified:", "nl:verified:cursor",
   "nl:voice:", "nl:voice:lock:", "nl:watch:due", "nl:watch:folders:", "nl:watch:monthly:",
   "nl:watch:opened:", "nl:watch:sec:", "nl:wb:", "nl:wb:cursor", "nl:wb:link:", "nl:wb:n:", "nl:wb:once:",
-  "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:",
+  "nl:weekly:lock", "nl:weekly:off", "nl:weekly:seen:", "nl:weekly:sent:", "nl:weekly:to:", "nl:wf:abandoned:", "nl:wf:day:", "nl:wf:ver:pause:",
   "nl:wl:jobs", "nl:wo:due", "nl:wo:n:", "nl:wo:r:", "nl:wo:start:", "nl:yearask:count:",
   "nl:yearask:cursor", "nl:yearly-offer:", "nl:yearly:fallback:both", "nl:yearly:fallback:check",
   "nl:yearly:fallback:try:", "nl:yearly:fallback:void", "nl:yearly:link:",
@@ -317,7 +317,11 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:mail:mk:": T("nl:store:leads:", 400), "nl:mail:paused:": E, "nl:mail:queue": I, "nl:mail:ramp:": E, "nl:mail:segs:": E,
   "nl:mail:unsub:": T("nl:store:leads:"), "nl:mail:used:": E,
   "nl:manage:link:": X(1), "nl:manage:opens:": X(1), "nl:manage:portal:": E,
-  "nl:meet:conn:": E, "nl:meet:gone:": Cr(1), "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E, "nl:meet:rf:": E,
+  "nl:meet:conn:": E, "nl:meet:gone:": Cr(1), "nl:meet:lock:": E, "nl:meet:log:": E, "nl:meet:q": I, "nl:meet:r:": E, "nl:meet:refresh:": E,
+  // The meetings' refund job's rotation (lib/call-meetings.ts): a member per member of nl:meet:stores, taken out with it
+  // within a run (ZINTERSTORE), and the day's log line of a late turn.
+  "nl:meet:refund-turns": Cr(1), "nl:meet:refund-turns:said": Cr(1),
+  "nl:meet:rf:": E,
   "nl:meet:state:": X(1), "nl:meet:stores": I, "nl:meet:test:": E, "nl:meet:user:": I, "nl:meet:zoomseen:": C,
   "nl:member:status:": E,
   "nl:metaads:conn:": E, "nl:metaads:gone:": Cr(1), "nl:metaads:gen": C, "nl:metaads:pass": C, "nl:metaads:read:": E, "nl:metaads:reading:": E, "nl:metaads:state:": X(1), "nl:metaads:stores": I, "nl:metaads:user:": I,
@@ -462,7 +466,7 @@ export const CLOSING: Readonly<Record<string, Closing>> = {
   "nl:watch:due": I, "nl:watch:folders:": I, "nl:watch:last:": E, "nl:watch:monthly:": C, "nl:watch:opened:": E, "nl:watch:sec:": E,
   "nl:wb:": E, "nl:wb:cursor": C, "nl:wb:link:": T("nl:erase:ix:", 60), "nl:wb:n:": E, "nl:wb:once:": E,
   "nl:weekly:lock": C, "nl:weekly:off": I, "nl:weekly:seen:": Cr(9), "nl:weekly:sent:": Cr(14), "nl:weekly:to:": { how: "erase", by: "handle" },
-  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E,
+  "nl:wf:abandoned:": X(2), "nl:wf:day:": E, "nl:wf:held:": E, "nl:wf:log:": E, "nl:wf:run:": E, "nl:wf:runs:": E, "nl:wf:ver:": E, "nl:wf:ver:idx:": E, "nl:wf:ver:pause:": X(1),
   "nl:wl:": E, "nl:wl:jobs": I, "nl:wl:t:": T("nl:erase:ix:", 7),
   "nl:wo:due": I, "nl:wo:n:": E, "nl:wo:r:": E, "nl:wo:start:": E,
   "nl:yearask:": E, "nl:yearask:count:": E, "nl:yearask:cursor": C,

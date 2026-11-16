@@ -498,18 +498,39 @@ export function parseSetup(raw: unknown): CallSetup | null {
   return typeof read === "string" ? null : read;
 }
 
+/**
+ * One formatter per zone, made once: building an Intl.DateTimeFormat costs far
+ * more than using one, and a calendar file's parse asks for the same zone on
+ * every step (R27). Only zones Intl accepts get here (it throws first); past
+ * ZONE_FORMATS_MAX the oldest is let go, one at a time, so the map never grows
+ * without bound and never empties at once. A calendar file reads its times in
+ * at most MAX_FILE_ZONES named zones (lib/ics-parse.ts), and offsets with no
+ * formatter, so one reading never builds the same zone's formatter twice.
+ */
+const ZONE_FORMATS_MAX = 512;
+const zoneFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** The parts of a date as a clock in `tz` shows them at instant `ms`. */
 export function partsIn(ms: number, tz: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    weekday: "short",
-  }).formatToParts(new Date(ms));
+  let format = zoneFormats.get(tz);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      weekday: "short",
+    });
+    if (zoneFormats.size >= ZONE_FORMATS_MAX) {
+      const oldest = zoneFormats.keys().next();
+      if (!oldest.done) zoneFormats.delete(oldest.value);
+    }
+    zoneFormats.set(tz, format);
+  }
+  const parts = format.formatToParts(new Date(ms));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(get("weekday"));
   return {
@@ -551,6 +572,19 @@ export function zonedToUtc(year: number, month: number, day: number, minuteOfDay
     return null;
   }
   return guess;
+}
+
+/**
+ * The first instant whose clock in `tz` shows this time or later: the time
+ * itself, or, when the clocks skip it, the moment they jump forward. Null
+ * only when nothing exists for three hours after it.
+ */
+export function firstInstantFrom(year: number, month: number, day: number, minuteOfDay: number, tz: string): number | null {
+  for (let m = minuteOfDay; m <= minuteOfDay + 180; m += 1) {
+    const at = zonedToUtc(year, month, day, m, tz);
+    if (at !== null) return at;
+  }
+  return null;
 }
 
 /**
@@ -630,11 +664,18 @@ export function openSlots(setup: CallSetup, now: number, busy: Busy[], productId
     const weekday = cursor.getUTCDay();
     const starts: number[] = [];
     for (const [from, to] of setup.weekly[weekday] ?? []) {
+      // The stretch's end as an instant: on the day the clocks go forward a
+      // call may not run past it in real time, nor overlap the call before.
+      const until = firstInstantFrom(y, m, d, to, setup.tz);
+      if (until === null) continue;
+      let free = -Infinity;
       for (let t = from; t + setup.minutes <= to; t += setup.minutes + setup.bufferMinutes) {
         const start = zonedToUtc(y, m, d, t, setup.tz);
         if (start === null) continue;
-        if (start < earliest || start > latest) continue;
         const end = start + length;
+        if (end > until || start < free) continue;
+        free = end + gap;
+        if (start < earliest || start > latest) continue;
         const mine = (b: Busy) => productId !== undefined && b.product === productId && b.start === start;
         if (productId !== undefined && seatsTaken(busy, productId, start) >= setup.seats) continue;
         const clash = busy.some((b) => !mine(b) && start < b.end + gap && end + gap > b.start);

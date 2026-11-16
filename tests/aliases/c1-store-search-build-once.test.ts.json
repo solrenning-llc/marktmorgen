@@ -1,0 +1,4 @@
+{
+  "next/headers": "security/next-headers.ts",
+  "next/server": "next-server-after-world.ts"
+}

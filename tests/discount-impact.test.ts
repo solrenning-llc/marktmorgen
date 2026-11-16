@@ -11,9 +11,10 @@
  *   - worked out while the sales are read, with nothing more asked of Stripe;
  *   - members by how they joined: full price first, then each discount.
  */
-import { discountImpact, discountKindOf, entryOf, type DiscountSale } from "@/lib/discount-impact";
+import { discountElsewhere, discountImpact, discountKindOf, elsewhereWords, entryOf, type DiscountSale } from "@/lib/discount-impact";
 import { type Sub, entriesFrom } from "@/lib/membership-numbers";
-import { readSales } from "@/lib/stats";
+import { keptNumbersCopy, openKeptNumbers } from "@/lib/api-numbers";
+import { readSales, studioStats, type Stats } from "@/lib/stats";
 import { claimHandle, ensureStatsId, setStripeAccount, storeForEmail } from "@/lib/store";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
@@ -78,6 +79,51 @@ async function main(): Promise<void> {
   ]);
   is("nothing to set beside full price, nothing shown", discountImpact([checkout("ana@example.com", 5, 2000, 0)], new Set(), "usd", NOW), null);
 
+  part("Sales in another currency: totals per currency, never converted (22 [E5] unit 2)");
+  const abroad: DiscountSale[] = [
+    ...sales,
+    { ...checkout("hal@example.com", 6, 1800, 200, { code: "SPRING" }), currency: "eur" },
+    { ...checkout("ivy@example.com", 7, 1600, 0), currency: "gbp" },
+    { ...checkout("jo@example.com", 8, 1200, 300, { sale: "20" }), currency: "gbp" },
+    // Left out abroad too: a one-click extra, a tip, a sale from before the 90 days, and a currency that is no code.
+    { ...checkout("kit@example.com", 6, 900, 0), currency: "eur", upsell: true },
+    { ...checkout("lee@example.com", 6, 500, 0, { kind: "tip" }), currency: "eur" },
+    { ...checkout("max@example.com", 120, 1500, 500, { code: "OLD" }), currency: "eur" },
+    { ...checkout("ned@example.com", 6, 1500, 0), currency: "" },
+    { ...checkout("ola@example.com", 6, 1500, 0), currency: "EUR " },
+  ];
+  is("the store's own table is unchanged by sales elsewhere", discountImpact(abroad, new Set(["pi_code_cy"]), "usd", NOW), rows);
+  is("each other currency on its own, in code order, its own amounts only", discountElsewhere(abroad, "usd", NOW), [
+    { currency: "eur", sales: 2, cents: 3800, discounted: 1, off: 200 },
+    { currency: "gbp", sales: 2, cents: 2800, discounted: 1, off: 300 },
+  ]);
+  is("nothing elsewhere, nothing listed", discountElsewhere(sales.filter((s) => s.currency === "usd"), "usd", NOW), []);
+  is(
+    "said in each currency's own money, never added to the table's",
+    elsewhereWords(discountElsewhere(abroad, "usd", NOW)),
+    "Sales paid in another currency are not added to the table, because amounts in two currencies do not add up: €38 from 2 sales, 1 with a discount taking €2 off; £28 from 2 sales, 1 with a discount taking £3 off.",
+  );
+  is("one sale, no discount", elsewhereWords([{ currency: "jpy", sales: 1, cents: 3000, discounted: 0, off: 0 }]), "Sales paid in another currency are not added to the table, because amounts in two currencies do not add up: ¥3,000 from 1 sale.");
+  is("no sentence when there is nothing elsewhere", elsewhereWords([]), null);
+
+  // The numbers kept for the API (lib/api-numbers.ts) take the per-currency totals in their checked shape, and a copy kept before they existed still opens.
+  const keptStore = { sid: "discount-elsewhere", statsId: "e".repeat(32), handle: "discount-elsewhere", name: "Elsewhere", currency: "usd", links: [] } as unknown as Parameters<typeof keptNumbersCopy>[0];
+  const kept = (discounts: unknown) => {
+    const empty = { visitors: 0, views: 0, checkouts: 0, sources: [], mediums: [], campaigns: [], checkoutsByProduct: {}, viewsByProduct: {}, linkClicks: {}, countries: [], devices: [], checkoutsBySource: [], freeBySource: [], reach: {}, heard: {}, searchMisses: [] };
+    const none = { visitors: 0, views: 0, checkouts: 0 };
+    const data = studioStats(keptStore, { days: [], windows: { d7: empty, d30: empty, d90: empty }, previous: { d7: none, d30: none, d90: none }, life: null } as unknown as Stats, null, "none", []);
+    (data as { discounts?: unknown }).discounts = discounts;
+    const raw = keptNumbersCopy(keptStore, "plain", data, NOW);
+    return raw ? openKeptNumbers(keptStore, "plain", raw, NOW) !== null : null;
+  };
+  const tableRows = discountImpact(sales, new Set(), "usd", NOW);
+  is("kept numbers: with totals elsewhere, without them (kept before), and a malformed one refused", [
+    kept({ rows: tableRows, refundsRead: true, elsewhere: discountElsewhere(abroad, "usd", NOW) }),
+    kept({ rows: tableRows, refundsRead: true }),
+    kept({ rows: tableRows, refundsRead: true, elsewhere: [{ currency: "eur", sales: 1, cents: "3800", discounted: 0, off: 0 }] }),
+    kept({ rows: tableRows, refundsRead: true, elsewhere: [{ currency: "eur", sales: 1, cents: 3800, off: 0 }] }),
+  ], [true, true, false, false]);
+
   part("Worked out while the sales are read");
   await claimHandle("owner@example.com", "harbor", "Harbor Kitchen", "");
   await ensureStatsId("owner@example.com");
@@ -107,6 +153,7 @@ async function main(): Promise<void> {
       { kind: "sale", sales: 1, cents: 1600, off: 400, refunded: 1, buyers: 1, again: 0 },
     ],
     refundsRead: true,
+    elsewhere: [],
   });
   is("with nothing more asked of Stripe than the sales, renewals, refunds and disputes the numbers read anyway", [...new Set(asked)].sort(), ["/checkout/sessions", "/disputes", "/invoices", "/payment_intents", "/refunds"]);
 

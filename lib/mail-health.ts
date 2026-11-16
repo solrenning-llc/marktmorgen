@@ -73,6 +73,8 @@
  */
 import { createHash } from "node:crypto";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, listSlots, repliesFor } from "@/lib/redis-reply";
+import { textCountOf } from "@/lib/redis-count";
 import { stopWriting } from "@/lib/contacts";
 import { normaliseEmail } from "@/lib/auth";
 import type { Store } from "@/lib/store";
@@ -144,17 +146,26 @@ export async function noteSent(id: string, n: number, now = Date.now()): Promise
 export async function listHealth(id: string, now = Date.now()): Promise<Health> {
   const days: string[] = [];
   for (let i = 0; i < HEALTH_WINDOW_DAYS; i += 1) days.push(dayOf(now - i * 86_400_000));
-  const [from, ...rows] = await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]);
+  // Read exactly (CX-123 rule 24): a day that does not read is unknown, never a day with nothing bounced, which could
+  // let a store over the line go on sending. Each day is three slots, each a whole number or nil (never counted); the
+  // pause's start day is text or nil. Anything else throws UnknownReplyError.
+  const replies = repliesFor(await redisPipeline([["GET", fromKey(id)], ...days.map((day) => ["HMGET", `nl:mail:health:${id}:${day}`, "s", "b", "c"])]), days.length + 1);
+  if (!replies) throw new UnknownReplyError("a store's week of watched email");
+  const [from, ...rows] = replies;
+  if (from !== null && typeof from !== "string") throw new UnknownReplyError("the day a store's pause ended");
   const total: Health = { sent: 0, bounced: 0, complained: 0 };
   rows.forEach((row, i) => {
-    if (!Array.isArray(row)) return;
+    const slots = listSlots(row);
+    const read = slots && slots.length === 3 ? slots.map((v) => textCountOf(v)) : null;
+    if (!read || read.some((v) => v === null)) throw new UnknownReplyError("a day of a store's watched email");
     // A store that has served a pause starts its count again from the day
     // the pause ends: the bounces it was paused for, and the ones that came
     // in late from the same emails, are not held against it twice.
     if (typeof from === "string" && days[i] < from) return;
-    total.sent += Number(row[0]) || 0;
-    total.bounced += Number(row[1]) || 0;
-    total.complained += Number(row[2]) || 0;
+    const [sent, bounced, complained] = read.map((v) => (v === "absent" ? 0 : (v as number)));
+    total.sent += sent;
+    total.bounced += bounced;
+    total.complained += complained;
   });
   return total;
 }

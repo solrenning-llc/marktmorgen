@@ -41,7 +41,7 @@ import { CONSENT_META, type DigitalConsent, consentKind, consentMetaValue, deliv
 import { consentEmailLines } from "@/lib/digital-consent-email";
 import { readListings } from "@/lib/catalog";
 import { canSellProduct } from "@/lib/store-checkout";
-import { type Membership, endsAtOf, grantOf, subscriptionCurrency, subsOf } from "@/lib/membership-manage";
+import { type Membership, endsAtOf, grantOf, ownedSub, subscriptionCurrency } from "@/lib/membership-manage";
 import { canTier, direction, dueNow, productOfSub } from "@/lib/tier-rules";
 import { formatMoney } from "@/lib/money";
 import { inPaidFreeDays } from "@/lib/member-free-days-rules";
@@ -312,9 +312,12 @@ type Found = { grant: NonNullable<Awaited<ReturnType<typeof grantOf>>>; itemId: 
 /** Checks one switch against the link, the membership and the tiers, asking Stripe only what it must. */
 async function find(store: Store, token: string, subscription: string, target: string): Promise<Found | { reason: "expired" | "gone" | "tier" | "currency" | "freeDays" }> {
   if (!SUB_PATTERN.test(subscription)) return { reason: "gone" };
-  const grant = await grantOf(store, token);
-  if (!grant) return { reason: "expired" };
-  const sub = (await subsOf(store, grant)).find((s) => s.id === subscription);
+  const link = await grantOf(store, token);
+  if (!link) return { reason: "expired" };
+  // Among every customer the link manages; `grant` is then the one who holds it (R43 F1 on #2985).
+  const owned = await ownedSub(store, link, subscription);
+  const sub = owned?.sub;
+  const grant = owned?.grant ?? link;
   // Not this member's, not this store's, or no longer running: one answer for all.
   if (!sub || endsAtOf(sub) !== null || sub.metadata?.ends_after || !SWITCHABLE.has(String(sub.status))) return { reason: "gone" };
   // Paid, in free days: Stripe would prorate nothing, so nothing is switched until they end.

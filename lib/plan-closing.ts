@@ -84,7 +84,7 @@ import { onBreak, pauseView } from "@/lib/plan-pause";
 import { withLock } from "@/lib/redis-lock";
 import { SITE_URL } from "@/lib/site-url";
 import { storageUsed, storageWords } from "@/lib/storage-quota";
-import { type Store, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
+import { type Store, imageFolder, setPodcastEpisodes, setProductFile, setSubscription, storeFolder, storeForRefExact, storeRef } from "@/lib/store";
 import { dropAllStreams, dropStream } from "@/lib/stream";
 import { readStreamPath } from "@/lib/stream-rules";
 import { SUPPORT_EMAIL } from "@/lib/creator-research";
@@ -403,7 +403,11 @@ export async function closingOf(store: Store, now = Date.now()): Promise<{ ended
   // after the last buyer was told.
   const day = Math.max(removalDay(endedAt), (state.week ?? now) + WARN_WEEK_DAYS * DAY_MS);
   if (!tellsBuyers(endedAt)) return { endedAt, day };
-  const closes = afterBuyersTold(day, state.buyersDone);
+  // Buyers not all told yet are told today at the soonest: the job closes no
+  // sooner than BUYER_NOTICE_DAYS after that. Counted from the start of today
+  // (UTC), so the day read stays the same all day (the refunds' review mark,
+  // lib/closing-refunds.ts, is drawn from it) and is never later than the job's.
+  const closes = afterBuyersTold(day, state.buyersDone ?? Math.floor(now / DAY_MS) * DAY_MS);
   return { endedAt, day: closes, buyers: { by: state.buyersDone ?? closes - BUYER_NOTICE_DAYS * DAY_MS, done: Boolean(state.buyersDone), untold: state.untold ?? 0 } };
 }
 
@@ -769,7 +773,7 @@ const HANDS: Hands = {
  * Past `until` this stops where it is and says it was not seen through, and
  * the next day's run carries on from what is left in the folders.
  */
-export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY): Promise<{ files: number; clean: boolean }> {
+export async function removeStored(key: string, hands: Pick<Hands, "list" | "remove"> = HANDS, until = Number.POSITIVE_INFINITY, closing = false): Promise<{ files: number; clean: boolean }> {
   // Only a record Redis says is not there (nil) has nothing left to remove. One that does not read (a failed request,
   // a record that does not parse, or one under that key for another owner) is unknown (rule 24): nothing is deleted
   // and it is not seen through, so the store is not written down as done and this runs again the next day.
@@ -870,7 +874,12 @@ export async function removeStored(key: string, hands: Pick<Hands, "list" | "rem
   // and its community's pictures (since 18 October 2026), which the
   // community's posts then show without.
   const pictures = store.community ? `community/${communityFolder(store.community.id)}/` : "";
-  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : [])]) {
+  // A store that closes takes its pictures with it (product, link and page pictures, email pictures, its buyers'
+  // review photos: images/<imageFolder>/), as the privacy policy says its files go that day (#closed-stores);
+  // app/api/image serves them to anybody with the address, whether the store is there or not. A store that stays
+  // (a plan ended before October 18, 2026) still shows them, so they are kept.
+  const images = closing ? `images/${await imageFolder(key)}/` : "";
+  for (const prefix of [`vault/${folder}/`, `stores/${folder}/`, ...(pictures ? [pictures] : []), ...(images ? [images] : [])]) {
     try {
       await removeAll(await hands.list(prefix));
       if (prefix === pictures && store.community) await forgetPictures(communityFolder(store.community.id));
@@ -1301,12 +1310,15 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     await save(next);
   };
   if (!next.renewals) {
-    // From here the closing is seen through (FINAL_INDEX): no release, no "it stays open".
-    await redisPipeline([["ZADD", FINAL_INDEX, endedAt, key], ["ZREM", HELD_INDEX, key]]);
+    // The day is written down before the store enters FINAL_INDEX: once it is
+    // there, a run that finds no day takes its own `now` (closeOne, closingOf),
+    // a later date that would give members back less of what they paid for.
     if (!next.day) {
       next = { ...next, day };
       await save(next);
     }
+    // From here the closing is seen through (FINAL_INDEX): no release, no "it stays open".
+    await redisPipeline([["ZADD", FINAL_INDEX, endedAt, key], ["ZREM", HELD_INDEX, key]]);
     // No plan can be paid for it from here: its open plan checkouts are
     // expired, and its address is marked for after its records are gone.
     await markShut(store, next.day ?? day, endedAt);
@@ -1356,9 +1368,22 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     // Another run's lock, or a failure of ours, is never silence; only Stripe giving no answer lapses (DONO-3).
     if (settled === "busy" || (settled === null && !(await failureLapses(stripeFailure(thrown))))) return { key, state: "held", note: "its members' unused time is not settled yet", ...(settled === null ? { overdue: heldAs(stripeFailure(thrown)) } : {}) };
     // Told for what happened: the balance did not cover it, or the closing's limit of calls did not reach it.
+    // The members' payments not read (rule 24, main) are never "nobody to tell": the day is held, its refunds not written
+    // down as settled. Every read of them below goes through these two.
+    const unread = { key, state: "held" as const, note: "its members' payments could not be read" };
+    const readPeriods = () => paidPeriods(store).catch((error) => {
+      console.error("reading a closing store's members' payments failed", error);
+      return null;
+    });
+    const readUnused = () => unusedRows(store, next.day ?? day).catch((error) => {
+      console.error("reading a closing store's members' payments failed", error);
+      return null;
+    });
     const tellUnmade = async (): Promise<Closing | null> => {
       for (const [why, r] of [["balance", "short"], ["limit", "over"]] as const) {
-        const periods = [...(await paidPeriods(store))];
+        const read = await readPeriods();
+        if (!read) return unread;
+        const periods = [...read];
         const left = periods.filter(([, row]) => row.r === r && row.f === 1 && !row.m);
         if (!left.length) continue;
         // An address already sent its follow-up (another subscription's letter) takes a credit for this one.
@@ -1380,7 +1405,9 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
       // #3463, MEDIUM): the silence was not the creator's, so the lapse is undone and the store held, its renewals
       // asked again on the next run with the count started again. Never removed as lapsed with them unstopped.
       if (settled.answered && lapsed && !next.renewals) return { key, state: "held", note: "the renewals it sold are not all stopped yet", overdue: "other" };
-      const left = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending");
+      const unsettled = await readUnused();
+      if (!unsettled) return unread;
+      const left = unsettled.filter((row) => row.paid.r !== "pending");
       if (settled.failed > 0 || left.length > 0) {
         // Rows past one request or the run's time are progress, carried on tomorrow. Refunds Stripe failed lapse only
         // past the deadline, on this run's own lapse (`lapsed`, from the renewals step) or, once the renewals were
@@ -1402,13 +1429,17 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
       // refund not made on the closing day: "over", final) only once that notice went out, so a Stripe that answers
       // again before it is still asked for the refund. A notice that cannot go out, or a closing out of email
       // credit, holds the store: nobody's paid time is deleted untold.
-      const owed = (await unusedRows(store, next.day ?? day)).filter((row) => row.paid.r !== "pending").map((row) => ({ row, want: stillToGive(row.unused, row.paid.back ?? 0) }));
+      const owedRows = await readUnused();
+      if (!owedRows) return unread;
+      const periodsNow = await readPeriods();
+      if (!periodsNow) return unread;
+      const owed = owedRows.filter((row) => row.paid.r !== "pending").map((row) => ({ row, want: stillToGive(row.unused, row.paid.back ?? 0) }));
       // One letter an address, whatever its subscriptions, and, closed also before the renewals were stopped, the
       // renewals said in that same letter (`n`): a member already told of the closing gets one follow-up, the one its
       // notice paid for; a letter past it takes a credit (Claude 1 cloud's review of #3463, MEDIUM).
       const renewalsToo = lapsed && !next.renewals && !next.renewalsTold;
       const told = await tellRefundShort(store, oneLetterAnAddress(owed.map(({ row, want }) => ({ email: row.paid.e, amount: want, cur: row.paid.cur }))), endedAt, "lapse", next.day ?? day, {
-        followed: followedUp([...(await paidPeriods(store)).values()]),
+        followed: followedUp([...periodsNow.values()]),
         renewals: renewalsToo,
       });
       if (!told.ok || told.uncredited > 0) return { key, state: "held", note: "its members whose refund may not have been made are not all told yet", overdue: "notice" };
@@ -1425,7 +1456,12 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
   if (lapsed && !next.renewals && !next.renewalsTold) {
     // Not again to an address told in its refund letter (`n`); one already sent its follow-up (`m`: the balance or the
     // limit letter) takes a credit for this one (Claude 1 cloud's review of #3463, MEDIUM).
-    const rows = [...(await paidPeriods(store)).values()];
+    const renewalRows = await paidPeriods(store).catch((error) => {
+      console.error("reading a closing store's members' payments failed", error);
+      return null;
+    });
+    if (!renewalRows) return { key, state: "held", note: "its members' payments could not be read" };
+    const rows = [...renewalRows.values()];
     const inRefundLetter = new Set(rows.filter((row) => row.n === 1 && typeof row.e === "string").map((row) => normaliseEmail(row.e)));
     const emails = [...new Set(rows.map((row) => row.e).filter((email): email is string => typeof email === "string" && email.length > 0).map((email) => normaliseEmail(email)))].filter((email) => !inRefundLetter.has(email));
     const told = await tellRefundShort(store, emails.map((email) => ({ email, amount: 0, cur: "usd" })), endedAt, "renewals", next.day ?? day, { followed: followedUp(rows) });
@@ -1439,7 +1475,7 @@ async function closingSteps(store: Store, key: string, state: State, endedAt: nu
     console.error("deleting what a closing store's files left failed", error);
     return { key, state: "held", note: "what its files left could not be deleted" };
   }
-  const done = await removeStored(key, hands, until);
+  const done = await removeStored(key, hands, until, true);
   if (!done.clean) return { key, state: "held", note: `removed ${done.files}, and something could not be removed` };
   const after = (await hands.measure(folder)) + (store.community && hands.pictures ? await hands.pictures(store.community.id) : 0);
   if (after > keptRoomFor(endedAt)) return { key, state: "held", note: `removed ${done.files} and it still keeps ${bytesWords(after)}` };

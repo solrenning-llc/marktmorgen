@@ -142,6 +142,8 @@ const MESSAGES: Record<string, string> = {
   placeholder: "This product's sales page still has a part for you to write, marked ⟦like this⟧ or in [brackets] from a campaign. Open it under Sales pages, replace each one with your own words, then publish it. Nothing was published.",
   // A sales page added to a draft while it was being published (review of #3693): nothing was published.
   page_changed: "This product's sales page changed while it was being published, so nothing was published. Publish it again.",
+  // A sales page whose size could not be read when publishing (Claude 6 on #3693): not "gone", only not checked.
+  page_unread: "Your sales page could not be checked just now. Nothing was published. Try again in a minute.",
   // A course from a ready structure, published before its example titles were replaced (540 [CU1]).
   course_examples: 'This course still has example titles. Open the course, replace each with your own, then publish it.',
   trial: `Type a free trial of ${MIN_TRIAL_DAYS} to ${MAX_TRIAL_DAYS} days, or leave it empty for none.`,

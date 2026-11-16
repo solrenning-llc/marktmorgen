@@ -55,13 +55,14 @@ import { quietedBy } from "@/lib/extras-notes";
 /**
  * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
  * under the store lock), by the kept record's own bytes (publishPageUnits; Claude 7 and Claude 6 on #3693), and says
- * how many bytes were paid for. No page: nothing read or taken. A size that does not read: unknown, nothing is read.
+ * how many bytes were paid for. No page: nothing read or taken. A size that does not read: page_unread (503), never
+ * "unknown", which this route answers for a product that is gone (Claude 6 on #3693, rule 24); nothing is read.
  * Units refused: the studio's own "used" answer, and nothing is read.
  */
 async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { id: string; page?: unknown }): Promise<{ paid: number } | Response> {
   if (!draft.page || !store.statsId) return { paid: 0 };
   const bytes = await keptPageBytes(store.statsId, draft.id);
-  if (bytes === null) return Response.json({ ok: false, error: "unknown" }, { status: 503 });
+  if (bytes === null) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
   const units = publishPageUnits(bytes);
   if (units === 0) return { paid: 0 };
   const paid = await countStudio(store, null, units);
@@ -433,8 +434,8 @@ export async function POST(request: NextRequest) {
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
-      // A publish reads its sales page twice (the check, then under the lock), up to MAX_PAGE_BYTES each: those reads
-      // are paid for in studio units before either is made, or nothing is read (PUBLISH_PAGE_UNITS; Claude 7 on #3693).
+      // A publish reads its sales page twice (the check, then under the lock), by the kept record's own bytes: those reads
+      // are paid for in studio units before either is made, or nothing is read (payPageReads; Claude 7 on #3693).
       let pagePaid = 0;
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
@@ -466,13 +467,18 @@ export async function POST(request: NextRequest) {
       // The sales page read again under the lock its saves are written under, so a part saved since the read above
       // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
       let pageChanged = false;
+      let pageUnread = false;
       let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
       const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
         if (!now.page || !store.statsId) return true;
         // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
         // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
         const keptBytes = await keptPageBytes(store.statsId, now.id);
-        if (keptBytes === null || keptBytes > pagePaid) {
+        if (keptBytes === null) {
+          pageUnread = true;
+          return false;
+        }
+        if (keptBytes > pagePaid) {
           pageChanged = true;
           return false;
         }
@@ -482,6 +488,7 @@ export async function POST(request: NextRequest) {
         heldBy = { fast, left, title: now.title };
         return !fast && !left;
       });
+      if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
       if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
       if (!done.ok && done.reason === "held" && heldBy) {
         const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };

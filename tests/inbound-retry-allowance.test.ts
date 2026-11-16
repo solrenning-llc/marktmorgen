@@ -55,6 +55,22 @@ async function main(): Promise<void> {
   const more: string[] = [];
   for (let i = 1; i < CREATOR_HOURLY; i += 1) more.push(await forwardInbound(id(i)));
   is(`${CREATOR_HOURLY} different messages that hour are all sent (each counted once)`, more.filter((r) => r !== "sent").length, 0);
+
+  // Codex L on #3926 (6892815812, MEDIUM; Codex U's RED): the mark said only that the message was counted, never what
+  // the count decided, so a retry that found it went on as if admitted, past a refusal or a decision never recorded.
+  part("A message the hourly allowance refused stays refused when it comes again");
+  const before = posted;
+  const over = id(CREATOR_HOURLY);
+  is("past the hour's allowance: skipped", await forwardInbound(over), "skipped");
+  is("announced again within the hour: still skipped, never sent", await forwardInbound(over), "skipped");
+  is("nothing more was sent", posted, before);
+
+  part("A mark with no decision recorded is not known: never sent on it");
+  const undecided = id(CREATOR_HOURLY + 1);
+  // A run that took the mark and stopped before its count's answer was written down (the value claimMark writes).
+  await redis.pipeline([["SET", `nl:inbound:counted:${undecided}`, "1794600000000.123456789", "EX", 3600]]);
+  is("a retry, so Resend announces it again later", await forwardInbound(undecided), "retry");
+  is("and nothing was sent", posted, before);
   done();
 }
 

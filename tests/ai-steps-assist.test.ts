@@ -73,6 +73,16 @@ function main(): void {
   is("nothing animates unless motion is allowed", (source.match(/\banimate-/g) ?? []).length === (source.match(/motion-safe:animate-/g) ?? []).length, true);
   is("no state is told by color alone: every state has its word", ["Not started", "Running", "Done", "Not run, not charged"].every((w) => source.includes(w)), true);
 
+  part("The PDF box cannot change a run already sent (Claude 5 on #3435, MEDIUM)");
+  const editor = readFileSync("components/page-editor.tsx", "utf8");
+  const box = editor.slice(editor.indexOf("<AiStepsAssist<DraftCopy>"), editor.indexOf("onResult={(draft)"));
+  is("the box is given whether a run is on", /product\.pdf\s*\?\s*\(busy: boolean\) =>/.test(box), true);
+  is("it says it is unavailable to assistive technology, and keeps focus (aria-disabled, not disabled)", [/aria-disabled=\{busy\}/.test(box), /\bdisabled=\{/.test(box.replace(/aria-disabled=\{busy\}/g, ""))], [true, false]);
+  is("a click while it runs changes nothing", /onChange=\{\(e\) => \{\s*if \(!busy\) setReadFile\(e\.target\.checked\);/.test(box), true);
+  is("its words keep their colors while unavailable (no faded text)", /opacity-|text-ink-soft\/|text-gray/.test(box), false);
+  is("a screen reader is told why", box.includes("This cannot be changed while the draft is being written."), true);
+  is("the steps drawn are fixed when the run starts", /runSteps\.current = steps;/.test(source) && /steps=\{shown\}/.test(source), true);
+
   done();
 }
 

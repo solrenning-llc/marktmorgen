@@ -1,10 +1,14 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { reserveStoreUpload, reserveUploadControl, OPEN_UPLOAD_BUDGET, RESERVE_UPLOAD_BUDGET, type UploadStore } from '../lib/upload-budget';
 import { AUTOMATIC_UPLOAD_CAPS, AUTOMATIC_UPLOAD_REVIEW_ID, PAID_UPLOAD_ALLOCATIONS_PER_TIER, automaticUploadBudgetPolicy, currentUploadBudgetPolicy, isUploadBudgetConfigured, minimumControlRequests, uploadAllowanceWords, uploadBudgetSnapshot, uploadLedgerKey, uploadOpenedKey } from '../lib/upload-budget-policy';
 import { PAID_STORAGE_BYTES } from '../lib/storage-rules';
 import { hashes, opened, calls, reset } from './upload-budget-redis';
 import { calendarPeriod, calendarPeriodId } from './billing-period-fixture';
+// The month below is named once, at load, and the code reads the month again on every call (lib/upload-budget.ts,
+// lib/upload-budget-policy.ts): a run crossing 00:00 UTC on a month's last day failed the ledger and starts checks.
+// Only Date is stopped, for the whole run; timers and performance.now() run as usual.
+mock.timers.enable({ apis: ['Date'], now: Date.now() });
 
 const now = new Date();
 const key = uploadLedgerKey(now.toISOString().slice(0, 7));

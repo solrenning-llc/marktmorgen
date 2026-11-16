@@ -107,7 +107,7 @@ async function planRefunds(): Promise<void> {
     await setSubscription(email, { customerId: customer, subscriptionId: sub, active: true, tier: "creator", cycle: "month", trialEnds: 0 });
     const at = NOW - 3 * DAY;
     const invoice = { id: `in_${handle}x1`, subscription: sub, status: "paid", created: at, total: 6_900, tax: null, billing_reason: "subscription_create", charge, status_transitions: { paid_at: at }, lines: { data: [{ type: "subscription", period: { start: at }, price: { unit_amount: 6_900, currency: "usd", recurring: { interval: "month" } } }] } };
-    const chargeRow = { id: charge, customer, invoice: invoice.id, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { fee: 230, currency: "usd" } };
+    const chargeRow = { id: charge, customer, invoice: invoice.id, payment_intent: `pi_${handle}x1`, status: "succeeded", paid: true, currency: "usd", created: at, amount_captured: 6_900, amount_refunded: 0, disputed: false, payment_method_details: { card: { fingerprint: `fp${handle}` } }, balance_transaction: { object: "balance_transaction", type: "charge", source: charge, fee: 230, currency: "usd" } };
     handler = (method, path, q) => {
       if (method === "POST" && path === "/refunds") {
         made.push(handle);

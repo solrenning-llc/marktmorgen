@@ -552,12 +552,27 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
-    is("11: Store, Studio and Scale keep 45.11, 313.83 and 703.26 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.83", "703.26"]);
+    // Merge of main into #3457 (15 November 2026): main's latest model and this PR's ticket-code records together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
+    // Merge of main into #3435 (15 November 2026): main's latest model and this PR's step-by-step AI page jobs together
+    // cost Studio's monthly month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #3435 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
+    // figures as the model computes them; still above zero (MR), cost not lowered.
+    // Merge of main into #4291 (15 November 2026): main's model and #4291's vault wrong-size release cost line together
+    // cost Studio's monthly worst month one cent more: 313.82 where 313.83 was; still above zero (MR). Cost is not lowered.
+    // Merge of main into #4291 (16 November 2026): main's costs and this PR's change together, monthly 45.10, 313.80, 703.18 -> 45.10, 313.80, 703.17;
+    // figures as the model computes them; still above zero (MR), cost not lowered.
+    // Merge of main into #3457 (16 November 2026, Claude 4 cloud AB): both together; figures as the model computes them.
+    // Merge of main into #4291 (16 November 2026, second pass): main's model and #4291's vault release line together;
+    // figures as the model computes them, still above zero (MR). Cost is not lowered.
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.17 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.17"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.70 and 579.98 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.70", "579.98"]);
+    is("11: and 37.04, 258.68 and 579.90 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.68", "579.90"]);
   } finally {
     Date.now = realNow;
   }

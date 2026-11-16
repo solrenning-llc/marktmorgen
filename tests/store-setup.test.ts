@@ -15,6 +15,9 @@ import { KIND, readListing } from "@/lib/catalog";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { MAX_TITLE_LENGTH } from "@/lib/catalog-rules";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 type Sent = { system: string; messages: { content: string }[] };
 const asked: Sent[] = [];
@@ -129,7 +132,7 @@ async function main(): Promise<void> {
     faq: [{ q: "How do I get the planner?", a: "As a download after paying." }],
   });
   const store = (await storeForEmail(owner))!;
-  is("the line, two drafts each with its page, the questions, and the one with no price refused by name", kept, { bio: true, products: 2, pages: 2, faq: true, refused: ["Free?"] });
+  is("the line, two drafts each with its page, the questions, and the one with no price refused by name", kept, { bio: true, products: 2, pages: 2, faq: true, refused: ["Free?"], long: [] });
   is("the line is under the name", store.bio, "Cook once, eat all week.");
   is("every product a draft, not on sale", store.catalog.items.map((item) => (item.kind & KIND.hidden) !== 0), [true, true]);
   is("the club is monthly", (store.catalog.items[1].kind & KIND.recurring) !== 0, true);
@@ -148,6 +151,22 @@ async function main(): Promise<void> {
   await setFaq(owner, [{ q: "Mine", a: "My answer." }]);
   await keepStoreSetup(owner, (await storeForEmail(owner))!, { faq: [{ q: "Theirs", a: "Not kept." }] });
   is("questions already written are never replaced", (await storeForEmail(owner))!.faq, [{ q: "Mine", a: "My answer." }]);
+
+  part("A name longer than a product's title is refused, never cut short");
+  const titles = async (): Promise<string[]> => {
+    const now = (await storeForEmail(owner))!;
+    return (await Promise.all(now.catalog.items.map((item) => readListing(now, item.id)))).map((listing) => listing?.title ?? "");
+  };
+  const long = "A".repeat(MAX_TITLE_LENGTH + 20);
+  const countBefore = (await storeForEmail(owner))!.catalog.items.length;
+  const keptLong = await keepStoreSetup(owner, (await storeForEmail(owner))!, { products: [{ title: long, summary: "s", kind: "download", price: "10" }] });
+  const afterLong = (await storeForEmail(owner))!;
+  is("the creator is told it was not kept, under the whole name, as too long rather than unpriced", [keptLong.products, keptLong.long, keptLong.refused], [0, [long], []]);
+  is("and no product with the first 80 characters of it is saved", [afterLong.catalog.items.length, (await titles()).includes(long.slice(0, MAX_TITLE_LENGTH))], [countBefore, false]);
+  const exact = "B".repeat(MAX_TITLE_LENGTH);
+  const keptExact = await keepStoreSetup(owner, (await storeForEmail(owner))!, { products: [{ title: exact, summary: "s", kind: "download", price: "10" }] });
+  is("a name of exactly the limit is kept whole", [keptExact.products, (await titles()).includes(exact)], [1, true]);
+  is("the draft's name field allows no more than a product title holds", /id=\{`setup-title-\$\{i\}`\}[^>]*maxLength=\{MAX_TITLE_LENGTH\}/.test(readFileSync(join(process.cwd(), "components/store-setup-ai.tsx"), "utf8")), true);
   done();
 }
 

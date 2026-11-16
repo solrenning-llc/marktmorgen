@@ -10,8 +10,9 @@
  *   - what they were told, the devices they let us notify, their private
  *     conversations and requests, what they said in the room and the leave
  *     they held there;
- *   - their answers to whether they are coming to each live event, and the
- *     answers kept about whether they may come in;
+ *   - their answers to whether they are coming to each live event, their
+ *     places and check-ins in challenges, and the answers kept about whether
+ *     they may come in;
  *   - the record behind the unsubscribe link in the announcements they got;
  *   - what they sent that waits for the creator's approval, the notes about
  *     what was not published, and how many of theirs were approved
@@ -35,8 +36,10 @@ import { forgetDmPerson } from "@/lib/community-dm";
 import { forgetChatPerson } from "@/lib/community-chat";
 import { forgetGrantPerson } from "@/lib/chat-grant";
 import { forgetRsvpsPerson } from "@/lib/community-events";
+import { forgetChallengesPerson } from "@/lib/community-challenges";
 import { forgetAccessPerson } from "@/lib/community-access";
 import { unindexMember } from "@/lib/community-index";
+import type { DataStore } from "@/lib/store-data";
 import { forgetHeldPerson } from "@/lib/community-approval";
 
 /**
@@ -46,9 +49,11 @@ import { forgetHeldPerson } from "@/lib/community-approval";
  * came back in an unknown shape (CX-123 rule 24) does not leave the steps after
  * it undone in this pass. Then, if any step could not finish, this throws the
  * first such error, so the erasure is said as not finished (lib/person-erasure.ts)
- * and a retry, keyed by the same member, reaches what is left.
+ * and a retry, keyed by the same member, reaches what is left. `room`, the
+ * store, gets back the room what is deleted was counted in, where a module
+ * counts it per person (the challenges).
  */
-export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[]): Promise<number> {
+export async function forgetCommunityPerson(id: string, who: string, email: string, productIds: string[], room?: DataStore): Promise<number> {
   const failures: unknown[] = [];
   let records = 0;
   const step = async (run: () => Promise<number | void>) => {
@@ -99,6 +104,7 @@ export async function forgetCommunityPerson(id: string, who: string, email: stri
   await step(() => forgetChatPerson(id, who));
   await step(() => forgetGrantPerson(id, who));
   await step(() => forgetRsvpsPerson(id, who, email));
+  await step(() => forgetChallengesPerson(id, who, room));
   await step(() => forgetAccessPerson(id, email, (config?.spaces ?? []).map((s) => s.id), productIds));
   await step(() => forgetHeldPerson(id, who));
   if (namedGone) {

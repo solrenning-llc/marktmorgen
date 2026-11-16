@@ -24,8 +24,8 @@
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { deriveKey } from "@/lib/secret-box";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
-import { UnknownReplyError, countOf, repliesFor } from "@/lib/redis-reply";
-import { type DataStore, giveData, needData, noteData, takeData } from "@/lib/store-data";
+import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-reply";
+import { type DataStore, dataKey, giveData, needData, noteData, takeData } from "@/lib/store-data";
 import { dataBytes } from "@/lib/store-data-rules";
 import { UPLOAD_SECONDS, readVaultPath } from "@/lib/vault-rules";
 import { reserveStoreUpload, reserveUploadControl, type UploadStore } from "@/lib/upload-budget";
@@ -58,7 +58,9 @@ const LIVE_SECONDS = MAX_SUBMISSION_KEEP_DAYS * DAY + SUBMISSION_SWEEP_GRACE_SEC
  */
 // Closing and giving up each read the buyer's places twice and set their room slot (settleBuyerRoom): 6 commands at
 // the most, added to their own (review of #3568).
-export const SUBMISSION_STEP_COMMANDS = { open: 7, sign: 1, done: 13, abort: 9 } as const;
+// Opening also writes the slot's turn on the store's list (three commands) and pays for the sweep's turn on it
+// (SUBMISSION_SLOT_SWEEP_COMMANDS; review of #3568, Claude 6).
+export const SUBMISSION_STEP_COMMANDS = { open: 7 + 3 + 10, sign: 1, done: 13, abort: 9 } as const;
 
 /** The most a door weighs as JSON: its names and address at their longest (a 120-character file name, a 254-character address, the path). */
 const MAX_DOOR_BYTES = 4_096;
@@ -89,6 +91,33 @@ export function buyerSlotFor(folder: string, courseId: string, lessonId: string,
   if (!key) return null;
   return `sbl:${createHmac("sha256", key).update([part(folder), part(courseId), part(lessonId), part(who)].join("|")).digest("hex").slice(0, 32)}`;
 }
+
+/**
+ * The buyer slots an upload was opened on, one list per store (review of
+ * #3568, Claude 6): each member "slot|course|lesson|buyer", scored at the end
+ * of the latest door opened on it (ZADD GT), so the daily sweep
+ * (settleSubmissionSlots) sets the slot back to what is still held once every
+ * door on it has had its day, and an upload opened and left never keeps the
+ * slot at its most for good. Kept SUBMISSION_SLOTS_KEEP_SECONDS after the last
+ * open; deleted with the store, and its buyer's members with the buyer.
+ */
+const slotsKey = (folder: string) => `nl:sub:slots:${part(folder)}`;
+/** The stores with a slot on their list, member "data|folder", scored at the soonest turn on it (ZADD LT). */
+const SLOTS_DUE_KEY = "nl:sub:slotdue";
+/** How long a store's list of slots is kept after its last open: a door's day and a month for the sweep to reach it. */
+export const SUBMISSION_SLOTS_KEEP_SECONDS = UPLOAD_SECONDS + 30 * DAY;
+/** The most slots one run of the sweep sets back, across every store. */
+export const SUBMISSION_SLOT_SWEEP_PER_RUN = 300;
+/** The most stores one run of the sweep reads the list of. */
+export const SUBMISSION_SLOT_STORES_PER_RUN = 100;
+/**
+ * The commands the sweep sends for one slot, the store's and the run's reads with it: the run's read of the stores,
+ * the store's read of its list and its turn written again, the member taken (one EVAL), and the slot set back
+ * (settleBuyerRoom: two reads, the slot set, and set again at its most when a place was taken meanwhile). Each open
+ * pays for this inside its own commands (SUBMISSION_STEP_COMMANDS.open).
+ */
+export const SUBMISSION_SLOT_SWEEP_COMMANDS = 1 + 2 + 1 + 6;
+const DATA_ID = /^[A-Za-z0-9_-]{1,80}$/;
 
 /** The owner id a submission's file is kept under in the vault: never a product's, an option's or a lesson's. */
 export const submissionOwnerId = (id: string) => `sub_${id}`;
@@ -141,8 +170,12 @@ export async function saveSetupFor(data: DataStore, courseId: string, lessonId: 
 
 // ------------------------------------------------------------------- places
 
-/** What one place weighs in the room: its member in the buyer's set. */
-const placeBytes = (live: string) => dataBytes([live, "0".repeat(32)], 1);
+/**
+ * What one place weighs in the room: its member in the buyer's set, and the slot's turn on the store's list
+ * (slotsKey) at its longest, counted with every place so the room never holds less than what is kept for it.
+ */
+const SLOT_TURN_BYTES = dataBytes([`nl:sub:slots:${"f".repeat(64)}`, `sbl:${"0".repeat(32)}|${"c".repeat(64)}|${"l".repeat(64)}|${"b".repeat(64)}`], 1);
+const placeBytes = (live: string) => dataBytes([live, "0".repeat(32)], 1) + SLOT_TURN_BYTES;
 /** What one open upload weighs in the room: its door, at the largest a door is ever written. */
 const DOOR_BYTES = dataBytes([`nl:sub:door:${"h".repeat(40)}`], 1) + MAX_DOOR_BYTES;
 /** The most one buyer's places and open uploads on one lesson ever weigh: every place an open upload. */
@@ -167,14 +200,15 @@ async function heldNow(live: string, nowSeconds: number): Promise<{ places: numb
  * never emptier. Read again after: a place taken meanwhile by another open
  * puts the slot back at its most, so an open is never left uncounted.
  */
-async function settleBuyerRoom(data: DataStore, live: string, slot: string, nowSeconds: number): Promise<void> {
+async function settleBuyerRoom(data: DataStore, live: string, slot: string, nowSeconds: number): Promise<boolean> {
   const before = await heldNow(live, nowSeconds);
-  if (!before) return;
+  if (!before) return false;
   const most = buyerMost(live);
   const bytes = Math.min(most, before.places * placeBytes(live) + before.doors * DOOR_BYTES);
   await giveData(data, [{ slot, bytes, set: true }], nowSeconds * 1000);
   const after = await heldNow(live, nowSeconds);
   if (!after || after.places > before.places || after.doors > before.doors) await noteData(data, [{ slot, bytes: most, set: true }], nowSeconds * 1000);
+  return true;
 }
 
 /** The buyer's files open or waiting on this lesson now; the ones that lapsed are let go first. */
@@ -184,6 +218,100 @@ export async function liveCount(folder: string, courseId: string, lessonId: stri
   const count = countOf(replies?.[1]);
   if (!replies || countOf(replies[0]) === null || count === null) throw new UnknownReplyError("a buyer's open submissions");
   return count;
+}
+
+/** The store's data room's own id (lib/store-data.ts dataKey), which the sweep sets a slot back in. */
+function dataIdOf(data: DataStore): string {
+  // The room's key is its family and the id, the id with no colon in it; read back through dataKey to be sure.
+  const key = dataKey(data);
+  const id = key?.split(":").pop() ?? "";
+  if (!DATA_ID.test(id) || dataKey({ sid: id }) !== key) throw new UnknownReplyError("the store's data room (no id to set a slot back in)");
+  return id;
+}
+
+/** Writes a slot's turn at `turn` (the later of the one there and this), and the store's own turn on the sweep's list. */
+async function noteSlotTurn(data: DataStore, folder: string, member: string, turn: number): Promise<void> {
+  const store = `${dataIdOf(data)}|${part(folder)}`;
+  const replies = repliesFor(
+    await redisPipeline([
+      ["ZADD", slotsKey(folder), "GT", turn, member],
+      ["EXPIRE", slotsKey(folder), SUBMISSION_SLOTS_KEEP_SECONDS],
+      ["ZADD", SLOTS_DUE_KEY, "LT", turn, store],
+    ]),
+    3,
+  );
+  if (!replies || countOf(replies[0]) === null || replies[1] !== 1 || countOf(replies[2]) === null) throw new UnknownReplyError("a buyer slot's turn on the sweep's list");
+}
+
+/**
+ * Takes a slot's turn off the store's list only while it is still at the score
+ * read, so an upload opened since (a later score) keeps its turn: 1 taken, 0 not.
+ */
+export const SUBMISSION_SLOT_TAKE = `-- marktmorgen:submission-slot-take:v1
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if score and tonumber(score) == tonumber(ARGV[2]) then
+  redis.call('ZREM', KEYS[1], ARGV[1])
+  return 1
+end
+return 0`;
+
+/**
+ * The store's turn on the sweep's list, written again from its list: taken off
+ * when the list is empty, otherwise set to the soonest turn on it. Answers 1.
+ */
+export const SUBMISSION_SLOT_STORE_NEXT = `-- marktmorgen:submission-slot-store-next:v1
+local first = redis.call('ZRANGE', KEYS[1], 0, 0, 'WITHSCORES')
+if #first == 0 then
+  redis.call('ZREM', KEYS[2], ARGV[1])
+else
+  redis.call('ZADD', KEYS[2], first[2], ARGV[1])
+end
+return 1`;
+
+/**
+ * The daily sweep's part for buyer slots (review of #3568, Claude 6): for
+ * each slot every door of which has had its day, the slot set back to what
+ * is still held (settleBuyerRoom, which reads again and puts it back at its
+ * most when a place was taken meanwhile), then its turn taken off the store's
+ * list only while no newer upload moved it. Bounded per run; a list that
+ * does not read is unknown and throws, never "nothing to do".
+ */
+export async function settleSubmissionSlots(nowSeconds: number): Promise<{ settled: number }> {
+  const stores = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", SLOTS_DUE_KEY, "-inf", nowSeconds, "LIMIT", 0, SUBMISSION_SLOT_STORES_PER_RUN]]), 1)?.[0]);
+  if (!stores) throw new UnknownReplyError("the stores with a buyer slot due");
+  let left = SUBMISSION_SLOT_SWEEP_PER_RUN;
+  let settled = 0;
+  for (const store of stores) {
+    if (left <= 0) break;
+    const [dataId, folder, ...rest] = store.split("|");
+    if (rest.length > 0 || !DATA_ID.test(dataId ?? "") || !PART.test(folder ?? "")) {
+      console.error("a store on the buyer slots' sweep list does not read; left for a person to look at");
+      continue;
+    }
+    const due = stringList(repliesFor(await redisPipeline([["ZRANGEBYSCORE", slotsKey(folder), "-inf", nowSeconds, "WITHSCORES", "LIMIT", 0, left]]), 1)?.[0]);
+    if (!due || due.length % 2 !== 0) throw new UnknownReplyError("a store's buyer slots due");
+    // Only the room's key is needed: setting a slot back is taken whatever the room is (giveData, noteData), so the
+    // plan's fields are never read for a limit here.
+    const data: DataStore = { sid: dataId, subscriptionActive: false, subscriptionId: null, trialEnds: 0, planEndedAt: "" };
+    for (let i = 0; i < due.length; i += 2) {
+      left -= 1;
+      const member = due[i];
+      const [slot, courseId, lessonId, who, ...extra] = member.split("|");
+      if (extra.length > 0 || !/^sbl:[0-9a-f]{32}$/.test(slot ?? "") || ![courseId, lessonId, who].every((value) => PART.test(value ?? ""))) {
+        console.error("a buyer slot's turn does not read; left for a person to look at");
+        continue;
+      }
+      // Set back first, then the turn taken: a slot whose places do not read keeps its turn for the next run, and an
+      // upload opened meanwhile moved the turn (so it stays) and set the slot at its most after this.
+      if (!(await settleBuyerRoom(data, liveKey(folder, courseId, lessonId, who), slot, nowSeconds))) continue;
+      const taken = countOf(repliesFor(await redisPipeline([["EVAL", SUBMISSION_SLOT_TAKE, 1, slotsKey(folder), member, due[i + 1]]]), 1)?.[0]);
+      if (taken === null) throw new UnknownReplyError("a buyer slot's turn taken");
+      if (taken === 1) settled += 1;
+    }
+    const next = repliesFor(await redisPipeline([["EVAL", SUBMISSION_SLOT_STORE_NEXT, 2, slotsKey(folder), SLOTS_DUE_KEY, store]]), 1);
+    if (next?.[0] !== 1) throw new UnknownReplyError("a store's turn on the buyer slots' sweep");
+  }
+  return { settled };
 }
 
 /**
@@ -312,6 +440,14 @@ export async function openSubmissionDoor(ask: DoorAsk, steps: DoorSteps = VAULT_
   if (!slot) throw new UnknownReplyError("the store's data room (no key to name a buyer's slot)");
   // A place first: a buyer whose places are all held is refused before the room is touched (review of #3568).
   if (!(await takePlace(live, id, ask.nowSeconds + UPLOAD_SECONDS, ask.nowSeconds))) return { ok: false, reason: "busy" };
+  // The slot's turn on the store's list before the room is set to its most, so a slot at its most always has a sweep
+  // to set it back once this door's day is over (review of #3568, Claude 6). Not known to be written: nothing opens.
+  try {
+    await noteSlotTurn(ask.data, ask.folder, `${slot}|${ask.courseId}|${ask.lessonId}|${ask.who}`, ask.nowSeconds + UPLOAD_SECONDS);
+  } catch (error) {
+    await givePlace(live, id).catch(() => undefined);
+    throw error;
+  }
   // Then the room, before the door is written: the buyer's one slot set to the most their places and open uploads
   // can weigh (each door at MAX_DOOR_BYTES, which a door never passes). Set, never added to, so another try takes
   // nothing more; given back to what is still held whenever an upload is refused, given up or closed.

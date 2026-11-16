@@ -275,7 +275,9 @@ async function main(): Promise<void> {
       const timed = Number((await redis.pipeline([["HGET", room, `~${month}`]]))[0] ?? 0);
       is("its record's bytes are counted in the data room until it expires", timed >= dataBytes([recKey, recJson], 1), true);
       const slot = Number((await redis.pipeline([["HGET", room, buyerSlotFor(FOLDER, COURSE, lesson, ANA) ?? ""]]))[0] ?? -1);
-      is("the buyer's slot holds the one place, not the upload's door", slot, dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1));
+      // With the slot's turn on the store's list at its longest (review of #3568, Claude 6), counted with every place.
+      const turn = dataBytes([`nl:sub:slots:${"f".repeat(64)}`, `sbl:${"0".repeat(32)}|${"c".repeat(64)}|${"l".repeat(64)}|${"b".repeat(64)}`], 1);
+      is("the buyer's slot holds the one place, not the upload's door", slot, dataBytes([`nl:sub:live:${FOLDER}:${COURSE}:${lesson}:${ANA}`, "0".repeat(32)], 1) + turn);
       is("so the room is lighter than with the upload open", ((await dataUsed(SHOP))?.used ?? -1) < usedBefore + dataBytes([recKey, recJson], 1), true);
     }
     is("its place is held to the keeping time", await liveCount(FOLDER, COURSE, lesson, ANA, NOW + 10 * 86_400), 1);
@@ -534,6 +536,7 @@ async function main(): Promise<void> {
     const swept = await commandsOf(() => settleSubmissionSlots(later));
     is("once the door's day is over, the sweep sets the slot back to what is held: nothing", [swept.value.settled, await slotOf()], [1, 0]);
     is("inside the commands each open pays for its sweep", swept.commands <= SUBMISSION_SLOT_SWEEP_COMMANDS, true);
+    is("an open's commands hold its turn's write and its sweep, still inside the hundred a buyer action is priced at", SUBMISSION_STEP_COMMANDS.open >= 7 + 3 + SUBMISSION_SLOT_SWEEP_COMMANDS && SUBMISSION_STEP_COMMANDS.open <= 100, true);
     is("and nothing is left on the list for it", await redis.pipeline([["ZCARD", `nl:sub:slots:${FOLDER}`], ["ZSCORE", "nl:sub:slotdue", `${dataKey(SHOP)?.slice(8)}|${FOLDER}`]]), [0, null]);
     const again = await commandsOf(() => settleSubmissionSlots(later + 60));
     is("a second sweep finds nothing to do", again.value.settled, 0);

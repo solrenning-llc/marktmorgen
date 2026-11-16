@@ -40,11 +40,12 @@ export async function withinStoreWhy(scope: string, who: string, limit: number, 
  */
 export type ServiceRefusal = { reason: "tries" } | { reason: "used" | "pool" | "unknown"; message: string };
 
-export async function withinServiceWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store): Promise<ServiceRefusal | null> {
+/** `units`: how many of the figure the call takes, one unless it costs more than a call (a PayPal press, paypalPressUnits). */
+export async function withinServiceWhy(scope: string, who: string, limit: number, windowSeconds: number, store: Store, units = 1): Promise<ServiceRefusal | null> {
   // A confirmed monthly allowance cannot repair an unknown short-window
   // counter. Refuse before taking that allowance or calling the provider.
   if (!(await withinEssentialLimit(scope, who, limit, windowSeconds))) return { reason: "tries" };
-  const taken = await takeAllowance(store, "integration");
+  const taken = await takeAllowance(store, "integration", units);
   return taken.ok ? null : { reason: taken.reason, message: taken.message };
 }
 

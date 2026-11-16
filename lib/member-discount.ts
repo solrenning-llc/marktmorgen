@@ -50,6 +50,11 @@ export type MemberSub = {
   amount: number;
   currency: string;
   interval: string;
+  /**
+   * How many of those one renewal covers, as Stripe bills it (interval_count, 609 [WP8]): 3 with "month" is every 3
+   * months. 1 when Stripe sends none; null when it sends one out of shape, so nothing is said rather than a guess.
+   */
+  every: number | null;
   /** Whether a discount already comes off it. */
   discounted: boolean;
 };
@@ -119,6 +124,7 @@ export function readMemberSub(sub: Raw, handles: Set<string>): MemberSub | null 
     amount: price.unit_amount,
     currency: price.currency,
     interval: recurring.interval,
+    every: recurring.interval_count === undefined || recurring.interval_count === null ? 1 : typeof recurring.interval_count === "number" && Number.isSafeInteger(recurring.interval_count) && recurring.interval_count >= 1 ? recurring.interval_count : null,
     discounted: hasDiscount(sub),
   };
 }

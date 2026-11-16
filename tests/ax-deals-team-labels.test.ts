@@ -12,5 +12,5 @@ is("no opacity on the open count or the view-only words", [board.includes('class
 
 part("The team table's scrolling region has a name of its own");
 const team = readFileSync("components/team-manager.tsx", "utf8");
-is("the region is named as the table, not as the section", [team.includes('role="region" aria-label="What each role can do"'), team.includes('role="region" aria-label="Table of what each role can do"')], [false, true]);
+is("the region is named as the table, not as the section", [team.includes('role="region" aria-label="What each role can do"'), team.includes('role="region" aria-label="What each role can do, as a table"')], [false, true]);
 done();

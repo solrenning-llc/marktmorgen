@@ -49,8 +49,8 @@ globalThis.fetch = (async (input: string | URL | Request) => {
 const sid = "g".repeat(32);
 const store = { statsId: sid, stripeAccountId: ACCOUNT, handle: "group-ref", previousHandles: [], language: "en", currency: "usd", name: "Group Ref", email: "creator@example.com", catalog: { items: [] } } as unknown as Store;
 const product = { id: "prod1", title: "Guide", priceCents: 1000, options: [], file: { name: "f" }, link: null, course: null, bundle: null, recurring: null, call: null, pwyw: null, keys: null, stock: null, podcast: null } as unknown as Listing;
-const charge = (refunded: boolean) => ({ id: "ch_GroupRef000001", object: "charge", amount: 5000, amount_refunded: refunded ? 5000 : 0, refunded, disputed: false });
-const paymentOf = (pi: string, refunded: boolean) => ({ id: pi, object: "payment_intent", status: "succeeded", latest_charge: charge(refunded) });
+const charge = (refunded: boolean, pi = "") => ({ id: "ch_GroupRef000001", object: "charge", amount: 5000, amount_refunded: refunded ? 5000 : 0, refunded, disputed: false, ...(pi ? { payment_intent: pi } : {}) });
+const paymentOf = (pi: string, refunded: boolean) => ({ id: pi, object: "payment_intent", status: "succeeded", latest_charge: charge(refunded, pi) });
 const sessionFor = (group: string, pi: string) => ({ id: `cs_test_${pi.slice(3).padEnd(24, "0")}`, created: NOW - 120, amount_total: 5000, currency: "usd", payment_intent: pi, status: "complete", payment_status: "paid", metadata: { store: "group-ref", product: "prod1", group }, customer_details: { email: "buyer@example.com" } });
 
 /** A purchase for five, started; then the sweep's refund pass runs; then the same run settles the paid checkout. */
@@ -98,6 +98,44 @@ async function main(): Promise<void> {
   payments[other] = paymentOf("pi_SomeoneElse0001", false);
   const foreign = await run(other);
   is("another payment's answer: not settled, nothing open", [foreign.settled === "settled", foreign.open], [false, false]);
+
+  part("The payment and its expanded charge must belong to this paid checkout (Codex X4 and N1 on #4494)");
+  const missingStart = await startGroup(store, product, "5");
+  if (!missingStart.ok) throw new Error("missing-payment group did not start");
+  const missing = await settleGroup({
+    store,
+    session: { ...sessionFor(missingStart.group.id, "pi_GroupRefMissing01"), payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a positive paid session with no readable payment stays pending", [missing, Boolean(await openGroup(store, missingStart.group.id))], ["threw", false]);
+  const own = "pi_GroupRefOwn0001";
+  payments[own] = { ...paymentOf(own, false), latest_charge: charge(false, "pi_GroupRefForeign1") };
+  const foreignCharge = await run(own);
+  is("another payment's expanded charge cannot decide this group", [foreignCharge.settled, foreignCharge.open], ["threw", false]);
+  const noAccountStart = await startGroup(store, product, "5");
+  if (!noAccountStart.ok) throw new Error("no-account group did not start");
+  const noAccount = await settleGroup({
+    store: { ...store, stripeAccountId: null } as unknown as Store,
+    session: sessionFor(noAccountStart.group.id, "pi_GroupRefNoAcct01"),
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a store whose account cannot be read: not settled, still pending", [noAccount, Boolean(await openGroup(store, noAccountStart.group.id))], ["threw", false]);
+
+  part("Control: a zero-total checkout needs no PaymentIntent");
+  const freeStart = await startGroup(store, product, "5");
+  if (!freeStart.ok) throw new Error("free group did not start");
+  const free = await settleGroup({
+    store,
+    session: { ...sessionFor(freeStart.group.id, "pi_unused_for_free"), amount_total: 0, payment_intent: null },
+    product,
+    base: "https://x.test/@group-ref",
+    from: "store@x.test",
+  }).then(() => "settled", () => "threw");
+  is("a free checkout settles with no payment read", free, "settled");
 
   part("Control: a payment that stands settles as before");
   const kept = "pi_GroupRefKept0001";

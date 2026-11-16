@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { SiteFooter } from "@/components/site-footer";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { AffiliateDirectory } from "@/components/affiliate-directory";
 import { DIRECTORY_ORDER, readDirectory } from "@/lib/affiliate-directory";
 import { INDEX_DIRECTORY_AT } from "@/lib/directory-index";

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/toast";
 import { SITE_URL } from "@/lib/site-url";
+import { NO_BUYER_ADDRESSES } from "@/lib/buyer-addresses";
 import type { Product } from "@/lib/store";
 import {
   DEFAULT_KEYS,
@@ -52,6 +53,8 @@ type Loaded = {
   counts: KeyCounts;
   keys: IssuedKey[];
   matching: number;
+  /** False for a role without "orders": the keys come without buyers' addresses (lib/buyer-addresses.ts). */
+  buyers?: boolean;
 };
 
 type Answer = { ok?: boolean; error?: string } & Record<string, unknown>;
@@ -71,7 +74,7 @@ async function call(method: "GET" | "POST", url: string, body?: Record<string, u
 
 const count = (n: number) => n.toLocaleString("en-US");
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-const quiet = "text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
+const quiet = "inline-flex min-h-11 items-center text-left text-sm font-bold text-ink-soft underline underline-offset-4 transition hover:text-violet-deep disabled:opacity-40";
 
 /** A product's license keys in the studio: where they come from, how many are left, and who has which. */
 export function LicenceKeyEditor({ product, handle }: { product: Product; handle: string }) {
@@ -321,13 +324,16 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
               className="field field-search mt-2"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Find by key, email or order reference"
+              placeholder={loaded.buyers === false ? "Find by key or order reference" : "Find by key, email or order reference"}
             />
           </label>
           <button type="submit" className="btn btn-secondary btn-sm">
             Find
           </button>
         </form>
+        {loaded.buyers === false ? (
+          <p role="status" className="mt-3 text-sm text-ink-soft">{NO_BUYER_ADDRESSES}</p>
+        ) : null}
         {loaded.keys.length === 0 ? (
           <p className="mt-3 rounded-[var(--r-sm)] bg-sand p-4 text-sm text-ink-soft">
             {query.trim() ? "No key given by this product matches that." : "No key given yet. The first sale gets the first one."}
@@ -341,7 +347,7 @@ export function LicenceKeyEditor({ product, handle }: { product: Product; handle
                     <p className={`break-all font-mono font-semibold ${entry.revokedAt ? "text-ink-mute line-through" : "text-ink"}`}>{entry.key}</p>
                     <p className="break-all text-xs text-ink-soft">
                       {[
-                        entry.email || "No email on the order",
+                        loaded.buyers === false ? null : entry.email || "No email on the order",
                         entry.at ? DAY.format(new Date(entry.at * 1000)) : null,
                         entry.reference,
                         entry.revokedBy === "refund" ? "Revoked: refunded in full" : null,

@@ -110,7 +110,7 @@ import { EXPORT_COMMANDS, EXPORT_PAGE_SECONDS, EXPORT_STRIPE_PAGES } from "@/lib
 import { PATH_REFUND_PAGES, PATH_SALE_PAGES } from "@/lib/path-facts";
 import { SNS_RECEIPT_COMMANDS_MOST, SNS_RECEIPT_VALUE_BYTES_MOST } from "@/lib/sns-receipt-rules";
 import { ALL_TIME_PAGES } from "@/lib/stats";
-import { MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
+import { BOOK_KEPT_SLICE, MAX_PAID_BYTES, PAYPAL_REFUNDS_READ } from "@/lib/paypal-sales";
 import { AGENDA_MAX_ROWS, AGENDA_ROW_SENT_BYTES, AGENDA_TASKS_BYTES } from "@/lib/person-agenda";
 import { LIFE_WRITE_MAX } from "@/lib/stats";
 import { MARK, cappedByteMonths, closingBytes, followedBytes, reserveBytes, reservePeakBytes } from "./store-data-registry";
@@ -124,7 +124,7 @@ import { ASSISTANT_ON_SALE } from "@/lib/opening";
 import { NEXT_OFFER_CHOICES, NEXT_OFFER_COMMANDS, NEXT_OFFER_PRODUCTS } from "@/lib/next-offer-rules";
 import { MAX_SHELF } from "@/lib/course-shelf-rules";
 import { ASSIST_REMIND_COMMANDS, ASSIST_REMIND_PRODUCTS } from "@/lib/assistant-reminder-rules";
-import { DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
+import { BOOK_KEPT_REFUND_BYTES, DONE_SET_BYTES, LISTING_BYTES, TASK_BYTES, type ReadWork } from "@/lib/api-read-rules";
 import { DOWNLOAD_LOOKUP_COMMANDS, DOWNLOAD_LOOKUP_MS, ORDERS_BUNDLE_BYTES, ORDERS_OLDER_BYTES, ORDERS_OLDER_COMMANDS, ORDERS_OPEN_COMMANDS, ORDERS_OPEN_SECONDS, ORDERS_PAGE_BYTES } from "@/lib/buyer-orders-rules";
 import { MOVES_PER_MGET, MOVE_BYTES, MOVE_KEY_BYTES } from "@/lib/call-moves-read";
 import { MAX_PER_PERSON as AGREEMENTS_PER_PERSON, MAX_BODY as AGREEMENT_BODY, MAX_LINES as AGREEMENT_LINES, MAX_LINE_TEXT as AGREEMENT_LINE_TEXT, MAX_NAME as AGREEMENT_NAME, MAX_TITLE as AGREEMENT_TITLE } from "@/lib/agreement-rules";
@@ -537,14 +537,18 @@ const stripePage = (bytes = STRIPE_PAGE_BYTES) => EXPORT_PAGE_SECONDS * MEMORY_S
  */
 export function affiliatePageRead(size: AffiliatePageSize): number {
   const rows = Math.min(size.rows, AFFILIATE_ROW_CAP);
+  // And the book's two questions about its PayPal payments (lib/affiliates.ts, readBook: an HMGET of the refunds kept
+  // for good and a ZMSCORE of the set, in slices of BOOK_KEPT_SLICE), each field a ceiling of the payments: their
+  // names sent and their answers, BOOK_KEPT_REFUND_BYTES a field, and two commands a slice (pre-review C).
+  const asks = 2 * Math.ceil(size.fields / BOOK_KEPT_SLICE);
   // Up to REFUND_MARKS_PER_READ fields could be a sale, share or lead whose refund is kept on it (lib/affiliates.ts,
   // AFFILIATE_REFUND_MARK): its whole new text sent, one script for each of the three hashes.
   const marks = 3;
-  const bytes = AFFILIATE_PAGE_BYTES + size.fields * AFFILIATE_FIELD_BYTES + Math.min(size.fields, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
+  const bytes = AFFILIATE_PAGE_BYTES + size.fields * (AFFILIATE_FIELD_BYTES + BOOK_KEPT_REFUND_BYTES) + Math.min(size.fields, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES + rows * AFFILIATE_ROW_BYTES + size.listings * PUBLIC_LISTING_BYTES;
   // Every field could be an affiliate with a part of their own; every part its lines.
   const kept = Math.min(BOOK_SNAPSHOT_MAX_BYTES, (2 * size.fields + rows + size.stripePages * 100) * BOOK_LINE_BYTES + size.fields * BOOK_PART_BYTES);
   const writes = Math.ceil(kept / 512_000) + 1;
-  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + 2 * writes + marks, bytes + kept) + perMegabyte(bytes + kept)
+  return request("heavy", AFFILIATE_PAGE_COMMANDS + TAKE_COMMANDS + rows + asks + 2 * writes + marks, bytes + kept) + perMegabyte(bytes + kept)
     + size.stripePages * stripePage();
 }
 /** What one load of an approved affiliate's page costs at the most: the page, its own part of the kept book, its listings, and its codes when it reads them. */
@@ -906,7 +910,9 @@ export const PAYPAL_RECEIPT_RETRY_COMMANDS = PAYPAL_HAND_OVER_RETRY.receiptTries
  * - looksPerOrderPerDayAtMost: nextLook asks hourly the first week (24 a day), every six hours until day 30 (4 a day)
  *   and daily until PayPal's 180 days (looksPerOrderPerDayAfter30Days); a capture in a status not known here is asked
  *   daily until its paid record ends (daysWatchedAtMost, PAID_KEPT_SECONDS).
- * Taking a payment back (its two marks, or one for a refund, the buyer's record, a course start) happens once an order
+ * The take-back marks (ZADD and EXPIRE of the refund set, and of the reversed set for a capture reversed, failed or
+ * declined) are counted on every refund look, retries included, in PAYPAL_REFUND_KEPT.markCommandsPerRefundLookAtMost
+ * (Claude 6 on #3464). The rest of taking a payment back (the buyer's record, a course start) happens once an order
  * and is not priced apart here: an open gap, never zero. A scheduled job bounded by its schedule and the batch, a
  * company fixed cost like HAND_OVER_BATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by tests/paypal-reversed-access.test.ts.
  */
@@ -918,6 +924,32 @@ export const PAYPAL_REFUND_WATCH = {
   looksPerOrderPerDayAtMost: 24,
   looksPerOrderPerDayAfter30Days: 1,
   daysWatchedAtMost: 400,
+} as const;
+/**
+ * The refund kept for good by the same watch (lib/paypal-sales.ts, watchPayPal, backKey; #3464, Claude 7's MÉDIO):
+ * each look at an order PayPal says is refunded in full writes it to nl:ppsell:back:<stats> with one ORDER_WRITE
+ * script (lib/order-data.ts, orderWrite) carrying one HSETNX, charged to the store's room:
+ * - scriptsPerRefundLook / writesPerScript: one script, one write;
+ * - commandsPerScriptAtMost: the EVAL and the script's own calls for one HSETNX field at its dearest (EXISTS, TYPE,
+ *   HEXISTS and HSTRLEN before, the HSETNX, HEXISTS and HSTRLEN after, the room's two HGETs and its HSET): 11;
+ * - markCommandsPerRefundLookAtMost: each look that reaches the write first runs the take-back marks again, the refund
+ *   set's ZADD and EXPIRE and, for a capture reversed, failed or declined, the reversed set's ZADD and EXPIRE: at most 4
+ *   a look, on the first look and on every retry (Claude 6 on #3464, MEDIUM);
+ * - retryWritesPerFailedLook: a write not known landed puts the order back on the watch an hour on (one ZADD) and
+ *   tells nothing, so its worst is the marks, one script and one ZADD an hour (looksPerDayAtMost, the watch's own hourly look),
+ *   for as long as the watch keeps the order (daysAtMost, the paid record's 400 days): no count of tries, bounded by
+ *   the watch itself and by its REFUND_WATCH_BATCH orders a run.
+ * A company fixed cost of the five-minute job like PAYPAL_REFUND_WATCH (NOT_A_COST.REFUND_WATCH_BATCH), held by
+ * tests/affiliate-refund-lifetime.test.ts.
+ */
+export const PAYPAL_REFUND_KEPT = {
+  scriptsPerRefundLook: 1,
+  writesPerScript: 1,
+  commandsPerScriptAtMost: 11,
+  markCommandsPerRefundLookAtMost: 4,
+  retryWritesPerFailedLook: 1,
+  looksPerDayAtMost: 24,
+  daysAtMost: 400,
 } as const;
 /**
  * The other half of the same function, the sweep of the store's pending PayPal orders (lib/paypal-sales.ts, watchPayPal,
@@ -945,7 +977,7 @@ export const PAYPAL_PENDING_SWEEP = {
  * five-minute job's watch of PayPal refunds, watchPayPal in lib/paypal-sales.ts): before the event, the person's
  * own-deletion note is read once (ownNoteReadsPerRefund: one HGET, erasedSincePaid with `own`), so an address deleted
  * at the person's request is left out (review of #3449, LEVE 2). Held by tests/paypal-receipt-once.test.ts (part M).
- * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH above.
+ * The watch's other per-order commands are the lines of PAYPAL_REFUND_WATCH and PAYPAL_REFUND_KEPT above.
  */
 export const PAYPAL_REFUND_TOLD = { ownNoteReadsPerRefund: 1 } as const;
 /**
@@ -1206,6 +1238,11 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/calls.ts", names: ["admitOrders(store, CALL_ORDER_UNITS)", "countOrder"] },
       { file: "lib/call-packages.ts", names: ["admitOrders(store, 1)"] },
       { file: "lib/group-buy.ts", names: ["placesHeld", "admitOrders(store, 1)", "settleAdmitted(store, hour)"] },
+      // A gift's and a purchase for several's exact reads and "OK"-checked writes, a place's compare-and-set scripts and a
+      // checkout's room given back once (#2872; Claude 7's LEVE 1): a few commands an order, inside ORDER_COMPUTE.
+      { file: "lib/gifts.ts", names: ["readGiftExactly"] },
+      { file: "lib/group-buy.ts", names: ["readGroupExactly", "PLACE_CLAIM", "PLACE_DROP"] },
+      { file: "lib/purchase-email.ts", names: ["firstToGiveRoomBack"] },
       // A payment request's checkout is one order, admitted before Stripe's page opens and counted at its receipt (18 October 2026).
       { file: "lib/payment-requests.ts", names: ["admitOrders(store, 1, now, 1)"] },
       { file: "lib/purchase-email.ts", names: ["confirmRequest", "countOrder"] },
@@ -1832,6 +1869,11 @@ export const PER_PAYMENT_LINES: CostLine[] = [
     monthlyUsd: (tier) => closureCost(tier).total,
     sources: [
       { file: "lib/closed-store-data.ts", names: ["walkPage", "FOLLOWERS", "prepareStore", "stopRenewals", "DEL_BATCH", "FOLLOW_BATCH", "RENEWALS_AT_ONCE"] },
+      { file: "lib/closed-store-data.ts", names: ["queueDeleted", "admitDeleted", "BATCH_SWAP", "DELETE_SETTLES_MS", "if (!entry.deleted) await finish(entry, now)", "settleDeletedStore({ ref, sid: entry.sid, email: entry.email, holds: entry.holds ?? [entry.handle] })", "await forgetBoth(entry.statsId ?? null, entry.sid)", "await queueStoreForget(entry.statsId ?? null, entry.sid)"] },
+      { file: "lib/store.ts", names: ["await queue(store)", "deleteIfHeldOnly(held, [owner, beforeMoveKeyOf(owner)])", "storeExactly", "settleDeletedStore", "DELETED_HOLD"] },
+      { file: "lib/store-forget-retry.ts", names: ["FORGET_TRY_COMMANDS", "forgetBoth"] },
+      { file: "lib/store-field-rules.ts", names: ["MAX_ADDRESSES"] },
+      { file: "app/api/store/stores/route.ts", names: ["deleteStore(ref, queueDeleted)"] },
       { file: "lib/plan-closing-rules.ts", names: ["ENDED_STORE_EXPORTS"] },
       { file: "app/api/store/export/route.ts", names: ["ENDED_STORE_EXPORTS", "storeExport(store)"] },
       { file: "lib/store-export.ts", names: ["EXPORT_STRIPE_PAGES", "EXPORT_PAGE_SECONDS", "EXPORT_COMMANDS"] },
@@ -1847,7 +1889,7 @@ export const PER_PAYMENT_LINES: CostLine[] = [
       { file: "lib/data-families.ts", names: ["FOLLOWED_FAMILIES", "CLOSING"] },
       { file: "lib/order-data.ts", names: ["ORDER_KEY_BYTES"] },
     ],
-    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host. The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst).",
+    basis: "Once for each store, so against each of its payments: a store that paid one month and closed carries all of it in that month's margin. Its keys deleted, the room's at the fewest bytes a key it counts can weigh and the rest at a mark's, DEL_BATCH at a command, each name sent back once: no longer than KEY_NAME_BYTES, and never more than that share of a key beside the ORDER_KEY_BYTES the room charges it, which the registry counts beside every key too (what Redis keeps beside it); its ENDED_STORE_EXPORTS whole exports once its plan has ended, its own and never refused, each at the largest store there can be: its room and its record, every product, course, lesson, post and form there can be, read together, and every page of its sales at Stripe; its ENDED_LIST_DOWNLOADS list downloads once its plan has ended, its own and never taken from its studio figure, each at the largest list its room and its record can hold (endedListDownloadCost); what its followers read, the room and what they read outside it, FOLLOW_BATCH entries at a command; and its last steps' commands, for its owner and every one of its team as a host. The walk's own time is its schedule's. Its id left in a person's records across stores that are the company's (the lists they joined, an affiliate's hub: tests/store-data-registry.ts) is the company's as those records are, and runs out with the quarter it was written in (lib/joined-stores.ts).  Reading the whole database to find its keys is the company's, a scheduled job bounded by its schedule (docs/funded-exposure-review.md). What an order leaves for it, a buyer's library entry and a renewal to stop, is in the order's cost (ORDER_COST); what it writes once its plan has ended is a store that pays nothing's, in the share of those (nonPayingWorst). A store its owner deletes from the studio (lib/store.ts deleteStore) takes the same walk instead, once, and never also closes, since its record goes with it: its marks read and its entry written under its lock (queueDeleted, the same reads as prepareStore's), its record read again and its entry rewritten or dropped when a walk begins (admitDeleted), each in one script and only over the exact entry read (BATCH_SWAP: the same one command as the plain write it replaces, with Lua's own HGET inside it), and its keys deleted and followed as a closed store's, with no export and no closing record; so its cost is this line's, already in its payments' worst case or, for a store that never paid, in nonPayingWorst (closureCost(\"creator\", true)), and its commands are within PREPARE_COMMANDS: its marks' reads within the hundred, and none of the (1 + MAX_TEAM) × (2 × 50 + 5) a closing store's hosts' claims take, in whose place its admission, once its record reads gone, does again what its delete does after the record (Claude 6's two LOWs and reviewer C3 on #3670): one DELETED_HOLD script for each address that still led to it (MAX_ADDRESSES at the most) and four removals (settleDeletedStore), and its webhooks, API keys and assistant notes forgotten once more (forgetBoth, FORGET_TRY_COMMANDS less the line's four) or, when that fails, the line's own commands (queueStoreForget, within those four), so at most 1 + MAX_ADDRESSES + 4 + FORGET_TRY_COMMANDS + 1 commands an admission, run again only on a run after one not confirmed. Its later tries in that line are the company's, as a delete's are (FORGET_TRIES).",
   },
 ];
 
@@ -2077,7 +2119,7 @@ export const NOT_A_COST: Record<string, string> = {
   TURN_LIMITS: "lib/studio-agent-rules.ts (631 [AA1], studio assistant, unit 1): the byte, step and token ceilings of one turn of the studio's assistant, pure rules. Nothing calls the model yet. They bound turnHoldMicroUsd, the whole turn at its most, which a turn reserves from the store's monthly AI budget (line ai, AUTOMATIC_AI_STORE_MICRO_USD) before its first call once a later unit wires it. Not a monthly figure of its own; unknown cost is not zero, and the wiring unit must cite its route here.",
   MEMORY_FORGET_COMMANDS: "lib/assistant-memory-store.ts forgetMemory is shared by three direct callers, not exclusively a company obligation. app/api/store/assistant-memory/route.ts POST forget belongs to an active store: guardStoreWrite(settings) reaches studioAccess/countStudio and takes one studio request before the operation; this caller and constant are cited by COST_LINES studio. app/api/store/stores/route.ts first attempts store-deletion cleanup after its essential delete admission. lib/store-forget-retry.ts later retries that deleted store as a company obligation, not as another active-store request. The constant bounds outer dispatches only: the measured lock path is eleven SET attempts plus three EVAL dispatches, deleting at most MAX_STORED_MEMORY_BYTES (55,264 bytes) without reading the note payload. Its 87-byte sample is a JSON-serialized stub reply, not RESP, wire or billed bytes. Lua-internal calls and expired data-room month cleanup are additional; sixteen is not a complete supplier invoice ceiling. The studio source citation records existing admission, not proof that its full command or function-time budget covers the lock wait. Complete active-store and company runtime, Lua and funding remain unknown, never zero; this shared exported constant is not a separate monthly allowance or margin approval.",
   FORGET_TRY_COMMANDS: "lib/store-forget-retry.ts forgetBoth adds assistant-note deletion to webhook and API-key cleanup. This is a company obligation after the original essential deletion request, not a per-plan allowance. The declared formula includes MEMORY_FORGET_COMMANDS but does not certify Lua-internal command costs, bytes, runtime or retention; its complete fixed-cost ceiling remains unknown and cannot approve a finite company base.",
-  FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",
+  FORGET_TRIES: "lib/store-forget-retry.ts permits eight total attempts per deleted store in one round in its line, including the original deletion. Up to seven later company attempts can repeat assistant-note cleanup. The closing walk's admission of a deleted store (lib/closed-store-data.ts admitDeleted) makes one more attempt and, when it fails while the line no longer holds that store, starts another round; the number of rounds is bounded only by the walk's admissions, one a run while its replies are not confirmed. This bounded work count is not a funded global case/retention or read-byte ceiling; costs remain unknown, never zero.",
   FORGET_PER_RUN: "lib/store-forget-retry.ts limits work to twenty-five stores per daily closing run, but first reads the entire active queue with HGETALL. The synthetic 2,000-row expired-deadline control produces a 166,893-byte JSON-serialized stub reply (not RESP, wire or billed bytes) and does no cleanup work. Twenty-five is not a queue-read byte bound. Complete queue, Lua, runtime, retention and company funding remain unknown; no finite fixed-cost or plan margin certification follows from this classification.",
   STATUS_VIEWS_PER_HOUR: "Requests in an hour, for the whole site, that read the runs on the public status page (247 [SP4] unit 2, lib/status-page.ts): not a plan's cost, since the page belongs to no store; a company cost under MR item 2, every kind of request priced at the rates of lib/spend-cost-table.ts and tests/traffic-cost.ts, held by tests/status-page.test.ts.",
   STATUS_COUNTS_PER_ADDRESS_PER_HOUR: "Times one address may make one server instance count a request on the public status page in an hour (247 [SP4] unit 2, lib/status-page.ts, lib/local-limit.ts): a pace that only refuses, held in memory at no cost, so one client cannot use up the hour's reads; the page's cost is the company's, priced in tests/status-page.test.ts.",

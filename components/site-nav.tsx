@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "@/components/icons";
 import { Logo } from "@/components/logo";
-import { PLANS_ON_SALE, PREVIEW_LINE, PREVIEW_LINK } from "@/lib/opening";
 import { moveFocus } from "@/lib/menu-keys";
 
 type MenuItem = {
@@ -188,7 +187,17 @@ const PLAIN_LINKS = [
   { href: "/blog", label: "Blog" },
 ];
 
-export function SiteNav() {
+/**
+ * What lib/opening.ts says about the plans, handed over by the server
+ * (components/site-nav-server.tsx). Read there, not imported here: lib/opening.ts
+ * reaches every gate and margin review, and importing it from this client file
+ * sent about 90 KB of that code to every public page's visitor, who only needs
+ * these three values.
+ */
+export type NavOpening = { onSale: boolean; line: string; link: { href: string; label: string } };
+
+export function SiteNav({ opening }: { opening: NavOpening }) {
+  const { onSale: PLANS_ON_SALE, line: PREVIEW_LINE, link: PREVIEW_LINK } = opening;
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { StudioEmptyState } from "@/components/empty-state";
 import { EmailField } from "@/components/email-field";
 import Link from "next/link";
-import { SiteNav } from "@/components/site-nav";
+import { SiteNav } from "@/components/site-nav-server";
 import { SiteFooter } from "@/components/site-footer";
 import { Icon } from "@/components/icons";
 import { type Store } from "@/lib/store";
@@ -202,7 +202,7 @@ export default async function LibraryPage({ searchParams }: Params) {
                   We send a link only if that address bought something here, and the page says the same either way. Each creator&apos;s own list still opens from their store too.
                 </p>
               </form>
-              <p className="mt-6 text-sm text-ink-soft">
+              <p className="mt-6 max-w-[50ch] text-sm text-ink-soft">
                 Purchases count from October 11, 2026, when the library opened. For anything bought before, open the store and use its own link to your purchases. <Link prefetch={false} href="/privacy#library" className="underline underline-offset-4">What is kept for this</Link>.
               </p>
             </div>

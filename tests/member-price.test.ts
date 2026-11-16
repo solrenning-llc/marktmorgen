@@ -56,6 +56,7 @@ import { addProduct, claimHandle, ensureStatsId, setMemberPrices, setProductLink
 import { readProduct } from "@/lib/catalog";
 import { currencyRule } from "@/lib/money";
 import { createCheckout } from "@/lib/store-checkout";
+import { MEMBER_CUSTOMER_STRIPE_CALLS } from "@/lib/fair-coupon";
 import { mintPass, passCookieName } from "@/lib/learn";
 import { importedKey } from "@/lib/imported-purchases";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
@@ -456,6 +457,8 @@ async function main(): Promise<void> {
   is("counted as the next product after a purchase is, from the plan's public requests", MEMBER_PRICE_REQUEST_UNITS, NEXT_OFFER_REQUEST_UNITS);
   is("its listings fit inside that read", MAX_MEMBER_QUALIFYING <= NEXT_OFFER_PRODUCTS + NEXT_OFFER_CHOICES, true);
   is("its Stripe calls fit inside that read's five", MEMBER_PRICE_STRIPE_CALLS <= 5, true);
+  // The checkout that proves the claim again (memberClaim, counted by takeBuyerRead) makes the member's customer in the same request.
+  is("with the member's customer made at checkout, still inside those five", MEMBER_PRICE_STRIPE_CALLS + MEMBER_CUSTOMER_STRIPE_CALLS <= 5, true);
 
   part("The report");
   is("a member-price sale is named for what it was", [discountKindOf({ metadata: { member: "20" } }), DISCOUNT_NAMES.member], ["member", "Member price"]);

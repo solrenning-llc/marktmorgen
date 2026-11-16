@@ -17,7 +17,7 @@ import { firstCharge } from "@/lib/move-rules";
 import { currentMeta } from "@/lib/tier-rules";
 import { saleOff, saleable } from "@/lib/store-sale";
 import { fairOff } from "@/lib/fair-price";
-import { fairCoupon, memberCoupon } from "@/lib/fair-coupon";
+import { fairCoupon, memberCoupon, memberCustomer } from "@/lib/fair-coupon";
 import { isMemberPercent, memberKeepsFloor } from "@/lib/member-price-rules";
 import { currencyRule } from "@/lib/money";
 import { introCoupon } from "@/lib/intro-coupon";
@@ -563,10 +563,13 @@ export async function createCheckout(
     body.set("metadata[regular_cents]", String(product.priceCents));
     body.set("subscription_data[metadata][intro]", String(intro.count));
   } else if (memberOffNow > saleOffNow && memberOffNow > fairOffNow) {
+    // The member's own purchase: the checkout belongs to a customer of the creator's made with the proved
+    // address, which Stripe's page shows and the buyer cannot change. customer_email would be only a prefill,
+    // typed over for somebody else (Codex X4 on #2999). No address proved, no member price: refused.
+    if (!extras.member?.email) throw new Error("The payment page could not be opened");
+    body.set("customer", await memberCustomer(store.stripeAccountId, extras.member.email));
     body.set("discounts[0][coupon]", await memberCoupon(store.stripeAccountId, memberOffNow));
     body.set("metadata[member]", String(memberOffNow));
-    // The member's own purchase: Stripe's page opens with the proved address, which the buyer cannot change.
-    if (extras.member?.email) body.set("customer_email", extras.member.email);
     mayComeOff.push({ kind: "percent", percent: memberOffNow });
   } else if (fairOffNow > saleOffNow) {
     body.set("discounts[0][coupon]", await fairCoupon(store.stripeAccountId, fairOffNow));
@@ -606,7 +609,8 @@ export async function createCheckout(
   // applies, or the buyer names the price): never opened without the code
   // the buyer asked for, and never two discounts.
   if (extras.returning && body.get("discounts[0][coupon]") !== extras.returning.coupon) throw new ReturningCodeRefused("other");
-  if (extras.email) body.set("customer_email", extras.email);
+  // Never over a member's own customer (above): Stripe takes one or the other, and the member's address is the one proved.
+  if (extras.email && !body.has("customer")) body.set("customer_email", extras.email);
 
   if (extras.gift) {
     body.set("metadata[gift]", extras.gift);
@@ -790,6 +794,17 @@ export async function createCheckout(
     keepConsentOn(body, extras.digitalConsent, kind, 1);
     if (!recurring) body.set(`payment_intent_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
     else body.set(`subscription_data[metadata][${CONSENT_META}]`, consentMetaValue(extras.digitalConsent, kind));
+  }
+
+  // A member's own customer (above): Stripe makes no other for the checkout (an offer after paying or a tax
+  // number box asked for one) and takes no prefill beside it; what the buyer types on its page (their name, a
+  // billing or a delivery address, which a tax number box and the tax on top need) is saved to that customer.
+  if (body.has("customer")) {
+    body.delete("customer_creation");
+    body.delete("customer_email");
+    body.set("customer_update[address]", "auto");
+    body.set("customer_update[name]", "auto");
+    if (shipping) body.set("customer_update[shipping]", "auto");
   }
 
   // Until the durable lifecycle is activated, the existing single-file sale

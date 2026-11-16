@@ -1504,6 +1504,9 @@ export const COST_LINES: CostLine[] = [
       // at most MANAGE_CUSTOMERS_MAX, the link's record within MANAGE_GRANT_BYTES (inside LINK_BYTES of tests/store-data-registry.ts):
       // Stripe bills no API call and no store command or byte is added, so the request's own cost is unchanged (R43 F1 on #2985, 9 November 2026).
       { file: "lib/membership-manage.ts", names: ["MANAGE_CUSTOMERS_MAX = 20", "MANAGE_GRANT_BYTES = 700", "Promise.allSettled(customersOf(grant)"] },
+      // The member's checkout, which proves the claim again under that same count, makes one customer on the creator's account
+      // with the proved address so the buyer cannot type another over it (Codex X4 on #2999): one more call inside those five.
+      { file: "lib/fair-coupon.ts", names: ["MEMBER_CUSTOMER_STRIPE_CALLS = 1", "memberCustomer(account: string, email: string)"] },
       // A code only for people who bought here before reads what the typed email bought from the creator's Stripe account, counted before (554 [DS1], unit 2, 11 November 2026).
       // A call's deposit code reads the creator's Stripe account for the typed code, counted before (rule MR audit G2, 14 November 2026).
       { file: "app/api/store/book/route.ts", names: ["takeBuyerRead(store, DEPOSIT_CODE_REQUEST_UNITS)"] },

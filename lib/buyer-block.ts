@@ -41,17 +41,31 @@ export const blockKey = (sid: string) => `nl:blk:${sid}`;
 
 type BlockStore = Pick<Store, "sid"> & Parameters<typeof takeData>[0];
 
+/**
+ * An address as one person: normalised, and its "+tag" left out of the part before the "@" (Claude 7 on #3839:
+ * "x+tag@" was not blocked when "x@" was). Both spellings reach the same mailbox, so a block covers them all.
+ */
+function personAddress(email: string): string {
+  const address = normaliseEmail(email);
+  const at = address.lastIndexOf("@");
+  if (at <= 0) return address;
+  const local = address.slice(0, at).replace(/\+.*$/, "");
+  return local ? `${local}${address.slice(at)}` : address;
+}
+
 /** The HMAC of an address, or null when there is no key to make it with. */
 export function personMark(email: string): string | null {
   const key = deriveKey("buyer-block");
   if (!key) return null;
-  return createHmac("sha256", key).update(normaliseEmail(email)).digest("hex");
+  return createHmac("sha256", key).update(personAddress(email)).digest("hex");
 }
 
 /** A reason as kept: one line, at most BLOCK_REASON_MAX characters. */
 export function blockReason(raw: unknown): string {
   return typeof raw === "string"
-    ? raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, BLOCK_REASON_MAX)
+    ? // Well formed after the cut (Claude 7 on #3839): a lone surrogate is written by JSON as six bytes, past the entry's
+      // room, and a pair cut at the most would leave one; each becomes U+FFFD, three bytes.
+      raw.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").replace(/\s+/g, " ").trim().slice(0, BLOCK_REASON_MAX).toWellFormed()
     : "";
 }
 
@@ -80,7 +94,9 @@ export const BLOCK_CHECK_COMMANDS = 2;
  * exactly. A store with no list blocks nobody, which needs no key to say.
  */
 export async function blockedState(store: Pick<Store, "sid">, email: string): Promise<BlockState> {
-  if (!store.sid || !isRedisConfigured()) return "unknown";
+  // A store with no sid has no list, so it blocks nobody (Claude 7 on #3839): never every visitor refused as unknown.
+  if (!store.sid) return { blocked: false };
+  if (!isRedisConfigured()) return "unknown";
   const key = blockKey(store.sid);
   const mark = personMark(email);
   let replies: unknown[] | null;

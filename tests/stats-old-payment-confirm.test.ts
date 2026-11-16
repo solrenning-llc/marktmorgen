@@ -51,6 +51,8 @@ async function main(): Promise<void> {
     ["not a list", { object: "invoice_payment" }],
     ["data not an array", { object: "list", data: { rows: [row()] }, has_more: false }],
     ["has_more missing", { object: "list", data: [row()] }],
+    // Codex X7 on #4549 (MEDIUM, money): one row with more behind it is not the payment's only invoice, so it proves nothing.
+    ["one row, but Stripe holds more (has_more true)", list([row()], { has_more: true })],
     ["the payment not paid", list([row({ status: "open" })])],
     ["another payment", list([row({ payment: { type: "payment_intent", payment_intent: "pi_Another00001" } })])],
     ["a charge, not a payment intent", list([row({ payment: { type: "charge", charge: "ch_1" } })])],

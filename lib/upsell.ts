@@ -280,6 +280,8 @@ export type TakeResult =
   | { kind: "failed" }
   /** Stripe's answer did not arrive; the thanks page finds out what happened. */
   | { kind: "checking" }
+  /** Stripe answered 429 (too many requests) to the yes: the offer was let go of and can be answered again, under the same idempotency key. */
+  | { kind: "busy" }
   | { kind: "unavailable" }
   /** A yes without the box to start access at once checked on this offer's own button (lib/digital-consent.ts): nothing written, nothing charged. */
   | { kind: "consent" }
@@ -579,11 +581,29 @@ export async function takeUpsell(input: {
     return { kind: "failed" };
   } catch (error) {
     // Stripe answered and said no — a declined card, a refused request — so
-    // nothing was charged.
-    if (error instanceof StripeError && error.status < 500) {
+    // nothing was charged. Never a 429 (too many requests: nothing done, and
+    // nothing said of the card), a 409 or an idempotency error (a request
+    // under this key is still being worked on, or was made before): those
+    // say nothing of a charge, and go the way of no answer below.
+    if (
+      error instanceof StripeError &&
+      error.status < 500 &&
+      error.status !== 409 &&
+      error.status !== 429 &&
+      error.code !== "idempotency_error" &&
+      error.code !== "idempotency_key_in_use"
+    ) {
       await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, customer, at: Date.now() });
       await unwatchPending(store, session, slot);
       return { kind: "failed" };
+    }
+    // Too many requests: not a word about the card, and the yes is not lost to it (outage drill, 13 November 2026).
+    // The offer is let go of so the buyer can answer it again; that yes goes under this same idempotency key, so
+    // whatever Stripe did with this one, it is charged once at most.
+    if (error instanceof StripeError && error.status === 429) {
+      await redisPipeline([["DEL", recordKey(session, slot)], ...(slot ? [["SREM", slotsKey(session), slot]] : [])]);
+      await unwatchPending(store, session, slot);
+      return { kind: "busy" };
     }
     // No answer, or Stripe's own failure: the charge may have gone through.
     // It stays pending and is settled from what Stripe says (settleUpsells),

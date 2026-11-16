@@ -160,6 +160,45 @@ export async function readPage(statsId: string | null, productId: string): Promi
   return pageOf(replies[0]);
 }
 
+/**
+ * The UTF-8 bytes a product's kept page record weighs (STRLEN, Redis's own count), read exactly: 0 when none is kept,
+ * null for any other answer or a failed request, never a size guessed (rule 24). What a publish pays its reads by.
+ */
+export async function keptPageBytes(statsId: string, productId: string): Promise<number | null> {
+  try {
+    const replies = repliesFor(await redisPipeline([["STRLEN", pageKey(statsId, productId)]]), 1);
+    const bytes = replies ? replies[0] : undefined;
+    return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A page that grew past what was counted for reading it: nothing was read whole, and nothing is decided from it. */
+export class PageGrown extends Error {
+  constructor() {
+    super("The page changed while it was being read. Try again in a moment.");
+    this.name = "PageGrown";
+  }
+}
+
+/**
+ * A product's page, read no further than `most` bytes (what keptPageBytes measured and the caller counted): a page grown
+ * since is read cut, cannot be read, and throws PageGrown, so never more is read than was paid for.
+ */
+export async function readPageWithin(statsId: string | null, productId: string, most: number): Promise<SalesPage> {
+  if (!statsId || !isRedisConfigured() || most <= 0) return { ...EMPTY_PAGE, blocks: [] };
+  const [raw] = repliesFor(await redisPipeline([["GETRANGE", pageKey(statsId, productId), 0, most - 1]]), 1) ?? [undefined];
+  if (typeof raw !== "string") throw new UnknownReplyError("a page");
+  if (!raw) return { ...EMPTY_PAGE, blocks: [] };
+  try {
+    JSON.parse(raw);
+  } catch {
+    throw new PageGrown();
+  }
+  return pageOf(raw);
+}
+
 /** A kept page from its GET or MGET slot: null is "none kept", a page's JSON is the page, anything else throws. */
 function pageOf(raw: unknown): SalesPage {
   if (raw === null) return { ...EMPTY_PAGE, blocks: [] };

@@ -12,6 +12,11 @@
  * rule. A false alarm costs a member a wait, not their words. Nothing is
  * guessed by a model and nothing leaves the store.
  *
+ * A member's change to what they already published is checked the same way
+ * (unit 2.3): the queue holds only new posts and comments, so a change the
+ * filter would hold is not saved, the published words stay as they were and
+ * the member reads one fixed sentence (`heldedit`), never which word or rule.
+ *
  * Two reasons, each said in words to the creator:
  *
  *   word   a word or phrase on the creator's own list, matched whole, without

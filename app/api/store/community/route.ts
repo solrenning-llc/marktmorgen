@@ -354,6 +354,13 @@ export async function POST(request: NextRequest) {
       if (!text && !post.img) return back(postPage, "empty", `post-${post.id}`);
       if (linkCount(`${title}\n${text}`) > MAX_LINKS_IN_POST) return back(postPage, "links", `post-${post.id}`);
       if (!owner && !(await within(id, key, "post"))) return back(postPage, "slow", `post-${post.id}`);
+      // The creator's words to check apply to a change too, or a member could
+      // publish clean words and then rewrite them (113 [E2-COMMUNITY-MODERATION],
+      // unit 2.3). The approval queue (543 [CM2]) holds only new posts and
+      // comments, so a change it would hold is not saved at all: what was
+      // published stays exactly as it was, and the member reads one fixed
+      // sentence naming no word or rule. Nothing is kept of the change.
+      if (filterHold(config.filter, [title, text], owner)) return back(postPage, "heldedit", `post-${post.id}`);
       await editPost(id, post, { title, text }, store);
       return back(postPage, "edited", `post-${post.id}`);
     }
@@ -366,6 +373,8 @@ export async function POST(request: NextRequest) {
       if (!text) return back(postPage, "empty", `comment-${comment.id}`);
       if (linkCount(text) > MAX_LINKS_IN_COMMENT) return back(postPage, "links", `comment-${comment.id}`);
       if (!owner && !(await within(id, key, "comment"))) return back(postPage, "slow", `comment-${comment.id}`);
+      // As for a post's change, above.
+      if (filterHold(config.filter, [text], owner)) return back(postPage, "heldedit", `comment-${comment.id}`);
       await editComment(id, post.id, comment, text, store);
       return back(postPage, "edited", `comment-${comment.id}`);
     }

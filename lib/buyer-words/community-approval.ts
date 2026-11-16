@@ -32,8 +32,14 @@ export type ApprovalWords = {
   takeBackSure: string;
   dismiss: string;
   unreadable: string;
-  /** What happened after a button (?n=...). */
-  notices: { held: string; heldcomment: string; heldfull: string; heldmine: string; withdrawn: string };
+  /**
+   * What happened after a button (?n=...). `heldedit`: a member's change to
+   * what they already published was not saved, because the creator's words
+   * to check would hold it and the queue holds only new posts and comments
+   * (113 [E2-COMMUNITY-MODERATION], lib/community-filter.ts). It names no
+   * word and no rule.
+   */
+  notices: { held: string; heldcomment: string; heldfull: string; heldmine: string; withdrawn: string; heldedit: string };
 };
 
 const en: ApprovalWords = {
@@ -55,6 +61,7 @@ const en: ApprovalWords = {
     heldfull: "Too many posts are waiting for approval in this community right now. Try again later.",
     heldmine: "You already have as many posts waiting as can wait. Wait for the creator's answer, or take one back.",
     withdrawn: "Taken back. It was not published.",
+    heldedit: "Your change was not saved, so what you wrote before is still there as it was. A change like this needs the creator's approval, and a change cannot wait for it. To say it another way, write it as a new post or comment, which can wait for the creator's approval.",
   },
 };
 
@@ -77,6 +84,7 @@ const es: ApprovalWords = {
     heldfull: "Ahora mismo hay demasiadas publicaciones pendientes de aprobación en esta comunidad. Inténtalo más tarde.",
     heldmine: "Ya tienes tantas publicaciones pendientes como pueden esperar. Espera la respuesta del creador o retira una.",
     withdrawn: "Retirado. No se publicó.",
+    heldedit: "Tu cambio no se guardó, así que lo que escribiste antes sigue como estaba. Un cambio como este necesita la aprobación del creador, y un cambio no puede quedar pendiente de ella. Para decirlo de otra forma, escríbelo como una publicación o un comentario nuevos, que sí pueden quedar pendientes de la aprobación del creador.",
   },
 };
 
@@ -99,6 +107,7 @@ const fr: ApprovalWords = {
     heldfull: "Trop de publications attendent une approbation dans cette communauté en ce moment. Réessayez plus tard.",
     heldmine: "Vous avez déjà autant de publications en attente que possible. Attendez la réponse du créateur, ou retirez-en une.",
     withdrawn: "Retiré. Il n'a pas été publié.",
+    heldedit: "Votre modification n'a pas été enregistrée, donc ce que vous aviez écrit reste tel quel. Une modification comme celle-ci demande l'approbation du créateur, et une modification ne peut pas l'attendre. Pour le dire autrement, écrivez-le dans une nouvelle publication ou un nouveau commentaire, qui peut attendre l'approbation du créateur.",
   },
 };
 
@@ -121,6 +130,7 @@ const de: ApprovalWords = {
     heldfull: "In dieser Community warten gerade zu viele Beiträge auf Freigabe. Versuchen Sie es später erneut.",
     heldmine: "Sie haben schon so viele Beiträge in der Warteschlange, wie warten können. Warten Sie auf die Antwort des Erstellers oder ziehen Sie einen zurück.",
     withdrawn: "Zurückgezogen. Es wurde nicht veröffentlicht.",
+    heldedit: "Ihre Änderung wurde nicht gespeichert, daher steht dort weiter, was Sie vorher geschrieben haben. Eine Änderung wie diese braucht die Freigabe des Erstellers, und eine Änderung kann nicht darauf warten. Wenn Sie es anders sagen möchten, schreiben Sie es als neuen Beitrag oder Kommentar, der auf die Freigabe des Erstellers warten kann.",
   },
 };
 
@@ -143,6 +153,7 @@ const it: ApprovalWords = {
     heldfull: "In questo momento ci sono troppi post in attesa di approvazione in questa community. Riprova più tardi.",
     heldmine: "Hai già tanti post in attesa quanti ne possono attendere. Aspetta la risposta del creatore o ritirane uno.",
     withdrawn: "Ritirato. Non è stato pubblicato.",
+    heldedit: "La tua modifica non è stata salvata, quindi ciò che avevi scritto prima resta com'era. Una modifica come questa richiede l'approvazione del creatore, e una modifica non può restare in attesa. Per dirlo in un altro modo, scrivilo come nuovo post o nuovo commento, che può restare in attesa dell'approvazione del creatore.",
   },
 };
 
@@ -165,6 +176,7 @@ const nl: ApprovalWords = {
     heldfull: "Er wachten nu te veel berichten op goedkeuring in deze community. Probeer het later opnieuw.",
     heldmine: "Je hebt al zoveel berichten wachten als er kunnen wachten. Wacht op het antwoord van de maker, of trek er een in.",
     withdrawn: "Ingetrokken. Het is niet geplaatst.",
+    heldedit: "Je wijziging is niet opgeslagen, dus wat je eerder schreef staat er nog zoals het was. Een wijziging als deze heeft goedkeuring van de maker nodig, en een wijziging kan daar niet op wachten. Wil je het anders zeggen, schrijf het dan als een nieuw bericht of een nieuwe reactie, die wel op goedkeuring van de maker kan wachten.",
   },
 };
 
@@ -187,6 +199,7 @@ const pt: ApprovalWords = {
     heldfull: "Neste momento há demasiadas publicações à espera de aprovação nesta comunidade. Tente mais tarde.",
     heldmine: "Já tem tantas publicações à espera quantas podem esperar. Aguarde a resposta do criador, ou retire uma.",
     withdrawn: "Retirado. Não foi publicado.",
+    heldedit: "A sua alteração não foi guardada, por isso o que tinha escrito continua como estava. Uma alteração como esta precisa da aprovação do criador, e uma alteração não pode ficar à espera dela. Para o dizer de outra forma, escreva-o como uma nova publicação ou um novo comentário, que pode ficar à espera da aprovação do criador.",
   },
 };
 
@@ -197,4 +210,4 @@ export function approvalWords(language: unknown): ApprovalWords {
 }
 
 /** The notices that warn rather than confirm. */
-export const APPROVAL_WARN = new Set(["heldfull", "heldmine"]);
+export const APPROVAL_WARN = new Set(["heldfull", "heldmine", "heldedit"]);

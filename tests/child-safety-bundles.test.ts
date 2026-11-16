@@ -199,7 +199,7 @@ async function main(): Promise<void> {
   await redis.pipeline([["SET", `nl:csa:keep:${tag}:${partC}`, "garbled"]]);
   is("the single checkout says unavailable", await sale(cleanBundle, []), "unavailable");
   is("the cart refuses", await cart([cleanBundle, partB]), ["refused", 0]);
-  is("the extras route answers 503", await send(extrasRoute as Handler, "extras", { id: other, bump: { productId: cleanBundle, price: "9", pitch: "" }, slot: 1 }), [503, "unavailable"]);
+  is("the extras route answers 503", await send(extrasRoute as Handler, "extras", { id: other, bump: { productId: cleanBundle, price: "9", pitch: "" }, slot: 1 }), [503, "hold_unread"]);
   await redis.pipeline([["DEL", `nl:csa:keep:${tag}:${partC}`]]);
 
   done();

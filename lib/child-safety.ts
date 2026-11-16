@@ -61,7 +61,8 @@ export { isHeldForReport } from "@/lib/child-safety-holds";
 /**
  * The answer a studio route gives instead of changing or deleting anything of
  * a product kept for a report, or null to go on: 409 `on_hold` while it is
- * held, 503 when the hold cannot be read, never the change. The id may name
+ * held, 503 `hold_unread` when the hold cannot be read (never `unavailable`, which the studio reads as stores
+ * not being switched on: cloud P's LEVE on #3471), never the change. The id may name
  * the product or one of its price options, whose product is the one held; an
  * id the store does not have reads nothing, since nothing of it can change.
  */
@@ -73,7 +74,7 @@ export async function heldRefusal(store: Store, id: string): Promise<Response | 
     return null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 
@@ -90,7 +91,7 @@ export async function heldRefusalAmong(store: Store, ids: readonly string[]): Pr
     return held ? Response.json({ ok: false, error: "on_hold" }, { status: 409 }) : null;
   } catch (error) {
     console.error("a preservation hold could not be read", error instanceof Error ? error.message : "unknown");
-    return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
+    return Response.json({ ok: false, error: "hold_unread" }, { status: 503 });
   }
 }
 

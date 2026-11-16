@@ -77,7 +77,7 @@ import { MAX_TEAM } from "@/lib/team";
 import { MAX_ANSWER_TEXT, MAX_FEEDBACK, MAX_TASK_FILE_BYTES, TASK_ROOM_BYTES, TRIAL_TASK_ROOM_BYTES } from "@/lib/assignment-rules";
 import { COMMUNITY_PICTURES, PICTURE_BYTES, TRIAL_COMMUNITY_PICTURES } from "@/lib/community-picture-rules";
 import { MAX_IMAGE_BYTES } from "@/lib/product-image";
-import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLOSING_DAYS, DEL_BATCH, ENDED_LIST_DOWNLOADS, ENDED_STORE_EXPORTS, ERASE_WITHIN_DAYS, FOLLOW_BATCH, RENEWALS_AT_ONCE, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { MAX_CRM_FIELDS } from "@/lib/crm-rules";
 import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
@@ -1880,9 +1880,11 @@ export const CLOSING_VISIT_REPLY_BYTES = MAX_STORE_BYTES + 128 * 1024;
 /**
  * The days a closing store is visited, once a day, from its plan's end to the walk: its CLOSING_DAYS, the week a late
  * last notice adds, the day its buyers' notices may start early, its closing day, and, when its state and its address
- * mark were both lost, a notice's length more (its buyers not told yet are told first) and the day it then closes.
+ * mark were both lost, a notice's length more (its buyers not told yet are told first) and the day it then closes;
+ * and, once closed ("removed"), the ERASE_WITHIN_DAYS it stays in the final line until the walk deletes its records
+ * and takes it out (lib/closed-store-data.ts), each day visited again (Claude 5 on #3501, 6907073223 and 6914305400).
  */
-export const CLOSING_VISIT_DAYS = CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS + 1 + BUYER_NOTICE_DAYS + 1;
+export const CLOSING_VISIT_DAYS = CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS + 1 + BUYER_NOTICE_DAYS + 1 + ERASE_WITHIN_DAYS;
 /** One daily visit of a closing store, in dollars: its commands and what it reads back. */
 export function closingVisitCost(): number {
   return CLOSING_VISIT_COMMANDS * COMMAND + CLOSING_VISIT_REPLY_BYTES * DB_BYTE;

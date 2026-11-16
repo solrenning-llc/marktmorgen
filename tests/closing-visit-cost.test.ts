@@ -21,7 +21,7 @@
 import { createHash } from "node:crypto";
 import { FINAL_INDEX } from "@/lib/closing-holds";
 import { type Hands, closeOne } from "@/lib/plan-closing";
-import { CLOSING_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
+import { CLOSING_DAYS, ERASE_WITHIN_DAYS, WARN_WEEK_DAYS } from "@/lib/plan-closing-rules";
 import { BUYER_NOTICE_DAYS, BUYER_SEND_DAYS } from "@/lib/closing-buyers-rules";
 import { claimHandle, setSubscription, storeForEmail, storeRef } from "@/lib/store";
 import { MAX_STORE_BYTES } from "@/lib/store";
@@ -116,7 +116,39 @@ async function main(): Promise<void> {
     is("it waits a notice's length after its buyers are told", lostVisits.some((v) => v.state === "waiting"), true);
     is("a waiting visit checks its state before it stops renewals (one GET more)", lostVisits.filter((v) => v.state === "waiting").every((v) => v.stateGets === 2), true);
     is("each of its visits sends at most CLOSING_VISIT_COMMANDS commands", lostVisits.filter((v) => !(v.commands <= bound)).map((v) => [v.day, v.commands]), []);
-    const most = Math.max(...visits.map((v) => v.commands), ...heldPostal.map((v) => v.commands), ...notices.map((v) => v.commands), ...lostVisits.map((v) => v.commands));
+
+    // A closed store (its closing day done, "removed") stays in the final line until the walk deletes its records and
+    // takes it out (lib/closed-store-data.ts, ZREM FINAL_INDEX), which comes within ERASE_WITHIN_DAYS of its closing
+    // day; every day until then closeOne visits it again (markShut, refuseLatePlans and the removed branch). Claude 5
+    // on #3501 (6907073223, 6914305400): those visits were priced in no day of CLOSING_VISIT_DAYS.
+    const closed = await endedStore("visitremoved");
+    const closedOn = closed.endedAt + (CLOSING_DAYS + 1) * DAY;
+    await pipeline([
+      ["ZADD", FINAL_INDEX, closed.endedAt, closed.key],
+      ["SET", stateKey(closed.key), JSON.stringify({ of: closed.endedAt, day: closedOn, removed: closedOn, due: closedOn })],
+    ]);
+    // Stripe, for this store only: every search and list of its plan subscriptions answers empty and complete, so a
+    // visit gets past refuseLatePlans as a closed store's does (nothing is reached; nothing is charged or stopped).
+    const refusing = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.hostname === "api.stripe.com" && (init?.method ?? "GET") === "GET" && url.pathname.startsWith("/v1/subscriptions")) return Response.json({ object: "list", data: [], has_more: false, next_page: null });
+      return refusing(input, init);
+    }) as typeof fetch;
+    process.env.STRIPE_SECRET_KEY = "sk_test_closing_visit_cost_only";
+    const removedVisits: Visit[] = [];
+    try {
+      for (let day = 1; day <= ERASE_WITHIN_DAYS; day += 1) removedVisits.push(await visit(closed.key, closed.key, closedOn + day * DAY, day));
+    } finally {
+      globalThis.fetch = refusing;
+      delete process.env.STRIPE_SECRET_KEY;
+    }
+    part("A closed store waits in the final line for the walk, visited each day until it");
+    is("every visit until the walk finds it closed, its records left to the walk", [...new Set(removedVisits.map((v) => `${v.state}: ${v.note}`))], ["removed: its records are deleted by the next walk"]);
+    is("it is visited on each of the ERASE_WITHIN_DAYS days before the walk must have come", removedVisits.length, ERASE_WITHIN_DAYS);
+    console.log(`the most commands one closed store's visit sent: ${Math.max(...removedVisits.map((v) => v.commands))}`);
+    is("each of its visits sends at most CLOSING_VISIT_COMMANDS commands", removedVisits.filter((v) => !(v.commands <= bound)).map((v) => [v.day, v.commands]), []);
+    const most = Math.max(...visits.map((v) => v.commands), ...heldPostal.map((v) => v.commands), ...notices.map((v) => v.commands), ...lostVisits.map((v) => v.commands), ...removedVisits.map((v) => v.commands));
     console.log(`the most commands one visit sent: ${most} (bound ${bound})`);
   } finally {
     console.error = quiet;
@@ -127,7 +159,7 @@ async function main(): Promise<void> {
   const days = num("CLOSING_VISIT_DAYS");
   const reply = num("CLOSING_VISIT_REPLY_BYTES");
   is("a named bound for a visit's commands", Number.isSafeInteger(bound) && bound > 0, true);
-  is("the days a closing is visited: its days, a late last notice's week, an early buyers' notice, its day, and a lost day's notice and the day after", days, CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS + 1 + BUYER_NOTICE_DAYS + 1);
+  is("the days a closing is visited: its days, a late last notice's week, an early buyers' notice, its day, a lost day's notice and the day after, and the days a closed store waits for the walk", days, CLOSING_DAYS + WARN_WEEK_DAYS + BUYER_SEND_DAYS + 1 + BUYER_NOTICE_DAYS + 1 + ERASE_WITHIN_DAYS);
   is("a visit reads its record back at the most", reply >= MAX_STORE_BYTES, true);
   is("one visit's cost: its commands and what it reads back", visitCost ? visitCost() : NaN, bound * COMMAND + reply * DB_BYTE);
   for (const tier of ["creator", "pro", "scale"] as const) {

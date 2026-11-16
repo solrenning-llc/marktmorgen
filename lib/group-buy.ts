@@ -51,7 +51,7 @@ import { sendEmail } from "@/lib/email";
 import { addressHash, grantImported, importedKey } from "@/lib/imported-purchases";
 import { bundleFromMeta } from "@/lib/bundle-rules";
 import { onAccount } from "@/lib/stripe-account";
-import { refundRowKnown } from "@/lib/refunds";
+import { confirmLostRead, lostCursorKey, lostDisputesOrRetry, refundRowKnown, rowGivesBack } from "@/lib/refunds";
 import { STRIPE_LIST_VERSION, StripeListUnreadable, readStripePage, type StripePage } from "@/lib/stripe-list";
 import { formatMoney } from "@/lib/money";
 import { type Listing, type Store, setPastBuyers, storeRef } from "@/lib/store";
@@ -274,8 +274,14 @@ async function sendReceipt(input: {
   const title = groupTitle(product, group);
   const buyer = typeof session.customer_details?.email === "string" ? session.customer_details.email : "";
   if (!buyer) return false;
-  const amount = typeof session.amount_total === "number" ? session.amount_total : product.priceCents * group.people;
-  const currency = typeof session.currency === "string" && session.currency ? session.currency : store.currency;
+  // What Stripe charged, read exactly (CX-123 rule 24; audit R48): a whole number of cents, never below zero, in a
+  // three-letter currency. Anything else leaves the line out, never the catalog's price times the people or the
+  // store's own currency; the receipt still goes, with the link that hands out the places.
+  const amount = session.amount_total;
+  const currency = session.currency;
+  const paid = Number.isSafeInteger(amount) && Number(amount) >= 0 && typeof currency === "string" && /^[a-z]{3}$/.test(currency)
+    ? formatMoney(Number(amount), currency, speech(store).lang.locale)
+    : null;
   const g = givingWords(store.language);
   return sendEmail({ meter: input.again ? { by: "store", store, kind: "email" } : { by: "order" },
     from: input.from,
@@ -285,7 +291,7 @@ async function sendReceipt(input: {
       input.lead,
       "",
       g.forWho(title, peopleWords(group.people, store.language)),
-      g.paidLine(formatMoney(amount, currency, speech(store).lang.locale)),
+      ...(paid ? [g.paidLine(paid)] : []),
       g.orderRef(group.session ?? ""),
       ...consentEmailLines(store, input.session?.metadata),
       "",
@@ -771,9 +777,10 @@ function readPass(raw: unknown): RefundPass | null | undefined {
 }
 
 /**
- * Takes back the places of purchases refunded in full: reads the store's
- * refunds since it last looked, finds the purchase each paid for, and removes
- * it from every address that took a place. Returns how many places went.
+ * Takes back the places of purchases refunded in full, or whose dispute was
+ * lost (queue 388 [TB14]): reads the store's refunds and closing events since
+ * it last looked, finds the purchase each paid for, and removes it from every
+ * address that took a place. Returns how many places went.
  *
  * The refunds are read in Stripe's exact list shape, every row as refundRowKnown (lib/refunds.ts) reads it, page
  * after page (CX-123 rules 24 and 30; C4-20261106-0450-C5-16). One pass from the anchor to the end of the list may
@@ -811,7 +818,15 @@ export async function revokeRefundedGroups(
     const id = refund.id as string;
     const pi = typeof refund.payment_intent === "string" ? refund.payment_intent : "";
     const charge = refund.charge as { refunded?: unknown } | null;
-    if (!pi || refund.status !== "succeeded" || charge?.refunded !== true) return true;
+    // A dispute closed as lost takes the purchase back as a full refund does, whatever its amount (lib/refunds.ts, the
+    // owner's rule of 4 November 2026; queue 388 [TB14]). One that names no payment says nothing of this store's
+    // purchases: it is marked read, so it never holds the place in the closing events back.
+    const dispute = refund.object === "dispute";
+    if (dispute && typeof id === "string" && id && !pi) {
+      const marked = repliesFor(await redisPipeline([["SADD", seenKey(sid), id], ["EXPIRE", seenKey(sid), SEEN_KEEP_SECONDS]]), 2);
+      return !!marked && oneWrite(marked[0]) && marked[1] === 1;
+    }
+    if (!pi || !(dispute ? rowGivesBack(refund) : refund.status === "succeeded" && charge?.refunded === true)) return true;
     const looked = repliesFor(await redisPipeline([["SISMEMBER", seenKey(sid), id], ["GET", piKey(pi)]]), 2);
     const handled = countOf(looked?.[0]);
     const groupId = looked?.[1];
@@ -939,6 +954,20 @@ export async function revokeRefundedGroups(
     }
   }
 
+  // The disputes closed as lost since the anchor, read from Stripe's closing events as lib/gifts.ts reads them. Every
+  // row read and handled keeps the place inside them (lostCursorKey, confirmLostRead), whether or not the read reached
+  // the end, so a run that reads only the newest pages leaves the next run to go on from there instead of reading them
+  // again (Claude 1 on #4774, M1; lib/gifts.ts does the same). A row not handled keeps that place where it was. The
+  // anchor moves only once the read reached the end and every row was handled: the closings are read from the anchor,
+  // so while one is unread the anchor waits, and it stays in the window.
+  const lost = await lostDisputesOrRetry(account, since, deadline, lostCursorKey("group", sid));
+  let rowsUnsure = false;
+  for (const row of lost.rows) {
+    if (Date.now() >= deadline) return revoked;
+    if (!(await handle(row))) rowsUnsure = true;
+  }
+  const lostDone = !rowsUnsure && (await confirmLostRead(lost, seenKey(sid))) && lost.complete;
+
   let pages = REFUND_PAGES;
   if (after) {
     // Resuming a pass: the newest refunds first, so one made meanwhile is not left until the pass ends. What is read
@@ -965,6 +994,12 @@ export async function revokeRefundedGroups(
     if (!whole) return revoked;
     for (const refund of read.rows) newest = Math.max(newest, refund.created as number);
     if (!read.hasMore) {
+      // The anchor moves only once the closing events were read to their end and every lost dispute read was handled
+      // (above): the closings are read from the anchor, so it waits while they are not all read. A read that went on
+      // from a place an earlier run kept did not read the closings made since that run, newer than its newest one,
+      // so the anchor goes no further than that one (lib/gifts.ts): the next run reads them from there.
+      if (!lostDone) return revoked;
+      if (lost.resumed) newest = Math.min(newest, Math.max(lost.newest, since));
       const ended = repliesFor(await redisPipeline([["SET", anchorKey(sid), String(newest)], ["DEL", passKey(sid)]]), 2);
       if (!ended) console.error("ending a pass over group refunds was left unknown");
       return revoked;

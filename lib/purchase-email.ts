@@ -37,7 +37,7 @@
 import { CLOSING_ACCESS_SENTENCE, CLOSING_TERMS_PATH, CLOSING_TERMS_WORDS } from "@/lib/closing-buyers-rules";
 import { deliversDigitally } from "@/lib/digital-consent";
 import { consentEmailLines } from "@/lib/digital-consent-email";
-import { ADMITTED_FIELD, settleAdmitted } from "@/lib/order-admission";
+import { ADMITTED_FIELD, OPEN_HOURS, settleAdmitted } from "@/lib/order-admission";
 import { countOrder } from "@/lib/orders";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
@@ -96,6 +96,27 @@ const SENT_MARK_SECONDS = 40 * 24 * 60 * 60;
 const SENDING_MARK_SECONDS = 15 * 60;
 
 export const confirmationKey = (session: string) => `nl:confirm:${session}`;
+/**
+ * A checkout whose admitted room was given back (confirmPurchase), kept an hour past the hours that room is held
+ * (lib/order-admission.ts OPEN_HOURS), so a second give-back for it can never reach a room still held.
+ */
+const roomGivenKey = (session: string) => `nl:confirm-room:${session}`;
+const ROOM_GIVEN_SECONDS = (OPEN_HOURS + 1) * 60 * 60;
+
+/**
+ * True only for the one run that gives a checkout's admitted room back (Claude 3, CX-116 on #2872): a gift or a
+ * purchase for several whose caller's "sent" mark was lost is told again within the day and answers "sent" a second
+ * time, and a second give-back would free another checkout's room in that hour, so the store could admit an order
+ * past its figure. Claimed with SET NX and answered exactly "OK"; taken already, an answer of another shape or a failed
+ * call give nothing back, and the room stays held until its hours end (CX-123 rule 24: never given back twice).
+ */
+async function firstToGiveRoomBack(sessionId: string): Promise<boolean> {
+  const claimed = await redisPipeline([["SET", roomGivenKey(sessionId), "1", "NX", "EX", ROOM_GIVEN_SECONDS]]).then(
+    (replies) => (Array.isArray(replies) && replies.length === 1 ? replies[0] : undefined),
+    () => undefined,
+  );
+  return claimed === "OK";
+}
 
 /** A checkout as Stripe lists or returns it, with only the fields read here. */
 export type SessionRecord = {
@@ -259,12 +280,37 @@ function firstChargeDiscount(session: SessionRecord): "none" | "once" | "every" 
   }
   const coupons = Array.isArray(session.discounts) ? session.discounts : [];
   const named = Boolean(meta.code || meta.sale || meta.welcome || meta.winback);
-  if ((details === undefined || details === null) && coupons.length === 0 && !named) return "none";
+  if ((details === undefined || details === null) && coupons.length === 0 && !named) {
+    // Stripe gave no total_details and nothing names a discount: what came off is read from the price before discounts.
+    // Above what was charged, something came off whose length does not read; a price before discounts that does not
+    // read is not taken for "nothing came off" (CX-123 rule 24).
+    const subtotal = session.amount_subtotal;
+    if (!Number.isSafeInteger(subtotal) || Number(subtotal) < 0 || !Number.isSafeInteger(session.amount_total)) return "unread";
+    return Number(subtotal) > Number(session.amount_total) ? "unsure" : "none";
+  }
   const durations = coupons.map(couponDuration);
   if (durations.length > 0 && durations.every((d) => d === "once")) return "once";
   if (durations.length > 0 && durations.every((d) => d === "forever")) return "every";
   if (durations.every((d) => d === null) && (meta.sale || meta.welcome) && !meta.code && !meta.winback) return "once";
   return "unsure";
+}
+
+/**
+ * For the thanks page (rule 27): a membership charged at checkout whose discount came off its first charge, said in
+ * the same words as the confirmation's "Paid:" line; "unread" when what was charged or what came off does not read, so
+ * the page names no price; null when the price is said as before (nothing off, every charge off, a free trial, a moved
+ * membership, a payment plan or an introductory price, which the page says itself).
+ */
+export function firstChargeSaid(store: Pick<Store, "language" | "tax">, session: SessionRecord, product: Listing): string | "unread" | null {
+  if (!product.recurring) return null;
+  const meta = session.metadata ?? {};
+  if (introOf(meta) || wholeNumber(meta.trial_days) > 0 || firstCharge(meta) || (meta.kind === "plan" && Number(meta.plan_payments) >= 2)) return null;
+  if (!chargeReads(session)) return "unread";
+  const discount = firstChargeDiscount(session);
+  if (discount === "unread") return "unread";
+  if (discount !== "once" && discount !== "unsure") return null;
+  const every = meta.every === "year" ? "year" : product.recurring.interval;
+  return paidLine(store, product, session.amount_total as number, session.currency as string, null, 0, wholeNumber(meta.ends_after), null, every, discount, regularOf(session, meta));
 }
 
 function renderConfirmation(store: Store, session: SessionRecord, nowSeconds: number, keys: KeyLine[], listings: Listing[],
@@ -526,8 +572,11 @@ export async function confirmPurchase(
     // A count not confirmed keeps the place its checkout was admitted with until its hours end, never given back as
     // if counted (lib/orders.ts, countOrder).
     if ((await countOrder(store, `checkout:${sessionId}`, paid, Date.now())) === "unknown") return outcome;
-    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts).
-    await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
+    // The hour its checkout was held in gives it back, now that it is counted (lib/order-admission.ts): once per
+    // checkout, however many runs answer "sent" for it.
+    if (read.session?.metadata?.[ADMITTED_FIELD] !== undefined && (await firstToGiveRoomBack(sessionId))) {
+      await settleAdmitted(store, read.session?.metadata?.[ADMITTED_FIELD], 1, read.items ?? 1);
+    }
   }
   return outcome;
 }
@@ -729,9 +778,10 @@ export type TakenOffer = {
   parent: string;
   product: Listing;
   email: string;
-  amountCents: number;
-  /** What Stripe charged it in. */
-  currency: string;
+  /** What Stripe charged, in cents; null when its answer did not say it exactly, and the "Paid" line is left out. */
+  amountCents: number | null;
+  /** What Stripe charged it in; null with an amount not read exactly. */
+  currency: string | null;
   /** When what was added is a bundle: the products it hands over. */
   items?: Listing[];
   /** The offer's own payment metadata, where its yes to start access at once is kept (lib/digital-consent.ts). */
@@ -744,13 +794,13 @@ export function offerConfirmationFor(store: Store, offer: TakenOffer, key: SaleK
   const name = store.name;
   const base = storeBase(store);
   const words = ordersWords(store.language);
-  const { money } = speaking(store, offer.currency);
+  const paid = offer.amountCents !== null && offer.currency !== null ? speaking(store, offer.currency).money(offer.amountCents) : null;
   const lines: string[] = [
     words.offerIntro(name),
     "",
     words.whatYouAdded(offer.product.title),
     ...(offer.items?.length ? [words.insideIt(offer.items.map((p) => p.title).join(", "))] : []),
-    words.paidOnce(money(offer.amountCents)),
+    ...(paid ? [words.paidOnce(paid)] : []),
     words.reference(offer.reference),
     ...consentEmailLines(store, offer.metadata),
     "",

@@ -131,9 +131,11 @@ export async function checkGrowthAndContact({owner,LOCAL,abStore,second,contactT
    assert.equal(contact.url(),url,"declined departure preserves uncertain values");
    assert.equal(await company.inputValue(),"Keep this copy "+width);
    assert.equal(await contact.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0);
-   // Audited from the top of the page: the leave link above scrolled to the foot, which can leave a task button half
-   // under the sticky studio header's 44 px links, a scroll position axe reads as a small target, not a smaller one.
-   await contact.evaluate(()=>window.scrollTo({top:0,behavior:"instant"}));
+   // The audit reads the page from its top, as the other axe checks do (accessibility-buyer-actions, -signup-actions):
+   // scrolled, a target of <main> passes under the sticky studio header, whose 44 x 44 home link (2.5.5 AAA, #4630)
+   // then overlaps it, and target-size would judge where the test left the scroll, not the page (#4630, 1280 px).
+   await contact.evaluate(()=>{document.activeElement?.blur?.();window.scrollTo({top:0,left:0,behavior:"instant"});});
+   assert.equal(await contact.evaluate(()=>scrollY),0,"the axe audit starts from the top of the page");
    await contact.addScriptTag({content:axeSource});
    const violations=await contact.evaluate(async()=>{const result=await window.axe.run(document.querySelector("main"),{runOnly:{type:"tag",values:["wcag2a","wcag2aa","wcag21aa","wcag22aa"]}});return result.violations.map(rule=>rule.id);});
    assert.deepEqual(violations,[]);

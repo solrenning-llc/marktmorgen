@@ -6,7 +6,8 @@ import { studioPath } from "@/lib/studio-route";
 export type Crumb = { label: string; href: string };
 
 // A link in a trail is a control, not words in a sentence: it gets the 44px
-// box of every target, with its words centered in it (AX274 2.5.5).
+// box of every target, wide as well as tall (a short "Studio" was 41 px wide), with its words centered in it
+// (AX274 2.5.5, tests/studio-header-targets.test.ts).
 const LINK = "inline-flex min-h-11 min-w-11 items-center text-ink-soft underline underline-offset-4 hover:text-violet-deep";
 
 /**

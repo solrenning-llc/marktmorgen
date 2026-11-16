@@ -210,6 +210,10 @@ async function main(): Promise<void> {
   is("off", [(await call({ action: "about-page", on: false, counts: true })).ok, (await readConfig(id))!.page], [true, { on: false, counts: false }]);
   is("on, without counts", [(await call({ action: "about-page", on: true, counts: false })).ok, (await readConfig(id))!.page], [true, { on: true, counts: false }]);
   is("the studio offers it", readFileSync("components/community-studio.tsx", "utf8").includes('action: "about-page"'), true);
+  // Claude 7's LOW and Codex L's LEVE on #3016 (AX274, WCAG 2.4.9): two links named "Open it" went to the community and
+  // to its About page; each link's own words name where it goes.
+  const studioSource = readFileSync("components/community-studio.tsx", "utf8");
+  is("the About page's link says so in its own words (2.4.9)", [/community\/about`\} className="btn btn-ghost">Open the About page</.test(studioSource), /community\/about`\} className="btn btn-ghost">Open it</.test(studioSource)], [true, false]);
 
   // Claude 7's review of #3016 (6889907689, MEDIUM), reopened by Claude 6 (6907359960), Codex X5 (6907743661) and Codex
   // L (6907745085): aboutPage read the community's settings (a GET of up to SITEMAP_SETTINGS_BYTES) before the visit was

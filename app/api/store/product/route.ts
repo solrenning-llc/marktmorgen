@@ -1,3 +1,4 @@
+import { runningSubscriptions } from "@/lib/payment-methods";
 import { applyCourseTaskDrops, noteTaskUpload, readCourseTaskDrops } from "@/lib/assignment";
 import { noteRemovedCourse } from "@/lib/removed-courses";
 import { courseIndexes } from "@/lib/certificate";
@@ -7,6 +8,7 @@ import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import {
   MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
@@ -30,7 +32,7 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { lockRead } from "@/lib/two-step-unknown";
 import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
@@ -50,8 +52,27 @@ import { deliveredFile, idsOfKind, readAllListings, readDelivery, readListing, r
 import { fastMoneyOnPage, fastMoneyRefusal } from "@/lib/terms-check-rules";
 import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
-import { readPage } from "@/lib/sales-page-store";
+import { templateLeft } from "@/lib/template-text";
+import { keptPageBytes, readPage } from "@/lib/sales-page-store";
+import { publishPageUnits } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
+
+/**
+ * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
+ * under the store lock), by the kept record's own bytes (publishPageUnits; Claude 7 and Claude 6 on #3693), and says
+ * how many bytes were paid for. No page: nothing read or taken. A size that does not read: page_unread (503), never
+ * "unknown", which this route answers for a product that is gone (Claude 6 on #3693, rule 24); nothing is read.
+ * Units refused: the studio's own "used" answer, and nothing is read.
+ */
+async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { id: string; page?: unknown }): Promise<{ paid: number } | Response> {
+  if (!draft.page || !store.statsId) return { paid: 0 };
+  const bytes = await keptPageBytes(store.statsId, draft.id);
+  if (bytes === null) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+  const units = publishPageUnits(bytes);
+  if (units === 0) return { paid: 0 };
+  const paid = await countStudio(store, null, units);
+  return paid.ok ? { paid: bytes } : Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });
+}
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -314,6 +335,15 @@ export async function POST(request: NextRequest) {
         console.error("could not read a product or its course before removing it", error);
         return Response.json({ ok: false, error: "unavailable" }, { status: 503 });
       }
+      // Members and payment plans charge again on the creator's Stripe account whatever this store says: a product
+      // is not removed while any of them still runs for it, so nobody keeps paying for something deleted. Asked for
+      // every product, not only one paid now: a membership edited to free first still charges its members (#4074).
+      // Not known (Stripe did not answer, or had more than could be read) is "some", never "none" (as for a currency).
+      if (before && guarded.store.stripeAccountId) {
+        const running = await runningSubscriptions(guarded.store, id);
+        if (running === null) return Response.json({ ok: false, error: "stripe" }, { status: 502 });
+        if (running > 0) return Response.json({ ok: false, error: "memberships", running }, { status: 409 });
+      }
       let course: Awaited<ReturnType<typeof readCourseExact>> = null;
       const removed = await removeProduct(ref, id, async (going, store) => {
         if (!going.course) return true;
@@ -420,25 +450,33 @@ export async function POST(request: NextRequest) {
       // released only after the record that pointed at it is written.
       const linked = await setProductLink(ref, id, read.url);
       if (linked.ok && linked.removed) {
-        await del(linked.removed.pathname).catch((error: unknown) => {
-          console.error("could not delete a file replaced by a link", error);
-        });
+        await deleteOrSweep(linked.removed.pathname, "a file replaced by a link");
         await dropStamped(linked.removed);
       }
       result = linked.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(linked.reason) };
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      // A publish reads its sales page twice (the check, then under the lock), by the kept record's own bytes: those reads
+      // are paid for in studio units before either is made, or nothing is read (payPageReads; Claude 7 on #3693).
+      let pagePaid = 0;
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
         const draft = await readListing(guarded.store, id);
         if (draft) {
+          const pay = await payPageReads(guarded.store, draft);
+          if (pay instanceof Response) return pay;
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          pagePaid = pay.paid;
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
+          // Nor while its sales page, in either version, still holds a part a template left to write: saving it
+          // is refused once the product is on the store, so publishing never takes it there (754 [STN1], Revisor 2 on #3593).
+          const pageLeft = shownPage ? templateLeft(shownPage) : null;
+          if (pageLeft) return Response.json({ ok: false, error: "placeholder", ...pageLeft, product: draft.title }, { status: 409 });
           // A course from a ready structure is published only once its example titles are replaced (540 [CU1]).
           if (draft.course) {
             const course = await readCourse(draft.course.id);
@@ -449,8 +487,38 @@ export async function POST(request: NextRequest) {
           if (!handsOver(draft)) return Response.json({ ok: false, error: "nothing_to_hand_over", product: draft.title }, { status: 409 });
         }
       }
-      const done = await setProductHidden(ref, id, body.hidden);
-      result = done.ok ? { ok: true, product: done.product } : done;
+      // The sales page read again under the lock its saves are written under, so a part saved since the read above
+      // is never published with it (754 [STN1], Codex P on #3693). A page that cannot be read publishes nothing.
+      let pageChanged = false;
+      let pageUnread = false;
+      let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
+      const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
+        if (!now.page || !store.statsId) return true;
+        // A page added since the read above was not paid for: nothing is published, and the creator is told to try again.
+        // As one grown past the bytes paid for: read only once its size, read exactly, is still within them.
+        const keptBytes = await keptPageBytes(store.statsId, now.id);
+        if (keptBytes === null) {
+          pageUnread = true;
+          return false;
+        }
+        if (keptBytes > pagePaid) {
+          pageChanged = true;
+          return false;
+        }
+        const page = await readPage(store.statsId, now.id);
+        const fast = fastMoneyOnPage(pageWords(page));
+        const left = templateLeft(page);
+        heldBy = { fast, left, title: now.title };
+        return !fast && !left;
+      });
+      if (!done.ok && done.reason === "held" && pageUnread) return Response.json({ ok: false, error: "page_unread" }, { status: 503 });
+      if (!done.ok && done.reason === "held" && pageChanged) return Response.json({ ok: false, error: "page_changed" }, { status: 409 });
+      if (!done.ok && done.reason === "held" && heldBy) {
+        const { fast, left, title } = heldBy as { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string };
+        if (fast) return Response.json({ ok: false, error: "fast_money", passage: { ...fast, product: title } }, { status: 409 });
+        if (left) return Response.json({ ok: false, error: "placeholder", ...left, product: title }, { status: 409 });
+      }
+      result = done.ok ? { ok: true, product: done.product } : { ok: false, reason: done.reason === "held" ? "unknown" : done.reason };
     } else if (action === "unlink") {
       // The last thing a product on the store hands over is not taken off: it is replaced, or the product unpublished
       // first (754 [STN1]; Claude 6 on #3432). Read like the publish check above, from the store record the guard loaded.

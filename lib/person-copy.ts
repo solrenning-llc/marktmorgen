@@ -186,6 +186,7 @@ export const COPY_ALSO: Readonly<Record<string, AlsoHow>> = {
   "lib/free.ts": { how: "passing", days: 1, what: "How often your address asked for free products, counted by a one-way code, for an hour" },
   "lib/buyer-orders.ts": { how: "passing", days: 1, what: "A link to your purchases that was emailed to you works for 24 hours" },
   "lib/returning-code.ts": { how: "passing", days: 1, what: "If you asked for a code kept for returning buyers, the one-time link emailed to you is kept with the code, the product and your address for 30 minutes, then deleted" },
+  "lib/purchase-moves.ts": { how: "passing", days: 2, what: "If you asked to move your purchases to another address, the request holds both addresses, which stores it covers and when each address confirmed it; it is found only by the links emailed to the two addresses and deleted a day after it was asked. The day's count of requests from your address is kept under a one-way code for two days" },
   "lib/membership-manage.ts": { how: "passing", days: 1, what: "A link to manage your membership that was emailed to you works for an hour" },
   "lib/request-guard.ts": { how: "passing", days: 32, what: "How often your address asked for things, counted by one-way codes, for at most 32 days" },
   "lib/erasure-request.ts": { how: "passing", days: 1, what: "A link you asked for to delete your data works for an hour" },

@@ -18,8 +18,13 @@
  *     reach the server after the step that reads it), never "when you
  *     pressed Stop";
  *   - a stop request that fails after the run ended says nothing about a
- *     Stop button that is no longer there.
+ *     Stop button that is no longer there;
+ *   - the steps shown are the ones sent when the run began: checking or
+ *     unchecking "Read the first 10 pages" mid-run (the page re-renders with
+ *     other steps) never shows a step or a Stop the server does not have,
+ *     nor hides a Stop that works (Claude 5 on #3435, MEDIUM).
  */
+import { createElement } from "react";
 import { AiStepsAssist, AiStepsProgress } from "@/components/ai-steps-assist";
 import { AiOn } from "@/components/ai-assist";
 import { pageSteps } from "@/lib/ai-steps";
@@ -62,24 +67,25 @@ const said = (tree: unknown) => find(tree, (n) => n.props?.role === "status" && 
 const alerts = (tree: unknown) => find(tree, (n) => n.props?.role === "alert").map((n) => texts(n.props?.children).join(""));
 const button = (tree: unknown, label: string) => find(tree, (n) => n.type === "button" && texts(n.props?.children).join("") === label)[0] as Node | undefined;
 const click = (node: Node | undefined) => (node?.props?.onClick as (() => unknown) | undefined)?.();
+const extraBusy = (tree: unknown) => find(tree, (n) => n.props?.["data-probe"] === "extra")[0]?.props?.["data-busy"];
 const progress = (tree: unknown) => find(tree, (n) => n.type === AiStepsProgress)[0]?.props as Parameters<typeof AiStepsProgress>[0] | undefined;
 
-async function box() {
+async function box(pdf = true) {
   const used: unknown[] = [];
-  const mounted = await mount(
-    AiStepsAssist<{ headline: string }>,
-    {
-      title: "Write the whole page with AI",
-      hint: "A full draft.",
-      placeholder: "Who it is for.",
-      payload: () => ({ kind: "page", product: "p1", readFile: true }),
-      steps: pageSteps(true),
-      onResult: (value: { headline: string }) => used.push(value),
-      done: DONE,
-      allowEmpty: true,
-    },
-    new Map([[AiOn, { on: true, left: 30 }]]),
-  );
+  // Kept so a check can change what the page passes in mid-run, as a re-render of the page editor would.
+  const props = {
+    title: "Write the whole page with AI",
+    hint: "A full draft.",
+    placeholder: "Who it is for.",
+    payload: () => ({ kind: "page", product: "p1", readFile: pdf }),
+    steps: pageSteps(pdf),
+    onResult: (value: { headline: string }) => used.push(value),
+    done: DONE,
+    allowEmpty: true,
+    // What the page puts above the notes; told whether a run is on, as the PDF box is.
+    extra: (busy: boolean) => createElement("span", { "data-probe": "extra", "data-busy": busy }),
+  };
+  const mounted = await mount(AiStepsAssist<{ headline: string }>, props, new Map([[AiOn, { on: true, left: 30 }]]));
   const write = async () => {
     click(button(mounted.tree(), "Write a draft"));
     await mounted.settle();
@@ -95,7 +101,7 @@ async function box() {
     await mounted.settle();
     await mounted.settle();
   };
-  return { mounted, used, write, send, end };
+  return { mounted, used, write, send, end, props };
 }
 
 const DRAFT = { headline: "Forty weeknight dinners" };
@@ -255,6 +261,37 @@ async function main(): Promise<void> {
     is("it says nothing was found to write from", /found nothing to write from in your PDF's first pages/.test(words), true);
     is("it asks for a few words, not a retry of the same", [/Add a few words/.test(words), /Try again in a moment/.test(words)], [true, false]);
     is("and what came back", words.includes("1 writing job given back, 20 left this month"), true);
+    b.mounted.unmount();
+  }
+
+  part("The steps shown are the ones the run began with, whatever the page passes in mid-run (Claude 5 on #3435, MEDIUM)");
+  {
+    // Checked mid-run: the run was sent without the PDF, so there is one step and no Stop.
+    const b = await box(false);
+    is("before a run, what the page put above the notes can be changed", extraBusy(b.mounted.tree()), false);
+    await b.write();
+    is("while it runs, it is told the run is on, so the PDF box is unavailable", extraBusy(b.mounted.tree()), true);
+    b.props.steps = pageSteps(true);
+    await b.send({ step: "write", state: "started" });
+    const now = progress(b.mounted.tree());
+    is("checking the box mid-run adds no step and no Stop the server does not have", [now?.stopShown, now?.steps.length], [false, 1]);
+    is("and nothing can be stopped", now?.canStop, false);
+    await b.end({ step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 29 });
+    is("the draft goes into the page as asked, with no question about a Stop", [b.used, button(b.mounted.tree(), "Use this draft")], [[DRAFT], undefined]);
+    is("the finished list is still the run's own", progress(b.mounted.tree())?.steps.length, 1);
+    is("once it ended, the box can be changed again", extraBusy(b.mounted.tree()), false);
+    b.mounted.unmount();
+  }
+  {
+    // Unchecked mid-run: the run was sent with the PDF, so the reading and its Stop stay.
+    const b = await box(true);
+    await b.write();
+    await b.send({ step: "read", state: "started" });
+    b.props.steps = pageSteps(false);
+    await b.send({ step: "read", state: "done" });
+    const now = progress(b.mounted.tree());
+    is("unchecking the box mid-run keeps both steps and the Stop that works", [now?.steps.length, now?.stopShown, now?.canStop], [2, true, true]);
+    await b.end({ step: "write", state: "started" }, { step: "write", state: "done" }, { done: true, ok: true, value: DRAFT, left: 19 });
     b.mounted.unmount();
   }
 

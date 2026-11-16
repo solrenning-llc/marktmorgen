@@ -123,8 +123,17 @@ function exactObject(raw: unknown, fields: readonly string[], what: string): Rec
 const wholeTime = (value: unknown, what: string): number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fail(`${what} is not a positive whole time in ms`);
 
+/**
+ * The contract's own rule for an object key: 1 to 1,024 characters, no C0 control and no DEL. The route runs it on
+ * each listed key before signing (lib/backup-files-source.ts), so a key the contract would refuse is left out alone,
+ * never the whole page (Claude 3's MEDIUM on #3313).
+ */
+export function isContractKey(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 1024 && !CONTROL.test(value);
+}
+
 function keyOf(value: unknown, what: string): string {
-  if (typeof value !== "string" || value.length < 1 || value.length > 1024 || CONTROL.test(value)) fail(`${what} is not an object key`);
+  if (!isContractKey(value)) fail(`${what} is not an object key`);
   return value as string;
 }
 

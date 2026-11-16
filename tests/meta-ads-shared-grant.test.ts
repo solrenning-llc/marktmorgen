@@ -36,6 +36,11 @@ let loginAs = USER_1;
 /** Each login's grant to the app: DELETE /me/permissions ends it for every token of that login. */
 const granted = new Map<string, boolean>();
 const revokedFor: string[] = [];
+/** Set to move the clock a day on once Meta lists the accounts: the flow goes stale while Meta is being read. */
+let staleOnAccounts = false;
+const realNow = Date.now.bind(Date);
+let skewMs = 0;
+Date.now = () => realNow() + skewMs;
 
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(String(input));
@@ -60,6 +65,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   }
   if (path === "/me/permissions") return json({ data: [{ permission: "ads_read", status: "granted" }] });
   if (path === "/me") return json({ id: user });
+  if (path === "/me/adaccounts" && staleOnAccounts) skewMs += 86_400_000;
   if (path === "/me/adaccounts") return json({ data: [{ id: "act_444", account_id: "444", name: "Shared Ads", currency: "USD", account_status: 1 }] });
   if (path === "/act_444/insights") return json({ data: [{ campaign_id: "1", campaign_name: "Reel", spend: "12.00", date_start: today, publisher_platform: "instagram" }] });
   return json({ error: { code: 803, message: "unknown" } }, 404);
@@ -75,7 +81,7 @@ async function makeStore(email: string, handle: string) {
 
 async function connect(s: Awaited<ReturnType<typeof makeStore>>, as: string) {
   loginAs = as;
-  const result = await finishMeta({ statsId: s.statsId!, sid: s.sid, code: "good-code", redirect, by: s.email, owner: { email: s.email, handle: s.handle }, currency: s.currency });
+  const result = await finishMeta({ statsId: s.statsId!, sid: s.sid, code: "good-code", redirect, by: s.email, owner: { email: s.email, handle: s.handle }, currency: s.currency, startedAt: Date.now() });
   is(`store ${s.handle} connects with login ${as}`, result.ok, true);
 }
 
@@ -122,6 +128,16 @@ async function main(): Promise<void> {
   redis.pipeline = pipeline as typeof redis.pipeline;
   is("forgotten here, but Meta's grant is kept rather than risk the other store", [unknown && unknown.metaAccess, granted.get(USER_2), revokedFor], ["kept", true, []]);
   is("the other store still reads Meta", await readMetaSpend(b.statsId!, b.currency) !== "broken", true);
+
+  part("A flow that goes stale while Meta is read keeps the grant another store uses (main's late expiry, merged)");
+  revokedFor.length = 0;
+  staleOnAccounts = true;
+  loginAs = USER_2;
+  const stale = await finishMeta({ statsId: a.statsId!, sid: a.sid, code: "good-code", redirect, by: a.email, owner: { email: a.email, handle: a.handle }, currency: a.currency, startedAt: Date.now() });
+  staleOnAccounts = false;
+  is("nothing is kept: the flow expired", stale.ok ? "kept" : stale.error, "expired");
+  is("and the login another store still uses keeps its grant at Meta", [granted.get(USER_2), revokedFor], [true, []]);
+  skewMs = 0;
 
   part("What the creator is told");
   const keptLine = accountChangeWords({ kind: "metaads-disconnected", kept: true }).line;

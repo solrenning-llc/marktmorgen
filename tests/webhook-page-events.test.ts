@@ -11,7 +11,7 @@ import { FEATURE_PAGES } from "@/lib/feature-pages";
 import { WEBHOOK_EVENTS } from "@/lib/webhooks";
 import { done, is, part } from "./check";
 
-const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+const WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "twenty-one", "twenty-two", "twenty-three", "twenty-four", "twenty-five"];
 const page = FEATURE_PAGES.find((p) => p.slug === "webhooks");
 const block = page?.blocks.find((b) => b.kind === "features" && / events, and how they arrive$/.test(b.title ?? "")) as { title: string; items: { title: string; body: string }[] } | undefined;
 const titles = (block?.items ?? []).map((i) => i.title);

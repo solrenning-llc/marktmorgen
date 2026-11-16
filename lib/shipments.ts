@@ -8,6 +8,11 @@
  * marked, and the email goes to the address that paid, not one the studio
  * sends. Marking it twice sends nothing more.
  *
+ * The mark this call kept is told to the store's webhooks as shipment.created
+ * (378 [TB4] complement WG (a)), once: the order, the product, the tracking
+ * link and the buyer's address. A mark cannot be changed once kept, so there
+ * is no shipment.updated.
+ *
  *   nl:ship:done:<session>   mark+tracking JSON: no expiry with pending mail,
  *                            400 days after a confirmed terminal outcome
  *                            (never-activated legacy mark: original 400 days)
@@ -22,6 +27,7 @@ import { isSettled } from "@/lib/instant-pay";
 import { shippingWords } from "@/lib/buyer-words/shipping";
 import { speech } from "@/lib/buyer-words";
 import { shippingAddressOf, wasShipped } from "@/lib/shipping-address";
+import { emitEvent } from "@/lib/webhooks";
 
 import { CURRENT_SHIPMENT_MAIL_LIFECYCLE, readTracking, readShippedRecord, type Shipped } from "@/lib/shipment-record";
 export { readTracking };
@@ -114,8 +120,34 @@ async function markWithoutQueuedMail(session: string, shipped: Shipped): Promise
     : { ok: false, reason: "unknown" };
 }
 
-/** Marks a shipped order as sent and tells its buyer, once. */
+/**
+ * Marks a shipped order as sent and tells its buyer, once; then tells the
+ * store's webhooks (shipment.created) when the mark kept is the one this call
+ * wrote: its time and tracking link are this call's. A press that finds an
+ * earlier mark, or loses a race to another link, tells nothing more, and the
+ * event's id (the order) keeps a race of two equal presses to one message. A
+ * failure to queue it is said and never fails the mark.
+ */
 export async function markShipped(store: Store, session: string, rawTracking: unknown, nowSeconds = Math.floor(Date.now() / 1000), runtime: ShipmentMailRuntime = {}): Promise<MarkResult> {
+  let order: Record<string, unknown> | null = null;
+  const result = await markOnce(store, session, rawTracking, nowSeconds, runtime, (row) => { order = row; });
+  const row = order as Record<string, unknown> | null;
+  if (result.ok && row && result.shipped.at === nowSeconds && result.shipped.tracking === readTracking(rawTracking)) {
+    const meta = (row.metadata ?? {}) as Record<string, unknown>;
+    const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+    await emitEvent(store, "shipment.created", session, {
+      checkout_session: session,
+      product: { id: text(meta.product), title: text(meta.title) },
+      tracking_url: result.shipped.tracking || null,
+      shipped_at: new Date(result.shipped.at * 1000).toISOString(),
+      buyer: { email: text((row.customer_details as { email?: unknown } | null | undefined)?.email) },
+    }).catch((error) => console.error("queueing the shipment.created webhook failed", error));
+  }
+  return result;
+}
+
+/** markShipped's mark and email; `seen` is given the order once Stripe confirmed it is this store's, paid and shipped. */
+async function markOnce(store: Store, session: string, rawTracking: unknown, nowSeconds: number, runtime: ShipmentMailRuntime, seen: (row: Record<string, unknown>) => void): Promise<MarkResult> {
   const lifecycle = runtime.lifecycle ?? CURRENT_SHIPMENT_MAIL_LIFECYCLE;
   if (!["never_activated", "active", "retired"].includes(lifecycle)) return { ok: false, reason: "unknown" };
   const authorizedAt = lifecycle === "active" ? (runtime.now ?? Date.now)() : 0;
@@ -130,6 +162,7 @@ export async function markShipped(store: Store, session: string, rawTracking: un
   }
   const meta = (row.metadata ?? {}) as Record<string, string>;
   if (!saleHandles(store).has(meta.store ?? "") || !wasShipped(row) || !isSettled(row as never)) return { ok: false, reason: "unknown" };
+  seen(row);
   const shipped: Shipped = { at: nowSeconds, tracking };
   if (lifecycle === "never_activated") return markNeverActivated(store, session, row, shipped);
   // Existing marks never authorize another message, including legacy marks

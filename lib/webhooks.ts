@@ -28,6 +28,8 @@
  *                        link or in the Stripe dashboard (378 [TB4] WG (a))
  *   membership.resumed   a membership's pause taken off, by the member, in the
  *                        Stripe dashboard or at its end (378 [TB4] WG (a))
+ *   shipment.created     a shipped order marked as shipped in the studio, with
+ *                        its tracking link (lib/shipments.ts; 378 [TB4] WG (a))
  *
  * The first four about money, and these last five, are read from the creator's own Stripe account,
  * which is the ledger, by the five-minute job (watchStripe): its events are
@@ -117,6 +119,7 @@ export const WEBHOOK_EVENTS = [
   "payment.failed",
   "membership.paused",
   "membership.resumed",
+  "shipment.created",
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 

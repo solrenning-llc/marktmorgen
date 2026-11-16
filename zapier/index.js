@@ -509,6 +509,20 @@ const EVENTS = [
       resumed_at: "2027-01-05T10:00:00.000Z",
     },
   },
+  {
+    key: "shipment_created",
+    event: "shipment.created",
+    noun: "Shipment",
+    label: "Order Shipped",
+    description: "Triggers when you mark an order as shipped, with its tracking link if you gave one.",
+    data: {
+      checkout_session: "cs_live_a1b2c3d4e5",
+      product: { id: "p_5e6f7a", title: "The Supper Book" },
+      tracking_url: "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000000",
+      shipped_at: "2026-11-12T16:40:00.000Z",
+      buyer: { email: "ada@example.com" },
+    },
+  },
 ];
 
 /** A message as the store's webhook sends it. */

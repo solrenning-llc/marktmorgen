@@ -114,6 +114,7 @@ export const NOT_ACTIONS: Readonly<Record<string, string>> = {
   totals: "Figures for all the stores of the account, opened from the store switcher rather than from inside a store.",
   paused: "Shown only when the studio's requests for the period are used up, never something to open.",
   disputes: "The review of one disputed purchase, which opens only from that purchase in Payment requests.",
+  appeals: "Asking us to look again at a decision, which opens only from the takedown notice, while something was taken down from the store.",
   "closing-refunds": "The review before members get unused time back, which opens only while the store is closing.",
   students: "Needs both Products and Orders, and an action asks for one permission: an Editor would be shown an action the screen refuses.",
 };

@@ -34,6 +34,8 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   affiliates: ["Can I run an affiliate program?"],
   agent: ["Can I connect Zapier, Make or my own server?"],
   agreements: ["How do I send a proposal or an agreement to sign?"],
+  // No answer covers asking us to look again yet (lib/help-areas.ts); the rules behind a decision are in this one.
+  appeals: ["What can I sell?"],
   blog: ["Can my store have a blog?", "Will search engines find my store?"],
   bundles: ["Can I sell a bundle of products?"],
   calendar: ["Can I sell paid calls?", "Can I sell a package of sessions, like 5 calls booked one at a time?"],

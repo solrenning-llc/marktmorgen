@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PromotionPlanner } from "@/components/promotion-planner";
+import * as jump from "@/lib/campaign-results-jump";
 import { CAMPAIGN_RESULTS_ID, NO_CAMPAIGN_RESULTS, showCampaignResults } from "@/lib/campaign-results-jump";
 import type { StatsData } from "@/lib/stats";
 import { done, is } from "./check";
@@ -31,7 +32,16 @@ const results = readFileSync("components/campaign-results.tsx", "utf8");
 is("the Campaigns heading carries the id and can be focused", results.includes(`<h3 id="${CAMPAIGN_RESULTS_ID}" tabIndex={-1}`), true);
 // The planner wires the button to it and keeps a status line for the answer, empty until pressed.
 const planner = readFileSync("components/promotion-planner.tsx", "utf8");
-is("the button uses showCampaignResults and shows NO_CAMPAIGN_RESULTS when it is not found", planner.includes("setNoResults(!showCampaignResults(") && planner.includes("noResults ? NO_CAMPAIGN_RESULTS"), true);
+is("the button uses showCampaignResults and says why when it is not found", planner.includes("setNoResults(!showCampaignResults(") && planner.includes("noResults ? campaignResultsMissing(spendUnread)"), true);
+// Claude 6 on #4094 (MEDIUM, rule 24): the section is also left out while the ad spend does not read (stats-panel.tsx
+// draws CampaignResultsPanel only with spendsKnown). Then the campaign may have visits and payments: "none yet" would be
+// untrue, so the planner says they are hidden until the spend reads, and "none yet" stays for a known empty period.
+const missing = (jump as Record<string, unknown>).campaignResultsMissing as ((spendUnread: boolean) => string) | undefined;
+const hidden = (jump as Record<string, unknown>).CAMPAIGN_RESULTS_HIDDEN as string | undefined;
+is("with the ad spend unread, it says the results are hidden and how to see them", [hidden !== undefined && missing?.(true) === hidden, Boolean(hidden && /could not be read/.test(hidden) && /Reload/.test(hidden)), Boolean(hidden && !/^No campaign results/.test(hidden))], [true, true, true]);
+is("with the ad spend read, it still says there are none yet", missing?.(false), NO_CAMPAIGN_RESULTS);
+const panel = readFileSync("components/stats-panel.tsx", "utf8");
+is("the numbers page tells the planner whether the ad spend is unread", /<PromotionPlanner [^>]*spendUnread=\{spendsUnread !== null\}/.test(panel), true);
 is("the planner no longer scrolls to the id on its own", planner.includes('getElementById("numbers-posts")?.scrollIntoView'), false);
 const row = { views: 100, sales: 1, cents: 12345, checkouts: 2 };
 const data = { sales: "ok", partial: false, currency: "usd", days: [{ date: "2026-10-16" }], products: [{ id: "a", title: "A", d7: row, d30: row, d90: row }], channels: { d7: [], d30: [], d90: [] } } as unknown as StatsData;

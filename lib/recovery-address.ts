@@ -275,7 +275,7 @@ export async function spendLostEmailLink(token: string): Promise<string | null> 
   } catch {
     const [readBack] = await redisPipeline([["GET", linkKey(token)]]);
     const [removed] = await redisPipeline([["DEL", linkKey(token)]]);
-    email = Number(removed) === 1 ? readBack : null;
+    email = countOf(removed) === 1 ? readBack : null;
   }
   if (typeof email !== "string" || !email) return null;
   // Mailed to an address the owner has since taken away or replaced: it opens nothing.

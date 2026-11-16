@@ -108,6 +108,38 @@ async function main(): Promise<void> {
   await withSession(elsewhere, "cs_test_otherwd1234", { status: "complete", payment_status: "paid", amount_total: 12000, payment_intent: "pi_test_otherwd1234", created: Math.floor(Date.now() / 1000), metadata: { kind: "request", request: elsewhere, store: "another-shop" } });
   is("paid, naming another store: refused, nothing written", [await outcome(elsewhere), (await requestOf(store, elsewhere))?.state], ["error", "open"]);
 
+  part("Read again under the hold (Claude 7 on #4513): a checkout opened after the first read is closed too");
+  // The buyer's checkout is written onto the request after withdrawRequest read it and before it took the hold.
+  const raced = await make();
+  const original = redis.pipeline.bind(redis);
+  let injected = false;
+  redis.pipeline = (async (commands: (string | number)[][]) => {
+    if (!injected && commands[0]?.[0] === "SET" && String(commands[0][1]) === `nl:payreq:lock:${raced}`) {
+      injected = true;
+      redis.pipeline = original;
+      await withSession(raced, "cs_test_racewd1234", { status: "open", payment_status: "unpaid" });
+    }
+    return original(commands);
+  }) as typeof redis.pipeline;
+  is("the checkout opened in between is closed on Stripe, then the request withdrawn",
+    [await outcome(raced), injected, expired.includes("cs_test_racewd1234"), (await requestOf(store, raced))?.state], ["canceled", true, true, "canceled"]);
+
+  part("Only an answer Stripe documents, about this checkout, closes anything");
+  const odd = await make();
+  await withSession(odd, "cs_test_oddwd123456", { status: "something_new", payment_status: "unpaid" });
+  is("a status not known here: refused, still open", [await outcome(odd), (await requestOf(store, odd))?.state], ["error", "open"]);
+  const foreign = await make();
+  await withSession(foreign, "cs_test_foreignwd12", { status: "open", payment_status: "unpaid" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === "POST" && String(input).includes("/cs_test_foreignwd12/expire")) {
+      return new Response(JSON.stringify({ id: "cs_test_someoneelse1", status: "expired" }), { status: 200 });
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  is("an \"expired\" receipt naming another checkout: refused, still open", [await outcome(foreign), (await requestOf(store, foreign))?.state], ["error", "open"]);
+  globalThis.fetch = realFetch;
+
   part("Nothing to close: withdrawn with no call to Stripe");
   const plain = await make();
   calls = 0;

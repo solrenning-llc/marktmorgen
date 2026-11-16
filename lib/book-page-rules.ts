@@ -56,13 +56,16 @@ export function bookTimesUnits(callListings: number): number {
 
 /**
  * What booking a time takes besides its times (app/api/store/book): the
- * request itself, which no page counted, and its two calls to the creator's
- * Stripe account before the time is held (a discount code read, the
- * browser's earlier hold let go). The hold's checkout is the order's own
- * work, admitted as orders (lib/calls.ts, admitOrders). Held against
- * BOOK_POST_READ in tests/plan-cost-registry.test.ts.
+ * request itself, which no page counted, and its calls to the creator's
+ * Stripe account before the time is held, at the dearer path: from a
+ * package, the browser's earlier hold let go, the package's checkout,
+ * disputes and coupon (prepareSession), and the hold let go again when
+ * another tab took the last session, five calls (Claude 7 on #3478). The
+ * hold's checkout is the order's own work, admitted as orders (lib/calls.ts,
+ * admitOrders). Held against BOOK_POST_READ in
+ * tests/plan-cost-registry.test.ts, which picks the fewest units that cover it.
  */
-export const BOOK_POST_EXTRA_UNITS = 2;
+export const BOOK_POST_EXTRA_UNITS = 3;
 
 /** A checkout session's id, as Stripe makes it (lib/store-checkout.ts, readOrder, reads nothing else). */
 export const BOOKING_SESSION = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;

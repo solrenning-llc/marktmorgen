@@ -510,11 +510,18 @@ export function bookTimesRead(listings: number): number {
 /**
  * What booking a time costs besides its times and its checkout (app/api/store/book; review of #3478): the request
  * itself, which no page counted (a later page's wait and work, a store's record and the call's listing read, its
- * limits and counts), and two calls to the creator's Stripe account before the time is held (a discount code read, the
- * browser's earlier hold let go), each waited on EXPORT_PAGE_SECONDS. The checkout opened for the hold is the order's
- * own work (ORDER_COMPUTE, admitted as CALL_ORDER_UNITS orders). Taken as BOOK_POST_EXTRA_UNITS with the times.
+ * limits and counts), and its calls to the creator's Stripe account before the time is held, each waited on
+ * EXPORT_PAGE_SECONDS, at the dearer of its two paths (Claude 7's MEDIUM 1 on #3478):
+ *   - with a discount code: the code read and the browser's earlier hold let go, two calls;
+ *   - from a package: the earlier hold let go (releaseOwnHold: its diary read and one /expire), prepareSession (the
+ *     package's checkout read, its charge's disputes read, the session's coupon made: three calls), and, when another
+ *     tab took the package's last session, this hold let go again (its diary read and one more /expire): five calls,
+ *     BOOK_POST_STRIPE_CALLS, and the booking diary read twice, each up to twice CALENDAR_CALLS entries.
+ * The checkout opened for the hold is the order's own work (ORDER_COMPUTE, admitted as CALL_ORDER_UNITS orders).
+ * Taken as BOOK_POST_EXTRA_UNITS with the times.
  */
-export const BOOK_POST_READ = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 65_536, outBytes: 2_048, stripePages: 2 });
+export const BOOK_POST_STRIPE_CALLS = 1 + 3 + 1;
+export const BOOK_POST_READ = readShapeCost({ seconds: 1.3, cpu: 0.2, commands: 30, dbBytes: 2 * LISTING_READ_BYTES + 2 * (2 * CALENDAR_CALLS * BOOK_DIARY_ENTRY_BYTES), outBytes: 2_048, stripePages: BOOK_POST_STRIPE_CALLS });
 /**
  * One product's shared card (app/[handle]/p/[product]/opengraph-image.tsx), at its worst (reviews of #4211): the call,
  * PRODUCT_CARD_CPU_SECONDS of CPU held PRODUCT_CARD_HELD_SECONDS at 2 GB (a stated bound: a picture decoded at the pixels
@@ -1577,7 +1584,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/book-page-admission.ts", names: ["bookTimesUnits(idsOfKind(store, \"call\").length)", "takePublicRequest(store, \"buyer\", now, units)", "holdPublicRequests(store, units, now)", "[\"HEXISTS\", bookingDiaryKey(store.callsId), session]"] },
       { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
       // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
-      { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");"] },
+      { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");", "if (previous) await releaseOwnHold(store, previous).catch(() => {});", "const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;", "await releaseOwnHold(store, result.session, { openedHere: true })"] },
       { file: "app/api/store/book/move/route.ts", names: ["if (!(await bookedHere(store, session))) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"slow\");"] },
       // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
       // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid

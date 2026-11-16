@@ -89,6 +89,17 @@
       ]
     },
     {
+      "source": "app/[handle]/community/challenges/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/[handle]/community/challenges",
+      "parameters": [
+        {
+          "name": "handle",
+          "kind": "segment"
+        }
+      ]
+    },
+    {
       "source": "app/[handle]/community/chat/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/[handle]/community/chat",
@@ -953,6 +964,12 @@
       "parameters": []
     },
     {
+      "source": "app/start-here/page.tsx",
+      "status": "AAA review not completed",
+      "routeTemplate": "/start-here",
+      "parameters": []
+    },
+    {
       "source": "app/status/page.tsx",
       "status": "AAA review not completed",
       "routeTemplate": "/status",
@@ -1366,6 +1383,8 @@
     "components/closing-refunds-confirm.tsx",
     "components/collections-editor.tsx",
     "components/community-approval-studio.tsx",
+    "components/community-challenges-studio.tsx",
+    "components/community-challenges.tsx",
     "components/community-composer.tsx",
     "components/community-event-room.tsx",
     "components/community-events-studio.tsx",
@@ -1544,6 +1563,7 @@
     "components/payment-requests-studio.tsx",
     "components/payments-panel.tsx",
     "components/paypal-payouts.tsx",
+    "components/paypal-waiting-notice.tsx",
     "components/pdf-preview-toggle.tsx",
     "components/pdf-stamp-toggle.tsx",
     "components/pending-submit.tsx",
@@ -1554,6 +1574,7 @@
     "components/person-notes.tsx",
     "components/person-tasks.tsx",
     "components/phone-alerts-panel.tsx",
+    "components/physical-legal-editor.tsx",
     "components/pick-bundle-form.tsx",
     "components/picture-viewer.tsx",
     "components/pixel-editor.tsx",
@@ -1620,6 +1641,7 @@
     "components/skip-link.tsx",
     "components/slot-picker.tsx",
     "components/socials-editor.tsx",
+    "components/start-quiz.tsx",
     "components/stats-panel.tsx",
     "components/step-count.tsx",
     "components/sticky-buy.tsx",
@@ -1651,6 +1673,7 @@
     "components/store-socials-row.tsx",
     "components/store-tip-box.tsx",
     "components/store-tracking.tsx",
+    "components/store-trust-card.tsx",
     "components/structured-data.tsx",
     "components/students-bulk.tsx",
     "components/studio-app.tsx",
@@ -1703,6 +1726,7 @@
     "components/withdrawal-where.tsx",
     "components/workflow-diagram.tsx",
     "components/workflow-tools.tsx",
+    "components/workflow-versions.tsx",
     "components/yearly-ask-editor.tsx"
   ],
   "apiRouteSources": [
@@ -1826,6 +1850,8 @@
     "app/api/store/come-back/route.ts",
     "app/api/store/community/approval/route.ts",
     "app/api/store/community/calendar/route.ts",
+    "app/api/store/community/challenge/route.ts",
+    "app/api/store/community/challenges/route.ts",
     "app/api/store/community/chat/new/route.ts",
     "app/api/store/community/chat/route.ts",
     "app/api/store/community/events/route.ts",
@@ -1964,6 +1990,7 @@
     "app/api/store/person/route.ts",
     "app/api/store/phone/route.ts",
     "app/api/store/photo/route.ts",
+    "app/api/store/physical-legal/route.ts",
     "app/api/store/pixels/route.ts",
     "app/api/store/podcast/feed/[token]/route.ts",
     "app/api/store/podcast/link/route.ts",
@@ -2138,6 +2165,6 @@
   "routeInventory": {
     "generator": "scripts/accessibility-route-inventory.mjs",
     "scope": "Source templates and parameter shapes only. Existing review status is preserved; a route is not an exercised fixture or a passing accessibility test.",
-    "pageTemplates": 146
+    "pageTemplates": 148
   }
 }

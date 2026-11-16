@@ -91,7 +91,7 @@ test("an export a paying store takes from its studio figure costs no more than t
 test("once a plan has ended, its whole exports are its own: counted for the store, never refused for want of a figure or a place, and priced in its closing", () => {
   const route = readFileSync(join(process.cwd(), "app/api/store/export/route.ts"), "utf8");
   const ended = route.slice(route.indexOf('if (standingOf(store) === "ended")'), route.indexOf("} else {", route.indexOf('if (standingOf(store) === "ended")')));
-  assert.ok(ended.includes("ENDED_STORE_EXPORTS") && ended.includes("INCR"), "counted for the store");
+  assert.ok(ended.includes("ENDED_STORE_EXPORTS") && ended.includes("windowCount("), "counted for the store"); // INCR, then EXPIRE NX (lib/window-count.ts)
   assert.ok(!ended.includes("takeAllowance") && !ended.includes("admitNonPaying"), "never from a figure or the share of stores that pay nothing");
   assert.ok(ENDED_STORE_EXPORTS >= 1);
   for (const tier of TIERS) assert.equal(closureCost(tier).exports, ENDED_STORE_EXPORTS * exportCost(DATA_ROOM_BYTES[tier] + 1_000_000));

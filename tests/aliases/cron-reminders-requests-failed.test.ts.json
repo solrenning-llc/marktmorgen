@@ -1,0 +1,8 @@
+{
+  "@/lib/request-guard": "cron-reminders-requests-world.ts",
+  "@/lib/billing": "cron-reminders-requests-world.ts",
+  "@/lib/billing-reminders": "cron-reminders-requests-world.ts",
+  "@/lib/plan-pause": "cron-reminders-requests-world.ts",
+  "@/lib/trial-nudges": "cron-reminders-requests-world.ts",
+  "@/lib/payment-requests": "cron-reminders-requests-world.ts"
+}

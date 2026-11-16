@@ -55,7 +55,7 @@ import { activePlan } from "@/lib/product-extras";
 import { canSell } from "@/lib/store-checkout";
 import { isHouseStore } from "@/lib/house-store";
 import { imageUrl } from "@/lib/product-image";
-import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, stillListed, wouldList } from "@/lib/directory-index";
+import { DIRECTORY_BUILD, DIRECTORY_BUILDS, DIRECTORY_CACHE, DIRECTORY_LAST, listedStores, numbersShown, stillListed, wouldList } from "@/lib/directory-index";
 import { isLanguage, type LanguageCode } from "@/lib/store-language";
 import { programNumbers } from "@/lib/affiliates";
 import { MIN_CLICKS_FOR_RATES } from "@/lib/affiliate-directory-rules";
@@ -438,14 +438,41 @@ export async function readDirectoryPage(): Promise<DirectoryPage> {
       ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS],
       ["DEL", DIRECTORY_BUILD],
     ]).catch(() => null);
-    return page;
+    return keptWithConsent(page, built.sids);
   }
   await redisPipeline([
     ["SET", DIRECTORY_CACHE, pageToKeep(page), "EX", KEEP_SECONDS],
     ["SET", DIRECTORY_LAST, JSON.stringify({ sids: built.sids, rows: built.rows, omitted: built.omitted }), "EX", LAST_KEEP_SECONDS],
     ["DEL", DIRECTORY_BUILD],
   ]).catch(() => null);
-  return page;
+  return keptWithConsent(page, built.sids);
+}
+
+/**
+ * The rows, each with its numbers only while its store's creator still lets the directory show them (nl:dir:numbers,
+ * kept by the save alone; Claude 5's MEDIUM on #3062 and #3118): one SMISMEMBER of the sids of the rows that carry
+ * numbers, none when no row does. A store not in the set, or a reply that cannot be read, is shown with no numbers
+ * (null, never $0). `sids` is the sid of each row, in the same order.
+ */
+async function numbersChecked(page: DirectoryPage, sids: string[]): Promise<{ page: DirectoryPage; hidden: boolean }> {
+  const carrying = page.rows.flatMap((row, at) => (row.numbers !== null ? [at] : []));
+  if (!carrying.length) return { page, hidden: false };
+  const shown = await numbersShown(carrying.map((at) => sids[at] ?? ""));
+  const hide = new Set(carrying.filter((_, k) => !shown[k]));
+  if (!hide.size) return { page, hidden: false };
+  return { page: { ...page, rows: page.rows.map((row, at) => (hide.has(at) ? { ...row, numbers: null } : row)) }, hidden: true };
+}
+
+/**
+ * A page just kept, checked once against the numbers' consent after its SET: a creator who took the numbers back
+ * while this build ran (it read them before the save's SREM and DEL) drops the kept page, so no visit is shown them
+ * from it, and this answer shows that row without them. Against the save's SREM-then-DEL this is linearizable: an SREM
+ * before this check is seen here; one after it is followed by the save's own DEL.
+ */
+async function keptWithConsent(page: DirectoryPage, sids: string[]): Promise<DirectoryPage> {
+  const checked = await numbersChecked(page, sids);
+  if (checked.hidden) await redisPipeline([["DEL", DIRECTORY_CACHE]]).catch(() => null);
+  return checked.page;
 }
 
 /**
@@ -496,8 +523,10 @@ async function lastDirectory(room: "full" | "unknown"): Promise<DirectoryPage> {
     throw new UnknownReplyError("the directory's last build (GET)");
   }
   const listed = await stillListed(sids as string[]);
-  // The stores that build left out, still counted: the page says the list is not whole (Codex N1 on #2921).
-  return { rows: (rows as DirectoryRow[]).filter((_, at) => listed[at]), omitted };
+  // The stores that build left out, still counted: the page says the list is not whole (Codex N1 on #2921). Each row's
+  // numbers only while its creator still lets them be shown (Claude 5's MEDIUM on #3062).
+  const kept = (rows as DirectoryRow[]).flatMap((row, at) => (listed[at] ? [{ row, sid: (sids as string[])[at] }] : []));
+  return (await numbersChecked({ rows: kept.map((k) => k.row), omitted }, kept.map((k) => k.sid))).page;
 }
 
 /** A build that could not finish: the next ones wait FAILED_SECONDS. A mark that cannot be written still ends by its BUILD_HOLD_SECONDS. */

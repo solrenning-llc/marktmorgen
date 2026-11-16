@@ -52,6 +52,30 @@ export const DIRECTORY_BUILDS = "nl:dir:builds";
  */
 export const DIRECTORY_LAST = "nl:dir:last";
 
+/**
+ * The stores whose creator lets the directory show their program's numbers ("Show my program's numbers there too"),
+ * kept only by a save (rememberListing) and never by a build, so a consent taken back is never written back by a build
+ * that read it before (Claude 5's MEDIUM on #3062 and #3118). The last good build and a page just kept are checked
+ * against it (lib/affiliate-directory.ts, numbersChecked): a row whose store is not in it is shown with no numbers.
+ */
+export const DIRECTORY_NUMBERS = "nl:dir:numbers";
+
+/**
+ * Which of these sids may show their numbers now, one flag each: one SMISMEMBER. A reply in any other shape, or one
+ * that cannot be had, shows no numbers for any of them (rule 24: an unknown consent is not a yes), never throws.
+ */
+export async function numbersShown(sids: string[]): Promise<boolean[]> {
+  if (!sids.length) return [];
+  try {
+    const replies = repliesFor(await redisPipeline([["SMISMEMBER", DIRECTORY_NUMBERS, ...sids]]), 1);
+    const flags = replies ? replies[0] : null;
+    if (Array.isArray(flags) && flags.length === sids.length && flags.every((flag) => flag === 0 || flag === 1)) return flags.map((flag) => flag === 1);
+  } catch {
+    // Unknown: no numbers shown.
+  }
+  return sids.map(() => false);
+}
+
 /** Which of these sids are in the listed set now, one flag each. Any reply but a list of 0 and 1, one a sid, is unknown. */
 export async function stillListed(sids: string[]): Promise<boolean[]> {
   if (!sids.length) return [];
@@ -98,17 +122,23 @@ export function wouldList(store: Store): boolean {
  * (UnknownReplyError), as is an SREM that failed. A store that is not listed
  * and stays so changes nothing the directory shows, so its saves never drop
  * the page (Claude 6 on #3062: any account could otherwise drop it in a loop).
- * The commands are the same or fewer: SADD + DEL, or SREM alone, or SREM + DEL.
+ * The commands: SADD, the numbers' SADD or SREM and DEL; or SREM of both sets, alone or with DEL.
  */
 export async function rememberListing(store: Store): Promise<void> {
   if (!store.sid || !isRedisConfigured()) return;
   if (wouldList(store)) {
-    await redisPipeline([["SADD", LISTED, store.sid], ["DEL", DIRECTORY_CACHE]]);
+    // The numbers' consent follows the save, before the kept page is dropped (Claude 5's MEDIUM on #3062).
+    await redisPipeline([
+      ["SADD", LISTED, store.sid],
+      store.affiliates.numbers ? ["SADD", DIRECTORY_NUMBERS, store.sid] : ["SREM", DIRECTORY_NUMBERS, store.sid],
+      ["DEL", DIRECTORY_CACHE],
+    ]);
     return;
   }
   let removed: unknown = null;
   try {
-    const replies = repliesFor(await redisPipeline([["SREM", LISTED, store.sid]]), 1);
+    // A store not listed shows no numbers either: taken out of both sets in one request.
+    const replies = repliesFor(await redisPipeline([["SREM", LISTED, store.sid], ["SREM", DIRECTORY_NUMBERS, store.sid]]), 2);
     removed = replies ? replies[0] : null;
   } catch (error) {
     await redisPipeline([["DEL", DIRECTORY_CACHE]]);
@@ -122,7 +152,7 @@ export async function rememberListing(store: Store): Promise<void> {
 /** Takes a store out, whatever it had said. For a store being deleted. */
 export async function forgetListing(sid: string): Promise<void> {
   if (!sid || !isRedisConfigured()) return;
-  await redisPipeline([["SREM", LISTED, sid], ["DEL", DIRECTORY_CACHE]]);
+  await redisPipeline([["SREM", LISTED, sid], ["SREM", DIRECTORY_NUMBERS, sid], ["DEL", DIRECTORY_CACHE]]);
 }
 
 /**

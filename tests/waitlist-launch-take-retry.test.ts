@@ -93,7 +93,7 @@ async function main(): Promise<void> {
 
   part("While the deletion waits for the next run, the studio says what is true (Claude 4's LOW on #3707)");
   const panel = (launch: { total: number; cursor: number; sent: number; finished: number }) =>
-    renderToStaticMarkup(createElement(WaitlistPanel, { productId: "p1", suggestedAddress: "", price: "$39", initial: { soon: false, confirmed: 0, waiting: 0, launch: { handle: "harbor", note: "", address: "", started: 1, ...launch } } }));
+    renderToStaticMarkup(createElement(WaitlistPanel, { productId: "p1", suggestedAddress: "", price: "$39", initial: { soon: false, confirmed: 0, waiting: 0, switchedOff: false, launch: { handle: "harbor", note: "", address: "", started: 1, stopped: 0, ...launch } } }));
   const allSent = panel({ total: 3, cursor: 3, sent: 3, finished: 0 });
   is("every email went: said as sent, the waitlist being deleted, never \"going out\"", [allSent.includes("going out"), allSent.includes("3 of 3 waitlist emails went out") && allSent.includes("the waitlist is being deleted")], [false, true]);
   const noneToEmail = panel({ total: 0, cursor: 0, sent: 0, finished: 0 });

@@ -49,7 +49,7 @@ import { type CallPlace, placeIcsLines, placeLine, whereOf } from "@/lib/call-pl
 import { admitOrders } from "@/lib/order-admission";
 import { CALL_ORDER_UNITS } from "@/lib/order-rules";
 import { countOrder } from "@/lib/orders";
-import { saleHandles } from "@/lib/store";
+import { saleHandles, storeForEmail, storeRef } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { UnknownReplyError, repliesFor, stringList } from "@/lib/redis-reply";
 import { releaseLock } from "@/lib/redis-lock";
@@ -66,7 +66,7 @@ import { inTheCurrencyShown, isSettled, onlyInstantMethods } from "@/lib/instant
 import { keptUnlessLost, refundedInFull } from "@/lib/refunds";
 import { type Answer, applyCheckoutFields, readAnswers } from "@/lib/checkout-fields";
 import type { Listing, Product, Store } from "@/lib/store";
-import { idsOfKind, listingFinder, readListing, readListings, sellsAny } from "@/lib/catalog";
+import { idsOfKind, listingFinder, readListing, readListingExactly, readListings, sellsAny } from "@/lib/catalog";
 
 /** A product that is a call, as listed: all a booking needs but its checkout questions. */
 export type CallListing = Listing & { call: CallSetup };
@@ -96,7 +96,7 @@ import { emitEvent } from "@/lib/webhooks";
 import { recordLead } from "@/lib/affiliate-leads";
 import { VIDEO_ROOM_NOTE, isVideoRoom, roomOf } from "@/lib/call-rooms";
 import { alertCreator } from "@/lib/phone-alerts";
-import { MEET_STORES, callMeeting, callMoved, linkUpdates } from "@/lib/meet-links";
+import { callMeeting, callMoved, keepMeetStore, linkUpdates } from "@/lib/meet-links";
 import type { MeetRecord } from "@/lib/meet-records";
 import { LANGUAGES, parseLanguage } from "@/lib/store-language";
 import { type BookingWords, bookingWords } from "@/lib/buyer-words/booking";
@@ -523,12 +523,13 @@ async function readBusy(
 ): Promise<{ busy: TeamBusy[]; paid: PaidCall[]; blocked: Busy[]; sessions: Busy[] }> {
   const local = store.callsId && isRedisConfigured() ? await heldAndBooked(store, now) : [];
   let paid: PaidCall[] = [];
-  // Read alongside Stripe, and never a reason to fail: a calendar that does
-  // not answer blocks nothing.
+  // Read alongside Stripe. A calendar whose busy times are not known closes
+  // its window (calendarBusy, which does not throw); were the reading to
+  // throw, no time is offered (the throw below), never every time.
   const weekly = sellsAny(store, "weekly");
-  const calendar = weekly
-    ? calendarBusy(store, now).catch(() => ({ busy: [] as Busy[] }))
-    : Promise.resolve({ busy: [] as Busy[] });
+  const calendar = weekly ? calendarBusy(store, now) : Promise.resolve({ busy: [] as Busy[] });
+  // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
+  calendar.catch(() => {});
   // The creator's dated sessions count against weekly hours only.
   const sessions = weekly ? readListings(store, idsOfKind(store, "call")).then((calls) => sessionTimes(calls, now)) : Promise.resolve([]);
   // Awaited below; marked here so a failure while Stripe is being read is not left unheard.
@@ -901,6 +902,55 @@ async function dropLock(lock: CallLock): Promise<void> {
 }
 
 /**
+ * Whether the call a request read before taking the lock is still the call as
+ * saved (issue #3983): the store and the product are read again, exactly, once
+ * the lock is ours. A creator's change (fewer seats, a session taken off, other
+ * hours) is written under the same lock (withCallLock), so a booking or a move
+ * that read the call before it is refused, never checked against the old one.
+ * "unknown" when the store or the product cannot be read exactly (rule 24).
+ */
+async function callUnchanged(store: Store, productId: string, read: CallSetup): Promise<boolean | "unknown"> {
+  const now = await storeForEmail(storeRef(store));
+  if (!now || now.callsId !== store.callsId) return "unknown";
+  const listing = await readListingExactly(now, productId);
+  if (listing === "unknown") return "unknown";
+  return Boolean(listing?.call) && JSON.stringify(listing?.call) === JSON.stringify(read);
+}
+
+/**
+ * Runs a creator's check of a call change against what buyers booked, and its
+ * write, under the store's calendar lock, the one a booking and a move take
+ * (issue #3983): no buyer books between the check and the write. `keep` makes
+ * the lock last again right before the write and says false when it is not
+ * ours any more; then nothing is written. A store with no calendar yet has no
+ * booking to keep and runs without a lock. "error" when the lock cannot be had
+ * or read: nothing ran.
+ */
+export async function withCallLock<T>(store: Store | null, work: (keep: () => Promise<boolean>) => Promise<T>): Promise<T | "error"> {
+  if (!store?.callsId) return work(async () => true);
+  let lock: CallLock | null;
+  try {
+    lock = await takeLock(store.callsId);
+  } catch (error) {
+    console.error("taking a call's lock for a change failed", error);
+    return "error";
+  }
+  if (!lock) return "error";
+  const held = lock;
+  try {
+    return await work(async () => {
+      try {
+        return await keepLock(held);
+      } catch {
+        return false;
+      }
+    });
+  } finally {
+    await dropLock(held);
+  }
+}
+
+/**
  * Closes a checkout opened under a lock that was not ours any more by the
  * time its hold was to be written. Its address was never handed out, so
  * nobody can have paid it; true only when Stripe says it is expired.
@@ -1193,7 +1243,10 @@ export async function holdAndCheckout(input: {
   let claimed: { hosts: string[]; claim: string } | null = null;
   let opened = false;
   try {
-    // Read once the lock is ours, so the check is about this moment.
+    // Read once the lock is ours, so the check is about this moment: the call as saved now, too (issue #3983).
+    const unchanged = await callUnchanged(store, product.id, product.call);
+    if (unchanged === "unknown") return { ok: false, reason: "error" };
+    if (!unchanged) return { ok: false, reason: "taken" };
     const now = Date.now();
     if (team) {
       try {
@@ -1476,6 +1529,10 @@ export async function moveBooking(input: {
   // A team booking whose call is no longer a team event: its hosts' old claim is let go after the move.
   let letGo: { hosts: string[]; claim: string } | null = null;
   try {
+    // The call as saved now, read once the lock is ours (issue #3983): a move that read it before a change is refused.
+    const unchanged = await callUnchanged(store, product.id, product.call);
+    if (unchanged === "unknown") return { ok: false, reason: "error" };
+    if (!unchanged) return { ok: false, reason: "taken" };
     const now = Date.now();
     const recorded = (await readMoves([session])).get(session);
     from = recorded
@@ -1946,7 +2003,7 @@ export async function confirmBooking(input: {
     if (team) {
       await confirmTeam(store, product.id, team.hosts, team.claim, start, end).catch((error) => console.error("confirming a team booking's hosts failed", error));
       // The five-minute job reads this store's refunds while it has team bookings to come, so a refund gives the hosts their time back.
-      await redisPipeline([["ZADD", MEET_STORES, end, `${store.callsId}|${store.handle}`]]).catch(() => {});
+      await keepMeetStore(store, end);
     }
     // Reminders are emails too, so the demo plans none (writesAboutBookings). Planning the same booking twice plans nothing new.
     if (writesAboutBookings(store)) {

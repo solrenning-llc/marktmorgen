@@ -192,9 +192,21 @@ export function autoPayEmail(paid: Awaited<ReturnType<typeof payWithPayPal>>, cu
   };
 }
 
-/** One store, if today is its payday and anybody is owed. True when sent. */
+/**
+ * How many days after its payday a store is still due, in the same month (#4620): the daily run stops at its
+ * deadline, so a store it did not reach on its payday is kept on the next days instead of waiting a whole month. The
+ * month's claim (claimMonth) still lets only one run send, so nothing goes twice.
+ */
+export const PAYDAY_CATCH_UP_DAYS = 3;
+
+/** Whether a store's payday is today or was at most PAYDAY_CATCH_UP_DAYS days ago in this month. */
+export function paydayDue(payday: number, dayOfMonth: number): boolean {
+  return payday >= 1 && dayOfMonth >= payday && dayOfMonth - payday <= PAYDAY_CATCH_UP_DAYS;
+}
+
+/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent. */
 async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean> {
-  if (!affiliatesOn(store) || store.affiliates.payday !== dayOfMonth) return false;
+  if (!affiliatesOn(store) || !paydayDue(store.affiliates.payday, dayOfMonth)) return false;
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
   // Anyone with a PayPal payment already on its way is not due again.
@@ -234,10 +246,10 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
 }
 
 /**
- * Every store, once, for whichever of them pays today. `deadline` is when the
- * run has to stop whatever it has reached; the next run starts again from the
- * beginning, and the month's claim keeps anybody already emailed from being
- * emailed twice.
+ * Every store, once, for whichever of them pays today or paid in the last
+ * PAYDAY_CATCH_UP_DAYS days. `deadline` is when the run has to stop whatever it
+ * has reached; the next run starts again from the beginning, and the month's
+ * claim keeps anybody already emailed from being emailed twice.
  */
 export async function sendPaydayEmails(deadline: number, now = new Date()): Promise<PaydayCounts> {
   const counts: PaydayCounts = { seen: 0, due: 0, sent: 0, failed: 0, complete: false };
@@ -247,10 +259,19 @@ export async function sendPaydayEmails(deadline: number, now = new Date()): Prom
   let cursor = "0";
   for (let step = 0; step < MAX_STEPS; step += 1) {
     if (Date.now() >= deadline) return counts;
-    const { stores, next } = await storesAfter(cursor);
+    // A page of stores that does not read ends the run as not complete (#4620), instead of throwing out of the job:
+    // the stores it would have held are reached on the next days, inside PAYDAY_CATCH_UP_DAYS.
+    let page: Awaited<ReturnType<typeof storesAfter>>;
+    try {
+      page = await storesAfter(cursor);
+    } catch (error) {
+      console.error("reading a page of stores for the affiliate payday failed; the run stops here", error);
+      return counts;
+    }
+    const { stores, next } = page;
     for (const store of stores) {
       counts.seen += 1;
-      if (store.affiliates.payday !== dayOfMonth) continue;
+      if (!paydayDue(store.affiliates.payday, dayOfMonth)) continue;
       counts.due += 1;
       try {
         if (await payday(store, month, dayOfMonth)) counts.sent += 1;

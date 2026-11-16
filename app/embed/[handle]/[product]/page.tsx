@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { isResting } from "@/lib/traffic";
 import { NewTab } from "@/components/new-tab";
 import { forVisitor } from "@/lib/visitor";
 import { connection } from "next/server";
@@ -155,8 +156,14 @@ export default async function EmbedCard({ params, searchParams }: Params) {
   const product = loaded.product;
   // With the visitor's country, for a fair price for it (lib/fair-price.ts).
   const store = loaded.store ? await forVisitor(loaded.store) : null;
+  // One of the store's public requests, counted before anything else is read (#4634), as the store's own pages do
+  // (app/[handle]/p/[product]/page.tsx): the card is dynamic, so every render reached the reads below with no ceiling.
+  // Past the store's requests (or a count that cannot be made) the card reads nothing more.
+  const resting = store && product ? await isResting(store) : false;
   // Opened by the checkout script: counted, and what it may show (lib/embed-open.ts).
-  const open: ScriptOpen | null = mode && store ? await readScriptOpen(store, mode, query) : null;
+  // Its request already taken above when there is a product, so the open does not take a second one; without one
+  // (an unknown id or an unread listing) nothing above counted, so the open counts its own (Claude 7 on #4645).
+  const open: ScriptOpen | null = mode && store && !resting ? await readScriptOpen(store, mode, query, Boolean(product)) : null;
   // The card's own links, tagged as the code that opened it was.
   const tag = (url: string) => (open ? withTags(url, open.tags, { via: open.via }) : tagged(url, place));
   // As a page of its own, links stay in the tab; in a frame, they open a new one.
@@ -181,6 +188,20 @@ export default async function EmbedCard({ params, searchParams }: Params) {
           ) : (
             "This product is no longer on sale."
           )}
+        </p>
+      </div>
+    );
+  }
+
+  if (resting) {
+    return (
+      <div className="flex h-screen items-center justify-center p-4" style={{ background: "transparent" }}>
+        <style>{SEE_THROUGH}</style>
+        <p lang={speech(store).lang.locale} className="rounded-3xl bg-white px-5 py-4 text-center text-sm text-ink-soft ring-1 ring-line">
+          {`${speech(store).w.cardUnread} `}
+          <a href={tag(`/@${store.handle}`)} {...aside} className="font-semibold underline underline-offset-4">
+            {speech(store).w.seeStore(store.name)}
+          </a>
         </p>
       </div>
     );

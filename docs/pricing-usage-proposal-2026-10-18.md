@@ -43,7 +43,7 @@ For each monthly price (the year at ten monthly payments), the largest share of 
 | $89 / $890 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $99 / $990 | cannot keep 60% with only the video hours included | — | — | — | — |
 | $129 / $1,290 **(recommended)** | 17.5% | 60.24% | 60.05% | $77.72 | 0.49 |
-| $149 / $1,490 | 70.0% | 60.27% | 60.06% | $89.81 | 0.43 |
+| $149 / $1,490 | 70.0% | 60.26% | 60.06% | $89.80 | 0.43 |
 | $169 / $1,690 | 100.0% | 60.41% | 60.20% | $102.10 | 0.38 |
 | $199 / $1,990 | 100.0% | 60.91% | 60.73% | $121.22 | 0.32 |
 
@@ -94,7 +94,7 @@ At the competitor's own price instead (Store $35, the lowest that keeps 60% at a
 | Net at full included use, yearly (sizing reading) | 60.05% | 60.04% | 60.02% |
 | Net at full use, monthly, under the most-tax reading (the gate) | 12.08% | 12.12% | 12.14% |
 | Net a customer, a month, at full included use | $77.72 | $150.27 | $241.03 |
-| The same at #553's price | $38.41 | $267.81 | $600.46 |
+| The same at #553's price | $38.41 | $267.81 | $600.45 |
 
 Every limit that costs nothing per use is **kept** as in #553 and on every plan: 2,000 products, 200 lessons a course, 20 forms, a team of 5, 0% of a sale, and every feature of the plan. One could be **raised** at no modelled cost: deal pipelines (Store 2, Studio 5, Scale 10), which tests/plan-cost-registry.ts lists under NOT_A_COST as a setting in a record the data room already prices; the proposal is 10 on every plan. No other visible figure is raised, because every other one is read by a priced line of the registry.
 

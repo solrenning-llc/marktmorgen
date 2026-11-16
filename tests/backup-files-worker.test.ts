@@ -192,6 +192,19 @@ async function main(): Promise<void> {
   report = await runAt(6 + BACKUP_FILES_ORPHAN_DAYS);
   is("and removed after 90 days missing from every complete listing", [copies().length, deletesIn(files).length], [7, 3]);
 
+  part("a listing that ends unsignable (a key the route could not sign): asked once, never complete, no orphan end");
+  // Claude 5's MEDIUM on #3313: the route leaves such a key out and ends the listing "unsignable", with no cursor.
+  fresh();
+  setListing("blob", S, objects("blob", S, 10));
+  world.unsignableEnd.add(listingKey("blob", S));
+  const listCalls = () => world.calls.filter((c) => c.url.includes("source=blob") && c.url.includes(`store=${S}`)).length;
+  report = await runAt(0);
+  is("the listing is asked for once, never again from its first page", listCalls(), 1);
+  is("its entries are copied; the listing is incomplete, with its alarm and no heartbeat", [copies().length, has(report, "listing_incomplete"), report.heartbeat], [10, true, false]);
+  setListing("blob", S, objects("blob", S, 7));
+  for (const day of [1, 1 + BACKUP_FILES_ORPHAN_DAYS, 2 + BACKUP_FILES_ORPHAN_DAYS]) report = await runAt(day);
+  is("objects missing from listings that are never complete are never ended as orphans", [deletesIn(files).length, copies().length], [0, 10]);
+
   part("a listing that shrinks 20% exactly passes; more than 20% holds");
   fresh();
   setListing("blob", S, objects("blob", S, 10));

@@ -70,7 +70,8 @@ async function main(): Promise<void> {
   is("an explicit zero amount remains zero", (await memberSubs(store, "member@example.com"))?.[0]?.amount, 0);
   reset();
   is("known membership still accepts the existing code once", [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: true }, 1]);
-  for (const value of [{}, { id: "sub_another0001" }, null]) {
+  // An answer whose discount does not read as Stripe writes one is not "applied", as hasDiscount reads the member list.
+  for (const value of [{}, { id: "sub_another0001" }, null, { id, discounts: [null] }, { id, discounts: [], discount: false }]) {
     reset(); postReply = value;
     is("an unconfirmed update is not success and is never retried", [await applyMemberDiscount(store, "member@example.com", id, promo), posts], [{ ok: false, reason: "stripe" }, 1]);
   }

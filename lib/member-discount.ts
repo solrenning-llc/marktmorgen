@@ -194,8 +194,8 @@ export async function applyMemberDiscount(store: Store, email: string, subscript
     // Applied only on Stripe's answer for this membership, its own id, showing a discount on it (rule 30, DISC-C-3):
     // any other answer is not known to have put it on, so the creator is never told the renewals are discounted.
     if (!row || !Object.hasOwn(row, "id") || row.id !== subscription) return { ok: false, reason: "stripe" };
-    const discounted = (Array.isArray(row.discounts) && row.discounts.length > 0) || (row.discount !== null && row.discount !== undefined);
-    if (!discounted) return { ok: false, reason: "stripe" };
+    // Read as the member list reads it (hasDiscount): a discount that does not read throws, and is "stripe" below.
+    if (!hasDiscount(row)) return { ok: false, reason: "stripe" };
     return { ok: true };
   } catch (error) {
     // Stripe refusing it by the code's own rules (a first order only, a minimum, used up) is said as such.

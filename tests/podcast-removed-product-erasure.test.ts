@@ -113,3 +113,30 @@ test("a deletion between a new feed's index and its grant leaves no address behi
   const left = ((redis.run(["SCAN", "0", "MATCH", "nl:pod:t:*"]) as [string, string[]])[1]).filter((key) => String(redis.run(["GET", key])).includes(late));
   assert.deepEqual(left, [], "no grant anywhere holds the erased address");
 }));
+
+// Codex P, T, L and X5 on #4471 @e9ad001138: a feed granted before the product note existed is handed out again
+// through its index, and that path returned before any note, so asking again for the link never made the product
+// findable once it was removed.
+test("asking again for a feed granted before the note notes its product, and its deletion then reaches it", () => quietly(async () => {
+  const { sid, pid, mine } = await world();
+  redis.run(["DEL", `nl:pod:pids:${sid}`]); // as a grant made before the note existed left it
+  assert.equal(await access.feedToken((await storeForEmail(owner))!, pid, person), mine, "the same feed address");
+  assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, pid]), 1, "its product is noted before the link is handed out");
+  assert.ok((await removeProduct(owner, pid)).ok);
+  const result = await erasePerson((await storeForEmail(owner))!, person, { kind: "person" });
+  assert.equal(result.ok, true);
+  assert.equal(redis.run(["GET", grantKey(mine)]), null, "the grant, with the address, is gone");
+}));
+
+test("an unknown reply to the note hands out no link", () => quietly(async () => {
+  const { sid, pid } = await world();
+  redis.run(["DEL", `nl:pod:pids:${sid}`]);
+  const original = redis.pipeline.bind(redis);
+  redis.pipeline = async (commands) => {
+    if (commands.some((c) => c[0] === "EVAL" && c.some((a) => String(a).startsWith("nl:pod:pids:")))) return [[0, "garbled"]];
+    return original(commands);
+  };
+  let token: unknown;
+  try { token = await access.feedToken((await storeForEmail(owner))!, pid, person).catch((error: unknown) => error); } finally { redis.pipeline = original; }
+  assert.ok(typeof token !== "string", "no link while its product's note is unknown");
+}));

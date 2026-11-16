@@ -76,6 +76,23 @@ async function main(): Promise<void> {
     bend = null;
   }
 
+  part("The sums' page that does not read is unknown, never 'every sum applied'");
+  {
+    const { recountStep, STATE_KEY, RECOUNT_VERSION } = await import("@/lib/data-recount");
+    await original([["HSET", STATE_KEY, "phase", "apply", "cursor", "0", "version", RECOUNT_VERSION], ["HSET", SUM_KEY, "someone@example.com", "123"]]);
+    for (const value of ["QUEUED", ["0"], ["0", ["only-a-field"]]]) {
+      bend = (commands, realReplies) => realReplies.map((r, i) => (commands[i][0] === "HSCAN" && commands[i][1] === SUM_KEY ? value : r));
+      is(`HSCAN ${JSON.stringify(value)}: unknown`, await outcome(() => recountStep(Date.now() + 5_000)), "unknown");
+      bend = null;
+      is("not marked done", ((await original([["HGET", STATE_KEY, "phase"]])) as unknown[])[0], "apply");
+    }
+    bend = (commands, realReplies) => realReplies.map((r, i) => (commands[i][0] === "HSCAN" && commands[i][1] === SUM_KEY ? ["0", ["someone@example.com", "12x"]] : r));
+    is("a stored sum that does not read: unknown", await outcome(() => recountStep(Date.now() + 5_000)), "unknown");
+    bend = null;
+    is("the sum is kept for the next run", ((await original([["HGET", SUM_KEY, "someone@example.com"]])) as unknown[])[0], "123");
+    await original([["DEL", STATE_KEY, SUM_KEY]]);
+  }
+
   part("Control: real replies weigh each key as before");
   for (const kind of ["string", "hash", "set", "zset", "list"]) {
     is(`${kind} weighs more than its data`, (real[kind] ?? 0) > 5_000, true);

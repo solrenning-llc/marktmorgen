@@ -40,6 +40,8 @@ import { isPathBoardSharedKey } from "@/lib/path-board";
  * company's, and are deleted when it is done.
  */
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
+import { UnknownReplyError, countOf, repliesFor, scanPage, stringList } from "@/lib/redis-reply";
+import { textCountOf } from "@/lib/redis-count";
 import { countedInRoom } from "@/lib/data-families";
 import { ORDER_BOARD_ENTRY_BYTES, ORDER_ENTRY_BYTES, ORDER_KEY_BYTES } from "@/lib/order-data";
 import { dataKey, noteData } from "@/lib/store-data";
@@ -107,25 +109,35 @@ async function readState(): Promise<State> {
 
 export type RecountReport = { phase: string; stores: number; pages: number; measured: number; applied: number; done: boolean };
 
+/** Every answer TYPE gives. */
+const REDIS_TYPES = new Set(["none", "string", "hash", "set", "zset", "list", "stream", "vectorset"]);
+
 /** What one key weighs, measured the way an order's write is charged (lib/order-data.ts). Null when it is gone. */
 export async function measureKey(key: string): Promise<number | null> {
-  const [rawType] = await redisPipeline([["TYPE", key]]);
-  const type = typeof rawType === "string" ? rawType : String((rawType as { ok?: string } | null)?.ok ?? "none");
+  // Every reply read exactly (CX-123 rule 24): a key weighed short sets its store's room below what it keeps, and the
+  // room is the ceiling each write is held to. A reply that does not read throws UnknownReplyError; recountStep then
+  // does not move past the page, and the next run measures it again.
+  const typeReply = repliesFor(await redisPipeline([["TYPE", key]]), 1)?.[0];
+  const typeText = typeof typeReply === "string" ? typeReply : typeReply && typeof typeReply === "object" && Object.hasOwn(typeReply, "ok") ? (typeReply as { ok?: unknown }).ok : undefined;
+  if (typeof typeText !== "string" || !REDIS_TYPES.has(typeText)) throw new UnknownReplyError(`the type of ${key}`);
+  const type = typeText;
   let raw = bytes(key) + ORDER_KEY_BYTES;
   const page = async (command: string, each: (flat: string[]) => number) => {
     let cursor = "0";
     for (let i = 0; i < 10_000; i += 1) {
-      const [reply] = await redisPipeline([[command, key, cursor, "COUNT", 1000]]);
-      if (!Array.isArray(reply) || reply.length < 2) return;
-      cursor = String(reply[0]);
-      raw += each(Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : []);
+      const read = scanPage(await redisPipeline([[command, key, cursor, "COUNT", 1000]]));
+      if (!read) throw new UnknownReplyError(`a page of ${key}`);
+      cursor = read.next;
+      raw += each(read.items);
       if (cursor === "0") return;
     }
+    throw new UnknownReplyError(`${key}, not at its end after 10,000 pages,`);
   };
   if (type === "none") return null;
   if (type === "string") {
-    const [len] = await redisPipeline([["STRLEN", key]]);
-    raw += Number(len) || 0;
+    const len = countOf(repliesFor(await redisPipeline([["STRLEN", key]]), 1)?.[0]);
+    if (len === null) throw new UnknownReplyError(`the length of ${key}`);
+    raw += len;
   } else if (type === "hash") {
     await page("HSCAN", (flat) => flat.reduce((sum, piece, i) => sum + bytes(piece) + (i % 2 === 1 ? ORDER_ENTRY_BYTES : 0), 0));
   } else if (type === "set") {
@@ -134,8 +146,8 @@ export async function measureKey(key: string): Promise<number | null> {
     await page("ZSCAN", (flat) => flat.reduce((sum, piece, i) => sum + (i % 2 === 0 ? bytes(piece) + 8 + ORDER_BOARD_ENTRY_BYTES : 0), 0));
   } else if (type === "list") {
     for (let at = 0; at < 1_000_000; at += 1000) {
-      const [items] = await redisPipeline([["LRANGE", key, at, at + 999]]);
-      const list = Array.isArray(items) ? items.map(String) : [];
+      const list = stringList(repliesFor(await redisPipeline([["LRANGE", key, at, at + 999]]), 1)?.[0]);
+      if (!list) throw new UnknownReplyError(`a page of ${key}`);
       raw += list.reduce((sum, v) => sum + bytes(v) + ORDER_ENTRY_BYTES, 0);
       if (list.length < 1000) break;
     }
@@ -208,17 +220,26 @@ async function applySums(deadline: number): Promise<{ applied: number; done: boo
   let applied = 0;
   for (let round = 0; round < 1_000; round += 1) {
     if (Date.now() > deadline) return { applied, done: false };
-    const [reply] = await redisPipeline([["HSCAN", SUM_KEY, "0", "COUNT", 100]]);
-    const flat = Array.isArray(reply) && Array.isArray(reply[1]) ? (reply[1] as unknown[]).map(String) : [];
+    // Read exactly (rule 24): a page that does not read is unknown, never "every sum applied".
+    const read = scanPage(await redisPipeline([["HSCAN", SUM_KEY, "0", "COUNT", 100]]));
+    if (!read || read.items.length % 2 !== 0) throw new UnknownReplyError("the measured sums");
+    const flat = read.items;
     if (!flat.length) return { applied, done: true };
     for (let i = 0; i + 1 < flat.length; i += 2) {
       const ref = flat[i];
-      const measured = Number(flat[i + 1]) || 0;
+      // The sum the page script stored: a whole number, or unknown (rule 24). Unknown throws before the sum is taken
+      // out, so a run never sets a store's slot from a sum it could not read.
+      const summed = textCountOf(flat[i + 1]);
+      if (summed === null || summed === "absent") throw new UnknownReplyError("a store's measured sum");
+      const measured = summed;
       const store: Store | null = await storeForEmail(ref).catch(() => null);
       const key = store ? dataKey(store) : null;
       if (store && key) {
-        const [room] = await redisPipeline([["HMGET", key, "#", LEGACY_SLOT]]);
-        const [total, legacy] = Array.isArray(room) ? room.map((v) => Number(v ?? 0) || 0) : [0, 0];
+        // The room's own total and slot, each a whole number or nil (never written): anything else is unknown, never 0.
+        const room = repliesFor(await redisPipeline([["HMGET", key, "#", LEGACY_SLOT]]), 1)?.[0];
+        const fields = Array.isArray(room) && room.length === 2 ? room.map((v) => textCountOf(v)) : null;
+        if (!fields || fields.some((v) => v === null)) throw new UnknownReplyError("a store's data room");
+        const [total, legacy] = fields.map((v) => (v === "absent" ? 0 : (v as number)));
         // What the room counts without this slot, its own field included.
         const counted = Math.max(0, total - legacy - (legacy > 0 ? 64 : 0));
         await noteData(store, [{ slot: LEGACY_SLOT, bytes: Math.max(0, measured - counted), set: true }]);

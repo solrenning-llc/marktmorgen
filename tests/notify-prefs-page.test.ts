@@ -69,6 +69,25 @@ async function main(): Promise<void> {
   is("unknown: it still offers the way to start them again", unknown.includes(RESTART), true);
   is("unknown: it does not say they are stopped for sure", unknown.includes("All of these alert emails are stopped"), false);
 
+  // Claude 7's LEVE on #3013 @2f6a0ef013: a SISMEMBER that answers in an unreadable shape (no throw) is unknown too,
+  // never drawn as "stopped for sure". weeklyOff reads it as stopped for the jobs; the page must not say it as fact.
+  await setWeeklyOff("notifypageharbor", false);
+  (redis as { pipeline: typeof redis.pipeline }).pipeline = (async (commands: unknown[][]) => {
+    if (commands.some((c) => c[0] === "SISMEMBER" && String(c[1]).includes("weekly"))) return ["not-a-count"] as never;
+    return real(commands as never);
+  }) as typeof redis.pipeline;
+  let malformed = "";
+  try {
+    malformed = await draw();
+  } catch (error) {
+    malformed = `threw: ${String(error)}`;
+  } finally {
+    (redis as { pipeline: typeof redis.pipeline }).pipeline = real;
+  }
+  is("a malformed reply: the page still opens", malformed.startsWith("threw:") ? malformed : "opened", "opened");
+  is("a malformed reply: it says it could not check the stop link", UNKNOWN.test(malformed), true);
+  is("a malformed reply: it does not say they are stopped for sure", malformed.includes("All of these alert emails are stopped"), false);
+
   part("What a save says, for each reading of the stop link");
   is("the save message is one function of the reading", typeof savedText, "function");
   if (savedText) {

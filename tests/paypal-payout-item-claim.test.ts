@@ -191,6 +191,14 @@ async function main(): Promise<void> {
   const odd = await addPayout(store, { aff: sentByPayPal.aff, cents: 900, currency: sentByPayPal.currency, date: "2026-11-03", reference: "PayPal ITEMOLDER1x" });
   is("a mark read in another shape: Undo is never carried out on a guess", await removePayout(store, odd?.id ?? "").catch(() => "threw"), "threw");
 
+  // Claude 4 cloud Z's LEVE on #4614: a payout kept as text that does not read may be one PayPal sent; Undo never takes it
+  // off on a guess, so the book never owes it again.
+  const unread = "0123456789ab";
+  redis.run(["HSET", `nl:aff:${store.statsId}:payouts`, unread, "{not a payout"]);
+  is("a payout kept as text that does not read: Undo is refused, never carried out on a guess", await removePayout(store, unread).catch(() => "threw"), "threw");
+  is("and it is still in the book", redis.run(["HEXISTS", `nl:aff:${store.statsId}:payouts`, unread]), 1);
+  redis.run(["HDEL", `nl:aff:${store.statsId}:payouts`, unread]);
+
   part("Two settles at once: written once");
   await seed(store);
   await Promise.all([settle(store), settle(store)]);

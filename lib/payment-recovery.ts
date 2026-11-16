@@ -69,8 +69,9 @@ export const CARD_PAGES = 5;
 /** Cards looked up one by one, for memberships paid with the customer's card rather than their own. */
 export const CARD_LOOKUPS = 20;
 /**
- * At most this many card notices written per store per run (16 November 2026): each is a claim, a card link, an email
- * and, for a card page already finished, up to four Stripe calls, so the run's cost has a ceiling before it is spent
+ * At most this many card notices written, and card pages already finished settled, per store per run (16 November
+ * 2026): a notice is a claim, a card link and an email, a page settled up to four Stripe calls, so the run's cost has a
+ * ceiling before it is spent
  * (regra MR), as failed renewals have PER_STORE. A notice past it waits for the next run: the run that stopped at it
  * leaves the reading where it began, so the same pages are read again, and a member told already is never told twice.
  */
@@ -389,7 +390,9 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
   const handles = saleHandles(store);
   const now = Date.now();
   const [saved] = await redisPipeline([["GET", cardCursorKey(account)]]);
-  let after = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
+  // Where this run began: kept when a notice due on these pages is left for the next run (CARD_NOTICES_PER_RUN).
+  const began = typeof saved === "string" && SUB_PATTERN.test(saved) ? saved : "";
+  let after = began;
   const due: { sub: RunningSub; card: Card; customer: string; email: string; payAt: number }[] = [];
   let lookups = 0;
 
@@ -432,8 +435,12 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     }
     after = last.id;
   }
-  await redisPipeline([after ? ["SET", cardCursorKey(account), after, "EX", 30 * 86_400] : ["DEL", cardCursorKey(account)]]);
-  if (!due.length) return 0;
+  // Where the next run begins: past these pages, unless a notice due on them is left (below).
+  const keep = (at: string) => redisPipeline([at ? ["SET", cardCursorKey(account), at, "EX", 30 * 86_400] : ["DEL", cardCursorKey(account)]]);
+  if (!due.length) {
+    await keep(after);
+    return 0;
+  }
 
   const ids = [...new Set(due.map((d) => d.sub.metadata?.product ?? "").filter(Boolean))];
   const titles = new Map((await readListings(store, ids).catch(() => [])).map((p) => [p.id, p.title]));
@@ -442,8 +449,15 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
   const m = membershipWords(language);
   let sent = 0;
 
+  let written = 0;
+  let left = false;
   for (const { sub, card, customer, email, payAt } of due) {
-    if (Date.now() >= deadline) break;
+    // At the ceiling, or out of time: the rest wait for the next run, which reads these pages again (never dropped;
+    // a member told already is skipped by the claim below, at no notice).
+    if (Date.now() >= deadline || written >= CARD_NOTICES_PER_RUN) {
+      left = true;
+      break;
+    }
     const subId = typeof sub.id === "string" && SUB_PATTERN.test(sub.id) ? sub.id : "";
     if (!subId) continue;
     // A member who saved a new card and closed the tab before Stripe sent
@@ -454,6 +468,8 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     // A page already finished is not waiting (lib/card-update.ts, waitingCardPage).
     const pending = waitingCardPage(open[0]);
     if (typeof pending === "string") {
+      // A page settled is work of the same ceiling: up to four Stripe calls (CARD_NOTICES_PER_RUN counts it too).
+      written += 1;
       const finished = await finishCardUpdate(store, pending);
       // Unsure whether the card was set: no notice on a guess either way; the page stays open and is finished again.
       if (finished === "updated" || finished === "paid" || finished === "declined" || finished === "unsure") continue;
@@ -461,6 +477,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
     const key = cardKey(account, subId, card.id);
     const value = claimValue();
     if ((await claimMark(key, CARD_SENT_SECONDS, value)) !== "ours") continue;
+    written += 1;
     try {
       const token = await cardLink(account, customer, subId);
       const mail = cardNoticeEmail({
@@ -491,6 +508,7 @@ async function noticeCards(store: Store, deadline: number): Promise<number> {
       console.error("writing about a card that stops working failed", store.handle, error);
     }
   }
+  await keep(left ? began : after);
   return sent;
 }
 

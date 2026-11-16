@@ -10,7 +10,7 @@
  *   - the line missing, not on every plan, or not built from the job's own caps.
  */
 import { readFileSync } from "node:fs";
-import { CARD_LOOKUPS, CARD_PAGES, FAILED_PAGES, PER_STORE } from "@/lib/payment-recovery";
+import { CARD_LOOKUPS, CARD_NOTICES_PER_RUN, CARD_PAGES, FAILED_PAGES, PER_STORE } from "@/lib/payment-recovery";
 import {
   COMMAND, COST_LINES, DB_BYTE, DUNNING_RUNS_PER_MONTH, DUNNING_STORE_BYTES, DUNNING_STORE_COMMANDS, DUNNING_STORE_MONTH,
   DUNNING_STORE_RUN, DUNNING_STRIPE_CALLS, DUNNING_STRIPE_PAGES, READ_LISTING_BYTES, STRIPE_LIST_PAGE,
@@ -55,7 +55,7 @@ is("a month is its runs", DUNNING_STORE_MONTH, DUNNING_RUNS_PER_MONTH * DUNNING_
 is("a run is at least its commands, bytes and list pages, and more for the calls waited on", DUNNING_STORE_RUN > DUNNING_STORE_COMMANDS * COMMAND + DUNNING_STORE_BYTES * DB_BYTE + DUNNING_STRIPE_PAGES * STRIPE_LIST_PAGE, true);
 const read = FAILED_PAGES * PER_STORE;
 const cards = CARD_PAGES * 100;
-is("its counts come from the job's own caps", [DUNNING_STRIPE_PAGES, DUNNING_STRIPE_CALLS, DUNNING_STORE_BYTES], [FAILED_PAGES + CARD_PAGES, PER_STORE + CARD_LOOKUPS + cards * 4, MAX_STORE_BYTES + (read + cards) * READ_LISTING_BYTES]);
+is("its counts come from the job's own caps", [DUNNING_STRIPE_PAGES, DUNNING_STRIPE_CALLS, DUNNING_STORE_BYTES], [FAILED_PAGES + CARD_PAGES, PER_STORE + CARD_LOOKUPS + (CARD_NOTICES_PER_RUN + 1) * 4, MAX_STORE_BYTES + (read + cards) * READ_LISTING_BYTES]);
 is("never zero", DUNNING_STORE_MONTH > 0, true);
 console.log("  (worst month a store: $" + DUNNING_STORE_MONTH.toFixed(4) + "; a run: " + DUNNING_STORE_COMMANDS + " commands, " + DUNNING_STRIPE_PAGES + " pages, " + DUNNING_STRIPE_CALLS + " calls)");
 done();

@@ -83,7 +83,7 @@ import { PERSON_ARG_BYTES } from "@/lib/crm";
 import { BUYER_SEND_DAYS, EMAILS_PER_BUYER_PER_ENDING, STRIPE_CALLS_PER_MEMBER, buyerNoticeCap } from "@/lib/closing-buyers-rules";
 import { PAYPAL_PAGE, buyerPagesCap } from "@/lib/closing-buyers";
 import { MAX_NAME_LENGTH as STORE_NAME_MOST, MAX_STORE_BYTES } from "@/lib/store";
-import { CARD_LOOKUPS as DUNNING_CARD_LOOKUPS, CARD_PAGES as DUNNING_CARD_PAGES, FAILED_PAGES as DUNNING_FAILED_PAGES, PER_STORE as DUNNING_PER_STORE } from "@/lib/payment-recovery";
+import { CARD_LOOKUPS as DUNNING_CARD_LOOKUPS, CARD_NOTICES_PER_RUN as DUNNING_CARD_NOTICES, CARD_PAGES as DUNNING_CARD_PAGES, FAILED_PAGES as DUNNING_FAILED_PAGES, PER_STORE as DUNNING_PER_STORE } from "@/lib/payment-recovery";
 import { BODIES_PER_READ } from "@/lib/course";
 import { COURSE_BYTES, REFUND_MARK_BYTES, REFUND_MARKS_PER_READ } from "@/lib/api-read-rules";
 import { MAX_LEADS } from "@/lib/contact-rules";
@@ -1057,8 +1057,9 @@ export const DAY_WINDOWS = 32;
  *     call waited on STRIPE_WAIT_SECONDS), the month's count (HINCRBY, EXPIRE) and the claim let go when the email
  *     does not go (EVAL, billed with its TYPE, PTTL, GET and DEL);
  *   - cards about to stop working (noticeCards, when the creator leaves it on): the cursor's GET and SET,
- *     DUNNING_CARD_PAGES pages of running memberships, DUNNING_CARD_LOOKUPS cards looked up, the titles again, and for
- *     each membership read that is due a notice: the open card page's GET, a finished page settled
+ *     DUNNING_CARD_PAGES pages of running memberships, DUNNING_CARD_LOOKUPS cards looked up, the titles again; for
+ *     each membership read that is due a notice, the open card page's GET and its claim tried; and for at most
+ *     DUNNING_CARD_NOTICES (CARD_NOTICES_PER_RUN, and one more for a member who has both) worked: a finished page settled
  *     (lib/card-update.ts, finishCardUpdate: its checkout session, the membership read, the card set and the failed
  *     payment paid, four Stripe calls, and the page read again and swapped for done, DUNNING_FINISH commands), the claim, the card link's SET, the count and the claim let go.
  * The emails themselves are the store's own figure (line store-email, EMAIL_SITES). Stripe bills no API call; each is
@@ -1076,10 +1077,13 @@ const DUNNING_LET_GO = 5;
 const DUNNING_FINISH = 4;
 export const DUNNING_STORE_COMMANDS = 3
   + DUNNING_READ * 3 + DUNNING_READ + DUNNING_PER_STORE * (DUNNING_CLAIM + DUNNING_COUNT + DUNNING_LET_GO)
-  + 2 + DUNNING_CARD_READ + DUNNING_CARD_READ * (1 + DUNNING_FINISH + DUNNING_CLAIM + 1 + DUNNING_COUNT + DUNNING_LET_GO);
+  // Cards: every membership read that is due has its open page read and its claim tried (a member told already stops
+  // there); at most DUNNING_CARD_NOTICES of them, and one more, are worked: a page settled and a notice written each.
+  + 2 + DUNNING_CARD_READ + DUNNING_CARD_READ * (1 + DUNNING_CLAIM)
+  + (DUNNING_CARD_NOTICES + 1) * (DUNNING_FINISH + 1 + DUNNING_COUNT + DUNNING_LET_GO);
 export const DUNNING_STORE_BYTES = MAX_STORE_BYTES + (DUNNING_READ + DUNNING_CARD_READ) * READ_LISTING_BYTES;
 export const DUNNING_STRIPE_PAGES = DUNNING_FAILED_PAGES + DUNNING_CARD_PAGES;
-export const DUNNING_STRIPE_CALLS = DUNNING_PER_STORE + DUNNING_CARD_LOOKUPS + DUNNING_CARD_READ * 4;
+export const DUNNING_STRIPE_CALLS = DUNNING_PER_STORE + DUNNING_CARD_LOOKUPS + (DUNNING_CARD_NOTICES + 1) * 4;
 /** One store's dunning in one run, in dollars, and in its worst month. */
 export const DUNNING_STORE_RUN = DUNNING_STORE_COMMANDS * COMMAND + DUNNING_STORE_BYTES * DB_BYTE
   + DUNNING_STRIPE_PAGES * STRIPE_LIST_PAGE + DUNNING_STRIPE_CALLS * STRIPE_WAIT_SECONDS * MEMORY_SECOND;
@@ -1636,7 +1640,7 @@ export const COST_LINES: CostLine[] = [
     feature: "The daily job that tells members of a failed renewal and of a card about to stop working (lib/payment-recovery.ts), for one store that sells memberships",
     monthlyUsd: () => DUNNING_STORE_MONTH,
     sources: [
-      { file: "lib/payment-recovery.ts", names: ["PER_STORE", "FAILED_PAGES", "CARD_PAGES", "CARD_LOOKUPS", "async function remindFailed", "async function noticeCards", "export async function recoverFailedPayments"] },
+      { file: "lib/payment-recovery.ts", names: ["PER_STORE", "FAILED_PAGES", "CARD_PAGES", "CARD_LOOKUPS", "CARD_NOTICES_PER_RUN", "async function remindFailed", "async function noticeCards", "export async function recoverFailedPayments"] },
       { file: "app/api/cron/plans/route.ts", names: ["recoverFailedPayments(deadline)"] },
       { file: "lib/card-update.ts", names: ["export async function finishCardUpdate", "export async function cardLink"] },
       { file: "vercel.json", names: ["/api/cron/plans", "0 9 * * *"] },

@@ -89,9 +89,10 @@ export const ORDER_DATA_BYTES = 4_608;
  * A course's student row is written when they first open it, and takes its
  * own room then (touchStudent). 4,352 until 9 November 2026; a podcast's listener is
  * also listed by its product since (lib/podcast-access.ts, audit A1), a member's
- * key and ENTRY_BYTES more.
+ * key and ENTRY_BYTES more. 4,416 until the merge of main of 16 November 2026: main's own product parts
+ * (tests/store-data-registry.ts itemBytes, 4,336 on main) and this PR's entries together keep 4,496.
  */
-export const ITEM_DATA_BYTES = 4_416;
+export const ITEM_DATA_BYTES = 4_496;
 
 /** The most products one order can hand over: a cart of MAX_CART, each with MAX_BUMPS added, every one a bundle of MAX_BUNDLE_ITEMS. */
 export const MAX_ORDER_ITEMS = (MAX_CART + MAX_BUMPS) * MAX_BUNDLE_ITEMS;

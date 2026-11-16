@@ -1590,7 +1590,7 @@ export const COST_LINES: CostLine[] = [
       { file: "lib/book-page-rules.ts", names: ["BOOK_STRIPE_READS", "BOOK_TIMES_BASE_UNITS", "BOOK_LISTINGS_IN_BASE", "BOOK_LISTINGS_PER_UNIT", "bookTimesUnits", "bookingDiaryKey", "BOOK_POST_EXTRA_UNITS"] },
       // Booking a time and moving a booking pay for the times they read, before Stripe is asked (review of #3478).
       { file: "app/api/store/book/route.ts", names: ["if (!(await payBookTimes(store, owned ? \"buyer\" : \"public\", Date.now(), BOOK_POST_EXTRA_UNITS))) return back(\"slow\");", "if (previous) await releaseOwnHold(store, previous).catch(() => {});", "const prepared = pkg ? await prepareSession(store, pkg, linkOrigin(request, store)) : null;", "await releaseOwnHold(store, result.session, { openedHere: true })"] },
-      { file: "app/api/store/book/move/route.ts", names: ["if (!(await bookedHere(store, session))) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"slow\");"] },
+      { file: "app/api/store/book/move/route.ts", names: ["const inDiary = await bookedHere(store, session);", "if (!inDiary) return back(\"unknown\");", "if (!(await payBookTimes(store, \"buyer\"))) return back(\"unavailable\");"] },
       // A search of the store page: the read of every listing the store record does not carry, once for everybody, kept
       // ten minutes and paid as the store's shared work; then the matches it shows and their checkout boxes, each paid
       // before it is read (lib/store-search-index.ts, c1-cost-store-search).

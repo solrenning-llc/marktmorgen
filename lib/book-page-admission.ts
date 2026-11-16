@@ -40,14 +40,18 @@ export async function packageFor(store: Store, productId: string, token: string)
 /**
  * Whether a `?move=` session is a booking in this store's diary (one HEXISTS
  * on the field its hold or its payment wrote, lib/calls.ts), read exactly:
- * any answer but a single 1 is no proof, and the page stays the public one.
+ * a single 1 is yes, a single 0 is no, and anything else (a read that failed,
+ * timed out or answered in another shape) is null, not known (rule 24; Claude 3
+ * on #3478): never proof, and never said to the buyer as "no such booking".
  */
-export async function bookedHere(store: Store, session: string): Promise<boolean> {
-  if (!BOOKING_SESSION.test(session) || !store.callsId || !isRedisConfigured()) return false;
+export async function bookedHere(store: Store, session: string): Promise<boolean | null> {
+  if (!BOOKING_SESSION.test(session) || !store.callsId) return false;
+  if (!isRedisConfigured()) return null;
   try {
     const reply = await redisPipeline([["HEXISTS", bookingDiaryKey(store.callsId), session]]);
-    return Array.isArray(reply) && reply.length === 1 && reply[0] === 1;
+    if (!Array.isArray(reply) || reply.length !== 1) return null;
+    return reply[0] === 1 ? true : reply[0] === 0 ? false : null;
   } catch {
-    return false;
+    return null;
   }
 }

@@ -303,9 +303,16 @@ async function main(): Promise<void> {
   is("bookedHere: a diary read that fails is not known (null), never \"not here\"", await failing(() => bookedHere(unread.store, KEPT)), null);
   is("control: the same booking read is there", await bookedHere(unread.store, KEPT), true);
   const moveWords = bookingWords(unread.store.language);
-  const shown = html((await failing(() => book(unread, { move: KEPT }, "198.51.100.210"))).result);
-  const escaped = (text: string) => renderToStaticMarkup(text as never);
-  is("the move page says the booking could not be read, never that it does not exist", [shown.includes(escaped(moveWords.unreadable)), shown.includes(escaped(moveWords.notFound))], [true, false]);
+  const seen = await failing(() => book(unread, { move: KEPT }, "198.51.100.210"));
+  // The move page sits in an async Shell, so its words are read from the element tree, not rendered.
+  const strings = (node: unknown): string[] => {
+    if (typeof node === "string") return [node];
+    if (Array.isArray(node)) return node.flatMap(strings);
+    const props = (node as { props?: { children?: unknown } } | null)?.props;
+    return props ? strings(props.children) : [];
+  };
+  const said = strings(seen.result);
+  is("the move page says the booking could not be read, never that it does not exist", [said.includes(moveWords.unreadable), said.includes(moveWords.notFound)], [true, false]);
   const routed = (await failing(() => post(unread, moveRoute, "/api/store/book/move", { session: KEPT, start: START }, "203.0.113.210"))).result as Response;
   is("the move route answers \"error\" for it, never \"unknown\"", routed.headers.get("location")?.includes("status=error"), true);
   is("Claude 3's LEVE: times that do not fit the window say \"unavailable\", not the buyer's \"slow\"", readFileSync("app/api/store/book/move/route.ts", "utf8").includes('if (!(await payBookTimes(store, "buyer"))) return back("unavailable");'), true);

@@ -552,18 +552,25 @@ async function main(): Promise<void> {
     // (ERASE_FIXED_COMMANDS 550 -> 551, ERASE_PER.droppedCourses), so the erasure line costs a little more: one cent
     // less kept on Store and Scale monthly, and on Store and Studio in a yearly month.
     // Merge of main into #4542 (15 November 2026): both changes together; figures as the model computes them.
+    // #4319 (the webhook outbox): a request whose queueing failed pays two commands more; less kept a month, still above zero.
+    // Merge of main into #4319 (15 November 2026): main's costs and the outbox together; figures as the model computes them.
     // #3446 (merged with main, 15 November 2026) prices a webhook try's read back of its delivery's line
     // (DELIVERY_READ_BACK, Claude 7's MÉDIO): one GET of up to DELIVERY_WRITE_MAX_BYTES and one DECR at every try of the
     // month's figure keep one cent less on Studio and two on Scale monthly, and one cent less on Scale in a yearly month.
     // Cost is not lowered; still above zero (MR).
-    is("11: Store, Studio and Scale keep 45.11, 313.82 and 703.24 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.11", "313.82", "703.24"]);
+    // Merge of main into #3446 (16 November 2026, third pass): main's outbox cost (#4319) and this PR's webhook read-back
+    // cost together keep two cents less on Scale monthly than main alone (703.16 where 703.18 was); Store and Studio as on
+    // main. Still above zero (MR); cost is not lowered. Figures as the model computes them.
+    is("11: Store, Studio and Scale keep 45.10, 313.80 and 703.16 dollars in their worst month on a monthly plan", worstMonth("month"), ["45.10", "313.80", "703.16"]);
     // Main's model at the merge of 14 November 2026 (claude3 nuvem N) costs Scale's yearly month one cent more again:
     // 579.99 kept where 580.00 was; the monthly figures and Store and Studio are unchanged.
     // Merge of main into #4542 (15 November 2026): main's #4015 cost and this PR's erasure probe together cost Scale's
     // yearly month one cent more: 579.98 where 579.99 was; still above zero (MR). Cost is not lowered.
     // Merge of main into #3446 (15 November 2026, second pass): main's latest model and #3446's webhook read-back cost
     // together cost Studio's yearly month one cent more: 258.69 where 258.70 was; still above zero (MR). Cost is not lowered.
-    is("11: and 37.05, 258.69 and 579.97 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.05", "258.69", "579.97"]);
+    // Merge of main into #3446 (16 November 2026, third pass): with main's outbox cost, one cent less than main alone on
+    // Studio and Scale in a yearly month (258.67 and 579.89 where 258.68 and 579.90 were); still above zero (MR).
+    is("11: and 37.04, 258.67 and 579.89 in a month of a yearly plan (a twelfth of the year paid)", worstMonth("year"), ["37.04", "258.67", "579.89"]);
   } finally {
     Date.now = realNow;
   }

@@ -90,6 +90,11 @@ test("RED: every other counter keyed by the window id takes its time to live fro
   assert.match(kit, /const kept = windowKeySeconds\(store, 40 \* 86_400, now\.getTime\(\)\);/);
   const share = read("app/api/store/funnel-share/route.ts");
   assert.doesNotMatch(share, /countUse\(storeMonthKey\([^)]*\), [^,]+, MONTH_USE_SECONDS\)/, "a store's month counted with a fixed 32 days");
+  // The saved sections' "apply" count is keyed by the same window (Claude 6's MEDIUM on #4561): a fixed 32 days let it
+  // lapse inside a stretched window and opened a second priced allowance there.
+  const blocks = read("app/api/store/saved-blocks/route.ts");
+  assert.doesNotMatch(blocks, /countUse\(storeMonthKey\([^)]*\), [^,]+, MONTH_USE_SECONDS\)/, "the saved sections' applies counted with a fixed 32 days");
+  assert.match(blocks, /countUse\(storeMonthKey\(statsId, "apply", month\), limits\.appliesPerMonth, windowKeySeconds\(store, MONTH_USE_SECONDS\)\)/);
 });
 
 test("RED: the emails to people brought over, used on 2 Mar, stay used on 12 Apr, in the same stretched window", async () => {

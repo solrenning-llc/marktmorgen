@@ -1777,6 +1777,8 @@
     "app/api/mail/ses/route.ts",
     "app/api/mail/unsubscribe/route.ts",
     "app/api/mcp/route.ts",
+    "app/api/numbers-guest/confirm/route.ts",
+    "app/api/numbers-guest/leave/route.ts",
     "app/api/numbers-link/route.ts",
     "app/api/operator/search-console/route.ts",
     "app/api/outreach/stop/route.ts",

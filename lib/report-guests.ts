@@ -34,7 +34,7 @@ import { redisPipeline } from "@/lib/redis";
 import { repliesFor, UnknownReplyError } from "@/lib/redis-reply";
 import { LockBusyError, setIfHeldOnly, withLock } from "@/lib/redis-lock";
 import { deriveKey } from "@/lib/secret-box";
-import { linkHash, linkRecord, newLinkToken, type LinkRecord } from "@/lib/report-guests-links";
+import { linkFits, linkHash, linkRecord, newLinkToken, type LinkKind, type LinkRecord } from "@/lib/report-guests-links";
 import {
   INVITE_DAYS,
   MAX_REPORT_GUESTS,
@@ -246,4 +246,58 @@ export async function forgetGuestPerson(sid: string, email: string): Promise<num
 export function linkKeysOf(raw: string): string[] {
   const share = raw ? parseShare(raw) : null;
   return share ? share.guests.flatMap((guest) => [guestLinkKey(guest.confirm), guestLinkKey(guest.leave)]) : [];
+}
+
+// ---- The confirm and leave links' doors (unit 4) ------------------------------
+
+export type LinkSeen = { result: "ok" | "done" | "expired" | "no"; sid?: string; share?: GuestShare };
+export type LinkUsed = { result: "confirmed" | "left" | "done" | "expired" | "no"; sid?: string; share?: GuestShare };
+
+/** The store a link's record names, when it is a store's id in its shape; anything else fits nothing. */
+function recordStore(record: unknown): string | null {
+  if (!record || typeof record !== "object") return null;
+  const store = (record as Record<string, unknown>).store;
+  return typeof store === "string" && /^[0-9a-f]{32}$/.test(store) ? store : null;
+}
+
+/**
+ * What a link would do now, read only, for the page a GET shows: every read
+ * exact, so a record or list that does not read throws (the page then says
+ * nothing changed) and is never "no" or "done".
+ */
+export async function checkLink(kind: LinkKind, token: unknown, now = Date.now()): Promise<LinkSeen> {
+  const record = await readLink(token);
+  const sid = recordStore(record);
+  if (!sid) return { result: "no" };
+  const share = await readShare(sid);
+  const address = (record as Record<string, unknown>).address;
+  const guest = share.guests.find((g) => g.address === address);
+  const result = linkFits(record, { kind, store: sid }, guest, now);
+  return result === "no" ? { result } : { result, sid, share };
+}
+
+/**
+ * Does what a link is for, under the store record's lock: a confirm link
+ * makes an invited address confirmed (and writes its leave link's record
+ * again, so it lives LEAVE_LINK_DAYS from now); a leave link makes it left.
+ * Pressed again: "done", nothing changed. Every read exact: an unknown read
+ * throws, and nothing is confirmed or left on it.
+ */
+export async function answerLink(kind: LinkKind, token: unknown, now = Date.now()): Promise<LinkUsed> {
+  const record = await readLink(token);
+  const sid = recordStore(record);
+  if (!sid) return { result: "no" };
+  return withLock(lockKey(sid), 10, 3_000, async (held) => {
+    const { share } = await readRaw(sid);
+    const address = (record as Record<string, unknown>).address;
+    const guest = share.guests.find((g) => g.address === address);
+    const fits = linkFits(record, { kind, store: sid }, guest, now);
+    if (fits === "no") return { result: "no" };
+    if (fits !== "ok") return { result: fits, sid, share };
+    const state: Guest["state"] = kind === "confirm" ? "confirmed" : "left";
+    const next: GuestShare = { ...share, guests: share.guests.map((g) => (g === guest ? { ...g, state } : g)) };
+    if (kind === "confirm") await keepLink(guest!.leave, linkRecord("leave", sid, guest!), LEAVE_LINK_DAYS);
+    await writeShare(held, sid, next);
+    return { result: kind === "confirm" ? "confirmed" : "left", sid, share: next };
+  });
 }

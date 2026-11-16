@@ -2158,6 +2158,8 @@ export const SCOPES: Record<string, ScopeClass> = {
   "two-step-rescue": ACCOUNT, "recovery-address": ACCOUNT, "recovery-address-change": ACCOUNT, "lost-email": ACCOUNT, "lost-email-ip": ACCOUNT,
   "discord-return": ACCOUNT, "metaads-return": ACCOUNT, "meet-return": ACCOUNT, report: guard("Takedown reports, per connection: a company cost."),
   "stock-hold": guard("Holds one connection may start on a store's limited products within one hold's time (lib/stock.ts, HOLDS_PER_ADDRESS): a bound on held units, not per store use."),
+  // 405 [HX1]: the confirm and leave links of the numbers email to addresses outside a team (lib/report-guests-page.ts).
+  "numbers-guest": guard("The confirm and leave links of the numbers email to addresses outside a team, per connection: a few exact reads and at most one write each, a company cost; the emails they answer are taken from the store's figure before they go."),
   "mail-ses": guard("The email provider's own notices: a company cost."), "mail-inbound": guard("The email provider's inbound notices, per connection: a company cost; what is sent on to a creator is one of their store's emails (lib/inbound-mail.ts)."),
   "mail-clicked": guard("A click beacon from a store page opened from an email link, which the page itself counts: a few commands and no work, per connection."),
   "stream-hook": guard("The video service's own notices: a company cost."), "zoom-notice": guard("Zoom's own notices: a company cost."),

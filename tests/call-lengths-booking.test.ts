@@ -146,7 +146,9 @@ async function main(): Promise<void> {
 
   part("Once the list is gone, a paid hour still moves as an hour");
   await setProductCall(OWNER, made.product.id, readSetup(weekly) as CallSetup);
-  const plainListing = (await readListing(store, made.product.id)) as CallListing;
+  // Read from the store as saved now: a listing read from the store record taken before the change still has the list,
+  // and a move that read the call before a change is refused (lib/calls.ts callUnchanged, issue #3983).
+  const plainListing = (await readListing((await storeForEmail(OWNER)) as Store, made.product.id)) as CallListing;
   const again = await moveBooking({ store, product: plainListing, session: long.session, booked: { start: later, end: later + 3_600_000, email: "ana@example.com", buyerTz: NY }, start: at + 3 * 3_600_000, origin: "https://marktmorgen.com" });
   is("the setup's own is half an hour, the booking stays an hour", again.ok ? again.end - again.start : again, 3_600_000);
 }

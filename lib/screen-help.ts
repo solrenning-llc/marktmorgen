@@ -69,6 +69,7 @@ export const SCREEN_HELP: Readonly<Record<string, readonly string[]>> = {
   path: ["What is Your Path, and how do I start it?"],
   people: ["Can I see everything one buyer has bought from me?", "Someone asked me to delete their data. What do I do?"],
   phone: ["Does it work on a phone?"],
+  privacy: ["What do you store about me?", "Can I have it deleted?"],
   podcast: ["Can I sell a private podcast?"],
   refund: ["What about refunds on the Marktmorgen subscription itself?", "What happens when my plan ends?"],
   requests: ["How do I ask one person to pay me a custom amount?"],

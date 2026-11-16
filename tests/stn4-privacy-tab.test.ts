@@ -162,7 +162,9 @@ is("#account holds Leaving this store", home.slice(home.indexOf('id="account"'))
 is("#account holds the passkeys and two-step login", /id="account"[\s\S]*<PasskeyManager[\s\S]*<TwoStepManager/.test(home), true);
 
 part("wiring: the page, the studio home and the module list");
-is("the page reads the person's own view, for any role", /studioView\(\s*await cookies\(\),[^;]*,\s*null\s*\)/.test(pageSource), true);
+// "member" is any role on the store, as null was (lib/studio-route.ts resolveAccess checks only a permission), and is
+// the need the studio's action search reads (tests/it3-studio-actions.test.ts).
+is("the page reads the person's own view, for any role", /studioView\(\s*await cookies\(\),[^;]*,\s*"member"\s*\)/.test(pageSource), true);
 is("the page counts as one studio page, like any other", pageSource.includes("count: false"), false);
 is("a signed-out visitor goes to the login page", pageSource.includes('redirect("/signin")'), true);
 is("the page draws StudioPrivacy with the view's own email", /<StudioPrivacy[\s\S]*email=\{view\.email\}/.test(pageSource), true);

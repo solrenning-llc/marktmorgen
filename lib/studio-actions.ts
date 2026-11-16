@@ -91,6 +91,7 @@ export const STUDIO_ACTIONS: readonly StudioAction[] = [
   { id: "integrations", title: "Connect Mailchimp, Kit, beehiiv or MailerLite", segment: "integrations", permission: "settings", words: ["mailchimp", "kit", "convertkit", "beehiiv", "mailerlite", "integration", "connect", "sync list"] },
   { id: "import", title: "Move from another platform", segment: "import", permission: "import", words: ["import", "migrate", "move", "transfer", "gumroad", "kajabi", "teachable", "thinkific", "csv", "upload list"] },
   { id: "phone", title: "Get notifications on your phone", segment: "phone", permission: "member", words: ["notification", "push", "phone", "alert", "buzz", "mobile app"] },
+  { id: "privacy", title: "See your data, logins and store deletion", segment: "privacy", permission: "member", words: ["privacy", "my data", "data file", "export data", "delete store", "sign out other devices", "sessions", "gdpr"] },
   { id: "calendar", title: "Connect your calendar", segment: "calendar", permission: "member", words: ["calendar", "busy times", "google calendar", "outlook", "availability", "schedule"] },
   { id: "labels", title: "Label many contacts at once", segment: "labels", permission: "send", words: ["label", "tag", "tag contacts", "segment", "bulk"] },
   { id: "card", title: "Edit your business card", segment: "card", permission: "page", words: ["business card", "vcard", "contact card", "save contact"] },

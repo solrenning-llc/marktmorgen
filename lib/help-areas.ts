@@ -56,6 +56,7 @@ export const HELP_AREAS: readonly HelpArea[] = [
   { folder: "people", name: "Buyers", answer: "can-i-see-everything-one-buyer-has-bought-from-me", mentions: "buyer" },
   { folder: "phone", name: "Phone notifications", answer: "does-it-work-on-a-phone", mentions: "notifications" },
   { folder: "podcast", name: "Private podcasts", answer: "can-i-sell-a-private-podcast", mentions: "podcast" },
+  { folder: "privacy", name: "Privacy", answer: "can-i-have-it-deleted", mentions: "delete" },
   { folder: "refund", name: "Your plan's refund", answer: "what-about-refunds-on-the-marktmorgen-subscription-itself", mentions: "refund" },
   { folder: "requests", name: "Payment requests", answer: "how-do-i-ask-one-person-to-pay-me-a-custom-amount", mentions: "link" },
   { folder: "reviews", name: "Reviews", answer: "can-buyers-leave-reviews", mentions: "review" },

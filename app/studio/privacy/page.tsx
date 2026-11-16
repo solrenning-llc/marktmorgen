@@ -25,7 +25,7 @@ type Params = { searchParams: Promise<{ [key: string]: string | string[] | undef
  */
 export default async function StudioPrivacyPage({ searchParams }: Params) {
   const query = await searchParams;
-  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, null);
+  const found = await studioView(await cookies(), typeof query.store === "string" ? query.store : undefined, "member");
   if (!found.ok) {
     if (found.reason === "signed_out") redirect("/signin");
     redirect(found.store ? studioPath(found.store) : "/studio");

@@ -46,8 +46,12 @@ import { UnknownReplyError, countOf, repliesFor, stringList } from "@/lib/redis-
 import { tellPlanOwed, tellPlanStuck } from "@/lib/plan-stuck-notice";
 import { refundLatePayments } from "@/lib/plan-late-refunds";
 import { tellLateRefunds } from "@/lib/plan-late-notice";
+import { ACCOUNT_ID, PENDING, SESSION_ID, entryOf, memberOf } from "@/lib/plan-remember";
 
-const PENDING = "nl:plans:pending";
+// Written down when a plan's checkout opens; kept in its own module so lib/store-checkout.ts reads it with no static
+// import cycle through this one (tests/plans-import-cycle.test.ts).
+export { rememberPlan } from "@/lib/plan-remember";
+
 /**
  * Plans tried and not settled yet, scored by when they are next due (seconds), so the one due first comes first.
  * A member is `account|session|since[|store|product[|told[|owed|owedTold]]]` (Entry): `since` is when the checkout
@@ -71,51 +75,6 @@ export const PLAN_STUCK_RETRY_DAYS = 7;
  */
 export const PLAN_OWED_TELL_DAYS = 3;
 const DAY = 86_400;
-const SESSION_ID = /^cs_(test|live)_[A-Za-z0-9]{10,200}$/;
-const ACCOUNT_ID = /^acct_[A-Za-z0-9]{8,64}$/;
-const STORE_ID = /^[0-9a-f]{32}$/;
-const PRODUCT_ID = /^[A-Za-z0-9_-]{1,64}$/;
-
-/**
- * One plan in a line: whose it is, since when its account has refused us, whether its creator was told, and since
- * when a payment after its end has been owed and whether its creator was told about that.
- */
-type Entry = { account: string; session: string; since: number; sid: string; product: string; told: boolean; owed: number; owedTold: boolean };
-
-/** Reads a member; a store or product that is not one of ours is left out, and a member written before them reads. */
-function entryOf(member: string): Entry {
-  const [account = "", session = "", since = "", sid = "", product = "", told = "", owed = "", owedTold = ""] = member.split("|");
-  return {
-    account,
-    session,
-    since: Number(since),
-    sid: STORE_ID.test(sid) ? sid : "",
-    product: PRODUCT_ID.test(product) ? product : "",
-    told: told === "told",
-    owed: /^[0-9]{1,12}$/.test(owed) ? Number(owed) : 0,
-    owedTold: owedTold === "told",
-  };
-}
-
-/** The member for an entry: one with nothing but its time is written as before, one never owed as before too. */
-function memberOf(entry: Entry): string {
-  const head = `${entry.account}|${entry.session}|${entry.since}`;
-  if (!entry.sid && !entry.product && !entry.told && !entry.owed && !entry.owedTold) return head;
-  const base = `${head}|${entry.sid}|${entry.product}`;
-  if (!entry.owed && !entry.owedTold) return `${base}${entry.told ? "|told" : ""}`;
-  return `${base}|${entry.told ? "told" : ""}|${entry.owed || ""}|${entry.owedTold ? "told" : ""}`;
-}
-
-/**
- * Written down when a plan's checkout opens, so it is settled either way. `about` names the store and the product,
- * so the creator can be told if their account refuses us for PLAN_GIVE_UP_DAYS.
- */
-export async function rememberPlan(account: string, session: string, about?: { sid: string; product: string }): Promise<void> {
-  if (!isRedisConfigured() || !ACCOUNT_ID.test(account) || !SESSION_ID.test(session)) return;
-  const sid = about && STORE_ID.test(about.sid) ? about.sid : "";
-  const product = about && PRODUCT_ID.test(about.product) ? about.product : "";
-  await redisPipeline([["SADD", PENDING, memberOf({ account, session, since: Math.floor(Date.now() / 1000), sid, product, told: false, owed: 0, owedTold: false })]]);
-}
 
 /**
  * Whether Stripe refused a call because of the creator's own account: our access to it revoked, or the account

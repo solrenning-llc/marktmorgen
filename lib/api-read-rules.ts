@@ -232,7 +232,8 @@ export function bookWork(s: BookSizes, stripePages: number): ReadWork {
     // With anything credited, the book's two questions about its PayPal payments, in slices of BOOK_KEPT_SLICE (an
     // HMGET of the refunds kept for good and a ZMSCORE of the set), BOOK_KEPT_REFUND_BYTES an entry; the set's listing
     // and its records (1 + paypal) are no longer read by the book, still counted as a ceiling. Main's refund marks
-    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The kept invoices (2 * kept) besides.
+    // (REFUND_MARKS_PER_READ, one round trip) are added on top: both are paid. The invoices kept between readings
+    // (2 * kept, audit A1 on #3378) are counted on top of both.
     commands: 8 + 7 + (any ? 1 + paypal + 2 * Math.ceil(s.entries / BOOK_KEPT_SLICE) : 0) + moveReads(moves) + products + 2 * kept + marks,
     bytes: s.entries * AFFILIATE_ENTRY_BYTES + (any ? s.entries * BOOK_KEPT_REFUND_BYTES : 0) + paypal * PAYPAL_PAID_BYTES + moves * (MOVE_BYTES + MOVE_KEY_BYTES) + products * LISTING_BYTES + 2 * kept * BOOK_INVOICES_KEPT_BYTES + (marks ? Math.min(s.entries, REFUND_MARKS_PER_READ) * REFUND_MARK_BYTES : 0),
     sent: s.people * AFFILIATE_SENT_BYTES,

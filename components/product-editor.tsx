@@ -309,6 +309,8 @@ async function send(
     }
     // Named, so the sentence in the list-level alert says which product (754 [STN1]; Claude 6 on #3432, LOW 2).
     if (data.error === "nothing_to_hand_over" || data.error === "last_delivery") return wrong(handOverRefusal(data.error, typeof (data as { product?: unknown }).product === "string" ? (data as { product: string }).product : null));
+    // The studio's own words when its requests are used up (lib/studio-route.ts), as the server says them.
+    if (data.error === "studio_used" && typeof (data as { message?: unknown }).message === "string" && (data as { message: string }).message) return wrong((data as { message: string }).message);
     if (data.error === "fast_money") return wrong(fastMoneyMessage((data as { passage?: unknown }).passage, payload.action === "visibility" ? "publish" : payload.action === "add" ? "add" : "save"));
     return wrong(MESSAGES[data.error ?? ""] ?? MESSAGES.server_error);
   } catch {

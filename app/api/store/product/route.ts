@@ -28,7 +28,7 @@ import { type Intro, introProblem } from "@/lib/intro-price";
 import { type Yearly, yearlyProblem } from "@/lib/yearly-price";
 import { priceBounds, readMoney } from "@/lib/money";
 import { MAX_ABOUT_LENGTH, cleanAbout, dropAbout, readAbout, writeAbout } from "@/lib/product-about";
-import { jsonAccess, refusedJson } from "@/lib/studio-route";
+import { countStudio, jsonAccess, refusedJson } from "@/lib/studio-route";
 import { lockedFor } from "@/lib/two-step";
 import { dropPage, picturesOfFailedDrop } from "@/lib/sales-page-store";
 import { finishLandingsDrop } from "@/lib/campaign-landing-store";
@@ -49,7 +49,19 @@ import { productPromptsLeft } from "@/lib/product-outline";
 import { pageWords } from "@/lib/page-translate";
 import { templateLeft } from "@/lib/template-text";
 import { readPage } from "@/lib/sales-page-store";
+import { PUBLISH_PAGE_UNITS } from "@/lib/sales-page";
 import { quietedBy } from "@/lib/extras-notes";
+
+/**
+ * Takes the studio units of a draft's two sales-page reads before its publish makes either (the check, then again
+ * under the store lock: PUBLISH_PAGE_UNITS; Claude 7 on #3693). Null when paid, or when there is no page to read; the
+ * studio's own "used" answer when the units are refused, and then nothing is read.
+ */
+async function payPageReads(store: Parameters<typeof countStudio>[0], draft: { page?: unknown }): Promise<Response | null> {
+  if (!draft.page || !store.statsId) return null;
+  const paid = await countStudio(store, null, PUBLISH_PAGE_UNITS);
+  return paid.ok ? null : Response.json({ ok: false, error: "studio_used", message: paid.message }, { status: 429 });
+}
 
 const ACTIONS = new Set(["add", "edit", "remove", "move", "link", "unlink", "visibility"]);
 
@@ -416,14 +428,20 @@ export async function POST(request: NextRequest) {
     } else if (action === "visibility") {
       // A draft published, or a product taken off the store and kept.
       if (typeof body.hidden !== "boolean") return Response.json({ ok: false, error: "invalid" }, { status: 400 });
+      // A publish reads its sales page twice (the check, then under the lock), up to MAX_PAGE_BYTES each: those reads
+      // are paid for in studio units before either is made, or nothing is read (PUBLISH_PAGE_UNITS; Claude 7 on #3693).
+      let pagePaid = false;
       if (body.hidden === false) {
         // Published only when nothing a buyer reads promises fast or easy money (the Terms; 567 [GD1] (d)).
         const draft = await readListing(guarded.store, id);
         if (draft) {
+          const unpaid = await payPageReads(guarded.store, draft);
+          if (unpaid) return unpaid;
           const words = draft.about && guarded.store.statsId ? await readAbout(guarded.store.statsId, draft.id) : "";
           const shownPage = draft.page && guarded.store.statsId ? await readPage(guarded.store.statsId, draft.id) : null;
           const refused = fastMoneyRefusal({ title: draft.title, summary: draft.summary, about: words }) ?? (shownPage ? fastMoneyOnPage(pageWords(shownPage)) : null);
           if (refused) return Response.json({ ok: false, error: "fast_money", passage: { ...refused, product: draft.title } }, { status: 409 });
+          pagePaid = Boolean(draft.page);
           const promptLeft = productPromptsLeft({ title: draft.title, summary: draft.summary, about: words })[0];
           if (promptLeft) return Response.json({ ok: false, error: "outline_left", left: promptLeft, product: draft.title }, { status: 409 });
           // Nor while its sales page, in either version, still holds a part a template left to write: saving it
@@ -445,6 +463,8 @@ export async function POST(request: NextRequest) {
       let heldBy: { fast: ReturnType<typeof fastMoneyOnPage>; left: ReturnType<typeof templateLeft>; title: string } | null = null;
       const done = await setProductHidden(ref, id, body.hidden, async (store, now) => {
         if (!now.page || !store.statsId) return true;
+        // A page added since the read above was not paid for: nothing is published, and the creator tries again.
+        if (!pagePaid) return false;
         const page = await readPage(store.statsId, now.id);
         const fast = fastMoneyOnPage(pageWords(page));
         const left = templateLeft(page);

@@ -578,6 +578,14 @@ export type SendOutcome = {
   refused?: { email: string; removed: boolean }[];
 };
 
+/**
+ * What a send says in the studio when the service that sends our email did not take a batch just now (a "retry":
+ * down, slow, or not confirmed): never that it "asked us to slow down", which it may not have (outage drill,
+ * 13 November 2026). Nothing of the batch was sent; it is tried again by the scheduled job.
+ */
+export const SENDER_RETRY_NOTE =
+  "Paused for a moment: the service that sends our email did not take this batch just now. It is tried again by itself.";
+
 /** What a send that met the sender's ceiling says in the studio. */
 export const SENDER_WAIT_NOTE =
   "Waiting on our side: the service that sends our email has no confirmed room for this batch right now. The rest go out by themselves when room is confirmed. Nothing is lost.";

@@ -25,13 +25,27 @@
  *   a paid call        a call is booked for a time at a set price;
  *   discount codes     not offered: the buyer already names the price.
  *
- * A one-click offer after paying, a limited quantity, sales tax, a course and
- * the questions at checkout all work with it unchanged.
+ * A one-click offer after paying, a limited quantity, sales tax, a course,
+ * the questions at checkout and a product the creator ships (514 [PF2], 16
+ * November 2026: the shipping is its own line on Stripe's page, not a second
+ * line item) all work with it. Stripe's limits for it, read on
+ * docs.stripe.com/payments/checkout/pay-what-you-want on 16 November 2026:
+ * no other line item and a quantity of 1, no promotion codes or discounts,
+ * no recurring payment and no optional items; shipping is not among them.
  */
 import type { Listing, Store } from "@/lib/store";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { onAccount } from "@/lib/stripe-account";
 import { type Currency, currencyRule } from "@/lib/money";
+import { activeShipping } from "@/lib/shipping";
+
+/**
+ * Stripe Tax's code for tangible goods, the one the checkout gives a product
+ * the creator ships (lib/store-checkout.ts). A choose-your-price line cannot
+ * carry it inline, so its Price is made with it (product_data[tax_code],
+ * Stripe's API for creating a Price, read on 16 November 2026).
+ */
+export const GOODS_TAX_CODE = "txcd_99999999";
 
 export type PayWhatYouWant = {
   /** What the buyer's box starts at on Stripe's page, in the currency's smallest unit. */
@@ -123,6 +137,8 @@ export async function pwywPriceId(
     maximum: Math.max(pwywMaximum(store.currency), pwyw.suggestedCents),
     tax: store.tax.enabled ? (store.tax.included ? "inclusive" : "exclusive") : "",
     ...(store.currency === "usd" ? {} : { currency: store.currency }),
+    // Only where the store collects tax on a product it ships, so every Price made before keeps its fingerprint.
+    ...(store.tax.enabled && activeShipping(product) ? { goods: GOODS_TAX_CODE } : {}),
   };
   const print = await fingerprint(JSON.stringify(shape));
   const key = priceKey(account, print);
@@ -146,6 +162,7 @@ export async function pwywPriceId(
     "metadata[product]": product.id,
   });
   if (shape.tax) body.set("tax_behavior", shape.tax);
+  if (shape.goods) body.set("product_data[tax_code]", shape.goods);
   // Two buyers pressing buy at the same moment make one Price, not two.
   const price = await onAccount("POST", account, "/prices", body, undefined, `pwyw-${print}${fresh ? `-${Date.now()}` : ""}`);
   if (typeof price.id !== "string" || !price.id) throw new Error("Stripe did not return a price");

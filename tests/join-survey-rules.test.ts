@@ -106,6 +106,16 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   is("a phone in fullwidth digits is taken out", clean("call ８５９９９９９９９９９ ok"), "call ok");
   is("a phone in Arabic-Indic digits is taken out", clean("call ٨٥٩٩٩٩٩٩٩٩٩ ok"), "call ok");
   is("control: a phone in plain digits still goes", clean("call 85999999999 ok"), "call ok");
+  // Claude 5 on #3652 (MEDIUM, privacy): the separators a phone is really typed or pasted with, not only "-". Built at
+  // run time, as spacedPhone is, so no tracked file holds a phone-shaped string.
+  const wide = ["０９０", "１２３４", "５６７８"];
+  is("a phone in wide digits with the Japanese IME's long mark is taken out", clean(`call ${wide.join("ー")} ok`), "call ok");
+  is("with wide hyphens and brackets too", clean(`call （０３）${["１２３４", "５６７８"].join("－")} ok`), "call ok");
+  const us = ["415", "555", "0100"];
+  for (const [name, mark] of [["an en dash", "–"], ["a non-breaking hyphen", "‑"], ["a Unicode hyphen", "‐"], ["a minus sign", "−"], ["slashes", "/"]] as const) {
+    is(`a phone written with ${name} is taken out`, clean(`call ${us.join(mark)} ok`), "call ok");
+  }
+  is("control: a price range stays", clean("worth $20-$30 to me"), "worth $20-$30 to me");
   // Claude 6 on #3652 (LOW): cases where only taking out the invisible characters lets the address be found.
   is("an invisible character inside a bare web address does not keep it", clean("see janesmith​.dev/shop ok"), "see ok");
   is("an invisible character inside a written-out address does not keep it", clean("write jane at​ gmail dot com ok"), "write ok");

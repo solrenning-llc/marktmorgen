@@ -49,14 +49,16 @@ async function main(): Promise<void> {
     limitReply(reply, at);
   }
 
+  // The limiter's two replies (lib/window-count.ts): the INCR's count, then the EXPIRE … NX's 0 or 1.
   const malformed: [string, unknown][] = [
-    ["missing count", ["OK"]], ["null count", ["OK", null]],
-    ["boolean count", ["OK", false]], ["text count", ["OK", "1"]],
-    ["zero count", ["OK", 0]], ["negative count", ["OK", -1]],
-    ["fractional count", ["OK", 1.5]], ["unsafe count", ["OK", Number.MAX_SAFE_INTEGER + 1]],
-    ["NaN count", ["OK", NaN]], ["infinite count", ["OK", Infinity]],
-    ["missing SET acknowledgement", [undefined, 1]], ["unknown SET acknowledgement", [false, 1]],
-    ["extra result", ["OK", 1, "OK"]], ["empty reply", []], ["null reply", null],
+    ["missing EXPIRE reply", [1]], ["null count", [null, 1]],
+    ["boolean count", [false, 1]], ["text count", ["1", 1]],
+    ["zero count", [0, 1]], ["negative count", [-1, 1]],
+    ["fractional count", [1.5, 1]], ["unsafe count", [Number.MAX_SAFE_INTEGER + 1, 1]],
+    ["NaN count", [NaN, 1]], ["infinite count", [Infinity, 1]],
+    ["missing EXPIRE acknowledgement", [1, undefined]], ["unknown EXPIRE acknowledgement", [1, false]],
+    ["EXPIRE acknowledgement out of range", [1, 2]], ["text EXPIRE acknowledgement", [1, "1"]],
+    ["extra result", [1, 1, "OK"]], ["empty reply", []], ["null reply", null],
   ];
   part("A link request needs both exact limit replies before member discovery");
   for (const at of [1, 2]) for (const [name, reply] of malformed) {
@@ -81,29 +83,58 @@ async function main(): Promise<void> {
   }
 
   part("Explicit acknowledgements keep the original boundaries");
-  for (const first of ["OK", null]) {
+  for (const ack of [1, 0]) {
     calls.length = 0;
-    await inject([first, 10]);
+    await inject([10, ack]);
     is("the IP limit's last included request continues", await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.10", origin }), "sent");
     is("only member discovery was read", calls, [{ method: "GET", path: "/v1/customers" }]);
-    await inject([first, 11]);
+    await inject([11, ack]);
     is("the next IP request is limited", await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.11", origin }), "limited");
-    await inject([first, 5], 2);
+    await inject([5, ack], 2);
     is("the address limit's last included request continues", await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.12", origin }), "sent");
-    await inject([first, 6], 2);
+    await inject([6, ack], 2);
     is("the next address request is limited", await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.13", origin }), "limited");
-    await inject([first, 10]);
+    await inject([10, ack]);
     is("the last included portal open continues", (await openPortal(store, token, origin)).ok, true);
-    await inject([first, 11]);
+    await inject([11, ack]);
     is("the next portal open is used", await openPortal(store, token, origin), { ok: false, reason: "used" });
-    await inject([first, 10]);
+    await inject([10, ack]);
     is("the last included cancel open continues", (await openCancel(store, token, subscription, origin)).ok, true);
-    await inject([first, 11]);
+    await inject([11, ack]);
     is("the next cancel open is used", await openCancel(store, token, subscription, origin), { ok: false, reason: "used" });
   }
 }
 
-void main().finally(() => {
+async function staleKey(): Promise<void> {
+  // The race the SET NX EX + INCR pair lost (review of #2498): the key was there for the SET, so the SET did nothing,
+  // and it ran out before the INCR, which made it again with no expiry. Every later SET NX then did nothing, the count
+  // only grew, and the link or the address was refused for good. A count that finds its key with no expiry gives it
+  // back its window, so the key and its hashed address never outlive it.
+  part("A limit key left with no expiry gets its window back, never counts for good");
+  clearLimitReply();
+  redis.clear();
+  await claimHandle("club@example.com", "club", "Supper Club", "");
+  await setStripeAccount("club@example.com", account, true);
+  const store = (await storeForEmail("club@example.com"))!;
+  const hash = createHash("sha256").update(`nimbus-manage:${token}`).digest("hex").slice(0, 40);
+  await redis.pipeline([["SET", `nl:manage:link:${hash}`, JSON.stringify({ a: account, c: customer, h: "club" }), "EX", 3600]]);
+  const opens = `nl:manage:opens:${createHash("sha256").update(`nimbus-manage-opens:${token}`).digest("hex").slice(0, 40)}`;
+  await redis.pipeline([["SET", opens, "3"]]);
+  is("the stale opens key starts with no expiry", await redis.pipeline([["TTL", opens]]), [-1]);
+  calls.length = 0;
+  is("an open within the link's ten still goes through", (await openPortal(store, token, origin)).ok, true);
+  const [left] = (await redis.pipeline([["TTL", opens]])) as number[];
+  is("and the opens key has its window back (at most the link's hour)", left > 0 && left <= 60 * 60, true);
+  is("counted once more, not reset", await redis.pipeline([["GET", opens]]), ["4"]);
+
+  const addr = `nl:rl:manage:addr:${createHash("sha256").update("nimbus-manage-addr:member@example.com").digest("hex").slice(0, 32)}`;
+  await redis.pipeline([["SET", addr, "2"]]);
+  is("a link request still goes through", await requestManageLink({ store, email: "member@example.com", ip: "203.0.113.20", origin }), "sent");
+  const [addrLeft] = (await redis.pipeline([["TTL", addr]])) as number[];
+  is("and the address key has its window back too (at most an hour)", addrLeft > 0 && addrLeft <= 60 * 60, true);
+}
+
+void main().then(staleKey).finally(() => {
   clearLimitReply(); globalThis.fetch = originalFetch;
   if (originalKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = originalKey;
   if (originalMailKey === undefined) delete process.env.RESEND_API_KEY; else process.env.RESEND_API_KEY = originalMailKey;

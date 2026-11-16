@@ -79,7 +79,7 @@ async function main(): Promise<void> {
   // Reserved by other agents (docs/reservations/): their owners move them to lib/window-count.ts in their own units.
   // lib/letter-access.ts keeps the pattern on purpose (no EXPIRE option, tests/letter-members.test.ts) and reads the
   // key's TTL in the same round, giving one back to a key left with none.
-  const reserved = ["lib/card-update.ts", "lib/community-access.ts", "lib/community-events.ts", "lib/community.ts", "lib/free.ts", "lib/membership-manage.ts", "lib/letter-access.ts"].map((f) => join(...f.split("/")));
+  const reserved = ["lib/card-update.ts", "lib/community-access.ts", "lib/community-events.ts", "lib/community.ts", "lib/free.ts", "lib/letter-access.ts"].map((f) => join(...f.split("/")));
   is("only the files reserved by other agents, and the one that repairs its key, still do; no new one", left, reserved.sort());
   done();
 }

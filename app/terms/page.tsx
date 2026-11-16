@@ -183,6 +183,22 @@ export default function TermsPage() {
           act on it; if it does not, you must refund it yourself. Marktmorgen
           never pays these refunds and never takes any part of them.
         </p>
+        <p id="course-access-end" className="scroll-mt-24">
+          <strong className="text-black">A course&apos;s end date.</strong>{" "}
+          You may set a day when access to a course ends. The course&apos;s
+          own page and its sales page show the date and time before anyone
+          pays, and the date applies only to people who buy the course there
+          while it is shown. People who bought before it was set, or another
+          way (your store page, the cart, a bundle, a gift, a group, a
+          pre-order or PayPal), keep the course with no end. Where the
+          course is sold only through PayPal, the date is not shown. In the last 24 hours
+          before the date, it is no longer shown, and people who buy then
+          keep the course with no end too. You can move the date later or
+          remove it, but not earlier, and doing either reaches everyone it
+          applied to. A course sold as a membership has no end date: members
+          keep it while they pay. People who pay in a payment plan
+          keep the course with no end too.
+        </p>
         <p id="instant-access" className="scroll-mt-24">
           <strong className="text-black">Starting before the 14 days end.</strong>{" "}
           In the European Union, the United Kingdom and some other places, a

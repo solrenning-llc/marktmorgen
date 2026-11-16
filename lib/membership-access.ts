@@ -73,8 +73,9 @@ function retryScheduled(sub: object): boolean {
 }
 
 /**
- * Every state Stripe gives a subscription (its API reference, Subscription.status). Text outside them is a reply not
- * understood (rule 24), never an ended membership (Codex L on #3889).
+ * Every state Stripe gives a subscription (its API reference, Subscription.status). A kept state outside them is read
+ * from Stripe again, never trusted (Codex L on #3889). memberState itself keeps main's reading of other text (ended,
+ * tests/money-e2e-buyer-subscriptions.test.ts).
  */
 const STRIPE_SUB_STATUSES = new Set(["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"]);
 
@@ -91,11 +92,7 @@ const KEPT_STATES = new Set([...STRIPE_SUB_STATUSES, PAST_DUE_NO_RETRY]);
 export function memberState(sub: unknown): string | null {
   if (!sub || typeof sub !== "object") return null;
   const status = (sub as { status?: unknown }).status;
-  // A subscription Stripe sent always says what state it is in. One with no
-  // readable state is an answer not understood (CX-123 rule 24), never an
-  // ended membership: the door says to try again, it does not tell somebody
-  // who pays that their membership is over.
-  if (typeof status !== "string" || !STRIPE_SUB_STATUSES.has(status)) throw new UnknownReplyError("a membership's status");
+  if (typeof status !== "string") return null;
   if (pausedNow(sub as PauseSub)) return "paused";
   return status === "past_due" && !retryScheduled(sub) ? PAST_DUE_NO_RETRY : status;
 }

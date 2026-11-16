@@ -13,8 +13,10 @@
  *     (lib/learn.ts), the community said a definite "no" (lib/community-access.ts)
  *     and the list of purchases showed it ended, with the way to renew
  *     (lib/buyer-orders.ts);
- *   - a subscription with no readable status (missing, a number): the same,
- *     and the thanks-page download said "ended" (lib/store-checkout.ts).
+ *   - (a subscription with no readable status or one Stripe does not have was
+ *     made unknown here too; that part was taken out when main was merged on
+ *     16 November 2026, because tests/money-e2e-buyer-subscriptions.test.ts on
+ *     main documents those as ended).
  *
  * Now each is unknown: the course door keeps nothing and opens on the next
  * good read, the community says it could not ask, and the list and the
@@ -22,7 +24,7 @@
  * closes, and an active membership still opens.
  */
 import { addProduct, claimHandle, ensureStatsId, setProductCourse, setProductLink, setStripeAccount, setSubscription, storeForEmail } from "@/lib/store";
-import { isLiveSub, memberState } from "@/lib/membership-access";
+import { isLiveSub } from "@/lib/membership-access";
 import { paidCourses } from "@/lib/learn";
 import { paidForAny } from "@/lib/community-access";
 import { purchasesFor } from "@/lib/buyer-orders";
@@ -86,20 +88,13 @@ async function main(): Promise<void> {
   const club = course.product.id;
   const ids = new Set([club]);
 
-  part("The rule: a subscription object with no readable status is unknown, not ended");
-  is("no status", (() => { try { return memberState({ id: "sub_TestNoStatus1" }); } catch { return "unknown"; } })(), "unknown");
-  is("a numeric status", (() => { try { return isLiveSub({ id: "sub_TestNumber01", status: 3 }); } catch { return "unknown"; } })(), "unknown");
-  // Codex L on #3889: text outside Stripe's subscription states is not understood either, never "ended".
-  is("a status Stripe does not have", (() => { try { return isLiveSub({ id: "sub_TestFuture01", status: "future_state" }); } catch { return "unknown"; } })(), "unknown");
+  part("The rule: a real end is ended, an active membership open");
   is("canceled is still ended", isLiveSub({ status: "canceled" }), false);
   is("active is still open", isLiveSub({ status: "active" }), true);
 
   const odd: [string, (id: string) => unknown][] = [
     ["not expanded (its id)", (id) => `sub_${id.slice(8)}`],
     ["null on a paid subscription checkout", () => null],
-    ["no status", (id) => subOf(id, undefined)],
-    ["a numeric status", (id) => subOf(id, 7)],
-    ["a status Stripe does not have", (id) => subOf(id, "future_state")],
   ];
   let n = 0;
   for (const [what, shape] of odd) {

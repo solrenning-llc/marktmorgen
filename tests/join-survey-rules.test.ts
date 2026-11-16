@@ -102,6 +102,13 @@ is("links and email addresses are taken out of a comment", (cleanJoinAnswer(on, 
   is("a messaging link with a number goes whole, not only its digits", clean("text wa.me/5585999999999 ok"), "text ok");
   is("invisible format characters cannot split an address to slip it through", clean("jane​@gmail.com hi"), "hi");
   is("control: a library's name stays", clean("I build with Node.js daily"), "I build with Node.js daily");
+  // Claude 6 on #3652 (MEDIUM, privacy): a phone number in any digits, as the reviews' cleaner reads it (\p{Nd}).
+  is("a phone in fullwidth digits is taken out", clean("call ８５９９９９９９９９９ ok"), "call ok");
+  is("a phone in Arabic-Indic digits is taken out", clean("call ٨٥٩٩٩٩٩٩٩٩٩ ok"), "call ok");
+  is("control: a phone in plain digits still goes", clean("call 85999999999 ok"), "call ok");
+  // Claude 6 on #3652 (LOW): cases where only taking out the invisible characters lets the address be found.
+  is("an invisible character inside a bare web address does not keep it", clean("see janesmith​.dev/shop ok"), "see ok");
+  is("an invisible character inside a written-out address does not keep it", clean("write jane at​ gmail dot com ok"), "write ok");
 }
 is("a comment that is not text is none", (cleanJoinAnswer(on, { v: 1, choice: "learn", comment: 5 }) as { answer: { comment: string } }).answer.comment, "");
 is("a choice that is not offered", cleanJoinAnswer(on, { v: 1, choice: "bogus", comment: "" }), { ok: false, problem: "choice" });

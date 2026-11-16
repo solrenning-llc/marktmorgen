@@ -13,6 +13,8 @@ import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
 import { ROOM } from "./data-room";
+import { readFileSync } from "node:fs";
+import { RELEASE } from "@/lib/redis-lock";
 
 const DAY = 86_400;
 const now = Date.now();
@@ -47,14 +49,24 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 type Cmd = (string | number)[];
 const original = redis.pipeline.bind(redis);
+/** The commands of the pipelines sent right after the odd link write, in order: what the failure path costs. */
+let afterOdd: Cmd[][] = [];
+let collecting = 0;
 /** While `work` runs, the first pipeline that writes a come-back link answers as `odd` says (after running for real). */
 async function oddLinkWrite<T>(odd: (out: unknown[], commands: Cmd[]) => unknown[], work: () => Promise<T>): Promise<T> {
   let used = false;
   redis.pipeline = (async (commands: Cmd[]) => {
     const out = await original(commands);
+    if (collecting > 0) {
+      collecting -= 1;
+      afterOdd.push(commands);
+    }
     const writesLink = commands.some((cmd) => cmd[0] === "SET" && String(cmd[1]).startsWith("nl:wb:link:"));
     if (!writesLink || used) return out;
     used = true;
+    // The failure path's three requests: the link taken back, then this run's two marks let go.
+    afterOdd = [];
+    collecting = 3;
     return odd(out, commands);
   }) as typeof redis.pipeline;
   try {
@@ -110,6 +122,17 @@ async function main(): Promise<void> {
   const run = () => sendWinBacks(Date.now() + 30_000, now);
   const links = () => redis.keys().filter((key) => key.startsWith("nl:wb:link:")).length;
 
+  // Claude 7's MÉDIO on #3889 (cost criterion): the failure path's commands are charged, so they are stated and
+  // priced. Upstash bills a script as one command plus every redis.call it runs (lib/capped-count.ts).
+  const source = readFileSync("lib/winback-send.ts", "utf8");
+  const stated = Number(source.match(/export const UNWRITTEN_LINK_COMMANDS = (\d+);/)?.[1] ?? NaN);
+  const releaseCalls = (RELEASE.match(/redis\.call\(/g) ?? []).length;
+  const billed = (cmds: Cmd[][]) => cmds.flat().reduce((sum, cmd) => sum + (cmd[0] === "EVAL" ? 1 + (String(cmd[1]) === RELEASE ? releaseCalls : 1000) : 1), 0);
+  const registry = readFileSync("tests/plan-cost-registry.ts", "utf8");
+  part("The failure path's commands are stated and priced");
+  is("lib/winback-send.ts states UNWRITTEN_LINK_COMMANDS", Number.isSafeInteger(stated), true);
+  is("tests/plan-cost-registry.ts prices them for lib/winback-send.ts", /file: "lib\/winback-send\.ts", names: \[[^\]]*"UNWRITTEN_LINK_COMMANDS"[^\]]*"OFFERS_PER_RUN"/.test(registry), true);
+
   for (const [name, how, odd] of cases) {
     part(`${how}: no email with a link that may lead nowhere, and the next run sends it once`);
     ended(`sub_${name[0].toUpperCase()}${name.slice(1)}LinkW0001`, cus(name), meta);
@@ -118,6 +141,12 @@ async function main(): Promise<void> {
     is(`the run counts ${name}'s offer as not sent`, first.sent, 0);
     is(`no email went to ${name}`, to(`${name}@example.com`).length, 0);
     is("the link that may have landed is taken back", links(), before);
+    is(
+      "the failure path is the link taken back and this run's two marks let go",
+      afterOdd.map((cmds) => cmds.map((cmd) => [cmd[0], String(cmd[0] === "EVAL" ? cmd[3] : cmd[1]).split(":").slice(0, 3).join(":")])),
+      [[["DEL", "nl:wb:link"]], [["EVAL", "nl:wb:once"]], [["EVAL", `nl:wb:acct_1TestWbLinkW`]]],
+    );
+    is(`and it bills at most the ${stated} commands stated`, billed(afterOdd) <= stated, true);
     const second = await run();
     is(`the next run sends ${name}'s offer`, second.sent, 1);
     is(`${name} was written to exactly once`, to(`${name}@example.com`).length, 1);

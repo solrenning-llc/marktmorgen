@@ -52,6 +52,7 @@ import { bumpsFromMeta, bundleFromMeta } from "@/lib/bundle-rules";
 import { type Contact, leadsKey, parseContact } from "@/lib/contacts";
 import { type Flow, readFlows, flowsStartedFor } from "@/lib/flows";
 import { doneLessons, studentDates } from "@/lib/learn";
+import { lessonsInOrder, readCourse } from "@/lib/course";
 import { importedFor } from "@/lib/imported-purchases";
 import { isGroupJob } from "@/lib/group-buy";
 import { callsFor, type BookedCall } from "@/lib/buyer-orders";
@@ -294,15 +295,16 @@ export type ProfileCourse = { title: string; done: number; lessons: number; sinc
 
 /**
  * A part of the page read apart from the payments, which may fail on its own
- * (rule 24): the calls coming up, the sequences they were started on, the
- * team's notes about them. A part that could not be read is named, never
+ * (rule 24): how far they are in their courses, the calls coming up, the
+ * sequences they were started on, the team's notes about them. A part that could not be read is named, never
  * shown as "none". Purchases handed over without a Stripe payment and the
  * amount of a PayPal sale are not named here: an unread one makes the reading
  * `partial`, which the page already says in the tiles and the orders box (#2908).
  */
-export type ProfilePart = "calls" | "sequences" | "notes";
-const PROFILE_PARTS: ProfilePart[] = ["calls", "sequences", "notes"];
+export type ProfilePart = "courses" | "calls" | "sequences" | "notes";
+const PROFILE_PARTS: ProfilePart[] = ["courses", "calls", "sequences", "notes"];
 const PART_WORDS: Record<ProfilePart, string> = {
+  courses: "how far they are in their courses",
   calls: "their calls coming up",
   sequences: "the sequences they were started on",
   notes: "your team's notes about them",
@@ -707,11 +709,23 @@ export async function buyerProfile(store: Store, rawEmail: string): Promise<Buye
     seen.add(id);
     const listing = await find(id);
     if (!listing?.course) continue;
-    const [done, dates] = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email)]);
+    // A read that fails (the outline, the lessons marked done, the dates) leaves this course off the page and names
+    // its progress as unread (rule 24): never a figure nobody read, and never the whole buyer page lost with it.
+    const read = await Promise.all([doneLessons(listing.course.id, email), studentDates(listing.course.id, email), readCourse(listing.course.id)]).catch((error) => {
+      console.error("reading a buyer's course progress failed", error);
+      unread.add("courses");
+      return null;
+    });
+    if (!read) continue;
+    const [done, dates, outline] = read;
+    // Counted against the course's lessons now: a mark kept for a lesson the
+    // creator took out is not a lesson done, and the listing's count can be
+    // older than the outline. Without the outline, the listing's count, as before.
+    const current = outline ? lessonsInOrder(outline).map(({ lesson }) => lesson.id) : null;
     courses.push({
       title: listing.title,
-      done: Math.min(done.size, listing.course.lessons),
-      lessons: listing.course.lessons,
+      done: current ? current.filter((id) => done.has(id)).length : Math.min(done.size, listing.course.lessons),
+      lessons: current ? current.length : listing.course.lessons,
       since: dates?.since ?? 0,
       lastSeen: dates?.lastSeen ?? 0,
     });

@@ -20,6 +20,14 @@ const S = " ";
 type Notice = { title: string; body: string };
 
 const en = {
+  /** 24 [E7]: when a course's access ends; `{when}` is the date and time in UTC (lib/course-access-end.ts). */
+  accessEndsOn: "Your access ends on {when}.",
+  accessEndedTitle: "Your access to this course has ended",
+  accessEndedBody: "Access to this course ended on {when}, as stated when you joined. Your progress is kept.",
+  accessEndsFact: "Access to the course ends on {when}.",
+  accessUncheckedTitle: "We could not check your access",
+  accessUncheckedBody: "We could not check your access to this course just now. Nothing has changed. Please try again in a moment.",
+  accessEndChanged: "This course's terms changed. Please review them and try again.",
   // ---- The tab's title ----------------------------------------------------------
   metaCourse: "Course — Marktmorgen",
   metaLesson: "Lesson — Marktmorgen",
@@ -70,6 +78,11 @@ const en = {
   /** Followed by the link `manageMembership` and a full stop. */
   endedPayment: "Did it end because a payment failed, not because you canceled? Updating the card may bring it back: ",
   manageMembership: "manage your membership",
+  /** A student whose access could not be checked just now (lib/course-door.ts): the course stays shut, never offered for sale to them. */
+  uncheckedTitle: "We couldn't check your access right now",
+  uncheckedBody: "Please try again in a minute.",
+  /** A link that loads the page again (components/access-unchecked-note.tsx). */
+  uncheckedRetry: "Check my access again",
   doneOf: (done: number, total: number) => `${done} of ${total} done`,
   yourProgress: "Your progress",
   /** Said instead of the count when the lessons done could not be read (rule 24). */
@@ -152,6 +165,7 @@ const en = {
   taskFull: "This course cannot take more files just now. Hand in your answer as text, or try again later.",
   taskNoRoom: "This store has no room for your work right now, so it was not handed in. Try again later.",
   taskFailed: "That did not go through. Try again in a moment.",
+  taskFileFailed: "That file could not be sent. This course may have no room for more files, or too many files were sent in the last hour. Hand in your answer as text, or try again later.",
   taskMailSubject: (lesson: string) => `Your work on “${lesson}”`,
   taskMailApproved: (store: string, lesson: string, course: string) => `${store} read your work on “${lesson}” in ${course} and approved it. The lesson is done.`,
   taskMailAgain: (store: string, lesson: string, course: string) => `${store} read your work on “${lesson}” in ${course} and asked for another try.`,
@@ -162,6 +176,8 @@ const en = {
   pausedStrong: "This video is paused for now.",
   pausedRest: (store: string) =>
     `${store} has no paid plan, and its videos have been watched for all the hours a store without one has this month. It plays again as soon as the store's plan is paid, or when the month turns. The rest of the lesson is here as usual.`,
+  // A preview played free, paused with the store's other free copies (lib/serve-file.ts): true whatever the plan.
+  freePausedRest: "Free previews and downloads from this store are paused until next month. Anything you have bought is unaffected. The rest of the lesson is here as usual.",
   videoFailed: (store: string) => `This lesson's video could not be prepared. ${store} has to upload it again.`,
   videoNotLoaded: "The video could not be loaded just now. Refresh the page in a moment.",
   /** The button under a stamped lesson video (602 [WP1]): puts the video and the buyer's mark in full screen together. */
@@ -361,6 +377,13 @@ export type CoursesWords = typeof en;
 
 // ------------------------------------------------------------------------- Spanish
 const es: CoursesWords = {
+  accessEndsOn: "Tu acceso termina el {when}.",
+  accessEndedTitle: "Tu acceso a este curso terminó",
+  accessEndedBody: "El acceso a este curso terminó el {when}, como se indicaba cuando te inscribiste. Tu progreso se conserva.",
+  accessEndsFact: "El acceso al curso termina el {when}.",
+  accessUncheckedTitle: "No pudimos comprobar tu acceso",
+  accessUncheckedBody: "No pudimos comprobar tu acceso a este curso en este momento. No ha cambiado nada. Vuelve a intentarlo en un momento.",
+  accessEndChanged: "Las condiciones de este curso cambiaron. Revísalas y vuelve a intentarlo.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Lección — Marktmorgen",
   codeBlock: "Código",
@@ -401,6 +424,9 @@ const es: CoursesWords = {
     "Este curso venía con tu membresía, que ya no está activa, así que sus lecciones ahora están cerradas. Renuévala y se abre al instante, con tu progreso donde lo dejaste.",
   endedPayment: "¿Terminó porque falló un pago, y no porque la cancelaste? Actualizar la tarjeta puede reactivarla: ",
   manageMembership: "gestiona tu membresía",
+  uncheckedTitle: "No pudimos comprobar tu acceso en este momento",
+  uncheckedBody: "Vuelve a intentarlo en un minuto.",
+  uncheckedRetry: "Comprobar mi acceso de nuevo",
   doneOf: (done, total) => `${done} de ${total} completadas`,
   yourProgress: "Tu progreso",
   progressUnknown: "No pudimos comprobar tu progreso en este momento. Todas tus lecciones siguen aquí. Vuelve a cargar la página para intentarlo de nuevo.",
@@ -476,6 +502,7 @@ const es: CoursesWords = {
   taskFull: "Este curso no puede recibir más archivos por ahora. Entrega tu respuesta como texto o inténtalo más tarde.",
   taskNoRoom: "Esta tienda no tiene espacio para tu trabajo ahora mismo, así que no se entregó. Inténtalo más tarde.",
   taskFailed: "No se pudo enviar. Inténtalo de nuevo en un momento.",
+  taskFileFailed: "No se pudo enviar ese archivo. Puede que este curso no tenga espacio para más archivos o que se hayan enviado demasiados archivos en la última hora. Entrega tu respuesta como texto o inténtalo más tarde.",
   taskMailSubject: (lesson) => `Tu trabajo en «${lesson}»`,
   taskMailApproved: (store, lesson, course) => `${store} leyó tu trabajo en «${lesson}» de ${course} y lo aprobó. La lección está hecha.`,
   taskMailAgain: (store, lesson, course) => `${store} leyó tu trabajo en «${lesson}» de ${course} y te pidió otro intento.`,
@@ -486,6 +513,7 @@ const es: CoursesWords = {
   pausedStrong: "Este video está en pausa por ahora.",
   pausedRest: (store) =>
     `${store} no tiene un plan de pago, y sus videos ya se vieron durante todas las horas que tiene este mes una tienda sin plan. Se vuelve a reproducir en cuanto se pague el plan de la tienda, o cuando empiece el mes siguiente. El resto de la lección está aquí como siempre.`,
+  freePausedRest: "Las vistas previas y descargas gratuitas de esta tienda están en pausa hasta el mes que viene. Lo que hayas comprado no se ve afectado. El resto de la lección está aquí como siempre.",
   videoFailed: (store) => `No se pudo preparar el video de esta lección. ${store} tiene que volver a subirlo.`,
   videoNotLoaded: "No se pudo cargar el video en este momento. Actualiza la página en un momento.",
   fullScreen: "Pantalla completa",
@@ -667,6 +695,13 @@ const es: CoursesWords = {
 const frPlural = (n: number, one: string, many: string) => (n < 2 ? one : many);
 
 const fr: CoursesWords = {
+  accessEndsOn: "Votre accès prend fin le {when}.",
+  accessEndedTitle: "Votre accès à ce cours a pris fin",
+  accessEndedBody: "L'accès à ce cours a pris fin le {when}, comme indiqué lors de votre inscription. Votre progression est conservée.",
+  accessEndsFact: "L'accès au cours prend fin le {when}.",
+  accessUncheckedTitle: "Nous n'avons pas pu vérifier votre accès",
+  accessUncheckedBody: "Nous n'avons pas pu vérifier votre accès à ce cours pour le moment. Rien n'a changé. Réessayez dans un instant.",
+  accessEndChanged: "Les conditions de ce cours ont changé. Relisez-les et réessayez.",
   metaCourse: "Formation — Marktmorgen",
   metaLesson: "Leçon — Marktmorgen",
   codeBlock: "Code",
@@ -707,6 +742,9 @@ const fr: CoursesWords = {
     "Cette formation était incluse dans votre abonnement, qui n'est plus actif. Ses leçons sont donc fermées pour le moment. Renouvelez-le et elle s'ouvre aussitôt, avec votre progression là où vous l'aviez laissée.",
   endedPayment: `A-t-il pris fin parce qu'un paiement a échoué, et non parce que vous l'avez résilié${S}? Mettre à jour la carte peut le rétablir${S}: `,
   manageMembership: "gérer votre abonnement",
+  uncheckedTitle: "Nous n'avons pas pu vérifier votre accès pour le moment",
+  uncheckedBody: "Réessayez dans une minute.",
+  uncheckedRetry: "Vérifier à nouveau mon accès",
   doneOf: (done, total) => `${done} sur ${total} ${frPlural(done, "terminée", "terminées")}`,
   yourProgress: "Votre progression",
   progressUnknown: "Nous n'avons pas pu vérifier votre progression pour le moment. Toutes vos leçons sont bien là. Rechargez la page pour réessayer.",
@@ -783,6 +821,7 @@ const fr: CoursesWords = {
   taskFull: "Ce cours ne peut pas recevoir d'autres fichiers pour le moment. Rendez votre réponse sous forme de texte, ou réessayez plus tard.",
   taskNoRoom: "Cette boutique n'a pas de place pour votre travail en ce moment, donc il n'a pas été remis. Réessayez plus tard.",
   taskFailed: "L'envoi n'a pas abouti. Réessayez dans un instant.",
+  taskFileFailed: "Ce fichier n'a pas pu être envoyé. Ce cours n'a peut-être plus de place pour d'autres fichiers, ou trop de fichiers ont été envoyés au cours de la dernière heure. Rendez votre réponse sous forme de texte, ou réessayez plus tard.",
   taskMailSubject: (lesson) => `Votre travail sur «${S}${lesson}${S}»`,
   taskMailApproved: (store, lesson, course) => `${store} a lu votre travail sur «${S}${lesson}${S}» dans ${course} et l'a validé. La leçon est terminée.`,
   taskMailAgain: (store, lesson, course) => `${store} a lu votre travail sur «${S}${lesson}${S}» dans ${course} et vous demande un nouvel essai.`,
@@ -793,6 +832,7 @@ const fr: CoursesWords = {
   pausedStrong: "Cette vidéo est en pause pour le moment.",
   pausedRest: (store) =>
     `${store} n'a pas de forfait payant, et ses vidéos ont été regardées pendant toutes les heures dont dispose ce mois-ci une boutique sans forfait. Elle sera de nouveau lue dès que le forfait de la boutique sera payé, ou au début du mois prochain. Le reste de la leçon est disponible comme d'habitude.`,
+  freePausedRest: "Les aperçus et téléchargements gratuits de cette boutique sont en pause jusqu'au mois prochain. Ce que vous avez acheté n'est pas concerné. Le reste de la leçon est disponible comme d'habitude.",
   videoFailed: (store) => `La vidéo de cette leçon n'a pas pu être préparée. ${store} doit la mettre en ligne à nouveau.`,
   videoNotLoaded: "La vidéo n'a pas pu être chargée pour le moment. Actualisez la page dans un instant.",
   fullScreen: "Plein écran",
@@ -967,6 +1007,13 @@ const fr: CoursesWords = {
 
 // ------------------------------------------------------------------------- German
 const de: CoursesWords = {
+  accessEndsOn: "Ihr Zugang endet am {when}.",
+  accessEndedTitle: "Ihr Zugang zu diesem Kurs ist beendet",
+  accessEndedBody: "Der Zugang zu diesem Kurs endete am {when}, wie bei Ihrer Anmeldung angegeben. Ihr Fortschritt bleibt erhalten.",
+  accessEndsFact: "Der Zugang zum Kurs endet am {when}.",
+  accessUncheckedTitle: "Wir konnten Ihren Zugang nicht prüfen",
+  accessUncheckedBody: "Wir konnten Ihren Zugang zu diesem Kurs gerade nicht prüfen. Nichts hat sich geändert. Bitte versuchen Sie es gleich noch einmal.",
+  accessEndChanged: "Die Bedingungen dieses Kurses haben sich geändert. Bitte lesen Sie sie und versuchen Sie es erneut.",
   metaCourse: "Kurs — Marktmorgen",
   metaLesson: "Lektion — Marktmorgen",
   codeBlock: "Code",
@@ -1007,6 +1054,9 @@ const de: CoursesWords = {
     "Dieser Kurs gehörte zu Ihrer Mitgliedschaft, die nicht mehr läuft, deshalb sind seine Lektionen jetzt geschlossen. Verlängern Sie sie, und er öffnet sich sofort wieder, mit Ihrem Fortschritt dort, wo Sie aufgehört haben.",
   endedPayment: "Ist sie beendet, weil eine Zahlung fehlgeschlagen ist, und nicht, weil Sie gekündigt haben? Eine aktualisierte Karte kann sie zurückbringen: ",
   manageMembership: "Mitgliedschaft verwalten",
+  uncheckedTitle: "Wir konnten Ihren Zugang gerade nicht prüfen",
+  uncheckedBody: "Bitte versuchen Sie es in einer Minute erneut.",
+  uncheckedRetry: "Meinen Zugang erneut prüfen",
   doneOf: (done, total) => `${done} von ${total} erledigt`,
   yourProgress: "Ihr Fortschritt",
   progressUnknown: "Wir konnten Ihren Fortschritt gerade nicht prüfen. Alle Ihre Lektionen sind noch da. Laden Sie die Seite neu, um es noch einmal zu versuchen.",
@@ -1084,6 +1134,7 @@ const de: CoursesWords = {
   taskFull: "Dieser Kurs kann gerade keine weiteren Dateien annehmen. Reichen Sie Ihre Antwort als Text ein oder versuchen Sie es später.",
   taskNoRoom: "Dieser Shop hat gerade keinen Platz für Ihre Arbeit, deshalb wurde sie nicht abgegeben. Versuchen Sie es später erneut.",
   taskFailed: "Das hat nicht geklappt. Versuchen Sie es gleich noch einmal.",
+  taskFileFailed: "Diese Datei konnte nicht gesendet werden. Vielleicht hat dieser Kurs keinen Platz für weitere Dateien, oder in der letzten Stunde wurden zu viele Dateien gesendet. Reichen Sie Ihre Antwort als Text ein oder versuchen Sie es später.",
   taskMailSubject: (lesson) => `Ihre Arbeit zu „${lesson}“`,
   taskMailApproved: (store, lesson, course) => `${store} hat Ihre Arbeit zu „${lesson}“ in ${course} gelesen und freigegeben. Die Lektion ist erledigt.`,
   taskMailAgain: (store, lesson, course) => `${store} hat Ihre Arbeit zu „${lesson}“ in ${course} gelesen und bittet um einen neuen Versuch.`,
@@ -1094,6 +1145,7 @@ const de: CoursesWords = {
   pausedStrong: "Dieses Video ist vorerst pausiert.",
   pausedRest: (store) =>
     `${store} hat keinen bezahlten Tarif, und seine Videos wurden in diesem Monat bereits so viele Stunden angesehen, wie ein Shop ohne Tarif hat. Es wird wieder abgespielt, sobald der Tarif des Shops bezahlt ist oder der neue Monat beginnt. Der Rest der Lektion ist wie gewohnt hier.`,
+  freePausedRest: "Kostenlose Vorschauen und Downloads dieses Shops sind bis zum nächsten Monat pausiert. Was Sie gekauft haben, ist davon nicht betroffen. Der Rest der Lektion ist wie gewohnt hier.",
   videoFailed: (store) => `Das Video dieser Lektion konnte nicht vorbereitet werden. ${store} muss es erneut hochladen.`,
   videoNotLoaded: "Das Video konnte gerade nicht geladen werden. Laden Sie die Seite gleich neu.",
   fullScreen: "Vollbild",
@@ -1272,6 +1324,13 @@ const de: CoursesWords = {
 
 // ------------------------------------------------------------------------- Italian
 const it: CoursesWords = {
+  accessEndsOn: "Il tuo accesso termina il {when}.",
+  accessEndedTitle: "Il tuo accesso a questo corso è terminato",
+  accessEndedBody: "L'accesso a questo corso è terminato il {when}, come indicato quando ti sei iscritto. I tuoi progressi sono conservati.",
+  accessEndsFact: "L'accesso al corso termina il {when}.",
+  accessUncheckedTitle: "Non siamo riusciti a verificare il tuo accesso",
+  accessUncheckedBody: "Non siamo riusciti a verificare il tuo accesso a questo corso in questo momento. Non è cambiato nulla. Riprova tra un momento.",
+  accessEndChanged: "Le condizioni di questo corso sono cambiate. Rileggile e riprova.",
   metaCourse: "Corso — Marktmorgen",
   metaLesson: "Lezione — Marktmorgen",
   codeBlock: "Codice",
@@ -1312,6 +1371,9 @@ const it: CoursesWords = {
     "Questo corso era incluso nella tua iscrizione, che non è più attiva, quindi ora le sue lezioni sono chiuse. Rinnovala e si riapre subito, con i tuoi progressi dove li avevi lasciati.",
   endedPayment: "È terminata perché un pagamento non è andato a buon fine, e non perché l'hai annullata? Aggiornare la carta può riattivarla: ",
   manageMembership: "gestisci la tua iscrizione",
+  uncheckedTitle: "Non siamo riusciti a verificare il tuo accesso in questo momento",
+  uncheckedBody: "Riprova tra un minuto.",
+  uncheckedRetry: "Verifica di nuovo il mio accesso",
   doneOf: (done, total) => `${done} di ${total} completate`,
   yourProgress: "I tuoi progressi",
   progressUnknown: "Non siamo riusciti a controllare i tuoi progressi in questo momento. Tutte le tue lezioni sono ancora qui. Ricarica la pagina per riprovare.",
@@ -1387,6 +1449,7 @@ const it: CoursesWords = {
   taskFull: "Questo corso non può ricevere altri file per ora. Consegna la tua risposta come testo o riprova più tardi.",
   taskNoRoom: "Questo negozio non ha spazio per il tuo lavoro in questo momento, quindi non è stato consegnato. Riprova più tardi.",
   taskFailed: "L'invio non è andato a buon fine. Riprova tra un momento.",
+  taskFileFailed: "Non è stato possibile inviare questo file. Forse questo corso non ha spazio per altri file, oppure nell'ultima ora sono stati inviati troppi file. Consegna la tua risposta come testo o riprova più tardi.",
   taskMailSubject: (lesson) => `Il tuo lavoro su “${lesson}”`,
   taskMailApproved: (store, lesson, course) => `${store} ha letto il tuo lavoro su “${lesson}” in ${course} e l'ha approvato. La lezione è fatta.`,
   taskMailAgain: (store, lesson, course) => `${store} ha letto il tuo lavoro su “${lesson}” in ${course} e ti ha chiesto un altro tentativo.`,
@@ -1397,6 +1460,7 @@ const it: CoursesWords = {
   pausedStrong: "Questo video è in pausa per ora.",
   pausedRest: (store) =>
     `${store} non ha un piano a pagamento, e i suoi video sono già stati guardati per tutte le ore che un negozio senza piano ha questo mese. Si potrà riprodurre di nuovo non appena il piano del negozio sarà pagato, o all'inizio del mese prossimo. Il resto della lezione è qui come sempre.`,
+  freePausedRest: "Le anteprime e i download gratuiti di questo negozio sono in pausa fino al mese prossimo. Ciò che hai acquistato non è interessato. Il resto della lezione è qui come sempre.",
   videoFailed: (store) => `Non è stato possibile preparare il video di questa lezione. ${store} deve caricarlo di nuovo.`,
   videoNotLoaded: "Non è stato possibile caricare il video in questo momento. Ricarica la pagina tra un momento.",
   fullScreen: "Schermo intero",
@@ -1575,6 +1639,13 @@ const it: CoursesWords = {
 
 // ------------------------------------------------------------------------- Dutch
 const nl: CoursesWords = {
+  accessEndsOn: "Je toegang eindigt op {when}.",
+  accessEndedTitle: "Je toegang tot deze cursus is afgelopen",
+  accessEndedBody: "De toegang tot deze cursus is geëindigd op {when}, zoals vermeld toen je je aanmeldde. Je voortgang blijft bewaard.",
+  accessEndsFact: "De toegang tot de cursus eindigt op {when}.",
+  accessUncheckedTitle: "We konden je toegang niet controleren",
+  accessUncheckedBody: "We konden je toegang tot deze cursus nu niet controleren. Er is niets veranderd. Probeer het zo meteen opnieuw.",
+  accessEndChanged: "De voorwaarden van deze cursus zijn gewijzigd. Lees ze opnieuw en probeer het nog eens.",
   metaCourse: "Cursus — Marktmorgen",
   metaLesson: "Les — Marktmorgen",
   codeBlock: "Code",
@@ -1615,6 +1686,9 @@ const nl: CoursesWords = {
     "Deze cursus hoorde bij je lidmaatschap, dat niet meer loopt, dus de lessen zijn nu gesloten. Verleng het en hij gaat meteen weer open, met je voortgang waar je was gebleven.",
   endedPayment: "Is het afgelopen omdat een betaling mislukte, en niet omdat je hebt opgezegd? Je kaart bijwerken kan het terugbrengen: ",
   manageMembership: "beheer je lidmaatschap",
+  uncheckedTitle: "We konden je toegang nu niet controleren",
+  uncheckedBody: "Probeer het over een minuut opnieuw.",
+  uncheckedRetry: "Mijn toegang opnieuw controleren",
   doneOf: (done, total) => `${done} van ${total} afgerond`,
   yourProgress: "Je voortgang",
   progressUnknown: "We konden je voortgang op dit moment niet controleren. Al je lessen staan er nog. Laad de pagina opnieuw om het nog eens te proberen.",
@@ -1691,6 +1765,7 @@ const nl: CoursesWords = {
   taskFull: "Deze cursus kan nu geen bestanden meer aannemen. Lever je antwoord als tekst in of probeer het later.",
   taskNoRoom: "Deze winkel heeft nu geen ruimte voor je werk, dus het is niet ingeleverd. Probeer het later opnieuw.",
   taskFailed: "Dat lukte niet. Probeer het zo opnieuw.",
+  taskFileFailed: "Dat bestand kon niet worden verstuurd. Misschien heeft deze cursus geen ruimte meer voor bestanden, of zijn er het afgelopen uur te veel bestanden verstuurd. Lever je antwoord als tekst in of probeer het later.",
   taskMailSubject: (lesson) => `Je werk bij ‘${lesson}’`,
   taskMailApproved: (store, lesson, course) => `${store} heeft je werk bij ‘${lesson}’ in ${course} gelezen en goedgekeurd. De les is klaar.`,
   taskMailAgain: (store, lesson, course) => `${store} heeft je werk bij ‘${lesson}’ in ${course} gelezen en vraagt om een nieuwe poging.`,
@@ -1701,6 +1776,7 @@ const nl: CoursesWords = {
   pausedStrong: "Deze video is voorlopig gepauzeerd.",
   pausedRest: (store) =>
     `${store} heeft geen betaald abonnement, en de video's van deze winkel zijn deze maand al bekeken voor alle uren die een winkel zonder abonnement heeft. Hij speelt weer af zodra het abonnement van de winkel is betaald, of wanneer de nieuwe maand begint. De rest van de les staat hier zoals gewoonlijk.`,
+  freePausedRest: "Gratis voorproefjes en downloads van deze winkel zijn gepauzeerd tot volgende maand. Wat je hebt gekocht, blijft gewoon beschikbaar. De rest van de les staat hier zoals gewoonlijk.",
   videoFailed: (store) => `De video van deze les kon niet worden voorbereid. ${store} moet hem opnieuw uploaden.`,
   videoNotLoaded: "De video kon nu niet worden geladen. Vernieuw de pagina zo.",
   fullScreen: "Volledig scherm",
@@ -1879,6 +1955,13 @@ const nl: CoursesWords = {
 
 // ------------------------------------------------------------------------- Portuguese (Portugal)
 const pt: CoursesWords = {
+  accessEndsOn: "O seu acesso termina a {when}.",
+  accessEndedTitle: "O seu acesso a este curso terminou",
+  accessEndedBody: "O acesso a este curso terminou a {when}, como indicado quando se inscreveu. O seu progresso fica guardado.",
+  accessEndsFact: "O acesso ao curso termina a {when}.",
+  accessUncheckedTitle: "Não foi possível verificar o seu acesso",
+  accessUncheckedBody: "Não foi possível verificar o seu acesso a este curso neste momento. Nada mudou. Tente novamente daqui a pouco.",
+  accessEndChanged: "As condições deste curso mudaram. Reveja-as e tente novamente.",
   metaCourse: "Curso — Marktmorgen",
   metaLesson: "Aula — Marktmorgen",
   codeBlock: "Código",
@@ -1919,6 +2002,9 @@ const pt: CoursesWords = {
     "Este curso fazia parte da sua subscrição, que já não está ativa, por isso as aulas estão agora fechadas. Renove-a e o curso abre de imediato, com o seu progresso onde o deixou.",
   endedPayment: "Terminou porque um pagamento falhou, e não porque a cancelou? Atualizar o cartão pode reativá-la: ",
   manageMembership: "gerir a sua subscrição",
+  uncheckedTitle: "Não conseguimos verificar o seu acesso neste momento",
+  uncheckedBody: "Tente novamente dentro de um minuto.",
+  uncheckedRetry: "Verificar o meu acesso novamente",
   doneOf: (done, total) => `${done} de ${total} concluídas`,
   yourProgress: "O seu progresso",
   progressUnknown: "Não foi possível verificar o seu progresso agora. Todas as suas aulas continuam aqui. Recarregue a página para tentar de novo.",
@@ -1995,6 +2081,7 @@ const pt: CoursesWords = {
   taskFull: "Este curso não pode receber mais ficheiros de momento. Entregue a sua resposta em texto, ou tente mais tarde.",
   taskNoRoom: "Esta loja não tem espaço para o seu trabalho neste momento, por isso não foi entregue. Tente mais tarde.",
   taskFailed: "Não foi possível enviar. Tente de novo dentro de momentos.",
+  taskFileFailed: "Não foi possível enviar esse ficheiro. Talvez este curso não tenha espaço para mais ficheiros, ou foram enviados demasiados ficheiros na última hora. Entregue a sua resposta em texto, ou tente mais tarde.",
   taskMailSubject: (lesson) => `O seu trabalho em «${lesson}»`,
   taskMailApproved: (store, lesson, course) => `${store} leu o seu trabalho em «${lesson}», de ${course}, e aprovou-o. A aula está concluída.`,
   taskMailAgain: (store, lesson, course) => `${store} leu o seu trabalho em «${lesson}», de ${course}, e pediu outra tentativa.`,
@@ -2005,6 +2092,7 @@ const pt: CoursesWords = {
   pausedStrong: "Este vídeo está em pausa por agora.",
   pausedRest: (store) =>
     `${store} não tem um plano pago, e os vídeos desta loja já foram vistos durante todas as horas que uma loja sem plano tem este mês. Volta a ser reproduzido assim que o plano da loja for pago, ou quando começar o próximo mês. O resto da aula está aqui como de costume.`,
+  freePausedRest: "As pré-visualizações e transferências gratuitas desta loja estão em pausa até ao próximo mês. O que comprou não é afetado. O resto da aula está aqui como de costume.",
   videoFailed: (store) => `Não foi possível preparar o vídeo desta aula. ${store} tem de o carregar novamente.`,
   videoNotLoaded: "Não foi possível carregar o vídeo neste momento. Atualize a página daqui a pouco.",
   fullScreen: "Tela cheia",

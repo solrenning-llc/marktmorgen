@@ -50,7 +50,6 @@ import { dropStamped } from "@/lib/pdf-stamp";
 import { dropPodcastRecord, readPodcast } from "@/lib/podcast";
 import type { Podcast } from "@/lib/podcast-rules";
 import { GoneFullError, ListenersUnpaidError, dropListeners } from "@/lib/podcast-access";
-import { countStudio } from "@/lib/studio-route";
 import { InvitesPendingFullError, InvitesUnpaidError, dropProductInvites, notePendingInvites } from "@/lib/move-members";
 import { studioRefusal } from "@/lib/person-tasks";
 import { withLock } from "@/lib/redis-lock";

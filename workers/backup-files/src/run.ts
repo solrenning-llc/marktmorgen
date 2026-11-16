@@ -733,7 +733,9 @@ async function listAll(ctx: Ctx, source: BackupFilesSource, store: string): Prom
         listing.entries.push({ entry, page: i });
       }
       if (page.complete) return { ...listing, status: "complete" };
-      if (page.reason === "over_bound") return listing;
+      // Incomplete with nothing to go on from ("over_bound", or "unsignable": a key the route could not sign was left
+      // out, Claude 5's MEDIUM on #3313): the listing stops here, incomplete, never asked again from its first page.
+      if (page.cursor === null) return listing;
       cursor = page.cursor;
     } catch {
       return { ...listing, status: "failed" };

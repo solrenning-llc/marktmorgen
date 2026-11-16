@@ -141,6 +141,8 @@ export const world = {
   /** A listing answered otherwise: a status, or a JSON value to send as the page. */
   listingFault: new Map<string, { status?: number; body?: unknown; afterPages?: number }>(),
   pageSize: 1000,
+  /** Listings whose last page ends "unsignable": a key the route could not sign was left out (Claude 5's MEDIUM on #3313). */
+  unsignableEnd: new Set<string>(),
   rangeIgnored: false,
   noEtag: false,
   /** An ETag the origin sends instead of the object's own (a version changed after the listing). */
@@ -163,6 +165,7 @@ export function resetWorld(): void {
   world.listings = new Map();
   world.listingFault = new Map();
   world.pageSize = 1000;
+  world.unsignableEnd = new Set();
   world.rangeIgnored = false;
   world.noEtag = false;
   world.etagHeader = null;
@@ -240,8 +243,8 @@ function routeAnswer(url: URL): Response {
       expiresAt,
     })),
     cursor: more ? `p${at + world.pageSize}` : null,
-    complete: !more,
-    reason: more ? "more" : "done",
+    complete: !more && !world.unsignableEnd.has(listingKey(source, store)),
+    reason: more ? "more" : world.unsignableEnd.has(listingKey(source, store)) ? "unsignable" : "done",
   });
 }
 

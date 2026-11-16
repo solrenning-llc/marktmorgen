@@ -7,6 +7,7 @@ import { imagePaths } from "@/lib/product-image";
 import { waitingCount } from "@/lib/preorders";
 import type { NextRequest } from "next/server";
 import { deleteFile as del } from "@/lib/file-store";
+import { deleteOrSweep } from "@/lib/file-drop";
 import {
   MAX_SUMMARY_LENGTH,
   MAX_TITLE_LENGTH,
@@ -574,9 +575,7 @@ export async function POST(request: NextRequest) {
       // released only after the record that pointed at it is written.
       const linked = await setProductLink(ref, id, read.url);
       if (linked.ok && linked.removed) {
-        await del(linked.removed.pathname).catch((error: unknown) => {
-          console.error("could not delete a file replaced by a link", error);
-        });
+        await deleteOrSweep(linked.removed.pathname, "a file replaced by a link");
         await dropStamped(linked.removed);
       }
       result = linked.ok ? { ok: true, product: null } : { ok: false, reason: asProductReason(linked.reason) };

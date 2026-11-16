@@ -21,6 +21,9 @@ import { createHash } from "node:crypto";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";
 import { paidPeriod } from "./billing-period-fixture";
+import { skipWaits } from "./skip-waits";
+// The pauses between a held lock's tries and between list batches pass at once, the clock moved on by each (tests/skip-waits.ts).
+skipWaits(["takeLock", "paced"]);
 
 process.env.RESEND_API_KEY = "re_test_partner_approve_only";
 process.env.STRIPE_SECRET_KEY = "sk_test_partner_approve_only";
@@ -123,7 +126,7 @@ async function main(): Promise<void> {
     metadata: { store: "keepershop", product },
   });
   const joined = await joinAsBuyer(await store(), "cs_test_cbuyer000000001");
-  is("(the order is read)", joined.ok, true);
+  is("(the order is read: C is known, so their link is emailed, MM-SA-34)", !joined.ok && joined.reason, "known");
   is("C still waits for the creator", await statusOf(c), "pending");
   is("partners hold 85%", await promised(), 85);
 

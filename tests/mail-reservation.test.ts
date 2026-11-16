@@ -2,7 +2,8 @@ import { dispatch } from './mail-reservation-email';
 import { sesObservation } from './mail-reservation-ses';
 import { claimHandle, ensureListId, ensureStatsId, setMailSettings, setSubscription, storeForEmail } from '@/lib/store';
 import { upsertContact } from '@/lib/contacts';
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, after } from 'node:test';
+import { UnknownReplyError } from '@/lib/redis-reply';
 import assert from 'node:assert/strict';
 import { reserve, reserveDay, usedThisMonth, monthlyAllowance, sendTo, takeFromMonth } from '@/lib/mail';
 import { PRO_MONTHLY_EMAILS, SCALE_MONTHLY_EMAILS } from '@/lib/plan';
@@ -11,6 +12,10 @@ import { store as memory } from './redis-stub';
 import { paidPeriod } from './billing-period-fixture';
 import { windowId } from '@/lib/allowance-window';
 import { ROOM } from "./data-room";
+import { installVirtualClock } from "./slow-test-virtual-clock";
+// The pace between list batches (lib/mail.ts, 1.5 s) passes on a virtual clock, in the order the real one would give.
+const clock=installVirtualClock({maxMs:1_500});
+after(()=>clock.restore());
 const actual=memory.pipeline.bind(memory);
 let reply: unknown[]|undefined;
 let dayRead: {value:unknown}|undefined;
@@ -29,6 +34,11 @@ const store={listId:'a'.repeat(32),tier:'pro',subscriptionActive:true,trialEnds:
 beforeEach(()=>{memory.clear();reply=undefined;dayRead=undefined;pipelines=[];process.env.MARKETING_DAILY_CAP='100000';dispatch.calls=0;dispatch.listCalls=0;dispatch.notices.length=0;dispatch.outcome='retry';sesObservation.configured=true;sesObservation.room=100000;});
 test('paid list caps (raised 18 October 2026 with the new prices) are the actual runtime allowances',()=>{assert.equal(monthlyAllowance(store),7000);assert.equal(monthlyAllowance({...store,tier:'scale'}),10000);assert.equal(PRO_MONTHLY_EMAILS,7000);assert.equal(SCALE_MONTHLY_EMAILS,10000);});
 test('an acknowledged exact reservation consumes the monthly capacity',async()=>{assert.equal(await reserve(store,3),'ok');assert.equal(await usedThisMonth(store.listId),3);});
+test('a malformed monthly usage value is never reported as zero',async()=>{
+ const id=windowId(store);
+ await memory.pipeline([['SET',`nl:mail:used:${store.listId}:${id}`,'not-a-count']]);
+ await assert.rejects(usedThisMonth(store.listId,id),UnknownReplyError);
+});
 test('missing, partial or corrupt counter acknowledgements cannot authorize',async()=>{
  for(const value of [[],[1,1],[1,1,1],[1,1,1,1,1],[undefined,1,1,1],[true,1,1,1],['01',1,1,1],[-1,1,1,1],[0,1,1,1],[1.5,1,1,1],[NaN,1,1,1],[Infinity,1,1,1],[1,0,1,1],[1,1,1,0],[1,true,1,1]]){reply=value;assert.equal(await reserve(store,1),'unavailable');}
 });
@@ -119,11 +129,13 @@ test('list dispatch uses only SES and known no-send waits keep recipients and al
  assert.equal(waiting.stopped,'sender');assert.deepEqual(waiting.rest,['reader@example.com']);
  assert.equal(waiting.uncertain,undefined);assert.deepEqual(waiting.done,[]);
  assert.equal(dispatch.calls,1);assert.equal(dispatch.listCalls,1);
- const cleanupStart=pipelines.findIndex(commands=>commands.some(command=>command[0]==='DECRBY'));
+ // A give-back is a DECRBY or, since release keeps the counts from going below zero, the give-back-floor EVAL.
+ const givesBack=(command:unknown[])=>command[0]==='DECRBY'||(command[0]==='EVAL'&&String(command[1]).includes('marktmorgen:give-back-floor'));
+ const cleanupStart=pipelines.findIndex(commands=>commands.some(givesBack));
  assert.ok(cleanupStart>=0);
  assert.ok(pipelines.slice(cleanupStart).reduce((sum,commands)=>sum+commands.length,0)<=4,'cleanup is bounded by the existing release and portion-return operations');
  assert.equal(await usedThisMonth(made.listId,windowId(made)),before,'confirmed no-send returns the monthly reservation');
- assert.equal(pipelines.filter(commands=>commands.some(command=>command[0]==='DECRBY')).length,1,'one existing two-counter release, not a retry loop');
+ assert.equal(pipelines.filter(commands=>commands.some(givesBack)).length,1,'one existing two-counter release, not a retry loop');
  dispatch.outcome='sent';
  const recovered=await sendTo(made,['reader@example.com'],'Synthetic','Test only','known-no-send');
  assert.equal(recovered.stopped,null);assert.deepEqual(recovered.done,['reader@example.com']);

@@ -10,8 +10,12 @@
  * Now each new grant also notes its product in the store's set (nl:pod:pids:<sid>), in the same counted write as
  * its index, and a person's deletion (and the copy of their data) goes over the catalog and that set, read exactly
  * (unreadable: the deletion is not finished). A removed product stays in the set, so its feeds stay within reach
- * of every deletion and of the walk at store closing. Grants made before this change for a product removed before
- * it are reached only by that walk (known limit).
+ * of every deletion and of the walk at store closing.
+ *
+ * Since the Codex reviews of @e9ad001138 (V, P, N1, T, X5): a new feed's index, note and grant are one script; a feed
+ * asked for again notes its product; feeds granted before the note are noted by a one-time walk (notePodcastProducts,
+ * run hourly by app/api/cron/recount until done), and until it is done a deletion and a copy look for the person's own
+ * old indexes by a read-only SCAN, a deletion answering "not finished" whenever that SCAN does not end.
  */
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
@@ -24,6 +28,8 @@ import { store as redis } from "./redis-stub";
 import { paidPeriod } from "./billing-period-fixture";
 import { NextRequest } from "next/server";
 import { GET as recountCron } from "@/app/api/cron/recount/route";
+import { NOTE_RUN_BYTES, NOTE_RUN_COMMANDS, NOTE_STORE_READS } from "@/lib/podcast-access";
+import { PODCAST_NOTE_RUN_USD } from "./plan-cost-registry";
 
 const owner = "podcast-removed-owner@example.test";
 const person = "podcast-removed-person@example.test";
@@ -97,20 +103,20 @@ test("a deletion between a new feed's index and its grant leaves no address behi
   const shop = (await storeForEmail(owner))!;
   const late = "podcast-removed-late@example.test";
   const original = redis.pipeline.bind(redis);
-  let erased: Awaited<ReturnType<typeof erasePerson>> | null = null;
+  const box: { erased?: Awaited<ReturnType<typeof erasePerson>> } = {};
   redis.pipeline = async (commands) => {
     const replies = await original(commands);
     const indexWrite = commands.some((c) => c[0] === "EVAL" && c.some((a) => String(a).startsWith("nl:pod:by:")));
-    if (indexWrite && erased === null) {
+    if (indexWrite && !box.erased) {
       redis.pipeline = original;
-      erased = await erasePerson((await storeForEmail(owner))!, late, { kind: "person" });
+      box.erased = await erasePerson((await storeForEmail(owner))!, late, { kind: "person" });
     }
     return replies;
   };
   let token: string | null;
   try { token = await access.feedToken(shop, pid, late); } finally { redis.pipeline = original; }
-  assert.ok(erased, "the deletion ran between the feed's writes");
-  assert.equal(erased!.ok, true);
+  assert.ok(box.erased, "the deletion ran between the feed's writes");
+  assert.equal(box.erased.ok, true);
   if (token) assert.equal(redis.run(["GET", grantKey(token)]), null, "no grant holds the erased address");
   const left = ((redis.run(["SCAN", "0", "MATCH", "nl:pod:t:*"]) as [string, string[]])[1]).filter((key) => String(redis.run(["GET", key])).includes(late));
   assert.deepEqual(left, [], "no grant anywhere holds the erased address");
@@ -210,4 +216,28 @@ test("the hourly one-time job notes the products of feeds granted before the not
   const answer = await recountCron(new NextRequest("https://local.example/api/cron/recount"));
   assert.equal(answer.status, 200);
   assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sid}`, old]), 1, "the removed product is noted");
+}));
+
+test("one run of the walk stops at its reads of stores, and the next run goes on from there", () => quietly(async () => {
+  redis.clear();
+  const many = NOTE_STORE_READS + 3;
+  const sidOf = (i: number) => `walkstore${String(i).padStart(4, "0")}`;
+  for (let i = 0; i < many; i += 1) {
+    redis.run(["SET", `nl:pod:by:${sidOf(i)}:walkproduct:${sha(`nimbus-podcast:${i}@example.test`).slice(0, 32)}`, randomBytes(24).toString("hex")]);
+  }
+  const original = redis.pipeline.bind(redis);
+  let commands = 0;
+  redis.pipeline = async (sent) => { commands += sent.length; return original(sent); };
+  let first: Awaited<ReturnType<typeof access.notePodcastProducts>>;
+  try { first = await access.notePodcastProducts(Date.now() + 60_000); } finally { redis.pipeline = original; }
+  assert.equal(first.storeReads, NOTE_STORE_READS);
+  assert.equal(first.done, false, "not done: the page is walked again");
+  assert.ok(commands <= NOTE_RUN_COMMANDS, `${commands} commands, within the run's ${NOTE_RUN_COMMANDS}`);
+  const second = await access.notePodcastProducts(Date.now() + 60_000);
+  assert.deepEqual([second.storeReads, second.noted, second.done], [3, 3, true]);
+  for (let i = 0; i < many; i += 1) assert.equal(redis.run(["SISMEMBER", `nl:pod:pids:${sidOf(i)}`, "walkproduct"]), 1);
+  const after = await access.notePodcastProducts(Date.now() + 60_000);
+  assert.deepEqual([after.pages, after.storeReads, after.done], [0, 0, true], "once done, a run only reads where the walk is");
+  assert.ok(PODCAST_NOTE_RUN_USD > 0 && Number.isFinite(PODCAST_NOTE_RUN_USD));
+  console.log(`a run of the walk: at most ${NOTE_RUN_COMMANDS} commands and ${NOTE_RUN_BYTES} bytes, $${PODCAST_NOTE_RUN_USD.toFixed(6)}`);
 }));

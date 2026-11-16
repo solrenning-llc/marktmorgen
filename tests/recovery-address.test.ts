@@ -23,7 +23,8 @@ import { studioAccess } from "@/lib/studio-route";
 import { LOCK_DAYS, confirmRecoveryAddress, keepRecoveryAddress, moveRecoveryAddress, recoveryAddress, recoveryLockUntil, sendLostEmailLink, startRecoveryAddress } from "@/lib/recovery-address";
 import { finishSetup, lockedUntil, startSetup } from "@/lib/two-step";
 import { base32Decode, codeAt, STEP_SECONDS } from "@/lib/totp";
-import { POST as lostRoute } from "@/app/api/auth/lost/route";
+import { POST as lostAnswer } from "@/app/api/auth/lost/route";
+import { afterTasks } from "./next-server-after-world";
 import { POST as lostConfirm } from "@/app/api/auth/lost/confirm/route";
 import { POST as callback } from "@/app/api/auth/callback/route";
 import { POST as codeRoute } from "@/app/api/auth/code/route";
@@ -60,6 +61,16 @@ async function linkFor(email: string): Promise<string> {
   const token = createHash("sha256").update(String(Math.random())).digest("hex");
   await redis.pipeline([["SET", `nl:auth:link:${createHash("sha256").update(`nimbus-auth-link:${token}`).digest("hex").slice(0, 40)}`, email, "EX", 900]]);
   return token;
+}
+
+/**
+ * The lost-inbox route, then what it leaves for after its answer (next/server `after`, held by
+ * tests/next-server-after-world.ts): since MM-SA-21 the link and the notice go after the answer.
+ */
+async function lostRoute(request: NextRequest): Promise<Response> {
+  const answer = await lostAnswer(request);
+  for (const task of afterTasks.splice(0)) await (task as () => Promise<unknown>)();
+  return answer;
 }
 
 const ME = "maker@example.com";

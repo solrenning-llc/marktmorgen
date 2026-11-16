@@ -1,0 +1,11 @@
+{
+  "@/lib/redis": "community-mail-read-world.ts",
+  "@/lib/community": "community-mail-read-world.ts",
+  "@/lib/community-access": "community-mail-read-world.ts",
+  "@/lib/community-events": "community-mail-read-world.ts",
+  "@/lib/email": "community-mail-read-world.ts",
+  "@/lib/mail": "community-mail-read-world.ts",
+  "@/lib/order-data": "community-mail-read-world.ts",
+  "@/lib/calls": "community-mail-read-world.ts",
+  "@/lib/phone-alerts": "community-mail-read-world.ts"
+}

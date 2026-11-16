@@ -227,9 +227,13 @@ export async function takeImportRows(store: Store, n: number, now = Date.now(), 
   if (!store.sid || !isRedisConfigured() || !window) return { ok: false, reason: "unavailable", limit };
   const key = `nl:imports:rows:${store.sid}:${window}`;
   try {
-    const [total, expire] = await redisPipeline(windowCountBy(key, 32 * 86_400, n));
-    const counted = Number(total);
-    if (!Number.isSafeInteger(counted) || (expire !== 0 && expire !== 1)) return { ok: false, reason: "unavailable", limit };
+    // Read exactly (CX-123 rule 24), as takeMovedCount reads the same pair: the INCRBY a whole number, the EXPIRE's
+    // 0 or 1 (main's windowCountBy). Any other shape (true, a list, a fraction) is not a count and takes nothing; what
+    // an INCRBY may have added stays counted (more, never less).
+    const replies = repliesFor(await redisPipeline(windowCountBy(key, 32 * 86_400, n)), 2);
+    const total = replies?.[0];
+    const counted = typeof total === "number" ? total : typeof total === "string" && /^(0|-?[1-9][0-9]{0,14})$/.test(total) ? Number(total) : NaN;
+    if (!replies || (replies[1] !== 0 && replies[1] !== 1) || !Number.isSafeInteger(counted)) return { ok: false, reason: "unavailable", limit };
     if (counted <= limit) return { ok: true, counted: n };
     await redisPipeline([["DECRBY", key, n]]);
     return { ok: false, reason: "rows_month", limit };

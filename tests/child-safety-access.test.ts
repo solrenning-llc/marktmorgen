@@ -302,8 +302,8 @@ async function main(): Promise<void> {
   is("a preview: try again later", (await preview(pdfId))[0], 503);
   is("the shared card does not name it", await card(pdfId), false);
   is("the team's studio download: try again later", (await download("editor", pdfId))[0], 503);
-  is("the AI: try again later, nothing sent", await ai({ kind: "page", product: pdfId, readFile: true }), [503, "unavailable"]);
-  is("a picture description, under a product that is not held: try again later, nothing read", await describe({ product: freeId, path: freePicture }), [503, "unavailable", "nothing read"]);
+  is("the AI: try again later, nothing sent", await ai({ kind: "page", product: pdfId, readFile: true }), [503, "hold_unread"]);
+  is("a picture description, under a product that is not held: try again later, nothing read", await describe({ product: freeId, path: freePicture }), [503, "hold_unread", "nothing read"]);
   is("under a page of the store's own too", await describe({ page: siteId, path: freePicture }), [503, "unavailable", "nothing read"]);
   is("the owner still sees the course", await front("owner"), "shown");
   redis.pipeline = real as typeof redis.pipeline;

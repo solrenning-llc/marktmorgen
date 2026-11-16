@@ -19,7 +19,8 @@ import { lookStyle } from "@/lib/store-look";
 import { photoUrl } from "@/lib/photo-limits";
 import { canSellProduct } from "@/lib/store-checkout";
 import { activePwyw } from "@/lib/pay-what-you-want";
-import { beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { accessEndForSale, beforeStart, isCohort, isOpen, lessonCount, lessonsInOrder, readCourse } from "@/lib/course";
+import { ACCESS_END_FIELD, accessEndWhen, shownAccessEnd } from "@/lib/course-access-end";
 import { courseAccess, doneLessonsOrUnknown, emailKey, touchStudent } from "@/lib/learn";
 import { heldBack, passedOrUnknown, requiredQuizLessons } from "@/lib/quiz";
 import { MAX_CERT_NAME, MIN_CERT_NAME, certificateOf, hasFinished } from "@/lib/certificate";
@@ -84,13 +85,18 @@ export default async function CoursePage({ params, searchParams }: Params) {
   const query = await searchParams;
   const notice = w.linkNotices[typeof query.link === "string" ? query.link : ""] ?? null;
   const jar = await cookies();
-  const access = await courseAccess(store, product, jar);
+  const access = await courseAccess(store, product, jar, course);
   // A signed-in student whose access is known not to be open: their places in this course's videos go from their device
   // (650 [WG10]); never while it could not be checked (lib/course-door.ts), when they may well still have it.
   const forgetKey = forgetsOnDevice(access) && access.learner ? devicePlaceKey(course.id, access.learner.email) : null;
   // And the last lesson kept for their library, when it is in this course (650 [WG10], unit 2).
   const forgetPerson = forgetsOnDevice(access) && access.learner ? deviceLastKey(access.learner.email) : null;
   const open = access.state === "open";
+  // When access ends (24 [E7]): this student's own end, or, to whoever has not bought, the date still ahead.
+  // A membership never takes an end (24 [E7]): members keep the course while they pay, so none is said to them.
+  const endsAt = open ? access.endsAt : product.recurring ? null : accessEndForSale(course);
+  // A student whose end has passed, or whose access could not be checked, already bought: no buy form for them.
+  const settled = access.state === "expired" || access.state === "unchecked";
   // A draft is left off the store and its own page (lib/catalog.ts): its front
   // door, title, price and outline are for its students and for the store's
   // owner and team, signed in, never for whoever only knows its id (MM-SA-30).
@@ -111,7 +117,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
     : [new Set<string>() as Set<string> | null, new Set<string>() as Set<string> | null, null];
   if (open && !access.learner.owner) {
     const { email } = access.learner;
-    after(() => touchStudent(course.id, email, access.start, store));
+    const stamp = access.stamp; // the purchase's end (24 [E7]), so drip emails stop with access
+    after(() => touchStudent(course.id, email, access.start, store, stamp));
     // Once the whole month's visits are used, a course rests too (lib/traffic-rules.ts).
     if (await isResting(store, undefined, "buyer")) redirect(`/@${store.handle}/resting`);
     // A student's day in a course is a visit to the store (lib/day-visit.ts).
@@ -127,7 +134,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
   // A student the course is no longer open to (a refund, an ended membership) still downloads, or deletes, their own
   // notes here, as the privacy policy says (#lesson-notes): no lesson's box is there to give them. Only while they keep
   // notes on this course (or when that cannot be read), never to any signed-in visitor (third review of #3031, M4).
-  const notesAfter = await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
+  // Not on a check that could not be made (24 [E7]): the course is not known to be closed to them, so nothing says it is.
+  const notesAfter = access.state === "unchecked" ? false : await notesDownloadAfterAccess(store.statsId ?? "", access, course.id, () => takeBuyerRead(store));
 
   // The "More from" shelf (628 [HN4](b), lib/course-shelf.ts): only for a student, never on a guess about what they have.
   const shelf = studying ? await shelfShown(store, course.shelf, product.id, access.learner.email) : [];
@@ -189,6 +197,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
               w.outline(total, course.modules.length),
               facts.videoSeconds !== null ? videoTotalLine(facts.videoSeconds, store.language) : null,
               course.certificate ? w.withCertificate : null,
+              // Only where the checkout that stamps it is offered: a PayPal purchase takes no end (Claude 5's M1 on #3445).
+              !open && !settled && selling && endsAt !== null ? w.accessEndsFact.replace("{when}", accessEndWhen(endsAt, store.language)) : null,
             ]
               .filter(Boolean)
               .join(" · ")}
@@ -199,6 +209,11 @@ export default async function CoursePage({ params, searchParams }: Params) {
               <p className="font-bold" style={{ color: "var(--st-text)" }}>{notice.title}</p>
               <p className="mt-1 text-sm">{notice.body}</p>
             </div>
+          ) : null}
+
+          {/* The end shown when this page was drawn is no longer the course's (24 [E7]): the checkout refused it. */}
+          {query.terms === "changed" && !open ? (
+            <p className="st-note mt-6 text-sm" role="alert">{w.accessEndChanged}</p>
           ) : null}
 
           {open && access.learner.owner ? (
@@ -229,6 +244,24 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </p>
               ) : null}
             </div>
+          ) : null}
+
+          {access.state === "expired" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessEndedTitle}</p>
+              <p className="mt-1 text-sm">{w.accessEndedBody.replace("{when}", accessEndWhen(access.endedAt, store.language))}</p>
+            </div>
+          ) : access.state === "unchecked" ? (
+            <div className="st-note mt-6" role="status">
+              <p className="font-bold" style={{ color: "var(--st-text)" }}>{w.accessUncheckedTitle}</p>
+              <p className="mt-1 text-sm">{w.accessUncheckedBody}</p>
+            </div>
+          ) : null}
+
+          {open && studying && endsAt !== null ? (
+            <p className="mt-6 text-sm font-semibold" style={{ color: "var(--st-text)" }}>
+              {w.accessEndsOn.replace("{when}", accessEndWhen(endsAt, store.language))}
+            </p>
           ) : null}
 
           {/* Their private lesson notes stay theirs once the course is no longer open to them (a refund, an ended
@@ -313,7 +346,7 @@ export default async function CoursePage({ params, searchParams }: Params) {
                 </div>
               ) : null}
             </div>
-          ) : door === "unchecked" ? (
+          ) : settled ? null : door === "unchecked" ? (
             <AccessUncheckedNote title={w.uncheckedTitle} body={w.uncheckedBody} retry={w.uncheckedRetry} href={base} className="mt-6" />
           ) : (
             <div className="mt-6 space-y-6">
@@ -334,6 +367,8 @@ export default async function CoursePage({ params, searchParams }: Params) {
                   <div className="mb-5">
                     <BillingCountryField id={`bc-course-${product.id}`} locale={said.lang.locale} label={said.w.billingCountry} choose={said.w.chooseCountry} />
                   </div>
+                  {/* The end this page says (24 [E7]), for the checkout to check and stamp; never for a membership. */}
+                  {product.recurring ? null : <input type="hidden" name={ACCESS_END_FIELD} value={shownAccessEnd(course)} />}
                   <DigitalConsentBox id={`dc-course-${product.id}`} lang={store.language} refused={query.consent === "needed"} className="mb-5" />
                   <button type="submit" className="btn st-btn btn-lg btn-block">{w.buyCourse(access.state === "ended", price)}</button>
                   <WhoAnswers store={store} className="st-muted mt-3 text-center text-sm" />

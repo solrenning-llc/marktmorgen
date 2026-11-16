@@ -570,18 +570,21 @@ export async function touchStudent(
     await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
     return;
   }
-  const commands: Cmd[] = [["HSET", key, field, json]];
   if (index && pairs.length > 0) {
+    // The pairs first, their replies read, and only then the row marked (`i`): a pipeline is not one step, so a ZADD
+    // that failed (OOM, WRONGTYPE) must never leave a row marked with no pairs, never emailed (Claude 5 on #3344, LOW).
     // Every pair written, so an earlier start moves the scores of those already there; only the new ones took room.
-    commands.push(
+    const pairsCommands: Cmd[] = [
       ["ZADD", dueKey(index.statsId), ...pairs.flatMap(([score, member]) => [score, member])],
       ["SADD", DRIP_STORES, `${index.statsId}|${index.handle}`],
-    );
+    ];
     // The course start hands the card it has just read (dripCardFor): written again only from the outline, which the
     // course page has and whose card may not be kept yet (Claude 5 on #3344, MEDIUM 2: 1 command and its bytes fewer).
-    if (!(drip && "card" in drip)) commands.push(["SET", cardKey(courseId), JSON.stringify(index.card), "NX"]);
+    if (!(drip && "card" in drip)) pairsCommands.push(["SET", cardKey(courseId), JSON.stringify(index.card), "NX"]);
+    const written = repliesFor(await redisPipeline(pairsCommands).catch(() => null), pairsCommands.length);
+    if (!written || countOf(written[0]) === null || countOf(written[1]) === null) delete row.i;
   }
-  await redisPipeline(commands);
+  await redisPipeline([["HSET", key, field, JSON.stringify(row)]]);
 }
 
 /**
@@ -1438,7 +1441,10 @@ async function walkPending(store: Store, statsId: string, pending: string[], run
   let budget = DRIP_INDEX_PAGES_PER_RUN;
   let pairsWritten = 0;
   let left = pending.length;
-  const some = pending.slice(0, budget);
+  // A different start each day: a course that cannot be read stays pending, and never keeps the ones after it from
+  // their turn for good (Claude 5 on #3344, LOW). Days, not runs, so one day's runs agree on the order.
+  const start = pending.length > budget ? Math.floor(run.nowSeconds / 86_400) % pending.length : 0;
+  const some = [...pending.slice(start), ...pending.slice(0, start)].slice(0, budget);
   const ids = some.map((member) => member.split("|")[0]);
   const read = repliesFor(await redisPipeline([["MGET", ...ids.map(cardKey)], ["HMGET", walkKey(statsId), ...ids]]), 2);
   const cards = listSlots(read?.[0]);

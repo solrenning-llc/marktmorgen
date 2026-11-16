@@ -17,7 +17,7 @@ import { done, is, part } from "./check";
 const PAID = `cs_test_${"r".repeat(24)}`;
 const store = { handle: "harbor", statsId: "s0123456789ab", language: "en", currency: "usd", name: "Harbor Kitchen" } as unknown as Store;
 const product = { id: "p_call", title: "Coaching Call" } as unknown as Listing;
-const input = (sessions: string | undefined, days: string | undefined) => ({
+const input = (sessions: string | undefined, days: string | undefined, paid: Record<string, unknown> = {}) => ({
   store,
   product,
   base: "https://marktmorgen.com/@harbor",
@@ -31,13 +31,14 @@ const input = (sessions: string | undefined, days: string | undefined) => ({
     currency: "usd",
     metadata: { store: "harbor", product: "p_call", kind: "package", ...(sessions === undefined ? {} : { sessions }), ...(days === undefined ? {} : { days }) },
     customer_details: { email: "dana@example.test" },
+    ...paid,
   },
 });
 
-async function outcome(sessions: string | undefined, days: string | undefined): Promise<string> {
+async function outcome(sessions: string | undefined, days: string | undefined, paid: Record<string, unknown> = {}): Promise<string> {
   redis.clear();
   try {
-    const bought = await recordPackage(input(sessions, days));
+    const bought = await recordPackage(input(sessions, days, paid));
     return bought ? `recorded ${bought.total} until+${bought.until ? bought.until - bought.at : 0}` : "null";
   } catch {
     return (await readBought(PAID)) === null ? "refused, nothing written" : "refused, but written";
@@ -60,6 +61,23 @@ async function main(): Promise<void> {
     "missing, empty, text, negative, a number of days never offered",
     [await outcome("5", undefined), await outcome("5", ""), await outcome("5", "ninety"), await outcome("5", "-90"), await outcome("5", "45")],
     Array(5).fill("refused, nothing written"),
+  );
+
+  // The email says what was paid, in the currency paid: a total or a currency that does not read would say "$0.00",
+  // or another currency's amount, to a buyer who paid.
+  part("What was paid, when it does not read: refused, nothing written");
+  is(
+    "amount_total missing, text, a fraction, negative; currency missing, empty, not three letters",
+    [
+      await outcome("5", "90", { amount_total: undefined }),
+      await outcome("5", "90", { amount_total: "50000" }),
+      await outcome("5", "90", { amount_total: 500.5 }),
+      await outcome("5", "90", { amount_total: -50000 }),
+      await outcome("5", "90", { currency: undefined }),
+      await outcome("5", "90", { currency: "" }),
+      await outcome("5", "90", { currency: "dollars" }),
+    ],
+    Array(7).fill("refused, nothing written"),
   );
 
   part("What reads is unchanged");

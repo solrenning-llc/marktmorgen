@@ -11,7 +11,11 @@
 import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { SESSION_COOKIE, openSession } from "@/lib/auth";
-import { claimHandle, createStore, deleteStore, setAssistantPlan, storeForId, storeRef } from "@/lib/store";
+import { claimHandle, createStore, deleteStore as deleteWith, setAssistantPlan, storeForId, storeRef } from "@/lib/store";
+import { queueDeleted } from "@/lib/closed-store-data";
+// Merged with main of 16 November 2026 (Claude 1 cloud c1-conflitos-2): main's deleteStore takes the walk's queue, as
+// tests/store-deletion-closing.test.ts passes it.
+const deleteStore = (ref: string) => deleteWith(ref, queueDeleted);
 import { POST as storesRoute } from "@/app/api/store/stores/route";
 import { store as redis } from "./redis-stub";
 import { done, is, part } from "./check";

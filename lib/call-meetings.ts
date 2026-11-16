@@ -403,12 +403,13 @@ const REFUND_CURSOR = /^[A-Za-z0-9_]{3,255}$/;
  * The Redis commands one run of the meetings' refund job sends for its place in a store's refunds, outside the rows it
  * reads (pre-review of claude5/call-refunds-confirmed; Claude 5's audit of the Stripe reads, A3): one GET of the anchor
  * and one of the pass, for a store with no anchor yet one SET NX EX of it before Stripe is asked anything (pre-review
- * of d0f4513887), then at most three writes: at the end of a pass the anchor written, the read set's expiry
+ * of d0f4513887) and, when another run wrote one first (its reply null), one GET of that one (Codex X4 on #3462), then
+ * at most three writes: at the end of a pass the anchor written, the read set's expiry
  * renewed and the pass deleted; otherwise the pass kept (or deleted when Stripe no longer knows its place) and the
  * anchor and the read set either written (a store with none yet) or their expiry renewed, so a refund held for later
  * never lets them lapse. The pass is one key a store, under 400 bytes, kept REFUND_PASS_SECONDS.
  */
-export const MEET_REFUND_PLACE_COMMANDS = 6;
+export const MEET_REFUND_PLACE_COMMANDS = 7;
 /**
  * The refunds of one charge read in one run (one GET /refunds?charge= each, for a call's refund that succeeded on a
  * charge read refunded in full without covering it by itself; each charge read once a run): past it, the refund is
@@ -477,18 +478,31 @@ async function refundsOf(store: Store, callsId: string, deadline: number): Promi
   // store's walk with the place as it was, never a one-day window written over the real, older place. The pass is read
   // with it (readRefundPass takes any other shape for no pass, which starts again from that place).
   const placeRead = repliesFor(await redisPipeline([["GET", anchorKey(callsId)], ["GET", passKey(callsId)]]), 2);
-  const anchorRaw = placeRead?.[0];
-  if (!placeRead || (anchorRaw !== null && !(typeof anchorRaw === "string" && /^\d{1,12}$/.test(anchorRaw)))) {
+  const placeTime = (raw: unknown): raw is string => typeof raw === "string" && /^\d{1,12}$/.test(raw);
+  let anchorRaw = placeRead?.[0];
+  if (!placeRead || (anchorRaw !== null && !placeTime(anchorRaw))) {
     throw new UnknownReplyError("the call refunds' place");
   }
   const passRaw = placeRead[1];
   // The first look goes back a day: meetings are only made from now on, and
   // a refund made before one existed has nothing to remove.
-  const anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;
+  let anchor = Number(anchorRaw) > 0 ? Number(anchorRaw) : nowSeconds - 86_400;
   // A store with no anchor yet has it written before Stripe is asked anything, so a first turn that fails still leaves
   // the next one reading from here, however long the rotation takes (pre-review of d0f4513887). NX: never over one
-  // written meanwhile.
-  if (!(Number(anchorRaw) > 0)) await redisPipeline([["SET", anchorKey(callsId), String(anchor), "NX", "EX", REFUND_KEEP_SECONDS * 2]]);
+  // written meanwhile. Its reply is read exactly before Stripe (Codex X4 on #3462, rule 24): "OK" is this anchor kept;
+  // null is one another run wrote first, read again and walked from (a time in its exact shape, or the walk stops);
+  // anything else stops this store's walk, so Stripe is never asked while the place it would resume from is not known.
+  if (!(Number(anchorRaw) > 0)) {
+    const [written] = repliesFor(await redisPipeline([["SET", anchorKey(callsId), String(anchor), "NX", "EX", REFUND_KEEP_SECONDS * 2]]), 1) ?? [undefined];
+    if (written === null) {
+      const [winner] = repliesFor(await redisPipeline([["GET", anchorKey(callsId)]]), 1) ?? [undefined];
+      if (!placeTime(winner) || !(Number(winner) > 0)) throw new UnknownReplyError("the call refunds' first place, written by another run");
+      anchorRaw = winner;
+      anchor = Number(winner);
+    } else if (written !== "OK") {
+      throw new UnknownReplyError("the call refunds' first place");
+    }
+  }
   const kept = readRefundPass(passRaw);
   const pass: RefundPass = kept ? { ...kept } : { from: anchor, start: nowSeconds, after: "", newest: anchor, floor: null };
   // A little overlap, so a refund created in the second the last pass read is not missed; the read set keeps it from

@@ -95,6 +95,11 @@ type UpsellRecord = {
    * offer was taken, which is what this buyer gets (lib/bundle-rules.ts).
    */
   items?: string[];
+  /**
+   * "processing" while Stripe last said the payment is processing: it can still be paid, so the buyer is told it is
+   * being checked (charged once at most), never that it was not charged. Absent while it waits on the buyer's bank.
+   */
+  waiting?: "processing";
 };
 
 /**
@@ -111,7 +116,39 @@ const slotsKey = (session: string) => `nl:upsell-slots:${session}`;
 const PENDING_KEY = "nl:upsell:pending";
 /** How long an offer waiting on the bank is looked at before the job lets it be. */
 const PENDING_WATCH_MS = 2 * 24 * 60 * 60 * 1000;
+/**
+ * A payment Stripe still says is "processing" (a bank debit can take days to clear) is not let go after
+ * PENDING_WATCH_MS: it is looked at again every PROCESSING_RECHECK_MS, until it settles or PROCESSING_WATCH_MS
+ * have passed, so a late success still gets its confirmation, count and commission (afterPaid). Seven days covers
+ * a US bank debit (Link paid from a bank account, lib/instant-pay.ts) and stays inside the record's own
+ * RECORD_SECONDS, so nothing is kept longer than before. Once a day, inside OFFER_WATCH_LOOKS_MOST looks an offer in all
+ * (tests/plan-cost-registry.ts, line "orders").
+ */
+const PROCESSING_WATCH_MS = 7 * 24 * 60 * 60 * 1000;
+const PROCESSING_RECHECK_MS = 24 * 60 * 60 * 1000;
+/**
+ * When the job looks at a waiting offer again, by how long after it began: its first look comes a minute after it
+ * began (settlePendingOffers' grace), then once its lost answer can be told apart (LOST_ANSWER_MS), after an hour,
+ * six hours, a day, and at the end of PENDING_WATCH_MS. The buyer's own thanks page settles it at once whenever it is
+ * opened (settleUpsells), so this is only the job's catch-up: six looks over two days instead of one every five
+ * minutes, at most OFFER_WATCH_LOOKS_MOST with the daily looks of a payment still processing
+ * (tests/plan-cost-registry.ts, line "orders").
+ */
+const WATCH_AFTER_MS = [LOST_ANSWER_MS + 60_000, 60 * 60 * 1000, 6 * 60 * 60 * 1000, 24 * 60 * 60 * 1000, PENDING_WATCH_MS + 60_000];
+
+/** When an offer that began at `at` is next looked at, or null once its watch is over. */
+function nextLook(at: number, now: number): number | null {
+  for (const after of WATCH_AFTER_MS) if (at + after > now) return at + after;
+  return null;
+}
 const pendingMember = (handle: string, session: string, slot: string) => `${handle}|${session}|${slot}`;
+
+/**
+ * The states of an offer's payment, answered at once, in which nothing was or will be taken without the buyer:
+ * declined or stopped (requires_payment_method, canceled), or waiting on a step the buyer is not sent to
+ * (requires_action with no page to confirm on, requires_confirmation). Any other is still on its way.
+ */
+const NOTHING_TAKEN = new Set(["requires_payment_method", "canceled", "requires_action", "requires_confirmation"]);
 
 /**
  * Adds an offer to the job's list, and takes it off. Best effort: the list
@@ -519,6 +556,13 @@ export async function takeUpsell(input: {
       await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now() });
       return { kind: "confirm", url };
     }
+    // Still on its way (DISC-B-4): "processing" (Link paid from a bank account, now and then a card) or any state not
+    // read as one that took nothing can still be paid. It stays pending on the five-minute job's list and is settled
+    // from what Stripe says (settleOne), never told as declined while the buyer may yet be charged.
+    if (!NOTHING_TAKEN.has(String(pi.status))) {
+      await writeUpsell(session, slot, { state: "pending", product: target.id, ...extra, pi: id, customer, at: Date.now(), waiting: "processing" });
+      return { kind: "checking" };
+    }
     await writeUpsell(session, slot, { state: "failed", product: target.id, ...extra, pi: id, customer, at: Date.now() });
     await unwatchPending(store, session, slot);
     return { kind: "failed" };
@@ -633,9 +677,26 @@ const ORPHAN_RELEASE = `-- marktmorgen:upsell-orphan-release:v1
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0`;
 
-/** Settles one offer still waiting on an answer. Nothing is ever charged here. */
-async function settleOne(store: Store, session: string, slot: string, record: UpsellRecord, pages: number): Promise<void> {
-  if (record.state !== "pending" || !store.stripeAccountId) return;
+/**
+ * What settleOne answers when Stripe could not be read (an error status, a timeout, a list it could not page
+ * through) or the answer could not be acted on: unknown, so never read as "not processing" (rule 24). Kept apart
+ * from null, which is an answer that was read and is not about this offer (or no payment to read).
+ */
+const UNREAD = Symbol("unread");
+
+/**
+ * Settles one offer still waiting on an answer. Nothing is ever charged here.
+ * Answers the payment's status as Stripe gave it, null when there was no status to read for this offer (no payment
+ * found, or a reply about another offer), or UNREAD when Stripe could not be read.
+ */
+async function settleOne(
+  store: Store,
+  session: string,
+  slot: string,
+  record: UpsellRecord,
+  pages: number,
+): Promise<string | null | typeof UNREAD> {
+  if (record.state !== "pending" || !store.stripeAccountId) return null;
   try {
     let pi: Record<string, unknown> | null;
     if (record.pi) {
@@ -648,7 +709,7 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
           await writeUpsell(session, slot, { ...record, state: "failed" });
           await unwatchPending(store, session, slot);
         }
-        return;
+        return null;
       }
     } else {
       // Neither a customer nor a payment: only the claim was written (its reply lost, or the write naming the
@@ -658,10 +719,10 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
       if (Date.now() - record.at > LOST_ANSWER_MS) {
         await redisPipeline([["EVAL", ORPHAN_RELEASE, 1, recordKey(session, slot), JSON.stringify(record)]]);
       }
-      return;
+      return null;
     }
     const meta = pi.metadata as Record<string, string> | null;
-    if (meta?.parent !== session || (meta?.step ?? "") !== slot) return;
+    if (meta?.parent !== session || (meta?.step ?? "") !== slot) return null;
     const id = typeof pi.id === "string" ? pi.id : record.pi;
     if (pi.status === "succeeded" || pi.status === "requires_payment_method" || pi.status === "canceled") {
       await unwatchPending(store, session, slot);
@@ -674,11 +735,20 @@ async function settleOne(store: Store, session: string, slot: string, record: Up
       else await creditCharge(store, session, slot, pi);
     } else if (pi.status === "requires_payment_method" || pi.status === "canceled") {
       await writeUpsell(session, slot, { ...record, pi: id, state: "failed" });
-    } else if (id !== record.pi) {
-      await writeUpsell(session, slot, { ...record, pi: id });
+    } else {
+      // Still pending: told as checking while Stripe says processing, as not confirmed while it waits on the buyer.
+      const waiting = pi.status === "processing" ? "processing" : pi.status === "requires_action" ? undefined : record.waiting;
+      if (id !== record.pi || waiting !== record.waiting) {
+        const next: UpsellRecord = { ...record, pi: id };
+        if (waiting) next.waiting = waiting;
+        else delete next.waiting;
+        await writeUpsell(session, slot, next);
+      }
     }
+    return typeof pi.status === "string" ? pi.status : null;
   } catch (error) {
     console.error("settling an upsell failed", error);
+    return UNREAD;
   }
 }
 
@@ -700,7 +770,9 @@ export async function settleUpsells(store: Store, session: string): Promise<void
  * store: each is settled from what Stripe says (settleOne), so a paid offer
  * gets its confirmation email and its affiliate credit without waiting for
  * the buyer to come back, and one the bank never confirmed is let go after
- * two days. Nothing is ever charged here. `storeFor` is passed in, as the
+ * two days (seven while Stripe still says it is processing, looked at once a
+ * day after the second). Each is looked at less often the longer it waits
+ * (WATCH_AFTER_MS). Nothing is ever charged here. `storeFor` is passed in, as the
  * other jobs do, so this file does not depend on the store record's.
  */
 export async function settlePendingOffers(
@@ -747,16 +819,29 @@ export async function settlePendingOffers(
       }
       const store = await storeFor(handle);
       if (!store || !store.stripeAccountId) {
-        if (Date.now() - record.at > PENDING_WATCH_MS) await drop();
+        const next = nextLook(record.at, Date.now());
+        if (next === null) await drop();
+        else await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
         continue;
       }
-      await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
+      const status = await settleOne(store, session, slot, record, OFFER_PAGES_IN_JOB);
       const after = await readUpsell(session, slot);
       if (!after || after.state !== "pending") {
         counts.settled += 1;
         await drop();
-      } else if (Date.now() - after.at > PENDING_WATCH_MS) {
-        await drop();
+      } else {
+        // Looked at again later, less often the longer it waits (WATCH_AFTER_MS); past its watch, a payment still
+        // clearing at the bank is looked at once a day, so a late success is handed over in full. An answer that
+        // could not be read is unknown, not "not processing" (rule 24): it is looked at again the same way, a day
+        // later, still only inside PROCESSING_WATCH_MS, so its looks stay inside OFFER_WATCH_LOOKS_MOST.
+        const next = nextLook(after.at, Date.now());
+        if (next !== null) {
+          await redisPipeline([["ZADD", PENDING_KEY, next, pendingMember(handle, session, slot)]]);
+        } else if ((status === "processing" || status === UNREAD) && Date.now() - after.at <= PROCESSING_WATCH_MS) {
+          await redisPipeline([["ZADD", PENDING_KEY, Date.now() + PROCESSING_RECHECK_MS, pendingMember(handle, session, slot)]]);
+        } else {
+          await drop();
+        }
       }
     } catch (error) {
       console.error("settling a waiting offer failed", error);
@@ -866,7 +951,7 @@ export async function funnelView(input: {
       const items = record.items?.length ? await contentsOf(store, record.items) : null;
       taken.push({ slot, product: known, reference: upsellReference(session, slot, record), items });
     }
-    if (record.state === "pending") notes.push({ state: record.pi ? "unconfirmed" : "checking", title });
+    if (record.state === "pending") notes.push({ state: record.pi && record.waiting !== "processing" ? "unconfirmed" : "checking", title });
     if (record.state === "failed") notes.push({ state: "declined", title });
     if (record.state === "declined" || record.state === "failed") declined.push(record.product);
   }

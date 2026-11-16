@@ -255,8 +255,8 @@ export function paydayDue(payday: number, dayOfMonth: number): boolean {
   return payday >= 1 && dayOfMonth >= payday && dayOfMonth - payday <= PAYDAY_CATCH_UP_DAYS;
 }
 
-/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent. */
-async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean> {
+/** One store, if its payday is due (paydayDue) and anybody is owed. True when sent; "failed" when its auto-pay paid nobody by an error. */
+async function payday(store: Store, month: string, dayOfMonth: number): Promise<boolean | "failed"> {
   if (!affiliatesOn(store) || !paydayDue(store.affiliates.payday, dayOfMonth)) return false;
   if (!store.statsId || !store.email) return false;
   const book = await readBook(store);
@@ -299,6 +299,12 @@ async function payday(store: Store, month: string, dayOfMonth: number): Promise<
     const paid = await payWithPayPal(store);
     const { subject, text } = autoPayEmail(paid, book.currency);
     const outcome = await sendEmailOutcome({ meter: { by: "store", store: store, kind: "email" }, from: NIMBUS_FROM, to: store.email, subject, text, idempotencyKey: `aff-payday-${store.statsId}-${month}` });
+    // A press that answered "error" paid nobody because something was not known (a link read inside the press, the
+    // lock, Redis or PayPal before the batch was written): not a business reason like "not connected" or "nothing".
+    // Its email still goes, once (the month is kept above), but the run counts the store as failed, not as sent, so
+    // the owner's report shows that a payday paid nothing by an error (the author's decision on #2844, after HOLD
+    // 6922548572: the press's own catch stays, and its unknown is a failure of the run).
+    if (!paid.ok && paid.reason === "error") return "failed";
     return outcome === "sent";
   }
   const { subject, text } = paydayEmail({
@@ -351,7 +357,9 @@ export async function sendPaydayEmails(deadline: number, now = new Date()): Prom
       if (!paydayDue(store.affiliates.payday, dayOfMonth)) continue;
       counts.due += 1;
       try {
-        if (await payday(store, month, dayOfMonth)) counts.sent += 1;
+        const done = await payday(store, month, dayOfMonth);
+        if (done === "failed") counts.failed += 1;
+        else if (done) counts.sent += 1;
       } catch (error) {
         counts.failed += 1;
         console.error("sending an affiliate payday email failed", error);

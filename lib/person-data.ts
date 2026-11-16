@@ -182,6 +182,7 @@ export const PERSON_DATA: PersonData[] = [
   { file: "lib/phone-alerts.ts", how: "account", what: "The creator's own phone, and one-way marks of events already told" },
   { file: "lib/path.ts", how: "account", what: "The store owner's own Path: their four answers, days, best level, cached facts and optional mission-board token/count/time; private record downloadable only by the owner through /api/store/path, board removed when Path/store is deleted, nothing about a buyer" },
   { file: "lib/stats-report.ts", how: "none", what: "Weekly reports to the store's own team; no buyer's address" },
+  { file: "lib/report-guests.ts", how: "erased", what: "If you send your numbers to them outside your team: their address, whether they confirmed or left, when they were invited, and the records of their confirm and leave links" },
   { file: "lib/traffic.ts", how: "none", what: "Visits counted by a keyed one-way fingerprint of the network address, two days; no email address" },
   { file: "lib/studio-demo.ts", how: "expires", days: 1, what: "Trying the studio without an account: how many demos a network address opened and how many of its demo requests were refused today, under a keyed one-way fingerprint that ends with the day, and what was typed in the demo, under a random id in a cookie, gone 21 hours after it opened; no email address or name is asked" },
   { file: "lib/answers.ts", how: "none", what: "Answers to visitors' questions, never who asked" },

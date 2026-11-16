@@ -56,6 +56,7 @@ import { clicksOf } from "@/lib/mail-clicks";
 import { waitlistPlacesOf } from "@/lib/waitlist";
 import { feedsOf } from "@/lib/podcast-access";
 import { remindersOf } from "@/lib/assistant-reminder";
+import { readShare } from "@/lib/report-guests";
 import { syncJobsOf } from "@/lib/email-sync";
 import { memberTraces, readMember as readCommunityMember } from "@/lib/community";
 import { pointsRecordOf } from "@/lib/community-points";
@@ -116,6 +117,7 @@ export const COPY_PLAN: Readonly<Record<string, { how: CopyHow; what: string }>>
   "lib/winback-send.ts": { how: "marks", what: "Marks that you heard a come-back offer about a product" },
   "lib/checkout-recovery.ts": { how: "marks", what: "Marks that you heard a checkout reminder about a product this week" },
   "lib/assistant-reminder.ts": { how: "copied", what: "A checkout reminder you asked for with the store's assistant box" },
+  "lib/report-guests.ts": { how: "copied", what: "Whether the store sends you its numbers by email: your state, when you were invited, which figures and how often" },
   "lib/move-members.ts": { how: "copied", what: "Invitations to keep a membership you had elsewhere" },
   "lib/inbox.ts": { how: "copied", what: "Your conversations with the store's inbox" },
   "lib/discord-access.ts": { how: "copied", what: "Your Discord account's link to the store, and its roles" },
@@ -414,6 +416,15 @@ export const COPIERS: Readonly<Record<string, Copier>> = {
   "lib/waitlist.ts": async (s) => (await waitlistPlacesOf(s.statsId, s.productIds, s.email)).map((w) => ({ product: w.product, joined: iso(w.joined), confirmed: iso(w.confirmed), alsoAskedForNews: w.news })),
   "lib/podcast-access.ts": async (s) => (await feedsOf(s.store, s.productIds, s.email)).map((product) => ({ product, privateFeed: true })),
   "lib/assistant-reminder.ts": async (s) => (await remindersOf(s.statsId, s.email)).map((r) => ({ ...r, at: new Date(r.at).toISOString() })),
+  // The link hashes are left out: they are marks, and say nothing a person can read.
+  "lib/report-guests.ts": async (s) => {
+    if (!s.sid) return [];
+    const share = await readShare(s.sid);
+    const address = s.email.trim().toLowerCase();
+    return share.guests
+      .filter((guest) => guest.address === address)
+      .map((guest) => ({ state: guest.state, invited: new Date(guest.invitedAt).toISOString(), figures: share.figures, every: share.every }));
+  },
   "lib/email-sync.ts": async (s) => syncJobsOf(s.statsId, s.email),
   "lib/community-erasure.ts": async (s) => {
     const id = s.communityId;

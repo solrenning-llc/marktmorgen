@@ -94,6 +94,7 @@ import { agreementKeys } from "@/lib/agreement-store";
 import { letterRecordKey } from "@/lib/letters";
 import { passKeyOfHash } from "@/lib/learn";
 import { forgetPath } from "@/lib/path";
+import { linkKeysOf } from "@/lib/report-guests";
 
 export const DUE_KEY = "nl:closed:due";
 export const BATCH_KEY = "nl:closed:batch";
@@ -486,6 +487,11 @@ export const FOLLOWERS: Readonly<Record<string, Follower>> = {
   "nl:outreach:": {
     match: (key) => /^nl:outreach:[^:]+:pitches$/.test(key),
     find: async (keys) => (await fieldsOf(keys, "stop")).map(pitchStopKey),
+  },
+  // The numbers email's outside addresses (405 [HX1], lib/report-guests.ts): each one's confirm and leave links.
+  "nl:rguest:": {
+    match: (key) => /^nl:rguest:[^:]+$/.test(key),
+    find: async (keys) => (await stringsOf(keys)).flatMap(linkKeysOf),
   },
   // A listener's private feed: the token it opens by.
   "nl:pod:by:": {

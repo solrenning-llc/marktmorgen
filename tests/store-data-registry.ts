@@ -93,6 +93,8 @@ import { TRIAL_ORDERS } from "@/lib/order-rules";
 import { TRIAL_MONTHLY_EMAILS } from "@/lib/plan";
 import { TRIAL_DAILY_RUNS } from "@/lib/flow-limits";
 import { REFUND_MARK_MAX_BYTES } from "@/lib/affiliate-lead-rules";
+import { LINK_RECORD_BYTES, SHARE_RECORD_BYTES } from "@/lib/report-guests";
+import { MAX_REPORT_GUESTS } from "@/lib/report-guests-rules";
 
 const KB = 1_024;
 /** A key with its name and a small value: what most links and records of a few fields weigh, rounded up. */
@@ -977,6 +979,11 @@ export const FAMILIES: Record<string, Family> = {
   "nl:weekly:off@lib/stats-report.ts": company("Creators who switched the weekly report off", "One set for every store."),
   "nl:weekly:seen:@lib/stats-report.ts": company("The stores the weekly job decided for a week", "One set a week for every store with visits, kept 9 days like the claims."),
   "nl:weekly:sent:@lib/stats-report.ts": company("A weekly report sent", "The company's email to a creator."),
+  // 405 [HX1]: the numbers email to up to MAX_REPORT_GUESTS addresses outside the team, one record a store, and each address's two links.
+  "nl:rguest:@lib/report-guests.ts": { what: "The figures a store sends outside its team, and the addresses", parts: [capped(SHARE_RECORD_BYTES + KEY, "One record a store, refused above its cap.", src("lib/report-guests.ts", "SHARE_RECORD_BYTES"))] },
+  "nl:rguest:link:@lib/report-guests.ts": { what: "The confirm and leave links of each outside address", parts: [capped(2 * MAX_REPORT_GUESTS * (LINK_RECORD_BYTES + KEY), "Two links an address on the list; those of an address taken off are deleted.", src("lib/report-guests.ts", "LINK_RECORD_BYTES"), src("lib/report-guests-rules.ts", "MAX_REPORT_GUESTS"))] },
+  "nl:rguest:lock:@lib/report-guests.ts": short("The outside addresses' record lock", "studio", 1, 128),
+  "nl:rguest:@lib/closed-store-data.ts": follower("nl:rguest:"),
   "nl:weekly:to:@lib/stats-report.ts": { what: "Who on the team gets the weekly report", parts: [capped((MAX_TEAM + 1) * KEY, "The team.", src("lib/team.ts", "MAX_TEAM"))] },
   "nl:stats:@lib/stats.ts": {
     what: "The store's numbers: every day's counts and visitors, all time, who is on now, cached sales",

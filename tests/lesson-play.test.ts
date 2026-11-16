@@ -284,13 +284,16 @@ async function main(): Promise<void> {
     is("and the next anonymous press is told the rest is kept for students", (await play(file, STUDIO_LIMIT, WINDOW, undefined, { anonymous: true }))?.kind, "kept");
   }
 
-  part("MEDIO (review of #3402, money M1): playback past a token's end is unverified, so it is open, and the store stays in line to be read");
+  part("MEDIO (review of #3402, money M1): playback past a token's end is unverified, said so in the video line, and the store stays in line to be read");
   {
-    // tests/plan-cost-registry.ts called it "Not verified, and open" while OPEN was empty, so the line passed at
-    // exactly the plan's hours (rule "unknown fails").
+    // Rule 23 (merge of main, 16 November 2026, BROADCAST-250 b: main prevails): was "the unverified stop at a token's
+    // end is an OPEN item of the cost registry" (an OPEN item video-playback-past-hold). Main holds the OPEN list
+    // empty ("Nothing may join it", tests/plan-cost-registry.test.ts), so the unknown is kept in the video line's own
+    // basis as not verified and never zero, and the list stays empty.
     const registry = await import("./plan-cost-registry");
-    const open = (registry.OPEN as { id: string; what: string }[]).find((item) => item.id === "video-playback-past-hold");
-    is("the unverified stop at a token's end is an OPEN item of the cost registry", Boolean(open && /token/.test(open.what)), true);
+    is("the cost registry's open list stays empty, as main holds it", (registry.OPEN as unknown[]).length, 0);
+    const line = registry.COST_LINES.find((item) => item.id === "video");
+    is("the video line says the stop at a token's end is not verified, never zero", Boolean(line && /Not verified, unknown and never zero/.test(line.basis) && /token runs out/.test(line.basis)), true);
     // A press puts the store in line to be read for a player's whole life and an hour (WATCHING_FOR_MS), as the
     // opened mark did before 9 November: watching past a half-hour token is read, not left until the next press.
     await fresh(3600, 0);

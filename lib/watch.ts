@@ -65,8 +65,8 @@ const KEEP_SECONDS = 400 * 24 * 60 * 60;
 /**
  * After a lesson's token was last signed, how long its store goes on being read: the longest a token is ever good
  * for, and an hour over. Not the half-hour block a press signs (lib/lesson-play-rules.ts, PLAY_BLOCK_SECONDS):
- * whether the video service stops a video already playing when its token runs out is not verified (an OPEN item of
- * tests/plan-cost-registry.ts), so watching past the block is read, not left until somebody presses Play again.
+ * whether the video service stops a video already playing when its token runs out is not verified (the video line's
+ * basis in tests/plan-cost-registry.ts: unknown, never zero), so watching past the block is read, not left until somebody presses Play again.
  */
 const WATCHING_FOR_MS = (PLAYER_SECONDS + 3600) * 1000;
 /** How long the opened mark is kept: past WATCHING_FOR_MS, so its absence means no token for that long. */

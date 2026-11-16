@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     is("read before its token ran out: still in line, the hold kept", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 5]);
     await measureDue(Date.now() + 60_000, start + 3 * 3600 * 1000);
     // Rule 23 (review of #3402, money M1): was [false, 0], out of line once given back. Whether a token's end stops a
-    // video already playing is not verified (OPEN item video-playback-past-hold), so a grant keeps the store read for
+    // video already playing is not verified (the video line's basis in tests/plan-cost-registry.ts), so a grant keeps the store read for
     // a player's whole life and an hour (WATCHING_FOR_MS); it leaves the line after that.
     is("read an interval after it ran out: given back, still in line to be read", [await due(), (await redis.pipeline([["ZCARD", HOLDS]]))[0]], [true, 0]);
     await measureDue(Date.now() + 60_000, start + 6 * 3600 * 1000);

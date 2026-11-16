@@ -23,6 +23,7 @@ import { poolFullWords } from "@/lib/free-pool-rules";
 import type { Tier } from "@/lib/plan";
 import { isRedisConfigured, redisPipeline } from "@/lib/redis";
 import { type AllowanceKind, KIND_WORDS, NON_PAYING_ALLOWANCES, allowanceFor, askedCeiling, usedWords } from "@/lib/store-allowance-rules";
+import { windowCountBy } from "@/lib/window-count";
 
 export type AllowanceStore = WindowFields & { tier?: Tier; sid?: string; statsId?: string | null; handle?: string };
 
@@ -84,8 +85,7 @@ export async function takeAllowance(store: AllowanceStore, kind: AllowanceKind, 
   try {
     const k = key(kind, id, window.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(window, now), n),
     ]);
     // A committed increment with a lost or malformed reply remains consumed.
     // Never coerce unknown evidence, inspect getters, retry or read it back.
@@ -117,8 +117,7 @@ export async function forceAllowance(store: AllowanceStore, kind: AllowanceKind,
   try {
     const k = key(kind, id, window.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(window, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(window, now), n),
     ]);
     return acknowledgedAllowanceCount(reply, n) !== null;
   } catch {
@@ -186,8 +185,7 @@ export async function holdAllowanceAt(store: AllowanceStore, kind: AllowanceKind
   try {
     const k = key(kind, id, target.id);
     const reply: unknown = await redisPipeline([
-      ["SET", k, "0", "NX", "EX", keepSecondsFor(target, now)],
-      ["INCRBY", k, n],
+      ...windowCountBy(k, keepSecondsFor(target, now), n),
     ]);
     const counted = acknowledgedAllowanceCount(reply, n);
     if (counted === null) return unknown;
@@ -241,16 +239,19 @@ function ownAllowanceReplies(reply: unknown, count: number): unknown[] | null {
 }
 
 
-/** Fixed-size own-data reply from the existing SET NX + INCRBY pipeline. */
+/**
+ * Fixed-size own-data reply from the INCRBY + EXPIRE NX pipeline (lib/window-count.ts, windowCountBy): the INCRBY's own
+ * whole count of at least `n`, then the EXPIRE's 0 or 1. Anything else is unknown.
+ */
 function acknowledgedAllowanceCount(reply: unknown, n: number): number | null {
  try {
   if (!Array.isArray(reply) || Object.getOwnPropertySymbols(reply).length) return null;
   const length = Object.getOwnPropertyDescriptor(reply, "length");
   if (!length || !Object.hasOwn(length, "value") || length.value !== 2) return null;
   if (Object.getOwnPropertyNames(reply).length !== 3) return null;
-  const set = Object.getOwnPropertyDescriptor(reply, "0"), count = Object.getOwnPropertyDescriptor(reply, "1");
-  if (!set || !Object.hasOwn(set, "value") || (set.value !== null && set.value !== "OK") ||
-      !count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < n) return null;
+  const count = Object.getOwnPropertyDescriptor(reply, "0"), expire = Object.getOwnPropertyDescriptor(reply, "1");
+  if (!count || !Object.hasOwn(count, "value") || !Number.isSafeInteger(count.value) || count.value < n ||
+      !expire || !Object.hasOwn(expire, "value") || (expire.value !== 0 && expire.value !== 1)) return null;
   return count.value;
  } catch { return null; }
 }

@@ -465,6 +465,7 @@ export async function sendReviewRequests(
     // one (Claude 7 on #4360): an undo that threw part-way is finished by the catch, a finished one never runs twice.
     let sent = false;
     let undone = false;
+    let maybeSent = false;
     let ready: Ready[] = prepared;
     let unheld = 0;
     try {
@@ -499,14 +500,23 @@ export async function sendReviewRequests(
       ready.map((item) => item.message),
       `review-ask:${sha(ready.map((item) => item.entry.reference).join(","))}`, { by: "monthly" },
     );
-    if (outcome !== "sent") {
+    if (outcome === "refused") {
+      // Refused for good, so nothing went: the undo comes before the give-back, and a give-back that throws leaves it
+      // done (Codex X2 on #4360). The order leaves the list, as on main.
+      await unclaim(ready, null);
+      for (const item of ready) await drop(item.member);
+      undone = true;
       await release(store, ready.length);
-      if (outcome === "refused") {
-        await unclaim(ready, null);
-        for (const item of ready) await drop(item.member);
-      } else {
-        await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
-      }
+      continue;
+    }
+    if (outcome !== "sent") {
+      // "retry" may also mean the provider took the batch and its answer was lost (lib/email.ts). The claims are let
+      // go only once the give-back succeeded; when it throws they stay stretched, as on main, so the order is never
+      // put in another batch under another key and sent twice (Codex X2 on #4360).
+      maybeSent = true;
+      await release(store, ready.length);
+      maybeSent = false;
+      await unclaim(ready, nowSeconds + RETRY_SECONDS.sender);
       undone = true;
       continue;
     }
@@ -516,7 +526,7 @@ export async function sendReviewRequests(
     await redisPipeline(afterSent(ready.map((item) => ({ reference: item.entry.reference, member: item.member, paidAt: item.entry.paidAt, stage: item.stage })), store.reviewAsk, nowSeconds));
     } catch (error) {
       console.error("sending a store's review requests failed", error);
-      if (!sent && !undone) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
+      if (!sent && !undone && !maybeSent) await unclaim(ready, nowSeconds + RETRY_SECONDS.sender).catch(() => undefined);
     } finally {
       // Nothing went for the claims not stretched: their share of the allowance is given back, best effort (a give-back
       // that fails only leaves the month counted higher, never an email sent past it).

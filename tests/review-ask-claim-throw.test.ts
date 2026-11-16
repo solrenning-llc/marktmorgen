@@ -310,40 +310,68 @@ test("a stale reader that finds the first's claim taken never drops the order", 
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });
 
-// Claude 7 on #4360: the batch did not go, and giving its allowance back threw once. The undo is finished by the
-// catch, so the stretched claims are let go and the order is asked again, never stuck.
-test("a batch that did not go and whose give-back throws still lets its claims go", async () => {
+// Claude 7 on #4360, narrowed by Codex X2 on #4360: a batch the provider refused for good did not go, and giving its
+// allowance back threw once. The undo still runs (it comes before the give-back): the claim is let go and the order,
+// which the provider will not take as it is, leaves the list as it does on main; nothing is left stuck.
+async function failingBatch(r: Awaited<ReturnType<typeof setup>>, answer: "refused" | "lost") {
+  const realFetch = globalThis.fetch;
+  let posted = false;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    if (!posted && url.hostname === "api.resend.com" && url.pathname === "/emails/batch") {
+      posted = true;
+      if (answer === "refused") return new Response("synthetic refusal", { status: 422 });
+      // The provider took the batch and its answer was lost on the way: sendBatch says "retry", which may mean sent.
+      r.batches.push(JSON.parse(String(init?.body)));
+      throw new Error("synthetic connection reset");
+    }
+    return realFetch(input, init);
+  }) as typeof fetch;
+  let threw = false;
+  redis.pipeline = async (commands) => {
+    if (posted && !threw && commands.some((c) => c[0] === "DECRBY" && String(c[1]).startsWith("nl:mail:used:"))) {
+      threw = true;
+      throw new Error("synthetic Redis timeout");
+    }
+    return r.original(commands);
+  };
+  const oldLog = console.error;
+  console.error = () => {};
+  const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
+  console.error = oldLog;
+  redis.pipeline = r.original;
+  globalThis.fetch = realFetch;
+  return { run, posted, threw };
+}
+
+test("a batch the provider refused whose give-back throws still lets its claims go", async () => {
   const oldFetch = globalThis.fetch;
   const r = await setup();
   try {
-    const realFetch = globalThis.fetch;
-    let refusedOnce = false;
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(String(input));
-      if (!refusedOnce && url.hostname === "api.resend.com") {
-        refusedOnce = true;
-        return new Response("synthetic outage", { status: 500 });
-      }
-      return realFetch(input, init);
-    }) as typeof fetch;
-    let threw = false;
-    redis.pipeline = async (commands) => {
-      if (refusedOnce && !threw && commands.some((c) => c[0] === "DECRBY" && String(c[1]).startsWith("nl:mail:used:"))) {
-        threw = true;
-        throw new Error("synthetic Redis timeout");
-      }
-      return r.original(commands);
-    };
-    const oldLog = console.error;
-    console.error = () => {};
-    const run = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now);
-    console.error = oldLog;
-    redis.pipeline = r.original;
-    assert.deepEqual([refusedOnce, threw], [true, true], "the send failed and the give-back threw (diagnostic)");
+    const { run, posted, threw } = await failingBatch(r, "refused");
+    assert.deepEqual([posted, threw], [true, true], "the provider refused and the give-back threw (diagnostic)");
     assert.equal(run.sent, 0, "nothing went");
     assert.equal(redis.run(["GET", SENT]), null, "the claim is let go");
-    assert.notEqual(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order is still due");
-    const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, r.now + 1800 + 60);
-    assert.equal(after.sent, 1, "the next run sends it");
+    assert.equal(redis.run(["ZSCORE", ASK_DUE_KEY, r.member]), null, "the order leaves the list, as a refusal does on main");
+  } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
+});
+
+// Codex X2 on #4360: "retry" also means the provider may have taken the batch (a lost answer). When giving the
+// allowance back then throws, the claims are kept stretched, as main keeps them: the order is never put in another
+// batch under another key, so an email that went is never sent twice.
+test("a batch that may have gone whose give-back throws keeps its claims and is never sent again", async () => {
+  const oldFetch = globalThis.fetch;
+  const r = await setup();
+  try {
+    const { run, posted, threw } = await failingBatch(r, "lost");
+    assert.deepEqual([posted, threw], [true, true], "the answer was lost and the give-back threw (diagnostic)");
+    assert.equal(run.sent, 0, "not counted as sent");
+    assert.match(String(redis.run(["GET", SENT])), /^sending:/, "the claim is kept");
+    assert.ok(Number(redis.run(["TTL", SENT])) > 3600, "stretched, so no run reads it as a short claim");
+    for (const at of [r.now + 1800 + 60, r.now + 6 * 3600]) {
+      const after = await sendReviewRequests(storeForHandle, Date.now() + 20000, at);
+      assert.equal(after.sent, 0, "no later run sends it again");
+    }
+    assert.equal(r.batches.flat().length, 1, "the provider was given the email once");
   } finally { redis.pipeline = r.base; globalThis.fetch = oldFetch; }
 });

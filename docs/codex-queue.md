@@ -2766,6 +2766,7 @@ Complemento WG (05/11/2026, pesquisa nova da Whop, pedido do dono pela mensagem 
    - Custo e margem: Calcular postagem/renovação/token/filas/franquia e teto antes de fornecedor; nenhuma solicitação de aprovação.
 
 41. **[G3] Documentar Google Business Profile e preparar resposta a avaliações, desligada até aprovação.**
+   - Assumido pelo Claude 3 (TODOS-112), 11/11/2026 16h20 Fortaleza: estudo em docs/google-business-profile-study-2026-11-11.md (fontes oficiais lidas no dia; aprovação depende de perfil verificado da empresa há 60+ dias e de preço oficial, que não está publicado; recomendação em "Depende do dono"). Estado: testado num PR (documento); nenhum código, conta ou pedido de acesso.
    - Pedido: P2 G3; datas/horas e grau de certeza em Proveniência.
    - Estado: **a fazer**. Posição vigente: OR: Bloco B, posição 63/81, após 272 [HM1] e antes das Partes B e C de 274 [AX1]; antes de começar, conferir sobreposição no código, na fila 203–275 e no já publicado; absorção somente com prova, parcial somente pela diferença.
    - Histórico OR — estado anterior à atualização documental: - Estado: **a fazer**.
@@ -22400,7 +22401,7 @@ Regra do dono ("recurso bom nunca descartado; vai ao fim"): recursos bons, de be
 16. Ligação com o Google Postmaster Tools e o Microsoft SNDS do domínio do criador, depois de 356 [ES2] (estende lib/mail-health.ts).
 17. Página pública mensal com a entregabilidade real da plataforma (entregues, devoluções, reclamações), só com números medidos e acima de mínimos (estende lib/platform-proof.ts; complemento de 570 [DR1]).
 18. Assinatura de e-mail por pessoa da equipe nas respostas da caixa de entrada (estende lib/inbox.ts e lib/mail-from.ts).
-19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts).
+19. Histórico de versões das automações, com restauração, como já existe nas páginas (estende lib/flows.ts e lib/autosave-rules.ts). Estado (Claude 3, 03/11/2026): unidades 1 e 2 (versões guardadas a cada mudança, até 10, com restauração que também pode ser desfeita, e a lista no estúdio de e-mail) no PR #1927 (ramo claude3/gl7-flow-versions), testado num PR e ainda não incorporado (atualizado em 13/11/2026 pelo LEVE 4 da revisão de Claude 1 cloud).
 20. Mais dados estruturados (Course, Event, ProfilePage e PodcastSeries), conferidos na documentação oficial do schema.org e do Google (estende lib/page-structured-data.ts).
 21. Biblioteca maior de ícones e ilustrações de licença livre, com texto alternativo (estende lib/sales-page-icons.ts).
 22. Cartão de visita digital do criador com "Save contact" (vCard) e formulário de troca de contato com consentimento (estende lib/site-pages.ts e lib/forms.ts).

@@ -70,6 +70,7 @@ const en = {
     declined: "No thanks, noted. Nothing more was charged.",
     failed: "That offer was not charged.",
     checking: "We are still hearing back from Stripe about that offer. Open this page again in a minute: it is charged once at most.",
+    busy: "Stripe was too busy to take that offer just now, so nothing was charged. You can answer it again below.",
     unavailable: "That offer is no longer open, so nothing was charged for it.",
     changed: "That offer was changed while you were reading it, so nothing was charged. Below is the offer as it is now, so you can decide again.",
   } as Record<string, string>,
@@ -240,6 +241,9 @@ const en = {
   ppHandingOverBody: (email: string) => `Your receipt will be emailed to ${email} once it is handed over. Refresh in a minute.`,
   ppRefunded: "Payment refunded",
   ppRefundedBody: "This payment was refunded in full through PayPal, so this purchase is no longer yours to open. Your PayPal account shows the refund.",
+  /** A payment PayPal took back by another way than a refund: failed or declined, or a capture ever reported reversed (pre-review MEDIUM on C4-13). */
+  ppTakenBack: "Payment taken back",
+  ppTakenBackBody: "This payment was taken back through PayPal, so this purchase is no longer yours to open. Your PayPal account shows what happened to it.",
   waitFew: "Wait a few minutes, then open this page again.",
 };
 
@@ -295,6 +299,7 @@ const es: ThanksWords = {
     declined: "No, gracias: anotado. No se cobró nada más.",
     failed: "Esa oferta no se cobró.",
     checking: "Seguimos esperando la respuesta de Stripe sobre esa oferta. Vuelve a abrir esta página en un minuto: como mucho se cobra una vez.",
+    busy: "Stripe estaba demasiado ocupado para cobrar esa oferta en este momento, así que no se cobró nada. Puedes volver a responderla abajo.",
     unavailable: "Esa oferta ya no está disponible, así que no se cobró nada por ella.",
     changed: "Esa oferta cambió mientras la leías, así que no se cobró nada. Abajo está la oferta tal como es ahora, por si quieres decidir de nuevo.",
   },
@@ -454,6 +459,8 @@ const es: ThanksWords = {
   ppHandingOverBody: (email) => `Tu recibo se enviará por email a ${email} en cuanto se entregue. Actualiza la página en un minuto.`,
   ppRefunded: "Pago reembolsado",
   ppRefundedBody: "Este pago se reembolsó por completo a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra el reembolso.",
+  ppTakenBack: "Pago revertido",
+  ppTakenBackBody: "Este pago se revirtió a través de PayPal, así que ya no puedes abrir esta compra. Tu cuenta de PayPal muestra qué pasó con él.",
   waitFew: "Espera unos minutos y vuelve a abrir esta página.",
 };
 
@@ -507,6 +514,7 @@ const fr: ThanksWords = {
     declined: "Non merci, c'est noté. Rien de plus n'a été débité.",
     failed: "Cette offre n'a pas été débitée.",
     checking: `Nous attendons encore la réponse de Stripe pour cette offre. Rouvrez cette page dans une minute${S}: elle n'est débitée qu'une fois au plus.`,
+    busy: "Stripe était trop occupé pour débiter cette offre à l'instant, rien n'a donc été débité. Vous pouvez y répondre à nouveau ci-dessous.",
     unavailable: "Cette offre n'est plus disponible, rien n'a donc été débité pour elle.",
     changed: "Cette offre a changé pendant que vous la lisiez, rien n'a donc été débité. Elle est présentée ci-dessous telle qu'elle est maintenant, pour que vous puissiez décider à nouveau.",
   },
@@ -667,6 +675,8 @@ const fr: ThanksWords = {
   ppHandingOverBody: (email) => `Votre reçu sera envoyé par e-mail à ${email} dès que l'achat vous sera remis. Actualisez la page dans une minute.`,
   ppRefunded: "Paiement remboursé",
   ppRefundedBody: "Ce paiement a été remboursé en totalité via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique le remboursement.",
+  ppTakenBack: "Paiement annulé",
+  ppTakenBackBody: "Ce paiement a été annulé via PayPal, vous ne pouvez donc plus ouvrir cet achat. Votre compte PayPal indique ce qu'il est devenu.",
   waitFew: "Patientez quelques minutes, puis rouvrez cette page.",
 };
 
@@ -720,6 +730,7 @@ const de: ThanksWords = {
     declined: "Nein danke, notiert. Es wurde nichts weiter belastet.",
     failed: "Dieses Angebot wurde nicht belastet.",
     checking: "Wir warten noch auf die Antwort von Stripe zu diesem Angebot. Öffnen Sie diese Seite in einer Minute erneut: Es wird höchstens einmal belastet.",
+    busy: "Stripe war gerade zu ausgelastet, um dieses Angebot zu belasten, daher wurde nichts belastet. Sie können unten erneut darauf antworten.",
     unavailable: "Dieses Angebot gilt nicht mehr, daher wurde dafür nichts belastet.",
     changed: "Dieses Angebot wurde geändert, während Sie es gelesen haben, daher wurde nichts belastet. Unten sehen Sie das Angebot, wie es jetzt ist, damit Sie neu entscheiden können.",
   },
@@ -880,6 +891,8 @@ const de: ThanksWords = {
   ppHandingOverBody: (email) => `Ihre Quittung wird an ${email} gemailt, sobald der Kauf übergeben ist. Laden Sie die Seite in einer Minute neu.`,
   ppRefunded: "Zahlung erstattet",
   ppRefundedBody: "Diese Zahlung wurde über PayPal vollständig erstattet, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt die Erstattung.",
+  ppTakenBack: "Zahlung rückgängig gemacht",
+  ppTakenBackBody: "Diese Zahlung wurde über PayPal rückgängig gemacht, daher können Sie diesen Kauf nicht mehr öffnen. Ihr PayPal-Konto zeigt, was mit ihr geschehen ist.",
   waitFew: "Warten Sie ein paar Minuten und öffnen Sie diese Seite dann erneut.",
 };
 
@@ -933,6 +946,7 @@ const it: ThanksWords = {
     declined: "No grazie, ricevuto. Non è stato addebitato altro.",
     failed: "Quell'offerta non è stata addebitata.",
     checking: "Stiamo ancora aspettando la risposta di Stripe su quell'offerta. Riapri questa pagina tra un minuto: viene addebitata al massimo una volta.",
+    busy: "Stripe era troppo occupato per addebitare quell'offerta in questo momento, quindi non è stato addebitato nulla. Puoi rispondere di nuovo qui sotto.",
     unavailable: "Quell'offerta non è più disponibile, quindi non è stato addebitato nulla.",
     changed: "Quell'offerta è cambiata mentre la leggevi, quindi non è stato addebitato nulla. Qui sotto trovi l'offerta com'è ora, così puoi decidere di nuovo.",
   },
@@ -1093,6 +1107,8 @@ const it: ThanksWords = {
   ppHandingOverBody: (email) => `La ricevuta verrà inviata via email a ${email} appena l'acquisto sarà consegnato. Aggiorna la pagina tra un minuto.`,
   ppRefunded: "Pagamento rimborsato",
   ppRefundedBody: "Questo pagamento è stato rimborsato per intero tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra il rimborso.",
+  ppTakenBack: "Pagamento stornato",
+  ppTakenBackBody: "Questo pagamento è stato stornato tramite PayPal, quindi non puoi più aprire questo acquisto. Il tuo account PayPal mostra cosa è successo.",
   waitFew: "Aspetta qualche minuto, poi riapri questa pagina.",
 };
 
@@ -1146,6 +1162,7 @@ const nl: ThanksWords = {
     declined: "Nee bedankt, genoteerd. Er is niets meer afgeschreven.",
     failed: "Dat aanbod is niet afgeschreven.",
     checking: "We wachten nog op antwoord van Stripe over dat aanbod. Open deze pagina over een minuut opnieuw: het wordt hooguit één keer afgeschreven.",
+    busy: "Stripe had het op dat moment te druk om dat aanbod af te schrijven, dus er is niets afgeschreven. Je kunt hieronder opnieuw antwoorden.",
     unavailable: "Dat aanbod geldt niet meer, dus er is niets voor afgeschreven.",
     changed: "Dat aanbod is veranderd terwijl je het las, dus er is niets afgeschreven. Hieronder staat het aanbod zoals het nu is, zodat je opnieuw kunt beslissen.",
   },
@@ -1306,6 +1323,8 @@ const nl: ThanksWords = {
   ppHandingOverBody: (email) => `Je bon wordt naar ${email} gemaild zodra de aankoop is overgedragen. Vernieuw de pagina over een minuut.`,
   ppRefunded: "Betaling terugbetaald",
   ppRefundedBody: "Deze betaling is volledig terugbetaald via PayPal, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont de terugbetaling.",
+  ppTakenBack: "Betaling teruggedraaid",
+  ppTakenBackBody: "Deze betaling is via PayPal teruggedraaid, dus je kunt deze aankoop niet meer openen. Je PayPal-rekening toont wat ermee is gebeurd.",
   waitFew: "Wacht een paar minuten en open deze pagina dan opnieuw.",
 };
 
@@ -1359,6 +1378,7 @@ const pt: ThanksWords = {
     declined: "Não, obrigado: registado. Nada mais foi cobrado.",
     failed: "Essa oferta não foi cobrada.",
     checking: "Ainda estamos a aguardar a resposta da Stripe sobre essa oferta. Abra esta página novamente daqui a um minuto: é cobrada no máximo uma vez.",
+    busy: "A Stripe estava demasiado ocupada para cobrar essa oferta neste momento, por isso nada foi cobrado. Pode voltar a responder abaixo.",
     unavailable: "Essa oferta já não está disponível, por isso nada foi cobrado por ela.",
     changed: "Essa oferta foi alterada enquanto a lia, por isso nada foi cobrado. Abaixo está a oferta tal como é agora, para que possa decidir de novo.",
   },
@@ -1519,6 +1539,8 @@ const pt: ThanksWords = {
   ppHandingOverBody: (email) => `O recibo será enviado por email para ${email} assim que a compra for entregue. Atualize a página dentro de um minuto.`,
   ppRefunded: "Pagamento reembolsado",
   ppRefundedBody: "Este pagamento foi reembolsado na totalidade através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o reembolso.",
+  ppTakenBack: "Pagamento revertido",
+  ppTakenBackBody: "Este pagamento foi revertido através do PayPal, por isso já não pode abrir esta compra. A sua conta PayPal mostra o que aconteceu.",
   waitFew: "Aguarde alguns minutos e depois abra esta página novamente.",
 };
 

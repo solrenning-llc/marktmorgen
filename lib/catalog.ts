@@ -38,6 +38,7 @@
 import { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 export { MAX_PRODUCTS, MAX_TITLE_LENGTH, MAX_SUMMARY_LENGTH } from "@/lib/catalog-rules";
 import { type Shipping, parseShipping } from "@/lib/shipping";
+import { type PhysicalLegal, readPhysicalLegal } from "@/lib/physical-legal-record";
 import { idInSegment } from "@/lib/product-slug";
 import { type CallPackage, parseCallPackage } from "@/lib/call-package-rules";
 import { type PodcastRef, parsePodcastRef } from "@/lib/podcast-rules";
@@ -252,6 +253,13 @@ export type Product = {
    */
   shipping?: Shipping | null;
   /**
+   * The legal information the creator filled on a product they ship
+   * (lib/physical-legal-record.ts, 618 [SZ2]): EU product safety, a
+   * Proposition 65 text and the net quantity of each price. Absent or null is
+   * nothing filled. Kept on the full record only, never on the listing.
+   */
+  legal?: PhysicalLegal | null;
+  /**
    * A draft: kept in the studio and left off the store, its own page and its
    * checkout until the creator publishes it. What an import makes starts
    * here. A hidden product can still be part of a bundle.
@@ -264,7 +272,7 @@ export type Product = {
  * its own page, a download and most of the site need. Anything that takes a
  * Listing also takes a full Product.
  */
-export type Listing = Omit<Product, "fields" | "funnel">;
+export type Listing = Omit<Product, "fields" | "funnel" | "legal">;
 
 /**
  * One product as the store record lists it: its id, what kind of thing it is
@@ -374,6 +382,8 @@ export function parseProduct(entry: unknown): Product | null {
   // An unreadable physical record must not become a digital product or free shipping.
   // Leave the stored creator record intact and refuse to offer this product.
   if (value.shipping !== undefined && value.shipping !== null && !shipping) return null;
+  // Unreadable legal fields read as not filled, so every EU/EEA gap stays open; the product itself still reads.
+  const legal = readPhysicalLegal(value.legal);
   return {
     id: value.id,
     title: value.title.slice(0, MAX_TITLE_LENGTH),
@@ -414,6 +424,7 @@ export function parseProduct(entry: unknown): Product | null {
     yearly: parseYearly(value.yearly),
     note: value.note === true,
     shipping,
+    ...(legal ? { legal } : {}),
     hidden: value.hidden === true,
   };
 }
@@ -691,11 +702,13 @@ function parseJson(raw: unknown): unknown {
 function wanted(store: Store, ids: Iterable<string> | undefined): string[] {
   if (ids === undefined) return productIds(store);
   const known = new Set(productIds(store));
-  const out: string[] = [];
+  // Each id once, in the order asked: a Set, so asking for every product stays linear (772 [SA4] unit 4 measured the
+  // list scan this replaced at 17 s for 100,000 products, tests/catalog-whole-read-load.test.ts).
+  const out = new Set<string>();
   for (const id of ids) {
-    if (typeof id === "string" && known.has(id) && !out.includes(id)) out.push(id);
+    if (typeof id === "string" && known.has(id)) out.add(id);
   }
-  return out;
+  return [...out];
 }
 
 /**
@@ -795,13 +808,79 @@ export async function readProducts(store: Store, ids?: Iterable<string>): Promis
   const raws = await getMany(asked.flatMap((id) => [listingKey(catalog.id!, id), extrasKey(catalog.id!, id)]));
   const out: Product[] = [];
   asked.forEach((id, i) => {
-    const listing = parseJson(raws[i * 2]);
-    if (!listing || typeof listing !== "object") return;
-    const extras = parseJson(raws[i * 2 + 1]);
-    const product = parseProduct({ ...(listing as object), ...(extras && typeof extras === "object" ? extras : {}) });
-    if (product && product.id === id) out.push(product);
+    const product = productRead(raws[i * 2], raws[i * 2 + 1], id);
+    if (product) out.push(product);
   });
   return out;
+}
+
+/**
+ * Which of these products ask questions at checkout (lib/checkout-fields.ts), read without the products in full:
+ * the questions live in the heavy rest of a product's record, which a listing does not carry, so a cart that reads
+ * listings alone took a product with questions for one it could pay for, and the cart checkout then refused the
+ * whole order (#4350). One GET per product a store does not hold inline. A product with no heavy rest asks nothing
+ * (productWrites deletes it); a reply or record that does not read throws UnknownReplyError (CX-123 rule 24), never
+ * "asks nothing".
+ */
+export async function readAsking(store: Store, ids: Iterable<string>): Promise<Set<string>> {
+  const asked = wanted(store, ids);
+  const catalog = store.catalog;
+  if (catalog.inline) return new Set(catalog.inline.filter((p) => asked.includes(p.id) && p.fields.length > 0).map((p) => p.id));
+  if (asked.length === 0) return new Set();
+  if (!catalog.id || !isRedisConfigured()) throw new UnknownReplyError("a product's checkout questions");
+  const raws = await getMany(asked.map((id) => extrasKey(catalog.id!, id)));
+  const asking = new Set<string>();
+  asked.forEach((id, i) => {
+    if (raws[i] === null) return;
+    // Read exactly as readProducts reads it (exactExtras): a record in another shape is unknown, never "asks nothing".
+    const extras = typeof raws[i] === "string" ? exactExtras(parseJson(raws[i])) : null;
+    if (!extras) throw new UnknownReplyError("a product's checkout questions");
+    if (parseFields(extras.fields).length > 0) asking.add(id);
+  });
+  return asking;
+}
+
+/**
+ * The extras record exactly as productWrites writes it: a JSON record whose own keys are "fields" (a list), "funnel"
+ * (null or one that reads) and, on a product the creator ships, "legal" (#3004). Anything else, a key of the listing (a
+ * title, a price, an id, "__proto__") among them, is null: spread over the listing it would replace the listing's own
+ * value, and the next edit would write it into the listing for good (Codex P on #3888). Only the validated values are
+ * returned, with "legal" as written (parseProduct reads it).
+ */
+function exactExtras(parsed: unknown): { fields: unknown[]; funnel: unknown; legal?: unknown } | null {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const keys = Object.keys(parsed);
+  if (!keys.includes("fields") || !keys.includes("funnel") || keys.some((key) => !EXTRAS_KEYS.has(key))) return null;
+  const { fields, funnel, legal } = parsed as { fields: unknown; funnel: unknown; legal?: unknown };
+  if (!Array.isArray(fields) || (funnel !== null && !parseFunnel(funnel))) return null;
+  // The legal information (#3004, 618 [SZ2]) is the full record's own, never a listing key; parseProduct reads it.
+  return keys.includes("legal") ? { fields, funnel, legal } : { fields, funnel };
+}
+
+/** The keys productWrites puts in a product's extras record: fields and funnel always, legal when filled (#3004). */
+const EXTRAS_KEYS = new Set(["fields", "funnel", "legal"]);
+
+/**
+ * One product as its two GETs answered (CX-123 rule 24): null only when Redis answered nil for its listing (no
+ * record); an extras nil is a product with no checkout questions and no funnel. Any other reply (not text, text that
+ * is not a JSON record, extras without their list of questions or with a funnel that does not read, a record that is
+ * not a product or is another product's) throws UnknownReplyError. Every product edit writes back what this read
+ * (lib/store.ts, onProduct), so extras taken for "none" would DEL the creator's questions and funnel, and a listing
+ * taken for "none" would drop the product from a store copy's batch.
+ */
+function productRead(rawListing: unknown, rawExtras: unknown, id: string): Product | null {
+  if (rawListing === null) return null;
+  const listing = typeof rawListing === "string" ? parseJson(rawListing) : null;
+  if (!listing || typeof listing !== "object" || Array.isArray(listing)) throw new UnknownReplyError("a product's listing");
+  let extras: { fields: unknown[]; funnel: unknown } | Record<string, never> = {};
+  if (rawExtras !== null) {
+    const parsed = typeof rawExtras === "string" ? exactExtras(parseJson(rawExtras)) : null;
+    if (!parsed) throw new UnknownReplyError("a product's checkout questions and funnel");
+    extras = parsed;
+  }
+  const product = parseProduct({ ...(listing as object), ...extras });
+  if (!product || product.id !== id) throw new UnknownReplyError("a product's records");
+  return product;
 }
 
 /** One product in full, or null when the store has no such product (or no id was given). */
@@ -942,22 +1021,40 @@ export const STORE_SEARCH_LIMIT = STORE_PAGE_SIZE * 2;
 /** The longest search the store page takes. */
 export const MAX_STORE_SEARCH = 80;
 
-/** Words as a search compares them: no accents, no case, letters and digits only. */
+/** Letters NFD does not take apart, as a buyer types them on a plain keyboard. */
+const PLAIN_LETTERS: Record<string, string> = { "\u00df": "ss", "\u0142": "l", "\u00f8": "o", "\u00e6": "ae", "\u0153": "oe", "\u0111": "d", "\u00f0": "d", "\u00fe": "th", "\u0131": "i" };
+
+/**
+ * Words as a search compares them: no accents, no case, letters and digits only. An apostrophe is part of its
+ * word ("Beginner’s" is "beginners", as typed without it), and the letters NFD keeps whole are spelled plainly.
+ */
 export function searchWords(text: string): string[] {
   return text
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/['\u2018\u2019\u02bc`]/g, "")
+    .replace(/[\u00df\u0142\u00f8\u00e6\u0153\u0111\u00f0\u00fe\u0131]/g, (letter) => PLAIN_LETTERS[letter])
     .split(/[^\p{L}\p{N}]+/u)
     .filter(Boolean);
 }
 
-/** Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one). */
+/** The text with its hyphens taken out, so "E-book" reads as "ebook" too. */
+const unhyphened = (text: string) => text.replace(/[-\u2010\u2011]/g, "");
+/** The text with its apostrophes as spaces, so the word after an elision ("L'Atelier", "dell'arte") is found by itself too. */
+const unelided = (text: string) => text.replace(/['\u2018\u2019\u02bc`]/g, " ");
+
+/**
+ * Whether a listing has every word searched for, in its title or its one-line summary (a word may start a longer one).
+ * A hyphenated word is found typed whole or in its parts, either side: "ebook" finds "E-book", "e-book" finds "Ebook".
+ * A word after an apostrophe is found by itself as well as glued: "atelier" and "latelier" both find "L'Atelier".
+ */
 export function matchesSearch(listing: Pick<Listing, "title" | "summary">, query: string): boolean {
-  const asked = searchWords(query);
-  if (asked.length === 0) return false;
-  const has = searchWords(`${listing.title} ${listing.summary}`);
-  return asked.every((word) => has.some((one) => one.startsWith(word)));
+  const text = `${listing.title} ${listing.summary}`;
+  const has = [...new Set([...searchWords(text), ...searchWords(unhyphened(text)), ...searchWords(unelided(text))])];
+  return [searchWords(query), searchWords(unhyphened(query))].some(
+    (asked) => asked.length > 0 && asked.every((word) => has.some((one) => one.startsWith(word))),
+  );
 }
 
 /**
@@ -1133,6 +1230,45 @@ export async function readCardsFor(store: Store, ids: Iterable<string>): Promise
   return found;
 }
 
+/**
+ * Every product's card, in the creator's order, for the studio's search (766
+ * [STN13], lib/studio-search.ts): what the store record holds (inline, or in
+ * the head) with no read, the rest in one HMGET of the card hash, read
+ * exactly. Never filled in from the products' own records, so a search's
+ * reads stay one command whatever the store: a product whose card is absent
+ * or in an older shape is counted in `missing` and left out (the studio's
+ * Sales pages fill them, readCards). Anything but one string or nil for each
+ * product throws UnknownReplyError (rule 24), never "no products".
+ */
+export async function readCardsExact(store: Store): Promise<{ cards: Card[]; missing: number }> {
+  const catalog = store.catalog;
+  const cardOf = (p: Listing): Card => ({ id: p.id, title: p.title, priceCents: p.priceCents, page: p.page });
+  if (catalog.inline) return { cards: catalog.inline.map(cardOf), missing: 0 };
+  const ids = productIds(store);
+  const head = new Map(catalog.head.map((listing) => [listing.id, listing]));
+  const rest = ids.filter((id) => !head.has(id));
+  const found = new Map<string, Card>();
+  for (const id of ids) {
+    const listing = head.get(id);
+    if (listing) found.set(id, cardOf(listing));
+  }
+  let missing = 0;
+  if (rest.length) {
+    if (!catalog.id || !isRedisConfigured()) throw new redisReply.UnknownReplyError("the products' cards");
+    const replies = redisReply.repliesFor(await redisPipeline([["HMGET", titlesKey(catalog.id), ...rest]]), 1);
+    const slots = replies ? redisReply.repliesFor(replies[0], rest.length) : null;
+    if (!slots) throw new redisReply.UnknownReplyError("the products' cards");
+    rest.forEach((id, i) => {
+      const raw = slots[i];
+      if (raw !== null && typeof raw !== "string") throw new redisReply.UnknownReplyError("a product's card");
+      const card = raw === null ? null : parseCard(id, raw);
+      if (card) found.set(id, card);
+      else missing += 1;
+    });
+  }
+  return { cards: ids.flatMap((id) => (found.has(id) ? [found.get(id)!] : [])), missing };
+}
+
 /** When the studio's list is one page of a longer one, as the studio page read it. */
 export type ProductPaging = {
   page: number;
@@ -1199,9 +1335,13 @@ export async function studioShelf(
   // command (readTitles). Only the fifty products actually shown are read.
   // This used to read every product in the store to find fifty.
   const titles = await readTitles(store);
+  // Folded as the store page's search folds words (searchWords: no accents, no case), so "creme brulee" finds
+  // "Crème brûlée class" here as it does for a buyer; a part of a word still finds it.
   const needle = query.toLowerCase();
+  const folded = searchWords(needle).join(" ");
   const ordered = productIds(store).filter((id) => titles.has(id));
-  const matches = needle ? ordered.filter((id) => (titles.get(id) ?? "").toLowerCase().includes(needle)) : ordered;
+  const has = (title: string) => (folded ? searchWords(title).join(" ").includes(folded) : title.toLowerCase().includes(needle));
+  const matches = needle ? ordered.filter((id) => has(titles.get(id) ?? "")) : ordered;
   const pages = Math.max(1, Math.ceil(matches.length / STUDIO_PAGE_SIZE));
   const page = Math.min(Math.max(1, asked), pages);
   const from = (page - 1) * STUDIO_PAGE_SIZE;
@@ -1245,12 +1385,23 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/**
+ * The heavy rest of a product, kept beside its listing: its checkout
+ * questions, its funnel and, on a product the creator ships, its legal
+ * information (lib/physical-legal-record.ts). "" when it has none of them.
+ */
+function extrasOf(product: Product): string {
+  const legal = product.legal ?? null;
+  if (product.fields.length === 0 && product.funnel === null && legal === null) return "";
+  return JSON.stringify({ fields: product.fields, funnel: product.funnel, ...(legal ? { legal } : {}) });
+}
+
 /** The writes that put one product in its records. Refuses one past the ceiling. */
 export function productWrites(catalog: string, product: Product): Command[] {
   if (!SAFE_ID.test(product.id)) throw new Error("product id");
   const listing = JSON.stringify(listingOf(product));
-  const heavy = product.fields.length > 0 || product.funnel !== null;
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   if (byteLength(listing) + byteLength(extras) > MAX_PRODUCT_BYTES) throw new StoreFullError();
   return [
     ["SET", listingKey(catalog, product.id), listing],
@@ -1265,9 +1416,9 @@ export function productWrites(catalog: string, product: Product): Command[] {
  * its own key or field.
  */
 export function productBytes(product: Product): number {
-  const heavy = product.fields.length > 0 || product.funnel !== null;
   const listing = JSON.stringify(listingOf(product));
-  const extras = heavy ? JSON.stringify({ fields: product.fields, funnel: product.funnel }) : "";
+  const extras = extrasOf(product);
+  const heavy = extras !== "";
   return dataBytes([listing, extras, product.id, cardValue(product)], heavy ? 3 : 2);
 }
 
@@ -1295,9 +1446,13 @@ export function movedMark(catalog: string, count: number): Command {
 /** How many products the index listed when this catalog was last written, or null when it was never moved. */
 export async function movedCount(catalog: string): Promise<number | null> {
   if (!CATALOG_ID_PATTERN.test(catalog) || !isRedisConfigured()) return null;
-  const [found] = await redisPipeline([["GET", movedKey(catalog)]]);
-  if (typeof found !== "string") return null;
-  return /^\d{1,6}$/.test(found) ? Number(found) : 0;
+  // Read exactly (rule 24): only GET's exact null is "never moved" and only digits are a count. Anything else throws, so
+  // moveToRecords writes nothing, never null or 0 that skipped its guard and wrote a lost index over the products.
+  const read = repliesFor(await redisPipeline([["GET", movedKey(catalog)]]), 1);
+  const found = read?.[0];
+  if (read && found === null) return null;
+  if (!read || typeof found !== "string" || !/^\d{1,6}$/.test(found)) throw new UnknownReplyError("how many products a moved catalog listed");
+  return Number(found);
 }
 
 /** Sends writes in pipelines of a few hundred. */
@@ -1382,12 +1537,11 @@ export async function readProductsStrict(store:Store,ids:readonly string[]):Prom
  return asked.map((id,index)=>{
   const listing=parseJson(raws[index*2]);
   const rawExtras=raws[index*2+1];
-  const extras=rawExtras===null?null:parseJson(rawExtras);
-  if(!listing||typeof listing!=="object"||Array.isArray(listing)||rawExtras!==null&&(!extras||typeof extras!=="object"||Array.isArray(extras)))throw new Error("Product records are invalid");
-  const x=extras as {funnel?:unknown;fields?:unknown}|null;
-  if(x&&(!Array.isArray(x.fields)||x.funnel!==null&&!parseFunnel(x.funnel)))throw new Error("Product offer record is invalid");
+  const extras=rawExtras===null?null:exactExtras(parseJson(rawExtras));
+  if(!listing||typeof listing!=="object"||Array.isArray(listing))throw new Error("Product records are invalid");
+  if(rawExtras!==null&&!extras)throw new Error("Product offer record is invalid");
   if(typeof raws[index*2]!=="string"||rawExtras!==null&&typeof rawExtras!=="string"||new TextEncoder().encode(String(raws[index*2])+(rawExtras??"")).length>MAX_PRODUCT_BYTES)throw new Error("Product record exceeds its bound");
-  const product=parseProduct({...listing,...((extras as Record<string,unknown>|null)??{})});
+  const product=parseProduct({...listing,...(extras??{})});
   if(!product||product.id!==id)throw new Error("Product association is invalid");
   return product;
  });
